@@ -1,6 +1,6 @@
 {
   "name": "react-native-sherpa-onnx",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Offline Speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD with sherpa-onnx for React NativeSpeech-to-Text with sherpa-onnx for React Native",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
