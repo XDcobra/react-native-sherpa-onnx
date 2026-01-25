@@ -26,22 +26,22 @@ if (mode === 'local') {
     console.error(' .npmrc.local not found');
     process.exit(1);
   }
-  
+
   // Update .npmrc
   fs.copyFileSync(npmrcLocalPath, npmrcPath);
-  
+
   // Update publishConfig in package.json
   if (!packageJson.publishConfig) {
     packageJson.publishConfig = {};
   }
   packageJson.publishConfig.registry = 'http://localhost:4873';
-  
+
   // Write updated package.json
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2) + '\n'
   );
-  
+
   console.log(' Switched to Verdaccio (local registry)');
   console.log('   Registry: http://localhost:4873');
   console.log('   Updated .npmrc and package.json publishConfig');
@@ -50,22 +50,22 @@ if (mode === 'local') {
     console.error(' .npmrc.public not found');
     process.exit(1);
   }
-  
+
   // Update .npmrc
   fs.copyFileSync(npmrcPublicPath, npmrcPath);
-  
+
   // Update publishConfig in package.json
   if (!packageJson.publishConfig) {
     packageJson.publishConfig = {};
   }
   packageJson.publishConfig.registry = 'https://registry.npmjs.org/';
-  
+
   // Write updated package.json
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2) + '\n'
   );
-  
+
   console.log(' Switched to npm (public registry)');
   console.log('   Registry: https://registry.npmjs.org/');
   console.log('   Updated .npmrc and package.json publishConfig');
