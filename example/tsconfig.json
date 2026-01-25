@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "react-native-sherpa-onnx": ["../src/index.tsx"],
+      "react-native-sherpa-onnx/stt": ["../src/stt/index.ts"],
+      "react-native-sherpa-onnx/tts": ["../src/tts/index.ts"],
+      "react-native-sherpa-onnx/vad": ["../src/vad/index.ts"],
+      "react-native-sherpa-onnx/diarization": ["../src/diarization/index.ts"],
+      "react-native-sherpa-onnx/enhancement": ["../src/enhancement/index.ts"],
+      "react-native-sherpa-onnx/separation": ["../src/separation/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

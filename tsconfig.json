@@ -1,0 +1,38 @@
+{
+  "exclude": ["sherpa-onnx/**", "node_modules/**", "lib/**"],
+  "compilerOptions": {
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "react-native-sherpa-onnx": ["./src/index.tsx"],
+      "react-native-sherpa-onnx/stt": ["./src/stt/index.ts"],
+      "react-native-sherpa-onnx/tts": ["./src/tts/index.ts"],
+      "react-native-sherpa-onnx/vad": ["./src/vad/index.ts"],
+      "react-native-sherpa-onnx/diarization": ["./src/diarization/index.ts"],
+      "react-native-sherpa-onnx/enhancement": ["./src/enhancement/index.ts"],
+      "react-native-sherpa-onnx/separation": ["./src/separation/index.ts"]
+    },
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "customConditions": ["react-native-strict-api"],
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noImplicitUseStrict": false,
+    "noStrictGenericChecks": false,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ESNext",
+    "verbatimModuleSyntax": true
+  }
+}

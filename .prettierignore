@@ -1,0 +1,14 @@
+sherpa-onnx/
+**/sherpa-onnx/
+node_modules/
+android/.cxx/
+android/build/
+ios/build/
+example/android/build/
+example/android/app/build/
+example/android/app/.cxx/
+example/ios/build/
+lib/
+*.log
+.DS_Store
+.yarn

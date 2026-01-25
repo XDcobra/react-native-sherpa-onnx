@@ -1,0 +1,77 @@
+name: Setup
+description: Setup Node.js, dependencies, and git submodules
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout (no submodules)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+
+    - name: Determine submodule revision
+      id: submodule-rev
+      shell: bash
+      run: echo "rev=$(git ls-tree HEAD sherpa-onnx | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+    - name: Restore sherpa-onnx cache
+      id: submodule-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          sherpa-onnx
+          .git/modules/sherpa-onnx
+        key: sherpa-onnx-${{ steps.submodule-rev.outputs.rev }}
+        restore-keys: |
+          sherpa-onnx-
+
+    - name: Init/Update submodule
+      shell: bash
+      run: |
+        set -e
+        git submodule update --init --recursive sherpa-onnx || true
+        if [ ! -d "sherpa-onnx" ]; then
+          echo "Submodule sherpa-onnx missing after cache/checkout"
+          exit 1
+        fi
+
+    - name: Save sherpa-onnx cache
+      if: steps.submodule-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          sherpa-onnx
+          .git/modules/sherpa-onnx
+        key: ${{ steps.submodule-cache.outputs.cache-primary-key }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version-file: .nvmrc
+
+    - name: Restore dependencies
+      id: yarn-cache
+      uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          **/node_modules
+          .yarn/install-state.gz
+        key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}-${{ hashFiles('**/package.json', '!node_modules/**') }}
+        restore-keys: |
+          ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
+          ${{ runner.os }}-yarn-
+
+    - name: Install dependencies
+      if: steps.yarn-cache.outputs.cache-hit != 'true'
+      run: yarn install --immutable
+      shell: bash
+
+    - name: Cache dependencies
+      if: steps.yarn-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          **/node_modules
+          .yarn/install-state.gz
+        key: ${{ steps.yarn-cache.outputs.cache-primary-key }}

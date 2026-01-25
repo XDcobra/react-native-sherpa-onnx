@@ -1,0 +1,193 @@
+// Configurable sherpa-onnx version (default: 1.12.23)
+def sherpaOnnxVersion = project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.23'
+
+buildscript {
+  ext.SherpaOnnx = [
+    kotlinVersion: "2.0.21",
+    minSdkVersion: 24,
+    compileSdkVersion: 36,
+    targetSdkVersion: 36
+  ]
+
+  ext.getExtOrDefault = { prop ->
+    if (rootProject.ext.has(prop)) {
+      return rootProject.ext.get(prop)
+    }
+
+    return SherpaOnnx[prop]
+  }
+
+  repositories {
+    google()
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.7.2"
+    // noinspection DifferentKotlinGradleVersion
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
+  }
+}
+
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+apply plugin: "com.facebook.react"
+
+android {
+  namespace "com.sherpaonnx"
+
+  compileSdkVersion getExtOrDefault("compileSdkVersion")
+
+  defaultConfig {
+    minSdkVersion getExtOrDefault("minSdkVersion")
+    targetSdkVersion getExtOrDefault("targetSdkVersion")
+
+    // NDK configuration
+    ndkVersion getExtOrDefault("ndkVersion")
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
+        arguments "-DANDROID_STL=c++_shared"
+      }
+    }
+
+    // Supported ABIs
+    ndk {
+      abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
+    }
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  // CMake configuration
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+
+  lint {
+    disable "GradleCompatible"
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+}
+
+
+repositories {
+  mavenCentral()
+  google()
+  maven { url 'https://jitpack.io' }
+}
+
+def kotlin_version = getExtOrDefault("kotlinVersion")
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  
+  // sherpa-onnx prebuilt AAR from JitPack
+  // This includes the native .so libraries for all ABIs
+  implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
+}
+
+// Create resolvable configuration for extraction
+configurations {
+  extractNativeLibs {
+    canBeResolved = true
+    canBeConsumed = false
+  }
+}
+
+dependencies {
+  extractNativeLibs "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
+}
+
+// Extract native libraries from AAR before CMake runs
+def extractNativeLibs = tasks.register("extractNativeLibs") {
+  doLast {
+    def extractedLibsDir = file("${buildDir}/extracted_native_libs")
+    extractedLibsDir.mkdirs()
+    
+    def resolvedConfig = configurations.extractNativeLibs.resolvedConfiguration
+    def foundAar = false
+    
+    resolvedConfig.resolvedArtifacts.each { artifact ->
+      def aarFile = artifact.file
+      println "Checking artifact: ${aarFile.name} (exists: ${aarFile.exists()})"
+      
+      if (aarFile.exists() && (aarFile.name.endsWith(".aar") || aarFile.name.endsWith(".jar"))) {
+        foundAar = true
+        println "Extracting native libraries from: ${aarFile.name}"
+        
+        copy {
+          from(zipTree(aarFile)) {
+            include "jni/**/*.so"
+          }
+          into extractedLibsDir
+        }
+        
+        // Verify extraction succeeded
+        def extractedFiles = fileTree(extractedLibsDir).matching { include "**/*.so" }
+        if (extractedFiles.isEmpty()) {
+          println "WARNING: No .so files extracted from ${aarFile.name}"
+          println "Contents of AAR:"
+          zipTree(aarFile).each { entry ->
+            if (entry.name.contains("jni") || entry.name.endsWith(".so")) {
+              println "  ${entry.name}"
+            }
+          }
+        }
+      }
+    }
+    
+    if (!foundAar) {
+      throw new RuntimeException("No AAR file found for sherpa-onnx. Check if the dependency is correctly resolved.")
+    }
+  }
+}
+
+// NOTE: Header files are now set up by postinstall script (yarn setup-assets)
+// This runs automatically after yarn/npm install and handles copying headers
+// We no longer need a Gradle task for this - headers will be present when build starts
+
+// Task to check and log header source before CMake runs
+def checkHeaderSource = tasks.register("checkHeaderSource") {
+  doLast {
+    def cppDir = file("src/main/cpp")
+    def bundledHeaderPath = file("${cppDir}/include/sherpa-onnx/c-api/cxx-api.h")
+    
+    if (bundledHeaderPath.exists()) {
+      println "[SherpaOnnx] Header files present"
+    } else {
+      println "[SherpaOnnx] ERROR: Header files not found at ${bundledHeaderPath.absolutePath}"
+      throw new RuntimeException("Header files not found. Run 'yarn setup-assets' or 'yarn copy-headers'")
+    }
+  }
+}
+
+// Make CMake depend on extraction and header verification - ensure they run before any CMake task
+afterEvaluate {
+  tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
+    dependsOn extractNativeLibs
+    dependsOn checkHeaderSource
+  }
+  
+  // Also ensure all extraction and verification tasks run before preBuild
+  preBuild.dependsOn extractNativeLibs
+  preBuild.dependsOn checkHeaderSource
+}
