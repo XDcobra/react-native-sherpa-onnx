@@ -6,13 +6,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  testSherpaInit,
-  autoModelPath,
-  resolveModelPath,
-} from 'react-native-sherpa-onnx';
+import * as DocumentPicker from '@react-native-documents/picker';
+import { autoModelPath, resolveModelPath } from 'react-native-sherpa-onnx';
 import {
   initializeSTT,
   unloadSTT,
@@ -22,33 +20,23 @@ import { getModelPath, MODELS, type ModelId } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 
 export default function STTScreen() {
-  const [testResult, setTestResult] = useState<string | null>(null);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModel, setCurrentModel] = useState<ModelId | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [audioSourceType, setAudioSourceType] = useState<
+    'example' | 'own' | null
+  >(null);
   const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
     null
   );
+  const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
+  const [customAudioName, setCustomAudioName] = useState<string | null>(null);
   const [transcriptionResult, setTranscriptionResult] = useState<string | null>(
     null
   );
   const [transcribing, setTranscribing] = useState(false);
-
-  const handleTest = async () => {
-    setLoading(true);
-    setError(null);
-    setTestResult(null);
-
-    try {
-      const result = await testSherpaInit();
-      setTestResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
   const handleInitialize = async (modelId: ModelId) => {
     setLoading(true);
@@ -85,6 +73,12 @@ export default function STTScreen() {
 
       setCurrentModel(modelId);
       setInitResult(`Initialized: ${modelName}`);
+      // Reset audio selection when changing models
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
+      setTranscriptionResult(null);
     } catch (err) {
       // Log full error details for debugging
       console.error('Initialization error:', err);
@@ -122,8 +116,14 @@ export default function STTScreen() {
   };
 
   const handleTranscribe = async () => {
-    if (!selectedAudio || !currentModel) {
-      setError('Please select a model and audio file first');
+    if (!currentModel) {
+      setError('Please select a model first');
+      return;
+    }
+
+    // If a custom audio file was chosen, prefer it
+    if (!selectedAudio && !customAudioPath) {
+      setError('Please select an audio file (example or local WAV)');
       return;
     }
 
@@ -132,12 +132,18 @@ export default function STTScreen() {
     setTranscriptionResult(null);
 
     try {
-      // Resolve audio file path (using auto detection - tries asset first, then file system)
-      const audioPathConfig = autoModelPath(selectedAudio.id);
-      const resolvedAudioPath = await resolveModelPath(audioPathConfig);
+      let pathToTranscribe: string;
 
-      // Transcribe the audio file
-      const result = await transcribeFile(resolvedAudioPath);
+      if (customAudioPath) {
+        pathToTranscribe = customAudioPath;
+      } else {
+        // Resolve audio file path (using auto detection - tries asset first, then file system)
+        const audioPathConfig = autoModelPath(selectedAudio!.id);
+        pathToTranscribe = await resolveModelPath(audioPathConfig);
+      }
+
+      // Transcribe the audio file (pathToTranscribe may be an asset path or file URI)
+      const result = await transcribeFile(pathToTranscribe);
       setTranscriptionResult(result);
     } catch (err) {
       console.error('Transcription error:', err);
@@ -165,6 +171,86 @@ export default function STTScreen() {
     }
   };
 
+  const handlePickLocalFile = async () => {
+    setError(null);
+    setTranscriptionResult(null);
+
+    try {
+      const res = await DocumentPicker.pick({
+        type: [DocumentPicker.types.audio],
+      });
+
+      // res may be an array or single object depending on version/config
+      const file = Array.isArray(res) ? res[0] : res;
+      const uri = file.uri || file.name;
+      const name = file.name || uri?.split('/')?.pop() || 'local.wav';
+
+      if (!uri) {
+        setError('Could not get file URI from picker result');
+        return;
+      }
+
+      setCustomAudioPath(uri);
+      setCustomAudioName(name);
+      // clear example selection when choosing a local file
+      setSelectedAudio(null);
+    } catch (err: any) {
+      const isCancel =
+        (DocumentPicker &&
+          typeof (DocumentPicker as any).isCancel === 'function' &&
+          (DocumentPicker as any).isCancel(err)) ||
+        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        err?.name === 'DocumentPickerCanceled' ||
+        (typeof err?.message === 'string' &&
+          err.message.toLowerCase().includes('cancel'));
+      if (isCancel) {
+        // user cancelled, ignore
+        return;
+      }
+      console.error('File pick error:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handlePlayAudio = () => {
+    if (!customAudioPath) return;
+
+    try {
+      // Try to use react-native-sound if available
+
+      const Sound = require('react-native-sound');
+      Sound.setCategory('Playback');
+
+      // Stop previous player if any
+      if (soundPlayer) {
+        soundPlayer.stop();
+        soundPlayer.release();
+      }
+
+      const player = new Sound(customAudioPath, '', (soundErr: any) => {
+        if (soundErr) {
+          console.error('Failed to load sound', soundErr);
+          Alert.alert('Error', 'Failed to load audio file');
+          return;
+        }
+        // Play the audio
+        player.play((success: boolean) => {
+          if (!success) {
+            Alert.alert('Error', 'Playback failed');
+          }
+          player.release();
+        });
+      });
+
+      setSoundPlayer(player);
+    } catch {
+      Alert.alert(
+        'Audio Playback Not Available',
+        'Please install react-native-sound to play audio files:\n\ncd example\nnpm install react-native-sound'
+      );
+    }
+  };
+
   // Get available audio files for current model
   const availableAudioFiles = currentModel
     ? getAudioFilesForModel(currentModel)
@@ -177,29 +263,7 @@ export default function STTScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. Library Test</Text>
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleTest}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Test Sherpa Init</Text>
-            )}
-          </TouchableOpacity>
-
-          {testResult && (
-            <View style={styles.resultContainer}>
-              <Text style={styles.resultLabel}>Result:</Text>
-              <Text style={styles.resultText}>{testResult}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. Initialize Model</Text>
+          <Text style={styles.sectionTitle}>1. Initialize Model</Text>
           <Text style={styles.hint}>
             Select a model to initialize. Models must be provided separately.
           </Text>
@@ -390,9 +454,10 @@ export default function STTScreen() {
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
+          <Text style={styles.sectionTitle}>2. Transcribe Audio</Text>
           <Text style={styles.hint}>
-            Select an audio file and transcribe it using the initialized model.
+            Select an audio source and transcribe it using the initialized
+            model.
           </Text>
 
           {!currentModel && (
@@ -403,41 +468,132 @@ export default function STTScreen() {
             </View>
           )}
 
-          {currentModel && availableAudioFiles.length > 0 && (
+          {currentModel && !audioSourceType && (
             <>
-              <Text style={styles.subsectionTitle}>Select Audio File:</Text>
-              <View style={styles.audioFilesContainer}>
-                {availableAudioFiles.map((audioFile) => (
-                  <TouchableOpacity
-                    key={audioFile.id}
-                    style={[
-                      styles.audioFileButton,
-                      selectedAudio?.id === audioFile.id &&
-                        styles.audioFileButtonActive,
-                    ]}
-                    onPress={() => setSelectedAudio(audioFile)}
-                  >
-                    <Text
-                      style={[
-                        styles.audioFileButtonText,
-                        selectedAudio?.id === audioFile.id &&
-                          styles.audioFileButtonTextActive,
-                      ]}
-                    >
-                      {audioFile.name}
-                    </Text>
-                    <Text style={styles.audioFileDescription}>
-                      {audioFile.description}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
+              <View style={styles.sourceChoiceRow}>
+                <TouchableOpacity
+                  style={[styles.sourceChoiceButton, styles.flex1, styles.mr12]}
+                  onPress={() => setAudioSourceType('example')}
+                >
+                  <Text style={styles.sourceChoiceButtonText}>
+                    📁 Example Audio
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.sourceChoiceButton, styles.flex1]}
+                  onPress={() => setAudioSourceType('own')}
+                >
+                  <Text style={styles.sourceChoiceButtonText}>
+                    🎵 Select Your Own Audio
+                  </Text>
+                </TouchableOpacity>
               </View>
+            </>
+          )}
 
-              {selectedAudio && (
+          {currentModel &&
+            audioSourceType === 'example' &&
+            availableAudioFiles.length > 0 && (
+              <>
+                <Text style={styles.subsectionTitle}>Select Audio File:</Text>
+                <View style={styles.audioFilesContainer}>
+                  {availableAudioFiles.map((audioFile) => (
+                    <TouchableOpacity
+                      key={audioFile.id}
+                      style={[
+                        styles.audioFileButton,
+                        selectedAudio?.id === audioFile.id &&
+                          styles.audioFileButtonActive,
+                      ]}
+                      onPress={() => setSelectedAudio(audioFile)}
+                    >
+                      <Text
+                        style={[
+                          styles.audioFileButtonText,
+                          selectedAudio?.id === audioFile.id &&
+                            styles.audioFileButtonTextActive,
+                        ]}
+                      >
+                        {audioFile.name}
+                      </Text>
+                      <Text style={styles.audioFileDescription}>
+                        {audioFile.description}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {selectedAudio && (
+                  <TouchableOpacity
+                    style={[
+                      styles.button,
+                      (transcribing || loading) && styles.buttonDisabled,
+                    ]}
+                    onPress={handleTranscribe}
+                    disabled={transcribing || loading}
+                  >
+                    {transcribing ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.buttonText}>Transcribe Audio</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.secondaryButton, styles.mt15]}
+                  onPress={() => {
+                    setAudioSourceType(null);
+                    setSelectedAudio(null);
+                    setTranscriptionResult(null);
+                  }}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    ← Change Audio Source
+                  </Text>
+                </TouchableOpacity>
+
+                {transcriptionResult && (
+                  <View style={styles.resultContainer}>
+                    <Text style={styles.resultLabel}>Transcription:</Text>
+                    <Text style={styles.resultText}>{transcriptionResult}</Text>
+                  </View>
+                )}
+              </>
+            )}
+
+          {currentModel && audioSourceType === 'own' && (
+            <>
+              <Text style={styles.subsectionTitle}>Select Local WAV File:</Text>
+              <TouchableOpacity
+                style={[styles.button, loading && styles.buttonDisabled]}
+                onPress={handlePickLocalFile}
+                disabled={loading}
+              >
+                <Text style={styles.buttonText}>📂 Choose Local WAV</Text>
+              </TouchableOpacity>
+
+              {customAudioName && (
+                <View style={styles.selectedFileContainer}>
+                  <Text style={styles.selectedFileLabel}>Selected file:</Text>
+                  <Text style={styles.selectedFileName}>{customAudioName}</Text>
+
+                  <TouchableOpacity
+                    style={[styles.playButton]}
+                    onPress={handlePlayAudio}
+                  >
+                    <Text style={styles.playButtonText}>▶️ Play Audio</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {customAudioPath && (
                 <TouchableOpacity
                   style={[
                     styles.button,
                     (transcribing || loading) && styles.buttonDisabled,
+                    styles.mt12,
                   ]}
                   onPress={handleTranscribe}
                   disabled={transcribing || loading}
@@ -450,6 +606,25 @@ export default function STTScreen() {
                 </TouchableOpacity>
               )}
 
+              <TouchableOpacity
+                style={[styles.secondaryButton, styles.mt15]}
+                onPress={() => {
+                  setAudioSourceType(null);
+                  setCustomAudioPath(null);
+                  setCustomAudioName(null);
+                  setTranscriptionResult(null);
+                  if (soundPlayer) {
+                    soundPlayer.stop();
+                    soundPlayer.release();
+                    setSoundPlayer(null);
+                  }
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  ← Change Audio Source
+                </Text>
+              </TouchableOpacity>
+
               {transcriptionResult && (
                 <View style={styles.resultContainer}>
                   <Text style={styles.resultLabel}>Transcription:</Text>
@@ -459,13 +634,15 @@ export default function STTScreen() {
             </>
           )}
 
-          {currentModel && availableAudioFiles.length === 0 && (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                No audio files available for this model
-              </Text>
-            </View>
-          )}
+          {currentModel &&
+            audioSourceType === 'example' &&
+            availableAudioFiles.length === 0 && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  No audio files available for this model
+                </Text>
+              </View>
+            )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -637,5 +814,85 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#856404',
     textAlign: 'center',
+  },
+  sourceChoiceButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sourceChoiceButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  sourceChoiceRow: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  flex1: {
+    flex: 1,
+  },
+  mr12: {
+    marginRight: 12,
+  },
+  mt15: {
+    marginTop: 15,
+  },
+  mt12: {
+    marginTop: 12,
+  },
+  secondaryButton: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectedFileContainer: {
+    marginTop: 20,
+    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  selectedFileLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  selectedFileName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  playButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  playButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

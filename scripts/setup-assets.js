@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const isWindows = process.platform === 'win32';
+// platform detection not needed currently
 
 /**
  * Setup script that runs after npm/yarn install
@@ -157,7 +157,7 @@ function copyHeaders() {
       log('Header verification failed after copy', 'error');
     }
     return headersOk;
-  } catch (error) {
+  } catch {
     log('Warning: Header copy failed, may already exist', 'warning');
     // Still try to verify if headers exist
     console.log('');
@@ -211,7 +211,7 @@ function verifyIOSFramework() {
             totalSize += stats.size;
           }
         });
-      } catch (e) {
+      } catch {
         // Silently ignore errors
       }
       return totalSize;
@@ -275,7 +275,7 @@ function downloadIOSFramework() {
 
     log('iOS framework download command reported failure', 'error');
     return false;
-  } catch (error) {
+  } catch {
     log('iOS framework download failed', 'error');
     return false;
   }

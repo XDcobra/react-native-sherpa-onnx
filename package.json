@@ -78,6 +78,7 @@
     "prepare": "bob build",
     "typecheck": "tsc",
     "lint": "eslint --ignore-pattern \"sherpa-onnx/**\" \"**/*.{js,ts,tsx}\"",
+    "lint:fix": "eslint --fix --ignore-pattern \"sherpa-onnx/**\" \"**/*.{js,ts,tsx}\"",
     "prettier": "npx prettier --write \"**/*.{js,ts,tsx}\"",
     "test": "jest",
     "verdaccio:start": "VERDACCIO_BODY_SIZE_LIMIT=100mb verdaccio --config verdaccio.config.yaml",
