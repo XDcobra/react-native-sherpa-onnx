@@ -10,16 +10,16 @@
 namespace sherpaonnx {
 
 /**
- * Wrapper class for sherpa-onnx OfflineRecognizer.
+ * Wrapper class for sherpa-onnx OfflineRecognizer (STT).
  * This provides a C++ interface that can be easily called from JNI.
  */
-class SherpaOnnxWrapper {
+class SttWrapper {
 public:
-    SherpaOnnxWrapper();
-    ~SherpaOnnxWrapper();
+    SttWrapper();
+    ~SttWrapper();
 
     /**
-     * Initialize sherpa-onnx with model directory.
+     * Initialize sherpa-onnx STT with model directory.
      * @param modelDir Path to the model directory
      * @param preferInt8 Optional: true = prefer int8 models, false = prefer regular models, nullopt = try int8 first (default)
      * @param modelType Optional: explicit model type ("transducer", "paraformer", "nemo_ctc"), nullopt = auto-detect (default)

@@ -8,13 +8,13 @@
 namespace sherpaonnx {
 
 /**
- * Wrapper class for sherpa-onnx OfflineRecognizer.
+ * Wrapper class for sherpa-onnx OfflineRecognizer (STT).
  * This provides a C++ interface that can be easily called from iOS Objective-C++.
  */
-class SherpaOnnxWrapper {
+class SttWrapper {
 public:
-    SherpaOnnxWrapper();
-    ~SherpaOnnxWrapper();
+    SttWrapper();
+    ~SttWrapper();
 
     /**
      * Initialize sherpa-onnx with model directory.

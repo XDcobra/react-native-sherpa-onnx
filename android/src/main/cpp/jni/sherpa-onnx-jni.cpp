@@ -17,7 +17,7 @@
 using namespace sherpaonnx;
 
 // Global wrapper instance
-static std::unique_ptr<SherpaOnnxWrapper> g_wrapper = nullptr;
+static std::unique_ptr<SttWrapper> g_stt_wrapper = nullptr;
 
 // Global TTS wrapper instance
 static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
@@ -25,7 +25,7 @@ static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeInitialize(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
     JNIEnv *env,
     jobject /* this */,
     jstring modelDir,
@@ -33,8 +33,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeInitialize(
     jboolean hasPreferInt8,
     jstring modelType) {
     try {
-        if (g_wrapper == nullptr) {
-            g_wrapper = std::make_unique<SherpaOnnxWrapper>();
+        if (g_stt_wrapper == nullptr) {
+            g_stt_wrapper = std::make_unique<SttWrapper>();
         }
 
         const char *modelDirStr = env->GetStringUTFChars(modelDir, nullptr);
@@ -65,7 +65,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeInitialize(
             modelTypeOpt = modelTypePath;
         }
         
-        bool result = g_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt);
+        bool result = g_stt_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt);
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
@@ -83,12 +83,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeInitialize(
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeTranscribeFile(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
     JNIEnv *env,
     jobject /* this */,
     jstring filePath) {
     try {
-        if (g_wrapper == nullptr || !g_wrapper->isInitialized()) {
+        if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
             LOGE("Not initialized. Call initialize() first.");
             return env->NewStringUTF("");
         }
@@ -99,7 +99,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTranscribeFile(
             return env->NewStringUTF("");
         }
 
-        std::string result = g_wrapper->transcribeFile(std::string(filePathStr));
+        std::string result = g_stt_wrapper->transcribeFile(std::string(filePathStr));
         env->ReleaseStringUTFChars(filePath, filePathStr);
 
         return env->NewStringUTF(result.c_str());
@@ -110,12 +110,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTranscribeFile(
 }
 
 JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeRelease(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeSttRelease(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {
-        if (g_wrapper != nullptr) {
-            g_wrapper->release();
+        if (g_stt_wrapper != nullptr) {
+            g_stt_wrapper->release();
         }
     } catch (const std::exception &e) {
         LOGE("Exception in nativeRelease: %s", e.what());
@@ -132,7 +132,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(
 // ==================== TTS JNI Methods ====================
 
 JNIEXPORT jboolean JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeInitializeTts(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
     JNIEnv *env,
     jobject /* this */,
     jstring modelDir,
@@ -185,7 +185,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeInitializeTts(
 }
 
 JNIEXPORT jobject JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeGenerateTts(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerate(
     JNIEnv *env,
     jobject /* this */,
     jstring text,
@@ -274,7 +274,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeGenerateTts(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeGetTtsSampleRate(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGetSampleRate(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {
@@ -293,7 +293,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeGetTtsSampleRate(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeGetTtsNumSpeakers(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGetNumSpeakers(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {
@@ -312,7 +312,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeGetTtsNumSpeakers(
 }
 
 JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeReleaseTts(
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsRelease(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {

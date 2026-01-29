@@ -10,8 +10,8 @@
 #ifdef __APPLE__
 #include <Foundation/Foundation.h>
 #include <cstdio>
-#define LOGI(fmt, ...) NSLog(@"SherpaOnnxWrapper: " fmt, ##__VA_ARGS__)
-#define LOGE(fmt, ...) NSLog(@"SherpaOnnxWrapper ERROR: " fmt, ##__VA_ARGS__)
+#define LOGI(fmt, ...) NSLog(@"SttWrapper: " fmt, ##__VA_ARGS__)
+#define LOGE(fmt, ...) NSLog(@"SttWrapper ERROR: " fmt, ##__VA_ARGS__)
 #else
 #define LOGI(...)
 #define LOGE(...)
@@ -27,23 +27,23 @@ namespace fs = std::filesystem;
 namespace sherpaonnx {
 
 // PIMPL pattern implementation
-class SherpaOnnxWrapper::Impl {
+class SttWrapper::Impl {
 public:
     bool initialized = false;
     std::string modelDir;
     std::optional<sherpa_onnx::cxx::OfflineRecognizer> recognizer;
 };
 
-SherpaOnnxWrapper::SherpaOnnxWrapper() : pImpl(std::make_unique<Impl>()) {
-    LOGI("SherpaOnnxWrapper created");
+SttWrapper::SttWrapper() : pImpl(std::make_unique<Impl>()) {
+    LOGI("SttWrapper created");
 }
 
-SherpaOnnxWrapper::~SherpaOnnxWrapper() {
+SttWrapper::~SttWrapper() {
     release();
-    LOGI("SherpaOnnxWrapper destroyed");
+    LOGI("SttWrapper destroyed");
 }
 
-bool SherpaOnnxWrapper::initialize(
+bool SttWrapper::initialize(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
     const std::optional<std::string>& modelType
@@ -373,7 +373,7 @@ bool SherpaOnnxWrapper::initialize(
     }
 }
 
-std::string SherpaOnnxWrapper::transcribeFile(const std::string& filePath) {
+std::string SttWrapper::transcribeFile(const std::string& filePath) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
         LOGE("Not initialized. Call initialize() first.");
         return "";
@@ -415,11 +415,11 @@ std::string SherpaOnnxWrapper::transcribeFile(const std::string& filePath) {
     }
 }
 
-bool SherpaOnnxWrapper::isInitialized() const {
+bool SttWrapper::isInitialized() const {
     return pImpl->initialized;
 }
 
-void SherpaOnnxWrapper::release() {
+void SttWrapper::release() {
     if (pImpl->initialized) {
         // OfflineRecognizer uses RAII - destruction happens automatically when optional is reset
         pImpl->recognizer.reset();

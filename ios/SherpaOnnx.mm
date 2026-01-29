@@ -175,7 +175,7 @@
 }
 
 // Global wrapper instance
-static std::unique_ptr<sherpaonnx::SherpaOnnxWrapper> g_wrapper = nullptr;
+static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
 
 // Global TTS wrapper instance
 static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
@@ -189,8 +189,8 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
     RCTLogInfo(@"Initializing sherpa-onnx with modelDir: %@", modelDir);
     
     @try {
-        if (g_wrapper == nullptr) {
-            g_wrapper = std::make_unique<sherpaonnx::SherpaOnnxWrapper>();
+        if (g_stt_wrapper == nullptr) {
+            g_stt_wrapper = std::make_unique<sherpaonnx::SttWrapper>();
         }
         
         std::string modelDirStr = [modelDir UTF8String];
@@ -207,7 +207,7 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
             modelTypeOpt = [modelType UTF8String];
         }
         
-        bool result = g_wrapper->initialize(modelDirStr, preferInt8Opt, modelTypeOpt);
+        bool result = g_stt_wrapper->initialize(modelDirStr, preferInt8Opt, modelTypeOpt);
         
         if (result) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");
@@ -241,13 +241,13 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
           withRejecter:(RCTPromiseRejectBlock)reject
 {
     @try {
-        if (g_wrapper == nullptr || !g_wrapper->isInitialized()) {
+        if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
             reject(@"TRANSCRIBE_ERROR", @"Sherpa-onnx not initialized. Call initializeSherpaOnnx first.", nil);
             return;
         }
         
         std::string filePathStr = [filePath UTF8String];
-        std::string result = g_wrapper->transcribeFile(filePathStr);
+        std::string result = g_stt_wrapper->transcribeFile(filePathStr);
         
         // Convert result to NSString - empty strings are valid (e.g., silence)
         NSString *transcribedText = [NSString stringWithUTF8String:result.c_str()];
@@ -268,10 +268,10 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
                       withRejecter:(RCTPromiseRejectBlock)reject
 {
     @try {
-        if (g_wrapper != nullptr) {
-            g_wrapper->release();
-            g_wrapper.reset();
-            g_wrapper = nullptr;
+        if (g_stt_wrapper != nullptr) {
+            g_stt_wrapper->release();
+            g_stt_wrapper.reset();
+            g_stt_wrapper = nullptr;
         }
         RCTLogInfo(@"Sherpa-onnx resources released");
         resolve(nil);

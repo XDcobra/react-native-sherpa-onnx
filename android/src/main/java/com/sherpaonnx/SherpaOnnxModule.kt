@@ -247,7 +247,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         return
       }
       
-      val success = nativeInitialize(
+      val success = nativeSttInitialize(
         modelDir,
         preferInt8 ?: false,
         preferInt8 != null,
@@ -273,7 +273,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun transcribeFile(filePath: String, promise: Promise) {
     try {
-      val result = nativeTranscribeFile(filePath)
+      val result = nativeSttTranscribe(filePath)
       promise.resolve(result)
     } catch (e: Exception) {
       promise.reject("TRANSCRIBE_ERROR", "Failed to transcribe file", e)
@@ -285,7 +285,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun unloadSherpaOnnx(promise: Promise) {
     try {
-      nativeRelease()
+      nativeSttRelease()
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("RELEASE_ERROR", "Failed to release resources", e)
@@ -305,7 +305,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val success = nativeInitializeTts(
+      val success = nativeTtsInitialize(
         modelDir,
         modelType,
         numThreads.toInt(),
@@ -331,7 +331,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val result = nativeGenerateTts(text, sid.toInt(), speed.toFloat())
+      val result = nativeTtsGenerate(text, sid.toInt(), speed.toFloat())
       if (result != null) {
         // Convert HashMap to WritableMap for React Native
         val map = com.facebook.react.bridge.Arguments.createMap()
@@ -366,7 +366,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun getTtsSampleRate(promise: Promise) {
     try {
-      val sampleRate = nativeGetTtsSampleRate()
+      val sampleRate = nativeTtsGetSampleRate()
       promise.resolve(sampleRate.toDouble())
     } catch (e: Exception) {
       promise.reject("TTS_ERROR", "Failed to get sample rate", e)
@@ -378,7 +378,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun getTtsNumSpeakers(promise: Promise) {
     try {
-      val numSpeakers = nativeGetTtsNumSpeakers()
+      val numSpeakers = nativeTtsGetNumSpeakers()
       promise.resolve(numSpeakers.toDouble())
     } catch (e: Exception) {
       promise.reject("TTS_ERROR", "Failed to get number of speakers", e)
@@ -390,7 +390,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun unloadTts(promise: Promise) {
     try {
-      nativeReleaseTts()
+      nativeTtsRelease()
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
@@ -405,7 +405,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeTestSherpaInit(): String
 
     @JvmStatic
-    private external fun nativeInitialize(
+    private external fun nativeSttInitialize(
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
@@ -413,14 +413,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): Boolean
 
     @JvmStatic
-    private external fun nativeTranscribeFile(filePath: String): String
+    private external fun nativeSttTranscribe(filePath: String): String
 
     @JvmStatic
-    private external fun nativeRelease()
+    private external fun nativeSttRelease()
 
     // TTS Native JNI methods
     @JvmStatic
-    private external fun nativeInitializeTts(
+    private external fun nativeTtsInitialize(
       modelDir: String,
       modelType: String,
       numThreads: Int,
@@ -428,19 +428,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): Boolean
 
     @JvmStatic
-    private external fun nativeGenerateTts(
+    private external fun nativeTtsGenerate(
       text: String,
       sid: Int,
       speed: Float
     ): java.util.HashMap<String, Any>?
 
     @JvmStatic
-    private external fun nativeGetTtsSampleRate(): Int
+    private external fun nativeTtsGetSampleRate(): Int
 
     @JvmStatic
-    private external fun nativeGetTtsNumSpeakers(): Int
+    private external fun nativeTtsGetNumSpeakers(): Int
 
     @JvmStatic
-    private external fun nativeReleaseTts()
+    private external fun nativeTtsRelease()
   }
 }

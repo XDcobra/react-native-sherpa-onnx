@@ -23,30 +23,30 @@ namespace fs = std::experimental::filesystem;
 // sherpa-onnx headers - use cxx-api which is compatible with libsherpa-onnx-cxx-api.so
 #include "sherpa-onnx/c-api/cxx-api.h"
 
-#define LOG_TAG "SherpaOnnxWrapper"
+#define LOG_TAG "SttWrapper"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace sherpaonnx {
 
 // PIMPL pattern implementation
-class SherpaOnnxWrapper::Impl {
+class SttWrapper::Impl {
 public:
     bool initialized = false;
     std::string modelDir;
     std::optional<sherpa_onnx::cxx::OfflineRecognizer> recognizer;
 };
 
-SherpaOnnxWrapper::SherpaOnnxWrapper() : pImpl(std::make_unique<Impl>()) {
-    LOGI("SherpaOnnxWrapper created");
+SttWrapper::SttWrapper() : pImpl(std::make_unique<Impl>()) {
+    LOGI("SttWrapper created");
 }
 
-SherpaOnnxWrapper::~SherpaOnnxWrapper() {
+SttWrapper::~SttWrapper() {
     release();
-    LOGI("SherpaOnnxWrapper destroyed");
+    LOGI("SttWrapper destroyed");
 }
 
-bool SherpaOnnxWrapper::initialize(
+bool SttWrapper::initialize(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
     const std::optional<std::string>& modelType
@@ -578,7 +578,7 @@ bool SherpaOnnxWrapper::initialize(
     }
 }
 
-std::string SherpaOnnxWrapper::transcribeFile(const std::string& filePath) {
+std::string SttWrapper::transcribeFile(const std::string& filePath) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
         LOGE("Not initialized. Call initialize() first.");
         return "";
@@ -633,11 +633,11 @@ std::string SherpaOnnxWrapper::transcribeFile(const std::string& filePath) {
     }
 }
 
-bool SherpaOnnxWrapper::isInitialized() const {
+bool SttWrapper::isInitialized() const {
     return pImpl->initialized;
 }
 
-void SherpaOnnxWrapper::release() {
+void SttWrapper::release() {
     if (pImpl->initialized) {
         // OfflineRecognizer uses RAII - destruction happens automatically when optional is reset
         pImpl->recognizer.reset();
