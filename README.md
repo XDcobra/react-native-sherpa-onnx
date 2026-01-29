@@ -142,6 +142,10 @@ Then run `pod install` as usual.
 
 ## Quick Start
 
+### Manual Setup
+
+Use this approach when you know the exact model name and type:
+
 ```typescript
 import { resolveModelPath } from 'react-native-sherpa-onnx';
 import {
@@ -150,50 +154,76 @@ import {
   unloadSTT,
 } from 'react-native-sherpa-onnx/stt';
 
-// Initialize with a model
+// Resolve model path from assets (explicit model name)
 const modelPath = await resolveModelPath({
   type: 'asset',
-  path: 'models/sherpa-onnx-model',
+  path: 'models/sherpa-onnx-whisper-tiny.en',
 });
 
-await initializeSTT({
+// Initialize STT with explicit model type and quantization preference
+const result = await initializeSTT({
   modelPath: modelPath,
-  preferInt8: true, // Optional: prefer quantized models
+  modelType: 'whisper', // Explicitly specify model type (no auto-detection)
+  preferInt8: true,     // Prefer quantized models
 });
+
+if (result.success) {
+  console.log('Detected models:', result.detectedModels);
+  // [{ type: 'whisper', modelDir: '/data/.../sherpa-onnx-whisper-tiny.en' }]
+}
 
 // Transcribe an audio file
-const transcription = await transcribeFile('path/to/audio.wav');
+const transcription = await transcribeFile('/path/to/audio.wav');
 console.log('Transcription:', transcription);
 
 // Release resources when done
 await unloadSTT();
 ```
 
-## Usage
+### Automated Discovery
 
-### Initialization
+Use this approach to automatically discover and use available models:
 
 ```typescript
+import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
 import {
-  initializeSherpaOnnx,
-  assetModelPath,
-  autoModelPath,
-} from 'react-native-sherpa-onnx';
+  initializeSTT,
+  transcribeFile,
+  unloadSTT,
+} from 'react-native-sherpa-onnx/stt';
 
-// Option 1: Asset model (bundled in app)
-await initializeSherpaOnnx({
-  modelPath: assetModelPath('models/sherpa-onnx-model'),
-  preferInt8: true, // Prefer quantized models
+// Discover all available models in assets
+const availableModels = await listAssetModels();
+console.log('Available models:', availableModels);
+// [{ folder: 'sherpa-onnx-whisper-tiny.en', hint: 'stt' }, { folder: 'vits-piper-en_US-lessac-medium', hint: 'tts' }, ...]
+
+const sttModels = availableModels.filter((model) => model.hint === 'stt');
+
+if (sttModels.length === 0) {
+  throw new Error('No STT models found in assets/models/');
+}
+
+// Automatically use the first available STT model
+const modelPath = await resolveModelPath({
+  type: 'asset',
+  path: `models/${sttModels[0].folder}`,
 });
 
-// Option 2: Auto-detect (tries asset, then file system)
-await initializeSherpaOnnx({
-  modelPath: autoModelPath('models/sherpa-onnx-model'),
-});
+// Initialize and use
+const result = await initializeSTT({ modelPath });
 
-// Option 3: Simple string (backward compatible)
-await initializeSherpaOnnx('models/sherpa-onnx-model');
+if (result.success) {
+  console.log(`Using model: ${sttModels[0].folder}`);
+  console.log('Detected types:', result.detectedModels);
+  
+  const transcription = await transcribeFile('/path/to/audio.wav');
+  console.log('Transcription:', transcription);
+  
+  await unloadSTT();
+}
 ```
+
+## Usage
 
 ### Transcription (Speech-to-Text)
 
@@ -357,7 +387,9 @@ Initialize the speech-to-text engine with a model.
 - `options.preferInt8` (optional): Prefer quantized models (`true`), regular models (`false`), or auto-detect (`undefined`, default)
 - `options.modelType` (optional): Explicit model type (`'transducer'`, `'paraformer'`, `'nemo_ctc'`, `'whisper'`, `'wenet_ctc'`, `'sense_voice'`, `'funasr_nano'`), or auto-detect (`'auto'`, default)
 
-**Returns:** `Promise<void>`
+**Returns:** `Promise<STTInitializeResult>`
+- `STTInitializeResult.success`: Whether initialization succeeded
+- `STTInitializeResult.detectedModels`: Array of detected models with `type` and `modelDir` properties
 
 #### `transcribeFile(filePath)`
 
@@ -390,7 +422,9 @@ Initialize the text-to-speech engine with a model.
 - `options.numThreads` (optional): Number of inference threads, default: `2`
 - `options.debug` (optional): Enable debug logging, default: `false`
 
-**Returns:** `Promise<void>`
+**Returns:** `Promise<TTSInitializeResult>`
+- `TTSInitializeResult.success`: Whether initialization succeeded
+- `TTSInitializeResult.detectedModels`: Array of detected models with `type` and `modelDir` properties
 
 #### `generateSpeech(text, options?)`
 
@@ -446,6 +480,22 @@ Resolve a model path configuration to an absolute path.
 - `config.path`: Path to resolve (relative for assets, absolute for files)
 
 **Returns:** `Promise<string>` - Absolute path to model directory
+
+#### `listAssetModels()`
+
+List all available model folders in the assets directory.
+
+**Returns:** `Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>` - Array of model info objects found in `assets/models/` (Android) or app bundle `models/` (iOS)
+
+**Example:**
+
+```typescript
+import { listAssetModels } from 'react-native-sherpa-onnx';
+
+const models = await listAssetModels();
+console.log('Available models:', models);
+// [{ folder: 'vits-piper-en_US-lessac-medium', hint: 'tts' }, { folder: 'sherpa-onnx-whisper-tiny.en', hint: 'stt' }, ...]
+```
 
 #### `testSherpaInit()`
 

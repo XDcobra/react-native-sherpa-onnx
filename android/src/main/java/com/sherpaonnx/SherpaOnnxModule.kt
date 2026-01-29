@@ -475,12 +475,58 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       
       val result = Arguments.createArray()
       modelFolders.forEach { folder ->
-        result.pushString(folder)
+        val modelMap = Arguments.createMap()
+        modelMap.putString("folder", folder)
+        modelMap.putString("hint", inferModelHint(folder))
+        result.pushMap(modelMap)
       }
       
       promise.resolve(result)
     } catch (e: Exception) {
       promise.reject("LIST_ASSETS_ERROR", "Failed to list asset models: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Infer a high-level model type hint from a folder name.
+   */
+  private fun inferModelHint(folderName: String): String {
+    val name = folderName.lowercase()
+    val sttHints = listOf(
+      "zipformer",
+      "paraformer",
+      "nemo",
+      "parakeet",
+      "whisper",
+      "wenet",
+      "sensevoice",
+      "sense-voice",
+      "sense",
+      "funasr",
+      "transducer",
+      "ctc",
+      "asr"
+    )
+    val ttsHints = listOf(
+      "vits",
+      "piper",
+      "matcha",
+      "kokoro",
+      "kitten",
+      "zipvoice",
+      "melo",
+      "coqui",
+      "mms",
+      "tts"
+    )
+
+    val isStt = sttHints.any { name.contains(it) }
+    val isTts = ttsHints.any { name.contains(it) }
+
+    return when {
+      isStt && !isTts -> "stt"
+      isTts && !isStt -> "tts"
+      else -> "unknown"
     }
   }
   companion object {

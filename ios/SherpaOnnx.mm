@@ -502,11 +502,73 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
             RCTLogWarn(@"Models directory not found at: %@", modelsPath);
         }
         
-        resolve(modelFolders);
+        NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
+        for (NSString *folder in modelFolders) {
+            NSString *hint = [self inferModelHint:folder];
+            [result addObject:@{ @"folder": folder, @"hint": hint }];
+        }
+        resolve(result);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception listing asset models: %@", exception.reason];
         reject(@"LIST_ASSETS_ERROR", errorMsg, nil);
     }
+}
+
+// Infer a high-level model type hint from a folder name.
+- (NSString *)inferModelHint:(NSString *)folderName
+{
+    NSString *name = [folderName lowercaseString];
+    NSArray<NSString *> *sttHints = @[
+        @"zipformer",
+        @"paraformer",
+        @"nemo",
+        @"parakeet",
+        @"whisper",
+        @"wenet",
+        @"sensevoice",
+        @"sense-voice",
+        @"sense",
+        @"funasr",
+        @"transducer",
+        @"ctc",
+        @"asr"
+    ];
+    NSArray<NSString *> *ttsHints = @[
+        @"vits",
+        @"piper",
+        @"matcha",
+        @"kokoro",
+        @"kitten",
+        @"zipvoice",
+        @"melo",
+        @"coqui",
+        @"mms",
+        @"tts"
+    ];
+
+    BOOL isStt = NO;
+    for (NSString *hint in sttHints) {
+        if ([name containsString:hint]) {
+            isStt = YES;
+            break;
+        }
+    }
+
+    BOOL isTts = NO;
+    for (NSString *hint in ttsHints) {
+        if ([name containsString:hint]) {
+            isTts = YES;
+            break;
+        }
+    }
+
+    if (isStt && !isTts) {
+        return @"stt";
+    }
+    if (isTts && !isStt) {
+        return @"tts";
+    }
+    return @"unknown";
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
