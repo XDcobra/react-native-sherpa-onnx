@@ -15,7 +15,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | Feature | Status |
 |---------|--------|
 | Offline Speech-to-Text | ✅ Supported |
-| Text-to-Speech | ❌ Not yet supported |
+| Text-to-Speech | ✅ **Supported** |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
 | Source Separation | ❌ Not yet supported |
@@ -46,6 +46,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 ## Supported Model Types
 
+### Speech-to-Text (STT) Models
+
 | Model Type               | `modelType` Value | Description                                                                              | Download Links                                                                                   |
 | ------------------------ | ----------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | **Zipformer/Transducer** | `'transducer'`    | Requires `encoder.onnx`, `decoder.onnx`, `joiner.onnx`, and `tokens.txt`                 | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-transducer/index.html) |
@@ -55,6 +57,16 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **WeNet CTC**            | `'wenet_ctc'`     | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/wenet/index.html)  |
 | **SenseVoice**           | `'sense_voice'`   | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/sense-voice/index.html)        |
 | **FunASR Nano**          | `'funasr_nano'`   | Requires `encoder_adaptor.onnx`, `llm.onnx`, `embedding.onnx`, and `tokenizer` directory | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/funasr-nano/index.html)        |
+
+### Text-to-Speech (TTS) Models
+
+| Model Type       | `modelType` Value | Description                                                                                          | Download Links                                                                      |
+| ---------------- | ----------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **VITS**         | `'vits'`          | Fast, high-quality TTS. Includes Piper, Coqui, MeloTTS, MMS variants. Requires `model.onnx`, `tokens.txt` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **Matcha**       | `'matcha'`        | High-quality acoustic model + vocoder. Requires `acoustic_model.onnx`, `vocoder.onnx`, `tokens.txt` | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html) |
+| **Kokoro**       | `'kokoro'`        | Multi-speaker, multi-language. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`    | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **Zipvoice**     | `'zipvoice'`      | Voice cloning capable. Requires `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`        | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
 
 ## Features
 
@@ -257,11 +269,53 @@ import { unloadSTT } from 'react-native-sherpa-onnx/stt';
 await unloadSTT();
 ```
 
+### Text-to-Speech (TTS)
+
+```typescript
+import { 
+  initializeTTS, 
+  generateSpeech, 
+  getModelInfo,
+  unloadTTS 
+} from 'react-native-sherpa-onnx/tts';
+
+// Initialize TTS with a model
+await initializeTTS({
+  modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' },
+  numThreads: 2
+});
+
+// Get model information
+const info = await getModelInfo();
+console.log(`Sample rate: ${info.sampleRate} Hz`);
+console.log(`Available voices: ${info.numSpeakers}`);
+
+// Generate speech
+const audio = await generateSpeech('Hello, world!');
+console.log(`Generated ${audio.samples.length} samples`);
+// audio.samples: float array in range [-1.0, 1.0]
+// audio.sampleRate: sample rate in Hz
+
+// With options
+const audio2 = await generateSpeech('Faster speech!', {
+  speed: 1.5,  // 1.5x faster
+  sid: 0       // Speaker ID for multi-speaker models
+});
+
+// Release TTS resources
+await unloadTTS();
+```
+
+See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for detailed TTS model setup instructions and download links.
+
 ## Model Setup
 
-The library does **not** bundle models. You must provide your own models. See [MODEL_SETUP.md](./MODEL_SETUP.md) for detailed setup instructions.
+The library does **not** bundle models. You must provide your own models.
 
-### Model File Requirements
+- **Speech-to-Text (STT)**: See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for detailed setup guide
+- **Text-to-Speech (TTS)**: See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for detailed setup guide
+
+### STT Model File Requirements
 
 - **Zipformer/Transducer**: Requires `encoder.onnx`, `decoder.onnx`, `joiner.onnx`, and `tokens.txt`
 - **Paraformer**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
@@ -270,7 +324,17 @@ The library does **not** bundle models. You must provide your own models. See [M
 - **WeNet CTC**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
 - **SenseVoice**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
 
-### Model Files
+### TTS Model File Requirements
+
+See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for complete guide with download links.
+
+- **VITS**: `model.onnx`, `tokens.txt`, optional: `lexicon.txt`, `espeak-ng-data/`
+- **Matcha**: `acoustic_model.onnx`, `vocoder.onnx`, `tokens.txt`
+- **Kokoro**: `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`
+- **KittenTTS**: `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`
+- **Zipvoice**: `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`
+
+### Model Files Location
 
 Place models in:
 
@@ -308,6 +372,63 @@ Transcribe an audio file.
 #### `unloadSTT()`
 
 Release resources and unload the speech-to-text model.
+
+**Returns:** `Promise<void>`
+
+### Text-to-Speech (TTS) Module
+
+Import from `react-native-sherpa-onnx/tts`:
+
+#### `initializeTTS(options)`
+
+Initialize the text-to-speech engine with a model.
+
+**Parameters:**
+
+- `options.modelPath`: Model path configuration (same as STT)
+- `options.modelType` (optional): Explicit model type (`'vits'`, `'matcha'`, `'kokoro'`, `'kitten'`, `'zipvoice'`, `'auto'`), default: `'auto'`
+- `options.numThreads` (optional): Number of inference threads, default: `2`
+- `options.debug` (optional): Enable debug logging, default: `false`
+
+**Returns:** `Promise<void>`
+
+#### `generateSpeech(text, options?)`
+
+Generate speech audio from text.
+
+**Parameters:**
+
+- `text`: Text to convert to speech
+- `options.sid` (optional): Speaker ID for multi-speaker models, default: `0`
+- `options.speed` (optional): Speech speed multiplier (0.5-2.0), default: `1.0`
+
+**Returns:** `Promise<GeneratedAudio>`
+- `GeneratedAudio.samples`: Audio samples as float array in range [-1.0, 1.0]
+- `GeneratedAudio.sampleRate`: Sample rate in Hz
+
+#### `getModelInfo()`
+
+Get TTS model information (sample rate and number of speakers).
+
+**Returns:** `Promise<TTSModelInfo>`
+- `TTSModelInfo.sampleRate`: Sample rate in Hz
+- `TTSModelInfo.numSpeakers`: Number of available speakers/voices
+
+#### `getSampleRate()`
+
+Get the sample rate of the initialized TTS model.
+
+**Returns:** `Promise<number>` - Sample rate in Hz
+
+#### `getNumSpeakers()`
+
+Get the number of speakers/voices available in the model.
+
+**Returns:** `Promise<number>` - Number of speakers (0 or 1 for single-speaker)
+
+#### `unloadTTS()`
+
+Release TTS resources and unload the model.
 
 **Returns:** `Promise<void>`
 
