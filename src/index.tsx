@@ -7,6 +7,7 @@ export {
   autoModelPath,
   fileModelPath,
   getDefaultModelPath,
+  listAssetModels,
   resolveModelPath,
 } from './utils';
 

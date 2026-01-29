@@ -447,7 +447,42 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
     }
   }
-
+  /**
+   * List all model folders in the assets/models directory.
+   * Scans the platform-specific model directory and returns folder names.
+   */
+  override fun listAssetModels(promise: Promise) {
+    try {
+      val assetManager = reactApplicationContext.assets
+      val modelFolders = mutableListOf<String>()
+      
+      try {
+        // List all items in the "models" directory
+        val items = assetManager.list("models") ?: emptyArray()
+        
+        // Filter to only include directories (check if they have contents)
+        for (item in items) {
+          val subItems = assetManager.list("models/$item")
+          if (subItems != null && subItems.isNotEmpty()) {
+            // It's a directory with contents
+            modelFolders.add(item)
+          }
+        }
+      } catch (e: Exception) {
+        Log.w(NAME, "Could not list models directory: ${e.message}")
+        // Return empty list if models directory doesn't exist
+      }
+      
+      val result = Arguments.createArray()
+      modelFolders.forEach { folder ->
+        result.pushString(folder)
+      }
+      
+      promise.resolve(result)
+    } catch (e: Exception) {
+      promise.reject("LIST_ASSETS_ERROR", "Failed to list asset models: ${e.message}", e)
+    }
+  }
   companion object {
     const val NAME = "SherpaOnnx"
 

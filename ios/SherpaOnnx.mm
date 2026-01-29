@@ -460,6 +460,55 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
     }
 }
 
+- (void)listAssetModels:(RCTPromiseResolveBlock)resolve
+          withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSMutableArray<NSString *> *modelFolders = [NSMutableArray array];
+        
+        // Get the main bundle resource path
+        NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
+        NSString *modelsPath = [bundleResourcePath stringByAppendingPathComponent:@"models"];
+        
+        // Check if models directory exists
+        BOOL isDirectory = NO;
+        BOOL exists = [fileManager fileExistsAtPath:modelsPath isDirectory:&isDirectory];
+        
+        if (exists && isDirectory) {
+            NSError *error = nil;
+            NSArray<NSString *> *items = [fileManager contentsOfDirectoryAtPath:modelsPath error:&error];
+            
+            if (error) {
+                RCTLogWarn(@"Could not list models directory: %@", error.localizedDescription);
+            } else {
+                // Filter to only include directories
+                for (NSString *item in items) {
+                    // Skip hidden files (starting with .)
+                    if ([item hasPrefix:@"."]) {
+                        continue;
+                    }
+                    
+                    NSString *itemPath = [modelsPath stringByAppendingPathComponent:item];
+                    BOOL itemIsDirectory = NO;
+                    [fileManager fileExistsAtPath:itemPath isDirectory:&itemIsDirectory];
+                    
+                    if (itemIsDirectory) {
+                        [modelFolders addObject:item];
+                    }
+                }
+            }
+        } else {
+            RCTLogWarn(@"Models directory not found at: %@", modelsPath);
+        }
+        
+        resolve(modelFolders);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception listing asset models: %@", exception.reason];
+        reject(@"LIST_ASSETS_ERROR", errorMsg, nil);
+    }
+}
+
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {

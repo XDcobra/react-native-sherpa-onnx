@@ -93,6 +93,29 @@ export interface Spec extends TurboModule {
    * Release TTS resources.
    */
   unloadTts(): Promise<void>;
+
+  /**
+   * List all model folders in the assets/models directory.
+   * Scans the platform-specific model directory and returns folder names.
+   *
+   * @returns Array of folder names found in assets/models/ (Android) or bundle models/ (iOS)
+   *
+   * @example
+   * ```typescript
+   * const folders = await listAssetModels();
+   * // Returns: ['sherpa-onnx-streaming-zipformer-en-2023-06-26', 'sherpa-onnx-matcha-icefall-en_US-ljspeech']
+   *
+   * // Then use with resolveModelPath and initialize:
+   * for (const folder of folders) {
+   *   const path = await resolveModelPath({ type: 'asset', path: `models/${folder}` });
+   *   const result = await initializeSherpaOnnx(path);
+   *   if (result.success) {
+   *     console.log(`Found models in ${folder}:`, result.detectedModels);
+   *   }
+   * }
+   * ```
+   */
+  listAssetModels(): Promise<string[]>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
