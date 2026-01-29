@@ -207,26 +207,86 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         }
         
         jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
+        if (detectedModelsList == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to create ArrayList object");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         for (const auto& model : result.detectedModels) {
             // Create HashMap for each model with type and modelDir
             jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
+            if (modelMap == nullptr || env->ExceptionCheck()) {
+                LOGE("STT JNI: Failed to create model HashMap");
+                if (env->ExceptionCheck()) {
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                }
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             
             jstring typeKey = env->NewStringUTF("type");
             jstring typeValue = env->NewStringUTF(model.type.c_str());
             env->CallObjectMethod(modelMap, putMethod, typeKey, typeValue);
+            if (env->ExceptionCheck()) {
+                LOGE("STT JNI: Exception while adding 'type' field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(typeKey);
+                env->DeleteLocalRef(typeValue);
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(typeKey);
             env->DeleteLocalRef(typeValue);
             
             jstring modelDirKey = env->NewStringUTF("modelDir");
             jstring modelDirValue = env->NewStringUTF(model.modelDir.c_str());
             env->CallObjectMethod(modelMap, putMethod, modelDirKey, modelDirValue);
+            if (env->ExceptionCheck()) {
+                LOGE("STT JNI: Exception while adding 'modelDir' field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(modelDirKey);
+                env->DeleteLocalRef(modelDirValue);
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(modelDirKey);
             env->DeleteLocalRef(modelDirValue);
             
             env->CallBooleanMethod(detectedModelsList, addMethod, modelMap);
+            if (env->ExceptionCheck()) {
+                LOGE("STT JNI: Exception while adding model to ArrayList");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(modelMap);
         }
-        
         jstring detectedModelsKey = env->NewStringUTF("detectedModels");
         env->CallObjectMethod(hashMap, putMethod, detectedModelsKey, detectedModelsList);
         if (env->ExceptionCheck()) {
@@ -490,26 +550,86 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         }
         
         jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
+        if (detectedModelsList == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to create ArrayList object");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         for (const auto& model : result.detectedModels) {
             // Create HashMap for each detected model
             jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
+            if (modelMap == nullptr || env->ExceptionCheck()) {
+                LOGE("TTS JNI: Failed to create model HashMap");
+                if (env->ExceptionCheck()) {
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                }
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             
             jstring typeKey = env->NewStringUTF("type");
             jstring typeValue = env->NewStringUTF(model.type.c_str());
             env->CallObjectMethod(modelMap, putMethod, typeKey, typeValue);
+            if (env->ExceptionCheck()) {
+                LOGE("TTS JNI: Exception while adding 'type' field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(typeKey);
+                env->DeleteLocalRef(typeValue);
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(typeKey);
             env->DeleteLocalRef(typeValue);
             
             jstring modelDirKey = env->NewStringUTF("modelDir");
             jstring modelDirValue = env->NewStringUTF(model.modelDir.c_str());
             env->CallObjectMethod(modelMap, putMethod, modelDirKey, modelDirValue);
+            if (env->ExceptionCheck()) {
+                LOGE("TTS JNI: Exception while adding 'modelDir' field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(modelDirKey);
+                env->DeleteLocalRef(modelDirValue);
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(modelDirKey);
             env->DeleteLocalRef(modelDirValue);
             
             env->CallObjectMethod(detectedModelsList, addMethod, modelMap);
+            if (env->ExceptionCheck()) {
+                LOGE("TTS JNI: Exception while adding model to ArrayList");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(modelMap);
+                env->DeleteLocalRef(detectedModelsList);
+                env->DeleteLocalRef(arrayListClass);
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
             env->DeleteLocalRef(modelMap);
         }
-        
         jstring detectedModelsKey = env->NewStringUTF("detectedModels");
         env->CallObjectMethod(hashMap, putMethod, detectedModelsKey, detectedModelsList);
         if (env->ExceptionCheck()) {
