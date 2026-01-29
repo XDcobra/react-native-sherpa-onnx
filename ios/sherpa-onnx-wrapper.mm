@@ -368,18 +368,26 @@ SttInitializeResult SttWrapper::initialize(
         // Collect detected models with type and path
         std::vector<DetectedModel> detectedModelsList;
         if (hasTransducer) detectedModelsList.push_back({"transducer", modelDir});
-        if (!paraformerModelPath.empty()) detectedModelsList.push_back({"paraformer", modelDir});
-        if (!ctcModelPath.empty()) {
+        
+        // Note: Both Paraformer and CTC models use model.onnx, so we need to prioritize
+        // CTC detection if directory name hints suggest it's a CTC model
+        if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {
+            // CTC models - add based on directory hints
             if (isLikelySenseVoice) {
                 detectedModelsList.push_back({"sense_voice", modelDir});
             } else if (isLikelyWenetCtc) {
                 detectedModelsList.push_back({"wenet_ctc", modelDir});
             } else if (isLikelyNemoCtc) {
                 detectedModelsList.push_back({"nemo_ctc", modelDir});
-            } else {
-                detectedModelsList.push_back({"nemo_ctc", modelDir}); // Default CTC type
             }
+        } else if (!paraformerModelPath.empty()) {
+            // Only add Paraformer if it's not a CTC model
+            detectedModelsList.push_back({"paraformer", modelDir});
+        } else if (!ctcModelPath.empty()) {
+            // No clear hints, but have model.onnx - default to CTC
+            detectedModelsList.push_back({"nemo_ctc", modelDir});
         }
+        
         if (hasWhisper) detectedModelsList.push_back({"whisper", modelDir});
         if (hasFunAsrNano) detectedModelsList.push_back({"funasr_nano", modelDir});
         
