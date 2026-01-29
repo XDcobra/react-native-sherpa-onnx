@@ -39,6 +39,52 @@ export interface Spec extends TurboModule {
    * Release sherpa-onnx resources.
    */
   unloadSherpaOnnx(): Promise<void>;
+
+  // ==================== TTS Methods ====================
+
+  /**
+   * Initialize Text-to-Speech (TTS) with model directory.
+   * @param modelDir - Absolute path to model directory
+   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'zipvoice', 'auto')
+   * @param numThreads - Number of threads for inference (default: 2)
+   * @param debug - Enable debug logging (default: false)
+   */
+  initializeTts(
+    modelDir: string,
+    modelType: string,
+    numThreads: number,
+    debug: boolean
+  ): Promise<void>;
+
+  /**
+   * Generate speech from text.
+   * @param text - Text to convert to speech
+   * @param sid - Speaker ID for multi-speaker models (default: 0)
+   * @param speed - Speech speed multiplier (default: 1.0)
+   * @returns Object with { samples: number[], sampleRate: number }
+   */
+  generateTts(
+    text: string,
+    sid: number,
+    speed: number
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
+  /**
+   * Get the sample rate of the initialized TTS model.
+   * @returns Sample rate in Hz
+   */
+  getTtsSampleRate(): Promise<number>;
+
+  /**
+   * Get the number of speakers/voices available in the model.
+   * @returns Number of speakers (0 or 1 for single-speaker models)
+   */
+  getTtsNumSpeakers(): Promise<number>;
+
+  /**
+   * Release TTS resources.
+   */
+  unloadTts(): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
