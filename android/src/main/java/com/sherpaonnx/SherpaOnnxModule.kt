@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import java.io.File
 import java.io.FileOutputStream
@@ -247,14 +248,39 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         return
       }
       
-      val success = nativeSttInitialize(
+      val result = nativeSttInitialize(
         modelDir,
         preferInt8 ?: false,
         preferInt8 != null,
         modelType ?: "auto"
       )
+      
+      if (result == null) {
+        val errorMsg = "Failed to initialize sherpa-onnx. Check native logs for details."
+        Log.e(NAME, "Native initialization returned null for modelDir: $modelDir")
+        promise.reject("INIT_ERROR", errorMsg)
+        return
+      }
+      
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*> ?: arrayListOf<HashMap<String, String>>()
+      
       if (success) {
-        promise.resolve(null)
+        // Create result map with detected models
+        val resultMap = Arguments.createMap()
+        resultMap.putBoolean("success", true)
+        val detectedModelsArray = Arguments.createArray()
+        for (model in detectedModels) {
+          val modelMap = model as? HashMap<*, *>
+          if (modelMap != null) {
+            val modelResultMap = Arguments.createMap()
+            modelResultMap.putString("type", modelMap["type"] as? String ?: "")
+            modelResultMap.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+            detectedModelsArray.pushMap(modelResultMap)
+          }
+        }
+        resultMap.putArray("detectedModels", detectedModelsArray)
+        promise.resolve(resultMap)
       } else {
         val errorMsg = "Failed to initialize sherpa-onnx. Check native logs for details."
         Log.e(NAME, "Native initialization returned false for modelDir: $modelDir")
@@ -305,14 +331,39 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val success = nativeTtsInitialize(
+      val result = nativeTtsInitialize(
         modelDir,
         modelType,
         numThreads.toInt(),
         debug
       )
+      
+      if (result == null) {
+        promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS: native call returned null")
+        return
+      }
+      
+      val success = result["success"] as? Boolean ?: false
+      
       if (success) {
-        promise.resolve(null)
+        // Extract detected models from result
+        val detectedModels = result["detectedModels"] as? ArrayList<*>
+        val modelsArray = Arguments.createArray()
+        
+        detectedModels?.forEach { modelObj ->
+          if (modelObj is HashMap<*, *>) {
+            val modelMap = Arguments.createMap()
+            modelMap.putString("type", modelObj["type"] as? String ?: "")
+            modelMap.putString("modelDir", modelObj["modelDir"] as? String ?: "")
+            modelsArray.pushMap(modelMap)
+          }
+        }
+        
+        // Create result map with success and detectedModels
+        val resultMap = Arguments.createMap()
+        resultMap.putBoolean("success", true)
+        resultMap.putArray("detectedModels", modelsArray)
+        promise.resolve(resultMap)
       } else {
         promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS")
       }
@@ -410,7 +461,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
       modelType: String
-    ): Boolean
+    ): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeSttTranscribe(filePath: String): String
@@ -425,7 +476,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelType: String,
       numThreads: Int,
       debug: Boolean
-    ): Boolean
+    ): java.util.HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeTtsGenerate(

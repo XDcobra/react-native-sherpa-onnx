@@ -11,6 +11,11 @@ set(CMAKE_ANDROID_ARCH_ABI ${ANDROID_ABI})
 set(CMAKE_SYSTEM_NAME Android)
 set(CMAKE_SYSTEM_VERSION ${ANDROID_PLATFORM_LEVEL})
 
+# Set Windows path length limit
+if(WIN32)
+    set(CMAKE_OBJECT_PATH_MAX 500)
+endif()
+
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 

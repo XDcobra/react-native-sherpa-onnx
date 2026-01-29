@@ -10,6 +10,30 @@
 namespace sherpaonnx {
 
 /**
+ * Information about a detected model.
+ */
+struct DetectedModel {
+    std::string type;      // Model type (e.g., "transducer", "paraformer", "nemo_ctc")
+    std::string modelDir;  // Directory path where the model is located
+};
+
+/**
+ * Result of STT initialization.
+ */
+struct SttInitializeResult {
+    bool success;
+    std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+};
+
+/**
+ * Result of TTS initialization.
+ */
+struct TtsInitializeResult {
+    bool success;
+    std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+};
+
+/**
  * Wrapper class for sherpa-onnx OfflineRecognizer (STT).
  * This provides a C++ interface that can be easily called from JNI.
  */
@@ -23,9 +47,9 @@ public:
      * @param modelDir Path to the model directory
      * @param preferInt8 Optional: true = prefer int8 models, false = prefer regular models, nullopt = try int8 first (default)
      * @param modelType Optional: explicit model type ("transducer", "paraformer", "nemo_ctc"), nullopt = auto-detect (default)
-     * @return true if successful, false otherwise
+     * @return SttInitializeResult with success status and list of detected usable models
      */
-    bool initialize(
+    SttInitializeResult initialize(
         const std::string& modelDir,
         const std::optional<bool>& preferInt8 = std::nullopt,
         const std::optional<std::string>& modelType = std::nullopt
@@ -69,9 +93,9 @@ public:
      * @param modelType Model type ('vits', 'matcha', 'kokoro', 'kitten', 'zipvoice', 'auto')
      * @param numThreads Number of threads for inference (default: 2)
      * @param debug Enable debug logging (default: false)
-     * @return true if successful, false otherwise
+     * @return TtsInitializeResult with success status and list of detected usable models
      */
-    bool initialize(
+    TtsInitializeResult initialize(
         const std::string& modelDir,
         const std::string& modelType = "auto",
         int32_t numThreads = 2,

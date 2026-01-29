@@ -24,7 +24,7 @@ static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
 
 extern "C" {
 
-JNIEXPORT jboolean JNICALL
+JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
     JNIEnv *env,
     jobject /* this */,
@@ -40,14 +40,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         const char *modelDirStr = env->GetStringUTFChars(modelDir, nullptr);
         if (modelDirStr == nullptr) {
             LOGE("Failed to get modelDir string from JNI");
-            return JNI_FALSE;
+            return nullptr;
         }
 
         const char *modelTypeStr = env->GetStringUTFChars(modelType, nullptr);
         if (modelTypeStr == nullptr) {
             LOGE("Failed to get modelType string from JNI");
             env->ReleaseStringUTFChars(modelDir, modelDirStr);
-            return JNI_FALSE;
+            return nullptr;
         }
 
         std::string modelDirPath(modelDirStr);
@@ -65,20 +65,56 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
             modelTypeOpt = modelTypePath;
         }
         
-        bool result = g_stt_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt);
+        SttInitializeResult result = g_stt_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt);
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
-        if (!result) {
+        if (!result.success) {
             LOGE("Native initialization failed for: %s", modelDirPath.c_str());
         }
-        return result ? JNI_TRUE : JNI_FALSE;
+        
+        // Create HashMap to return
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        if (hashMapClass == nullptr) {
+            LOGE("Failed to find HashMap class");
+            return nullptr;
+        }
+        
+        jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        
+        jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+        
+        // Put success boolean
+        jclass booleanClass = env->FindClass("java/lang/Boolean");
+        jmethodID booleanConstructor = env->GetMethodID(booleanClass, "<init>", "(Z)V");
+        jobject successObj = env->NewObject(booleanClass, booleanConstructor, result.success ? JNI_TRUE : JNI_FALSE);
+        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("success"), successObj);
+        
+        // Put detectedModels array
+        jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        jmethodID arrayListConstructor = env->GetMethodID(arrayListClass, "<init>", "()V");
+        jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+        
+        jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
+        for (const auto& model : result.detectedModels) {
+            // Create HashMap for each model with type and modelDir
+            jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
+            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("type"), env->NewStringUTF(model.type.c_str()));
+            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("modelDir"), env->NewStringUTF(model.modelDir.c_str()));
+            env->CallBooleanMethod(detectedModelsList, addMethod, modelMap);
+            env->DeleteLocalRef(modelMap);
+        }
+        
+        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("detectedModels"), detectedModelsList);
+        
+        return hashMap;
     } catch (const std::exception &e) {
         LOGE("Exception in nativeInitialize: %s", e.what());
-        return JNI_FALSE;
+        return nullptr;
     } catch (...) {
         LOGE("Unknown exception in nativeInitialize");
-        return JNI_FALSE;
+        return nullptr;
     }
 }
 
@@ -131,7 +167,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(
 
 // ==================== TTS JNI Methods ====================
 
-JNIEXPORT jboolean JNICALL
+JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
     JNIEnv *env,
     jobject /* this */,
@@ -147,20 +183,20 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         const char *modelDirStr = env->GetStringUTFChars(modelDir, nullptr);
         if (modelDirStr == nullptr) {
             LOGE("TTS JNI: Failed to get modelDir string");
-            return JNI_FALSE;
+            return nullptr;
         }
 
         const char *modelTypeStr = env->GetStringUTFChars(modelType, nullptr);
         if (modelTypeStr == nullptr) {
             LOGE("TTS JNI: Failed to get modelType string");
             env->ReleaseStringUTFChars(modelDir, modelDirStr);
-            return JNI_FALSE;
+            return nullptr;
         }
 
         std::string modelDirPath(modelDirStr);
         std::string modelTypePath(modelTypeStr);
         
-        bool result = g_tts_wrapper->initialize(
+        TtsInitializeResult result = g_tts_wrapper->initialize(
             modelDirPath,
             modelTypePath,
             static_cast<int32_t>(numThreads),
@@ -170,17 +206,50 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
-        if (!result) {
+        if (!result.success) {
             LOGE("TTS JNI: Native initialization failed for: %s", modelDirPath.c_str());
         }
         
-        return result ? JNI_TRUE : JNI_FALSE;
+        // Create HashMap to return (same structure as STT)
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        if (hashMapClass == nullptr) {
+            LOGE("TTS JNI: Failed to find HashMap class");
+            return nullptr;
+        }
+        
+        jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        
+        jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+        
+        // Put success boolean
+        jclass booleanClass = env->FindClass("java/lang/Boolean");
+        jmethodID booleanConstructor = env->GetMethodID(booleanClass, "<init>", "(Z)V");
+        jobject successObj = env->NewObject(booleanClass, booleanConstructor, result.success ? JNI_TRUE : JNI_FALSE);
+        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("success"), successObj);
+        
+        // Put detectedModels array
+        jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        jmethodID arrayListConstructor = env->GetMethodID(arrayListClass, "<init>", "()V");
+        jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+        
+        jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
+        for (const auto& model : result.detectedModels) {
+            // Create HashMap for each detected model
+            jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
+            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("type"), env->NewStringUTF(model.type.c_str()));
+            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("modelDir"), env->NewStringUTF(model.modelDir.c_str()));
+            env->CallObjectMethod(detectedModelsList, addMethod, modelMap);
+        }
+        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("detectedModels"), detectedModelsList);
+        
+        return hashMap;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeInitializeTts: %s", e.what());
-        return JNI_FALSE;
+        return nullptr;
     } catch (...) {
         LOGE("TTS JNI: Unknown exception in nativeInitializeTts");
-        return JNI_FALSE;
+        return nullptr;
     }
 }
 

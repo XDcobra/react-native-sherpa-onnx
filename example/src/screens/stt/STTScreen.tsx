@@ -22,6 +22,12 @@ import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 export default function STTScreen() {
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModel, setCurrentModel] = useState<ModelId | null>(null);
+  const [detectedModels, setDetectedModels] = useState<
+    Array<{ type: string; modelDir: string }>
+  >([]);
+  const [selectedModelType, setSelectedModelType] = useState<string | null>(
+    null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioSourceType, setAudioSourceType] = useState<
@@ -42,6 +48,8 @@ export default function STTScreen() {
     setLoading(true);
     setError(null);
     setInitResult(null);
+    setDetectedModels([]);
+    setSelectedModelType(null);
 
     try {
       const modelPathConfig = getModelPath(modelId);
@@ -52,27 +60,45 @@ export default function STTScreen() {
       }
 
       // Initialize new model
-      await initializeSTT({
+      const result = await initializeSTT({
         modelPath: modelPathConfig,
       });
 
-      const modelName =
-        modelId === MODELS.ZIPFORMER_EN
-          ? 'English (Zipformer)'
-          : modelId === MODELS.PARAFORMER_ZH
-          ? 'Chinese (Paraformer)'
-          : modelId === MODELS.NEMO_CTC_EN
-          ? 'English (NeMo CTC)'
-          : modelId === MODELS.WHISPER_EN
-          ? 'English (Whisper)'
-          : modelId === MODELS.WENET_CTC_ZH_EN_CANTONESE
-          ? 'Chinese/English/Cantonese (WeNet CTC)'
-          : modelId === MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE
-          ? 'Chinese/English/Japanese/Korean/Yue (SenseVoice)'
-          : 'FunASR Nano';
+      if (result.success && result.detectedModels.length > 0) {
+        setDetectedModels(result.detectedModels);
+        setCurrentModel(modelId);
 
-      setCurrentModel(modelId);
-      setInitResult(`Initialized: ${modelName}`);
+        const modelName =
+          modelId === MODELS.ZIPFORMER_EN
+            ? 'English (Zipformer)'
+            : modelId === MODELS.PARAFORMER_ZH
+            ? 'Chinese (Paraformer)'
+            : modelId === MODELS.NEMO_CTC_EN
+            ? 'English (NeMo CTC)'
+            : modelId === MODELS.WHISPER_EN
+            ? 'English (Whisper)'
+            : modelId === MODELS.WENET_CTC_ZH_EN_CANTONESE
+            ? 'Chinese/English/Cantonese (WeNet CTC)'
+            : modelId === MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE
+            ? 'Chinese/English/Japanese/Korean/Yue (SenseVoice)'
+            : 'FunASR Nano';
+
+        const detectedTypes = result.detectedModels
+          .map((m) => m.type)
+          .join(', ');
+        setInitResult(
+          `Initialized: ${modelName}\nDetected models: ${detectedTypes}`
+        );
+
+        // Auto-select first detected model
+        if (result.detectedModels.length === 1 && result.detectedModels[0]) {
+          setSelectedModelType(result.detectedModels[0].type);
+        }
+      } else {
+        setError('No models detected in the directory');
+        setInitResult('Initialization failed: No compatible models found');
+      }
+
       // Reset audio selection when changing models
       setAudioSourceType(null);
       setSelectedAudio(null);
@@ -454,21 +480,79 @@ export default function STTScreen() {
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. Transcribe Audio</Text>
+          <Text style={styles.sectionTitle}>2. Select Model Type</Text>
           <Text style={styles.hint}>
-            Select an audio source and transcribe it using the initialized
-            model.
+            If multiple model types were detected, select which one to use for
+            transcription.
           </Text>
 
           {!currentModel && (
             <View style={styles.warningContainer}>
               <Text style={styles.warningText}>
-                Please initialize a model first
+                Please initialize a model directory first
               </Text>
             </View>
           )}
 
-          {currentModel && !audioSourceType && (
+          {currentModel && detectedModels.length === 0 && (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>
+                No models detected. Please try another directory.
+              </Text>
+            </View>
+          )}
+
+          {detectedModels.length > 0 && (
+            <View style={styles.detectedModelsContainer}>
+              {detectedModels.map((model, index) => (
+                <TouchableOpacity
+                  key={`${model.type}-${index}`}
+                  style={[
+                    styles.detectedModelButton,
+                    selectedModelType === model.type &&
+                      styles.detectedModelButtonActive,
+                  ]}
+                  onPress={() => setSelectedModelType(model.type)}
+                >
+                  <Text
+                    style={[
+                      styles.detectedModelButtonText,
+                      selectedModelType === model.type &&
+                        styles.detectedModelButtonTextActive,
+                    ]}
+                  >
+                    {model.type.toUpperCase()}
+                  </Text>
+                  <Text style={styles.detectedModelPath}>{model.modelDir}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {currentModel && detectedModels.length > 0 && !selectedModelType && (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>
+                Please select a model type above
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
+          <Text style={styles.hint}>
+            Select an audio source and transcribe it using the selected model.
+          </Text>
+
+          {!selectedModelType && (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>
+                Please select a model type first
+              </Text>
+            </View>
+          )}
+
+          {selectedModelType && !audioSourceType && (
             <>
               <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
               <View style={styles.sourceChoiceRow}>
@@ -492,7 +576,7 @@ export default function STTScreen() {
             </>
           )}
 
-          {currentModel &&
+          {selectedModelType &&
             audioSourceType === 'example' &&
             availableAudioFiles.length > 0 && (
               <>
@@ -563,7 +647,7 @@ export default function STTScreen() {
               </>
             )}
 
-          {currentModel && audioSourceType === 'own' && (
+          {selectedModelType && audioSourceType === 'own' && (
             <>
               <Text style={styles.subsectionTitle}>Select Local WAV File:</Text>
               <TouchableOpacity
@@ -634,7 +718,7 @@ export default function STTScreen() {
             </>
           )}
 
-          {currentModel &&
+          {selectedModelType &&
             audioSourceType === 'example' &&
             availableAudioFiles.length === 0 && (
               <View style={styles.warningContainer}>
@@ -894,5 +978,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  detectedModelsSection: {
+    marginTop: 20,
+  },
+  detectedModelsContainer: {
+    marginTop: 10,
+  },
+  detectedModelButton: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#ddd',
+    marginBottom: 10,
+  },
+  detectedModelButtonActive: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196f3',
+  },
+  detectedModelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  detectedModelButtonTextActive: {
+    color: '#1976d2',
+  },
+  detectedModelPath: {
+    fontSize: 12,
+    color: '#999',
   },
 });

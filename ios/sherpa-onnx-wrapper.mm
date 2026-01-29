@@ -43,18 +43,21 @@ SttWrapper::~SttWrapper() {
     LOGI("SttWrapper destroyed");
 }
 
-bool SttWrapper::initialize(
+SttInitializeResult SttWrapper::initialize(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
     const std::optional<std::string>& modelType
 ) {
+    SttInitializeResult result;
+    result.success = false;
+    
     if (pImpl->initialized) {
         release();
     }
 
     if (modelDir.empty()) {
         LOGE("Model directory is empty");
-        return false;
+        return result;
     }
 
     try {
@@ -70,7 +73,7 @@ bool SttWrapper::initialize(
         // Check if model directory exists
         if (!fileExists(modelDir) || !isDirectory(modelDir)) {
             LOGE("Model directory does not exist or is not a directory: %s", modelDir.c_str());
-            return false;
+            return result;
         }
 
         // Setup configuration using C++ API
@@ -257,12 +260,12 @@ bool SttWrapper::initialize(
                     LOGI("Using tokens file for Whisper: %s", tokensPath.c_str());
                 } else {
                     LOGE("Tokens file not found for Whisper model: %s", tokensPath.c_str());
-                    return false;
+                    return result;
                 }
                 modelConfigured = true;
             } else {
                 LOGE("Explicit model type '%s' specified but required files not found", type.c_str());
-                return false;
+                return result;
             }
         }
         
@@ -294,7 +297,7 @@ bool SttWrapper::initialize(
                     LOGI("Using tokens file for Whisper: %s", tokensPath.c_str());
                 } else {
                     LOGE("Tokens file not found for Whisper model: %s", tokensPath.c_str());
-                    return false;
+                    return result;
                 }
                 modelConfigured = true;
             } else if (!ctcModelPath.empty() && isLikelySenseVoice) {
@@ -326,7 +329,7 @@ bool SttWrapper::initialize(
         if (tokensRequired) {
             if (!fileExists(tokensPath)) {
                 LOGE("Tokens file not found: %s", tokensPath.c_str());
-                return false;
+                return result;
             }
             config.model_config.tokens = tokensPath;
             LOGI("Using tokens file: %s", tokensPath.c_str());
@@ -337,7 +340,7 @@ bool SttWrapper::initialize(
         
         if (!modelConfigured) {
             LOGE("No valid model files found in directory: %s", modelDir.c_str());
-            return false;
+            return result;
         }
 
         // Set remaining config
@@ -351,25 +354,45 @@ bool SttWrapper::initialize(
             auto recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
             if (recognizer.Get() == nullptr) {
                 LOGE("Failed to create OfflineRecognizer: Create returned invalid object (nullptr)");
-                return false;
+                return result;
             }
             pImpl->recognizer = std::move(recognizer);
             LOGI("OfflineRecognizer created successfully using C++ API");
         } catch (const std::exception& e) {
             LOGE("Failed to create OfflineRecognizer: %s", e.what());
-            return false;
+            return result;
         }
         
         pImpl->modelDir = modelDir;
         pImpl->initialized = true;
-        return true;
+        // Collect detected models with type and path
+        std::vector<DetectedModel> detectedModelsList;
+        if (hasTransducer) detectedModelsList.push_back({"transducer", modelDir});
+        if (!paraformerModelPath.empty()) detectedModelsList.push_back({"paraformer", modelDir});
+        if (!ctcModelPath.empty()) {
+            if (isLikelySenseVoice) {
+                detectedModelsList.push_back({"sense_voice", modelDir});
+            } else if (isLikelyWenetCtc) {
+                detectedModelsList.push_back({"wenet_ctc", modelDir});
+            } else if (isLikelyNemoCtc) {
+                detectedModelsList.push_back({"nemo_ctc", modelDir});
+            } else {
+                detectedModelsList.push_back({"nemo_ctc", modelDir}); // Default CTC type
+            }
+        }
+        if (hasWhisper) detectedModelsList.push_back({"whisper", modelDir});
+        if (hasFunAsrNano) detectedModelsList.push_back({"funasr_nano", modelDir});
+        
+        result.success = true;
+        result.detectedModels = detectedModelsList;
+        return result;
         
     } catch (const std::exception& e) {
         LOGE("Exception during initialization: %s", e.what());
-        return false;
+        return result;
     } catch (...) {
         LOGE("Unknown exception during initialization");
-        return false;
+        return result;
     }
 }
 
@@ -447,19 +470,22 @@ TtsWrapper::~TtsWrapper() {
     LOGI("TtsWrapper destroyed");
 }
 
-bool TtsWrapper::initialize(
+TtsInitializeResult TtsWrapper::initialize(
     const std::string& modelDir,
     const std::string& modelType,
     int32_t numThreads,
     bool debug
 ) {
+    TtsInitializeResult result;
+    result.success = false;
+    
     if (pImpl->initialized) {
         release();
     }
 
     if (modelDir.empty()) {
         LOGE("TTS: Model directory is empty");
-        return false;
+        return result;
     }
 
     try {
@@ -475,7 +501,7 @@ bool TtsWrapper::initialize(
         // Check if model directory exists
         if (!fileExists(modelDir) || !isDirectory(modelDir)) {
             LOGE("TTS: Model directory does not exist: %s", modelDir.c_str());
-            return false;
+            return result;
         }
 
         // Build file paths
@@ -495,6 +521,93 @@ bool TtsWrapper::initialize(
         sherpa_onnx::cxx::OfflineTtsConfig config;
         config.model.num_threads = numThreads;
         config.model.debug = debug;
+
+        // Collect detected models for return value
+
+
+        std::vector<DetectedModel> detectedModelsList;
+
+
+        
+
+
+        // Detect all possible TTS model types based on file structure
+
+
+        bool hasVits = fileExists(modelOnnx) || fileExists(modelFp16) || fileExists(modelInt8);
+
+
+        bool hasMatcha = fileExists(acousticModel) && fileExists(vocoder);
+
+
+        bool hasVoicesFile = fileExists(voicesFile);
+
+
+        bool hasZipvoice = fileExists(encoder) && fileExists(decoder) && fileExists(vocoder);
+
+
+        
+
+
+        // Add detected model types to list
+
+
+        if (hasMatcha) {
+
+
+            detectedModelsList.push_back({"matcha", modelDir});
+
+
+        }
+
+
+        if (hasZipvoice && !hasMatcha) {  // Zipvoice has encoder+decoder+vocoder, Matcha only acoustic+vocoder
+
+
+            detectedModelsList.push_back({"zipvoice", modelDir});
+
+
+        }
+
+
+        if (hasVoicesFile) {
+
+
+            // Both kokoro and kitten use voices.bin - add both as possibilities
+
+
+            detectedModelsList.push_back({"kokoro", modelDir});
+
+
+            detectedModelsList.push_back({"kitten", modelDir});
+
+
+        }
+
+
+        if (hasVits && !hasMatcha && !hasZipvoice && !hasVoicesFile) {
+
+
+            // Only add VITS if no other specific model type detected
+
+
+            detectedModelsList.push_back({"vits", modelDir});
+
+
+        } else if (hasVits && (hasVoicesFile || hasMatcha || hasZipvoice)) {
+
+
+            // If VITS files exist alongside other model types, still add VITS as option
+
+
+            detectedModelsList.push_back({"vits", modelDir});
+
+
+        }
+
+
+        
+
 
         // Detect model type or use explicit type
         std::string detectedType = modelType;
@@ -524,7 +637,7 @@ bool TtsWrapper::initialize(
             }
             else {
                 LOGE("TTS: Cannot auto-detect model type. No recognizable files found.");
-                return false;
+                return result;
             }
         }
 
@@ -542,14 +655,14 @@ bool TtsWrapper::initialize(
                 LOGI("TTS: Using VITS model: %s", modelOnnx.c_str());
             } else {
                 LOGE("TTS: VITS model.onnx not found");
-                return false;
+                return result;
             }
 
             if (fileExists(tokensFile)) {
                 config.model.vits.tokens = tokensFile;
             } else {
                 LOGE("TTS: tokens.txt not found");
-                return false;
+                return result;
             }
 
             if (fileExists(lexiconFile)) {
@@ -571,7 +684,7 @@ bool TtsWrapper::initialize(
                 config.model.matcha.tokens = tokensFile;
             } else {
                 LOGE("TTS: tokens.txt not found for Matcha model");
-                return false;
+                return result;
             }
 
             if (fileExists(lexiconFile)) {
@@ -590,21 +703,21 @@ bool TtsWrapper::initialize(
                 config.model.kokoro.model = modelOnnx;
             } else {
                 LOGE("TTS: Kokoro model.onnx not found");
-                return false;
+                return result;
             }
 
             if (fileExists(voicesFile)) {
                 config.model.kokoro.voices = voicesFile;
             } else {
                 LOGE("TTS: Kokoro voices.bin not found");
-                return false;
+                return result;
             }
 
             if (fileExists(tokensFile)) {
                 config.model.kokoro.tokens = tokensFile;
             } else {
                 LOGE("TTS: tokens.txt not found for Kokoro model");
-                return false;
+                return result;
             }
 
             if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
@@ -626,21 +739,21 @@ bool TtsWrapper::initialize(
                 config.model.kitten.model = modelOnnx;
             } else {
                 LOGE("TTS: Kitten model.onnx not found");
-                return false;
+                return result;
             }
 
             if (fileExists(voicesFile)) {
                 config.model.kitten.voices = voicesFile;
             } else {
                 LOGE("TTS: Kitten voices.bin not found");
-                return false;
+                return result;
             }
 
             if (fileExists(tokensFile)) {
                 config.model.kitten.tokens = tokensFile;
             } else {
                 LOGE("TTS: tokens.txt not found for Kitten model");
-                return false;
+                return result;
             }
 
             if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
@@ -659,7 +772,7 @@ bool TtsWrapper::initialize(
                 config.model.zipvoice.tokens = tokensFile;
             } else {
                 LOGE("TTS: tokens.txt not found for Zipvoice model");
-                return false;
+                return result;
             }
 
             if (fileExists(lexiconFile)) {
@@ -674,7 +787,7 @@ bool TtsWrapper::initialize(
         }
         else {
             LOGE("TTS: Unknown model type: %s", detectedType.c_str());
-            return false;
+            return result;
         }
 
         // Create TTS instance
@@ -683,7 +796,7 @@ bool TtsWrapper::initialize(
         
         if (!pImpl->tts.has_value()) {
             LOGE("TTS: Failed to create OfflineTts instance");
-            return false;
+            return result;
         }
 
         pImpl->initialized = true;
@@ -693,13 +806,24 @@ bool TtsWrapper::initialize(
         LOGI("TTS: Sample rate: %d Hz", pImpl->tts.value().SampleRate());
         LOGI("TTS: Number of speakers: %d", pImpl->tts.value().NumSpeakers());
 
-        return true;
+
+
+        // Success - return detected models
+
+
+        result.success = true;
+
+
+        result.detectedModels = detectedModelsList;
+
+
+        return result;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during initialization: %s", e.what());
-        return false;
+        return result;
     } catch (...) {
         LOGE("TTS: Unknown exception during initialization");
-        return false;
+        return result;
     }
 }
 

@@ -22,12 +22,16 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
    * @param modelType - Optional: explicit model type ('transducer', 'paraformer', 'nemo_ctc', 'auto'), undefined = auto (default)
+   * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeSherpaOnnx(
     modelDir: string,
     preferInt8?: boolean,
     modelType?: string
-  ): Promise<void>;
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+  }>;
 
   /**
    * Transcribe an audio file.
@@ -48,13 +52,17 @@ export interface Spec extends TurboModule {
    * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'zipvoice', 'auto')
    * @param numThreads - Number of threads for inference (default: 2)
    * @param debug - Enable debug logging (default: false)
+   * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeTts(
     modelDir: string,
     modelType: string,
     numThreads: number,
     debug: boolean
-  ): Promise<void>;
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+  }>;
 
   /**
    * Generate speech from text.

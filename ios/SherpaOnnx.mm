@@ -207,11 +207,25 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
             modelTypeOpt = [modelType UTF8String];
         }
         
-        bool result = g_stt_wrapper->initialize(modelDirStr, preferInt8Opt, modelTypeOpt);
+        sherpaonnx::SttInitializeResult result = g_stt_wrapper->initialize(modelDirStr, preferInt8Opt, modelTypeOpt);
         
-        if (result) {
+        if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");
-            resolve(nil);
+            
+            // Create result dictionary with detected models
+            NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+            resultDict[@"success"] = @YES;
+            
+            NSMutableArray *detectedModelsArray = [NSMutableArray array];
+            for (const auto& model : result.detectedModels) {
+                NSMutableDictionary *modelDict = [NSMutableDictionary dictionary];
+                modelDict[@"type"] = [NSString stringWithUTF8String:model.type.c_str()];
+                modelDict[@"modelDir"] = [NSString stringWithUTF8String:model.modelDir.c_str()];
+                [detectedModelsArray addObject:modelDict];
+            }
+            resultDict[@"detectedModels"] = detectedModelsArray;
+            
+            resolve(resultDict);
         } else {
             NSString *errorMsg = [NSString stringWithFormat:@"Failed to initialize sherpa-onnx with model directory: %@", modelDir];
             RCTLogError(@"%@", errorMsg);
@@ -301,16 +315,33 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
         std::string modelDirStr = [modelDir UTF8String];
         std::string modelTypeStr = [modelType UTF8String];
         
-        bool success = g_tts_wrapper->initialize(
+        sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
             modelDirStr,
             modelTypeStr,
             static_cast<int32_t>(numThreads),
             debug
         );
         
-        if (success) {
+        if (result.success) {
             RCTLogInfo(@"TTS initialization successful");
-            resolve(nil);
+            
+            // Create detected models array
+            NSMutableArray *detectedModelsArray = [NSMutableArray array];
+            for (const auto& model : result.detectedModels) {
+                NSDictionary *modelDict = @{
+                    @"type": [NSString stringWithUTF8String:model.type.c_str()],
+                    @"modelDir": [NSString stringWithUTF8String:model.modelDir.c_str()]
+                };
+                [detectedModelsArray addObject:modelDict];
+            }
+            
+            // Create result dictionary
+            NSDictionary *resultDict = @{
+                @"success": @YES,
+                @"detectedModels": detectedModelsArray
+            };
+            
+            resolve(resultDict);
         } else {
             NSString *errorMsg = @"Failed to initialize TTS";
             RCTLogError(@"%@", errorMsg);

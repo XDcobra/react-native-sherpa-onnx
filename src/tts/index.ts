@@ -24,25 +24,27 @@ import { resolveModelPath } from '../utils';
  * - Zipvoice (voice cloning capable)
  *
  * @param options - TTS initialization options or model path configuration
+ * @returns Promise resolving to result with success and detected models
  * @example
  * ```typescript
  * // Simple string (auto-detect)
- * await initializeTTS('models/sherpa-onnx-vits-piper-en_US-lessac-medium');
+ * const result = await initializeTTS('models/sherpa-onnx-vits-piper-en_US-lessac-medium');
+ * console.log('Detected models:', result.detectedModels);
  *
  * // Asset model
- * await initializeTTS({
+ * const result = await initializeTTS({
  *   modelPath: { type: 'asset', path: 'models/vits-piper-en' }
  * });
  *
  * // File system model with options
- * await initializeTTS({
+ * const result = await initializeTTS({
  *   modelPath: { type: 'file', path: '/path/to/model' },
  *   numThreads: 4,
  *   debug: true
  * });
  *
  * // With explicit model type
- * await initializeTTS({
+ * const result = await initializeTTS({
  *   modelPath: { type: 'asset', path: 'models/kokoro-en' },
  *   modelType: 'kokoro'
  * });
@@ -50,7 +52,10 @@ import { resolveModelPath } from '../utils';
  */
 export async function initializeTTS(
   options: TTSInitializeOptions | InitializeOptions['modelPath']
-): Promise<void> {
+): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+}> {
   // Handle both object syntax and direct path syntax
   let modelPath: InitializeOptions['modelPath'];
   let modelType: string | undefined;
