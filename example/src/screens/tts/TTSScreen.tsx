@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Text,
   View,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  Platform,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -15,9 +17,16 @@ import {
   generateSpeech,
   unloadTTS,
   getModelInfo,
+  saveAudioToFile,
+  saveAudioToContentUri,
+  copyContentUriToCache,
+  shareAudioFile,
 } from 'react-native-sherpa-onnx/tts';
 import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
 import { getModelDisplayName } from '../../modelConfig';
+import RNFS from 'react-native-fs';
+import Sound from 'react-native-sound';
+import * as DocumentPicker from '@react-native-documents/picker';
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -46,23 +55,66 @@ export default function TTSScreen() {
     sampleRate: number;
     numSpeakers: number;
   } | null>(null);
+  const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [soundInstance, setSoundInstance] = useState<Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [loadingSound, setLoadingSound] = useState(false);
+  const [cachedPlaybackPath, setCachedPlaybackPath] = useState<string | null>(
+    null
+  );
+  const [cachedPlaybackSource, setCachedPlaybackSource] = useState<
+    string | null
+  >(null);
+
+  const getDisplayPath = (path: string) => {
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
+    }
+  };
+
+  const getShareUrl = (path: string) => {
+    const decoded = getDisplayPath(path);
+    if (decoded.startsWith('content://') || decoded.startsWith('file://')) {
+      return decoded;
+    }
+    if (path.startsWith('content://') || path.startsWith('file://')) {
+      return path;
+    }
+    return Platform.OS === 'android' ? `file://${path}` : path;
+  };
+  const currentModelFolderRef = useRef<string | null>(null);
+  const soundInstanceRef = useRef<Sound | null>(null);
+
+  useEffect(() => {
+    soundInstanceRef.current = soundInstance;
+  }, [soundInstance]);
 
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
   }, []);
 
+  useEffect(() => {
+    currentModelFolderRef.current = currentModelFolder;
+  }, [currentModelFolder]);
+
   // Cleanup: Release TTS resources when leaving the screen
   useEffect(() => {
     return () => {
-      if (currentModelFolder !== null) {
+      if (currentModelFolderRef.current !== null) {
         console.log('TTSScreen: Cleaning up TTS resources');
         unloadTTS().catch((err) => {
           console.error('TTSScreen: Failed to unload TTS:', err);
         });
       }
+      if (soundInstanceRef.current) {
+        soundInstanceRef.current.release();
+      }
     };
-  }, [currentModelFolder]);
+  }, []);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -103,6 +155,15 @@ export default function TTSScreen() {
     setDetectedModels([]);
     setSelectedModelType(null);
     setModelInfo(null);
+    setGeneratedAudio(null);
+    setSavedAudioPath(null);
+    setCachedPlaybackPath(null);
+    setCachedPlaybackSource(null);
+    if (soundInstance) {
+      soundInstance.release();
+      setSoundInstance(null);
+      setIsPlaying(false);
+    }
 
     try {
       // Unload previous model if any
@@ -207,6 +268,14 @@ export default function TTSScreen() {
     setGenerating(true);
     setError(null);
     setGeneratedAudio(null);
+    setSavedAudioPath(null);
+    setCachedPlaybackPath(null);
+    setCachedPlaybackSource(null);
+    if (soundInstance) {
+      soundInstance.release();
+      setSoundInstance(null);
+      setIsPlaying(false);
+    }
 
     try {
       const sid = parseInt(speakerId, 10);
@@ -256,8 +325,255 @@ export default function TTSScreen() {
     }
   };
 
+  const handleSaveAudio = async () => {
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to save. Generate speech first.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const timestamp = Date.now();
+      const filename = `tts_${timestamp}.wav`;
+
+      let directoryPath: string | null = null;
+      let directoryUri: string | null = null;
+      try {
+        const picked = await DocumentPicker.pickDirectory();
+        if (picked?.uri) {
+          if (picked.uri.startsWith('file://')) {
+            directoryPath = decodeURI(picked.uri.replace('file://', ''));
+          } else if (picked.uri.startsWith('content://')) {
+            directoryUri = picked.uri;
+          }
+        }
+      } catch (pickerErr) {
+        const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
+        if (!isCancel) {
+          console.warn('Directory picker error:', pickerErr);
+        }
+      }
+
+      if (directoryUri) {
+        const savedUri = await saveAudioToContentUri(
+          generatedAudio,
+          directoryUri,
+          filename
+        );
+        setSavedAudioPath(savedUri);
+        setCachedPlaybackPath(null);
+        setCachedPlaybackSource(null);
+
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedUri)}`, [
+          {
+            text: 'OK',
+            onPress: () => console.log('Audio saved:', savedUri),
+          },
+        ]);
+        return;
+      }
+
+      if (!directoryPath) {
+        // Fallback to a user-visible directory when possible
+        if (Platform.OS === 'android' && RNFS.DownloadDirectoryPath) {
+          directoryPath = RNFS.DownloadDirectoryPath;
+        } else {
+          directoryPath = RNFS.DocumentDirectoryPath;
+        }
+        Alert.alert(
+          'Notice',
+          'The selected storage location cannot be written to directly. The file will be saved in a default directory.'
+        );
+      }
+
+      await RNFS.mkdir(directoryPath);
+      const filePath = `${directoryPath}/${filename}`;
+
+      // Save audio to file
+      const savedPath = await saveAudioToFile(generatedAudio, filePath);
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
+
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`, [
+        {
+          text: 'OK',
+          onPress: () => console.log('Audio saved:', savedPath),
+        },
+      ]);
+    } catch (err) {
+      console.error('Save audio error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to save audio: ${errorMessage}`);
+      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveTemporary = async () => {
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to save. Generate speech first.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const timestamp = Date.now();
+      const filename = `tts_${timestamp}.wav`;
+      const directoryPath = RNFS.DocumentDirectoryPath;
+
+      await RNFS.mkdir(directoryPath);
+      const filePath = `${directoryPath}/${filename}`;
+
+      const savedPath = await saveAudioToFile(generatedAudio, filePath);
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
+
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`, [
+        {
+          text: 'OK',
+          onPress: () => console.log('Audio saved:', savedPath),
+        },
+      ]);
+    } catch (err) {
+      console.error('Save audio error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to save audio: ${errorMessage}`);
+      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePlayAudio = async () => {
+    if (!savedAudioPath) {
+      Alert.alert('Error', 'No audio file saved. Save audio first.');
+      return;
+    }
+
+    try {
+      if (soundInstance && isPlaying) {
+        soundInstance.pause(() => setIsPlaying(false));
+        return;
+      }
+
+      if (soundInstance && !isPlaying) {
+        soundInstance.play((success) => {
+          setIsPlaying(false);
+          if (!success) {
+            Alert.alert('Error', 'Playback failed');
+          }
+        });
+        setIsPlaying(true);
+        return;
+      }
+
+      setLoadingSound(true);
+      Sound.setCategory('Playback');
+
+      let playbackPath = savedAudioPath;
+      if (savedAudioPath.startsWith('content://')) {
+        const cacheName = `tts_playback_${Date.now()}.wav`;
+        if (
+          cachedPlaybackPath &&
+          cachedPlaybackSource === savedAudioPath &&
+          (await RNFS.exists(cachedPlaybackPath))
+        ) {
+          playbackPath = cachedPlaybackPath;
+        } else {
+          const cachedPath = await copyContentUriToCache(
+            savedAudioPath,
+            cacheName
+          );
+          setCachedPlaybackPath(cachedPath);
+          setCachedPlaybackSource(savedAudioPath);
+          playbackPath = cachedPath;
+        }
+      }
+
+      const sound = new Sound(playbackPath, '', (loadError) => {
+        setLoadingSound(false);
+        if (loadError) {
+          console.error('Failed to load sound:', loadError);
+          Alert.alert('Error', 'Failed to load audio file');
+          return;
+        }
+
+        setSoundInstance(sound);
+        sound.play((success) => {
+          setIsPlaying(false);
+          if (!success) {
+            Alert.alert('Error', 'Playback failed');
+          }
+          sound.release();
+          setSoundInstance(null);
+        });
+        setIsPlaying(true);
+      });
+    } catch (err) {
+      console.error('Play audio error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Error', `Failed to play audio: ${errorMessage}`);
+    }
+  };
+
+  const handleStopAudio = async () => {
+    try {
+      if (soundInstance) {
+        soundInstance.stop(() => {
+          setIsPlaying(false);
+        });
+      }
+    } catch (err) {
+      console.error('Stop audio error:', err);
+    }
+  };
+
+  const handleShareAudio = async () => {
+    if (!savedAudioPath) {
+      Alert.alert('Error', 'No audio file saved. Save audio first.');
+      return;
+    }
+
+    try {
+      const exists = await RNFS.exists(savedAudioPath);
+      if (!exists && !savedAudioPath.startsWith('content://')) {
+        Alert.alert('Error', 'Saved audio file not found.');
+        return;
+      }
+
+      const shareUrl = getShareUrl(savedAudioPath);
+
+      if (Platform.OS === 'android') {
+        await shareAudioFile(shareUrl, 'audio/wav');
+        return;
+      }
+
+      await Share.share({
+        title: 'Share TTS Audio',
+        message: 'TTS audio file',
+        url: shareUrl,
+      });
+    } catch (err) {
+      console.error('Share audio error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Error', `Failed to share audio: ${errorMessage}`);
+    }
+  };
+
   const handleCleanup = async () => {
     try {
+      if (soundInstance) {
+        soundInstance.release();
+        setSoundInstance(null);
+        setIsPlaying(false);
+      }
       await unloadTTS();
       setCurrentModelFolder(null);
       setInitResult(null);
@@ -265,6 +581,7 @@ export default function TTSScreen() {
       setSelectedModelType(null);
       setModelInfo(null);
       setGeneratedAudio(null);
+      setSavedAudioPath(null);
       setError(null);
       Alert.alert('Success', 'TTS resources released');
     } catch (err) {
@@ -479,9 +796,81 @@ export default function TTSScreen() {
                 seconds
               </Text>
             </View>
-            <Text style={styles.noteText}>
-              Note: Audio playback will be implemented in a future update
-            </Text>
+
+            {/* Audio Controls */}
+            <View style={styles.audioControls}>
+              <TouchableOpacity
+                style={[
+                  styles.audioButton,
+                  styles.saveButton,
+                  saving && styles.buttonDisabled,
+                ]}
+                onPress={handleSaveTemporary}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.audioButtonText}>💾 Save temporary</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.audioButton,
+                  styles.saveButton,
+                  saving && styles.buttonDisabled,
+                ]}
+                onPress={handleSaveAudio}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.audioButtonText}>📁 Save to Folder</Text>
+                )}
+              </TouchableOpacity>
+
+              {savedAudioPath && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.audioButton, styles.playButton]}
+                    onPress={handlePlayAudio}
+                    disabled={loadingSound}
+                  >
+                    {loadingSound ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.audioButtonText}>
+                        {isPlaying ? '⏸️ Pause' : '▶️ Play'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.audioButton, styles.stopButton]}
+                    onPress={handleStopAudio}
+                  >
+                    <Text style={styles.audioButtonText}>⏹️ Stop</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.audioButton, styles.shareButton]}
+                    onPress={handleShareAudio}
+                  >
+                    <Text style={styles.audioButtonText}>📤 Share</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
+            {savedAudioPath && (
+              <Text style={styles.savedPathText}>
+                Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
+                {'\n'}
+                {getDisplayPath(savedAudioPath)}
+              </Text>
+            )}
           </View>
         )}
 
@@ -692,6 +1081,45 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  audioControls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  audioButton: {
+    flexBasis: '30%',
+    maxWidth: '32%',
+    flexGrow: 1,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButton: {
+    backgroundColor: '#34C759',
+  },
+  playButton: {
+    backgroundColor: '#007AFF',
+  },
+  stopButton: {
+    backgroundColor: '#FF9500',
+  },
+  shareButton: {
+    backgroundColor: '#5856D6',
+  },
+  audioButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  savedPathText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   noteText: {
     fontSize: 12,
