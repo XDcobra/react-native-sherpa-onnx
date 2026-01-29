@@ -646,4 +646,366 @@ void SherpaOnnxWrapper::release() {
     }
 }
 
+// ==================== TtsWrapper Implementation ====================
+
+class TtsWrapper::Impl {
+public:
+    bool initialized = false;
+    std::string modelDir;
+    std::optional<sherpa_onnx::cxx::OfflineTts> tts;
+};
+
+TtsWrapper::TtsWrapper() : pImpl(std::make_unique<Impl>()) {
+    LOGI("TtsWrapper created");
+}
+
+TtsWrapper::~TtsWrapper() {
+    release();
+    LOGI("TtsWrapper destroyed");
+}
+
+bool TtsWrapper::initialize(
+    const std::string& modelDir,
+    const std::string& modelType,
+    int32_t numThreads,
+    bool debug
+) {
+    if (pImpl->initialized) {
+        release();
+    }
+
+    if (modelDir.empty()) {
+        LOGE("TTS: Model directory is empty");
+        return false;
+    }
+
+    try {
+        // Helper functions for file checking
+        auto fileExists = [](const std::string& path) -> bool {
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+            return std::filesystem::exists(path);
+#elif __has_include(<experimental/filesystem>)
+            return std::experimental::filesystem::exists(path);
+#else
+            struct stat buffer;
+            return (stat(path.c_str(), &buffer) == 0);
+#endif
+        };
+
+        auto isDirectory = [](const std::string& path) -> bool {
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+            return std::filesystem::is_directory(path);
+#elif __has_include(<experimental/filesystem>)
+            return std::experimental::filesystem::is_directory(path);
+#else
+            struct stat buffer;
+            if (stat(path.c_str(), &buffer) != 0) return false;
+            return S_ISDIR(buffer.st_mode);
+#endif
+        };
+
+        // Check if model directory exists
+        if (!fileExists(modelDir) || !isDirectory(modelDir)) {
+            LOGE("TTS: Model directory does not exist: %s", modelDir.c_str());
+            return false;
+        }
+
+        // Build file paths
+        std::string modelOnnx = modelDir + "/model.onnx";
+        std::string modelFp16 = modelDir + "/model.fp16.onnx";
+        std::string modelInt8 = modelDir + "/model.int8.onnx";
+        std::string tokensFile = modelDir + "/tokens.txt";
+        std::string lexiconFile = modelDir + "/lexicon.txt";
+        std::string dataDirPath = modelDir + "/espeak-ng-data";
+        std::string voicesFile = modelDir + "/voices.bin";
+        std::string acousticModel = modelDir + "/acoustic_model.onnx";
+        std::string vocoder = modelDir + "/vocoder.onnx";
+        std::string encoder = modelDir + "/encoder.onnx";
+        std::string decoder = modelDir + "/decoder.onnx";
+
+        // Setup TTS configuration
+        sherpa_onnx::cxx::OfflineTtsConfig config;
+        config.model.num_threads = numThreads;
+        config.model.debug = debug;
+
+        // Detect model type or use explicit type
+        std::string detectedType = modelType;
+        
+        if (modelType == "auto") {
+            LOGI("TTS: Auto-detecting model type...");
+            
+            // Matcha: acoustic_model + vocoder
+            if (fileExists(acousticModel) && fileExists(vocoder)) {
+                detectedType = "matcha";
+                LOGI("TTS: Detected Matcha model");
+            }
+            // Kokoro/Kitten: voices.bin present
+            else if (fileExists(voicesFile)) {
+                // Both use same structure, differentiate by checking filename patterns if needed
+                // For now, default to kokoro
+                detectedType = "kokoro";
+                LOGI("TTS: Detected Kokoro/Kitten model (voices.bin present)");
+            }
+            // Zipvoice: encoder + decoder + vocoder
+            else if (fileExists(encoder) && fileExists(decoder) && fileExists(vocoder)) {
+                detectedType = "zipvoice";
+                LOGI("TTS: Detected Zipvoice model");
+            }
+            // VITS: model.onnx (most common)
+            else if (fileExists(modelOnnx) || fileExists(modelFp16) || fileExists(modelInt8)) {
+                detectedType = "vits";
+                LOGI("TTS: Detected VITS model");
+            }
+            else {
+                LOGE("TTS: Cannot auto-detect model type. No recognizable files found.");
+                return false;
+            }
+        }
+
+        // Configure based on model type
+        if (detectedType == "vits") {
+            // VITS model configuration
+            if (fileExists(modelInt8)) {
+                config.model.vits.model = modelInt8;
+                LOGI("TTS: Using quantized VITS model: %s", modelInt8.c_str());
+            } else if (fileExists(modelFp16)) {
+                config.model.vits.model = modelFp16;
+                LOGI("TTS: Using fp16 VITS model: %s", modelFp16.c_str());
+            } else if (fileExists(modelOnnx)) {
+                config.model.vits.model = modelOnnx;
+                LOGI("TTS: Using VITS model: %s", modelOnnx.c_str());
+            } else {
+                LOGE("TTS: VITS model.onnx not found");
+                return false;
+            }
+
+            if (fileExists(tokensFile)) {
+                config.model.vits.tokens = tokensFile;
+            } else {
+                LOGE("TTS: tokens.txt not found");
+                return false;
+            }
+
+            if (fileExists(lexiconFile)) {
+                config.model.vits.lexicon = lexiconFile;
+                LOGI("TTS: Using lexicon: %s", lexiconFile.c_str());
+            }
+
+            if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
+                config.model.vits.data_dir = dataDirPath;
+                LOGI("TTS: Using espeak-ng data dir: %s", dataDirPath.c_str());
+            }
+        }
+        else if (detectedType == "matcha") {
+            // Matcha model configuration
+            config.model.matcha.acoustic_model = acousticModel;
+            config.model.matcha.vocoder = vocoder;
+
+            if (fileExists(tokensFile)) {
+                config.model.matcha.tokens = tokensFile;
+            } else {
+                LOGE("TTS: tokens.txt not found for Matcha model");
+                return false;
+            }
+
+            if (fileExists(lexiconFile)) {
+                config.model.matcha.lexicon = lexiconFile;
+            }
+
+            if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
+                config.model.matcha.data_dir = dataDirPath;
+            }
+
+            LOGI("TTS: Configured Matcha model");
+        }
+        else if (detectedType == "kokoro") {
+            // Kokoro model configuration
+            if (fileExists(modelOnnx)) {
+                config.model.kokoro.model = modelOnnx;
+            } else {
+                LOGE("TTS: Kokoro model.onnx not found");
+                return false;
+            }
+
+            if (fileExists(voicesFile)) {
+                config.model.kokoro.voices = voicesFile;
+            } else {
+                LOGE("TTS: Kokoro voices.bin not found");
+                return false;
+            }
+
+            if (fileExists(tokensFile)) {
+                config.model.kokoro.tokens = tokensFile;
+            } else {
+                LOGE("TTS: tokens.txt not found for Kokoro model");
+                return false;
+            }
+
+            if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
+                config.model.kokoro.data_dir = dataDirPath;
+            }
+
+            if (fileExists(lexiconFile)) {
+                config.model.kokoro.lexicon = lexiconFile;
+            }
+
+            LOGI("TTS: Configured Kokoro model");
+        }
+        else if (detectedType == "kitten") {
+            // KittenTTS model configuration
+            if (fileExists(modelFp16)) {
+                config.model.kitten.model = modelFp16;
+                LOGI("TTS: Using fp16 Kitten model");
+            } else if (fileExists(modelOnnx)) {
+                config.model.kitten.model = modelOnnx;
+            } else {
+                LOGE("TTS: Kitten model.onnx not found");
+                return false;
+            }
+
+            if (fileExists(voicesFile)) {
+                config.model.kitten.voices = voicesFile;
+            } else {
+                LOGE("TTS: Kitten voices.bin not found");
+                return false;
+            }
+
+            if (fileExists(tokensFile)) {
+                config.model.kitten.tokens = tokensFile;
+            } else {
+                LOGE("TTS: tokens.txt not found for Kitten model");
+                return false;
+            }
+
+            if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
+                config.model.kitten.data_dir = dataDirPath;
+            }
+
+            LOGI("TTS: Configured Kitten model");
+        }
+        else if (detectedType == "zipvoice") {
+            // Zipvoice model configuration
+            config.model.zipvoice.encoder = encoder;
+            config.model.zipvoice.decoder = decoder;
+            config.model.zipvoice.vocoder = vocoder;
+
+            if (fileExists(tokensFile)) {
+                config.model.zipvoice.tokens = tokensFile;
+            } else {
+                LOGE("TTS: tokens.txt not found for Zipvoice model");
+                return false;
+            }
+
+            if (fileExists(lexiconFile)) {
+                config.model.zipvoice.lexicon = lexiconFile;
+            }
+
+            if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
+                config.model.zipvoice.data_dir = dataDirPath;
+            }
+
+            LOGI("TTS: Configured Zipvoice model");
+        }
+        else {
+            LOGE("TTS: Unknown model type: %s", detectedType.c_str());
+            return false;
+        }
+
+        // Create TTS instance
+        LOGI("TTS: Creating OfflineTts instance...");
+        pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
+        
+        if (!pImpl->tts.has_value()) {
+            LOGE("TTS: Failed to create OfflineTts instance");
+            return false;
+        }
+
+        pImpl->initialized = true;
+        pImpl->modelDir = modelDir;
+        
+        LOGI("TTS: Initialization successful");
+        LOGI("TTS: Sample rate: %d Hz", pImpl->tts.value().SampleRate());
+        LOGI("TTS: Number of speakers: %d", pImpl->tts.value().NumSpeakers());
+
+        return true;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during initialization: %s", e.what());
+        return false;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during initialization");
+        return false;
+    }
+}
+
+TtsWrapper::AudioResult TtsWrapper::generate(
+    const std::string& text,
+    int32_t sid,
+    float speed
+) {
+    AudioResult result;
+    result.sampleRate = 0;
+    
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return result;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return result;
+    }
+
+    try {
+        LOGI("TTS: Generating speech for text: %s (sid=%d, speed=%.2f)", 
+             text.c_str(), sid, speed);
+
+        // Generate audio using cxx-api
+        auto audio = pImpl->tts.value().Generate(text, sid, speed);
+
+        // Copy samples to result
+        result.samples = std::move(audio.samples);
+        result.sampleRate = audio.sample_rate;
+
+        LOGI("TTS: Generated %zu samples at %d Hz", 
+             result.samples.size(), result.sampleRate);
+
+        return result;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during generation: %s", e.what());
+        return result;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during generation");
+        return result;
+    }
+}
+
+int32_t TtsWrapper::getSampleRate() const {
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return 0;
+    }
+    return pImpl->tts.value().SampleRate();
+}
+
+int32_t TtsWrapper::getNumSpeakers() const {
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return 0;
+    }
+    return pImpl->tts.value().NumSpeakers();
+}
+
+bool TtsWrapper::isInitialized() const {
+    return pImpl->initialized;
+}
+
+void TtsWrapper::release() {
+    if (pImpl->initialized) {
+        pImpl->tts.reset();
+        pImpl->initialized = false;
+        pImpl->modelDir.clear();
+        LOGI("TTS: Resources released");
+    }
+}
+
 } // namespace sherpaonnx

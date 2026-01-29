@@ -292,6 +292,111 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ==================== TTS Methods ====================
+
+  /**
+   * Initialize TTS with model directory.
+   */
+  override fun initializeTts(
+    modelDir: String,
+    modelType: String,
+    numThreads: Double,
+    debug: Boolean,
+    promise: Promise
+  ) {
+    try {
+      val success = nativeInitializeTts(
+        modelDir,
+        modelType,
+        numThreads.toInt(),
+        debug
+      )
+      if (success) {
+        promise.resolve(null)
+      } else {
+        promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS")
+      }
+    } catch (e: Exception) {
+      promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS", e)
+    }
+  }
+
+  /**
+   * Generate speech from text.
+   */
+  override fun generateTts(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    try {
+      val result = nativeGenerateTts(text, sid.toInt(), speed.toFloat())
+      if (result != null) {
+        // Convert HashMap to WritableMap for React Native
+        val map = com.facebook.react.bridge.Arguments.createMap()
+        
+        @Suppress("UNCHECKED_CAST")
+        val samples = result["samples"] as? FloatArray
+        val sampleRate = result["sampleRate"] as? Int
+        
+        if (samples != null && sampleRate != null) {
+          // Convert FloatArray to WritableArray
+          val samplesArray = com.facebook.react.bridge.Arguments.createArray()
+          for (sample in samples) {
+            samplesArray.pushDouble(sample.toDouble())
+          }
+          
+          map.putArray("samples", samplesArray)
+          map.putInt("sampleRate", sampleRate)
+          promise.resolve(map)
+        } else {
+          promise.reject("TTS_GENERATE_ERROR", "Invalid result format from native code")
+        }
+      } else {
+        promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech")
+      }
+    } catch (e: Exception) {
+      promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech", e)
+    }
+  }
+
+  /**
+   * Get TTS sample rate.
+   */
+  override fun getTtsSampleRate(promise: Promise) {
+    try {
+      val sampleRate = nativeGetTtsSampleRate()
+      promise.resolve(sampleRate.toDouble())
+    } catch (e: Exception) {
+      promise.reject("TTS_ERROR", "Failed to get sample rate", e)
+    }
+  }
+
+  /**
+   * Get number of speakers.
+   */
+  override fun getTtsNumSpeakers(promise: Promise) {
+    try {
+      val numSpeakers = nativeGetTtsNumSpeakers()
+      promise.resolve(numSpeakers.toDouble())
+    } catch (e: Exception) {
+      promise.reject("TTS_ERROR", "Failed to get number of speakers", e)
+    }
+  }
+
+  /**
+   * Release TTS resources.
+   */
+  override fun unloadTts(promise: Promise) {
+    try {
+      nativeReleaseTts()
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
+    }
+  }
+
   companion object {
     const val NAME = "SherpaOnnx"
 
@@ -312,5 +417,30 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     @JvmStatic
     private external fun nativeRelease()
+
+    // TTS Native JNI methods
+    @JvmStatic
+    private external fun nativeInitializeTts(
+      modelDir: String,
+      modelType: String,
+      numThreads: Int,
+      debug: Boolean
+    ): Boolean
+
+    @JvmStatic
+    private external fun nativeGenerateTts(
+      text: String,
+      sid: Int,
+      speed: Float
+    ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeGetTtsSampleRate(): Int
+
+    @JvmStatic
+    private external fun nativeGetTtsNumSpeakers(): Int
+
+    @JvmStatic
+    private external fun nativeReleaseTts()
   }
 }
