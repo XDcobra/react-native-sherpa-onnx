@@ -28,7 +28,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
 | **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>✅ GitHub Actions builds pass<br/>❌ **No local Xcode testing** *(Windows-only dev)* |
 
-### 🔧 **iOS Contributors WANTED!** 🙌
+### 🔧 **iOS Contributors WANTED!**
 
 **Full iOS support is a priority!** Help bring sherpa-onnx to iOS devices.
 

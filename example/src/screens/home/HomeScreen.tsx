@@ -1,0 +1,209 @@
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList, Feature } from '../../types/navigation';
+
+const FEATURES: Feature[] = [
+  {
+    id: 'stt',
+    title: 'Speech-to-Text',
+    description: 'Convert speech to text using offline models',
+    icon: '🎤',
+    screen: 'STT',
+    implemented: true,
+  },
+  {
+    id: 'tts',
+    title: 'Text-to-Speech',
+    description: 'Generate speech from text',
+    icon: '🔊',
+    screen: 'TTS',
+    implemented: false,
+  },
+  {
+    id: 'vad',
+    title: 'Voice Activity Detection',
+    description: 'Detect voice activity in audio streams',
+    icon: '📊',
+    screen: 'VAD',
+    implemented: false,
+  },
+  {
+    id: 'diarization',
+    title: 'Speaker Diarization',
+    description: 'Identify who spoke when in audio',
+    icon: '👥',
+    screen: 'Diarization',
+    implemented: false,
+  },
+  {
+    id: 'enhancement',
+    title: 'Speech Enhancement',
+    description: 'Remove noise and improve audio quality',
+    icon: '🎚️',
+    screen: 'Enhancement',
+    implemented: false,
+  },
+  {
+    id: 'separation',
+    title: 'Source Separation',
+    description: 'Separate voice from background music',
+    icon: '🎵',
+    screen: 'Separation',
+    implemented: false,
+  },
+];
+
+type Props = {
+  navigation: NativeStackNavigationProp<RootStackParamList, 'Home'>;
+};
+
+export default function HomeScreen({ navigation }: Props) {
+  const renderFeatureCard = ({ item }: { item: Feature }) => (
+    <TouchableOpacity
+      style={[styles.card, !item.implemented && styles.cardDisabled]}
+      onPress={() => navigation.navigate(item.screen)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.cardContent}>
+        <Text style={styles.icon}>{item.icon}</Text>
+        <View style={styles.textContainer}>
+          <View style={styles.titleRow}>
+            <Text
+              style={[styles.title, !item.implemented && styles.textDisabled]}
+            >
+              {item.title}
+            </Text>
+            {!item.implemented && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>Coming Soon</Text>
+              </View>
+            )}
+          </View>
+          <Text
+            style={[
+              styles.description,
+              !item.implemented && styles.textDisabled,
+            ]}
+          >
+            {item.description}
+          </Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Sherpa-ONNX Features</Text>
+        <Text style={styles.headerSubtitle}>
+          Offline speech processing on device
+        </Text>
+      </View>
+      <FlatList
+        data={FEATURES}
+        renderItem={renderFeatureCard}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardDisabled: {
+    opacity: 0.65,
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  icon: {
+    fontSize: 36,
+    marginRight: 16,
+  },
+  textContainer: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000000',
+    marginRight: 8,
+  },
+  textDisabled: {
+    color: '#C7C7CC',
+  },
+  description: {
+    fontSize: 14,
+    color: '#8E8E93',
+    lineHeight: 18,
+  },
+  badge: {
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  chevron: {
+    fontSize: 28,
+    color: '#C7C7CC',
+    marginLeft: 8,
+  },
+});

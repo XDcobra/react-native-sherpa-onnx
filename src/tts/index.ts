@@ -107,11 +107,7 @@ export async function generateSpeech(
   text: string,
   options?: SynthesisOptions
 ): Promise<GeneratedAudio> {
-  return SherpaOnnx.generateTts(
-    text,
-    options?.sid ?? 0,
-    options?.speed ?? 1.0
-  );
+  return SherpaOnnx.generateTts(text, options?.sid ?? 0, options?.speed ?? 1.0);
 }
 
 /**
@@ -212,4 +208,3 @@ export type {
   GeneratedAudio,
   TTSModelInfo,
 } from './types';
-

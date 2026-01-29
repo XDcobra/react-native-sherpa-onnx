@@ -86,14 +86,12 @@ android/generated
 nitrogen/
 
 # Model files (too large for git)
-example/android/app/src/main/assets/models/**/*.onnx
-example/android/app/src/main/assets/models/**/*.int8.onnx
-example/android/app/src/main/assets/models/**/*.txt
-example/android/app/src/main/assets/models/**/vocab.json
-example/android/app/src/main/assets/models/**/merges.txt
-example/android/app/src/main/assets/models/**/tokens.txt
-example/android/app/src/main/assets/models/**/tokenizer.json
-example/android/app/src/main/assets/models/**/Qwen3-*/
+# Ignore all model files and subdirectories under the example app assets
+# but keep README.md files inside each model folder so the directories
+# remain discoverable and documented in the repo.
+example/android/app/src/main/assets/models/**
+!example/android/app/src/main/assets/models/**/README.md
+!example/android/app/src/main/assets/models/README.md
 
 # sherpa-onnx source (if cloned for building)
 sherpa-onnx/
