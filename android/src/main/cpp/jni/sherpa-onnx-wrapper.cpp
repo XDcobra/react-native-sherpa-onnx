@@ -817,10 +817,16 @@ TtsInitializeResult TtsWrapper::initialize(
             }
             // Kokoro/Kitten: voices.bin present
             else if (fileExists(voicesFile)) {
-                // Both use same structure, differentiate by checking filename patterns if needed
-                // For now, default to kokoro
-                detectedType = "kokoro";
-                LOGI("TTS: Detected Kokoro/Kitten model (voices.bin present)");
+                // Differentiate by checking directory name
+                std::string modelDirLower = modelDir;
+                std::transform(modelDirLower.begin(), modelDirLower.end(), modelDirLower.begin(), ::tolower);
+                if (modelDirLower.find("kitten") != std::string::npos) {
+                    detectedType = "kitten";
+                    LOGI("TTS: Detected Kitten model (directory name contains 'kitten')");
+                } else {
+                    detectedType = "kokoro";
+                    LOGI("TTS: Detected Kokoro model (voices.bin present, default)");
+                }
             }
             // Zipvoice: encoder + decoder + vocoder
             else if (fileExists(encoder) && fileExists(decoder) && fileExists(vocoder)) {
