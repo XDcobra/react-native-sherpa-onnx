@@ -919,10 +919,20 @@ TtsInitializeResult TtsWrapper::initialize(
 
             if (fileExists(dataDirPath) && isDirectory(dataDirPath)) {
                 config.model.kokoro.data_dir = dataDirPath;
+            } else {
+                LOGE("TTS: espeak-ng-data directory not found for Kokoro model");
+                LOGE("TTS: Required: %s", dataDirPath.c_str());
+                return result;
             }
 
             if (fileExists(lexiconFile)) {
                 config.model.kokoro.lexicon = lexiconFile;
+                LOGI("TTS: Using lexicon: %s", lexiconFile.c_str());
+            } else {
+                LOGE("TTS: lexicon.txt not found for Kokoro model");
+                LOGE("TTS: Kokoro models require a lexicon file (e.g., lexicon.txt)");
+                LOGE("TTS: Rename lexicon-us-en.txt or lexicon-gb-en.txt to lexicon.txt");
+                return result;
             }
 
             LOGI("TTS: Configured Kokoro model");
