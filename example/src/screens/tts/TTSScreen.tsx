@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Text,
   View,
@@ -16,23 +16,16 @@ import {
   unloadTTS,
   getModelInfo,
 } from 'react-native-sherpa-onnx/tts';
-import { autoModelPath } from 'react-native-sherpa-onnx';
-
-// TTS model configuration
-const TTS_MODELS = {
-  VITS_PIPER_EN: 'sherpa-onnx-vits-piper-en_US-lessac-medium',
-  VITS_ZH: 'sherpa-onnx-vits-zh-hf-fanchen-C',
-} as const;
-
-type TTSModelId = (typeof TTS_MODELS)[keyof typeof TTS_MODELS];
-
-const getTTSModelPath = (modelId: TTSModelId) => {
-  return autoModelPath(`models/${modelId}`);
-};
+import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+import { getModelDisplayName } from '../../modelConfig';
 
 export default function TTSScreen() {
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
-  const [currentModel, setCurrentModel] = useState<TTSModelId | null>(null);
+  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
+    null
+  );
   const [detectedModels, setDetectedModels] = useState<
     Array<{ type: string; modelDir: string }>
   >([]);
@@ -54,7 +47,56 @@ export default function TTSScreen() {
     numSpeakers: number;
   } | null>(null);
 
-  const handleInitialize = async (modelId: TTSModelId) => {
+  // Load available models on mount
+  useEffect(() => {
+    loadAvailableModels();
+  }, []);
+
+  // Cleanup: Release TTS resources when leaving the screen
+  useEffect(() => {
+    return () => {
+      if (currentModelFolder !== null) {
+        console.log('TTSScreen: Cleaning up TTS resources');
+        unloadTTS().catch((err) => {
+          console.error('TTSScreen: Failed to unload TTS:', err);
+        });
+      }
+    };
+  }, [currentModelFolder]);
+
+  const loadAvailableModels = async () => {
+    setLoadingModels(true);
+    setError(null);
+    try {
+      const models = await listAssetModels();
+      const ttsFolders = models
+        .filter((model) => model.hint === 'tts')
+        .map((model) => model.folder);
+      const sttFolders = models
+        .filter((model) => model.hint === 'stt')
+        .map((model) => model.folder);
+      const unknownFolders = models.filter((model) => model.hint === 'unknown');
+
+      console.log('TTSScreen: Found model folders:', models);
+      setAvailableModels(ttsFolders);
+      if (ttsFolders.length === 0) {
+        setError(
+          sttFolders.length > 0
+            ? 'No TTS models found. Only STT models detected in assets/models/. See TTS_MODEL_SETUP.md'
+            : unknownFolders.length > 0
+            ? 'No TTS models found. Some models have unknown type hints. See TTS_MODEL_SETUP.md'
+            : 'No TTS models found in assets. See TTS_MODEL_SETUP.md'
+        );
+      }
+    } catch (err) {
+      console.error('TTSScreen: Failed to list models:', err);
+      setError('Failed to list available models');
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
     setError(null);
     setInitResult(null);
@@ -63,34 +105,37 @@ export default function TTSScreen() {
     setModelInfo(null);
 
     try {
-      const modelPathConfig = getTTSModelPath(modelId);
-
       // Unload previous model if any
-      if (currentModel) {
+      if (currentModelFolder) {
         await unloadTTS();
       }
 
+      // Resolve model path
+      const modelPath = await resolveModelPath({
+        type: 'asset',
+        path: `models/${modelFolder}`,
+      });
+
+      console.log('TTSScreen: Resolved model path:', modelPath);
+
       // Initialize new model
       const result = await initializeTTS({
-        modelPath: modelPathConfig,
+        modelPath,
         numThreads: 2,
         debug: false,
       });
 
       if (result.success && result.detectedModels.length > 0) {
         setDetectedModels(result.detectedModels);
-        setCurrentModel(modelId);
-
-        const modelName =
-          modelId === TTS_MODELS.VITS_PIPER_EN
-            ? 'English VITS (Piper)'
-            : 'Chinese VITS';
+        setCurrentModelFolder(modelFolder);
 
         const detectedTypes = result.detectedModels
           .map((m) => m.type)
           .join(', ');
         setInitResult(
-          `Initialized: ${modelName}\nDetected models: ${detectedTypes}`
+          `Initialized: ${getModelDisplayName(
+            modelFolder
+          )}\nDetected models: ${detectedTypes}`
         );
 
         // Auto-select first detected model
@@ -144,7 +189,7 @@ export default function TTSScreen() {
   };
 
   const handleGenerate = async () => {
-    if (!currentModel) {
+    if (!currentModelFolder) {
       setError('Please initialize a model first');
       return;
     }
@@ -214,7 +259,7 @@ export default function TTSScreen() {
   const handleCleanup = async () => {
     try {
       await unloadTTS();
-      setCurrentModel(null);
+      setCurrentModelFolder(null);
       setInitResult(null);
       setDetectedModels([]);
       setSelectedModelType(null);
@@ -250,48 +295,44 @@ export default function TTSScreen() {
             Select a TTS model to load:
           </Text>
 
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === TTS_MODELS.VITS_PIPER_EN &&
-                  styles.modelButtonActive,
-              ]}
-              onPress={() => handleInitialize(TTS_MODELS.VITS_PIPER_EN)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === TTS_MODELS.VITS_PIPER_EN &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                English VITS (Piper)
+          {loadingModels ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#007AFF" />
+              <Text style={styles.loadingText}>Loading models...</Text>
+            </View>
+          ) : availableModels.length === 0 ? (
+            <View style={styles.resultContainer}>
+              <Text style={styles.errorText}>
+                No TTS models found. See TTS_MODEL_SETUP.md
               </Text>
-              <Text style={styles.modelButtonSubtext}>en_US-lessac-medium</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === TTS_MODELS.VITS_ZH && styles.modelButtonActive,
-              ]}
-              onPress={() => handleInitialize(TTS_MODELS.VITS_ZH)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === TTS_MODELS.VITS_ZH &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                Chinese VITS
-              </Text>
-              <Text style={styles.modelButtonSubtext}>zh-hf-fanchen-C</Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          ) : (
+            <View style={styles.buttonGroup}>
+              {availableModels.map((modelFolder) => (
+                <TouchableOpacity
+                  key={modelFolder}
+                  style={[
+                    styles.modelButton,
+                    currentModelFolder === modelFolder &&
+                      styles.modelButtonActive,
+                  ]}
+                  onPress={() => handleInitialize(modelFolder)}
+                  disabled={loading}
+                >
+                  <Text
+                    style={[
+                      styles.modelButtonText,
+                      currentModelFolder === modelFolder &&
+                        styles.modelButtonTextActive,
+                    ]}
+                  >
+                    {getModelDisplayName(modelFolder)}
+                  </Text>
+                  <Text style={styles.modelButtonSubtext}>{modelFolder}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {loading && (
             <View style={styles.loadingContainer}>
@@ -452,7 +493,7 @@ export default function TTSScreen() {
         )}
 
         {/* Cleanup Button */}
-        {currentModel && (
+        {currentModelFolder && (
           <TouchableOpacity
             style={styles.cleanupButton}
             onPress={handleCleanup}

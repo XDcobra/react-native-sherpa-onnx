@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Text,
   View,
@@ -10,18 +10,26 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
-import { autoModelPath, resolveModelPath } from 'react-native-sherpa-onnx';
+import {
+  autoModelPath,
+  resolveModelPath,
+  listAssetModels,
+} from 'react-native-sherpa-onnx';
 import {
   initializeSTT,
   unloadSTT,
   transcribeFile,
 } from 'react-native-sherpa-onnx/stt';
-import { getModelPath, MODELS, type ModelId } from '../../modelConfig';
+import { getModelDisplayName } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 
 export default function STTScreen() {
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
-  const [currentModel, setCurrentModel] = useState<ModelId | null>(null);
+  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
+    null
+  );
   const [detectedModels, setDetectedModels] = useState<
     Array<{ type: string; modelDir: string }>
   >([]);
@@ -44,7 +52,56 @@ export default function STTScreen() {
   const [transcribing, setTranscribing] = useState(false);
   const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
-  const handleInitialize = async (modelId: ModelId) => {
+  // Load available models on mount
+  useEffect(() => {
+    loadAvailableModels();
+  }, []);
+
+  // Cleanup: Release STT resources when leaving the screen
+  useEffect(() => {
+    return () => {
+      if (currentModelFolder !== null) {
+        console.log('STTScreen: Cleaning up STT resources');
+        unloadSTT().catch((err) => {
+          console.error('STTScreen: Failed to unload STT:', err);
+        });
+      }
+    };
+  }, [currentModelFolder]);
+
+  const loadAvailableModels = async () => {
+    setLoadingModels(true);
+    setError(null);
+    try {
+      const models = await listAssetModels();
+      const sttFolders = models
+        .filter((model) => model.hint === 'stt')
+        .map((model) => model.folder);
+      const ttsFolders = models
+        .filter((model) => model.hint === 'tts')
+        .map((model) => model.folder);
+      const unknownFolders = models.filter((model) => model.hint === 'unknown');
+
+      console.log('STTScreen: Found model folders:', models);
+      setAvailableModels(sttFolders);
+      if (sttFolders.length === 0) {
+        setError(
+          ttsFolders.length > 0
+            ? 'No STT models found. Only TTS models detected in assets/models/. See STT_MODEL_SETUP.md'
+            : unknownFolders.length > 0
+            ? 'No STT models found. Some models have unknown type hints. See STT_MODEL_SETUP.md'
+            : 'No STT models found in assets. See STT_MODEL_SETUP.md'
+        );
+      }
+    } catch (err) {
+      console.error('STTScreen: Failed to list models:', err);
+      setError('Failed to list available models');
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
     setError(null);
     setInitResult(null);
@@ -52,42 +109,33 @@ export default function STTScreen() {
     setSelectedModelType(null);
 
     try {
-      const modelPathConfig = getModelPath(modelId);
-
       // Unload previous model if any
-      if (currentModel) {
+      if (currentModelFolder) {
         await unloadSTT();
       }
 
+      // Resolve model path
+      const modelPath = await resolveModelPath({
+        type: 'asset',
+        path: `models/${modelFolder}`,
+      });
+
       // Initialize new model
       const result = await initializeSTT({
-        modelPath: modelPathConfig,
+        modelPath: { type: 'file', path: modelPath },
       });
 
       if (result.success && result.detectedModels.length > 0) {
         setDetectedModels(result.detectedModels);
-        setCurrentModel(modelId);
-
-        const modelName =
-          modelId === MODELS.ZIPFORMER_EN
-            ? 'English (Zipformer)'
-            : modelId === MODELS.PARAFORMER_ZH
-            ? 'Chinese (Paraformer)'
-            : modelId === MODELS.NEMO_CTC_EN
-            ? 'English (NeMo CTC)'
-            : modelId === MODELS.WHISPER_EN
-            ? 'English (Whisper)'
-            : modelId === MODELS.WENET_CTC_ZH_EN_CANTONESE
-            ? 'Chinese/English/Cantonese (WeNet CTC)'
-            : modelId === MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE
-            ? 'Chinese/English/Japanese/Korean/Yue (SenseVoice)'
-            : 'FunASR Nano';
+        setCurrentModelFolder(modelFolder);
 
         const detectedTypes = result.detectedModels
           .map((m) => m.type)
           .join(', ');
         setInitResult(
-          `Initialized: ${modelName}\nDetected models: ${detectedTypes}`
+          `Initialized: ${getModelDisplayName(
+            modelFolder
+          )}\nDetected models: ${detectedTypes}`
         );
 
         // Auto-select first detected model
@@ -142,7 +190,7 @@ export default function STTScreen() {
   };
 
   const handleTranscribe = async () => {
-    if (!currentModel) {
+    if (!currentModelFolder) {
       setError('Please select a model first');
       return;
     }
@@ -278,8 +326,8 @@ export default function STTScreen() {
   };
 
   // Get available audio files for current model
-  const availableAudioFiles = currentModel
-    ? getAudioFilesForModel(currentModel)
+  const availableAudioFiles = currentModelFolder
+    ? getAudioFilesForModel(currentModelFolder)
     : [];
 
   return (
@@ -291,172 +339,60 @@ export default function STTScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. Initialize Model</Text>
           <Text style={styles.hint}>
-            Select a model to initialize. Models must be provided separately.
+            Select a model to initialize. Available models are discovered
+            automatically from your assets folder.
           </Text>
 
-          {currentModel && (
+          {currentModelFolder && (
             <View style={styles.currentModelContainer}>
               <Text style={styles.currentModelText}>
-                Current:{' '}
-                {currentModel === MODELS.ZIPFORMER_EN ||
-                currentModel === MODELS.NEMO_CTC_EN ||
-                currentModel === MODELS.WHISPER_EN
-                  ? 'English'
-                  : currentModel === MODELS.WENET_CTC_ZH_EN_CANTONESE
-                  ? 'Chinese/English/Cantonese'
-                  : 'Chinese'}
+                Current: {getModelDisplayName(currentModelFolder)}
               </Text>
             </View>
           )}
 
-          <View style={styles.modelButtons}>
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.ZIPFORMER_EN &&
-                  styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.ZIPFORMER_EN)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.ZIPFORMER_EN &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                English (Zipformer)
+          {loadingModels ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#007AFF" />
+              <Text style={styles.loadingText}>
+                Discovering available models...
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.PARAFORMER_ZH &&
-                  styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.PARAFORMER_ZH)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.PARAFORMER_ZH &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                中文 (Paraformer)
+            </View>
+          ) : availableModels.length === 0 ? (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>
+                No models found in assets/models/ folder. Please add STT models
+                first. See STT_MODEL_SETUP.md for details.
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.NEMO_CTC_EN && styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.NEMO_CTC_EN)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.NEMO_CTC_EN &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                English (NeMo CTC)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.WHISPER_EN && styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.WHISPER_EN)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.WHISPER_EN &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                English (Whisper)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.WENET_CTC_ZH_EN_CANTONESE &&
-                  styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.WENET_CTC_ZH_EN_CANTONESE)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.WENET_CTC_ZH_EN_CANTONESE &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                中英粤 (WeNet CTC)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE &&
-                  styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() =>
-                handleInitialize(MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE)
-              }
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.SENSE_VOICE_ZH_EN_JA_KO_YUE &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                多语言 (SenseVoice)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modelButton,
-                currentModel === MODELS.FUNASR_NANO_INT8 &&
-                  styles.modelButtonActive,
-                loading && styles.buttonDisabled,
-              ]}
-              onPress={() => handleInitialize(MODELS.FUNASR_NANO_INT8)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.modelButtonText,
-                  currentModel === MODELS.FUNASR_NANO_INT8 &&
-                    styles.modelButtonTextActive,
-                ]}
-              >
-                FunASR Nano
-              </Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          ) : (
+            <View style={styles.modelButtons}>
+              {availableModels.map((modelFolder) => (
+                <TouchableOpacity
+                  key={modelFolder}
+                  style={[
+                    styles.modelButton,
+                    currentModelFolder === modelFolder &&
+                      styles.modelButtonActive,
+                    loading && styles.buttonDisabled,
+                  ]}
+                  onPress={() => handleInitialize(modelFolder)}
+                  disabled={loading}
+                >
+                  <Text
+                    style={[
+                      styles.modelButtonText,
+                      currentModelFolder === modelFolder &&
+                        styles.modelButtonTextActive,
+                    ]}
+                  >
+                    {getModelDisplayName(modelFolder)}
+                  </Text>
+                  <Text style={styles.modelFolderText}>{modelFolder}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {initResult && (
             <View
@@ -486,7 +422,7 @@ export default function STTScreen() {
             transcription.
           </Text>
 
-          {!currentModel && (
+          {!currentModelFolder && (
             <View style={styles.warningContainer}>
               <Text style={styles.warningText}>
                 Please initialize a model directory first
@@ -494,7 +430,7 @@ export default function STTScreen() {
             </View>
           )}
 
-          {currentModel && detectedModels.length === 0 && (
+          {currentModelFolder && detectedModels.length === 0 && (
             <View style={styles.warningContainer}>
               <Text style={styles.warningText}>
                 No models detected. Please try another directory.
@@ -529,13 +465,15 @@ export default function STTScreen() {
             </View>
           )}
 
-          {currentModel && detectedModels.length > 0 && !selectedModelType && (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                Please select a model type above
-              </Text>
-            </View>
-          )}
+          {currentModelFolder &&
+            detectedModels.length > 0 &&
+            !selectedModelType && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  Please select a model type above
+                </Text>
+              </View>
+            )}
         </View>
 
         <View style={styles.section}>
@@ -817,6 +755,16 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     textAlign: 'center',
   },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 14,
+    color: '#666',
+  },
   modelButtons: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -848,6 +796,12 @@ const styles = StyleSheet.create({
   },
   modelButtonTextActive: {
     color: '#2e7d32',
+  },
+  modelFolderText: {
+    fontSize: 10,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
   },
   subsectionTitle: {
     fontSize: 14,
