@@ -177,6 +177,9 @@
 // Global wrapper instance
 static std::unique_ptr<sherpaonnx::SherpaOnnxWrapper> g_wrapper = nullptr;
 
+// Global TTS wrapper instance
+static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
+
 - (void)initializeSherpaOnnx:(NSString *)modelDir
                 preferInt8:(NSNumber *)preferInt8
                  modelType:(NSString *)modelType
@@ -276,6 +279,153 @@ static std::unique_ptr<sherpaonnx::SherpaOnnxWrapper> g_wrapper = nullptr;
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during cleanup: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"CLEANUP_ERROR", errorMsg, nil);
+    }
+}
+
+// ==================== TTS Methods ====================
+
+- (void)initializeTts:(NSString *)modelDir
+            modelType:(NSString *)modelType
+           numThreads:(double)numThreads
+                debug:(BOOL)debug
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    RCTLogInfo(@"Initializing TTS with modelDir: %@, modelType: %@", modelDir, modelType);
+    
+    @try {
+        if (g_tts_wrapper == nullptr) {
+            g_tts_wrapper = std::make_unique<sherpaonnx::TtsWrapper>();
+        }
+        
+        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelTypeStr = [modelType UTF8String];
+        
+        bool success = g_tts_wrapper->initialize(
+            modelDirStr,
+            modelTypeStr,
+            static_cast<int32_t>(numThreads),
+            debug
+        );
+        
+        if (success) {
+            RCTLogInfo(@"TTS initialization successful");
+            resolve(nil);
+        } else {
+            NSString *errorMsg = @"Failed to initialize TTS";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_INIT_ERROR", errorMsg, nil);
+        }
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS init: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"TTS_INIT_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)generateTts:(NSString *)text
+                sid:(double)sid
+              speed:(double)speed
+       withResolver:(RCTPromiseResolveBlock)resolve
+       withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
+            return;
+        }
+        
+        std::string textStr = [text UTF8String];
+        
+        auto result = g_tts_wrapper->generate(
+            textStr,
+            static_cast<int32_t>(sid),
+            static_cast<float>(speed)
+        );
+        
+        if (result.samples.empty() || result.sampleRate == 0) {
+            NSString *errorMsg = @"Failed to generate speech or result is empty";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
+            return;
+        }
+        
+        // Convert samples to NSArray of NSNumber
+        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:result.samples.size()];
+        for (float sample : result.samples) {
+            [samplesArray addObject:@(sample)];
+        }
+        
+        // Create result dictionary
+        NSDictionary *resultDict = @{
+            @"samples": samplesArray,
+            @"sampleRate": @(result.sampleRate)
+        };
+        
+        RCTLogInfo(@"TTS: Generated %lu samples at %d Hz", 
+                   (unsigned long)result.samples.size(), result.sampleRate);
+        
+        resolve(resultDict);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS generation: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)getTtsSampleRate:(RCTPromiseResolveBlock)resolve
+            withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
+            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
+            return;
+        }
+        
+        int32_t sampleRate = g_tts_wrapper->getSampleRate();
+        resolve(@(sampleRate));
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception getting sample rate: %@", exception.reason];
+        reject(@"TTS_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)getTtsNumSpeakers:(RCTPromiseResolveBlock)resolve
+             withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
+            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
+            return;
+        }
+        
+        int32_t numSpeakers = g_tts_wrapper->getNumSpeakers();
+        resolve(@(numSpeakers));
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception getting num speakers: %@", exception.reason];
+        reject(@"TTS_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)unloadTts:(RCTPromiseResolveBlock)resolve
+     withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_wrapper != nullptr) {
+            g_tts_wrapper->release();
+            g_tts_wrapper.reset();
+            g_tts_wrapper = nullptr;
+        }
+        RCTLogInfo(@"TTS resources released");
+        resolve(nil);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"TTS_CLEANUP_ERROR", errorMsg, nil);
     }
 }
 
