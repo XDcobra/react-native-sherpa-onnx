@@ -616,7 +616,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
             env->DeleteLocalRef(modelDirKey);
             env->DeleteLocalRef(modelDirValue);
             
-            env->CallObjectMethod(detectedModelsList, addMethod, modelMap);
+            env->CallBooleanMethod(detectedModelsList, addMethod, modelMap);
             if (env->ExceptionCheck()) {
                 LOGE("TTS JNI: Exception while adding model to ArrayList");
                 env->ExceptionDescribe();
