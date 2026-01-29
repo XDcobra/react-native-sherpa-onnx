@@ -69,51 +69,197 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
+        LOGI("STT JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
         if (!result.success) {
-            LOGE("Native initialization failed for: %s", modelDirPath.c_str());
+            LOGE("STT JNI: Native initialization failed for: %s", modelDirPath.c_str());
+        } else {
+            LOGI("STT JNI: Successfully initialized model at: %s", modelDirPath.c_str());
         }
         
         // Create HashMap to return
+        LOGI("STT JNI: Creating HashMap for result");
         jclass hashMapClass = env->FindClass("java/util/HashMap");
-        if (hashMapClass == nullptr) {
-            LOGE("Failed to find HashMap class");
+        if (hashMapClass == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to find HashMap class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
             return nullptr;
         }
         
         jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        if (hashMapConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to get HashMap constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        if (putMethod == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to get HashMap put method");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+        if (hashMap == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to create HashMap object");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         // Put success boolean
+        LOGI("STT JNI: Adding success field to HashMap");
         jclass booleanClass = env->FindClass("java/lang/Boolean");
+        if (booleanClass == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to find Boolean class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID booleanConstructor = env->GetMethodID(booleanClass, "<init>", "(Z)V");
+        if (booleanConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to get Boolean constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(booleanClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jobject successObj = env->NewObject(booleanClass, booleanConstructor, result.success ? JNI_TRUE : JNI_FALSE);
-        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("success"), successObj);
+        jstring successKey = env->NewStringUTF("success");
+        env->CallObjectMethod(hashMap, putMethod, successKey, successObj);
+        if (env->ExceptionCheck()) {
+            LOGE("STT JNI: Exception while putting success field");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            env->DeleteLocalRef(successKey);
+            env->DeleteLocalRef(successObj);
+            env->DeleteLocalRef(booleanClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        env->DeleteLocalRef(successKey);
+        env->DeleteLocalRef(successObj);
+        env->DeleteLocalRef(booleanClass);
         
         // Put detectedModels array
+        LOGI("STT JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        if (arrayListClass == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to find ArrayList class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID arrayListConstructor = env->GetMethodID(arrayListClass, "<init>", "()V");
+        if (arrayListConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to get ArrayList constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+        if (addMethod == nullptr || env->ExceptionCheck()) {
+            LOGE("STT JNI: Failed to get ArrayList add method");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
         for (const auto& model : result.detectedModels) {
             // Create HashMap for each model with type and modelDir
             jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
-            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("type"), env->NewStringUTF(model.type.c_str()));
-            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("modelDir"), env->NewStringUTF(model.modelDir.c_str()));
+            
+            jstring typeKey = env->NewStringUTF("type");
+            jstring typeValue = env->NewStringUTF(model.type.c_str());
+            env->CallObjectMethod(modelMap, putMethod, typeKey, typeValue);
+            env->DeleteLocalRef(typeKey);
+            env->DeleteLocalRef(typeValue);
+            
+            jstring modelDirKey = env->NewStringUTF("modelDir");
+            jstring modelDirValue = env->NewStringUTF(model.modelDir.c_str());
+            env->CallObjectMethod(modelMap, putMethod, modelDirKey, modelDirValue);
+            env->DeleteLocalRef(modelDirKey);
+            env->DeleteLocalRef(modelDirValue);
+            
             env->CallBooleanMethod(detectedModelsList, addMethod, modelMap);
             env->DeleteLocalRef(modelMap);
         }
         
-        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("detectedModels"), detectedModelsList);
+        jstring detectedModelsKey = env->NewStringUTF("detectedModels");
+        env->CallObjectMethod(hashMap, putMethod, detectedModelsKey, detectedModelsList);
+        if (env->ExceptionCheck()) {
+            LOGE("STT JNI: Exception while putting detectedModels array");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            env->DeleteLocalRef(detectedModelsKey);
+            env->DeleteLocalRef(detectedModelsList);
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        env->DeleteLocalRef(detectedModelsKey);
+        env->DeleteLocalRef(detectedModelsList);
+        env->DeleteLocalRef(arrayListClass);
+        env->DeleteLocalRef(hashMapClass);
         
+        LOGI("STT JNI: Successfully created result HashMap, returning to Java");
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("Exception in nativeInitialize: %s", e.what());
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
         return nullptr;
     } catch (...) {
         LOGE("Unknown exception in nativeInitialize");
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
         return nullptr;
     }
 }
@@ -206,49 +352,197 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
+        LOGI("TTS JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
         if (!result.success) {
             LOGE("TTS JNI: Native initialization failed for: %s", modelDirPath.c_str());
+        } else {
+            LOGI("TTS JNI: Successfully initialized model at: %s", modelDirPath.c_str());
         }
         
         // Create HashMap to return (same structure as STT)
+        LOGI("TTS JNI: Creating HashMap for result");
         jclass hashMapClass = env->FindClass("java/util/HashMap");
-        if (hashMapClass == nullptr) {
+        if (hashMapClass == nullptr || env->ExceptionCheck()) {
             LOGE("TTS JNI: Failed to find HashMap class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
             return nullptr;
         }
         
         jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        if (hashMapConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to get HashMap constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        if (putMethod == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to get HashMap put method");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+        if (hashMap == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to create HashMap object");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         // Put success boolean
+        LOGI("TTS JNI: Adding success field to HashMap");
         jclass booleanClass = env->FindClass("java/lang/Boolean");
+        if (booleanClass == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to find Boolean class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID booleanConstructor = env->GetMethodID(booleanClass, "<init>", "(Z)V");
+        if (booleanConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to get Boolean constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(booleanClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jobject successObj = env->NewObject(booleanClass, booleanConstructor, result.success ? JNI_TRUE : JNI_FALSE);
-        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("success"), successObj);
+        jstring successKey = env->NewStringUTF("success");
+        env->CallObjectMethod(hashMap, putMethod, successKey, successObj);
+        if (env->ExceptionCheck()) {
+            LOGE("TTS JNI: Exception while putting success field");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            env->DeleteLocalRef(successKey);
+            env->DeleteLocalRef(successObj);
+            env->DeleteLocalRef(booleanClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        env->DeleteLocalRef(successKey);
+        env->DeleteLocalRef(successObj);
+        env->DeleteLocalRef(booleanClass);
         
         // Put detectedModels array
+        LOGI("TTS JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        if (arrayListClass == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to find ArrayList class");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID arrayListConstructor = env->GetMethodID(arrayListClass, "<init>", "()V");
+        if (arrayListConstructor == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to get ArrayList constructor");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        
         jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+        if (addMethod == nullptr || env->ExceptionCheck()) {
+            LOGE("TTS JNI: Failed to get ArrayList add method");
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
         
         jobject detectedModelsList = env->NewObject(arrayListClass, arrayListConstructor);
         for (const auto& model : result.detectedModels) {
             // Create HashMap for each detected model
             jobject modelMap = env->NewObject(hashMapClass, hashMapConstructor);
-            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("type"), env->NewStringUTF(model.type.c_str()));
-            env->CallObjectMethod(modelMap, putMethod, env->NewStringUTF("modelDir"), env->NewStringUTF(model.modelDir.c_str()));
+            
+            jstring typeKey = env->NewStringUTF("type");
+            jstring typeValue = env->NewStringUTF(model.type.c_str());
+            env->CallObjectMethod(modelMap, putMethod, typeKey, typeValue);
+            env->DeleteLocalRef(typeKey);
+            env->DeleteLocalRef(typeValue);
+            
+            jstring modelDirKey = env->NewStringUTF("modelDir");
+            jstring modelDirValue = env->NewStringUTF(model.modelDir.c_str());
+            env->CallObjectMethod(modelMap, putMethod, modelDirKey, modelDirValue);
+            env->DeleteLocalRef(modelDirKey);
+            env->DeleteLocalRef(modelDirValue);
+            
             env->CallObjectMethod(detectedModelsList, addMethod, modelMap);
+            env->DeleteLocalRef(modelMap);
         }
-        env->CallObjectMethod(hashMap, putMethod, env->NewStringUTF("detectedModels"), detectedModelsList);
         
+        jstring detectedModelsKey = env->NewStringUTF("detectedModels");
+        env->CallObjectMethod(hashMap, putMethod, detectedModelsKey, detectedModelsList);
+        if (env->ExceptionCheck()) {
+            LOGE("TTS JNI: Exception while putting detectedModels array");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            env->DeleteLocalRef(detectedModelsKey);
+            env->DeleteLocalRef(detectedModelsList);
+            env->DeleteLocalRef(arrayListClass);
+            env->DeleteLocalRef(hashMap);
+            env->DeleteLocalRef(hashMapClass);
+            return nullptr;
+        }
+        env->DeleteLocalRef(detectedModelsKey);
+        env->DeleteLocalRef(detectedModelsList);
+        env->DeleteLocalRef(arrayListClass);
+        env->DeleteLocalRef(hashMapClass);
+        
+        LOGI("TTS JNI: Successfully created result HashMap, returning to Java");
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeInitializeTts: %s", e.what());
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
         return nullptr;
     } catch (...) {
         LOGE("TTS JNI: Unknown exception in nativeInitializeTts");
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
         return nullptr;
     }
 }
