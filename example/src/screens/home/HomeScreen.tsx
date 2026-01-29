@@ -25,7 +25,7 @@ const FEATURES: Feature[] = [
     description: 'Generate speech from text',
     icon: '🔊',
     screen: 'TTS',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'vad',
