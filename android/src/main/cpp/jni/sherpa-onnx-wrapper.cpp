@@ -1087,4 +1087,75 @@ void TtsWrapper::release() {
     }
 }
 
+bool TtsWrapper::saveToWavFile(
+    const std::vector<float>& samples,
+    int32_t sampleRate,
+    const std::string& filePath
+) {
+    if (samples.empty()) {
+        LOGE("TTS: Cannot save empty audio samples");
+        return false;
+    }
+
+    if (sampleRate <= 0) {
+        LOGE("TTS: Invalid sample rate: %d", sampleRate);
+        return false;
+    }
+
+    try {
+        std::ofstream outfile(filePath, std::ios::binary);
+        if (!outfile) {
+            LOGE("TTS: Failed to open file for writing: %s", filePath.c_str());
+            return false;
+        }
+
+        // WAV file header
+        const int32_t numChannels = 1;  // Mono
+        const int32_t bitsPerSample = 16;  // 16-bit PCM
+        const int32_t byteRate = sampleRate * numChannels * bitsPerSample / 8;
+        const int32_t blockAlign = numChannels * bitsPerSample / 8;
+        const int32_t dataSize = static_cast<int32_t>(samples.size()) * bitsPerSample / 8;
+        const int32_t chunkSize = 36 + dataSize;
+
+        // RIFF header
+        outfile.write("RIFF", 4);
+        outfile.write(reinterpret_cast<const char*>(&chunkSize), 4);
+        outfile.write("WAVE", 4);
+
+        // fmt subchunk
+        outfile.write("fmt ", 4);
+        const int32_t subchunk1Size = 16;  // PCM
+        outfile.write(reinterpret_cast<const char*>(&subchunk1Size), 4);
+        const int16_t audioFormat = 1;  // PCM
+        outfile.write(reinterpret_cast<const char*>(&audioFormat), 2);
+        const int16_t numChannelsInt16 = static_cast<int16_t>(numChannels);
+        outfile.write(reinterpret_cast<const char*>(&numChannelsInt16), 2);
+        outfile.write(reinterpret_cast<const char*>(&sampleRate), 4);
+        outfile.write(reinterpret_cast<const char*>(&byteRate), 4);
+        const int16_t blockAlignInt16 = static_cast<int16_t>(blockAlign);
+        outfile.write(reinterpret_cast<const char*>(&blockAlignInt16), 2);
+        const int16_t bitsPerSampleInt16 = static_cast<int16_t>(bitsPerSample);
+        outfile.write(reinterpret_cast<const char*>(&bitsPerSampleInt16), 2);
+
+        // data subchunk
+        outfile.write("data", 4);
+        outfile.write(reinterpret_cast<const char*>(&dataSize), 4);
+
+        // Convert float samples to int16 PCM and write
+        for (float sample : samples) {
+            // Clamp to [-1.0, 1.0] and convert to int16
+            float clampedSample = std::max(-1.0f, std::min(1.0f, sample));
+            int16_t pcmSample = static_cast<int16_t>(clampedSample * 32767.0f);
+            outfile.write(reinterpret_cast<const char*>(&pcmSample), 2);
+        }
+
+        outfile.close();
+        LOGI("TTS: Successfully saved %zu samples to %s", samples.size(), filePath.c_str());
+        return true;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception while saving WAV file: %s", e.what());
+        return false;
+    }
+}
+
 } // namespace sherpaonnx

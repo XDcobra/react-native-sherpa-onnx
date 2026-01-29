@@ -124,6 +124,19 @@ public:
     );
 
     /**
+     * Save audio samples to a WAV file.
+     * @param samples Audio samples vector
+     * @param sampleRate Sample rate in Hz
+     * @param filePath Output file path
+     * @return true if successful, false otherwise
+     */
+    static bool saveToWavFile(
+        const std::vector<float>& samples,
+        int32_t sampleRate,
+        const std::string& filePath
+    );
+
+    /**
      * Get the sample rate of the initialized TTS model.
      * @return Sample rate in Hz
      */

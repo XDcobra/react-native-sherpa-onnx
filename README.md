@@ -466,6 +466,47 @@ Release TTS resources and unload the model.
 
 **Returns:** `Promise<void>`
 
+#### `saveAudioToFile(audio, filePath)`
+
+Save generated TTS audio to a WAV file.
+
+**Parameters:**
+
+- `audio`: Generated audio from `generateSpeech()`
+- `filePath`: Absolute file path where to save the WAV file
+
+**Returns:** `Promise<string>` - The file path where audio was saved
+
+**Example:**
+
+```typescript
+import { generateSpeech, saveAudioToFile } from 'react-native-sherpa-onnx/tts';
+import RNFS from 'react-native-fs';
+import { Platform } from 'react-native';
+
+// Generate speech
+const audio = await generateSpeech('Hello, world!');
+
+// Save to file
+const directory = Platform.OS === 'ios' 
+  ? RNFS.DocumentDirectoryPath 
+  : RNFS.ExternalDirectoryPath;
+const filePath = `${directory}/speech_${Date.now()}.wav`;
+
+const savedPath = await saveAudioToFile(audio, filePath);
+console.log('Audio saved to:', savedPath);
+
+// Play with react-native-sound or other audio player
+import Sound from 'react-native-sound';
+const sound = new Sound(savedPath, '', (error) => {
+  if (error) {
+    console.error('Failed to load sound', error);
+    return;
+  }
+  sound.play(() => sound.release());
+});
+```
+
 ### Utility Functions
 
 Import from `react-native-sherpa-onnx`:

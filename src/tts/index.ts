@@ -205,6 +205,88 @@ export function unloadTTS(): Promise<void> {
   return SherpaOnnx.unloadTts();
 }
 
+/**
+ * Save generated TTS audio to a WAV file.
+ *
+ * @param audio - Generated audio from generateSpeech()
+ * @param filePath - Absolute path where to save the WAV file
+ * @returns Promise resolving to the file path where audio was saved
+ * @example
+ * ```typescript
+ * import { Platform } from 'react-native';
+ * import RNFS from 'react-native-fs';
+ *
+ * const audio = await generateSpeech('Hello, world!');
+ *
+ * // Save to documents directory
+ * const documentsPath = Platform.OS === 'ios'
+ *   ? RNFS.DocumentDirectoryPath
+ *   : RNFS.ExternalDirectoryPath;
+ * const filePath = `${documentsPath}/speech_${Date.now()}.wav`;
+ *
+ * const savedPath = await saveAudioToFile(audio, filePath);
+ * console.log('Audio saved to:', savedPath);
+ * ```
+ */
+export function saveAudioToFile(
+  audio: GeneratedAudio,
+  filePath: string
+): Promise<string> {
+  return SherpaOnnx.saveTtsAudioToFile(
+    audio.samples,
+    audio.sampleRate,
+    filePath
+  );
+}
+
+/**
+ * Save generated TTS audio to a WAV file via Android SAF content URI.
+ *
+ * @param audio - Generated audio from generateSpeech()
+ * @param directoryUri - Directory content URI from SAF
+ * @param filename - Desired file name
+ * @returns Promise resolving to content URI of the saved file
+ */
+export function saveAudioToContentUri(
+  audio: GeneratedAudio,
+  directoryUri: string,
+  filename: string
+): Promise<string> {
+  return SherpaOnnx.saveTtsAudioToContentUri(
+    audio.samples,
+    audio.sampleRate,
+    directoryUri,
+    filename
+  );
+}
+
+/**
+ * Copy a SAF content URI to a cache file for local playback (Android only).
+ *
+ * @param fileUri - Content URI of the saved WAV file
+ * @param filename - Desired cache filename
+ * @returns Promise resolving to absolute path of the cached file
+ */
+export function copyContentUriToCache(
+  fileUri: string,
+  filename: string
+): Promise<string> {
+  return SherpaOnnx.copyTtsContentUriToCache(fileUri, filename);
+}
+
+/**
+ * Share a TTS audio file (file path or content URI).
+ *
+ * @param fileUri - File path or content URI
+ * @param mimeType - MIME type (default: audio/wav)
+ */
+export function shareAudioFile(
+  fileUri: string,
+  mimeType = 'audio/wav'
+): Promise<void> {
+  return SherpaOnnx.shareTtsAudio(fileUri, mimeType);
+}
+
 // Export types
 export type {
   TTSInitializeOptions,

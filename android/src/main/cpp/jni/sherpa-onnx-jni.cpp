@@ -809,4 +809,44 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsRelease(
     }
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsSaveToWavFile(
+    JNIEnv *env,
+    jobject /* this */,
+    jfloatArray samples,
+    jint sampleRate,
+    jstring filePath) {
+    try {
+        if (samples == nullptr || filePath == nullptr) {
+            LOGE("TTS JNI: Invalid arguments to nativeTtsSaveToWavFile");
+            return JNI_FALSE;
+        }
+
+        // Convert jfloatArray to std::vector<float>
+        jsize len = env->GetArrayLength(samples);
+        std::vector<float> samplesVec(len);
+        env->GetFloatArrayRegion(samples, 0, len, samplesVec.data());
+
+        // Convert jstring to std::string
+        const char *filePathCStr = env->GetStringUTFChars(filePath, nullptr);
+        std::string filePathStr(filePathCStr);
+        env->ReleaseStringUTFChars(filePath, filePathCStr);
+
+        // Call the static method
+        bool success = sherpaonnx::TtsWrapper::saveToWavFile(
+            samplesVec,
+            static_cast<int32_t>(sampleRate),
+            filePathStr
+        );
+
+        return success ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception &e) {
+        LOGE("TTS JNI: Exception in nativeTtsSaveToWavFile: %s", e.what());
+        return JNI_FALSE;
+    } catch (...) {
+        LOGE("TTS JNI: Unknown exception in nativeTtsSaveToWavFile");
+        return JNI_FALSE;
+    }
+}
+
 } // extern "C"

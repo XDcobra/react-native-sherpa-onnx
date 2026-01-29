@@ -95,6 +95,49 @@ export interface Spec extends TurboModule {
   unloadTts(): Promise<void>;
 
   /**
+   * Save TTS audio samples to a WAV file.
+   * @param samples - Audio samples array
+   * @param sampleRate - Sample rate in Hz
+   * @param filePath - Absolute path where to save the WAV file
+   * @returns The file path where audio was saved
+   */
+  saveTtsAudioToFile(
+    samples: number[],
+    sampleRate: number,
+    filePath: string
+  ): Promise<string>;
+
+  /**
+   * Save TTS audio samples to a WAV file via Android SAF content URI.
+   * @param samples - Audio samples array
+   * @param sampleRate - Sample rate in Hz
+   * @param directoryUri - Directory content URI (tree or document)
+   * @param filename - Desired file name (e.g., tts_123.wav)
+   * @returns The content URI of the saved file
+   */
+  saveTtsAudioToContentUri(
+    samples: number[],
+    sampleRate: number,
+    directoryUri: string,
+    filename: string
+  ): Promise<string>;
+
+  /**
+   * Copy a SAF content URI to a cache file for local playback.
+   * @param fileUri - Content URI of the saved WAV file
+   * @param filename - Desired cache filename
+   * @returns Absolute file path to the cached copy
+   */
+  copyTtsContentUriToCache(fileUri: string, filename: string): Promise<string>;
+
+  /**
+   * Share a TTS audio file (file path or content URI).
+   * @param fileUri - File path or content URI
+   * @param mimeType - MIME type (e.g., audio/wav)
+   */
+  shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
+
+  /**
    * List all model folders in the assets/models directory.
    * Scans the platform-specific model directory and returns folder names.
    *

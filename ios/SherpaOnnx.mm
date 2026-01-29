@@ -1,6 +1,7 @@
 #import "SherpaOnnx.h"
 #import <React/RCTUtils.h>
 #import <React/RCTLog.h>
+#import <UIKit/UIKit.h>
 #import "sherpa-onnx-wrapper.h"
 #import <memory>
 #import <optional>
@@ -278,6 +279,43 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
     }
 }
 
+- (void)shareTtsAudio:(NSString *)fileUri
+            mimeType:(NSString *)mimeType
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        NSURL *url = nil;
+        if ([fileUri hasPrefix:@"file://"] || [fileUri hasPrefix:@"content://"]) {
+            url = [NSURL URLWithString:fileUri];
+        } else {
+            url = [NSURL fileURLWithPath:fileUri];
+        }
+
+        if (!url) {
+            reject(@"TTS_SHARE_ERROR", @"Invalid file URL", nil);
+            return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIViewController *controller = RCTPresentedViewController();
+            if (!controller) {
+                reject(@"TTS_SHARE_ERROR", @"No active view controller", nil);
+                return;
+            }
+
+            UIActivityViewController *activity =
+                [[UIActivityViewController alloc] initWithActivityItems:@[url]
+                                                  applicationActivities:nil];
+            [controller presentViewController:activity animated:YES completion:nil];
+            resolve(nil);
+        });
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Failed to share audio: %@", exception.reason];
+        reject(@"TTS_SHARE_ERROR", errorMsg, nil);
+    }
+}
+
 - (void)unloadSherpaOnnxWithResolver:(RCTPromiseResolveBlock)resolve
                       withRejecter:(RCTPromiseRejectBlock)reject
 {
@@ -457,6 +495,41 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_CLEANUP_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)saveTtsAudioToFile:(NSArray<NSNumber *> *)samples
+              withSampleRate:(double)sampleRate
+              withFilePath:(NSString *)filePath
+              withResolver:(RCTPromiseResolveBlock)resolve
+              withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        // Convert NSArray<NSNumber *> to std::vector<float>
+        std::vector<float> samplesVec;
+        samplesVec.reserve([samples count]);
+        for (NSNumber *num in samples) {
+            samplesVec.push_back([num floatValue]);
+        }
+        
+        // Convert NSString to std::string
+        std::string filePathStr = std::string([filePath UTF8String]);
+        
+        // Call the static method
+        bool success = sherpaonnx::TtsWrapper::saveToWavFile(
+            samplesVec,
+            static_cast<int32_t>(sampleRate),
+            filePathStr
+        );
+        
+        if (success) {
+            resolve(filePath);
+        } else {
+            reject(@"TTS_SAVE_ERROR", @"Failed to save audio to file", nil);
+        }
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception saving TTS audio: %@", exception.reason];
+        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
     }
 }
 

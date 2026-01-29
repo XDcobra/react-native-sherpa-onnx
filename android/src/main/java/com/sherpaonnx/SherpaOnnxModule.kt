@@ -1,14 +1,20 @@
 package com.sherpaonnx
 
 import android.util.Log
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.content.Intent
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -447,6 +453,129 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
     }
   }
+
+  /**
+   * Save TTS audio samples to a WAV file.
+   */
+  override fun saveTtsAudioToFile(
+    samples: ReadableArray,
+    sampleRate: Double,
+    filePath: String,
+    promise: Promise
+  ) {
+    try {
+      // Convert ReadableArray to FloatArray
+      val samplesArray = FloatArray(samples.size())
+      for (i in 0 until samples.size()) {
+        samplesArray[i] = samples.getDouble(i).toFloat()
+      }
+      
+      val success = nativeTtsSaveToWavFile(samplesArray, sampleRate.toInt(), filePath)
+      if (success) {
+        promise.resolve(filePath)
+      } else {
+        promise.reject("TTS_SAVE_ERROR", "Failed to save audio to file")
+      }
+    } catch (e: Exception) {
+      promise.reject("TTS_SAVE_ERROR", "Failed to save audio to file", e)
+    }
+  }
+
+  /**
+   * Save TTS audio samples to a WAV file via Android SAF content URI.
+   */
+  override fun saveTtsAudioToContentUri(
+    samples: ReadableArray,
+    sampleRate: Double,
+    directoryUri: String,
+    filename: String,
+    promise: Promise
+  ) {
+    try {
+      val samplesArray = FloatArray(samples.size())
+      for (i in 0 until samples.size()) {
+        samplesArray[i] = samples.getDouble(i).toFloat()
+      }
+
+      val resolver = reactApplicationContext.contentResolver
+      val dirUri = Uri.parse(directoryUri)
+      val fileUri = createDocumentInDirectory(resolver, dirUri, filename)
+
+      resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
+        writeWavToStream(samplesArray, sampleRate.toInt(), outputStream)
+      } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
+
+      promise.resolve(fileUri.toString())
+    } catch (e: Exception) {
+      promise.reject("TTS_SAVE_ERROR", "Failed to save audio to content URI", e)
+    }
+  }
+
+  /**
+   * Copy a SAF content URI to a cache file for local playback.
+   */
+  override fun copyTtsContentUriToCache(
+    fileUri: String,
+    filename: String,
+    promise: Promise
+  ) {
+    try {
+      val resolver = reactApplicationContext.contentResolver
+      val uri = Uri.parse(fileUri)
+      val cacheFile = File(reactApplicationContext.cacheDir, filename)
+
+      resolver.openInputStream(uri)?.use { inputStream ->
+        FileOutputStream(cacheFile).use { outputStream ->
+          copyStream(inputStream, outputStream)
+        }
+      } ?: throw IllegalStateException("Failed to open input stream for URI: $fileUri")
+
+      promise.resolve(cacheFile.absolutePath)
+    } catch (e: Exception) {
+      promise.reject("TTS_SAVE_ERROR", "Failed to copy audio to cache", e)
+    }
+  }
+
+  /**
+   * Share a TTS audio file (file path or content URI).
+   */
+  override fun shareTtsAudio(fileUri: String, mimeType: String, promise: Promise) {
+    try {
+      val context = reactApplicationContext
+      val uri = if (fileUri.startsWith("content://")) {
+        Uri.parse(fileUri)
+      } else {
+        // Handle file:// URIs by stripping scheme
+        val path = if (fileUri.startsWith("file://")) {
+          try {
+            Uri.parse(fileUri).path ?: fileUri.replaceFirst("file://", "")
+          } catch (e: Exception) {
+            fileUri.replaceFirst("file://", "")
+          }
+        } else {
+          fileUri
+        }
+
+        val file = File(path)
+        val authority = context.packageName + ".fileprovider"
+        FileProvider.getUriForFile(context, authority, file)
+      }
+
+      val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = mimeType
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+
+      val chooser = Intent.createChooser(shareIntent, "Share audio")
+      chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(chooser)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("TTS_SHARE_ERROR", "Failed to share audio", e)
+    }
+  }
+
   /**
    * List all model folders in the assets/models directory.
    * Scans the platform-specific model directory and returns folder names.
@@ -529,6 +658,78 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       else -> "unknown"
     }
   }
+
+  private fun createDocumentInDirectory(
+    resolver: android.content.ContentResolver,
+    directoryUri: Uri,
+    filename: String
+  ): Uri {
+    val mimeType = "audio/wav"
+
+    return if (DocumentsContract.isTreeUri(directoryUri)) {
+      val documentId = DocumentsContract.getTreeDocumentId(directoryUri)
+      val dirDocUri = DocumentsContract.buildDocumentUriUsingTree(directoryUri, documentId)
+      DocumentsContract.createDocument(resolver, dirDocUri, mimeType, filename)
+        ?: throw IllegalStateException("Failed to create document in tree URI")
+    } else {
+      DocumentsContract.createDocument(resolver, directoryUri, mimeType, filename)
+        ?: throw IllegalStateException("Failed to create document in directory URI")
+    }
+  }
+
+  private fun writeWavToStream(samples: FloatArray, sampleRate: Int, outputStream: OutputStream) {
+    val numChannels = 1
+    val bitsPerSample = 16
+    val byteRate = sampleRate * numChannels * bitsPerSample / 8
+    val blockAlign = numChannels * bitsPerSample / 8
+    val dataSize = samples.size * 2
+    val chunkSize = 36 + dataSize
+
+    outputStream.write("RIFF".toByteArray(Charsets.US_ASCII))
+    writeIntLE(outputStream, chunkSize)
+    outputStream.write("WAVE".toByteArray(Charsets.US_ASCII))
+    outputStream.write("fmt ".toByteArray(Charsets.US_ASCII))
+    writeIntLE(outputStream, 16)
+    writeShortLE(outputStream, 1)
+    writeShortLE(outputStream, numChannels.toShort())
+    writeIntLE(outputStream, sampleRate)
+    writeIntLE(outputStream, byteRate)
+    writeShortLE(outputStream, blockAlign.toShort())
+    writeShortLE(outputStream, bitsPerSample.toShort())
+    outputStream.write("data".toByteArray(Charsets.US_ASCII))
+    writeIntLE(outputStream, dataSize)
+
+    for (sample in samples) {
+      val clamped = sample.coerceIn(-1.0f, 1.0f)
+      val intSample = (clamped * 32767.0f).toInt()
+      writeShortLE(outputStream, intSample.toShort())
+    }
+
+    outputStream.flush()
+  }
+
+  private fun writeIntLE(outputStream: OutputStream, value: Int) {
+    outputStream.write(value and 0xFF)
+    outputStream.write((value shr 8) and 0xFF)
+    outputStream.write((value shr 16) and 0xFF)
+    outputStream.write((value shr 24) and 0xFF)
+  }
+
+  private fun writeShortLE(outputStream: OutputStream, value: Short) {
+    val intValue = value.toInt()
+    outputStream.write(intValue and 0xFF)
+    outputStream.write((intValue shr 8) and 0xFF)
+  }
+
+  private fun copyStream(inputStream: InputStream, outputStream: OutputStream) {
+    val buffer = ByteArray(8192)
+    var bytes = inputStream.read(buffer)
+    while (bytes >= 0) {
+      outputStream.write(buffer, 0, bytes)
+      bytes = inputStream.read(buffer)
+    }
+    outputStream.flush()
+  }
   companion object {
     const val NAME = "SherpaOnnx"
 
@@ -574,5 +775,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     @JvmStatic
     private external fun nativeTtsRelease()
+
+    @JvmStatic
+    private external fun nativeTtsSaveToWavFile(
+      samples: FloatArray,
+      sampleRate: Int,
+      filePath: String
+    ): Boolean
   }
 }
