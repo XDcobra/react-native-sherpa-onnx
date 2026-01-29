@@ -72,12 +72,16 @@ The TTS module supports multiple model architectures, each with specific file re
 models/vits-piper-en_US-lessac-medium/
 ├── model.onnx              # Required: Main TTS model
 ├── tokens.txt              # Required: Token vocabulary
+├── model.json              # Optional but recommended: Model metadata
+│                           # (speaker names, inference parameters, sample rate)
 ├── lexicon.txt             # Optional: Pronunciation dictionary
 └── espeak-ng-data/         # Optional: Phonemization data
     └── ...
 ```
 
 **Quantized Models**: Some VITS models offer `model.int8.onnx` for smaller size and faster inference.
+
+**Note**: `model.json` contains valuable metadata such as speaker ID mappings, optimal inference parameters (noise_scale, length_scale), sample rate information, and phoneme mappings. While not strictly required for basic operation, it is **recommended** as it enables better speaker selection (by name instead of numeric ID) and improved audio quality through optimized parameters. The library automatically loads this file if present in the model directory.
 
 ### Matcha Models
 
@@ -100,8 +104,16 @@ models/kokoro-en-v0_19/
 ├── tokens.txt              # Required: Token vocabulary
 ├── espeak-ng-data/         # Required: Phonemization data
 │   └── ...
-└── lexicon.txt             # Optional: Pronunciation dictionary
+├── lexicon.txt             # Optional: Pronunciation dictionary
+└── [Additional language-specific files - auto-loaded if present]
+    ├── date-{lang}.fst     # Optional: Date text normalization
+    ├── number-{lang}.fst   # Optional: Number text normalization
+    ├── phone-{lang}.fst    # Optional: Phone number normalization
+    └── dict/               # Optional: Language-specific tokenization
+        └── ...             # (e.g., Jieba dictionaries for Chinese)
 ```
+
+**Note**: Language-specific files (FST files and `dict/` folder) are automatically loaded by sherpa-onnx if present in the model directory. They do not need to be explicitly configured in code. These files enable better text normalization for non-English languages (e.g., Chinese number/date formatting, word segmentation).
 
 ### KittenTTS Models
 
