@@ -35,6 +35,7 @@ import { getModelDisplayName } from '../../modelConfig';
 import RNFS from 'react-native-fs';
 import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -50,6 +51,9 @@ export default function TTSScreen() {
     null
   );
   const [loading, setLoading] = useState(false);
+  const [initializingModel, setInitializingModel] = useState<string | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
   const [speakerId, setSpeakerId] = useState<string>('0');
@@ -421,6 +425,7 @@ export default function TTSScreen() {
 
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
+    setInitializingModel(modelFolder);
     setError(null);
     setInitResult(null);
     setDetectedModels([]);
@@ -478,21 +483,46 @@ export default function TTSScreen() {
         lengthScaleNumber = parsed;
       }
 
-      // Initialize new model
-      const result = await initializeTTS({
-        modelPath,
-        numThreads: 2,
-        debug: false,
-        noiseScale: noiseScaleNumber,
-        lengthScale: lengthScaleNumber,
-      });
+      // Initialize new model (defer to event loop to avoid blocking UI)
+      let result: any;
+      try {
+        result = await new Promise((resolve, reject) => {
+          setTimeout(async () => {
+            try {
+              const r = await initializeTTS({
+                modelPath,
+                numThreads: 2,
+                debug: false,
+                noiseScale: noiseScaleNumber,
+                lengthScale: lengthScaleNumber,
+              });
+              resolve(r);
+            } catch (e) {
+              reject(e);
+            }
+          }, 50);
+        });
+      } catch (initErr) {
+        console.warn(
+          'Initial initializeTTS failed, retrying with fewer threads',
+          initErr
+        );
+        // Retry with reduced resource usage
+        result = await initializeTTS({
+          modelPath,
+          numThreads: 1,
+          debug: false,
+          noiseScale: noiseScaleNumber,
+          lengthScale: lengthScaleNumber,
+        });
+      }
 
       if (result.success && result.detectedModels.length > 0) {
         setDetectedModels(result.detectedModels);
         setCurrentModelFolder(modelFolder);
 
         const detectedTypes = result.detectedModels
-          .map((m) => m.type)
+          .map((m: { type: string }) => m.type)
           .join(', ');
         setInitResult(
           `Initialized: ${getModelDisplayName(
@@ -549,6 +579,7 @@ export default function TTSScreen() {
       );
     } finally {
       setLoading(false);
+      setInitializingModel(null);
     }
   };
 
@@ -1217,7 +1248,7 @@ export default function TTSScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.icon}>🔊</Text>
+          <Ionicons name="volume-high" size={48} style={styles.icon} />
           <Text style={styles.title}>Text-to-Speech Demo</Text>
           <Text style={styles.subtitle}>
             Generate speech from text using offline TTS models
@@ -1240,6 +1271,7 @@ export default function TTSScreen() {
                 onChangeText={setNoiseScale}
                 keyboardType="decimal-pad"
                 placeholder="0.667"
+                placeholderTextColor="#8E8E93"
               />
             </View>
 
@@ -1251,6 +1283,7 @@ export default function TTSScreen() {
                 onChangeText={setLengthScale}
                 keyboardType="decimal-pad"
                 placeholder="1.0"
+                placeholderTextColor="#8E8E93"
               />
             </View>
           </View>
@@ -1272,29 +1305,42 @@ export default function TTSScreen() {
             </View>
           ) : (
             <View style={styles.buttonGroup}>
-              {availableModels.map((modelFolder) => (
-                <TouchableOpacity
-                  key={modelFolder}
-                  style={[
-                    styles.modelButton,
-                    currentModelFolder === modelFolder &&
-                      styles.modelButtonActive,
-                  ]}
-                  onPress={() => handleInitialize(modelFolder)}
-                  disabled={loading}
-                >
-                  <Text
+              {availableModels.map((modelFolder) => {
+                const isInitializingOther =
+                  initializingModel !== null &&
+                  initializingModel !== modelFolder;
+                const isDisabled =
+                  isInitializingOther ||
+                  (loading && initializingModel !== modelFolder);
+                return (
+                  <TouchableOpacity
+                    key={modelFolder}
                     style={[
-                      styles.modelButtonText,
+                      styles.modelButton,
                       currentModelFolder === modelFolder &&
-                        styles.modelButtonTextActive,
+                        styles.modelButtonActive,
+                      isDisabled && styles.modelButtonDisabled,
                     ]}
+                    onPress={() => {
+                      if (isDisabled) return;
+                      handleInitialize(modelFolder);
+                    }}
+                    disabled={isDisabled}
                   >
-                    {getModelDisplayName(modelFolder)}
-                  </Text>
-                  <Text style={styles.modelButtonSubtext}>{modelFolder}</Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.modelButtonText,
+                        currentModelFolder === modelFolder &&
+                          styles.modelButtonTextActive,
+                        isDisabled && styles.modelButtonTextDisabled,
+                      ]}
+                    >
+                      {getModelDisplayName(modelFolder)}
+                    </Text>
+                    <Text style={styles.modelButtonSubtext}>{modelFolder}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
 
@@ -1346,9 +1392,17 @@ export default function TTSScreen() {
                 </View>
               </>
             ) : (
-              <Text style={styles.autoSelectedText}>
-                ✓ Auto-selected: {selectedModelType}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={16}
+                  color="#34C759"
+                  style={styles.iconInline}
+                />
+                <Text style={styles.autoSelectedText}>
+                  Auto-selected: {selectedModelType}
+                </Text>
+              </View>
             )}
           </View>
         )}
@@ -1392,6 +1446,7 @@ export default function TTSScreen() {
                   onChangeText={setSpeakerId}
                   keyboardType="numeric"
                   placeholder="0"
+                  placeholderTextColor="#8E8E93"
                 />
               </View>
 
@@ -1403,6 +1458,7 @@ export default function TTSScreen() {
                   onChangeText={setSpeed}
                   keyboardType="decimal-pad"
                   placeholder="1.0"
+                  placeholderTextColor="#8E8E93"
                 />
               </View>
             </View>
@@ -1505,7 +1561,15 @@ export default function TTSScreen() {
                 {saving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.audioButtonText}>💾 Save temporary</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons
+                      name="save-outline"
+                      size={16}
+                      color="#fff"
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.audioButtonText}>Save temporary</Text>
+                  </View>
                 )}
               </TouchableOpacity>
 
@@ -1521,7 +1585,15 @@ export default function TTSScreen() {
                 {saving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.audioButtonText}>📁 Save to Folder</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons
+                      name="folder-outline"
+                      size={16}
+                      color="#fff"
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.audioButtonText}>Save to Folder</Text>
+                  </View>
                 )}
               </TouchableOpacity>
 
@@ -1535,9 +1607,19 @@ export default function TTSScreen() {
                     {loadingSound ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.audioButtonText}>
-                        {isPlaying ? '⏸️ Pause' : '▶️ Play'}
-                      </Text>
+                      <View
+                        style={{ flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        <Ionicons
+                          name={isPlaying ? 'pause' : 'play'}
+                          size={16}
+                          color="#fff"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.audioButtonText}>
+                          {isPlaying ? 'Pause' : 'Play'}
+                        </Text>
+                      </View>
                     )}
                   </TouchableOpacity>
 
@@ -1545,14 +1627,34 @@ export default function TTSScreen() {
                     style={[styles.audioButton, styles.stopButton]}
                     onPress={handleStopAudio}
                   >
-                    <Text style={styles.audioButtonText}>⏹️ Stop</Text>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons
+                        name="stop"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Stop</Text>
+                    </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[styles.audioButton, styles.shareButton]}
                     onPress={handleShareAudio}
                   >
-                    <Text style={styles.audioButtonText}>📤 Share</Text>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons
+                        name="share-social"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Share</Text>
+                    </View>
                   </TouchableOpacity>
                 </>
               )}
@@ -1636,9 +1738,12 @@ export default function TTSScreen() {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            💡 Tip: Models must be placed in assets/models/ directory
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="bulb" size={16} style={styles.iconInline} />
+            <Text style={styles.footerText}>
+              Tip: Models must be placed in assets/models/ directory
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -1661,7 +1766,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   icon: {
-    fontSize: 48,
     marginBottom: 8,
   },
   title: {
@@ -1714,6 +1818,12 @@ const styles = StyleSheet.create({
   },
   modelButtonTextActive: {
     color: '#007AFF',
+  },
+  modelButtonDisabled: {
+    opacity: 0.5,
+  },
+  modelButtonTextDisabled: {
+    color: '#C7C7CC',
   },
   modelButtonSubtext: {
     fontSize: 12,
@@ -1920,6 +2030,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     fontStyle: 'italic',
+  },
+  iconInline: {
+    marginRight: 8,
   },
   separator: {
     height: 1,

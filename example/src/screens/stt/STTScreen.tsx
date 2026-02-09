@@ -22,6 +22,7 @@ import {
 } from 'react-native-sherpa-onnx/stt';
 import { getModelDisplayName } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -498,17 +499,43 @@ export default function STTScreen() {
                   style={[styles.sourceChoiceButton, styles.flex1, styles.mr12]}
                   onPress={() => setAudioSourceType('example')}
                 >
-                  <Text style={styles.sourceChoiceButtonText}>
-                    📁 Example Audio
-                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons
+                      name="folder-outline"
+                      size={18}
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.sourceChoiceButtonText}>
+                      Example Audio
+                    </Text>
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.sourceChoiceButton, styles.flex1]}
                   onPress={() => setAudioSourceType('own')}
                 >
-                  <Text style={styles.sourceChoiceButtonText}>
-                    🎵 Select Your Own Audio
-                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons
+                      name="musical-notes"
+                      size={18}
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.sourceChoiceButtonText}>
+                      Select Your Own Audio
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
             </>
@@ -593,7 +620,20 @@ export default function STTScreen() {
                 onPress={handlePickLocalFile}
                 disabled={loading}
               >
-                <Text style={styles.buttonText}>📂 Choose Local WAV</Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons
+                    name="folder-open-outline"
+                    size={16}
+                    style={styles.iconInline}
+                  />
+                  <Text style={styles.buttonText}>Choose Local WAV</Text>
+                </View>
               </TouchableOpacity>
 
               {customAudioName && (
@@ -605,7 +645,16 @@ export default function STTScreen() {
                     style={[styles.playButton]}
                     onPress={handlePlayAudio}
                   >
-                    <Text style={styles.playButtonText}>▶️ Play Audio</Text>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons
+                        name="play"
+                        size={16}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.playButtonText}>Play Audio</Text>
+                    </View>
                   </TouchableOpacity>
                 </View>
               )}
@@ -932,6 +981,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  iconInline: {
+    marginRight: 8,
   },
   detectedModelsSection: {
     marginTop: 20,

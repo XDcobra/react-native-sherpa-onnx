@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function VADScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.icon}>📊</Text>
+        <Ionicons name="stats-chart" size={72} style={styles.icon} />
         <Text style={styles.title}>Voice Activity Detection</Text>
         <Text style={styles.subtitle}>Coming Soon</Text>
         <Text style={styles.description}>
@@ -34,7 +35,6 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   icon: {
-    fontSize: 72,
     marginBottom: 24,
   },
   title: {

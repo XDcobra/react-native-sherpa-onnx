@@ -6,6 +6,8 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
+import type { ComponentProps } from 'react';
 import { StatusBar } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, Feature } from '../../types/navigation';
@@ -15,7 +17,7 @@ const FEATURES: Feature[] = [
     id: 'stt',
     title: 'Speech-to-Text',
     description: 'Convert speech to text using offline models',
-    icon: '🎤',
+    icon: 'mic',
     screen: 'STT',
     implemented: true,
   },
@@ -23,7 +25,7 @@ const FEATURES: Feature[] = [
     id: 'tts',
     title: 'Text-to-Speech',
     description: 'Generate speech from text',
-    icon: '🔊',
+    icon: 'volume-high',
     screen: 'TTS',
     implemented: true,
   },
@@ -31,7 +33,7 @@ const FEATURES: Feature[] = [
     id: 'vad',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
-    icon: '📊',
+    icon: 'stats-chart',
     screen: 'VAD',
     implemented: false,
   },
@@ -39,7 +41,7 @@ const FEATURES: Feature[] = [
     id: 'diarization',
     title: 'Speaker Diarization',
     description: 'Identify who spoke when in audio',
-    icon: '👥',
+    icon: 'people',
     screen: 'Diarization',
     implemented: false,
   },
@@ -47,7 +49,7 @@ const FEATURES: Feature[] = [
     id: 'enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality',
-    icon: '🎚️',
+    icon: 'options',
     screen: 'Enhancement',
     implemented: false,
   },
@@ -55,7 +57,7 @@ const FEATURES: Feature[] = [
     id: 'separation',
     title: 'Source Separation',
     description: 'Separate voice from background music',
-    icon: '🎵',
+    icon: 'musical-notes',
     screen: 'Separation',
     implemented: false,
   },
@@ -73,7 +75,11 @@ export default function HomeScreen({ navigation }: Props) {
       activeOpacity={0.7}
     >
       <View style={styles.cardContent}>
-        <Text style={styles.icon}>{item.icon}</Text>
+        <Ionicons
+          name={item.icon as ComponentProps<typeof Ionicons>['name']}
+          size={36}
+          style={styles.icon}
+        />
         <View style={styles.textContainer}>
           <View style={styles.titleRow}>
             <Text
@@ -167,7 +173,6 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   icon: {
-    fontSize: 36,
     marginRight: 16,
   },
   textContainer: {
