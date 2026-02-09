@@ -4,6 +4,7 @@ import type {
   TTSInitializeOptions,
   SynthesisOptions,
   GeneratedAudio,
+  GeneratedAudioWithTimestamps,
   TTSModelInfo,
   TtsStreamChunk,
   TtsStreamEnd,
@@ -117,6 +118,23 @@ export async function generateSpeech(
   options?: SynthesisOptions
 ): Promise<GeneratedAudio> {
   return SherpaOnnx.generateTts(text, options?.sid ?? 0, options?.speed ?? 1.0);
+}
+
+/**
+ * Generate speech from text and return subtitle/timestamp metadata.
+ *
+ * Timestamps are estimated based on the output duration when models do not
+ * provide native timing information.
+ */
+export async function generateSpeechWithTimestamps(
+  text: string,
+  options?: SynthesisOptions
+): Promise<GeneratedAudioWithTimestamps> {
+  return SherpaOnnx.generateTtsWithTimestamps(
+    text,
+    options?.sid ?? 0,
+    options?.speed ?? 1.0
+  );
 }
 
 const ttsEventEmitter = new NativeEventEmitter();
@@ -337,6 +355,29 @@ export function saveAudioToContentUri(
 }
 
 /**
+ * Save a text file via Android SAF content URI.
+ *
+ * @param text - Text content to write
+ * @param directoryUri - Directory content URI from SAF
+ * @param filename - Desired file name
+ * @param mimeType - MIME type (default: text/plain)
+ * @returns Promise resolving to content URI of the saved file
+ */
+export function saveTextToContentUri(
+  text: string,
+  directoryUri: string,
+  filename: string,
+  mimeType = 'text/plain'
+): Promise<string> {
+  return SherpaOnnx.saveTtsTextToContentUri(
+    text,
+    directoryUri,
+    filename,
+    mimeType
+  );
+}
+
+/**
  * Copy a SAF content URI to a cache file for local playback (Android only).
  *
  * @param fileUri - Content URI of the saved WAV file
@@ -369,5 +410,7 @@ export type {
   TTSModelType,
   SynthesisOptions,
   GeneratedAudio,
+  GeneratedAudioWithTimestamps,
+  TtsSubtitleItem,
   TTSModelInfo,
 } from './types';

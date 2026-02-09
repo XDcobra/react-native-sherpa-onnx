@@ -101,6 +101,41 @@ export interface GeneratedAudio {
 }
 
 /**
+ * Subtitle/timestamp item for synthesized speech.
+ */
+export interface TtsSubtitleItem {
+  /**
+   * Text token for this time range.
+   */
+  text: string;
+
+  /**
+   * Start time in seconds.
+   */
+  start: number;
+
+  /**
+   * End time in seconds.
+   */
+  end: number;
+}
+
+/**
+ * Generated audio with subtitle/timestamp metadata.
+ */
+export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
+  /**
+   * Subtitle/timestamp entries.
+   */
+  subtitles: TtsSubtitleItem[];
+
+  /**
+   * True if timestamps are estimated rather than model-provided.
+   */
+  estimated: boolean;
+}
+
+/**
  * Streaming chunk event payload for TTS generation.
  */
 export interface TtsStreamChunk {

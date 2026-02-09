@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initializeTTS,
   generateSpeech,
+  generateSpeechWithTimestamps,
   generateSpeechStream,
   cancelSpeechStream,
   startTtsPcmPlayer,
@@ -24,6 +25,7 @@ import {
   getModelInfo,
   saveAudioToFile,
   saveAudioToContentUri,
+  saveTextToContentUri,
   copyContentUriToCache,
   shareAudioFile,
 } from 'react-native-sherpa-onnx/tts';
@@ -55,6 +57,12 @@ export default function TTSScreen() {
     samples: number[];
     sampleRate: number;
   } | null>(null);
+  const [generatedSubtitles, setGeneratedSubtitles] = useState<Array<{
+    text: string;
+    start: number;
+    end: number;
+  }> | null>(null);
+  const [subtitleEstimated, setSubtitleEstimated] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -64,6 +72,9 @@ export default function TTSScreen() {
     numSpeakers: number;
   } | null>(null);
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
+  const [savedSubtitlePath, setSavedSubtitlePath] = useState<string | null>(
+    null
+  );
   const [saving, setSaving] = useState(false);
   const [soundInstance, setSoundInstance] = useState<Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -358,7 +369,10 @@ export default function TTSScreen() {
     setSelectedModelType(null);
     setModelInfo(null);
     setGeneratedAudio(null);
+    setGeneratedSubtitles(null);
+    setSubtitleEstimated(true);
     setSavedAudioPath(null);
+    setSavedSubtitlePath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
@@ -423,6 +437,8 @@ export default function TTSScreen() {
       }
 
       setGeneratedAudio(null);
+      setGeneratedSubtitles(null);
+      setSubtitleEstimated(true);
     } catch (err) {
       console.error('TTS Initialization error:', err);
 
@@ -474,7 +490,10 @@ export default function TTSScreen() {
     setGenerating(true);
     setError(null);
     setGeneratedAudio(null);
+    setGeneratedSubtitles(null);
+    setSubtitleEstimated(true);
     setSavedAudioPath(null);
+    setSavedSubtitlePath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
@@ -535,6 +554,94 @@ export default function TTSScreen() {
     }
   };
 
+  const handleGenerateWithTimestamps = async () => {
+    if (!currentModelFolder) {
+      setError('Please initialize a model first');
+      return;
+    }
+
+    if (!selectedModelType) {
+      setError('Please select a model type first');
+      return;
+    }
+
+    if (!inputText.trim()) {
+      setError('Please enter text to synthesize');
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setGeneratedAudio(null);
+    setGeneratedSubtitles(null);
+    setSubtitleEstimated(true);
+    setSavedAudioPath(null);
+    setSavedSubtitlePath(null);
+    setCachedPlaybackPath(null);
+    setCachedPlaybackSource(null);
+    if (streaming) {
+      await cancelSpeechStream();
+      resetStreamingState(true);
+    }
+    if (soundInstance) {
+      soundInstance.release();
+      setSoundInstance(null);
+      setIsPlaying(false);
+    }
+
+    try {
+      const sid = parseInt(speakerId, 10);
+      const speedValue = parseFloat(speed);
+
+      if (isNaN(sid) || sid < 0) {
+        throw new Error('Invalid speaker ID');
+      }
+
+      if (isNaN(speedValue) || speedValue <= 0) {
+        throw new Error('Invalid speed value');
+      }
+
+      const result = await generateSpeechWithTimestamps(inputText, {
+        sid,
+        speed: speedValue,
+      });
+
+      setGeneratedAudio({
+        samples: result.samples,
+        sampleRate: result.sampleRate,
+      });
+      setGeneratedSubtitles(result.subtitles);
+      setSubtitleEstimated(result.estimated);
+      Alert.alert(
+        'Success',
+        `Generated ${result.samples.length} samples at ${result.sampleRate} Hz`
+      );
+    } catch (err) {
+      console.error('TTS Generation error:', err);
+
+      let errorMessage = 'Unknown error';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        if ('code' in err) {
+          errorMessage = `[${err.code}] ${errorMessage}`;
+        }
+      } else if (typeof err === 'object' && err !== null) {
+        const errorObj = err as any;
+        errorMessage =
+          errorObj.message ||
+          errorObj.userInfo?.NSLocalizedDescription ||
+          JSON.stringify(err);
+        if (errorObj.code) {
+          errorMessage = `[${errorObj.code}] ${errorMessage}`;
+        }
+      }
+
+      setError(errorMessage);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleStartStreaming = async () => {
     if (!currentModelFolder) {
       setError('Please initialize a model first');
@@ -552,7 +659,10 @@ export default function TTSScreen() {
 
     setError(null);
     setGeneratedAudio(null);
+    setGeneratedSubtitles(null);
+    setSubtitleEstimated(true);
     setSavedAudioPath(null);
+    setSavedSubtitlePath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     resetStreamingState(true);
@@ -591,6 +701,43 @@ export default function TTSScreen() {
     }
   };
 
+  const pickSaveDirectory = async () => {
+    let directoryPath: string | null = null;
+    let directoryUri: string | null = null;
+
+    try {
+      const picked = await DocumentPicker.pickDirectory();
+      if (picked?.uri) {
+        if (picked.uri.startsWith('file://')) {
+          directoryPath = decodeURI(picked.uri.replace('file://', ''));
+        } else if (picked.uri.startsWith('content://')) {
+          directoryUri = picked.uri;
+        }
+      }
+    } catch (pickerErr) {
+      const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
+      if (!isCancel) {
+        console.warn('Directory picker error:', pickerErr);
+      }
+    }
+
+    return { directoryPath, directoryUri };
+  };
+
+  const getFallbackDirectory = () => {
+    if (Platform.OS === 'android' && RNFS.DownloadDirectoryPath) {
+      return RNFS.DownloadDirectoryPath;
+    }
+    return RNFS.DocumentDirectoryPath;
+  };
+
+  const showFallbackNotice = () => {
+    Alert.alert(
+      'Notice',
+      'The selected storage location cannot be written to directly. The file will be saved in a default directory.'
+    );
+  };
+
   const saveAudioWithData = async (audio: {
     samples: number[];
     sampleRate: number;
@@ -607,23 +754,7 @@ export default function TTSScreen() {
       const timestamp = Date.now();
       const filename = `tts_${timestamp}.wav`;
 
-      let directoryPath: string | null = null;
-      let directoryUri: string | null = null;
-      try {
-        const picked = await DocumentPicker.pickDirectory();
-        if (picked?.uri) {
-          if (picked.uri.startsWith('file://')) {
-            directoryPath = decodeURI(picked.uri.replace('file://', ''));
-          } else if (picked.uri.startsWith('content://')) {
-            directoryUri = picked.uri;
-          }
-        }
-      } catch (pickerErr) {
-        const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
-        if (!isCancel) {
-          console.warn('Directory picker error:', pickerErr);
-        }
-      }
+      const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
         const savedUri = await saveAudioToContentUri(
@@ -644,21 +775,13 @@ export default function TTSScreen() {
         return;
       }
 
+      const targetDirectory = directoryPath ?? getFallbackDirectory();
       if (!directoryPath) {
-        // Fallback to a user-visible directory when possible
-        if (Platform.OS === 'android' && RNFS.DownloadDirectoryPath) {
-          directoryPath = RNFS.DownloadDirectoryPath;
-        } else {
-          directoryPath = RNFS.DocumentDirectoryPath;
-        }
-        Alert.alert(
-          'Notice',
-          'The selected storage location cannot be written to directly. The file will be saved in a default directory.'
-        );
+        showFallbackNotice();
       }
 
-      await RNFS.mkdir(directoryPath);
-      const filePath = `${directoryPath}/${filename}`;
+      await RNFS.mkdir(targetDirectory);
+      const filePath = `${targetDirectory}/${filename}`;
 
       // Save audio to file
       const savedPath = await saveAudioToFile(audio, filePath);
@@ -688,6 +811,137 @@ export default function TTSScreen() {
       return;
     }
     await saveAudioWithData(generatedAudio);
+  };
+
+  const formatSrtTimestamp = (seconds: number) => {
+    const safeSeconds = Math.max(0, seconds);
+    const totalMs = Math.round(safeSeconds * 1000);
+    const ms = totalMs % 1000;
+    const totalSeconds = Math.floor(totalMs / 1000);
+    const s = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const m = totalMinutes % 60;
+    const h = Math.floor(totalMinutes / 60);
+
+    const pad = (value: number, size = 2) => `${value}`.padStart(size, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`;
+  };
+
+  const buildSrtContent = (
+    subtitles: Array<{ text: string; start: number; end: number }>
+  ) => {
+    return subtitles
+      .map((item, index) => {
+        const start = formatSrtTimestamp(item.start);
+        const end = formatSrtTimestamp(item.end);
+        const text = item.text.trim() || '...';
+        return `${index + 1}\n${start} --> ${end}\n${text}`;
+      })
+      .join('\n\n');
+  };
+
+  const handleShareSrt = async () => {
+    if (!generatedSubtitles || generatedSubtitles.length === 0) {
+      Alert.alert(
+        'Error',
+        'No subtitles available. Generate with timestamps first.'
+      );
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const timestamp = Date.now();
+      const filename = `tts_${timestamp}.srt`;
+      const directoryPath = RNFS.DocumentDirectoryPath;
+
+      await RNFS.mkdir(directoryPath);
+      const filePath = `${directoryPath}/${filename}`;
+
+      const srtContent = buildSrtContent(generatedSubtitles);
+      await RNFS.writeFile(filePath, srtContent, 'utf8');
+      setSavedSubtitlePath(filePath);
+
+      const shareUrl = getShareUrl(filePath);
+      if (Platform.OS === 'android') {
+        await shareAudioFile(shareUrl, 'application/x-subrip');
+      } else {
+        await Share.share({
+          title: 'Share TTS Subtitles',
+          message: 'TTS subtitles file',
+          url: shareUrl,
+        });
+      }
+    } catch (err) {
+      console.error('Export SRT error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to export SRT: ${errorMessage}`);
+      Alert.alert('Error', `Failed to export SRT: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveSrtToFolder = async () => {
+    if (!generatedSubtitles || generatedSubtitles.length === 0) {
+      Alert.alert(
+        'Error',
+        'No subtitles available. Generate with timestamps first.'
+      );
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const timestamp = Date.now();
+      const filename = `tts_${timestamp}.srt`;
+
+      const { directoryPath, directoryUri } = await pickSaveDirectory();
+
+      const srtContent = buildSrtContent(generatedSubtitles);
+
+      if (directoryUri) {
+        const savedUri = await saveTextToContentUri(
+          srtContent,
+          directoryUri,
+          filename,
+          'application/x-subrip'
+        );
+        setSavedSubtitlePath(savedUri);
+        Alert.alert(
+          'Success',
+          `Subtitles saved to:\n${getDisplayPath(savedUri)}`
+        );
+        return;
+      }
+
+      const targetDirectory = directoryPath ?? getFallbackDirectory();
+      if (!directoryPath) {
+        showFallbackNotice();
+      }
+
+      await RNFS.mkdir(targetDirectory);
+      const filePath = `${targetDirectory}/${filename}`;
+
+      await RNFS.writeFile(filePath, srtContent, 'utf8');
+      setSavedSubtitlePath(filePath);
+
+      Alert.alert(
+        'Success',
+        `Subtitles saved to:\n${getDisplayPath(filePath)}`
+      );
+    } catch (err) {
+      console.error('Save SRT error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to save SRT: ${errorMessage}`);
+      Alert.alert('Error', `Failed to save SRT: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveTemporary = async () => {
@@ -862,7 +1116,10 @@ export default function TTSScreen() {
       setSelectedModelType(null);
       setModelInfo(null);
       setGeneratedAudio(null);
+      setGeneratedSubtitles(null);
+      setSubtitleEstimated(true);
       setSavedAudioPath(null);
+      setSavedSubtitlePath(null);
       setError(null);
       Alert.alert('Success', 'TTS resources released');
     } catch (err) {
@@ -1056,6 +1313,23 @@ export default function TTSScreen() {
               )}
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[
+                styles.generateButtonSecondary,
+                generating && styles.buttonDisabled,
+              ]}
+              onPress={handleGenerateWithTimestamps}
+              disabled={generating}
+            >
+              {generating ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.generateButtonText}>
+                  Generate + Timestamps
+                </Text>
+              )}
+            </TouchableOpacity>
+
             <View style={styles.streamControls}>
               <TouchableOpacity
                 style={[
@@ -1180,6 +1454,55 @@ export default function TTSScreen() {
                 Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
                 {'\n'}
                 {getDisplayPath(savedAudioPath)}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {generatedSubtitles && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subtitles / Timestamps</Text>
+            <Text style={styles.sectionDescription}>
+              {subtitleEstimated
+                ? 'Estimated word timings based on output duration.'
+                : 'Model-provided timings.'}
+            </Text>
+            <View style={styles.resultContainer}>
+              {generatedSubtitles.map((item, index) => (
+                <Text key={`${item.text}-${index}`} style={styles.resultText}>
+                  {item.text} {item.start.toFixed(2)}s - {item.end.toFixed(2)}s
+                </Text>
+              ))}
+            </View>
+            <View style={styles.subtitleActions}>
+              <TouchableOpacity
+                style={[styles.audioButton, styles.exportButton]}
+                onPress={handleShareSrt}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.audioButtonText}>Share SRT</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.audioButton, styles.saveSubtitleButton]}
+                onPress={handleSaveSrtToFolder}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.audioButtonText}>Save SRT</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            {savedSubtitlePath && (
+              <Text style={styles.savedPathText}>
+                Subtitles: {getDisplayPath(savedSubtitlePath).split('/').pop()}
+                {'\n'}
+                {getDisplayPath(savedSubtitlePath)}
               </Text>
             )}
           </View>
@@ -1385,6 +1708,13 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
+  generateButtonSecondary: {
+    backgroundColor: '#5856D6',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 10,
+  },
   generateButtonText: {
     fontSize: 16,
     fontWeight: '600',
@@ -1425,6 +1755,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
+  subtitleActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
   audioButton: {
     flexBasis: '30%',
     maxWidth: '32%',
@@ -1445,6 +1781,12 @@ const styles = StyleSheet.create({
   },
   shareButton: {
     backgroundColor: '#5856D6',
+  },
+  exportButton: {
+    backgroundColor: '#6E56CF',
+  },
+  saveSubtitleButton: {
+    backgroundColor: '#34C759',
   },
   audioButtonText: {
     fontSize: 14,

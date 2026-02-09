@@ -432,6 +432,59 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Generate speech with subtitle/timestamp metadata.
+   */
+  override fun generateTtsWithTimestamps(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    try {
+      val result = nativeTtsGenerateWithTimestamps(text, sid.toInt(), speed.toFloat())
+      if (result != null) {
+        val map = Arguments.createMap()
+
+        @Suppress("UNCHECKED_CAST")
+        val samples = result["samples"] as? FloatArray
+        val sampleRate = result["sampleRate"] as? Int
+        val subtitles = result["subtitles"] as? ArrayList<*>
+        val estimated = result["estimated"] as? Boolean ?: true
+
+        if (samples != null && sampleRate != null) {
+          val samplesArray = Arguments.createArray()
+          for (sample in samples) {
+            samplesArray.pushDouble(sample.toDouble())
+          }
+
+          val subtitlesArray = Arguments.createArray()
+          subtitles?.forEach { item ->
+            if (item is HashMap<*, *>) {
+              val subtitleMap = Arguments.createMap()
+              subtitleMap.putString("text", item["text"] as? String ?: "")
+              subtitleMap.putDouble("start", (item["start"] as? Number)?.toDouble() ?: 0.0)
+              subtitleMap.putDouble("end", (item["end"] as? Number)?.toDouble() ?: 0.0)
+              subtitlesArray.pushMap(subtitleMap)
+            }
+          }
+
+          map.putArray("samples", samplesArray)
+          map.putInt("sampleRate", sampleRate)
+          map.putArray("subtitles", subtitlesArray)
+          map.putBoolean("estimated", estimated)
+          promise.resolve(map)
+        } else {
+          promise.reject("TTS_GENERATE_ERROR", "Invalid result format from native code")
+        }
+      } else {
+        promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech")
+      }
+    } catch (e: Exception) {
+      promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech", e)
+    }
+  }
+
+  /**
    * Generate speech in streaming mode (emits chunk events).
    */
   override fun generateTtsStream(
@@ -708,7 +761,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val resolver = reactApplicationContext.contentResolver
       val dirUri = Uri.parse(directoryUri)
-      val fileUri = createDocumentInDirectory(resolver, dirUri, filename)
+      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, "audio/wav")
 
       resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
         writeWavToStream(samplesArray, sampleRate.toInt(), outputStream)
@@ -717,6 +770,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
       promise.reject("TTS_SAVE_ERROR", "Failed to save audio to content URI", e)
+    }
+  }
+
+  /**
+   * Save text content to a file via Android SAF content URI.
+   */
+  override fun saveTtsTextToContentUri(
+    text: String,
+    directoryUri: String,
+    filename: String,
+    mimeType: String,
+    promise: Promise
+  ) {
+    try {
+      val resolver = reactApplicationContext.contentResolver
+      val dirUri = Uri.parse(directoryUri)
+      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
+
+      resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
+        outputStream.write(text.toByteArray(Charsets.UTF_8))
+      } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
+
+      promise.resolve(fileUri.toString())
+    } catch (e: Exception) {
+      promise.reject("TTS_SAVE_ERROR", "Failed to save text to content URI", e)
     }
   }
 
@@ -871,10 +949,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private fun createDocumentInDirectory(
     resolver: android.content.ContentResolver,
     directoryUri: Uri,
-    filename: String
+    filename: String,
+    mimeType: String
   ): Uri {
-    val mimeType = "audio/wav"
-
     return if (DocumentsContract.isTreeUri(directoryUri)) {
       val documentId = DocumentsContract.getTreeDocumentId(directoryUri)
       val dirDocUri = DocumentsContract.buildDocumentUriUsingTree(directoryUri, documentId)
@@ -994,6 +1071,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     @JvmStatic
     private external fun nativeTtsGenerate(
+      text: String,
+      sid: Int,
+      speed: Float
+    ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTtsGenerateWithTimestamps(
       text: String,
       sid: Int,
       speed: Float

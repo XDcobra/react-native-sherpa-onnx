@@ -9,20 +9,9 @@ Gute Frage! Lass mich die wichtigsten TTS-Features von sherpa-onnx mit unserer a
 5. **Ressourcen freigeben** - `unloadTTS()`
 6. **Multi-Speaker Support** - `sid` Parameter in `generateSpeech()`
 7. **Speed Control** - `speed` Parameter in `generateSpeech()`
+8. **Subtitle/Timestamps (estimated)** - `generateSpeechWithTimestamps()`
 
 ## ❌ Was sherpa-onnx bietet, wir aber NICHT unterstützen
-
-### 1. **Streaming TTS (Online TTS)**
-```cpp
-// sherpa-onnx bietet auch streaming/chunked generation
-OnlineTts tts = OnlineTts::Create(config);
-tts.GenerateSubtitle(text);  // Gibt Text + Timestamps zurück
-```
-
-**Nutzen:** Echtzeit-TTS mit sofortigem Audio-Start (wichtig für lange Texte)
-
----
-
 ### 2. **Audio Streaming Callback**
 ```cpp
 // Callback während Generation für progressive Wiedergabe
@@ -34,17 +23,7 @@ config.callback = callback;
 
 ---
 
-### 3. **Subtitle/Timestamp Generation**
-```cpp
-OfflineTtsGeneratedAudio audio = tts->Generate(text);
-// audio enthält auch timestamps für jedes Wort/Phonem
-```
-
-**Nutzen:** Lippensynchronisation, Karaoke-Style Text-Highlighting
-
----
-
-### 4. **Batch Generation (Multiple Texts)**
+### 3. **Batch Generation (Multiple Texts)**
 ```cpp
 std::vector<GeneratedAudio> audios = tts->Generate({"Hello", "World", "!"});
 ```
@@ -53,7 +32,7 @@ std::vector<GeneratedAudio> audios = tts->Generate({"Hello", "World", "!"});
 
 ---
 
-### 5. **SSML Support (für manche Modelle)**
+### 4. **SSML Support (für manche Modelle)**
 ```xml
 <speak>
   <prosody rate="slow" pitch="+2st">Hello</prosody>
@@ -66,7 +45,7 @@ std::vector<GeneratedAudio> audios = tts->Generate({"Hello", "World", "!"});
 
 ---
 
-### 6. **Speaker Embedding Customization**
+### 5. **Speaker Embedding Customization**
 ```cpp
 // Für Kokoro/Kitten: Custom speaker embeddings laden
 config.model.kokoro.speaker_embedding = customEmbeddingFile;
@@ -76,7 +55,7 @@ config.model.kokoro.speaker_embedding = customEmbeddingFile;
 
 ---
 
-### 7. **Audio Format Control**
+### 6. **Audio Format Control**
 ```cpp
 // Aktuell: Nur WAV mit 16-bit PCM
 // Möglich: MP3, OGG, FLAC Export
@@ -86,7 +65,7 @@ config.model.kokoro.speaker_embedding = customEmbeddingFile;
 
 ---
 
-### 8. **Noise/Length Scale Parameter**
+### 7. **Noise/Length Scale Parameter**
 ```cpp
 // Für VITS/Matcha Modelle
 config.model.vits.noise_scale = 0.667;
@@ -97,7 +76,7 @@ config.model.vits.length_scale = 1.0;
 
 ---
 
-### 9. **Real-time Factor (RTF) Messung**
+### 8. **Real-time Factor (RTF) Messung**
 ```cpp
 // Performance-Metrik: Wie schnell vs. Echtzeit
 float rtf = audio.real_time_factor;
@@ -110,22 +89,19 @@ float rtf = audio.real_time_factor;
 ## 🎯 Empfehlungen für nächste Features
 
 **Priorität HOCH (stark nachgefragt):**
-
-1. **Streaming TTS** - Für lange Texte/Echtzeit-Apps
-2. **Subtitle/Timestamps** - Für Lippensync/UI-Highlighting
-3. **Noise/Length Scale** - Für Audio-Qualität-Tuning
+2. **Noise/Length Scale** - Für Audio-Qualität-Tuning
+3. **Audio Callback** - Progressive Playback
 
 **Priorität MITTEL:**
 
 4. **Batch Generation** - Performance-Optimierung
 5. **RTF Messung** - Performance-Monitoring
-6. **Audio Callback** - Progressive Playback
+6. **SSML Support** - Feinere Sprechsteuerung
 
 **Priorität NIEDRIG (Nische):**
 
-7. **SSML Support** - Nur für spezielle Use Cases
-8. **Custom Speaker Embeddings** - Voice Cloning (fortgeschritten)
-9. **Andere Audio-Formate** - MP3/OGG Export
+7. **Custom Speaker Embeddings** - Voice Cloning (fortgeschritten)
+8. **Andere Audio-Formate** - MP3/OGG Export
 
 ---
 
@@ -135,8 +111,8 @@ Basierend auf typischen TTS-Use-Cases würde ich sagen:
 
 **Top 3 fehlende Features:**
 
-1. **🔴 Streaming/Online TTS** - Game-changer für UX
-2. **🟡 Timestamps/Subtitles** - Wichtig für Sync-Apps
-3. **🟡 Noise/Length Scale** - Audio-Qualität verbessern
+1. **🟡 Noise/Length Scale** - Audio-Qualität verbessern
+2. **🟡 Audio Callback** - Progressive Playback
+3. **🔵 Batch Generation** - Effizienz bei mehreren Texten
 
 Soll ich eines dieser Features implementieren? Ich würde mit **Streaming TTS** oder **Noise/Length Scale Parameter** anfangen, da sie den größten Impact haben.

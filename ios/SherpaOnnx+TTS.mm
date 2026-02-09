@@ -7,7 +7,9 @@
 #include "sherpa-onnx-tts-wrapper.h"
 #include <atomic>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <vector>
 
 // Global TTS wrapper instance
 static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
@@ -16,6 +18,21 @@ static std::atomic<bool> g_tts_stream_cancelled{false};
 static AVAudioEngine *g_tts_engine = nil;
 static AVAudioPlayerNode *g_tts_player = nil;
 static AVAudioFormat *g_tts_format = nil;
+
+namespace {
+std::vector<std::string> SplitTtsTokens(const std::string &text) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(text);
+    std::string token;
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+    if (tokens.empty() && !text.empty()) {
+        tokens.push_back(text);
+    }
+    return tokens;
+}
+}
 
 @implementation SherpaOnnx (TTS)
 
@@ -114,6 +131,74 @@ static AVAudioFormat *g_tts_format = nil;
 
         RCTLogInfo(@"TTS: Generated %lu samples at %d Hz",
                    (unsigned long)result.samples.size(), result.sampleRate);
+
+        resolve(resultDict);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS generation: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)generateTtsWithTimestamps:(NSString *)text
+                              sid:(double)sid
+                            speed:(double)speed
+                     withResolver:(RCTPromiseResolveBlock)resolve
+                     withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
+            return;
+        }
+
+        std::string textStr = [text UTF8String];
+
+        auto result = g_tts_wrapper->generate(
+            textStr,
+            static_cast<int32_t>(sid),
+            static_cast<float>(speed)
+        );
+
+        if (result.samples.empty() || result.sampleRate == 0) {
+            NSString *errorMsg = @"Failed to generate speech or result is empty";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
+            return;
+        }
+
+        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:result.samples.size()];
+        for (float sample : result.samples) {
+            [samplesArray addObject:@(sample)];
+        }
+
+        std::vector<std::string> tokens = SplitTtsTokens(textStr);
+        NSMutableArray *subtitlesArray = [NSMutableArray array];
+        if (!tokens.empty()) {
+            double totalSeconds = static_cast<double>(result.samples.size()) /
+                                  static_cast<double>(result.sampleRate);
+            double perToken = totalSeconds / static_cast<double>(tokens.size());
+
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                double start = perToken * static_cast<double>(i);
+                double end = perToken * static_cast<double>(i + 1);
+                NSDictionary *item = @{
+                    @"text": [NSString stringWithUTF8String:tokens[i].c_str()],
+                    @"start": @(start),
+                    @"end": @(end)
+                };
+                [subtitlesArray addObject:item];
+            }
+        }
+
+        NSDictionary *resultDict = @{
+            @"samples": samplesArray,
+            @"sampleRate": @(result.sampleRate),
+            @"subtitles": subtitlesArray,
+            @"estimated": @YES
+        };
 
         resolve(resultDict);
     } @catch (NSException *exception) {
@@ -397,6 +482,52 @@ static AVAudioFormat *g_tts_format = nil;
         }
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception saving TTS audio: %@", exception.reason];
+        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)saveTtsTextToContentUri:(NSString *)text
+                 directoryUri:(NSString *)directoryUri
+                     filename:(NSString *)filename
+                     mimeType:(NSString *)mimeType
+                  withResolver:(RCTPromiseResolveBlock)resolve
+                  withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if ([directoryUri hasPrefix:@"content://"]) {
+            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+            return;
+        }
+
+        NSURL *directoryUrl = nil;
+        if ([directoryUri hasPrefix:@"file://"]) {
+            directoryUrl = [NSURL URLWithString:directoryUri];
+        } else {
+            directoryUrl = [NSURL fileURLWithPath:directoryUri];
+        }
+
+        if (!directoryUrl) {
+            reject(@"TTS_SAVE_ERROR", @"Invalid directory URL", nil);
+            return;
+        }
+
+        NSString *directoryPath = [directoryUrl path];
+        NSString *filePath = [directoryPath stringByAppendingPathComponent:filename];
+
+        NSError *writeError = nil;
+        BOOL success = [text writeToFile:filePath
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&writeError];
+
+        if (!success || writeError) {
+            reject(@"TTS_SAVE_ERROR", @"Failed to save text to file", writeError);
+            return;
+        }
+
+        resolve(filePath);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception saving text file: %@", exception.reason];
         reject(@"TTS_SAVE_ERROR", errorMsg, nil);
     }
 }

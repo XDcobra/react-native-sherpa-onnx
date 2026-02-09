@@ -78,6 +78,24 @@ export interface Spec extends TurboModule {
   ): Promise<{ samples: number[]; sampleRate: number }>;
 
   /**
+   * Generate speech with subtitle/timestamp metadata.
+   * @param text - Text to convert to speech
+   * @param sid - Speaker ID for multi-speaker models (default: 0)
+   * @param speed - Speech speed multiplier (default: 1.0)
+   * @returns Object with samples, sampleRate, subtitles, and estimated flag
+   */
+  generateTtsWithTimestamps(
+    text: string,
+    sid: number,
+    speed: number
+  ): Promise<{
+    samples: number[];
+    sampleRate: number;
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    estimated: boolean;
+  }>;
+
+  /**
    * Generate speech in streaming mode (emits chunk events).
    * @param text - Text to convert to speech
    * @param sid - Speaker ID for multi-speaker models (default: 0)
@@ -151,6 +169,21 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     directoryUri: string,
     filename: string
+  ): Promise<string>;
+
+  /**
+   * Save a text file via Android SAF content URI.
+   * @param text - Text content to write
+   * @param directoryUri - Directory content URI (tree or document)
+   * @param filename - Desired file name (e.g., tts_123.srt)
+   * @param mimeType - MIME type (e.g., application/x-subrip)
+   * @returns The content URI of the saved file
+   */
+  saveTtsTextToContentUri(
+    text: string,
+    directoryUri: string,
+    filename: string,
+    mimeType: string
   ): Promise<string>;
 
   /**

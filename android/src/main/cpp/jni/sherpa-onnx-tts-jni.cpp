@@ -1,7 +1,9 @@
 // Include standard library headers first to avoid conflicts with jni.h
 #include <atomic>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <vector>
 
 // Then include JNI headers
 #include <android/log.h>
@@ -15,6 +17,21 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 using namespace sherpaonnx;
+
+namespace {
+std::vector<std::string> SplitTtsTokens(const std::string &text) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(text);
+    std::string token;
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+    if (tokens.empty() && !text.empty()) {
+        tokens.push_back(text);
+    }
+    return tokens;
+}
+}
 
 // Global TTS wrapper instance
 static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
@@ -365,6 +382,148 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerate(
         return nullptr;
     } catch (...) {
         LOGE("TTS JNI: Unknown exception in nativeGenerateTts");
+        return nullptr;
+    }
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateWithTimestamps(
+    JNIEnv *env,
+    jobject /* this */,
+    jstring text,
+    jint sid,
+    jfloat speed) {
+    try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            LOGE("TTS JNI: Not initialized. Call initialize() first.");
+            return nullptr;
+        }
+
+        const char *textStr = env->GetStringUTFChars(text, nullptr);
+        if (textStr == nullptr) {
+            LOGE("TTS JNI: Failed to get text string");
+            return nullptr;
+        }
+
+        std::string textValue(textStr);
+        auto result = g_tts_wrapper->generate(
+            textValue,
+            static_cast<int32_t>(sid),
+            static_cast<float>(speed)
+        );
+
+        env->ReleaseStringUTFChars(text, textStr);
+
+        if (result.samples.empty() || result.sampleRate == 0) {
+            LOGE("TTS JNI: Generation returned empty result");
+            return nullptr;
+        }
+
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        if (hashMapClass == nullptr) {
+            LOGE("TTS JNI: Failed to find HashMap class");
+            return nullptr;
+        }
+
+        jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID hashMapPut = env->GetMethodID(
+            hashMapClass,
+            "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+        );
+        if (hashMapInit == nullptr || hashMapPut == nullptr) {
+            LOGE("TTS JNI: Failed to get HashMap methods");
+            return nullptr;
+        }
+
+        jobject hashMap = env->NewObject(hashMapClass, hashMapInit);
+        if (hashMap == nullptr) {
+            LOGE("TTS JNI: Failed to create HashMap object");
+            return nullptr;
+        }
+
+        jfloatArray samplesArray = env->NewFloatArray(result.samples.size());
+        if (samplesArray == nullptr) {
+            LOGE("TTS JNI: Failed to create float array");
+            return nullptr;
+        }
+        env->SetFloatArrayRegion(samplesArray, 0, result.samples.size(), result.samples.data());
+
+        jstring samplesKey = env->NewStringUTF("samples");
+        env->CallObjectMethod(hashMap, hashMapPut, samplesKey, samplesArray);
+        env->DeleteLocalRef(samplesKey);
+        env->DeleteLocalRef(samplesArray);
+
+        jclass integerClass = env->FindClass("java/lang/Integer");
+        jmethodID integerInit = env->GetMethodID(integerClass, "<init>", "(I)V");
+        jobject sampleRateObj = env->NewObject(integerClass, integerInit, result.sampleRate);
+
+        jstring sampleRateKey = env->NewStringUTF("sampleRate");
+        env->CallObjectMethod(hashMap, hashMapPut, sampleRateKey, sampleRateObj);
+        env->DeleteLocalRef(sampleRateKey);
+        env->DeleteLocalRef(sampleRateObj);
+
+        jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");
+        jmethodID arrayListAdd = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+
+        jobject subtitlesList = env->NewObject(arrayListClass, arrayListInit);
+        auto tokens = SplitTtsTokens(textValue);
+        if (!tokens.empty()) {
+            const double totalSeconds = static_cast<double>(result.samples.size()) /
+                                        static_cast<double>(result.sampleRate);
+            const double perToken = totalSeconds / static_cast<double>(tokens.size());
+
+            jclass doubleClass = env->FindClass("java/lang/Double");
+            jmethodID doubleInit = env->GetMethodID(doubleClass, "<init>", "(D)V");
+
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                double start = perToken * static_cast<double>(i);
+                double end = perToken * static_cast<double>(i + 1);
+
+                jobject subtitleMap = env->NewObject(hashMapClass, hashMapInit);
+                jstring textKey = env->NewStringUTF("text");
+                jstring textValueKey = env->NewStringUTF(tokens[i].c_str());
+                env->CallObjectMethod(subtitleMap, hashMapPut, textKey, textValueKey);
+                env->DeleteLocalRef(textKey);
+                env->DeleteLocalRef(textValueKey);
+
+                jstring startKey = env->NewStringUTF("start");
+                jobject startObj = env->NewObject(doubleClass, doubleInit, start);
+                env->CallObjectMethod(subtitleMap, hashMapPut, startKey, startObj);
+                env->DeleteLocalRef(startKey);
+                env->DeleteLocalRef(startObj);
+
+                jstring endKey = env->NewStringUTF("end");
+                jobject endObj = env->NewObject(doubleClass, doubleInit, end);
+                env->CallObjectMethod(subtitleMap, hashMapPut, endKey, endObj);
+                env->DeleteLocalRef(endKey);
+                env->DeleteLocalRef(endObj);
+
+                env->CallBooleanMethod(subtitlesList, arrayListAdd, subtitleMap);
+                env->DeleteLocalRef(subtitleMap);
+            }
+        }
+
+        jstring subtitlesKey = env->NewStringUTF("subtitles");
+        env->CallObjectMethod(hashMap, hashMapPut, subtitlesKey, subtitlesList);
+        env->DeleteLocalRef(subtitlesKey);
+        env->DeleteLocalRef(subtitlesList);
+
+        jclass booleanClass = env->FindClass("java/lang/Boolean");
+        jmethodID booleanInit = env->GetMethodID(booleanClass, "<init>", "(Z)V");
+        jobject estimatedObj = env->NewObject(booleanClass, booleanInit, JNI_TRUE);
+        jstring estimatedKey = env->NewStringUTF("estimated");
+        env->CallObjectMethod(hashMap, hashMapPut, estimatedKey, estimatedObj);
+        env->DeleteLocalRef(estimatedKey);
+        env->DeleteLocalRef(estimatedObj);
+
+        return hashMap;
+    } catch (const std::exception &e) {
+        LOGE("TTS JNI: Exception in nativeGenerateTtsWithTimestamps: %s", e.what());
+        return nullptr;
+    } catch (...) {
+        LOGE("TTS JNI: Unknown exception in nativeGenerateTtsWithTimestamps");
         return nullptr;
     }
 }
