@@ -14,7 +14,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 | Feature | Status |
 |---------|--------|
-| Offline Speech-to-Text | ✅ Supported |
+| Offline Speech-to-Text | ✅ **Supported** |
 | Text-to-Speech | ✅ **Supported** |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
@@ -77,7 +77,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 - ✅ **Android Support** - Fully supported on Android
 - ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
 - ✅ **TypeScript Support** - Full TypeScript definitions included
-- 🚧 **Additional Features Coming Soon** - Text-to-Speech, Speaker Diarization, Speech Enhancement, Source Separation, and VAD support are planned for future releases
+- 🚧 **Additional Features Coming Soon** - Speaker Diarization, Speech Enhancement, Source Separation, and VAD support are planned for future releases
 
 ## Installation
 
@@ -305,6 +305,11 @@ await unloadSTT();
 import { 
   initializeTTS, 
   generateSpeech, 
+  generateSpeechStream,
+  cancelSpeechStream,
+  startTtsPcmPlayer,
+  writeTtsPcmChunk,
+  stopTtsPcmPlayer,
   getModelInfo,
   unloadTTS 
 } from 'react-native-sherpa-onnx/tts';
@@ -334,6 +339,53 @@ const audio2 = await generateSpeech('Faster speech!', {
 
 // Release TTS resources
 await unloadTTS();
+```
+
+#### Streaming TTS (chunk events + live PCM playback)
+
+```typescript
+import { generateSpeechStream, cancelSpeechStream } from 'react-native-sherpa-onnx/tts';
+
+// Start a streaming generation
+const unsubscribe = await generateSpeechStream('Hello streaming world!', {
+  sid: 0,
+  speed: 1.0,
+}, {
+  onChunk: (chunk) => {
+    // chunk.samples: Float32 samples
+    // chunk.sampleRate: number
+    // chunk.progress: 0..1
+  },
+  onEnd: () => {
+    // Stream finished
+  },
+  onError: ({ message }) => {
+    console.warn('Stream error:', message);
+  },
+});
+
+// Stop streaming
+await cancelSpeechStream();
+
+// Unsubscribe from events when done
+unsubscribe();
+```
+
+```typescript
+import {
+  startTtsPcmPlayer,
+  writeTtsPcmChunk,
+  stopTtsPcmPlayer,
+} from 'react-native-sherpa-onnx/tts';
+
+// Start PCM playback before or on first chunk
+await startTtsPcmPlayer(sampleRate, 1);
+
+// Write chunks as they arrive
+await writeTtsPcmChunk(chunk.samples);
+
+// Stop and release the player
+await stopTtsPcmPlayer();
 ```
 
 See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for detailed TTS model setup instructions and download links.
@@ -440,6 +492,27 @@ Generate speech audio from text.
 - `GeneratedAudio.samples`: Audio samples as float array in range [-1.0, 1.0]
 - `GeneratedAudio.sampleRate`: Sample rate in Hz
 
+#### `generateSpeechStream(text, options?, handlers)`
+
+Generate speech audio in streaming mode with chunk callbacks.
+
+**Parameters:**
+
+- `text`: Text to convert to speech
+- `options.sid` (optional): Speaker ID for multi-speaker models, default: `0`
+- `options.speed` (optional): Speech speed multiplier (0.5-2.0), default: `1.0`
+- `handlers.onChunk`: Called with `{ samples, sampleRate, progress }`
+- `handlers.onEnd`: Called when the stream finishes
+- `handlers.onError`: Called with `{ message }`
+
+**Returns:** `Promise<() => void>` - Unsubscribe function
+
+#### `cancelSpeechStream()`
+
+Cancel the current streaming generation.
+
+**Returns:** `Promise<void>`
+
 #### `getModelInfo()`
 
 Get TTS model information (sample rate and number of speakers).
@@ -463,6 +536,33 @@ Get the number of speakers/voices available in the model.
 #### `unloadTTS()`
 
 Release TTS resources and unload the model.
+
+**Returns:** `Promise<void>`
+
+#### `startTtsPcmPlayer(sampleRate, channels)`
+
+Start a native PCM player for streaming audio.
+
+**Parameters:**
+
+- `sampleRate`: Sample rate in Hz
+- `channels`: Number of channels (currently mono is recommended)
+
+**Returns:** `Promise<void>`
+
+#### `writeTtsPcmChunk(samples)`
+
+Write a chunk of float PCM samples to the native PCM player.
+
+**Parameters:**
+
+- `samples`: Float array of PCM samples in range [-1.0, 1.0]
+
+**Returns:** `Promise<void>`
+
+#### `stopTtsPcmPlayer()`
+
+Stop and release the native PCM player.
 
 **Returns:** `Promise<void>`
 
