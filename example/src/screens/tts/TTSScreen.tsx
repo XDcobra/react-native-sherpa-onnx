@@ -1985,7 +1985,8 @@ const styles = StyleSheet.create({
     maxWidth: '32%',
     flexGrow: 1,
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2032,7 +2033,7 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   iconInline: {
-    marginRight: 8,
+    marginRight: 12,
   },
   separator: {
     height: 1,
