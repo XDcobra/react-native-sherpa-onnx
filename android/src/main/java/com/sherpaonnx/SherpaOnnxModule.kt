@@ -4,6 +4,11 @@ import android.util.Log
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.media.AudioManager
+import android.os.Build
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
@@ -30,6 +35,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val ttsStreamRunning = AtomicBoolean(false)
   private val ttsStreamCancelled = AtomicBoolean(false)
   private var ttsStreamThread: Thread? = null
+  private var ttsPcmTrack: AudioTrack? = null
 
   override fun getName(): String {
     return NAME
@@ -476,6 +482,114 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  /**
+   * Start PCM playback for streaming TTS.
+   */
+  override fun startTtsPcmPlayer(sampleRate: Double, channels: Double, promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        promise.reject("TTS_PCM_ERROR", "PCM playback requires API 21+")
+        return
+      }
+
+      if (channels.toInt() != 1) {
+        promise.reject("TTS_PCM_ERROR", "PCM playback supports mono only")
+        return
+      }
+
+      stopPcmPlayerInternal()
+
+      val channelConfig = AudioFormat.CHANNEL_OUT_MONO
+
+      val audioFormat = AudioFormat.Builder()
+        .setSampleRate(sampleRate.toInt())
+        .setChannelMask(channelConfig)
+        .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+        .build()
+
+      val minBufferSize = AudioTrack.getMinBufferSize(
+        sampleRate.toInt(),
+        channelConfig,
+        AudioFormat.ENCODING_PCM_FLOAT
+      )
+
+      if (minBufferSize == AudioTrack.ERROR || minBufferSize == AudioTrack.ERROR_BAD_VALUE) {
+        promise.reject("TTS_PCM_ERROR", "Invalid buffer size for PCM player")
+        return
+      }
+
+      val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
+      ttsPcmTrack = AudioTrack(
+        attributes,
+        audioFormat,
+        minBufferSize,
+        AudioTrack.MODE_STREAM,
+        AudioManager.AUDIO_SESSION_ID_GENERATE
+      )
+
+      ttsPcmTrack?.play()
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("TTS_PCM_ERROR", "Failed to start PCM player", e)
+    }
+  }
+
+  /**
+   * Write PCM samples to the streaming TTS player.
+   */
+  override fun writeTtsPcmChunk(samples: ReadableArray, promise: Promise) {
+    val track = ttsPcmTrack
+    if (track == null) {
+      promise.reject("TTS_PCM_ERROR", "PCM player not initialized")
+      return
+    }
+
+    try {
+      val buffer = FloatArray(samples.size())
+      for (i in 0 until samples.size()) {
+        buffer[i] = samples.getDouble(i).toFloat()
+      }
+
+      val written = track.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
+      if (written < 0) {
+        promise.reject("TTS_PCM_ERROR", "PCM write failed: $written")
+        return
+      }
+
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("TTS_PCM_ERROR", "Failed to write PCM chunk", e)
+    }
+  }
+
+  /**
+   * Stop PCM playback for streaming TTS.
+   */
+  override fun stopTtsPcmPlayer(promise: Promise) {
+    try {
+      stopPcmPlayerInternal()
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("TTS_PCM_ERROR", "Failed to stop PCM player", e)
+    }
+  }
+
+  private fun stopPcmPlayerInternal() {
+    ttsPcmTrack?.apply {
+      try {
+        stop()
+      } catch (_: IllegalStateException) {
+      }
+      flush()
+      release()
+    }
+    ttsPcmTrack = null
+  }
+
   private fun emitTtsStreamChunk(
     samples: FloatArray,
     sampleRate: Int,
@@ -541,6 +655,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun unloadTts(promise: Promise) {
     try {
+      stopPcmPlayerInternal()
       nativeTtsRelease()
       promise.resolve(null)
     } catch (e: Exception) {

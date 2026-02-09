@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Text,
   View,
@@ -17,6 +17,9 @@ import {
   generateSpeech,
   generateSpeechStream,
   cancelSpeechStream,
+  startTtsPcmPlayer,
+  writeTtsPcmChunk,
+  stopTtsPcmPlayer,
   unloadTTS,
   getModelInfo,
   saveAudioToFile,
@@ -95,6 +98,11 @@ export default function TTSScreen() {
   const streamChunksRef = useRef<number[][]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
   const streamUnsubscribeRef = useRef<(() => void) | null>(null);
+  const streamPlaybackStartedRef = useRef(false);
+  const streamQueueRef = useRef<string[]>([]);
+  const streamInFlightRef = useRef(false);
+  const streamLastTextRef = useRef('');
+  const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
@@ -125,20 +133,190 @@ export default function TTSScreen() {
         streamUnsubscribeRef.current();
         streamUnsubscribeRef.current = null;
       }
+      stopTtsPcmPlayer().catch((err) => {
+        console.warn('Failed to stop PCM player:', err);
+      });
     };
   }, []);
 
-  const resetStreamingState = () => {
+  const resetStreamingState = useCallback((clearBuffer = true) => {
     if (streamUnsubscribeRef.current) {
       streamUnsubscribeRef.current();
       streamUnsubscribeRef.current = null;
     }
-    streamChunksRef.current = [];
-    streamSampleRateRef.current = null;
+    if (clearBuffer) {
+      streamChunksRef.current = [];
+      streamSampleRateRef.current = null;
+      setStreamSampleCount(0);
+    }
+    streamQueueRef.current = [];
+    streamInFlightRef.current = false;
+    streamLastTextRef.current = '';
+    streamPlaybackStartedRef.current = false;
+    stopTtsPcmPlayer().catch((err) => {
+      console.warn('Failed to stop PCM player:', err);
+    });
     setStreamProgress(null);
-    setStreamSampleCount(0);
     setStreaming(false);
+  }, []);
+
+  const buildStreamedAudio = () => {
+    const chunks = streamChunksRef.current;
+    if (chunks.length === 0) {
+      return null;
+    }
+    const total = chunks.reduce((sum, part) => sum + part.length, 0);
+    const combined = new Array<number>(total);
+    let offset = 0;
+    for (const part of chunks) {
+      for (let i = 0; i < part.length; i += 1) {
+        combined[offset + i] = part[i] as number;
+      }
+      offset += part.length;
+    }
+    const sampleRate =
+      streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
+    return { samples: combined, sampleRate };
   };
+
+  const getSynthesisOptions = useCallback(() => {
+    const sid = parseInt(speakerId, 10);
+    const speedValue = parseFloat(speed);
+
+    if (isNaN(sid) || sid < 0) {
+      throw new Error('Invalid speaker ID');
+    }
+
+    if (isNaN(speedValue) || speedValue <= 0) {
+      throw new Error('Invalid speed value');
+    }
+
+    return { sid, speed: speedValue };
+  }, [speakerId, speed]);
+
+  const processStreamQueue = useCallback(async () => {
+    if (!streaming || streamInFlightRef.current) {
+      return;
+    }
+
+    const nextText = streamQueueRef.current.shift();
+    if (!nextText) {
+      return;
+    }
+
+    let options: { sid: number; speed: number };
+    try {
+      options = getSynthesisOptions();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      resetStreamingState(false);
+      return;
+    }
+
+    streamInFlightRef.current = true;
+
+    try {
+      const unsubscribe = await generateSpeechStream(nextText, options, {
+        onChunk: (chunk) => {
+          if (streamSampleRateRef.current === null) {
+            streamSampleRateRef.current = chunk.sampleRate;
+          }
+          if (!streamPlaybackStartedRef.current) {
+            streamPlaybackStartedRef.current = true;
+            startTtsPcmPlayer(chunk.sampleRate, 1).catch((err) => {
+              console.warn('Failed to start PCM player:', err);
+            });
+          }
+          writeTtsPcmChunk(chunk.samples).catch((err) => {
+            console.warn('Failed to write PCM chunk:', err);
+          });
+          streamChunksRef.current.push(chunk.samples);
+          setStreamSampleCount((prev) => prev + chunk.samples.length);
+          setStreamProgress(chunk.progress);
+        },
+        onEnd: () => {
+          streamInFlightRef.current = false;
+          if (streamUnsubscribeRef.current) {
+            streamUnsubscribeRef.current();
+            streamUnsubscribeRef.current = null;
+          }
+          setStreamProgress(null);
+          processStreamQueue().catch((err) => {
+            console.warn('Failed to process stream queue:', err);
+          });
+        },
+        onError: ({ message }) => {
+          setError(message);
+          streamInFlightRef.current = false;
+          if (streamUnsubscribeRef.current) {
+            streamUnsubscribeRef.current();
+            streamUnsubscribeRef.current = null;
+          }
+          resetStreamingState(false);
+        },
+      });
+
+      streamUnsubscribeRef.current = unsubscribe;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      streamInFlightRef.current = false;
+      resetStreamingState(false);
+    }
+  }, [getSynthesisOptions, resetStreamingState, streaming]);
+
+  const enqueueStreamingText = useCallback(
+    (text: string) => {
+      if (!text.trim()) {
+        return;
+      }
+
+      const lastText = streamLastTextRef.current;
+      let delta = text;
+
+      if (text.startsWith(lastText)) {
+        delta = text.slice(lastText.length);
+      }
+
+      if (!delta.trim()) {
+        streamLastTextRef.current = text;
+        return;
+      }
+
+      streamLastTextRef.current = text;
+      streamQueueRef.current.push(delta);
+      processStreamQueue().catch((err) => {
+        console.warn('Failed to process stream queue:', err);
+      });
+    },
+    [processStreamQueue]
+  );
+
+  useEffect(() => {
+    if (!streaming) {
+      if (streamDebounceRef.current) {
+        clearTimeout(streamDebounceRef.current);
+        streamDebounceRef.current = null;
+      }
+      return;
+    }
+
+    if (streamDebounceRef.current) {
+      clearTimeout(streamDebounceRef.current);
+    }
+
+    streamDebounceRef.current = setTimeout(() => {
+      enqueueStreamingText(inputText);
+    }, 400);
+
+    return () => {
+      if (streamDebounceRef.current) {
+        clearTimeout(streamDebounceRef.current);
+        streamDebounceRef.current = null;
+      }
+    };
+  }, [enqueueStreamingText, inputText, streaming]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -185,7 +363,7 @@ export default function TTSScreen() {
     setCachedPlaybackSource(null);
     if (streaming) {
       await cancelSpeechStream();
-      resetStreamingState();
+      resetStreamingState(true);
     }
     if (soundInstance) {
       soundInstance.release();
@@ -301,7 +479,7 @@ export default function TTSScreen() {
     setCachedPlaybackSource(null);
     if (streaming) {
       await cancelSpeechStream();
-      resetStreamingState();
+      resetStreamingState(true);
     }
     if (soundInstance) {
       soundInstance.release();
@@ -368,11 +546,6 @@ export default function TTSScreen() {
       return;
     }
 
-    if (!inputText.trim()) {
-      setError('Please enter text to synthesize');
-      return;
-    }
-
     if (streaming) {
       return;
     }
@@ -382,7 +555,7 @@ export default function TTSScreen() {
     setSavedAudioPath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
-    resetStreamingState();
+    resetStreamingState(true);
     setStreaming(true);
     setStreamProgress(0);
     if (soundInstance) {
@@ -392,59 +565,12 @@ export default function TTSScreen() {
     }
 
     try {
-      const sid = parseInt(speakerId, 10);
-      const speedValue = parseFloat(speed);
-
-      if (isNaN(sid) || sid < 0) {
-        throw new Error('Invalid speaker ID');
-      }
-
-      if (isNaN(speedValue) || speedValue <= 0) {
-        throw new Error('Invalid speed value');
-      }
-
-      const unsubscribe = await generateSpeechStream(
-        inputText,
-        { sid, speed: speedValue },
-        {
-          onChunk: (chunk) => {
-            if (streamSampleRateRef.current === null) {
-              streamSampleRateRef.current = chunk.sampleRate;
-            }
-            streamChunksRef.current.push(chunk.samples);
-            setStreamSampleCount((prev) => prev + chunk.samples.length);
-            setStreamProgress(chunk.progress);
-          },
-          onEnd: ({ cancelled }) => {
-            if (!cancelled) {
-              const chunks = streamChunksRef.current;
-              const total = chunks.reduce((sum, part) => sum + part.length, 0);
-              const combined = new Array<number>(total);
-              let offset = 0;
-              for (const part of chunks) {
-                for (let i = 0; i < part.length; i += 1) {
-                  combined[offset + i] = part[i] as number;
-                }
-                offset += part.length;
-              }
-              const sampleRate =
-                streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-              setGeneratedAudio({ samples: combined, sampleRate });
-            }
-            resetStreamingState();
-          },
-          onError: ({ message }) => {
-            setError(message);
-            resetStreamingState();
-          },
-        }
-      );
-
-      streamUnsubscribeRef.current = unsubscribe;
+      streamLastTextRef.current = '';
+      enqueueStreamingText(inputText);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
-      resetStreamingState();
+      resetStreamingState(true);
     }
   };
 
@@ -457,13 +583,20 @@ export default function TTSScreen() {
     } catch (err) {
       console.warn('Failed to cancel streaming:', err);
     } finally {
-      resetStreamingState();
+      const streamedAudio = buildStreamedAudio();
+      if (streamedAudio) {
+        setGeneratedAudio(streamedAudio);
+      }
+      resetStreamingState(false);
     }
   };
 
-  const handleSaveAudio = async () => {
-    if (!generatedAudio) {
-      Alert.alert('Error', 'No audio to save. Generate speech first.');
+  const saveAudioWithData = async (audio: {
+    samples: number[];
+    sampleRate: number;
+  }) => {
+    if (!audio.samples.length) {
+      Alert.alert('Error', 'No audio to save.');
       return;
     }
 
@@ -494,7 +627,7 @@ export default function TTSScreen() {
 
       if (directoryUri) {
         const savedUri = await saveAudioToContentUri(
-          generatedAudio,
+          audio,
           directoryUri,
           filename
         );
@@ -528,7 +661,7 @@ export default function TTSScreen() {
       const filePath = `${directoryPath}/${filename}`;
 
       // Save audio to file
-      const savedPath = await saveAudioToFile(generatedAudio, filePath);
+      const savedPath = await saveAudioToFile(audio, filePath);
       setSavedAudioPath(savedPath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
@@ -547,6 +680,14 @@ export default function TTSScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveAudio = async () => {
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to save. Generate speech first.');
+      return;
+    }
+    await saveAudioWithData(generatedAudio);
   };
 
   const handleSaveTemporary = async () => {
@@ -707,7 +848,7 @@ export default function TTSScreen() {
     try {
       if (streaming) {
         await cancelSpeechStream();
-        resetStreamingState();
+        resetStreamingState(true);
       }
       if (soundInstance) {
         soundInstance.release();

@@ -168,6 +168,30 @@ export function cancelSpeechStream(): Promise<void> {
 }
 
 /**
+ * Start PCM playback for streaming TTS.
+ */
+export function startTtsPcmPlayer(
+  sampleRate: number,
+  channels: number
+): Promise<void> {
+  return SherpaOnnx.startTtsPcmPlayer(sampleRate, channels);
+}
+
+/**
+ * Write PCM samples to the streaming TTS player.
+ */
+export function writeTtsPcmChunk(samples: number[]): Promise<void> {
+  return SherpaOnnx.writeTtsPcmChunk(samples);
+}
+
+/**
+ * Stop PCM playback for streaming TTS.
+ */
+export function stopTtsPcmPlayer(): Promise<void> {
+  return SherpaOnnx.stopTtsPcmPlayer();
+}
+
+/**
  * Get TTS model information.
  *
  * Returns the sample rate and number of available speakers/voices.

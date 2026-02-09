@@ -91,6 +91,24 @@ export interface Spec extends TurboModule {
   cancelTtsStream(): Promise<void>;
 
   /**
+   * Start PCM playback for streaming TTS.
+   * @param sampleRate - Sample rate in Hz
+   * @param channels - Number of channels (1 = mono)
+   */
+  startTtsPcmPlayer(sampleRate: number, channels: number): Promise<void>;
+
+  /**
+   * Write PCM samples to the streaming TTS player.
+   * @param samples - Float PCM samples in range [-1.0, 1.0]
+   */
+  writeTtsPcmChunk(samples: number[]): Promise<void>;
+
+  /**
+   * Stop PCM playback for streaming TTS.
+   */
+  stopTtsPcmPlayer(): Promise<void>;
+
+  /**
    * Get the sample rate of the initialized TTS model.
    * @returns Sample rate in Hz
    */

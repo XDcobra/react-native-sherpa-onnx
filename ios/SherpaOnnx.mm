@@ -2,6 +2,7 @@
 #import <React/RCTUtils.h>
 #import <React/RCTLog.h>
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import "sherpa-onnx-wrapper.h"
 #import <memory>
 #import <optional>
@@ -189,6 +190,9 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
 static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
 static std::atomic<bool> g_tts_stream_running{false};
 static std::atomic<bool> g_tts_stream_cancelled{false};
+static AVAudioEngine *g_tts_engine = nil;
+static AVAudioPlayerNode *g_tts_player = nil;
+static AVAudioFormat *g_tts_format = nil;
 
 - (void)initializeSherpaOnnx:(NSString *)modelDir
                 preferInt8:(NSNumber *)preferInt8
@@ -551,6 +555,98 @@ static std::atomic<bool> g_tts_stream_cancelled{false};
     }
 }
 
+- (void)startTtsPcmPlayer:(double)sampleRate
+                 channels:(double)channels
+             withResolver:(RCTPromiseResolveBlock)resolve
+             withRejecter:(RCTPromiseRejectBlock)reject
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            if (channels != 1.0) {
+                reject(@"TTS_PCM_ERROR", @"PCM playback supports mono only", nil);
+                return;
+            }
+            [self stopTtsPcmPlayer:^(__unused id result) {}
+                       withRejecter:^(__unused NSString *code, __unused NSString *message, __unused NSError *error) {}];
+
+            AVAudioSession *session = [AVAudioSession sharedInstance];
+            [session setCategory:AVAudioSessionCategoryPlayback error:nil];
+            [session setActive:YES error:nil];
+
+            g_tts_engine = [[AVAudioEngine alloc] init];
+            g_tts_player = [[AVAudioPlayerNode alloc] init];
+
+            g_tts_format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
+
+            [g_tts_engine attachNode:g_tts_player];
+            [g_tts_engine connect:g_tts_player to:g_tts_engine.mainMixerNode format:g_tts_format];
+
+            NSError *startError = nil;
+            if (![g_tts_engine startAndReturnError:&startError]) {
+                NSString *errorMsg = [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription];
+                reject(@"TTS_PCM_ERROR", errorMsg, startError);
+                return;
+            }
+
+            [g_tts_player play];
+            resolve(nil);
+        } @catch (NSException *exception) {
+            NSString *errorMsg = [NSString stringWithFormat:@"Failed to start PCM player: %@", exception.reason];
+            reject(@"TTS_PCM_ERROR", errorMsg, nil);
+        }
+    });
+}
+
+- (void)writeTtsPcmChunk:(NSArray<NSNumber *> *)samples
+            withResolver:(RCTPromiseResolveBlock)resolve
+            withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (g_tts_engine == nil || g_tts_player == nil || g_tts_format == nil) {
+            reject(@"TTS_PCM_ERROR", @"PCM player not initialized", nil);
+            return;
+        }
+
+        AVAudioFrameCount frameCount = (AVAudioFrameCount)[samples count];
+        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:g_tts_format frameCapacity:frameCount];
+        buffer.frameLength = frameCount;
+
+        float *channelData = buffer.floatChannelData[0];
+        for (NSUInteger i = 0; i < [samples count]; i++) {
+            channelData[i] = [samples[i] floatValue];
+        }
+
+        [g_tts_player scheduleBuffer:buffer completionHandler:nil];
+        resolve(nil);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Failed to write PCM chunk: %@", exception.reason];
+        reject(@"TTS_PCM_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)stopTtsPcmPlayer:(RCTPromiseResolveBlock)resolve
+            withRejecter:(RCTPromiseRejectBlock)reject
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            if (g_tts_player != nil) {
+                [g_tts_player stop];
+            }
+            if (g_tts_engine != nil) {
+                [g_tts_engine stop];
+                [g_tts_engine reset];
+            }
+            g_tts_player = nil;
+            g_tts_engine = nil;
+            g_tts_format = nil;
+            resolve(nil);
+        } @catch (NSException *exception) {
+            NSString *errorMsg = [NSString stringWithFormat:@"Failed to stop PCM player: %@", exception.reason];
+            reject(@"TTS_PCM_ERROR", errorMsg, nil);
+        }
+    });
+}
+
 - (void)getTtsSampleRate:(RCTPromiseResolveBlock)resolve
             withRejecter:(RCTPromiseRejectBlock)reject
 {
@@ -591,6 +687,8 @@ static std::atomic<bool> g_tts_stream_cancelled{false};
      withRejecter:(RCTPromiseRejectBlock)reject
 {
     @try {
+        [self stopTtsPcmPlayer:^(__unused id result) {}
+               withRejecter:^(__unused NSString *code, __unused NSString *message, __unused NSError *error) {}];
         if (g_tts_wrapper != nullptr) {
             g_tts_wrapper->release();
             g_tts_wrapper.reset();
