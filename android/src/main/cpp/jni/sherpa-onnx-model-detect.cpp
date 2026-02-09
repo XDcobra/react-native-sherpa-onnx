@@ -414,13 +414,44 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         result.detectedModels.push_back({"zipvoice", modelDir});
     }
     if (hasVoicesFile) {
-        result.detectedModels.push_back({"kokoro", modelDir});
-        result.detectedModels.push_back({"kitten", modelDir});
+        // If the directory name clearly hints at one voice backend, prefer that
+        // single candidate. If there's no clear hint, include both kokoro and
+        // kitten as possible detected models so the UI can present the choice.
+        if (isLikelyKitten && !isLikelyKokoro) {
+            result.detectedModels.push_back({"kitten", modelDir});
+        } else if (isLikelyKokoro && !isLikelyKitten) {
+            result.detectedModels.push_back({"kokoro", modelDir});
+        } else {
+            // Ambiguous: suggest both possibilities so the app can let the
+            // user decide. Do not force a single selection here.
+            result.detectedModels.push_back({"kokoro", modelDir});
+            result.detectedModels.push_back({"kitten", modelDir});
+        }
     }
-    if (hasVits && !hasMatcha && !hasZipvoice && !hasVoicesFile) {
-        result.detectedModels.push_back({"vits", modelDir});
-    } else if (hasVits && hasVoicesFile) {
-        result.detectedModels.push_back({"vits", modelDir});
+    // Decide whether to offer VITS as a candidate. If a voices.bin is present
+    // and the directory name clearly hints at kokoro/kitten, prefer the
+    // hinted voice backend(s) and do not add VITS unless the folder also
+    // explicitly hints at VITS or the voices case is ambiguous.
+    if (hasVits) {
+        bool isLikelyVits = modelDirLower.find("vits") != std::string::npos;
+        bool voicesAmbiguous = !isLikelyKitten && !isLikelyKokoro;
+
+        bool addVits = false;
+        if (!hasVoicesFile) {
+            // No voices.bin => VITS is a valid standalone model.
+            addVits = true;
+        } else {
+            // voices.bin exists: only add VITS when folder explicitly
+            // references 'vits' or when the voices backend is ambiguous.
+            if (isLikelyVits || voicesAmbiguous) {
+                addVits = true;
+            }
+        }
+
+        if (addVits) {
+            // Avoid adding VITS multiple times if other checks added it.
+            result.detectedModels.push_back({"vits", modelDir});
+        }
     }
 
     TtsModelKind selected = TtsModelKind::kUnknown;
