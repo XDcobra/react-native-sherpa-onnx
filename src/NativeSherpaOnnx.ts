@@ -3,7 +3,6 @@ import { TurboModuleRegistry, type TurboModule } from 'react-native';
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
-   * Phase 1: Minimal "Hello World" test.
    */
   testSherpaInit(): Promise<string>;
 
@@ -33,9 +32,10 @@ export interface Spec extends TurboModule {
     detectedModels: Array<{ type: string; modelDir: string }>;
   }>;
 
+  // ==================== STT Methods ====================
+
   /**
    * Transcribe an audio file.
-   * Phase 1: Stub implementation.
    */
   transcribeFile(filePath: string): Promise<string>;
 
@@ -167,6 +167,8 @@ export interface Spec extends TurboModule {
    * @param mimeType - MIME type (e.g., audio/wav)
    */
   shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
+
+  // ==================== Helper Methods ====================
 
   /**
    * List all model folders in the assets/models directory.

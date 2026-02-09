@@ -1,142 +1,181 @@
-Gute Frage! Lass mich die wichtigsten TTS-Features von sherpa-onnx mit unserer aktuellen Implementierung vergleichen:
+# Text-to-Speech (TTS)
 
-## ✅ Was wir bereits unterstützen
+This guide covers the offline TTS APIs shipped with this package and practical examples for streaming playback, saving, and low-latency playback.
 
-1. **Model-Initialisierung** - `initializeTTS()`
-2. **Text-to-Speech Generation** - `generateSpeech()`
-3. **WAV-Datei speichern** - `saveAudioToFile()` / `saveAudioToContentUri()`
-4. **Model-Informationen** - `getModelInfo()` (Sample Rate, Num Speakers)
-5. **Ressourcen freigeben** - `unloadTTS()`
-6. **Multi-Speaker Support** - `sid` Parameter in `generateSpeech()`
-7. **Speed Control** - `speed` Parameter in `generateSpeech()`
+## Overview
 
-## ❌ Was sherpa-onnx bietet, wir aber NICHT unterstützen
+The TTS module supports both full-buffer generation (return the entire sample buffer) and streaming generation (emit incremental PCM chunks). Streaming is useful for low-latency playback and interactive UIs.
 
-### 1. **Streaming TTS (Online TTS)**
-```cpp
-// sherpa-onnx bietet auch streaming/chunked generation
-OnlineTts tts = OnlineTts::Create(config);
-tts.GenerateSubtitle(text);  // Gibt Text + Timestamps zurück
+## Quick Start
+
+```typescript
+import { resolveModelPath } from 'react-native-sherpa-onnx';
+import {
+  initializeTTS,
+  generateSpeech,
+  unloadTTS,
+} from 'react-native-sherpa-onnx/tts';
+
+const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
+await initializeTTS({ modelPath, numThreads: 2 });
+
+const audio = await generateSpeech('Hello, world!');
+console.log('sampleRate:', audio.sampleRate, 'samples:', audio.samples.length);
+
+await unloadTTS();
 ```
 
-**Nutzen:** Echtzeit-TTS mit sofortigem Audio-Start (wichtig für lange Texte)
+## Streaming TTS (low-latency)
 
----
+Use streaming mode to receive incremental float PCM chunks and play them immediately.
 
-### 2. **Audio Streaming Callback**
-```cpp
-// Callback während Generation für progressive Wiedergabe
-OfflineTtsGeneratedAudioCallbackWithArg callback;
-config.callback = callback;
+```typescript
+import { generateSpeechStream, cancelSpeechStream } from 'react-native-sherpa-onnx/tts';
+
+const unsubscribe = await generateSpeechStream(
+  'Hello streaming world!',
+  { sid: 0, speed: 1.0 },
+  {
+    onChunk: (chunk) => {
+      // chunk.samples: number[] (Float32 samples)
+      // chunk.sampleRate: number
+      // chunk.progress: 0..1
+      // Best practice: forward chunk.samples immediately to native PCM player
+      // to avoid JS buffering and latency.
+    },
+    onEnd: () => {
+      // Stream finished
+    },
+    onError: ({ message }) => {
+      console.warn('Stream error:', message);
+    },
+  }
+);
+
+// cancel generation if needed
+await cancelSpeechStream();
+unsubscribe();
 ```
 
-**Nutzen:** Audio abspielen während es generiert wird (bessere UX)
+## Live PCM Playback (native player)
 
----
+The library exposes a native PCM player so you can minimize JS roundtrips and play chunks immediately.
 
-### 3. **Subtitle/Timestamp Generation**
-```cpp
-OfflineTtsGeneratedAudio audio = tts->Generate(text);
-// audio enthält auch timestamps für jedes Wort/Phonem
+```typescript
+import { startTtsPcmPlayer, writeTtsPcmChunk, stopTtsPcmPlayer, getTtsSampleRate } from 'react-native-sherpa-onnx/tts';
+
+const sampleRate = await getTtsSampleRate();
+await startTtsPcmPlayer(sampleRate, 1); // mono
+
+// inside onChunk handler from generateSpeechStream:
+// await writeTtsPcmChunk(chunk.samples);
+
+await stopTtsPcmPlayer();
 ```
 
-**Nutzen:** Lippensynchronisation, Karaoke-Style Text-Highlighting
+## API Reference & Practical Notes
 
----
+### `initializeTTS(options)`
 
-### 4. **Batch Generation (Multiple Texts)**
-```cpp
-std::vector<GeneratedAudio> audios = tts->Generate({"Hello", "World", "!"});
+Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory (use `resolveModelPath` for assets).
+
+### `generateSpeech(text, options?)`
+
+Generate speech audio from text. Returns `{ samples: number[]; sampleRate: number }`.
+
+Tips:
+- Check `getTtsSampleRate()` after initialization to know the model's native sample rate.
+- If a model outputs 22050 Hz and your playback path expects 48000 Hz, resample to avoid pitch/tempo mismatch.
+
+### `generateSpeechStream(text, options?, handlers)`
+
+Generate speech audio in streaming mode with `onChunk` callbacks. Handlers should be lightweight; forward audio to native playback quickly.
+
+Best practices and caveats:
+- Chunk sizes vary by model and internal buffer. Avoid heavy CPU work in `onChunk`.
+- Accumulating all chunks in JS for very long sessions can exhaust memory — prefer saving on native or writing to a file incrementally.
+- To stop generation early, call `cancelSpeechStream()`.
+
+### `startTtsPcmPlayer(sampleRate, channels)` / `writeTtsPcmChunk(samples)` / `stopTtsPcmPlayer()`
+
+Important:
+- `writeTtsPcmChunk` expects float PCM samples in [-1.0, 1.0]. Values outside this range will clip.
+- Balance write frequency and chunk size: very small writes increase bridge overhead; very large writes increase latency.
+
+### Persistence (save/share)
+
+Use `saveTtsAudioToFile` to write a WAV file to an absolute path. On Android, prefer `saveTtsAudioToContentUri` when writing to user-selected directories (SAF). After saving to SAF, you can call `copyTtsContentUriToCache` to obtain a local copy for playback or sharing.
+
+Android SAF notes:
+- `saveTtsAudioToContentUri` accepts a directory content URI and filename and returns a content URI for the saved file. Use the returned URI to share or present to the user.
+
+iOS notes:
+- On iOS the native implementation writes into the app container. Use share APIs to export if needed.
+
+## Detailed Example: streaming -> native playback -> optional save
+
+```typescript
+import {
+  resolveModelPath,
+  initializeTTS,
+  generateSpeechStream,
+  cancelSpeechStream,
+  startTtsPcmPlayer,
+  writeTtsPcmChunk,
+  stopTtsPcmPlayer,
+  getTtsSampleRate,
+  saveTtsAudioToFile,
+} from 'react-native-sherpa-onnx/tts';
+
+const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
+await initializeTTS({ modelPath, numThreads: 2 });
+
+const sampleRate = await getTtsSampleRate();
+await startTtsPcmPlayer(sampleRate, 1);
+
+const accumulated: number[] = [];
+
+const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, {
+  onChunk: async (chunk) => {
+    // low-latency play
+    await writeTtsPcmChunk(chunk.samples);
+    // optionally persist to JS buffer (watch memory)
+    accumulated.push(...chunk.samples);
+  },
+  onEnd: async () => {
+    await stopTtsPcmPlayer();
+    // optionally save accumulated audio (beware memory for long sessions)
+    await saveTtsAudioToFile(accumulated, sampleRate, '/data/user/0/.../tts_out.wav');
+  },
+  onError: ({ message }) => console.warn('TTS stream error', message),
+});
+
+// cancel if needed
+// await cancelSpeechStream();
+// unsub();
 ```
 
-**Nutzen:** Effizienter für mehrere kurze Texte
+## Troubleshooting & tuning
 
----
+- Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
+- Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
+- Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
+- Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
 
-### 5. **SSML Support (für manche Modelle)**
-```xml
-<speak>
-  <prosody rate="slow" pitch="+2st">Hello</prosody>
-  <break time="500ms"/>
-  World!
-</speak>
-```
+## Mapping to Native API (`src/NativeSherpaOnnx.ts`)
 
-**Nutzen:** Feinere Kontrolle über Betonung, Pausen, Pitch
+For advanced users the TurboModule exposes native primitives used by the JS wrappers. Key methods:
 
----
+- `initializeTts(modelDir, modelType, numThreads, debug)`
+- `generateTts(text, sid, speed)` — full-buffer generation
+- `generateTtsStream(text, sid, speed)` — streaming generation (emits chunk events)
+- `cancelTtsStream()`
+- `startTtsPcmPlayer(sampleRate, channels)` / `writeTtsPcmChunk(samples)` / `stopTtsPcmPlayer()`
+- `getTtsSampleRate()` / `getTtsNumSpeakers()`
+- `saveTtsAudioToFile(...)` / `saveTtsAudioToContentUri(...)` / `copyTtsContentUriToCache(...)`
 
-### 6. **Speaker Embedding Customization**
-```cpp
-// Für Kokoro/Kitten: Custom speaker embeddings laden
-config.model.kokoro.speaker_embedding = customEmbeddingFile;
-```
+Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
 
-**Nutzen:** Eigene Voice-Clones/Custom Voices
+## Model Setup
 
----
-
-### 7. **Audio Format Control**
-```cpp
-// Aktuell: Nur WAV mit 16-bit PCM
-// Möglich: MP3, OGG, FLAC Export
-```
-
-**Nutzen:** Kleinere Dateien, breitere Kompatibilität
-
----
-
-### 8. **Noise/Length Scale Parameter**
-```cpp
-// Für VITS/Matcha Modelle
-config.model.vits.noise_scale = 0.667;
-config.model.vits.length_scale = 1.0;
-```
-
-**Nutzen:** Audio-Qualität tunen (Natürlichkeit vs. Klarheit)
-
----
-
-### 9. **Real-time Factor (RTF) Messung**
-```cpp
-// Performance-Metrik: Wie schnell vs. Echtzeit
-float rtf = audio.real_time_factor;
-```
-
-**Nutzen:** Performance-Monitoring, Optimierung
-
----
-
-## 🎯 Empfehlungen für nächste Features
-
-**Priorität HOCH (stark nachgefragt):**
-
-1. **Streaming TTS** - Für lange Texte/Echtzeit-Apps
-2. **Subtitle/Timestamps** - Für Lippensync/UI-Highlighting
-3. **Noise/Length Scale** - Für Audio-Qualität-Tuning
-
-**Priorität MITTEL:**
-
-4. **Batch Generation** - Performance-Optimierung
-5. **RTF Messung** - Performance-Monitoring
-6. **Audio Callback** - Progressive Playback
-
-**Priorität NIEDRIG (Nische):**
-
-7. **SSML Support** - Nur für spezielle Use Cases
-8. **Custom Speaker Embeddings** - Voice Cloning (fortgeschritten)
-9. **Andere Audio-Formate** - MP3/OGG Export
-
----
-
-## 📊 Was fehlt am meisten?
-
-Basierend auf typischen TTS-Use-Cases würde ich sagen:
-
-**Top 3 fehlende Features:**
-
-1. **🔴 Streaming/Online TTS** - Game-changer für UX
-2. **🟡 Timestamps/Subtitles** - Wichtig für Sync-Apps
-3. **🟡 Noise/Length Scale** - Audio-Qualität verbessern
-
-Soll ich eines dieser Features implementieren? Ich würde mit **Streaming TTS** oder **Noise/Length Scale Parameter** anfangen, da sie den größten Impact haben.
+See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup steps.
