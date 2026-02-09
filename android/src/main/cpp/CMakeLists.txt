@@ -51,8 +51,11 @@ endif()
 
 # Source files
 set(SOURCES
-    jni/sherpa-onnx-jni.cpp
-    jni/sherpa-onnx-wrapper.cpp
+    jni/sherpa-onnx-stt-jni.cpp
+    jni/sherpa-onnx-tts-jni.cpp
+    jni/sherpa-onnx-model-detect.cpp
+    jni/sherpa-onnx-stt-wrapper.cpp
+    jni/sherpa-onnx-tts-wrapper.cpp
 )
 
 # Create shared library
