@@ -161,8 +161,14 @@ export async function generateSpeechWithTimestamps(
   );
 }
 
-const ttsEventEmitter = new NativeEventEmitter(SherpaOnnx);
+const nativeTtsEventModule =
+  SherpaOnnx &&
+  typeof (SherpaOnnx as any).addListener === 'function' &&
+  typeof (SherpaOnnx as any).removeListeners === 'function'
+    ? (SherpaOnnx as any)
+    : undefined;
 
+const ttsEventEmitter = new NativeEventEmitter(nativeTtsEventModule);
 export type TtsStreamHandlers = {
   onChunk?: (chunk: TtsStreamChunk) => void;
   onEnd?: (event: TtsStreamEnd) => void;
