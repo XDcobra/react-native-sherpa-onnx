@@ -2,6 +2,16 @@
 
 This guide covers the STT APIs for offline transcription.
 
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Model initialization | Supported | `initializeSTT()` |
+| Offline file transcription | Supported | `transcribeFile()` |
+| Unload resources | Supported | `unloadSTT()` |
+| Model discovery helpers | Supported | `listAssetModels()` / `resolveModelPath()` |
+| Streaming/online recognition | Planned | C API supports online recognizers (model-dependent) |
+| Endpointing / VAD-based segmentation | Planned | C API supports endpointing + VAD (model-dependent) |
+| Timestamps (segment/word) | Planned | Model-dependent |
+
 ## Quick Start
 
 ```typescript

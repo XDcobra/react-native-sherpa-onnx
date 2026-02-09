@@ -58,7 +58,23 @@ export interface Spec extends TurboModule {
     modelDir: string,
     modelType: string,
     numThreads: number,
-    debug: boolean
+    debug: boolean,
+    noiseScale?: number,
+    lengthScale?: number
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+  }>;
+
+  /**
+   * Update TTS model parameters by re-initializing with stored config.
+   * @param noiseScale - Optional noise scale override
+   * @param lengthScale - Optional length scale override
+   * @returns Object with success boolean and array of detected models
+   */
+  updateTtsParams(
+    noiseScale?: number | null,
+    lengthScale?: number | null
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;

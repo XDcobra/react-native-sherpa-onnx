@@ -55,7 +55,9 @@ TtsInitializeResult TtsWrapper::initialize(
     const std::string& modelDir,
     const std::string& modelType,
     int32_t numThreads,
-    bool debug
+    bool debug,
+    std::optional<float> noiseScale,
+    std::optional<float> lengthScale
 ) {
     TtsInitializeResult result;
     result.success = false;
@@ -85,12 +87,24 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.vits.model = detect.paths.ttsModel;
                 config.model.vits.tokens = detect.paths.tokens;
                 config.model.vits.data_dir = detect.paths.dataDir;
+                if (noiseScale.has_value()) {
+                    config.model.vits.noise_scale = noiseScale.value();
+                }
+                if (lengthScale.has_value()) {
+                    config.model.vits.length_scale = lengthScale.value();
+                }
                 break;
             case TtsModelKind::kMatcha:
                 config.model.matcha.acoustic_model = detect.paths.acousticModel;
                 config.model.matcha.vocoder = detect.paths.vocoder;
                 config.model.matcha.tokens = detect.paths.tokens;
                 config.model.matcha.data_dir = detect.paths.dataDir;
+                if (noiseScale.has_value()) {
+                    config.model.matcha.noise_scale = noiseScale.value();
+                }
+                if (lengthScale.has_value()) {
+                    config.model.matcha.length_scale = lengthScale.value();
+                }
                 break;
             case TtsModelKind::kKokoro:
                 config.model.kokoro.model = detect.paths.ttsModel;
@@ -100,12 +114,18 @@ TtsInitializeResult TtsWrapper::initialize(
                 if (!detect.paths.lexicon.empty()) {
                     config.model.kokoro.lexicon = detect.paths.lexicon;
                 }
+                if (lengthScale.has_value()) {
+                    config.model.kokoro.length_scale = lengthScale.value();
+                }
                 break;
             case TtsModelKind::kKitten:
                 config.model.kitten.model = detect.paths.ttsModel;
                 config.model.kitten.tokens = detect.paths.tokens;
                 config.model.kitten.data_dir = detect.paths.dataDir;
                 config.model.kitten.voices = detect.paths.voices;
+                if (lengthScale.has_value()) {
+                    config.model.kitten.length_scale = lengthScale.value();
+                }
                 break;
             case TtsModelKind::kZipvoice:
                 config.model.zipvoice.encoder = detect.paths.encoder;

@@ -40,7 +40,9 @@ public:
         const std::string& modelDir,
         const std::string& modelType = "auto",
         int32_t numThreads = 2,
-        bool debug = false
+        bool debug = false,
+        std::optional<float> noiseScale = std::nullopt,
+        std::optional<float> lengthScale = std::nullopt
     );
 
     /**

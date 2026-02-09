@@ -37,6 +37,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private var ttsStreamThread: Thread? = null
   private var ttsPcmTrack: AudioTrack? = null
 
+  private data class TtsInitState(
+    val modelDir: String,
+    val modelType: String,
+    val numThreads: Int,
+    val debug: Boolean,
+    val noiseScale: Double?,
+    val lengthScale: Double?
+  )
+
+  private var ttsInitState: TtsInitState? = null
+
   override fun getName(): String {
     return NAME
   }
@@ -347,6 +358,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelType: String,
     numThreads: Double,
     debug: Boolean,
+    noiseScale: Double?,
+    lengthScale: Double?,
     promise: Promise
   ) {
     try {
@@ -354,7 +367,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         modelDir,
         modelType,
         numThreads.toInt(),
-        debug
+        debug,
+        noiseScale ?: Double.NaN,
+        lengthScale ?: Double.NaN
       )
       
       if (result == null) {
@@ -382,12 +397,99 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val resultMap = Arguments.createMap()
         resultMap.putBoolean("success", true)
         resultMap.putArray("detectedModels", modelsArray)
+        ttsInitState = TtsInitState(
+          modelDir,
+          modelType,
+          numThreads.toInt(),
+          debug,
+          noiseScale?.takeUnless { it.isNaN() },
+          lengthScale?.takeUnless { it.isNaN() }
+        )
         promise.resolve(resultMap)
       } else {
         promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS")
       }
     } catch (e: Exception) {
       promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS", e)
+    }
+  }
+
+  /**
+   * Update TTS params by re-initializing with stored config.
+   */
+  override fun updateTtsParams(
+    noiseScale: Double?,
+    lengthScale: Double?,
+    promise: Promise
+  ) {
+    if (ttsStreamRunning.get()) {
+      promise.reject("TTS_UPDATE_ERROR", "Cannot update params while streaming")
+      return
+    }
+
+    val state = ttsInitState
+    if (state == null) {
+      promise.reject("TTS_UPDATE_ERROR", "TTS not initialized")
+      return
+    }
+
+    val nextNoiseScale = when {
+      noiseScale == null -> null
+      noiseScale.isNaN() -> state.noiseScale
+      else -> noiseScale
+    }
+    val nextLengthScale = when {
+      lengthScale == null -> null
+      lengthScale.isNaN() -> state.lengthScale
+      else -> lengthScale
+    }
+
+    try {
+      val result = nativeTtsInitialize(
+        state.modelDir,
+        state.modelType,
+        state.numThreads,
+        state.debug,
+        nextNoiseScale ?: Double.NaN,
+        nextLengthScale ?: Double.NaN
+      )
+
+      if (result == null) {
+        promise.reject("TTS_UPDATE_ERROR", "Failed to update TTS params: native call returned null")
+        return
+      }
+
+      val success = result["success"] as? Boolean ?: false
+      if (!success) {
+        promise.reject("TTS_UPDATE_ERROR", "Failed to update TTS params")
+        return
+      }
+
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+      val modelsArray = Arguments.createArray()
+      detectedModels?.forEach { modelObj ->
+        if (modelObj is HashMap<*, *>) {
+          val modelMap = Arguments.createMap()
+          modelMap.putString("type", modelObj["type"] as? String ?: "")
+          modelMap.putString("modelDir", modelObj["modelDir"] as? String ?: "")
+          modelsArray.pushMap(modelMap)
+        }
+      }
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", true)
+      resultMap.putArray("detectedModels", modelsArray)
+      ttsInitState = TtsInitState(
+        state.modelDir,
+        state.modelType,
+        state.numThreads,
+        state.debug,
+        nextNoiseScale,
+        nextLengthScale
+      )
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      promise.reject("TTS_UPDATE_ERROR", "Failed to update TTS params", e)
     }
   }
 
@@ -710,6 +812,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       stopPcmPlayerInternal()
       nativeTtsRelease()
+      ttsInitState = null
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
@@ -1066,7 +1169,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       modelType: String,
       numThreads: Int,
-      debug: Boolean
+      debug: Boolean,
+      noiseScale: Double,
+      lengthScale: Double
     ): java.util.HashMap<String, Any>?
 
     @JvmStatic

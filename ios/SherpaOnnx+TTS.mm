@@ -18,6 +18,12 @@ static std::atomic<bool> g_tts_stream_cancelled{false};
 static AVAudioEngine *g_tts_engine = nil;
 static AVAudioPlayerNode *g_tts_player = nil;
 static AVAudioFormat *g_tts_format = nil;
+static NSString *g_tts_model_dir = nil;
+static NSString *g_tts_model_type = nil;
+static int32_t g_tts_num_threads = 2;
+static BOOL g_tts_debug = NO;
+static NSNumber *g_tts_noise_scale = nil;
+static NSNumber *g_tts_length_scale = nil;
 
 namespace {
 std::vector<std::string> SplitTtsTokens(const std::string &text) {
@@ -40,6 +46,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             modelType:(NSString *)modelType
            numThreads:(double)numThreads
                 debug:(BOOL)debug
+         noiseScale:(NSNumber *)noiseScale
+        lengthScale:(NSNumber *)lengthScale
          withResolver:(RCTPromiseResolveBlock)resolve
          withRejecter:(RCTPromiseRejectBlock)reject
 {
@@ -53,15 +61,33 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         std::string modelDirStr = [modelDir UTF8String];
         std::string modelTypeStr = [modelType UTF8String];
 
+        std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> lengthScaleOpt = std::nullopt;
+        if (noiseScale != nil) {
+            noiseScaleOpt = [noiseScale floatValue];
+        }
+        if (lengthScale != nil) {
+            lengthScaleOpt = [lengthScale floatValue];
+        }
+
         sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
             modelDirStr,
             modelTypeStr,
             static_cast<int32_t>(numThreads),
-            debug
+            debug,
+            noiseScaleOpt,
+            lengthScaleOpt
         );
 
         if (result.success) {
             RCTLogInfo(@"TTS initialization successful");
+
+            g_tts_model_dir = [modelDir copy];
+            g_tts_model_type = [modelType copy];
+            g_tts_num_threads = static_cast<int32_t>(numThreads);
+            g_tts_debug = debug;
+            g_tts_noise_scale = noiseScale ? [noiseScale copy] : nil;
+            g_tts_length_scale = lengthScale ? [lengthScale copy] : nil;
 
             NSMutableArray *detectedModelsArray = [NSMutableArray array];
             for (const auto& model : result.detectedModels) {
@@ -87,6 +113,90 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS init: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_INIT_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)updateTtsParams:(NSNumber *)noiseScale
+            lengthScale:(NSNumber *)lengthScale
+           withResolver:(RCTPromiseResolveBlock)resolve
+           withRejecter:(RCTPromiseRejectBlock)reject
+{
+    if (g_tts_stream_running.load()) {
+        reject(@"TTS_UPDATE_ERROR", @"Cannot update params while streaming", nil);
+        return;
+    }
+
+    if (g_tts_wrapper == nullptr || g_tts_model_dir == nil || g_tts_model_type == nil) {
+        reject(@"TTS_UPDATE_ERROR", @"TTS not initialized", nil);
+        return;
+    }
+
+    NSNumber *nextNoiseScale = nil;
+    if (noiseScale == nil) {
+        nextNoiseScale = nil;
+    } else if (isnan([noiseScale doubleValue])) {
+        nextNoiseScale = g_tts_noise_scale;
+    } else {
+        nextNoiseScale = noiseScale;
+    }
+
+    NSNumber *nextLengthScale = nil;
+    if (lengthScale == nil) {
+        nextLengthScale = nil;
+    } else if (isnan([lengthScale doubleValue])) {
+        nextLengthScale = g_tts_length_scale;
+    } else {
+        nextLengthScale = lengthScale;
+    }
+
+    @try {
+        std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> lengthScaleOpt = std::nullopt;
+        if (nextNoiseScale != nil) {
+            noiseScaleOpt = [nextNoiseScale floatValue];
+        }
+        if (nextLengthScale != nil) {
+            lengthScaleOpt = [nextLengthScale floatValue];
+        }
+
+        sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
+            std::string([g_tts_model_dir UTF8String]),
+            std::string([g_tts_model_type UTF8String]),
+            g_tts_num_threads,
+            g_tts_debug,
+            noiseScaleOpt,
+            lengthScaleOpt
+        );
+
+        if (!result.success) {
+            NSString *errorMsg = @"Failed to update TTS params";
+            RCTLogError(@"%@", errorMsg);
+            reject(@"TTS_UPDATE_ERROR", errorMsg, nil);
+            return;
+        }
+
+        g_tts_noise_scale = nextNoiseScale ? [nextNoiseScale copy] : nil;
+        g_tts_length_scale = nextLengthScale ? [nextLengthScale copy] : nil;
+
+        NSMutableArray *detectedModelsArray = [NSMutableArray array];
+        for (const auto& model : result.detectedModels) {
+            NSDictionary *modelDict = @{
+                @"type": [NSString stringWithUTF8String:model.type.c_str()],
+                @"modelDir": [NSString stringWithUTF8String:model.modelDir.c_str()]
+            };
+            [detectedModelsArray addObject:modelDict];
+        }
+
+        NSDictionary *resultDict = @{
+            @"success": @YES,
+            @"detectedModels": detectedModelsArray
+        };
+
+        resolve(resultDict);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS update: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"TTS_UPDATE_ERROR", errorMsg, nil);
     }
 }
 
@@ -445,6 +555,12 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             g_tts_wrapper.reset();
             g_tts_wrapper = nullptr;
         }
+        g_tts_model_dir = nil;
+        g_tts_model_type = nil;
+        g_tts_num_threads = 2;
+        g_tts_debug = NO;
+        g_tts_noise_scale = nil;
+        g_tts_length_scale = nil;
         RCTLogInfo(@"TTS resources released");
         resolve(nil);
     } @catch (NSException *exception) {

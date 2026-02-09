@@ -1,5 +1,6 @@
 // Include standard library headers first to avoid conflicts with jni.h
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -47,7 +48,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
     jstring modelDir,
     jstring modelType,
     jint numThreads,
-    jboolean debug) {
+    jboolean debug,
+    jdouble noiseScale,
+    jdouble lengthScale) {
     try {
         if (g_tts_wrapper == nullptr) {
             g_tts_wrapper = std::make_unique<TtsWrapper>();
@@ -69,11 +72,22 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         std::string modelDirPath(modelDirStr);
         std::string modelTypePath(modelTypeStr);
 
+        std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> lengthScaleOpt = std::nullopt;
+        if (!std::isnan(noiseScale)) {
+            noiseScaleOpt = static_cast<float>(noiseScale);
+        }
+        if (!std::isnan(lengthScale)) {
+            lengthScaleOpt = static_cast<float>(lengthScale);
+        }
+
         TtsInitializeResult result = g_tts_wrapper->initialize(
             modelDirPath,
             modelTypePath,
             static_cast<int32_t>(numThreads),
-            debug == JNI_TRUE
+            debug == JNI_TRUE,
+            noiseScaleOpt,
+            lengthScaleOpt
         );
 
         env->ReleaseStringUTFChars(modelDir, modelDirStr);

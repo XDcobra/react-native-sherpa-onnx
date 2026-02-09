@@ -2,6 +2,7 @@ import { NativeEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
+  TtsUpdateOptions,
   SynthesisOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
@@ -66,17 +67,23 @@ export async function initializeTTS(
   let modelType: string | undefined;
   let numThreads: number | undefined;
   let debug: boolean | undefined;
+  let noiseScale: number | undefined;
+  let lengthScale: number | undefined;
 
   if (typeof options === 'object' && 'modelPath' in options) {
     modelPath = options.modelPath;
     modelType = options.modelType;
     numThreads = options.numThreads;
     debug = options.debug;
+    noiseScale = options.noiseScale;
+    lengthScale = options.lengthScale;
   } else {
     modelPath = options as InitializeOptions['modelPath'];
     modelType = undefined;
     numThreads = undefined;
     debug = undefined;
+    noiseScale = undefined;
+    lengthScale = undefined;
   }
 
   const resolvedPath = await resolveModelPath(modelPath);
@@ -84,8 +91,25 @@ export async function initializeTTS(
     resolvedPath,
     modelType ?? 'auto',
     numThreads ?? 2,
-    debug ?? false
+    debug ?? false,
+    noiseScale,
+    lengthScale
   );
+}
+
+/**
+ * Update TTS parameters by re-initializing with stored config.
+ */
+export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+}> {
+  const noiseArg =
+    options.noiseScale === undefined ? Number.NaN : options.noiseScale;
+  const lengthArg =
+    options.lengthScale === undefined ? Number.NaN : options.lengthScale;
+
+  return SherpaOnnx.updateTtsParams(noiseArg, lengthArg);
 }
 
 /**

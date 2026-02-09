@@ -2,6 +2,22 @@
 
 This guide covers the offline TTS APIs shipped with this package and practical examples for streaming playback, saving, and low-latency playback.
 
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Model initialization | Supported | `initializeTTS()` |
+| Full-buffer generation | Supported | `generateSpeech()` |
+| Streaming generation | Supported | `generateSpeechStream()` |
+| Native PCM playback | Supported | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
+| Save/share WAV | Supported | `saveTtsAudioToFile()` / `saveTtsAudioToContentUri()` |
+| Timestamps (estimated) | Supported | `generateSpeechWithTimestamps()` |
+| Noise/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
+| Runtime param updates | Supported | `updateTtsParams()` |
+| Batch generation | Planned | C API supports multi-text generation |
+| SSML | Planned | Model-dependent |
+| Real-time factor (RTF) | Planned | Performance metrics |
+| Speaker embedding customization | Planned | Model-dependent |
+| Additional audio formats | Planned | MP3/OGG/FLAC export |
+
 ## Overview
 
 The TTS module supports both full-buffer generation (return the entire sample buffer) and streaming generation (emit incremental PCM chunks). Streaming is useful for low-latency playback and interactive UIs.
@@ -78,6 +94,28 @@ await stopTtsPcmPlayer();
 ### `initializeTTS(options)`
 
 Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory (use `resolveModelPath` for assets).
+
+Noise/Length scale tuning (model-dependent):
+
+```typescript
+await initializeTTS({
+  modelPath,
+  numThreads: 2,
+  noiseScale: 0.667,
+  lengthScale: 1.0,
+});
+```
+
+### `updateTtsParams(options)`
+
+Update TTS parameters at runtime without reloading the model manually. Pass `null` to reset a parameter to the model default; omit a field to keep the current value.
+
+```typescript
+await updateTtsParams({
+  noiseScale: 0.7,
+  lengthScale: null,
+});
+```
 
 ### `generateSpeech(text, options?)`
 
@@ -161,6 +199,7 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
 - Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
 - Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
 - Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
+- Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` can trade naturalness vs. clarity (model-dependent).
 
 ## Mapping to Native API (`src/NativeSherpaOnnx.ts`)
 

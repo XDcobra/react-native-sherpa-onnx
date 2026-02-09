@@ -21,6 +21,7 @@ import {
   startTtsPcmPlayer,
   writeTtsPcmChunk,
   stopTtsPcmPlayer,
+  updateTtsParams,
   unloadTTS,
   getModelInfo,
   saveAudioToFile,
@@ -53,6 +54,8 @@ export default function TTSScreen() {
   const [inputText, setInputText] = useState<string>('Hello, world!');
   const [speakerId, setSpeakerId] = useState<string>('0');
   const [speed, setSpeed] = useState<string>('1.0');
+  const [noiseScale, setNoiseScale] = useState<string>('');
+  const [lengthScale, setLengthScale] = useState<string>('');
   const [generatedAudio, setGeneratedAudio] = useState<{
     samples: number[];
     sampleRate: number;
@@ -114,6 +117,7 @@ export default function TTSScreen() {
   const streamInFlightRef = useRef(false);
   const streamLastTextRef = useRef('');
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
@@ -127,6 +131,60 @@ export default function TTSScreen() {
   useEffect(() => {
     currentModelFolderRef.current = currentModelFolder;
   }, [currentModelFolder]);
+
+  useEffect(() => {
+    if (!currentModelFolder || streaming) {
+      return;
+    }
+
+    if (paramsDebounceRef.current) {
+      clearTimeout(paramsDebounceRef.current);
+    }
+
+    paramsDebounceRef.current = setTimeout(() => {
+      const noiseValue = noiseScale.trim();
+      const lengthValue = lengthScale.trim();
+
+      const nextNoise = noiseValue.length > 0 ? parseFloat(noiseValue) : null;
+      if (
+        noiseValue.length > 0 &&
+        (isNaN(nextNoise as number) || (nextNoise as number) <= 0)
+      ) {
+        setError('Invalid noise scale value');
+        return;
+      }
+
+      const nextLength =
+        lengthValue.length > 0 ? parseFloat(lengthValue) : null;
+      if (
+        lengthValue.length > 0 &&
+        (isNaN(nextLength as number) || (nextLength as number) <= 0)
+      ) {
+        setError('Invalid length scale value');
+        return;
+      }
+
+      if (nextNoise === null && nextLength === null) {
+        return;
+      }
+
+      updateTtsParams({
+        noiseScale: nextNoise,
+        lengthScale: nextLength,
+      }).catch((err) => {
+        const message =
+          err instanceof Error ? err.message : 'Failed to update TTS params';
+        setError(message);
+      });
+    }, 500);
+
+    return () => {
+      if (paramsDebounceRef.current) {
+        clearTimeout(paramsDebounceRef.current);
+        paramsDebounceRef.current = null;
+      }
+    };
+  }, [currentModelFolder, lengthScale, noiseScale, streaming]);
 
   // Cleanup: Release TTS resources when leaving the screen
   useEffect(() => {
@@ -399,11 +457,34 @@ export default function TTSScreen() {
 
       console.log('TTSScreen: Resolved model path:', modelPath);
 
+      const noiseScaleValue = noiseScale.trim();
+      const lengthScaleValue = lengthScale.trim();
+      let noiseScaleNumber: number | undefined;
+      let lengthScaleNumber: number | undefined;
+
+      if (noiseScaleValue.length > 0) {
+        const parsed = parseFloat(noiseScaleValue);
+        if (isNaN(parsed) || parsed <= 0) {
+          throw new Error('Invalid noise scale value');
+        }
+        noiseScaleNumber = parsed;
+      }
+
+      if (lengthScaleValue.length > 0) {
+        const parsed = parseFloat(lengthScaleValue);
+        if (isNaN(parsed) || parsed <= 0) {
+          throw new Error('Invalid length scale value');
+        }
+        lengthScaleNumber = parsed;
+      }
+
       // Initialize new model
       const result = await initializeTTS({
         modelPath,
         numThreads: 2,
         debug: false,
+        noiseScale: noiseScaleNumber,
+        lengthScale: lengthScaleNumber,
       });
 
       if (result.success && result.detectedModels.length > 0) {
@@ -1150,6 +1231,34 @@ export default function TTSScreen() {
             Select a TTS model to load:
           </Text>
 
+          <View style={styles.parameterRow}>
+            <View style={styles.parameterColumn}>
+              <Text style={styles.inputLabel}>Noise Scale (optional):</Text>
+              <TextInput
+                style={styles.parameterInput}
+                value={noiseScale}
+                onChangeText={setNoiseScale}
+                keyboardType="decimal-pad"
+                placeholder="0.667"
+              />
+            </View>
+
+            <View style={styles.parameterColumn}>
+              <Text style={styles.inputLabel}>Length Scale (optional):</Text>
+              <TextInput
+                style={styles.parameterInput}
+                value={lengthScale}
+                onChangeText={setLengthScale}
+                keyboardType="decimal-pad"
+                placeholder="1.0"
+              />
+            </View>
+          </View>
+
+          <Text style={styles.hint}>
+            Noise/Length scale — leave blank to reset to model defaults.
+          </Text>
+          <View style={styles.separator} />
           {loadingModels ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#007AFF" />
@@ -1804,6 +1913,20 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontStyle: 'italic',
     marginTop: 8,
+  },
+  hint: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 4,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#E5E5EA',
+    marginTop: 8,
+    marginBottom: 12,
+    borderRadius: 1,
   },
   errorContainer: {
     backgroundColor: '#FFE5E5',
