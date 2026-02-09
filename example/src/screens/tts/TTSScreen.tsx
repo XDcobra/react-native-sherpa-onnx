@@ -1392,7 +1392,7 @@ export default function TTSScreen() {
                 </View>
               </>
             ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.rowAlignCenter}>
                 <Ionicons
                   name="checkmark-circle"
                   size={16}
@@ -1561,7 +1561,7 @@ export default function TTSScreen() {
                 {saving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.rowAlignCenter}>
                     <Ionicons
                       name="save-outline"
                       size={16}
@@ -1585,7 +1585,7 @@ export default function TTSScreen() {
                 {saving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.rowAlignCenter}>
                     <Ionicons
                       name="folder-outline"
                       size={16}
@@ -1607,9 +1607,7 @@ export default function TTSScreen() {
                     {loadingSound ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <View
-                        style={{ flexDirection: 'row', alignItems: 'center' }}
-                      >
+                      <View style={styles.rowAlignCenter}>
                         <Ionicons
                           name={isPlaying ? 'pause' : 'play'}
                           size={16}
@@ -1627,9 +1625,7 @@ export default function TTSScreen() {
                     style={[styles.audioButton, styles.stopButton]}
                     onPress={handleStopAudio}
                   >
-                    <View
-                      style={{ flexDirection: 'row', alignItems: 'center' }}
-                    >
+                    <View style={styles.rowAlignCenter}>
                       <Ionicons
                         name="stop"
                         size={16}
@@ -1644,9 +1640,7 @@ export default function TTSScreen() {
                     style={[styles.audioButton, styles.shareButton]}
                     onPress={handleShareAudio}
                   >
-                    <View
-                      style={{ flexDirection: 'row', alignItems: 'center' }}
-                    >
+                    <View style={styles.rowAlignCenter}>
                       <Ionicons
                         name="share-social"
                         size={16}
@@ -1738,7 +1732,7 @@ export default function TTSScreen() {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.rowAlignCenter}>
             <Ionicons name="bulb" size={16} style={styles.iconInline} />
             <Text style={styles.footerText}>
               Tip: Models must be placed in assets/models/ directory
@@ -2034,6 +2028,15 @@ const styles = StyleSheet.create({
   },
   iconInline: {
     marginRight: 12,
+  },
+  rowCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowAlignCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   separator: {
     height: 1,

@@ -499,13 +499,7 @@ export default function STTScreen() {
                   style={[styles.sourceChoiceButton, styles.flex1, styles.mr12]}
                   onPress={() => setAudioSourceType('example')}
                 >
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
+                  <View style={styles.rowCenter}>
                     <Ionicons
                       name="folder-outline"
                       size={18}
@@ -520,13 +514,7 @@ export default function STTScreen() {
                   style={[styles.sourceChoiceButton, styles.flex1]}
                   onPress={() => setAudioSourceType('own')}
                 >
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
+                  <View style={styles.rowCenter}>
                     <Ionicons
                       name="musical-notes"
                       size={18}
@@ -620,13 +608,7 @@ export default function STTScreen() {
                 onPress={handlePickLocalFile}
                 disabled={loading}
               >
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
+                <View style={styles.rowCenter}>
                   <Ionicons
                     name="folder-open-outline"
                     size={16}
@@ -645,9 +627,7 @@ export default function STTScreen() {
                     style={[styles.playButton]}
                     onPress={handlePlayAudio}
                   >
-                    <View
-                      style={{ flexDirection: 'row', alignItems: 'center' }}
-                    >
+                    <View style={styles.rowAlignCenter}>
                       <Ionicons
                         name="play"
                         size={16}
@@ -984,6 +964,15 @@ const styles = StyleSheet.create({
   },
   iconInline: {
     marginRight: 8,
+  },
+  rowCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowAlignCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   detectedModelsSection: {
     marginTop: 20,
