@@ -36,6 +36,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 // Global TTS wrapper instance
 static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
 static std::atomic<bool> g_tts_stream_cancelled{false};
+static std::atomic<uint64_t> g_tts_active_stream_id{0};
 
 extern "C" {
 
@@ -376,6 +377,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerate(
         env->DeleteLocalRef(sampleRateKey);
         env->DeleteLocalRef(sampleRateObj);
 
+        // Clean up local class refs
+        env->DeleteLocalRef(integerClass);
+
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeGenerateTts: %s", e.what());
@@ -469,12 +473,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateWithTimestamps(
 
         jobject subtitlesList = env->NewObject(arrayListClass, arrayListInit);
         auto tokens = SplitTtsTokens(textValue);
+        jclass doubleClass = nullptr;
         if (!tokens.empty()) {
             const double totalSeconds = static_cast<double>(result.samples.size()) /
                                         static_cast<double>(result.sampleRate);
             const double perToken = totalSeconds / static_cast<double>(tokens.size());
 
-            jclass doubleClass = env->FindClass("java/lang/Double");
+            doubleClass = env->FindClass("java/lang/Double");
             jmethodID doubleInit = env->GetMethodID(doubleClass, "<init>", "(D)V");
 
             for (size_t i = 0; i < tokens.size(); ++i) {
@@ -518,6 +523,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateWithTimestamps(
         env->DeleteLocalRef(estimatedKey);
         env->DeleteLocalRef(estimatedObj);
 
+        // Clean up local class refs used above
+        env->DeleteLocalRef(booleanClass);
+        env->DeleteLocalRef(arrayListClass);
+        env->DeleteLocalRef(integerClass);
+        if (doubleClass) env->DeleteLocalRef(doubleClass);
+        env->DeleteLocalRef(hashMapClass);
+
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeGenerateTtsWithTimestamps: %s", e.what());
@@ -549,20 +561,20 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateStream(
 
         g_tts_stream_cancelled.store(false);
 
-        jclass moduleClass = env->FindClass("com/sherpaonnx/SherpaOnnxModule");
-        if (moduleClass == nullptr) {
+        jclass moduleClassLocal = env->FindClass("com/sherpaonnx/SherpaOnnxModule");
+        if (moduleClassLocal == nullptr) {
             LOGE("TTS JNI: Failed to find SherpaOnnxModule class");
             env->ReleaseStringUTFChars(text, textStr);
             return JNI_FALSE;
         }
 
         jmethodID onChunk = env->GetStaticMethodID(
-            moduleClass,
+            moduleClassLocal,
             "onTtsStreamChunk",
             "([FIFZ)V"
         );
         jmethodID onError = env->GetStaticMethodID(
-            moduleClass,
+            moduleClassLocal,
             "onTtsStreamError",
             "(Ljava/lang/String;)V"
         );
@@ -570,16 +582,33 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateStream(
         if (onChunk == nullptr) {
             LOGE("TTS JNI: Failed to get onTtsStreamChunk method");
             env->ReleaseStringUTFChars(text, textStr);
-            env->DeleteLocalRef(moduleClass);
+            env->DeleteLocalRef(moduleClassLocal);
             return JNI_FALSE;
         }
 
+        // Make a global ref for the class to be safe if the callback runs on another thread
+        JavaVM *jvm = nullptr;
+        if (env->GetJavaVM(&jvm) != JNI_OK) {
+            LOGE("TTS JNI: Failed to get JavaVM");
+            env->ReleaseStringUTFChars(text, textStr);
+            env->DeleteLocalRef(moduleClassLocal);
+            return JNI_FALSE;
+        }
+
+        jclass moduleClass = reinterpret_cast<jclass>(env->NewGlobalRef(moduleClassLocal));
+        // we can drop the local ref now
+        env->DeleteLocalRef(moduleClassLocal);
+
         const int32_t sampleRate = g_tts_wrapper->getSampleRate();
-        bool ok = g_tts_wrapper->generateStream(
+        auto finalSent = std::make_shared<std::atomic<bool>>(false);
+        const uint64_t streamId = g_tts_active_stream_id.fetch_add(1) + 1;
+        g_tts_active_stream_id.store(streamId);
+        const bool ok = g_tts_wrapper->generateStream(
             std::string(textStr),
             static_cast<int32_t>(sid),
             static_cast<float>(speed),
-            [env, moduleClass, onChunk, sampleRate](
+            streamId,
+            [jvm, moduleClass, onChunk, sampleRate, finalSent, streamId](
                 const float *samples,
                 int32_t numSamples,
                 float progress
@@ -588,29 +617,74 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateStream(
                     return 0;
                 }
 
-                jfloatArray floatArray = env->NewFloatArray(numSamples);
+                JNIEnv *callbackEnv = nullptr;
+                bool attached = false;
+                if (jvm->GetEnv(reinterpret_cast<void **>(&callbackEnv), JNI_VERSION_1_6) != JNI_OK) {
+                    if (jvm->AttachCurrentThread(reinterpret_cast<JNIEnv **>(&callbackEnv), nullptr) != 0) {
+                        // Failed to attach
+                        return 0;
+                    }
+                    attached = true;
+                }
+
+                jfloatArray floatArray = callbackEnv->NewFloatArray(numSamples);
                 if (floatArray == nullptr) {
+                    if (attached) jvm->DetachCurrentThread();
                     return 0;
                 }
-                env->SetFloatArrayRegion(floatArray, 0, numSamples, samples);
+                callbackEnv->SetFloatArrayRegion(floatArray, 0, numSamples, samples);
 
-                env->CallStaticVoidMethod(moduleClass, onChunk, floatArray, sampleRate, progress, JNI_FALSE);
-                env->DeleteLocalRef(floatArray);
+                const bool isFinal = progress >= 0.999f;
+                callbackEnv->CallStaticVoidMethod(
+                    moduleClass,
+                    onChunk,
+                    floatArray,
+                    sampleRate,
+                    progress,
+                    isFinal ? JNI_TRUE : JNI_FALSE
+                );
+                callbackEnv->DeleteLocalRef(floatArray);
+
+                if (isFinal && !finalSent->exchange(true)) {
+                    if (g_tts_wrapper) {
+                        g_tts_wrapper->endStream(streamId);
+                    }
+                }
+
+                if (attached) jvm->DetachCurrentThread();
                 return 1;
             }
         );
 
         env->ReleaseStringUTFChars(text, textStr);
-        env->DeleteLocalRef(moduleClass);
 
         if (!ok && !g_tts_stream_cancelled.load()) {
-            if (onError != nullptr) {
-                jstring errorMsg = env->NewStringUTF("TTS: Streaming generation failed");
-                env->CallStaticVoidMethod(moduleClass, onError, errorMsg);
-                env->DeleteLocalRef(errorMsg);
+            // Ensure we have a JNIEnv for calling the error callback
+            JNIEnv *errEnv = nullptr;
+            bool errAttached = false;
+            if (jvm->GetEnv(reinterpret_cast<void **>(&errEnv), JNI_VERSION_1_6) != JNI_OK) {
+                if (jvm->AttachCurrentThread(reinterpret_cast<JNIEnv **>(&errEnv), nullptr) == 0) {
+                    errAttached = true;
+                } else {
+                    errEnv = nullptr;
+                }
             }
+
+            if (errEnv != nullptr && onError != nullptr) {
+                jstring errorMsg = errEnv->NewStringUTF("TTS: Streaming generation failed");
+                errEnv->CallStaticVoidMethod(moduleClass, onError, errorMsg);
+                errEnv->DeleteLocalRef(errorMsg);
+            }
+
+            if (errAttached) jvm->DetachCurrentThread();
         }
 
+        if (!ok && g_tts_wrapper) {
+            g_tts_wrapper->endStream(streamId);
+        }
+
+        // cleanup global ref
+        env->DeleteGlobalRef(moduleClass);
         return ok ? JNI_TRUE : JNI_FALSE;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeTtsGenerateStream: %s", e.what());
@@ -626,6 +700,10 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsCancelStream(
     JNIEnv * /* env */,
     jobject /* this */) {
     g_tts_stream_cancelled.store(true);
+    if (g_tts_wrapper) {
+        g_tts_wrapper->cancelStream(g_tts_active_stream_id.load());
+    }
+    g_tts_active_stream_id.store(0);
 }
 
 JNIEXPORT jint JNICALL

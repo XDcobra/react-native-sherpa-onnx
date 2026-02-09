@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <sstream>
 #include <sys/stat.h>
 
@@ -35,6 +37,9 @@ public:
     bool initialized = false;
     std::string modelDir;
     std::optional<sherpa_onnx::cxx::OfflineTts> tts;
+    // Hold active stream callbacks to ensure they remain alive while native code may call them
+    std::unordered_map<uint64_t, std::shared_ptr<TtsStreamCallback>> activeStreamCallbacks;
+    std::mutex streamMutex;
 };
 
 TtsWrapper::TtsWrapper() : pImpl(std::make_unique<Impl>()) {
@@ -190,6 +195,7 @@ bool TtsWrapper::generateStream(
     const std::string& text,
     int32_t sid,
     float speed,
+    StreamId streamId,
     const TtsStreamCallback& callback
 ) {
     if (!pImpl->initialized || !pImpl->tts.has_value()) {
@@ -206,7 +212,14 @@ bool TtsWrapper::generateStream(
         LOGI("TTS: Streaming generation for text: %s (sid=%d, speed=%.2f)",
              text.c_str(), sid, speed);
 
-        auto callbackCopy = callback;
+        // Keep a shared_ptr to the callback so it remains valid while native code may call it.
+        std::shared_ptr<TtsStreamCallback> cbPtr = nullptr;
+        if (callback) {
+            cbPtr = std::make_shared<TtsStreamCallback>(callback);
+            std::lock_guard<std::mutex> lock(pImpl->streamMutex);
+            pImpl->activeStreamCallbacks.emplace(streamId, cbPtr);
+        }
+
         auto shim = [](const float *samples, int32_t numSamples, float progress, void *arg) -> int32_t {
             auto *cb = reinterpret_cast<TtsStreamCallback*>(arg);
             if (!cb || !(*cb)) return 0;
@@ -217,8 +230,8 @@ bool TtsWrapper::generateStream(
             text,
             sid,
             speed,
-            callbackCopy ? shim : nullptr,
-            callbackCopy ? &callbackCopy : nullptr
+            cbPtr ? shim : nullptr,
+            cbPtr ? cbPtr.get() : nullptr
         );
 
         return true;
@@ -229,6 +242,18 @@ bool TtsWrapper::generateStream(
         LOGE("TTS: Unknown exception during streaming generation");
         return false;
     }
+}
+
+void TtsWrapper::cancelStream(StreamId streamId) {
+    if (streamId == 0) return;
+    std::lock_guard<std::mutex> lock(pImpl->streamMutex);
+    pImpl->activeStreamCallbacks.erase(streamId);
+}
+
+void TtsWrapper::endStream(StreamId streamId) {
+    if (streamId == 0) return;
+    std::lock_guard<std::mutex> lock(pImpl->streamMutex);
+    pImpl->activeStreamCallbacks.erase(streamId);
 }
 
 int32_t TtsWrapper::getSampleRate() const {
@@ -254,6 +279,11 @@ bool TtsWrapper::isInitialized() const {
 void TtsWrapper::release() {
     if (pImpl->initialized) {
         pImpl->tts.reset();
+        // Clear any stored callbacks to allow them to be freed
+        {
+            std::lock_guard<std::mutex> lock(pImpl->streamMutex);
+            pImpl->activeStreamCallbacks.clear();
+        }
         pImpl->initialized = false;
         pImpl->modelDir.clear();
         LOGI("TTS: Resources released");

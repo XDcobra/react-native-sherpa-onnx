@@ -51,6 +51,8 @@ public:
         int32_t sampleRate;           // Sample rate in Hz
     };
 
+    using StreamId = uint64_t;
+
     using TtsStreamCallback = std::function<int32_t(
         const float *samples,
         int32_t numSamples,
@@ -76,14 +78,25 @@ public:
      * @param sid Speaker ID for multi-speaker models (default: 0)
      * @param speed Speech speed multiplier (default: 1.0)
      * @param callback Callback invoked with partial audio samples
-     * @return true if generation completed, false on error
+     * @return true if generation started, false on error
      */
     bool generateStream(
         const std::string& text,
         int32_t sid,
         float speed,
+        StreamId streamId,
         const TtsStreamCallback& callback
     );
+
+    /**
+     * Cancel a streaming TTS callback and release its resources by ID.
+     */
+    void cancelStream(StreamId streamId);
+
+    /**
+     * Mark a stream as completed and release its resources by ID.
+     */
+    void endStream(StreamId streamId);
 
     /**
      * Save audio samples to a WAV file.
