@@ -107,7 +107,7 @@ export async function resolveModelPath(
  *
  * @example
  * ```typescript
- * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx-core';
+ * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
  *
  * // Get all model folders
  * const models = await listAssetModels();

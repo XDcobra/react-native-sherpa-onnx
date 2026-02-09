@@ -17,9 +17,9 @@ This guide covers the STT APIs for offline transcription.
 ```typescript
 import { resolveModelPath, listAssetModels } from 'react-native-sherpa-onnx';
 import {
-  initializeSherpaOnnx as initializeSTT,
+  initializeSTT,
   transcribeFile,
-  unloadSherpaOnnx as unloadSTT,
+  unloadSTT,
 } from 'react-native-sherpa-onnx/stt';
 
 // 1) Find bundled models (optional)
@@ -75,7 +75,7 @@ const models = await listAssetModels();
 for (const m of models) {
   if (m.hint === 'stt' || m.folder.includes('zipformer') || m.folder.includes('paraformer') || m.folder.includes('whisper')) {
     const path = await resolveModelPath({ type: 'asset', path: `models/${m.folder}` });
-    const r = await initializeSTT(path, true, 'auto');
+    const r = await initializeSTT({ modelPath: path, preferInt8: true, modelType: 'auto' });
     if (r.success) {
       console.log('Loaded', m.folder, r.detectedModels);
       break;
