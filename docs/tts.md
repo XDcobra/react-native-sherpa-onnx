@@ -8,7 +8,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Full-buffer generation | Supported | `generateSpeech()` |
 | Streaming generation | Supported | `generateSpeechStream()` |
 | Native PCM playback | Supported | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
-| Save/share WAV | Supported | `saveTtsAudioToFile()` / `saveTtsAudioToContentUri()` |
+| Save/share WAV | Supported | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Timestamps (estimated) | Supported | `generateSpeechWithTimestamps()` |
 | Noise/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
 | Runtime param updates | Supported | `updateTtsParams()` |
@@ -78,9 +78,9 @@ unsubscribe();
 The library exposes a native PCM player so you can minimize JS roundtrips and play chunks immediately.
 
 ```typescript
-import { startTtsPcmPlayer, writeTtsPcmChunk, stopTtsPcmPlayer, getTtsSampleRate } from 'react-native-sherpa-onnx/tts';
+import { startTtsPcmPlayer, writeTtsPcmChunk, stopTtsPcmPlayer, getSampleRate } from 'react-native-sherpa-onnx/tts';
 
-const sampleRate = await getTtsSampleRate();
+const sampleRate = await getSampleRate();
 await startTtsPcmPlayer(sampleRate, 1); // mono
 
 // inside onChunk handler from generateSpeechStream:

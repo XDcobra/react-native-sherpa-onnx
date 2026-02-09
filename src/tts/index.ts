@@ -161,7 +161,7 @@ export async function generateSpeechWithTimestamps(
   );
 }
 
-const ttsEventEmitter = new NativeEventEmitter();
+const ttsEventEmitter = new NativeEventEmitter(SherpaOnnx);
 
 export type TtsStreamHandlers = {
   onChunk?: (chunk: TtsStreamChunk) => void;
@@ -191,11 +191,17 @@ export async function generateSpeechStream(
     }),
   ];
 
-  await SherpaOnnx.generateTtsStream(
-    text,
-    options?.sid ?? 0,
-    options?.speed ?? 1.0
-  );
+  try {
+    await SherpaOnnx.generateTtsStream(
+      text,
+      options?.sid ?? 0,
+      options?.speed ?? 1.0
+    );
+  } catch (error) {
+    // Clean up listeners if native call fails
+    subscriptions.forEach((sub) => sub.remove());
+    throw error;
+  }
 
   return () => {
     subscriptions.forEach((sub) => sub.remove());

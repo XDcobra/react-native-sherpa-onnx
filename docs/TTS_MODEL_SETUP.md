@@ -190,9 +190,13 @@ models/zipvoice/
 4. **Use in code**:
    ```typescript
    await initializeTTS({
-     modelPath: { type: 'asset', path: 'vits-piper-en_US-lessac-medium' }
+     modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' }
    });
    ```
+
+   > Note: For consistency with Android and with `listAssetModels()`, we recommend
+   > placing all bundled TTS models under a `models/` folder and using asset paths
+   > that start with `models/` (e.g., `models/vits-piper-en_US-lessac-medium`).
 
 ### File System Storage (Alternative)
 
