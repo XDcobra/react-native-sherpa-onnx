@@ -59,6 +59,7 @@ export default function TTSScreen() {
   const [speakerId, setSpeakerId] = useState<string>('0');
   const [speed, setSpeed] = useState<string>('1.0');
   const [noiseScale, setNoiseScale] = useState<string>('');
+  const [noiseScaleW, setNoiseScaleW] = useState<string>('');
   const [lengthScale, setLengthScale] = useState<string>('');
   const [generatedAudio, setGeneratedAudio] = useState<{
     samples: number[];
@@ -147,6 +148,7 @@ export default function TTSScreen() {
 
     paramsDebounceRef.current = setTimeout(() => {
       const noiseValue = noiseScale.trim();
+      const noiseWValue = noiseScaleW.trim();
       const lengthValue = lengthScale.trim();
 
       const nextNoise = noiseValue.length > 0 ? parseFloat(noiseValue) : null;
@@ -155,6 +157,16 @@ export default function TTSScreen() {
         (isNaN(nextNoise as number) || (nextNoise as number) <= 0)
       ) {
         setError('Invalid noise scale value');
+        return;
+      }
+
+      const nextNoiseW =
+        noiseWValue.length > 0 ? parseFloat(noiseWValue) : null;
+      if (
+        noiseWValue.length > 0 &&
+        (isNaN(nextNoiseW as number) || (nextNoiseW as number) <= 0)
+      ) {
+        setError('Invalid noise scale W value');
         return;
       }
 
@@ -168,12 +180,13 @@ export default function TTSScreen() {
         return;
       }
 
-      if (nextNoise === null && nextLength === null) {
+      if (nextNoise === null && nextNoiseW === null && nextLength === null) {
         return;
       }
 
       updateTtsParams({
         noiseScale: nextNoise,
+        noiseScaleW: nextNoiseW,
         lengthScale: nextLength,
       }).catch((err) => {
         const message =
@@ -188,7 +201,7 @@ export default function TTSScreen() {
         paramsDebounceRef.current = null;
       }
     };
-  }, [currentModelFolder, lengthScale, noiseScale, streaming]);
+  }, [currentModelFolder, lengthScale, noiseScale, noiseScaleW, streaming]);
 
   // Cleanup: Release TTS resources when leaving the screen
   useEffect(() => {
@@ -463,8 +476,10 @@ export default function TTSScreen() {
       console.log('TTSScreen: Resolved model path:', modelPath);
 
       const noiseScaleValue = noiseScale.trim();
+      const noiseScaleWValue = noiseScaleW.trim();
       const lengthScaleValue = lengthScale.trim();
       let noiseScaleNumber: number | undefined;
+      let noiseScaleWNumber: number | undefined;
       let lengthScaleNumber: number | undefined;
 
       if (noiseScaleValue.length > 0) {
@@ -473,6 +488,14 @@ export default function TTSScreen() {
           throw new Error('Invalid noise scale value');
         }
         noiseScaleNumber = parsed;
+      }
+
+      if (noiseScaleWValue.length > 0) {
+        const parsed = parseFloat(noiseScaleWValue);
+        if (isNaN(parsed) || parsed <= 0) {
+          throw new Error('Invalid noise scale W value');
+        }
+        noiseScaleWNumber = parsed;
       }
 
       if (lengthScaleValue.length > 0) {
@@ -494,6 +517,7 @@ export default function TTSScreen() {
                 numThreads: 2,
                 debug: false,
                 noiseScale: noiseScaleNumber,
+                noiseScaleW: noiseScaleWNumber,
                 lengthScale: lengthScaleNumber,
               });
               resolve(r);
@@ -513,6 +537,7 @@ export default function TTSScreen() {
           numThreads: 1,
           debug: false,
           noiseScale: noiseScaleNumber,
+          noiseScaleW: noiseScaleWNumber,
           lengthScale: lengthScaleNumber,
         });
       }
@@ -1276,6 +1301,20 @@ export default function TTSScreen() {
             </View>
 
             <View style={styles.parameterColumn}>
+              <Text style={styles.inputLabel}>Noise Scale W (optional):</Text>
+              <TextInput
+                style={styles.parameterInput}
+                value={noiseScaleW}
+                onChangeText={setNoiseScaleW}
+                keyboardType="decimal-pad"
+                placeholder="0.8"
+                placeholderTextColor="#8E8E93"
+              />
+            </View>
+          </View>
+
+          <View style={styles.parameterRow}>
+            <View style={styles.parameterColumn}>
               <Text style={styles.inputLabel}>Length Scale (optional):</Text>
               <TextInput
                 style={styles.parameterInput}
@@ -1289,7 +1328,7 @@ export default function TTSScreen() {
           </View>
 
           <Text style={styles.hint}>
-            Noise/Length scale — leave blank to reset to model defaults.
+            Noise/Noise W/Length scale — leave blank to reset to model defaults.
           </Text>
           <View style={styles.separator} />
           {loadingModels ? (

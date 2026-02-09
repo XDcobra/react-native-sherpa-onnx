@@ -31,7 +31,10 @@ public:
         const std::string& modelDir,
         const std::string& modelType = "auto",
         int32_t numThreads = 2,
-        bool debug = false
+        bool debug = false,
+        const std::optional<float>& noiseScale = std::nullopt,
+        const std::optional<float>& noiseScaleW = std::nullopt,
+        const std::optional<float>& lengthScale = std::nullopt
     );
 
     struct AudioResult {

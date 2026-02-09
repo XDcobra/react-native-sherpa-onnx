@@ -50,6 +50,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
     jint numThreads,
     jboolean debug,
     jdouble noiseScale,
+    jdouble noiseScaleW,
     jdouble lengthScale) {
     try {
         if (g_tts_wrapper == nullptr) {
@@ -73,9 +74,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         std::string modelTypePath(modelTypeStr);
 
         std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> noiseScaleWOpt = std::nullopt;
         std::optional<float> lengthScaleOpt = std::nullopt;
         if (!std::isnan(noiseScale)) {
             noiseScaleOpt = static_cast<float>(noiseScale);
+        }
+        if (!std::isnan(noiseScaleW)) {
+            noiseScaleWOpt = static_cast<float>(noiseScaleW);
         }
         if (!std::isnan(lengthScale)) {
             lengthScaleOpt = static_cast<float>(lengthScale);
@@ -87,6 +92,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
             static_cast<int32_t>(numThreads),
             debug == JNI_TRUE,
             noiseScaleOpt,
+            noiseScaleWOpt,
             lengthScaleOpt
         );
 

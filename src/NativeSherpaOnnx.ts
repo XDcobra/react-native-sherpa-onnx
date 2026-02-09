@@ -60,6 +60,7 @@ export interface Spec extends TurboModule {
     numThreads: number,
     debug: boolean,
     noiseScale?: number,
+    noiseScaleW?: number,
     lengthScale?: number
   ): Promise<{
     success: boolean;
@@ -69,11 +70,13 @@ export interface Spec extends TurboModule {
   /**
    * Update TTS model parameters by re-initializing with stored config.
    * @param noiseScale - Optional noise scale override
+   * @param noiseScaleW - Optional noise scale W override
    * @param lengthScale - Optional length scale override
    * @returns Object with success boolean and array of detected models
    */
   updateTtsParams(
     noiseScale?: number | null,
+    noiseScaleW?: number | null,
     lengthScale?: number | null
   ): Promise<{
     success: boolean;

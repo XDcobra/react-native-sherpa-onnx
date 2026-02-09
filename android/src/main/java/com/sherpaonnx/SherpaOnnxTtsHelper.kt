@@ -33,6 +33,7 @@ internal class SherpaOnnxTtsHelper(
       numThreads: Int,
       debug: Boolean,
       noiseScale: Double,
+      noiseScaleW: Double,
       lengthScale: Double
     ): HashMap<String, Any>?
 
@@ -59,6 +60,7 @@ internal class SherpaOnnxTtsHelper(
     val numThreads: Int,
     val debug: Boolean,
     val noiseScale: Double?,
+    val noiseScaleW: Double?,
     val lengthScale: Double?
   )
 
@@ -74,6 +76,7 @@ internal class SherpaOnnxTtsHelper(
     numThreads: Double,
     debug: Boolean,
     noiseScale: Double?,
+    noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
@@ -84,6 +87,7 @@ internal class SherpaOnnxTtsHelper(
         numThreads.toInt(),
         debug,
         noiseScale ?: Double.NaN,
+        noiseScaleW ?: Double.NaN,
         lengthScale ?: Double.NaN
       )
 
@@ -116,6 +120,7 @@ internal class SherpaOnnxTtsHelper(
           numThreads.toInt(),
           debug,
           noiseScale?.takeUnless { it.isNaN() },
+          noiseScaleW?.takeUnless { it.isNaN() },
           lengthScale?.takeUnless { it.isNaN() }
         )
         promise.resolve(resultMap)
@@ -129,6 +134,7 @@ internal class SherpaOnnxTtsHelper(
 
   fun updateTtsParams(
     noiseScale: Double?,
+    noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
@@ -148,6 +154,11 @@ internal class SherpaOnnxTtsHelper(
       noiseScale.isNaN() -> state.noiseScale
       else -> noiseScale
     }
+    val nextNoiseScaleW = when {
+      noiseScaleW == null -> null
+      noiseScaleW.isNaN() -> state.noiseScaleW
+      else -> noiseScaleW
+    }
     val nextLengthScale = when {
       lengthScale == null -> null
       lengthScale.isNaN() -> state.lengthScale
@@ -161,6 +172,7 @@ internal class SherpaOnnxTtsHelper(
         state.numThreads,
         state.debug,
         nextNoiseScale ?: Double.NaN,
+        nextNoiseScaleW ?: Double.NaN,
         nextLengthScale ?: Double.NaN
       )
 
@@ -195,6 +207,7 @@ internal class SherpaOnnxTtsHelper(
         state.numThreads,
         state.debug,
         nextNoiseScale,
+        nextNoiseScaleW,
         nextLengthScale
       )
       promise.resolve(resultMap)

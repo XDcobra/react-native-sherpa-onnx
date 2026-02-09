@@ -23,6 +23,7 @@ static NSString *g_tts_model_type = nil;
 static int32_t g_tts_num_threads = 2;
 static BOOL g_tts_debug = NO;
 static NSNumber *g_tts_noise_scale = nil;
+static NSNumber *g_tts_noise_scale_w = nil;
 static NSNumber *g_tts_length_scale = nil;
 
 namespace {
@@ -47,6 +48,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
            numThreads:(double)numThreads
                 debug:(BOOL)debug
          noiseScale:(NSNumber *)noiseScale
+    noiseScaleW:(NSNumber *)noiseScaleW
         lengthScale:(NSNumber *)lengthScale
          withResolver:(RCTPromiseResolveBlock)resolve
          withRejecter:(RCTPromiseRejectBlock)reject
@@ -62,9 +64,13 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         std::string modelTypeStr = [modelType UTF8String];
 
         std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> noiseScaleWOpt = std::nullopt;
         std::optional<float> lengthScaleOpt = std::nullopt;
         if (noiseScale != nil) {
             noiseScaleOpt = [noiseScale floatValue];
+        }
+        if (noiseScaleW != nil) {
+            noiseScaleWOpt = [noiseScaleW floatValue];
         }
         if (lengthScale != nil) {
             lengthScaleOpt = [lengthScale floatValue];
@@ -76,6 +82,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             static_cast<int32_t>(numThreads),
             debug,
             noiseScaleOpt,
+            noiseScaleWOpt,
             lengthScaleOpt
         );
 
@@ -87,6 +94,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             g_tts_num_threads = static_cast<int32_t>(numThreads);
             g_tts_debug = debug;
             g_tts_noise_scale = noiseScale ? [noiseScale copy] : nil;
+            g_tts_noise_scale_w = noiseScaleW ? [noiseScaleW copy] : nil;
             g_tts_length_scale = lengthScale ? [lengthScale copy] : nil;
 
             NSMutableArray *detectedModelsArray = [NSMutableArray array];
@@ -117,6 +125,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)updateTtsParams:(NSNumber *)noiseScale
+            noiseScaleW:(NSNumber *)noiseScaleW
             lengthScale:(NSNumber *)lengthScale
            withResolver:(RCTPromiseResolveBlock)resolve
            withRejecter:(RCTPromiseRejectBlock)reject
@@ -140,6 +149,15 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         nextNoiseScale = noiseScale;
     }
 
+    NSNumber *nextNoiseScaleW = nil;
+    if (noiseScaleW == nil) {
+        nextNoiseScaleW = nil;
+    } else if (isnan([noiseScaleW doubleValue])) {
+        nextNoiseScaleW = g_tts_noise_scale_w;
+    } else {
+        nextNoiseScaleW = noiseScaleW;
+    }
+
     NSNumber *nextLengthScale = nil;
     if (lengthScale == nil) {
         nextLengthScale = nil;
@@ -151,9 +169,13 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
     @try {
         std::optional<float> noiseScaleOpt = std::nullopt;
+        std::optional<float> noiseScaleWOpt = std::nullopt;
         std::optional<float> lengthScaleOpt = std::nullopt;
         if (nextNoiseScale != nil) {
             noiseScaleOpt = [nextNoiseScale floatValue];
+        }
+        if (nextNoiseScaleW != nil) {
+            noiseScaleWOpt = [nextNoiseScaleW floatValue];
         }
         if (nextLengthScale != nil) {
             lengthScaleOpt = [nextLengthScale floatValue];
@@ -165,6 +187,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             g_tts_num_threads,
             g_tts_debug,
             noiseScaleOpt,
+            noiseScaleWOpt,
             lengthScaleOpt
         );
 
@@ -176,6 +199,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         }
 
         g_tts_noise_scale = nextNoiseScale ? [nextNoiseScale copy] : nil;
+        g_tts_noise_scale_w = nextNoiseScaleW ? [nextNoiseScaleW copy] : nil;
         g_tts_length_scale = nextLengthScale ? [nextLengthScale copy] : nil;
 
         NSMutableArray *detectedModelsArray = [NSMutableArray array];

@@ -42,6 +42,7 @@ public:
         int32_t numThreads = 2,
         bool debug = false,
         std::optional<float> noiseScale = std::nullopt,
+        std::optional<float> noiseScaleW = std::nullopt,
         std::optional<float> lengthScale = std::nullopt
     );
 

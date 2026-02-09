@@ -10,7 +10,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Native PCM playback | Supported | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
 | Save/share WAV | Supported | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Timestamps (estimated) | Supported | `generateSpeechWithTimestamps()` |
-| Noise/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
+| Noise/Noise W/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
 | Runtime param updates | Supported | `updateTtsParams()` |
 | Batch generation | Planned | C API supports multi-text generation |
 | SSML | Planned | Model-dependent |
@@ -95,13 +95,14 @@ await stopTtsPcmPlayer();
 
 Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory (use `resolveModelPath` for assets).
 
-Noise/Length scale tuning (model-dependent):
+Noise/Noise W/Length scale tuning (model-dependent):
 
 ```typescript
 await initializeTTS({
   modelPath,
   numThreads: 2,
   noiseScale: 0.667,
+  noiseScaleW: 0.8,
   lengthScale: 1.0,
 });
 ```
@@ -113,6 +114,7 @@ Update TTS parameters at runtime without reloading the model manually. Pass `nul
 ```typescript
 await updateTtsParams({
   noiseScale: 0.7,
+  noiseScaleW: 0.8,
   lengthScale: null,
 });
 ```
@@ -199,13 +201,13 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
 - Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
 - Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
 - Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
-- Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` can trade naturalness vs. clarity (model-dependent).
+- Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` and `noiseScaleW` can trade naturalness vs. clarity (model-dependent).
 
 ## Mapping to Native API (`src/NativeSherpaOnnx.ts`)
 
 For advanced users the TurboModule exposes native primitives used by the JS wrappers. Key methods:
 
-- `initializeTts(modelDir, modelType, numThreads, debug)`
+- `initializeTts(modelDir, modelType, numThreads, debug, noiseScale, noiseScaleW, lengthScale)`
 - `generateTts(text, sid, speed)` — full-buffer generation
 - `generateTtsStream(text, sid, speed)` — streaming generation (emits chunk events)
 - `cancelTtsStream()`

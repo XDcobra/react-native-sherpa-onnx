@@ -48,9 +48,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         numThreads: Int,
         debug: Boolean,
         noiseScale: Double,
+        noiseScaleW: Double,
         lengthScale: Double
       ): HashMap<String, Any>? {
-        return Companion.nativeTtsInitialize(modelDir, modelType, numThreads, debug, noiseScale, lengthScale)
+        return Companion.nativeTtsInitialize(
+          modelDir,
+          modelType,
+          numThreads,
+          debug,
+          noiseScale,
+          noiseScaleW,
+          lengthScale
+        )
       }
 
       override fun nativeTtsGenerate(text: String, sid: Int, speed: Float): HashMap<String, Any>? {
@@ -163,10 +172,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     numThreads: Double,
     debug: Boolean,
     noiseScale: Double?,
+    noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
-    ttsHelper.initializeTts(modelDir, modelType, numThreads, debug, noiseScale, lengthScale, promise)
+    ttsHelper.initializeTts(
+      modelDir,
+      modelType,
+      numThreads,
+      debug,
+      noiseScale,
+      noiseScaleW,
+      lengthScale,
+      promise
+    )
   }
 
   /**
@@ -174,10 +193,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun updateTtsParams(
     noiseScale: Double?,
+    noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
-    ttsHelper.updateTtsParams(noiseScale, lengthScale, promise)
+    ttsHelper.updateTtsParams(noiseScale, noiseScaleW, lengthScale, promise)
   }
 
   /**
@@ -416,6 +436,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       numThreads: Int,
       debug: Boolean,
       noiseScale: Double,
+      noiseScaleW: Double,
       lengthScale: Double
     ): java.util.HashMap<String, Any>?
 

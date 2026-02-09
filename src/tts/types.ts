@@ -60,6 +60,13 @@ export interface TTSInitializeOptions {
   noiseScale?: number;
 
   /**
+   * Noise scale W for VITS models.
+   *
+   * If omitted, the model default (or model.json) is used.
+   */
+  noiseScaleW?: number;
+
+  /**
    * Length scale for VITS/Matcha/Kokoro/Kitten models.
    *
    * If omitted, the model default (or model.json) is used.
@@ -75,6 +82,11 @@ export interface TtsUpdateOptions {
    * Noise scale for VITS/Matcha models.
    */
   noiseScale?: number | null;
+
+  /**
+   * Noise scale W for VITS models.
+   */
+  noiseScaleW?: number | null;
 
   /**
    * Length scale for VITS/Matcha/Kokoro/Kitten models.

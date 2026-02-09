@@ -68,6 +68,7 @@ export async function initializeTTS(
   let numThreads: number | undefined;
   let debug: boolean | undefined;
   let noiseScale: number | undefined;
+  let noiseScaleW: number | undefined;
   let lengthScale: number | undefined;
 
   if (typeof options === 'object' && 'modelPath' in options) {
@@ -76,6 +77,7 @@ export async function initializeTTS(
     numThreads = options.numThreads;
     debug = options.debug;
     noiseScale = options.noiseScale;
+    noiseScaleW = options.noiseScaleW;
     lengthScale = options.lengthScale;
   } else {
     modelPath = options as InitializeOptions['modelPath'];
@@ -83,6 +85,7 @@ export async function initializeTTS(
     numThreads = undefined;
     debug = undefined;
     noiseScale = undefined;
+    noiseScaleW = undefined;
     lengthScale = undefined;
   }
 
@@ -93,6 +96,7 @@ export async function initializeTTS(
     numThreads ?? 2,
     debug ?? false,
     noiseScale,
+    noiseScaleW,
     lengthScale
   );
 }
@@ -106,10 +110,12 @@ export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
 }> {
   const noiseArg =
     options.noiseScale === undefined ? Number.NaN : options.noiseScale;
+  const noiseWArg =
+    options.noiseScaleW === undefined ? Number.NaN : options.noiseScaleW;
   const lengthArg =
     options.lengthScale === undefined ? Number.NaN : options.lengthScale;
 
-  return SherpaOnnx.updateTtsParams(noiseArg, lengthArg);
+  return SherpaOnnx.updateTtsParams(noiseArg, noiseWArg, lengthArg);
 }
 
 /**

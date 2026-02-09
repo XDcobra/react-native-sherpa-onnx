@@ -57,6 +57,7 @@ TtsInitializeResult TtsWrapper::initialize(
     int32_t numThreads,
     bool debug,
     std::optional<float> noiseScale,
+    std::optional<float> noiseScaleW,
     std::optional<float> lengthScale
 ) {
     TtsInitializeResult result;
@@ -89,6 +90,9 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.vits.data_dir = detect.paths.dataDir;
                 if (noiseScale.has_value()) {
                     config.model.vits.noise_scale = noiseScale.value();
+                }
+                if (noiseScaleW.has_value()) {
+                    config.model.vits.noise_scale_w = noiseScaleW.value();
                 }
                 if (lengthScale.has_value()) {
                     config.model.vits.length_scale = lengthScale.value();
