@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <atomic>
 
 // Then include JNI headers
 #include <jni.h>
@@ -21,6 +22,7 @@ static std::unique_ptr<SttWrapper> g_stt_wrapper = nullptr;
 
 // Global TTS wrapper instance
 static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
+static std::atomic<bool> g_tts_stream_cancelled{false};
 
 extern "C" {
 
@@ -754,6 +756,138 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerate(
         LOGE("TTS JNI: Unknown exception in nativeGenerateTts");
         return nullptr;
     }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsGenerateStream(
+    JNIEnv *env,
+    jobject /* this */,
+    jstring text,
+    jint sid,
+    jfloat speed) {
+    try {
+        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+            LOGE("TTS JNI: Not initialized. Call initializeTts() first.");
+            jclass moduleClass = env->FindClass("com/sherpaonnx/SherpaOnnxModule");
+            if (moduleClass != nullptr) {
+                jmethodID onError = env->GetStaticMethodID(
+                    moduleClass,
+                    "onTtsStreamError",
+                    "(Ljava/lang/String;)V"
+                );
+                if (onError != nullptr) {
+                    jstring message = env->NewStringUTF("TTS not initialized. Call initializeTts() first.");
+                    env->CallStaticVoidMethod(moduleClass, onError, message);
+                    env->DeleteLocalRef(message);
+                }
+                env->DeleteLocalRef(moduleClass);
+            }
+            return JNI_FALSE;
+        }
+
+        const char *textStr = env->GetStringUTFChars(text, nullptr);
+        if (textStr == nullptr) {
+            LOGE("TTS JNI: Failed to get text string");
+            return JNI_FALSE;
+        }
+
+        g_tts_stream_cancelled.store(false);
+
+        jclass moduleClass = env->FindClass("com/sherpaonnx/SherpaOnnxModule");
+        if (moduleClass == nullptr) {
+            env->ReleaseStringUTFChars(text, textStr);
+            LOGE("TTS JNI: Failed to find SherpaOnnxModule class");
+            return JNI_FALSE;
+        }
+
+        jmethodID onChunk = env->GetStaticMethodID(
+            moduleClass,
+            "onTtsStreamChunk",
+            "([FIFZ)V"
+        );
+        jmethodID onError = env->GetStaticMethodID(
+            moduleClass,
+            "onTtsStreamError",
+            "(Ljava/lang/String;)V"
+        );
+
+        if (onChunk == nullptr) {
+            env->DeleteLocalRef(moduleClass);
+            env->ReleaseStringUTFChars(text, textStr);
+            LOGE("TTS JNI: Failed to get onTtsStreamChunk method");
+            return JNI_FALSE;
+        }
+
+        const int32_t sampleRate = g_tts_wrapper->getSampleRate();
+        bool ok = g_tts_wrapper->generateStream(
+            std::string(textStr),
+            static_cast<int32_t>(sid),
+            static_cast<float>(speed),
+            [env, moduleClass, onChunk, sampleRate](
+                const float *samples,
+                int32_t numSamples,
+                float progress
+            ) -> int32_t {
+                if (g_tts_stream_cancelled.load()) {
+                    return 0;
+                }
+
+                jfloatArray samplesArray = env->NewFloatArray(numSamples);
+                if (samplesArray == nullptr) {
+                    return 0;
+                }
+
+                env->SetFloatArrayRegion(samplesArray, 0, numSamples, samples);
+                env->CallStaticVoidMethod(
+                    moduleClass,
+                    onChunk,
+                    samplesArray,
+                    sampleRate,
+                    progress,
+                    JNI_FALSE
+                );
+
+                env->DeleteLocalRef(samplesArray);
+
+                if (env->ExceptionCheck()) {
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                    return 0;
+                }
+
+                return g_tts_stream_cancelled.load() ? 0 : 1;
+            }
+        );
+
+        env->ReleaseStringUTFChars(text, textStr);
+        env->DeleteLocalRef(moduleClass);
+
+        if (!ok && !g_tts_stream_cancelled.load()) {
+            LOGE("TTS JNI: Streaming generation failed");
+            jclass errorClass = env->FindClass("com/sherpaonnx/SherpaOnnxModule");
+            if (errorClass != nullptr && onError != nullptr) {
+                jstring message = env->NewStringUTF("TTS streaming generation failed");
+                env->CallStaticVoidMethod(errorClass, onError, message);
+                env->DeleteLocalRef(message);
+                env->DeleteLocalRef(errorClass);
+            }
+        }
+
+        return ok ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception &e) {
+        LOGE("TTS JNI: Exception in nativeTtsGenerateStream: %s", e.what());
+        return JNI_FALSE;
+    } catch (...) {
+        LOGE("TTS JNI: Unknown exception in nativeTtsGenerateStream");
+        return JNI_FALSE;
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsCancelStream(
+    JNIEnv * /* env */,
+    jobject /* this */) {
+    g_tts_stream_cancelled.store(true);
 }
 
 JNIEXPORT jint JNICALL

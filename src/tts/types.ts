@@ -101,6 +101,30 @@ export interface GeneratedAudio {
 }
 
 /**
+ * Streaming chunk event payload for TTS generation.
+ */
+export interface TtsStreamChunk {
+  samples: number[];
+  sampleRate: number;
+  progress: number;
+  isFinal: boolean;
+}
+
+/**
+ * Streaming end event payload.
+ */
+export interface TtsStreamEnd {
+  cancelled: boolean;
+}
+
+/**
+ * Streaming error event payload.
+ */
+export interface TtsStreamError {
+  message: string;
+}
+
+/**
  * Information about TTS model capabilities.
  */
 export interface TTSModelInfo {

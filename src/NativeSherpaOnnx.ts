@@ -78,6 +78,19 @@ export interface Spec extends TurboModule {
   ): Promise<{ samples: number[]; sampleRate: number }>;
 
   /**
+   * Generate speech in streaming mode (emits chunk events).
+   * @param text - Text to convert to speech
+   * @param sid - Speaker ID for multi-speaker models (default: 0)
+   * @param speed - Speech speed multiplier (default: 1.0)
+   */
+  generateTtsStream(text: string, sid: number, speed: number): Promise<void>;
+
+  /**
+   * Cancel an ongoing streaming TTS generation.
+   */
+  cancelTtsStream(): Promise<void>;
+
+  /**
    * Get the sample rate of the initialized TTS model.
    * @returns Sample rate in Hz
    */

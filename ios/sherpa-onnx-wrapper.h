@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include <functional>
 
 namespace sherpaonnx {
 
@@ -110,6 +111,12 @@ public:
         int32_t sampleRate;           // Sample rate in Hz
     };
 
+    using TtsStreamCallback = std::function<int32_t(
+        const float *samples,
+        int32_t numSamples,
+        float progress
+    )>;
+
     /**
      * Generate speech from text.
      * @param text Text to convert to speech
@@ -121,6 +128,21 @@ public:
         const std::string& text,
         int32_t sid = 0,
         float speed = 1.0f
+    );
+
+    /**
+     * Generate speech with streaming callback.
+     * @param text Text to convert to speech
+     * @param sid Speaker ID for multi-speaker models (default: 0)
+     * @param speed Speech speed multiplier (default: 1.0)
+     * @param callback Callback invoked with partial audio samples
+     * @return true if generation completed, false on error
+     */
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback
     );
 
     /**

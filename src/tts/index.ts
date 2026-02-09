@@ -1,9 +1,13 @@
+import { NativeEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
   SynthesisOptions,
   GeneratedAudio,
   TTSModelInfo,
+  TtsStreamChunk,
+  TtsStreamEnd,
+  TtsStreamError,
 } from './types';
 import type { InitializeOptions } from '../types';
 import { resolveModelPath } from '../utils';
@@ -113,6 +117,54 @@ export async function generateSpeech(
   options?: SynthesisOptions
 ): Promise<GeneratedAudio> {
   return SherpaOnnx.generateTts(text, options?.sid ?? 0, options?.speed ?? 1.0);
+}
+
+const ttsEventEmitter = new NativeEventEmitter();
+
+export type TtsStreamHandlers = {
+  onChunk?: (chunk: TtsStreamChunk) => void;
+  onEnd?: (event: TtsStreamEnd) => void;
+  onError?: (event: TtsStreamError) => void;
+};
+
+/**
+ * Generate speech in streaming mode (emits chunk events).
+ *
+ * Returns an unsubscribe function to remove event listeners.
+ */
+export async function generateSpeechStream(
+  text: string,
+  options: SynthesisOptions | undefined,
+  handlers: TtsStreamHandlers
+): Promise<() => void> {
+  const subscriptions = [
+    ttsEventEmitter.addListener('ttsStreamChunk', (event) => {
+      handlers.onChunk?.(event as TtsStreamChunk);
+    }),
+    ttsEventEmitter.addListener('ttsStreamEnd', (event) => {
+      handlers.onEnd?.(event as TtsStreamEnd);
+    }),
+    ttsEventEmitter.addListener('ttsStreamError', (event) => {
+      handlers.onError?.(event as TtsStreamError);
+    }),
+  ];
+
+  await SherpaOnnx.generateTtsStream(
+    text,
+    options?.sid ?? 0,
+    options?.speed ?? 1.0
+  );
+
+  return () => {
+    subscriptions.forEach((sub) => sub.remove());
+  };
+}
+
+/**
+ * Cancel ongoing streaming TTS generation.
+ */
+export function cancelSpeechStream(): Promise<void> {
+  return SherpaOnnx.cancelTtsStream();
 }
 
 /**

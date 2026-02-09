@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initializeTTS,
   generateSpeech,
+  generateSpeechStream,
+  cancelSpeechStream,
   unloadTTS,
   getModelInfo,
   saveAudioToFile,
@@ -51,6 +53,9 @@ export default function TTSScreen() {
     sampleRate: number;
   } | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [streamProgress, setStreamProgress] = useState<number | null>(null);
+  const [streamSampleCount, setStreamSampleCount] = useState(0);
   const [modelInfo, setModelInfo] = useState<{
     sampleRate: number;
     numSpeakers: number;
@@ -87,6 +92,9 @@ export default function TTSScreen() {
   };
   const currentModelFolderRef = useRef<string | null>(null);
   const soundInstanceRef = useRef<Sound | null>(null);
+  const streamChunksRef = useRef<number[][]>([]);
+  const streamSampleRateRef = useRef<number | null>(null);
+  const streamUnsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
@@ -113,8 +121,24 @@ export default function TTSScreen() {
       if (soundInstanceRef.current) {
         soundInstanceRef.current.release();
       }
+      if (streamUnsubscribeRef.current) {
+        streamUnsubscribeRef.current();
+        streamUnsubscribeRef.current = null;
+      }
     };
   }, []);
+
+  const resetStreamingState = () => {
+    if (streamUnsubscribeRef.current) {
+      streamUnsubscribeRef.current();
+      streamUnsubscribeRef.current = null;
+    }
+    streamChunksRef.current = [];
+    streamSampleRateRef.current = null;
+    setStreamProgress(null);
+    setStreamSampleCount(0);
+    setStreaming(false);
+  };
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -159,6 +183,10 @@ export default function TTSScreen() {
     setSavedAudioPath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
+    if (streaming) {
+      await cancelSpeechStream();
+      resetStreamingState();
+    }
     if (soundInstance) {
       soundInstance.release();
       setSoundInstance(null);
@@ -271,6 +299,10 @@ export default function TTSScreen() {
     setSavedAudioPath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
+    if (streaming) {
+      await cancelSpeechStream();
+      resetStreamingState();
+    }
     if (soundInstance) {
       soundInstance.release();
       setSoundInstance(null);
@@ -322,6 +354,110 @@ export default function TTSScreen() {
       setError(errorMessage);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleStartStreaming = async () => {
+    if (!currentModelFolder) {
+      setError('Please initialize a model first');
+      return;
+    }
+
+    if (!selectedModelType) {
+      setError('Please select a model type first');
+      return;
+    }
+
+    if (!inputText.trim()) {
+      setError('Please enter text to synthesize');
+      return;
+    }
+
+    if (streaming) {
+      return;
+    }
+
+    setError(null);
+    setGeneratedAudio(null);
+    setSavedAudioPath(null);
+    setCachedPlaybackPath(null);
+    setCachedPlaybackSource(null);
+    resetStreamingState();
+    setStreaming(true);
+    setStreamProgress(0);
+    if (soundInstance) {
+      soundInstance.release();
+      setSoundInstance(null);
+      setIsPlaying(false);
+    }
+
+    try {
+      const sid = parseInt(speakerId, 10);
+      const speedValue = parseFloat(speed);
+
+      if (isNaN(sid) || sid < 0) {
+        throw new Error('Invalid speaker ID');
+      }
+
+      if (isNaN(speedValue) || speedValue <= 0) {
+        throw new Error('Invalid speed value');
+      }
+
+      const unsubscribe = await generateSpeechStream(
+        inputText,
+        { sid, speed: speedValue },
+        {
+          onChunk: (chunk) => {
+            if (streamSampleRateRef.current === null) {
+              streamSampleRateRef.current = chunk.sampleRate;
+            }
+            streamChunksRef.current.push(chunk.samples);
+            setStreamSampleCount((prev) => prev + chunk.samples.length);
+            setStreamProgress(chunk.progress);
+          },
+          onEnd: ({ cancelled }) => {
+            if (!cancelled) {
+              const chunks = streamChunksRef.current;
+              const total = chunks.reduce((sum, part) => sum + part.length, 0);
+              const combined = new Array<number>(total);
+              let offset = 0;
+              for (const part of chunks) {
+                for (let i = 0; i < part.length; i += 1) {
+                  combined[offset + i] = part[i] as number;
+                }
+                offset += part.length;
+              }
+              const sampleRate =
+                streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
+              setGeneratedAudio({ samples: combined, sampleRate });
+            }
+            resetStreamingState();
+          },
+          onError: ({ message }) => {
+            setError(message);
+            resetStreamingState();
+          },
+        }
+      );
+
+      streamUnsubscribeRef.current = unsubscribe;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      resetStreamingState();
+    }
+  };
+
+  const handleCancelStreaming = async () => {
+    if (!streaming) {
+      return;
+    }
+    try {
+      await cancelSpeechStream();
+    } catch (err) {
+      console.warn('Failed to cancel streaming:', err);
+    } finally {
+      resetStreamingState();
     }
   };
 
@@ -569,6 +705,10 @@ export default function TTSScreen() {
 
   const handleCleanup = async () => {
     try {
+      if (streaming) {
+        await cancelSpeechStream();
+        resetStreamingState();
+      }
       if (soundInstance) {
         soundInstance.release();
         setSoundInstance(null);
@@ -774,6 +914,36 @@ export default function TTSScreen() {
                 <Text style={styles.generateButtonText}>Generate Speech</Text>
               )}
             </TouchableOpacity>
+
+            <View style={styles.streamControls}>
+              <TouchableOpacity
+                style={[
+                  styles.streamButton,
+                  streaming && styles.buttonDisabled,
+                ]}
+                onPress={handleStartStreaming}
+                disabled={streaming}
+              >
+                <Text style={styles.generateButtonText}>Start Streaming</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.cancelStreamButton,
+                  !streaming && styles.buttonDisabled,
+                ]}
+                onPress={handleCancelStreaming}
+                disabled={!streaming}
+              >
+                <Text style={styles.generateButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            {streaming && (
+              <Text style={styles.streamInfoText}>
+                Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
+                {streamSampleCount} samples)
+              </Text>
+            )}
           </View>
         )}
 
@@ -1078,6 +1248,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  streamControls: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  streamButton: {
+    flex: 1,
+    backgroundColor: '#34C759',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  cancelStreamButton: {
+    flex: 1,
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  streamInfoText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   buttonDisabled: {
     opacity: 0.5,

@@ -6,8 +6,15 @@
 #import <memory>
 #import <optional>
 #import <string>
+#include <atomic>
 
 @implementation SherpaOnnx
+
+- (NSArray<NSString *> *)supportedEvents
+{
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError" ];
+}
+
 - (void)resolveModelPath:(NSDictionary *)config
                 withResolver:(RCTPromiseResolveBlock)resolve
                 withRejecter:(RCTPromiseRejectBlock)reject
@@ -180,6 +187,8 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
 
 // Global TTS wrapper instance
 static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
+static std::atomic<bool> g_tts_stream_running{false};
+static std::atomic<bool> g_tts_stream_cancelled{false};
 
 - (void)initializeSherpaOnnx:(NSString *)modelDir
                 preferInt8:(NSNumber *)preferInt8
@@ -441,6 +450,104 @@ static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS generation: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)generateTtsStream:(NSString *)text
+                      sid:(double)sid
+                    speed:(double)speed
+             withResolver:(RCTPromiseResolveBlock)resolve
+             withRejecter:(RCTPromiseRejectBlock)reject
+{
+    if (g_tts_stream_running.load()) {
+        reject(@"TTS_STREAM_ERROR", @"TTS streaming already in progress", nil);
+        return;
+    }
+
+    if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
+        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+
+    g_tts_stream_cancelled.store(false);
+    g_tts_stream_running.store(true);
+
+    std::string textStr = [text UTF8String];
+    int32_t sampleRate = g_tts_wrapper->getSampleRate();
+
+    __weak SherpaOnnx *weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        bool success = false;
+        @try {
+            success = g_tts_wrapper->generateStream(
+                textStr,
+                static_cast<int32_t>(sid),
+                static_cast<float>(speed),
+                [weakSelf, sampleRate](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                    if (g_tts_stream_cancelled.load()) {
+                        return 0;
+                    }
+
+                    NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:numSamples];
+                    for (int32_t i = 0; i < numSamples; i++) {
+                        [samplesArray addObject:@(samples[i])];
+                    }
+
+                    NSDictionary *payload = @{
+                        @"samples": samplesArray,
+                        @"sampleRate": @(sampleRate),
+                        @"progress": @(progress),
+                        @"isFinal": @NO
+                    };
+
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (weakSelf) {
+                            [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                        }
+                    });
+
+                    return g_tts_stream_cancelled.load() ? 0 : 1;
+                }
+            );
+        } @catch (NSException *exception) {
+            NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"message": errorMsg }];
+                }
+            });
+        }
+
+        bool cancelled = g_tts_stream_cancelled.load();
+        if (!success && !cancelled) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"message": @"TTS streaming generation failed" }];
+                }
+            });
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf) {
+                [weakSelf sendEventWithName:@"ttsStreamEnd" body:@{ @"cancelled": @(cancelled) }];
+            }
+        });
+
+        g_tts_stream_running.store(false);
+    });
+
+    resolve(nil);
+}
+
+- (void)cancelTtsStream:(RCTPromiseResolveBlock)resolve
+           withRejecter:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        g_tts_stream_cancelled.store(true);
+        resolve(nil);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Failed to cancel TTS stream: %@", exception.reason];
+        reject(@"TTS_STREAM_ERROR", errorMsg, nil);
     }
 }
 

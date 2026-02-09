@@ -1074,6 +1074,53 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     }
 }
 
+bool TtsWrapper::generateStream(
+    const std::string& text,
+    int32_t sid,
+    float speed,
+    const TtsStreamCallback& callback
+) {
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return false;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return false;
+    }
+
+    try {
+        LOGI("TTS: Streaming generation for text: %s (sid=%d, speed=%.2f)",
+             text.c_str(), sid, speed);
+
+        auto callbackCopy = callback;
+        auto shim = [](const float *samples, int32_t numSamples, float progress, void *arg) -> int32_t {
+            auto *cb = reinterpret_cast<TtsStreamCallback *>(arg);
+            if (cb == nullptr) {
+                return 0;
+            }
+            return (*cb)(samples, numSamples, progress);
+        };
+
+        pImpl->tts.value().Generate(
+            text,
+            sid,
+            speed,
+            callbackCopy ? shim : nullptr,
+            callbackCopy ? &callbackCopy : nullptr
+        );
+
+        return true;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during streaming generation: %s", e.what());
+        return false;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during streaming generation");
+        return false;
+    }
+}
+
 int32_t TtsWrapper::getSampleRate() const {
     if (!pImpl->initialized || !pImpl->tts.has_value()) {
         LOGE("TTS: Not initialized. Call initialize() first.");

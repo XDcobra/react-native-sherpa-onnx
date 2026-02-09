@@ -10,11 +10,13 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -22,7 +24,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   init {
     System.loadLibrary("sherpaonnx")
+    instance = this
   }
+
+  private val ttsStreamRunning = AtomicBoolean(false)
+  private val ttsStreamCancelled = AtomicBoolean(false)
+  private var ttsStreamThread: Thread? = null
 
   override fun getName(): String {
     return NAME
@@ -419,6 +426,93 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Generate speech in streaming mode (emits chunk events).
+   */
+  override fun generateTtsStream(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    if (ttsStreamRunning.get()) {
+      promise.reject("TTS_STREAM_ERROR", "TTS streaming already in progress")
+      return
+    }
+
+    ttsStreamCancelled.set(false)
+    ttsStreamRunning.set(true)
+
+    ttsStreamThread = Thread {
+      var success = false
+      try {
+        success = nativeTtsGenerateStream(text, sid.toInt(), speed.toFloat())
+        if (!success && !ttsStreamCancelled.get()) {
+          emitTtsStreamError("TTS streaming generation failed")
+        }
+      } catch (e: Exception) {
+        emitTtsStreamError("TTS streaming failed: ${e.message}")
+      } finally {
+        emitTtsStreamEnd(ttsStreamCancelled.get())
+        ttsStreamRunning.set(false)
+      }
+    }
+
+    ttsStreamThread?.start()
+    promise.resolve(null)
+  }
+
+  /**
+   * Cancel ongoing streaming TTS.
+   */
+  override fun cancelTtsStream(promise: Promise) {
+    ttsStreamCancelled.set(true)
+    try {
+      nativeTtsCancelStream()
+      ttsStreamThread?.interrupt()
+    } catch (e: Exception) {
+      promise.reject("TTS_STREAM_ERROR", "Failed to cancel TTS stream", e)
+      return
+    }
+    promise.resolve(null)
+  }
+
+  private fun emitTtsStreamChunk(
+    samples: FloatArray,
+    sampleRate: Int,
+    progress: Float,
+    isFinal: Boolean
+  ) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val samplesArray = Arguments.createArray()
+    for (sample in samples) {
+      samplesArray.pushDouble(sample.toDouble())
+    }
+    val payload = Arguments.createMap()
+    payload.putArray("samples", samplesArray)
+    payload.putInt("sampleRate", sampleRate)
+    payload.putDouble("progress", progress.toDouble())
+    payload.putBoolean("isFinal", isFinal)
+    eventEmitter.emit("ttsStreamChunk", payload)
+  }
+
+  private fun emitTtsStreamError(message: String) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("message", message)
+    eventEmitter.emit("ttsStreamError", payload)
+  }
+
+  private fun emitTtsStreamEnd(cancelled: Boolean) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putBoolean("cancelled", cancelled)
+    eventEmitter.emit("ttsStreamEnd", payload)
+  }
+
+  /**
    * Get TTS sample rate.
    */
   override fun getTtsSampleRate(promise: Promise) {
@@ -733,6 +827,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   companion object {
     const val NAME = "SherpaOnnx"
 
+    @Volatile
+    private var instance: SherpaOnnxModule? = null
+
+    @JvmStatic
+    fun onTtsStreamChunk(
+      samples: FloatArray,
+      sampleRate: Int,
+      progress: Float,
+      isFinal: Boolean
+    ) {
+      instance?.emitTtsStreamChunk(samples, sampleRate, progress, isFinal)
+    }
+
+    @JvmStatic
+    fun onTtsStreamError(message: String) {
+      instance?.emitTtsStreamError(message)
+    }
+
+    @JvmStatic
+    fun onTtsStreamEnd(cancelled: Boolean) {
+      instance?.emitTtsStreamEnd(cancelled)
+    }
+
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
@@ -766,6 +883,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       sid: Int,
       speed: Float
     ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTtsGenerateStream(
+      text: String,
+      sid: Int,
+      speed: Float
+    ): Boolean
+
+    @JvmStatic
+    private external fun nativeTtsCancelStream()
 
     @JvmStatic
     private external fun nativeTtsGetSampleRate(): Int
