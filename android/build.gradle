@@ -99,6 +99,8 @@ def kotlin_version = getExtOrDefault("kotlinVersion")
 dependencies {
   implementation "com.facebook.react:react-android"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  implementation "org.apache.commons:commons-compress:1.26.2"
+  implementation "commons-io:commons-io:2.16.1"
   
   // sherpa-onnx prebuilt AAR from JitPack
   // This includes the native .so libraries for all ABIs

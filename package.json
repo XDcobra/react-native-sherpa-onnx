@@ -40,6 +40,11 @@
       "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
     },
+    "./download": {
+      "source": "./src/download/index.ts",
+      "types": "./lib/typescript/src/download/index.d.ts",
+      "default": "./lib/module/download/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

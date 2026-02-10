@@ -4,13 +4,14 @@
  */
 
 #import "SherpaOnnx.h"
+#import "SherpaOnnxArchiveHelper.h"
 #import <React/RCTLog.h>
 
 @implementation SherpaOnnx
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError" ];
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress" ];
 }
 
 - (void)resolveModelPath:(NSDictionary *)config
@@ -189,6 +190,25 @@
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during test: %@", exception.reason];
         reject(@"TEST_ERROR", errorMsg, nil);
     }
+}
+
+- (void)extractTarBz2:(NSString *)sourcePath
+           targetPath:(NSString *)targetPath
+                force:(BOOL)force
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSDictionary *result = [helper extractTarBz2:sourcePath
+                                     targetPath:targetPath
+                                          force:force
+                                       progress:^(long long bytes, long long totalBytes, double percent) {
+        [self sendEventWithName:@"extractTarBz2Progress"
+                           body:@{ @"bytes": @(bytes),
+                                   @"totalBytes": @(totalBytes),
+                                   @"percent": @(percent) }];
+    }];
+    resolve(result);
 }
 
 - (void)listAssetModels:(RCTPromiseResolveBlock)resolve

@@ -12,29 +12,33 @@ This document is a step-by-step implementation plan to add model discovery, down
 - Models are hosted at: https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
 - Download URL pattern:
 	- https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<model_id>.tar.bz2
+- The SDK will fetch the model list dynamically via GitHub API and cache it in app storage.
 - The SDK already supports loading TTS models from a local file system path.
 - The example app will use the SDK API and should not implement its own download logic.
 
 ## 3) Data model: registry and metadata
 
-### 3.1 Registry file
-Create a model registry JSON (generated from docs/tts-models.md) and ship it in the SDK:
-- Location: src/models/tts-models.json (or similar)
-- Fields per model (example):
-	- id: "sherpa-onnx-kokoro-en-XX" (matches file name in GitHub release)
-	- displayName
-	- type: "vits" | "kokoro" | "matcha" | "kitten" | "zipvoice"
-	- languages: ["en", "de", "zh", ...]
-	- quantization: "fp16" | "int8" | "int8-quantized" | "unknown"
-	- sizeTier: "tiny" | "small" | "medium" | "large" | "unknown"
-	- downloadUrl
-	- archiveExt: "tar.bz2"
-	- expectedFiles (optional): list of required files (model.onnx, tokens.txt, etc.)
-	- sha256 (optional, but recommended if available)
+### 3.1 Dynamic registry (GitHub API)
+Fetch model assets at runtime from GitHub Releases API and cache the results:
+- Release endpoint (tag): https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/tts-models
+- The API returns assets with name, size, and download URL.
+- Cache response locally (e.g. models-cache.json) with a timestamp.
 
-### 3.2 Parse or pre-generate registry
-- Preferred: generate tts-models.json offline (script) from docs/tts-models.md.
-- Keep docs/tts-models.md as the source of truth if you plan to update models.
+### 3.2 Model metadata structure
+For each asset, derive metadata for filtering:
+- id: asset name without extension (matches file name in GitHub release)
+- displayName (human readable)
+- type: "vits" | "kokoro" | "matcha" | "kitten" | "zipvoice" | "unknown"
+- languages: ["en", "de", "zh", ...] (parsed from asset name)
+- quantization: "fp16" | "int8" | "int8-quantized" | "unknown"
+- sizeTier: "tiny" | "small" | "medium" | "large" | "unknown" (heuristic)
+- downloadUrl
+- archiveExt: "tar.bz2"
+- bytes: number (from GitHub asset size)
+
+### 3.3 Unsupported models handling
+- If a model type is unknown/unsupported, do not show it in the dropdown.
+- Log it in Logcat with a stable tag (e.g. "SherpaOnnxModelList").
 
 ## 4) SDK API design
 
@@ -56,6 +60,9 @@ Interfaces:
 
 ### 4.2 Public functions
 - listTtsModels(): TtsModelMeta[]
+- refreshTtsModels(options?): Promise<TtsModelMeta[]>
+	- options: forceRefresh, cacheTtlMinutes
+- getTtsModelsCacheStatus(): Promise<{ lastUpdated: string | null, source: "cache" | "remote" }>
 - filterTtsModels(options: FilterOptions): TtsModelMeta[]
 - getTtsModelById(id: string): TtsModelMeta | null
 - isModelDownloaded(id: string): Promise<boolean>
@@ -67,6 +74,7 @@ Interfaces:
 
 ### 4.3 Events (optional)
 - Use an event emitter for progress updates when the UI is open.
+- Emit "modelsListUpdated" when cache is refreshed.
 
 ## 5) Download pipeline
 
@@ -90,6 +98,7 @@ Use the app's documents directory (per platform):
 - Use react-native-fs for download to file.
 - Use a pure JS tar+bz2 library or native helper.
 - For large files, ensure streaming and avoid loading the whole file into memory.
+- Prefer GitHub API response for model size, show size in UI.
 
 ## 6) Extraction and verification
 
@@ -107,14 +116,16 @@ Use the app's documents directory (per platform):
 ### 7.1 UI screens
 - Add a Model Download screen or section in the TTS settings.
 - Steps:
-	1) Select language
-	2) Select quantization (int8/fp16/auto)
-	3) Select size tier (tiny/low/medium/small/etc.)
-	4) Select model type (vits/kokoro/etc.)
-	5) Show filtered list
+	1) Select language (include "Any")
+	2) Select quantization (int8/fp16/auto, include "Any")
+	3) Select size tier (tiny/low/medium/small/etc., include "Any")
+	4) Select model type (vits/kokoro/etc., include "Any")
+	5) Show filtered list with model size (MB)
 	6) Download button with progress
 
 ### 7.2 Workflow
+- On screen open, call refreshTtsModels().
+- If cache is empty due to API failure, show an error message and a "Reload" button.
 - On selection, call SDK filter API to populate dropdown.
 - On download confirm, call downloadTtsModel(id).
 - After download success, call getLocalModelPath(id) and initialize the TTS pipeline.
@@ -123,6 +134,7 @@ Use the app's documents directory (per platform):
 ## 8) Error handling and retries
 
 ### 8.1 Error categories
+- GitHub API: retry with exponential backoff, then surface cache empty error.
 - Network: retry with exponential backoff.
 - Storage: warn about disk space and allow user to delete other models.
 - Corrupt download: delete archive and re-download.
@@ -133,6 +145,7 @@ Use the app's documents directory (per platform):
 - Clear failure reasons and retry button.
 
 ## 9) Performance and cache strategy
+- Cache the GitHub models list with TTL (e.g. 24 hours).
 - Maintain LRU metadata to allow auto-cleanup if space is low.
 - Provide a "Manage downloads" screen to delete models.
 - Store last-used timestamp in a cache manifest.
@@ -142,37 +155,27 @@ Use the app's documents directory (per platform):
 - Clearly disclose model downloads in privacy policy.
 - Set "Online content" to Yes in Play Console.
 
-## 11) Testing checklist
+## 11) Implementation steps (ordered)
 
-### 11.1 Unit tests
-- Filter logic correctness
-- Model registry parsing
-- Path resolution and cache manifest
+1) Implement GitHub API fetch for tts-models release assets
+2) Add model list cache (JSON + timestamp + TTL)
+3) Parse asset names into model metadata (type, language, quantization, sizeTier)
+4) Add filtering utilities with "Any" support
+5) Implement download + progress (react-native-fs)
+6) Implement tar.bz2 extraction helper
+7) Add checksum validation and expected file checks (if available)
+8) Add cache manifest + ready marker
+9) Create example app UI for model selection and download
+10) Add error + reload UI if model list cache is empty
+11) Wire downloaded model path into TTS init
+12) Add cleanup UI and LRU strategy (optional)
+13) Update privacy policy and Play Console declarations
 
-### 11.2 Integration tests
-- Successful download of a small model
-- Resume after cancel
-- Verify extraction and required files
-- Initialize TTS using downloaded model path
-
-## 12) Implementation steps (ordered)
-
-1) Create and validate tts-models.json from docs/tts-models.md
-2) Add model registry loader in SDK
-3) Add filter utilities in SDK
-4) Implement download + progress (react-native-fs)
-5) Implement tar.bz2 extraction helper
-6) Add checksum validation and expected file checks
-7) Add cache manifest + ready marker
-8) Create example app UI for model selection and download
-9) Wire downloaded model path into TTS init
-10) Add cleanup UI and LRU strategy (optional)
-11) Update privacy policy and Play Console declarations
-
-## 13) Open questions to resolve early
-- Which tar.bz2 extraction library is acceptable and tested on Android/iOS?
-- Where to host checksums (if GitHub release does not provide)?
-- What is the default fallback model when no filter matches?
+## 12) Open questions to resolve early
+- tar.bz2 extraction: use https://github.com/cozy/react-native-nitro-tar-gzip
+- Checksums: https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/checksum.txt
+- Fallback model: none yet. Show a disclaimer when no models match a filter combination.
+- Cache TTL for GitHub API model list updates.
 
 ---
 

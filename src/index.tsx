@@ -14,6 +14,7 @@ export {
 // Note: Feature-specific exports are available via subpath imports:
 // - import { ... } from 'react-native-sherpa-onnx/stt'
 // - import { ... } from 'react-native-sherpa-onnx/tts'
+// - import { ... } from 'react-native-sherpa-onnx/download'
 // - import { ... } from 'react-native-sherpa-onnx/vad' (planned)
 // - import { ... } from 'react-native-sherpa-onnx/diarization' (planned)
 // - import { ... } from 'react-native-sherpa-onnx/enhancement' (planned)
