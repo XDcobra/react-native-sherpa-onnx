@@ -5,6 +5,8 @@ This document is a step-by-step implementation plan to add model discovery, down
 ## 1) Goals
 - Provide a first-class SDK download API for TTS models hosted on GitHub Releases.
 - Keep the example app lightweight by downloading models on demand.
+- Show only downloaded/cached models on feature screens (tts/stt/etc.).
+- Add a dedicated model management screen to download and delete models.
 - Support filtering by language, quantization, size tier, and model type (vits, kokoro, etc.).
 - Cache downloads locally and reuse them on subsequent launches.
 
@@ -65,6 +67,7 @@ Interfaces:
 - getTtsModelsCacheStatus(): Promise<{ lastUpdated: string | null, source: "cache" | "remote" }>
 - filterTtsModels(options: FilterOptions): TtsModelMeta[]
 - getTtsModelById(id: string): TtsModelMeta | null
+- listDownloadedTtsModels(): Promise<TtsModelMeta[]>
 - isModelDownloaded(id: string): Promise<boolean>
 - getLocalModelPath(id: string): Promise<string | null>
 - downloadTtsModel(id: string, opts?): Promise<DownloadResult>
@@ -114,22 +117,28 @@ Use the app's documents directory (per platform):
 ## 7) Example app integration
 
 ### 7.1 UI screens
-- Add a Model Download screen or section in the TTS settings.
-- Steps:
-	1) Select language (include "Any")
-	2) Select quantization (int8/fp16/auto, include "Any")
-	3) Select size tier (tiny/low/medium/small/etc., include "Any")
-	4) Select model type (vits/kokoro/etc., include "Any")
-	5) Show filtered list with model size (MB)
-	6) Download button with progress
+- Add a Model Management screen and place a download icon next to the settings icon.
+- The Model Management screen shows:
+	1) Filters: language, quantization, size tier, model type (include "Any")
+	2) Available models list (filtered) with size (MB)
+	3) Download button with progress
+	4) Downloaded/cached models list
+	5) Delete action for cached models
+- Feature screens (tts/stt/etc.) only list downloaded/cached models.
+- If no cached models exist, show an empty state with a shortcut to the Model Management screen.
 
 ### 7.2 Workflow
-- On screen open, call refreshTtsModels().
-- If cache is empty due to API failure, show an error message and a "Reload" button.
-- On selection, call SDK filter API to populate dropdown.
-- On download confirm, call downloadTtsModel(id).
-- After download success, call getLocalModelPath(id) and initialize the TTS pipeline.
-- If not downloaded, keep a "Download" call-to-action with size info.
+- Model Management screen:
+	- On screen open, call refreshTtsModels().
+	- If cache is empty due to API failure, show an error message and a "Reload" button.
+	- Use filterTtsModels() to populate the available list.
+	- On download confirm, call downloadTtsModel(id).
+	- After download success, update the downloaded list and show ready state.
+	- On delete, call deleteTtsModel(id) and refresh lists.
+- Feature screens (tts/stt/etc.):
+	- On screen open, call listDownloadedTtsModels() (or cached manifest) and show only local models.
+	- On selection, call getLocalModelPath(id) and initialize the pipeline.
+	- If no local models exist, show a prompt to open Model Management.
 
 ## 8) Error handling and retries
 
@@ -165,14 +174,15 @@ Use the app's documents directory (per platform):
 6) Implement tar.bz2 extraction helper
 7) Add checksum validation and expected file checks (if available)
 8) Add cache manifest + ready marker
-9) Create example app UI for model selection and download
+9) Add model management screen with download/delete and filters
 10) Add error + reload UI if model list cache is empty
-11) Wire downloaded model path into TTS init
-12) Add cleanup UI and LRU strategy (optional)
-13) Update privacy policy and Play Console declarations
+11) Update feature screens to show only cached models
+12) Wire downloaded model path into TTS init
+13) Add cleanup UI and LRU strategy (optional)
+14) Update privacy policy and Play Console declarations
 
 ## 12) Open questions to resolve early
-- tar.bz2 extraction: use https://github.com/cozy/react-native-nitro-tar-gzip
+- tar.bz2 extraction: use our own native solution extractTarBz2()
 - Checksums: https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/checksum.txt
 - Fallback model: none yet. Show a disclaimer when no models match a filter combination.
 - Cache TTL for GitHub API model list updates.
