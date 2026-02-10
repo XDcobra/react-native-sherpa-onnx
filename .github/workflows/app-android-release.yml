@@ -1,0 +1,145 @@
+name: App Release Android
+
+on:
+  push:
+    tags:
+      - 'app-v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android-release:
+    runs-on: ubuntu-latest
+
+    env:
+      JAVA_VERSION: '17'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Setup SherpaOnnx assets (headers and framework)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Setting up SherpaOnnx assets..."
+          yarn setup-assets
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Error: ANDROID_KEYSTORE_BASE64 is not set"
+            exit 1
+          fi
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > example/android/app/release.keystore
+
+      - name: Build Android release AAB
+        env:
+          ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: ${{ github.workspace }}/example/android/app/release.keystore
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          echo "Building Android release AAB..."
+
+          cd example/android
+
+          ./gradlew clean
+
+          if ! ./gradlew bundleRelease \
+            --stacktrace \
+            --info \
+            > /tmp/build.full.log 2>&1; then
+            BUILD_FAILED=1
+          fi
+
+          echo "=== Filtered Build Output ==="
+          grep -E "(FAILED|ERROR|error:|warning:|BUILD SUCCEEDED|BUILD FAILED|FAILURE|Exception)" /tmp/build.full.log | head -100 || true
+
+          if [ "${BUILD_FAILED:-0}" = "1" ]; then
+            echo ""
+            echo "=== Build failed. Full error analysis ==="
+
+            echo ""
+            echo "--- Compilation/Linker Errors ---"
+            grep -B 2 -A 5 -i "error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
+
+            echo ""
+            echo "--- Fatal Errors ---"
+            grep -B 2 -A 5 -i "fatal" /tmp/build.full.log | head -50 || echo "No fatal errors found"
+
+            echo ""
+            echo "--- Exceptions ---"
+            grep -B 2 -A 10 "Exception" /tmp/build.full.log | head -50 || echo "No exceptions found"
+
+            echo ""
+            echo "--- CMake Errors ---"
+            grep -B 2 -A 5 -i "cmake" /tmp/build.full.log | grep -i "error\|fail" | head -30 || echo "No CMake errors found"
+
+            echo ""
+            echo "--- Failed Tasks ---"
+            grep -B 5 -A 2 "FAILED" /tmp/build.full.log | head -30 || true
+
+            echo ""
+            echo "--- Last 50 lines of build log ---"
+            tail -50 /tmp/build.full.log
+            exit 1
+          fi
+
+          echo "[OK] Android release build completed successfully"
+
+      - name: Verify release AAB artifact
+        run: |
+          echo "Verifying AAB artifact..."
+
+          AAB_PATH="example/android/app/build/outputs/bundle/release/app-release.aab"
+
+          if [ -f "$AAB_PATH" ]; then
+            echo "[OK] AAB found: $AAB_PATH"
+
+            AAB_SIZE=$(stat -f%z "$AAB_PATH" 2>/dev/null || stat -c%s "$AAB_PATH")
+            AAB_SIZE_MB=$((AAB_SIZE / 1024 / 1024))
+            echo "  AAB size: ${AAB_SIZE_MB}MB"
+          else
+            echo "[ERROR] AAB not found at expected path: $AAB_PATH"
+            echo "Available bundle outputs:"
+            find example/android/app/build/outputs -name "*.aab" -type f 2>/dev/null || echo "No AAB files found"
+            exit 1
+          fi
+
+      - name: Upload Android AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab
+          path: example/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 7
+          if-no-files-found: error
+
+      # Fastlane upload will be enabled after fastlane config is added in Phase 3/5.
+      # - name: Upload to Play Store (Closed Testing)
+      #   env:
+      #     FASTLANE_JSON_KEY: ${{ secrets.FASTLANE_JSON_KEY }}
+      #   run: |
+      #     cd example/android
+      #     bundle install
+      #     bundle exec fastlane closed_testing
