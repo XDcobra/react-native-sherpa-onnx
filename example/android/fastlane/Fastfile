@@ -3,10 +3,15 @@ default_platform(:android)
 platform :android do
   desc "Upload AAB to Play Store closed testing"
   lane :closed_testing do
+    version_code = ENV['VERSION_CODE'] || ENV['ORG_GRADLE_PROJECT_VERSION_CODE']
+    version_name = ENV['VERSION_NAME'] || ENV['ORG_GRADLE_PROJECT_VERSION_NAME']
+    release_name = version_code && version_name ? "#{version_code} (#{version_name})" : nil
+
     supply(
       aab: "app/build/outputs/bundle/release/app-release.aab",
       mapping: "app/build/outputs/mapping/release/mapping.txt",
       track: "alpha",
+      release_name: release_name,
       skip_upload_metadata: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,

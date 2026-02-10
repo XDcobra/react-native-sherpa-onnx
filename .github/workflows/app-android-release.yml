@@ -197,6 +197,9 @@ jobs:
           chmod 600 example/android/fastlane/fastlane.json
 
       - name: Upload to Play Store (Closed Testing)
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.build_number }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           cd example/android
           bundle exec fastlane closed_testing
