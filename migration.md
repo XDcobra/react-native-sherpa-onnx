@@ -98,7 +98,7 @@
 - [x] release-it fuer SDK angepasst.
 - [x] Neuer App-Release-Workflow definiert.
 - [ ] Alle Secrets in GitHub gesetzt.
-- [ ] Debug/Release Ad-Logik klar getrennt.
+- [x] Debug/Release Ad-Logik klar getrennt.
 - [ ] Consent-Flows definiert.
 - [ ] Fastlane Zugang getestet.
 
