@@ -84,6 +84,9 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [
+            admobAppId: "ca-app-pub-3940256099942544~3347511713"
+        ]
     }
     signingConfigs {
         debug {
@@ -112,6 +115,13 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
+            def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
+            if (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty()) {
+                throw new RuntimeException("ADMOB_APP_ID_ANDROID is required for release builds")
+            }
+            manifestPlaceholders = [
+                admobAppId: releaseAdmobAppId
+            ]
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.release
