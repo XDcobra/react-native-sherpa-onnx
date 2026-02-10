@@ -4,7 +4,7 @@ platform :android do
   desc "Upload AAB to Play Store closed testing"
   lane :closed_testing do
     supply(
-      aab: "../app/build/outputs/bundle/release/app-release.aab",
+      aab: "app/build/outputs/bundle/release/app-release.aab",
       track: "closed_testing",
       skip_upload_metadata: true,
       skip_upload_images: true,
