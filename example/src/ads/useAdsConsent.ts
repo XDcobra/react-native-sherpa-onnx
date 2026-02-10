@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AdsConsent } from 'react-native-google-mobile-ads';
 import type {
   AdsConsentInfo,
@@ -8,6 +8,15 @@ import type {
 export function useAdsConsent(enabled: boolean) {
   const [consentInfo, setConsentInfo] = useState<AdsConsentInfo | null>(null);
   const [error, setError] = useState<Error | null>(null);
+
+  const refreshConsent = useCallback(async () => {
+    try {
+      const info = await AdsConsent.getConsentInfo();
+      setConsentInfo(info);
+    } catch (err) {
+      setError(err as Error);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,5 +52,5 @@ export function useAdsConsent(enabled: boolean) {
   const status: AdsConsentStatus | null = consentInfo?.status ?? null;
   const canRequestAds = Boolean(consentInfo?.canRequestAds);
 
-  return { canRequestAds, status, error };
+  return { canRequestAds, status, error, refreshConsent };
 }

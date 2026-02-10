@@ -1,0 +1,106 @@
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { AdsConsent, AdsConsentStatus } from 'react-native-google-mobile-ads';
+import { adsEnabled } from '../../ads/adsConfig';
+import { useAdsConsent } from '../../ads/useAdsConsent';
+
+export default function SettingsScreen() {
+  const { status, canRequestAds, error, refreshConsent } =
+    useAdsConsent(adsEnabled);
+  const [loading, setLoading] = useState(false);
+
+  const handlePrivacyOptions = async () => {
+    if (!adsEnabled || loading) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await AdsConsent.showPrivacyOptionsForm();
+      await refreshConsent();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statusLabel = status ?? AdsConsentStatus.UNKNOWN;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.section}>
+        <Text style={styles.title}>Advertising</Text>
+        <Text style={styles.body}>
+          Ads are {adsEnabled ? 'enabled' : 'disabled'} for this build.
+        </Text>
+        <Text style={styles.body}>Consent status: {statusLabel}</Text>
+        <Text style={styles.body}>
+          Can request ads: {canRequestAds ? 'yes' : 'no'}
+        </Text>
+        {error ? (
+          <Text style={styles.errorText}>Consent error: {error.message}</Text>
+        ) : null}
+      </View>
+
+      <TouchableOpacity
+        style={[styles.button, !adsEnabled && styles.buttonDisabled]}
+        onPress={handlePrivacyOptions}
+        disabled={!adsEnabled || loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.buttonText}>Privacy Options</Text>
+        )}
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+    padding: 16,
+  },
+  section: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111111',
+    marginBottom: 8,
+  },
+  body: {
+    fontSize: 14,
+    color: '#444444',
+    marginBottom: 6,
+  },
+  errorText: {
+    color: '#C62828',
+    marginTop: 8,
+  },
+  button: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+});

@@ -8,6 +8,7 @@ import VADScreen from '../screens/vad/VADScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
+import SettingsScreen from '../screens/settings/SettingsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -73,6 +74,13 @@ export default function RootNavigator() {
         component={SeparationScreen}
         options={{
           title: 'Source Separation',
+        }}
+      />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{
+          title: 'Settings',
         }}
       />
     </Stack.Navigator>

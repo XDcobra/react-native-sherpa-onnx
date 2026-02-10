@@ -6,6 +6,7 @@ export type RootStackParamList = {
   Diarization: undefined;
   Enhancement: undefined;
   Separation: undefined;
+  Settings: undefined;
 };
 
 export type FeatureId =

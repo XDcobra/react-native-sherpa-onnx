@@ -112,7 +112,16 @@ export default function HomeScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Sherpa-ONNX Features</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Sherpa-ONNX Features</Text>
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => navigation.navigate('Settings')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={22} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.headerSubtitle}>
           Offline speech processing on device
         </Text>
@@ -142,11 +151,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#000000',
     marginBottom: 4,
+  },
+  settingsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerSubtitle: {
     fontSize: 14,
