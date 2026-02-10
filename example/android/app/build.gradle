@@ -113,18 +113,28 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "boolean", "ADS_ENABLED", "false"
+            buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"ca-app-pub-3940256099942544/6300978111\""
         }
         release {
             def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
+            def releaseAdmobBannerId = project.findProperty('ADMOB_BANNER_ID_ANDROID')
             def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
             if (isReleaseTask && (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty())) {
                 throw new RuntimeException("ADMOB_APP_ID_ANDROID is required for release builds")
+            }
+            if (isReleaseTask && (releaseAdmobBannerId == null || releaseAdmobBannerId.toString().trim().isEmpty())) {
+                throw new RuntimeException("ADMOB_BANNER_ID_ANDROID is required for release builds")
             }
             if (releaseAdmobAppId != null && !releaseAdmobAppId.toString().trim().isEmpty()) {
                 manifestPlaceholders = [
                     admobAppId: releaseAdmobAppId
                 ]
             }
+            if (releaseAdmobBannerId != null && !releaseAdmobBannerId.toString().trim().isEmpty()) {
+                buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"${releaseAdmobBannerId}\""
+            }
+            buildConfigField "boolean", "ADS_ENABLED", "true"
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.release
