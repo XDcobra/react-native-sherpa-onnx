@@ -14,8 +14,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 | Feature | Status |
 |---------|--------|
-| Offline Speech-to-Text | ✅ Supported |
-| Text-to-Speech | ❌ Not yet supported |
+| Offline Speech-to-Text | ✅ **Supported** |
+| Text-to-Speech | ✅ **Supported** |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
 | Source Separation | ❌ Not yet supported |
@@ -28,7 +28,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
 | **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>✅ GitHub Actions builds pass<br/>❌ **No local Xcode testing** *(Windows-only dev)* |
 
-### 🔧 **iOS Contributors WANTED!** 🙌
+### 🔧 **iOS Contributors WANTED!**
 
 **Full iOS support is a priority!** Help bring sherpa-onnx to iOS devices.
 
@@ -46,6 +46,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 ## Supported Model Types
 
+### Speech-to-Text (STT) Models
+
 | Model Type               | `modelType` Value | Description                                                                              | Download Links                                                                                   |
 | ------------------------ | ----------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | **Zipformer/Transducer** | `'transducer'`    | Requires `encoder.onnx`, `decoder.onnx`, `joiner.onnx`, and `tokens.txt`                 | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-transducer/index.html) |
@@ -56,6 +58,16 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **SenseVoice**           | `'sense_voice'`   | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/sense-voice/index.html)        |
 | **FunASR Nano**          | `'funasr_nano'`   | Requires `encoder_adaptor.onnx`, `llm.onnx`, `embedding.onnx`, and `tokenizer` directory | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/funasr-nano/index.html)        |
 
+### Text-to-Speech (TTS) Models
+
+| Model Type       | `modelType` Value | Description                                                                                          | Download Links                                                                      |
+| ---------------- | ----------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **VITS**         | `'vits'`          | Fast, high-quality TTS. Includes Piper, Coqui, MeloTTS, MMS variants. Requires `model.onnx`, `tokens.txt` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **Matcha**       | `'matcha'`        | High-quality acoustic model + vocoder. Requires `acoustic_model.onnx`, `vocoder.onnx`, `tokens.txt` | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html) |
+| **Kokoro**       | `'kokoro'`        | Multi-speaker, multi-language. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`    | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
+| **Zipvoice**     | `'zipvoice'`      | Voice cloning capable. Requires `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`        | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
+
 ## Features
 
 - ✅ **Offline Speech-to-Text** - No internet connection required for speech recognition
@@ -65,7 +77,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 - ✅ **Android Support** - Fully supported on Android
 - ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
 - ✅ **TypeScript Support** - Full TypeScript definitions included
-- 🚧 **Additional Features Coming Soon** - Text-to-Speech, Speaker Diarization, Speech Enhancement, Source Separation, and VAD support are planned for future releases
+- 🚧 **Additional Features Coming Soon** - Speaker Diarization, Speech Enhancement, Source Separation, and VAD support are planned for future releases
 
 ## Installation
 
@@ -128,209 +140,31 @@ Then run `pod install` as usual.
 
 **Note:** The iOS implementation uses the same C++ wrapper as Android, ensuring consistent behavior across platforms.
 
-## Quick Start
+## Documentation
 
-```typescript
-import { resolveModelPath } from 'react-native-sherpa-onnx';
-import {
-  initializeSTT,
-  transcribeFile,
-  unloadSTT,
-} from 'react-native-sherpa-onnx/stt';
+- [Speech-to-Text (STT)](./docs/stt.md)
+- [Text-to-Speech (TTS)](./docs/tts.md)
+- [Voice Activity Detection (VAD)](./docs/vad.md)
+- [Speaker Diarization](./docs/diarization.md)
+- [Speech Enhancement](./docs/enhancement.md)
+- [Source Separation](./docs/separation.md)
+- [General STT Model Setup](./docs/STT_MODEL_SETUP.md)
+- [General TTS Model Setup](./docs/TTS_MODEL_SETUP.md)
 
-// Initialize with a model
-const modelPath = await resolveModelPath({
-  type: 'asset',
-  path: 'models/sherpa-onnx-model',
-});
+### Example Model READMEs
 
-await initializeSTT({
-  modelPath: modelPath,
-  preferInt8: true, // Optional: prefer quantized models
-});
-
-// Transcribe an audio file
-const transcription = await transcribeFile('path/to/audio.wav');
-console.log('Transcription:', transcription);
-
-// Release resources when done
-await unloadSTT();
-```
-
-## Usage
-
-### Initialization
-
-```typescript
-import {
-  initializeSherpaOnnx,
-  assetModelPath,
-  autoModelPath,
-} from 'react-native-sherpa-onnx';
-
-// Option 1: Asset model (bundled in app)
-await initializeSherpaOnnx({
-  modelPath: assetModelPath('models/sherpa-onnx-model'),
-  preferInt8: true, // Prefer quantized models
-});
-
-// Option 2: Auto-detect (tries asset, then file system)
-await initializeSherpaOnnx({
-  modelPath: autoModelPath('models/sherpa-onnx-model'),
-});
-
-// Option 3: Simple string (backward compatible)
-await initializeSherpaOnnx('models/sherpa-onnx-model');
-```
-
-### Transcription (Speech-to-Text)
-
-```typescript
-import { transcribeFile } from 'react-native-sherpa-onnx/stt';
-
-// Transcribe a WAV file (16kHz, mono, 16-bit PCM)
-const result = await transcribeFile('path/to/audio.wav');
-console.log('Transcription:', result);
-```
-
-### Model Quantization
-
-Control whether to prefer quantized (int8) or regular models:
-
-```typescript
-import { initializeSTT } from 'react-native-sherpa-onnx/stt';
-import { resolveModelPath } from 'react-native-sherpa-onnx';
-
-const modelPath = await resolveModelPath({
-  type: 'asset',
-  path: 'models/my-model',
-});
-
-// Default: try int8 first, then regular
-await initializeSTT({ modelPath });
-
-// Explicitly prefer int8 models (smaller, faster)
-await initializeSTT({
-  modelPath,
-  preferInt8: true,
-});
-
-// Explicitly prefer regular models (higher accuracy)
-await initializeSTT({
-  modelPath,
-  preferInt8: false,
-});
-```
-
-### Explicit Model Type
-
-For robustness, you can explicitly specify the model type to avoid auto-detection issues:
-
-```typescript
-import { initializeSTT } from 'react-native-sherpa-onnx/stt';
-import { resolveModelPath } from 'react-native-sherpa-onnx';
-
-const modelPath = await resolveModelPath({
-  type: 'asset',
-  path: 'models/sherpa-onnx-nemo-parakeet-tdt-ctc-en',
-});
-
-// Explicitly specify model type
-await initializeSTT({
-  modelPath,
-  modelType: 'nemo_ctc', // 'transducer', 'paraformer', 'nemo_ctc', 'whisper', 'wenet_ctc', 'sense_voice', 'funasr_nano'
-});
-
-// Auto-detection (default behavior)
-await initializeSTT({
-  modelPath,
-  // modelType defaults to 'auto'
-});
-```
-
-### Cleanup (Speech-to-Text)
-
-```typescript
-import { unloadSTT } from 'react-native-sherpa-onnx/stt';
-
-// Release resources when done
-await unloadSTT();
-```
-
-## Model Setup
-
-The library does **not** bundle models. You must provide your own models. See [MODEL_SETUP.md](./MODEL_SETUP.md) for detailed setup instructions.
-
-### Model File Requirements
-
-- **Zipformer/Transducer**: Requires `encoder.onnx`, `decoder.onnx`, `joiner.onnx`, and `tokens.txt`
-- **Paraformer**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
-- **NeMo CTC**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
-- **Whisper**: Requires `encoder.onnx`, `decoder.onnx`, and `tokens.txt`
-- **WeNet CTC**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
-- **SenseVoice**: Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`
-
-### Model Files
-
-Place models in:
-
-- **Android**: `android/app/src/main/assets/models/`
-- **iOS**: Add to Xcode project as folder reference
-
-## API Reference
-
-### Speech-to-Text (STT) Module
-
-Import from `react-native-sherpa-onnx/stt`:
-
-#### `initializeSTT(options)`
-
-Initialize the speech-to-text engine with a model.
-
-**Parameters:**
-
-- `options.modelPath`: Absolute path to the model directory
-- `options.preferInt8` (optional): Prefer quantized models (`true`), regular models (`false`), or auto-detect (`undefined`, default)
-- `options.modelType` (optional): Explicit model type (`'transducer'`, `'paraformer'`, `'nemo_ctc'`, `'whisper'`, `'wenet_ctc'`, `'sense_voice'`, `'funasr_nano'`), or auto-detect (`'auto'`, default)
-
-**Returns:** `Promise<void>`
-
-#### `transcribeFile(filePath)`
-
-Transcribe an audio file.
-
-**Parameters:**
-
-- `filePath`: Path to WAV file (16kHz, mono, 16-bit PCM)
-
-**Returns:** `Promise<string>` - Transcribed text
-
-#### `unloadSTT()`
-
-Release resources and unload the speech-to-text model.
-
-**Returns:** `Promise<void>`
-
-### Utility Functions
-
-Import from `react-native-sherpa-onnx`:
-
-#### `resolveModelPath(config)`
-
-Resolve a model path configuration to an absolute path.
-
-**Parameters:**
-
-- `config.type`: Path type (`'asset'`, `'file'`, or `'auto'`)
-- `config.path`: Path to resolve (relative for assets, absolute for files)
-
-**Returns:** `Promise<string>` - Absolute path to model directory
-
-#### `testSherpaInit()`
-
-Test that the sherpa-onnx native module is properly loaded.
-
-**Returns:** `Promise<string>` - Test message confirming module is loaded
+- [kokoro (US) README](./example/android/app/src/main/assets/models/kokoro-us/README.md)
+- [kokoro (ZH) README](./example/android/app/src/main/assets/models/kokoro-zh/README.md)
+- [funasr-nano README](./example/android/app/src/main/assets/models/sherpa-onnx-funasr-nano-int8/README.md)
+- [kitten-nano README](./example/android/app/src/main/assets/models/sherpa-onnx-kitten-nano-en-v0_1-fp16/README.md)
+- [matcha README](./example/android/app/src/main/assets/models/sherpa-onnx-matcha-icefall-en_US-ljspeech/README.md)
+- [nemo-ctc README](./example/android/app/src/main/assets/models/sherpa-onnx-nemo-parakeet-tdt-ctc-en/README.md)
+- [paraformer README](./example/android/app/src/main/assets/models/sherpa-onnx-paraformer-zh-small/README.md)
+- [sense-voice README](./example/android/app/src/main/assets/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8/README.md)
+- [vits README](./example/android/app/src/main/assets/models/sherpa-onnx-vits-piper-en_US-libritts_r-medium/README.md)
+- [wenet-ctc README](./example/android/app/src/main/assets/models/sherpa-onnx-wenetspeech-ctc-zh-en-cantonese/README.md)
+- [whisper-tiny README](./example/android/app/src/main/assets/models/sherpa-onnx-whisper-tiny-en/README.md)
+- [zipformer README](./example/android/app/src/main/assets/models/sherpa-onnx-zipformer-small-en/README.md)
 
 ## Requirements
 

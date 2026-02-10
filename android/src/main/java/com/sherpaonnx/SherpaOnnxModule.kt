@@ -1,13 +1,12 @@
 package com.sherpaonnx
 
-import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -15,7 +14,94 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   init {
     System.loadLibrary("sherpaonnx")
+    instance = this
   }
+
+  private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
+  private val sttHelper = SherpaOnnxSttHelper(
+    object : SherpaOnnxSttHelper.NativeSttBridge {
+      override fun nativeSttInitialize(
+        modelDir: String,
+        preferInt8: Boolean,
+        hasPreferInt8: Boolean,
+        modelType: String
+      ): HashMap<String, Any>? {
+        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType)
+      }
+
+      override fun nativeSttTranscribe(filePath: String): String {
+        return Companion.nativeSttTranscribe(filePath)
+      }
+
+      override fun nativeSttRelease() {
+        Companion.nativeSttRelease()
+      }
+    },
+    NAME
+  )
+  private val ttsHelper = SherpaOnnxTtsHelper(
+    reactApplicationContext,
+    object : SherpaOnnxTtsHelper.NativeTtsBridge {
+      override fun nativeTtsInitialize(
+        modelDir: String,
+        modelType: String,
+        numThreads: Int,
+        debug: Boolean,
+        noiseScale: Double,
+        noiseScaleW: Double,
+        lengthScale: Double
+      ): HashMap<String, Any>? {
+        return Companion.nativeTtsInitialize(
+          modelDir,
+          modelType,
+          numThreads,
+          debug,
+          noiseScale,
+          noiseScaleW,
+          lengthScale
+        )
+      }
+
+      override fun nativeTtsGenerate(text: String, sid: Int, speed: Float): HashMap<String, Any>? {
+        return Companion.nativeTtsGenerate(text, sid, speed)
+      }
+
+      override fun nativeTtsGenerateWithTimestamps(
+        text: String,
+        sid: Int,
+        speed: Float
+      ): HashMap<String, Any>? {
+        return Companion.nativeTtsGenerateWithTimestamps(text, sid, speed)
+      }
+
+      override fun nativeTtsGenerateStream(text: String, sid: Int, speed: Float): Boolean {
+        return Companion.nativeTtsGenerateStream(text, sid, speed)
+      }
+
+      override fun nativeTtsCancelStream() {
+        Companion.nativeTtsCancelStream()
+      }
+
+      override fun nativeTtsGetSampleRate(): Int {
+        return Companion.nativeTtsGetSampleRate()
+      }
+
+      override fun nativeTtsGetNumSpeakers(): Int {
+        return Companion.nativeTtsGetNumSpeakers()
+      }
+
+      override fun nativeTtsRelease() {
+        Companion.nativeTtsRelease()
+      }
+
+      override fun nativeTtsSaveToWavFile(samples: FloatArray, sampleRate: Int, filePath: String): Boolean {
+        return Companion.nativeTtsSaveToWavFile(samples, sampleRate, filePath)
+      }
+    },
+    ::emitTtsStreamChunk,
+    ::emitTtsStreamError,
+    ::emitTtsStreamEnd
+  )
 
   override fun getName(): String {
     return NAME
@@ -39,190 +125,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Handles asset paths, file system paths, and auto-detection.
    */
   override fun resolveModelPath(config: ReadableMap, promise: Promise) {
-    try {
-      val type = config.getString("type") ?: "auto"
-      val path = config.getString("path")
-        ?: throw IllegalArgumentException("Path is required")
-
-      val resolvedPath = when (type) {
-        "asset" -> resolveAssetPath(path)
-        "file" -> resolveFilePath(path)
-        "auto" -> resolveAutoPath(path)
-        else -> throw IllegalArgumentException("Unknown path type: $type")
-      }
-
-      promise.resolve(resolvedPath)
-    } catch (e: Exception) {
-      val errorMessage = "Failed to resolve model path: ${e.message ?: e.javaClass.simpleName}"
-      Log.e(NAME, errorMessage, e)
-      promise.reject("PATH_RESOLVE_ERROR", errorMessage, e)
-    }
+    coreHelper.resolveModelPath(config, promise)
   }
 
   /**
    * Resolve asset path - copy from assets to internal storage if needed
    * Preserves the directory structure from assets (e.g., test_wavs/ stays as test_wavs/)
    */
-  private fun resolveAssetPath(assetPath: String): String {
-    val assetManager = reactApplicationContext.assets
-    
-    // Extract base directory from path (e.g., "test_wavs/en-1.wav" -> "test_wavs", "models/sherpa-onnx-model" -> "models")
-    val pathParts = assetPath.split("/")
-    val baseDir = if (pathParts.size > 1) pathParts[0] else "models"
-    
-    val targetBaseDir = File(reactApplicationContext.filesDir, baseDir)
-    targetBaseDir.mkdirs()
-
-    // Check if it's a file path (contains a file extension) or directory path
-    val isFilePath = pathParts.any { it.contains(".") && !it.startsWith(".") }
-    
-    val targetPath = if (isFilePath) {
-      // It's a file path (e.g., test_wavs/en-1.wav)
-      // Return the full file path
-      File(targetBaseDir, pathParts.drop(1).joinToString("/"))
-    } else {
-      // It's a directory path (e.g., models/sherpa-onnx-model)
-      // Return the directory path
-      File(targetBaseDir, File(assetPath).name)
-    }
-    
-    // Check if already extracted
-    if (isFilePath) {
-      // For files, check if file exists
-      if (targetPath.exists() && targetPath.isFile) {
-        return targetPath.absolutePath
-      }
-      // Extract the parent directory (e.g., test_wavs/)
-      val parentDir = targetPath.parentFile ?: targetBaseDir
-      parentDir.mkdirs()
-      
-      // Try to copy the file directly first
-      try {
-        assetManager.open(assetPath).use { input ->
-          FileOutputStream(targetPath).use { output ->
-            input.copyTo(output)
-          }
-        }
-        return targetPath.absolutePath
-      } catch (e: java.io.FileNotFoundException) {
-        // If direct file open fails, try to copy the parent directory recursively
-        // This handles cases where the file is in a subdirectory
-        val parentAssetPath = pathParts.dropLast(1).joinToString("/")
-        if (parentAssetPath.isNotEmpty()) {
-          try {
-            // Copy the entire parent directory
-            copyAssetRecursively(assetManager, parentAssetPath, parentDir)
-            // Check if file now exists
-            if (targetPath.exists() && targetPath.isFile) {
-              return targetPath.absolutePath
-            }
-            throw IllegalArgumentException("File not found after copying parent directory: $assetPath")
-          } catch (dirException: Exception) {
-            throw IllegalArgumentException("Failed to extract asset file: $assetPath. Tried direct copy and directory copy.", dirException)
-          }
-        } else {
-          throw IllegalArgumentException("Failed to extract asset file: $assetPath", e)
-        }
-      } catch (e: Exception) {
-        throw IllegalArgumentException("Failed to extract asset file: $assetPath", e)
-      }
-    } else {
-      // For directories, check if directory exists
-      if (targetPath.exists() && targetPath.isDirectory) {
-        return targetPath.absolutePath
-      }
-      // Extract from assets recursively
-      try {
-        targetPath.mkdirs()
-        copyAssetRecursively(assetManager, assetPath, targetPath)
-        return targetPath.absolutePath
-      } catch (e: Exception) {
-        throw IllegalArgumentException("Failed to extract asset directory: $assetPath", e)
-      }
-    }
-  }
-
-  /**
-   * Recursively copy assets from asset manager to target directory
-   */
-  private fun copyAssetRecursively(
-    assetManager: android.content.res.AssetManager,
-    assetPath: String,
-    targetDir: File
-  ) {
-    val assetFiles = assetManager.list(assetPath)
-      ?: throw IllegalArgumentException("Asset path not found: $assetPath")
-
-    for (fileName in assetFiles) {
-      val assetFilePath = "$assetPath/$fileName"
-      val targetFile = File(targetDir, fileName)
-
-      try {
-        // Try to list as directory first
-        val subFiles = assetManager.list(assetFilePath)
-        if (subFiles != null && subFiles.isNotEmpty()) {
-          // It's a directory, recurse
-          targetFile.mkdirs()
-          copyAssetRecursively(assetManager, assetFilePath, targetFile)
-        } else {
-          // It's a file, copy it
-          assetManager.open(assetFilePath).use { input ->
-            FileOutputStream(targetFile).use { output ->
-              input.copyTo(output)
-            }
-          }
-        }
-      } catch (e: Exception) {
-        // If listing fails, try to open as file
-        try {
-          assetManager.open(assetFilePath).use { input ->
-            FileOutputStream(targetFile).use { output ->
-              input.copyTo(output)
-            }
-          }
-        } catch (fileException: Exception) {
-          throw IllegalArgumentException("Failed to copy asset: $assetFilePath", fileException)
-        }
-      }
-    }
-  }
-
-  /**
-   * Resolve file system path - verify it exists
-   */
-  private fun resolveFilePath(filePath: String): String {
-    val file = File(filePath)
-    if (!file.exists()) {
-      throw IllegalArgumentException("File path does not exist: $filePath")
-    }
-    if (!file.isDirectory) {
-      throw IllegalArgumentException("Path is not a directory: $filePath")
-    }
-    return file.absolutePath
-  }
-
-  /**
-   * Auto-detect path - try asset first, then file system
-   */
-  private fun resolveAutoPath(path: String): String {
-    return try {
-      resolveAssetPath(path)
-    } catch (e: Exception) {
-      // If asset fails, try file system
-      try {
-        resolveFilePath(path)
-      } catch (fileException: Exception) {
-        throw IllegalArgumentException(
-          "Path not found as asset or file: $path. Asset error: ${e.message}, File error: ${fileException.message}",
-          e
-        )
-      }
-    }
-  }
 
   /**
    * Initialize sherpa-onnx with model directory.
-   * Phase 1: Stub implementation
    */
   override fun initializeSherpaOnnx(
     modelDir: String,
@@ -230,87 +142,342 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelType: String?,
     promise: Promise
   ) {
-    try {
-      // Verify model directory exists
-      val modelDirFile = File(modelDir)
-      if (!modelDirFile.exists()) {
-        val errorMsg = "Model directory does not exist: $modelDir"
-        Log.e(NAME, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
-        return
-      }
-      
-      if (!modelDirFile.isDirectory) {
-        val errorMsg = "Model path is not a directory: $modelDir"
-        Log.e(NAME, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
-        return
-      }
-      
-      val success = nativeInitialize(
-        modelDir,
-        preferInt8 ?: false,
-        preferInt8 != null,
-        modelType ?: "auto"
-      )
-      if (success) {
-        promise.resolve(null)
-      } else {
-        val errorMsg = "Failed to initialize sherpa-onnx. Check native logs for details."
-        Log.e(NAME, "Native initialization returned false for modelDir: $modelDir")
-        promise.reject("INIT_ERROR", errorMsg)
-      }
-    } catch (e: Exception) {
-      val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
-      Log.e(NAME, errorMsg, e)
-      promise.reject("INIT_ERROR", errorMsg, e)
-    }
-  }
-
-  /**
-   * Transcribe an audio file.
-   * Phase 1: Stub implementation
-   */
-  override fun transcribeFile(filePath: String, promise: Promise) {
-    try {
-      val result = nativeTranscribeFile(filePath)
-      promise.resolve(result)
-    } catch (e: Exception) {
-      promise.reject("TRANSCRIBE_ERROR", "Failed to transcribe file", e)
-    }
+    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, promise)
   }
 
   /**
    * Release sherpa-onnx resources.
    */
   override fun unloadSherpaOnnx(promise: Promise) {
-    try {
-      nativeRelease()
-      promise.resolve(null)
-    } catch (e: Exception) {
-      promise.reject("RELEASE_ERROR", "Failed to release resources", e)
-    }
+    sttHelper.unloadSherpaOnnx(promise)
   }
 
+  // ==================== STT Methods ====================
+
+  /**
+   * Transcribe an audio file.
+   */
+  override fun transcribeFile(filePath: String, promise: Promise) {
+    sttHelper.transcribeFile(filePath, promise)
+  }
+
+  // ==================== TTS Methods ====================
+
+  /**
+   * Initialize TTS with model directory.
+   */
+  override fun initializeTts(
+    modelDir: String,
+    modelType: String,
+    numThreads: Double,
+    debug: Boolean,
+    noiseScale: Double?,
+    noiseScaleW: Double?,
+    lengthScale: Double?,
+    promise: Promise
+  ) {
+    ttsHelper.initializeTts(
+      modelDir,
+      modelType,
+      numThreads,
+      debug,
+      noiseScale,
+      noiseScaleW,
+      lengthScale,
+      promise
+    )
+  }
+
+  /**
+   * Update TTS params by re-initializing with stored config.
+   */
+  override fun updateTtsParams(
+    noiseScale: Double?,
+    noiseScaleW: Double?,
+    lengthScale: Double?,
+    promise: Promise
+  ) {
+    ttsHelper.updateTtsParams(noiseScale, noiseScaleW, lengthScale, promise)
+  }
+
+  /**
+   * Generate speech from text.
+   */
+  override fun generateTts(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    ttsHelper.generateTts(text, sid, speed, promise)
+  }
+
+  /**
+   * Generate speech with subtitle/timestamp metadata.
+   */
+  override fun generateTtsWithTimestamps(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    ttsHelper.generateTtsWithTimestamps(text, sid, speed, promise)
+  }
+
+  /**
+   * Generate speech in streaming mode (emits chunk events).
+   */
+  override fun generateTtsStream(
+    text: String,
+    sid: Double,
+    speed: Double,
+    promise: Promise
+  ) {
+    ttsHelper.generateTtsStream(text, sid, speed, promise)
+  }
+
+  /**
+   * Cancel ongoing streaming TTS.
+   */
+  override fun cancelTtsStream(promise: Promise) {
+    ttsHelper.cancelTtsStream(promise)
+  }
+
+  /**
+   * Start PCM playback for streaming TTS.
+   */
+  override fun startTtsPcmPlayer(sampleRate: Double, channels: Double, promise: Promise) {
+    ttsHelper.startTtsPcmPlayer(sampleRate, channels, promise)
+  }
+
+  /**
+   * Write PCM samples to the streaming TTS player.
+   */
+  override fun writeTtsPcmChunk(samples: ReadableArray, promise: Promise) {
+    ttsHelper.writeTtsPcmChunk(samples, promise)
+  }
+
+  /**
+   * Stop PCM playback for streaming TTS.
+   */
+  override fun stopTtsPcmPlayer(promise: Promise) {
+    ttsHelper.stopTtsPcmPlayer(promise)
+  }
+
+  private fun emitTtsStreamChunk(
+    samples: FloatArray,
+    sampleRate: Int,
+    progress: Float,
+    isFinal: Boolean
+  ) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val samplesArray = Arguments.createArray()
+    for (sample in samples) {
+      samplesArray.pushDouble(sample.toDouble())
+    }
+    val payload = Arguments.createMap()
+    payload.putArray("samples", samplesArray)
+    payload.putInt("sampleRate", sampleRate)
+    payload.putDouble("progress", progress.toDouble())
+    payload.putBoolean("isFinal", isFinal)
+    eventEmitter.emit("ttsStreamChunk", payload)
+  }
+
+  private fun emitTtsStreamError(message: String) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("message", message)
+    eventEmitter.emit("ttsStreamError", payload)
+  }
+
+  private fun emitTtsStreamEnd(cancelled: Boolean) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putBoolean("cancelled", cancelled)
+    eventEmitter.emit("ttsStreamEnd", payload)
+  }
+
+  /**
+   * Get TTS sample rate.
+   */
+  override fun getTtsSampleRate(promise: Promise) {
+    ttsHelper.getTtsSampleRate(promise)
+  }
+
+  /**
+   * Get number of speakers.
+   */
+  override fun getTtsNumSpeakers(promise: Promise) {
+    ttsHelper.getTtsNumSpeakers(promise)
+  }
+
+  /**
+   * Release TTS resources.
+   */
+  override fun unloadTts(promise: Promise) {
+    ttsHelper.unloadTts(promise)
+  }
+
+  /**
+   * Save TTS audio samples to a WAV file.
+   */
+  override fun saveTtsAudioToFile(
+    samples: ReadableArray,
+    sampleRate: Double,
+    filePath: String,
+    promise: Promise
+  ) {
+    ttsHelper.saveTtsAudioToFile(samples, sampleRate, filePath, promise)
+  }
+
+  /**
+   * Save TTS audio samples to a WAV file via Android SAF content URI.
+   */
+  override fun saveTtsAudioToContentUri(
+    samples: ReadableArray,
+    sampleRate: Double,
+    directoryUri: String,
+    filename: String,
+    promise: Promise
+  ) {
+    ttsHelper.saveTtsAudioToContentUri(samples, sampleRate, directoryUri, filename, promise)
+  }
+
+  /**
+   * Save text content to a file via Android SAF content URI.
+   */
+  override fun saveTtsTextToContentUri(
+    text: String,
+    directoryUri: String,
+    filename: String,
+    mimeType: String,
+    promise: Promise
+  ) {
+    ttsHelper.saveTtsTextToContentUri(text, directoryUri, filename, mimeType, promise)
+  }
+
+  /**
+   * Copy a SAF content URI to a cache file for local playback.
+   */
+  override fun copyTtsContentUriToCache(
+    fileUri: String,
+    filename: String,
+    promise: Promise
+  ) {
+    ttsHelper.copyTtsContentUriToCache(fileUri, filename, promise)
+  }
+
+  /**
+   * Share a TTS audio file (file path or content URI).
+   */
+  override fun shareTtsAudio(fileUri: String, mimeType: String, promise: Promise) {
+    ttsHelper.shareTtsAudio(fileUri, mimeType, promise)
+  }
+
+  /**
+   * List all model folders in the assets/models directory.
+   * Scans the platform-specific model directory and returns folder names.
+   */
+  override fun listAssetModels(promise: Promise) {
+    coreHelper.listAssetModels(promise)
+  }
   companion object {
     const val NAME = "SherpaOnnx"
+
+    @Volatile
+    private var instance: SherpaOnnxModule? = null
+
+    @JvmStatic
+    fun onTtsStreamChunk(
+      samples: FloatArray,
+      sampleRate: Int,
+      progress: Float,
+      isFinal: Boolean
+    ) {
+      instance?.emitTtsStreamChunk(samples, sampleRate, progress, isFinal)
+    }
+
+    @JvmStatic
+    fun onTtsStreamError(message: String) {
+      instance?.emitTtsStreamError(message)
+    }
+
+    @JvmStatic
+    fun onTtsStreamEnd(cancelled: Boolean) {
+      instance?.emitTtsStreamEnd(cancelled)
+    }
 
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
     @JvmStatic
-    private external fun nativeInitialize(
+    private external fun nativeSttInitialize(
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
       modelType: String
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeSttTranscribe(filePath: String): String
+
+    @JvmStatic
+    private external fun nativeSttRelease()
+
+    // TTS Native JNI methods
+    @JvmStatic
+    private external fun nativeTtsInitialize(
+      modelDir: String,
+      modelType: String,
+      numThreads: Int,
+      debug: Boolean,
+      noiseScale: Double,
+      noiseScaleW: Double,
+      lengthScale: Double
+    ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTtsGenerate(
+      text: String,
+      sid: Int,
+      speed: Float
+    ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTtsGenerateWithTimestamps(
+      text: String,
+      sid: Int,
+      speed: Float
+    ): java.util.HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTtsGenerateStream(
+      text: String,
+      sid: Int,
+      speed: Float
     ): Boolean
 
     @JvmStatic
-    private external fun nativeTranscribeFile(filePath: String): String
+    private external fun nativeTtsCancelStream()
 
     @JvmStatic
-    private external fun nativeRelease()
+    private external fun nativeTtsGetSampleRate(): Int
+
+    @JvmStatic
+    private external fun nativeTtsGetNumSpeakers(): Int
+
+    @JvmStatic
+    private external fun nativeTtsRelease()
+
+    @JvmStatic
+    private external fun nativeTtsSaveToWavFile(
+      samples: FloatArray,
+      sampleRate: Int,
+      filePath: String
+    ): Boolean
   }
 }

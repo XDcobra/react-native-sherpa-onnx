@@ -1,7 +1,9 @@
 /**
- * Model configuration for the example app.
+ * Model configuration helpers for the example app.
  * This is app-specific and not part of the library.
- * Users should create their own model configuration based on their needs.
+ *
+ * These helpers work with any model name - use listAssetModels() to discover
+ * available models dynamically instead of hardcoding model names.
  */
 
 import {
@@ -12,55 +14,71 @@ import {
   type ModelPathConfig,
 } from 'react-native-sherpa-onnx';
 
-/**
- * Predefined model identifiers for this example app
- */
-export const MODELS = {
-  ZIPFORMER_EN: 'sherpa-onnx-zipformer-small-en',
-  PARAFORMER_ZH: 'sherpa-onnx-paraformer-zh-small',
-  NEMO_CTC_EN: 'sherpa-onnx-nemo-parakeet-tdt-ctc-en',
-  WHISPER_EN: 'sherpa-onnx-whisper-tiny-en',
-  WENET_CTC_ZH_EN_CANTONESE: 'sherpa-onnx-wenetspeech-ctc-zh-en-cantonese',
-  SENSE_VOICE_ZH_EN_JA_KO_YUE: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8',
-  FUNASR_NANO_INT8: 'sherpa-onnx-funasr-nano-int8',
-} as const;
-
-export type ModelId = (typeof MODELS)[keyof typeof MODELS];
+const titleCase = (value: string) =>
+  value.length > 0 ? value[0]!.toUpperCase() + value.slice(1) : value;
 
 /**
- * Get model path for a predefined model identifier.
- * Uses auto-detection (tries asset first, then file system).
- *
- * @param modelId - Predefined model identifier (e.g., MODELS.ZIPFORMER_EN)
- * @returns Model path configuration
+ * Convert a model folder name into a more readable display name.
  */
-export function getModelPath(modelId: ModelId): ModelPathConfig {
-  return autoModelPath(`models/${modelId}`);
+export function getModelDisplayName(modelFolder: string): string {
+  const cleaned = modelFolder.replace(/^sherpa-onnx-/, '');
+  const tokens = cleaned.split(/[-_]+/g).filter(Boolean);
+
+  const mapped = tokens.map((token) => {
+    const lower = token.toLowerCase();
+    if (['en', 'zh', 'ja', 'ko', 'yue'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    if (['us', 'gb'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    if (['ctc', 'asr', 'tts', 'vits', 'mms'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    return titleCase(lower);
+  });
+
+  return mapped.join(' ');
 }
 
 /**
- * Get asset model path for a predefined model identifier.
+ * Get model path with auto-detection (tries asset first, then file system).
  *
- * @param modelId - Predefined model identifier (e.g., MODELS.ZIPFORMER_EN)
+ * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
  * @returns Model path configuration
+ *
+ * @example
+ * // Discover models first
+ * const models = await listAssetModels();
+ * const modelPath = getModelPath(models[0].folder);
  */
-export function getAssetModelPath(modelId: ModelId): ModelPathConfig {
-  return assetModelPath(`models/${modelId}`);
+export function getModelPath(modelName: string): ModelPathConfig {
+  return autoModelPath(`models/${modelName}`);
 }
 
 /**
- * Get file system model path for a predefined model identifier.
+ * Get asset model path for a model folder name.
  *
- * @param modelId - Predefined model identifier (e.g., MODELS.ZIPFORMER_EN)
+ * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
+ * @returns Model path configuration
+ */
+export function getAssetModelPath(modelName: string): ModelPathConfig {
+  return assetModelPath(`models/${modelName}`);
+}
+
+/**
+ * Get file system model path for a model folder name.
+ *
+ * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
  * @param basePath - Base path for file system models (default: platform-specific)
  * @returns Model path configuration
  */
 export function getFileModelPath(
-  modelId: ModelId,
+  modelName: string,
   basePath?: string
 ): ModelPathConfig {
   const path = basePath
-    ? `${basePath}/${modelId}`
-    : `${getDefaultModelPath()}/${modelId}`;
+    ? `${basePath}/${modelName}`
+    : `${getDefaultModelPath()}/${modelName}`;
   return fileModelPath(path);
 }

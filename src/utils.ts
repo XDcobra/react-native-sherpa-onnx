@@ -95,3 +95,37 @@ export async function resolveModelPath(
 
   return SherpaOnnx.resolveModelPath(config);
 }
+
+/**
+ * List all model folders in the assets/models directory.
+ * Scans the platform-specific model directory and returns folder names.
+ *
+ * This is useful for discovering models at runtime without hardcoding paths.
+ * You can then use the returned folder names with resolveModelPath and initialize.
+ *
+ * @returns Promise resolving to array of model info objects
+ *
+ * @example
+ * ```typescript
+ * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+ *
+ * // Get all model folders
+ * const models = await listAssetModels();
+ * console.log('Found models:', models);
+ * // Example output: [{ folder: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', hint: 'stt' }, { folder: 'sherpa-onnx-matcha-icefall-en_US-ljspeech', hint: 'tts' }]
+ *
+ * // Initialize each model to detect types
+ * for (const model of models) {
+ *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
+ *   const result = await initializeSherpaOnnx(path);
+ *   if (result.success) {
+ *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
+ *   }
+ * }
+ * ```
+ */
+export async function listAssetModels(): Promise<
+  Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
+> {
+  return SherpaOnnx.listAssetModels();
+}

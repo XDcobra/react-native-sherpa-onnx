@@ -98,13 +98,6 @@ jobs:
           fi
           echo "[OK] example/android/app/build.gradle found"
 
-          # Check native source files
-          if [ ! -f "android/src/main/cpp/jni/sherpa-onnx-jni.cpp" ]; then
-            echo "Error: JNI source file not found"
-            exit 1
-          fi
-          echo "[OK] JNI source files found"
-
           # Verify header file structure
           echo ""
           echo "Header file structure:"

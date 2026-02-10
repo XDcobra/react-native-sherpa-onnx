@@ -12,24 +12,27 @@ import { resolveModelPath } from '../utils';
  * - Auto-detection (tries asset first, then file system)
  *
  * @param options - STT initialization options or model path configuration
+ * @returns Object with success status and array of detected models (each with type and modelDir)
  * @example
  * ```typescript
  * // Simple string (auto-detect)
- * await initializeSTT('models/sherpa-onnx-model');
+ * const result = await initializeSTT('models/sherpa-onnx-model');
+ * console.log('Detected models:', result.detectedModels);
+ * // result.detectedModels = [{ type: 'transducer', modelDir: '/path/to/model' }]
  *
  * // Asset model
- * await initializeSTT({
+ * const result = await initializeSTT({
  *   modelPath: { type: 'asset', path: 'models/sherpa-onnx-model' }
  * });
  *
  * // File system model with preferInt8 option
- * await initializeSTT({
+ * const result = await initializeSTT({
  *   modelPath: { type: 'file', path: '/path/to/model' },
  *   preferInt8: true  // Prefer quantized int8 models (smaller, faster)
  * });
  *
  * // With explicit model type
- * await initializeSTT({
+ * const result = await initializeSTT({
  *   modelPath: { type: 'asset', path: 'models/sherpa-onnx-nemo-parakeet-tdt-ctc-en' },
  *   modelType: 'nemo_ctc'
  * });
@@ -37,7 +40,10 @@ import { resolveModelPath } from '../utils';
  */
 export async function initializeSTT(
   options: STTInitializeOptions | InitializeOptions['modelPath']
-): Promise<void> {
+): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+}> {
   // Handle both object syntax and direct path syntax
   let modelPath: InitializeOptions['modelPath'];
   let preferInt8: boolean | undefined;

@@ -11,6 +11,11 @@ set(CMAKE_ANDROID_ARCH_ABI ${ANDROID_ABI})
 set(CMAKE_SYSTEM_NAME Android)
 set(CMAKE_SYSTEM_VERSION ${ANDROID_PLATFORM_LEVEL})
 
+# Set Windows path length limit
+if(WIN32)
+    set(CMAKE_OBJECT_PATH_MAX 500)
+endif()
+
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
@@ -46,8 +51,11 @@ endif()
 
 # Source files
 set(SOURCES
-    jni/sherpa-onnx-jni.cpp
-    jni/sherpa-onnx-wrapper.cpp
+    jni/sherpa-onnx-stt-jni.cpp
+    jni/sherpa-onnx-tts-jni.cpp
+    jni/sherpa-onnx-model-detect.cpp
+    jni/sherpa-onnx-stt-wrapper.cpp
+    jni/sherpa-onnx-tts-wrapper.cpp
 )
 
 # Create shared library
