@@ -39,7 +39,10 @@ function AdsBanner() {
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom }]}>
-      <BannerAd unitId={bannerAdUnitId} size={BannerAdSize.ADAPTIVE_BANNER} />
+      <BannerAd
+        unitId={bannerAdUnitId}
+        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+      />
     </View>
   );
 }

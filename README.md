@@ -193,10 +193,12 @@ yarn install
 yarn android  # or yarn ios
 ```
 
-<div align="center">
-  <img src="./docs/images/example_home_screen.png" alt="Model selection home screen" width="30%" />
-  <img src="./docs/images/example_english.png" alt="Transcribe english audio" width="30%" />
-  <img src="./docs/images/example_multilanguage.png" alt="Transcribe english and chinese audio" width="30%" />
+<div align="center" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
+  <img src="./docs/images/example_home_screen.png" alt="Model selection home screen" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_stt_1.png" alt="Transcribe english audio" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_tts_1.png" alt="Text to speech settings" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_tts_2.png" alt="Text to speech generation" style="flex:0 0 32%;max-width:32%;" />
 </div>
 
 ### Video to Text Comparison App
