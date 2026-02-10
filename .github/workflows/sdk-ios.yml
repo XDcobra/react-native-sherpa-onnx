@@ -1,4 +1,4 @@
-name: Build iOS example app
+name: SDK - Build iOS example app
 on:
   pull_request:
     branches:

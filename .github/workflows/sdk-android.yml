@@ -1,4 +1,4 @@
-name: Build Android example app
+name: SDK - Build Android example app
 on:
   pull_request:
     branches:

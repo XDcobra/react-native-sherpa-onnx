@@ -1,4 +1,4 @@
-name: Create Release
+name: SDK - Create Release
 
 on:
   push:

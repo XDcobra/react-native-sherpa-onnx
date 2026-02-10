@@ -94,9 +94,9 @@
 - Secrets nicht im Repo.
 
 ## Checkliste vor Umsetzung
-- [ ] Tag-Schema final und mit Team abgestimmt.
-- [ ] release-it fuer SDK angepasst.
-- [ ] Neuer App-Release-Workflow definiert.
+- [x] Tag-Schema final und mit Team abgestimmt.
+- [x] release-it fuer SDK angepasst.
+- [x] Neuer App-Release-Workflow definiert.
 - [ ] Alle Secrets in GitHub gesetzt.
 - [ ] Debug/Release Ad-Logik klar getrennt.
 - [ ] Consent-Flows definiert.
