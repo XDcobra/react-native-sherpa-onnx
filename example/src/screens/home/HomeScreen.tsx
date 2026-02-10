@@ -11,6 +11,7 @@ import type { ComponentProps } from 'react';
 import { StatusBar } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, Feature } from '../../types/navigation';
+import AdsBanner from '../../ads/AdsBanner';
 
 const FEATURES: Feature[] = [
   {
@@ -121,6 +122,7 @@ export default function HomeScreen({ navigation }: Props) {
         renderItem={renderFeatureCard}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListFooterComponent={<AdsBanner />}
         showsVerticalScrollIndicator={false}
       />
     </SafeAreaView>

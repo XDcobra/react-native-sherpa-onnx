@@ -113,7 +113,7 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            buildConfigField "boolean", "ADS_ENABLED", "false"
+            buildConfigField "boolean", "ADS_ENABLED", "true"
             buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"ca-app-pub-3940256099942544/6300978111\""
         }
         release {
