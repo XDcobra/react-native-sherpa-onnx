@@ -214,7 +214,7 @@ jobs:
           fi
 
       - name: Upload Android APK artifact
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/sdk-v')
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-apk

@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'sdk-v*'
 
 jobs:
   trigger-builds:
