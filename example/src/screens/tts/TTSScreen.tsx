@@ -1267,234 +1267,60 @@ export default function TTSScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Ionicons name="volume-high" size={48} style={styles.icon} />
-          <Text style={styles.title}>Text-to-Speech Demo</Text>
-          <Text style={styles.subtitle}>
-            Generate speech from text using offline TTS models
-          </Text>
-        </View>
-
-        {/* Section 1: Initialize Model */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. Initialize TTS Model</Text>
-          <Text style={styles.sectionDescription}>
-            Select a TTS model to load:
-          </Text>
-
-          <View style={styles.parameterRow}>
-            <View style={styles.parameterColumn}>
-              <Text style={styles.inputLabel}>Noise Scale (optional):</Text>
-              <TextInput
-                style={styles.parameterInput}
-                value={noiseScale}
-                onChangeText={setNoiseScale}
-                keyboardType="decimal-pad"
-                placeholder="0.667"
-                placeholderTextColor="#8E8E93"
-              />
-            </View>
-
-            <View style={styles.parameterColumn}>
-              <Text style={styles.inputLabel}>Noise Scale W (optional):</Text>
-              <TextInput
-                style={styles.parameterInput}
-                value={noiseScaleW}
-                onChangeText={setNoiseScaleW}
-                keyboardType="decimal-pad"
-                placeholder="0.8"
-                placeholderTextColor="#8E8E93"
-              />
-            </View>
+      <View style={styles.body}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <Ionicons name="volume-high" size={48} style={styles.icon} />
+            <Text style={styles.title}>Text-to-Speech Demo</Text>
+            <Text style={styles.subtitle}>
+              Generate speech from text using offline TTS models
+            </Text>
           </View>
 
-          <View style={styles.parameterRow}>
-            <View style={styles.parameterColumn}>
-              <Text style={styles.inputLabel}>Length Scale (optional):</Text>
-              <TextInput
-                style={styles.parameterInput}
-                value={lengthScale}
-                onChangeText={setLengthScale}
-                keyboardType="decimal-pad"
-                placeholder="1.0"
-                placeholderTextColor="#8E8E93"
-              />
-            </View>
-          </View>
-
-          <Text style={styles.hint}>
-            Noise/Noise W/Length scale — leave blank to reset to model defaults.
-          </Text>
-          <View style={styles.separator} />
-          {loadingModels ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#007AFF" />
-              <Text style={styles.loadingText}>Loading models...</Text>
-            </View>
-          ) : availableModels.length === 0 ? (
-            <View style={styles.resultContainer}>
-              <Text style={styles.errorText}>
-                No TTS models found. See TTS_MODEL_SETUP.md
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.buttonGroup}>
-              {availableModels.map((modelFolder) => {
-                const isInitializingOther =
-                  initializingModel !== null &&
-                  initializingModel !== modelFolder;
-                const isDisabled =
-                  isInitializingOther ||
-                  (loading && initializingModel !== modelFolder);
-                return (
-                  <TouchableOpacity
-                    key={modelFolder}
-                    style={[
-                      styles.modelButton,
-                      currentModelFolder === modelFolder &&
-                        styles.modelButtonActive,
-                      isDisabled && styles.modelButtonDisabled,
-                    ]}
-                    onPress={() => {
-                      if (isDisabled) return;
-                      handleInitialize(modelFolder);
-                    }}
-                    disabled={isDisabled}
-                  >
-                    <Text
-                      style={[
-                        styles.modelButtonText,
-                        currentModelFolder === modelFolder &&
-                          styles.modelButtonTextActive,
-                        isDisabled && styles.modelButtonTextDisabled,
-                      ]}
-                    >
-                      {getModelDisplayName(modelFolder)}
-                    </Text>
-                    <Text style={styles.modelButtonSubtext}>{modelFolder}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
-          {loading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>Initializing model...</Text>
-            </View>
-          )}
-
-          {initResult && (
-            <View style={styles.resultContainer}>
-              <Text style={styles.resultText}>{initResult}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Section 2: Select Model Type */}
-        {detectedModels.length > 0 && (
+          {/* Section 1: Initialize Model */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Select Model Type</Text>
-            {detectedModels.length > 1 ? (
-              <>
-                <Text style={styles.sectionDescription}>
-                  Multiple model types detected. Select one:
-                </Text>
-                <View style={styles.detectedModelsContainer}>
-                  {detectedModels.map((model) => (
-                    <TouchableOpacity
-                      key={model.type}
-                      style={[
-                        styles.detectedModelButton,
-                        selectedModelType === model.type &&
-                          styles.detectedModelButtonActive,
-                      ]}
-                      onPress={() => setSelectedModelType(model.type)}
-                    >
-                      <Text
-                        style={[
-                          styles.detectedModelButtonText,
-                          selectedModelType === model.type &&
-                            styles.detectedModelButtonTextActive,
-                        ]}
-                      >
-                        {model.type}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            ) : (
-              <View style={styles.rowAlignCenter}>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={16}
-                  color="#34C759"
-                  style={styles.iconInline}
-                />
-                <Text style={styles.autoSelectedText}>
-                  Auto-selected: {selectedModelType}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Section 3: Model Info */}
-        {modelInfo && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Model Information</Text>
-            <View style={styles.infoContainer}>
-              <Text style={styles.infoText}>
-                Sample Rate: {modelInfo.sampleRate} Hz
-              </Text>
-              <Text style={styles.infoText}>
-                Speakers: {modelInfo.numSpeakers}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Section 4: Generate Speech */}
-        {selectedModelType && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Generate Speech</Text>
-
-            <Text style={styles.inputLabel}>Text to Synthesize:</Text>
-            <TextInput
-              style={styles.textInput}
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder="Enter text to synthesize..."
-              multiline
-              numberOfLines={3}
-            />
+            <Text style={styles.sectionTitle}>1. Initialize TTS Model</Text>
+            <Text style={styles.sectionDescription}>
+              Select a TTS model to load:
+            </Text>
 
             <View style={styles.parameterRow}>
               <View style={styles.parameterColumn}>
-                <Text style={styles.inputLabel}>Speaker ID:</Text>
+                <Text style={styles.inputLabel}>Noise Scale (optional):</Text>
                 <TextInput
                   style={styles.parameterInput}
-                  value={speakerId}
-                  onChangeText={setSpeakerId}
-                  keyboardType="numeric"
-                  placeholder="0"
+                  value={noiseScale}
+                  onChangeText={setNoiseScale}
+                  keyboardType="decimal-pad"
+                  placeholder="0.667"
                   placeholderTextColor="#8E8E93"
                 />
               </View>
 
               <View style={styles.parameterColumn}>
-                <Text style={styles.inputLabel}>Speed:</Text>
+                <Text style={styles.inputLabel}>Noise Scale W (optional):</Text>
                 <TextInput
                   style={styles.parameterInput}
-                  value={speed}
-                  onChangeText={setSpeed}
+                  value={noiseScaleW}
+                  onChangeText={setNoiseScaleW}
+                  keyboardType="decimal-pad"
+                  placeholder="0.8"
+                  placeholderTextColor="#8E8E93"
+                />
+              </View>
+            </View>
+
+            <View style={styles.parameterRow}>
+              <View style={styles.parameterColumn}>
+                <Text style={styles.inputLabel}>Length Scale (optional):</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  value={lengthScale}
+                  onChangeText={setLengthScale}
                   keyboardType="decimal-pad"
                   placeholder="1.0"
                   placeholderTextColor="#8E8E93"
@@ -1502,283 +1328,464 @@ export default function TTSScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.generateButton,
-                generating && styles.buttonDisabled,
-              ]}
-              onPress={handleGenerate}
-              disabled={generating}
-            >
-              {generating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.generateButtonText}>Generate Speech</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.generateButtonSecondary,
-                generating && styles.buttonDisabled,
-              ]}
-              onPress={handleGenerateWithTimestamps}
-              disabled={generating}
-            >
-              {generating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.generateButtonText}>
-                  Generate + Timestamps
+            <Text style={styles.hint}>
+              Noise/Noise W/Length scale — leave blank to reset to model
+              defaults.
+            </Text>
+            <View style={styles.separator} />
+            {loadingModels ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#007AFF" />
+                <Text style={styles.loadingText}>Loading models...</Text>
+              </View>
+            ) : availableModels.length === 0 ? (
+              <View style={styles.resultContainer}>
+                <Text style={styles.errorText}>
+                  No TTS models found. See TTS_MODEL_SETUP.md
                 </Text>
-              )}
-            </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.buttonGroup}>
+                {availableModels.map((modelFolder) => {
+                  const isInitializingOther =
+                    initializingModel !== null &&
+                    initializingModel !== modelFolder;
+                  const isDisabled =
+                    isInitializingOther ||
+                    (loading && initializingModel !== modelFolder);
+                  return (
+                    <TouchableOpacity
+                      key={modelFolder}
+                      style={[
+                        styles.modelButton,
+                        currentModelFolder === modelFolder &&
+                          styles.modelButtonActive,
+                        isDisabled && styles.modelButtonDisabled,
+                      ]}
+                      onPress={() => {
+                        if (isDisabled) return;
+                        handleInitialize(modelFolder);
+                      }}
+                      disabled={isDisabled}
+                    >
+                      <Text
+                        style={[
+                          styles.modelButtonText,
+                          currentModelFolder === modelFolder &&
+                            styles.modelButtonTextActive,
+                          isDisabled && styles.modelButtonTextDisabled,
+                        ]}
+                      >
+                        {getModelDisplayName(modelFolder)}
+                      </Text>
+                      <Text style={styles.modelButtonSubtext}>
+                        {modelFolder}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
 
-            <View style={styles.streamControls}>
-              <TouchableOpacity
-                style={[
-                  styles.streamButton,
-                  streaming && styles.buttonDisabled,
-                ]}
-                onPress={handleStartStreaming}
-                disabled={streaming}
-              >
-                <Text style={styles.generateButtonText}>Start Streaming</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.cancelStreamButton,
-                  !streaming && styles.buttonDisabled,
-                ]}
-                onPress={handleCancelStreaming}
-                disabled={!streaming}
-              >
-                <Text style={styles.generateButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
+            {loading && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>Initializing model...</Text>
+              </View>
+            )}
 
-            {streaming && (
-              <Text style={styles.streamInfoText}>
-                Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
-                {streamSampleCount} samples)
-              </Text>
+            {initResult && (
+              <View style={styles.resultContainer}>
+                <Text style={styles.resultText}>{initResult}</Text>
+              </View>
             )}
           </View>
-        )}
 
-        {/* Section 5: Results */}
-        {generatedAudio && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Generated Audio</Text>
-            <View style={styles.resultContainer}>
-              <Text style={styles.resultText}>
-                Samples: {generatedAudio.samples.length.toLocaleString()}
-              </Text>
-              <Text style={styles.resultText}>
-                Sample Rate: {generatedAudio.sampleRate} Hz
-              </Text>
-              <Text style={styles.resultText}>
-                Duration:{' '}
-                {(
-                  generatedAudio.samples.length / generatedAudio.sampleRate
-                ).toFixed(2)}{' '}
-                seconds
-              </Text>
-            </View>
-
-            {/* Audio Controls */}
-            <View style={styles.audioControls}>
-              <TouchableOpacity
-                style={[
-                  styles.audioButton,
-                  styles.saveButton,
-                  saving && styles.buttonDisabled,
-                ]}
-                onPress={handleSaveTemporary}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <View style={styles.rowAlignCenter}>
-                    <Ionicons
-                      name="save-outline"
-                      size={16}
-                      color="#fff"
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.audioButtonText}>Save temporary</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.audioButton,
-                  styles.saveButton,
-                  saving && styles.buttonDisabled,
-                ]}
-                onPress={handleSaveAudio}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <View style={styles.rowAlignCenter}>
-                    <Ionicons
-                      name="folder-outline"
-                      size={16}
-                      color="#fff"
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.audioButtonText}>Save to Folder</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {savedAudioPath && (
+          {/* Section 2: Select Model Type */}
+          {detectedModels.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>2. Select Model Type</Text>
+              {detectedModels.length > 1 ? (
                 <>
-                  <TouchableOpacity
-                    style={[styles.audioButton, styles.playButton]}
-                    onPress={handlePlayAudio}
-                    disabled={loadingSound}
-                  >
-                    {loadingSound ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
+                  <Text style={styles.sectionDescription}>
+                    Multiple model types detected. Select one:
+                  </Text>
+                  <View style={styles.detectedModelsContainer}>
+                    {detectedModels.map((model) => (
+                      <TouchableOpacity
+                        key={model.type}
+                        style={[
+                          styles.detectedModelButton,
+                          selectedModelType === model.type &&
+                            styles.detectedModelButtonActive,
+                        ]}
+                        onPress={() => setSelectedModelType(model.type)}
+                      >
+                        <Text
+                          style={[
+                            styles.detectedModelButtonText,
+                            selectedModelType === model.type &&
+                              styles.detectedModelButtonTextActive,
+                          ]}
+                        >
+                          {model.type}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <View style={styles.rowAlignCenter}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color="#34C759"
+                    style={styles.iconInline}
+                  />
+                  <Text style={styles.autoSelectedText}>
+                    Auto-selected: {selectedModelType}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Section 3: Model Info */}
+          {modelInfo && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Model Information</Text>
+              <View style={styles.infoContainer}>
+                <Text style={styles.infoText}>
+                  Sample Rate: {modelInfo.sampleRate} Hz
+                </Text>
+                <Text style={styles.infoText}>
+                  Speakers: {modelInfo.numSpeakers}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Section 4: Generate Speech */}
+          {selectedModelType && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>3. Generate Speech</Text>
+
+              <Text style={styles.inputLabel}>Text to Synthesize:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder="Enter text to synthesize..."
+                multiline
+                numberOfLines={3}
+              />
+
+              <View style={styles.parameterRow}>
+                <View style={styles.parameterColumn}>
+                  <Text style={styles.inputLabel}>Speaker ID:</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    value={speakerId}
+                    onChangeText={setSpeakerId}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor="#8E8E93"
+                  />
+                </View>
+
+                <View style={styles.parameterColumn}>
+                  <Text style={styles.inputLabel}>Speed:</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    value={speed}
+                    onChangeText={setSpeed}
+                    keyboardType="decimal-pad"
+                    placeholder="1.0"
+                    placeholderTextColor="#8E8E93"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.generateButton,
+                  generating && styles.buttonDisabled,
+                ]}
+                onPress={handleGenerate}
+                disabled={generating}
+              >
+                {generating ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.generateButtonText}>Generate Speech</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.generateButtonSecondary,
+                  generating && styles.buttonDisabled,
+                ]}
+                onPress={handleGenerateWithTimestamps}
+                disabled={generating}
+              >
+                {generating ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.generateButtonText}>
+                    Generate + Timestamps
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <View style={styles.streamControls}>
+                <TouchableOpacity
+                  style={[
+                    styles.streamButton,
+                    streaming && styles.buttonDisabled,
+                  ]}
+                  onPress={handleStartStreaming}
+                  disabled={streaming}
+                >
+                  <Text style={styles.generateButtonText}>Start Streaming</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelStreamButton,
+                    !streaming && styles.buttonDisabled,
+                  ]}
+                  onPress={handleCancelStreaming}
+                  disabled={!streaming}
+                >
+                  <Text style={styles.generateButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+
+              {streaming && (
+                <Text style={styles.streamInfoText}>
+                  Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
+                  {streamSampleCount} samples)
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Section 5: Results */}
+          {generatedAudio && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Generated Audio</Text>
+              <View style={styles.resultContainer}>
+                <Text style={styles.resultText}>
+                  Samples: {generatedAudio.samples.length.toLocaleString()}
+                </Text>
+                <Text style={styles.resultText}>
+                  Sample Rate: {generatedAudio.sampleRate} Hz
+                </Text>
+                <Text style={styles.resultText}>
+                  Duration:{' '}
+                  {(
+                    generatedAudio.samples.length / generatedAudio.sampleRate
+                  ).toFixed(2)}{' '}
+                  seconds
+                </Text>
+              </View>
+
+              {/* Audio Controls */}
+              <View style={styles.audioControls}>
+                <TouchableOpacity
+                  style={[
+                    styles.audioButton,
+                    styles.saveButton,
+                    saving && styles.buttonDisabled,
+                  ]}
+                  onPress={handleSaveTemporary}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <View style={styles.rowAlignCenter}>
+                      <Ionicons
+                        name="save-outline"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Save temporary</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.audioButton,
+                    styles.saveButton,
+                    saving && styles.buttonDisabled,
+                  ]}
+                  onPress={handleSaveAudio}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <View style={styles.rowAlignCenter}>
+                      <Ionicons
+                        name="folder-outline"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Save to Folder</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {savedAudioPath && (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.audioButton, styles.playButton]}
+                      onPress={handlePlayAudio}
+                      disabled={loadingSound}
+                    >
+                      {loadingSound ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <View style={styles.rowAlignCenter}>
+                          <Ionicons
+                            name={isPlaying ? 'pause' : 'play'}
+                            size={16}
+                            color="#fff"
+                            style={styles.iconInline}
+                          />
+                          <Text style={styles.audioButtonText}>
+                            {isPlaying ? 'Pause' : 'Play'}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.audioButton, styles.stopButton]}
+                      onPress={handleStopAudio}
+                    >
                       <View style={styles.rowAlignCenter}>
                         <Ionicons
-                          name={isPlaying ? 'pause' : 'play'}
+                          name="stop"
                           size={16}
                           color="#fff"
                           style={styles.iconInline}
                         />
-                        <Text style={styles.audioButtonText}>
-                          {isPlaying ? 'Pause' : 'Play'}
-                        </Text>
+                        <Text style={styles.audioButtonText}>Stop</Text>
                       </View>
-                    )}
-                  </TouchableOpacity>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.audioButton, styles.stopButton]}
-                    onPress={handleStopAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="stop"
-                        size={16}
-                        color="#fff"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.audioButtonText}>Stop</Text>
-                    </View>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.audioButton, styles.shareButton]}
+                      onPress={handleShareAudio}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name="share-social"
+                          size={16}
+                          color="#fff"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.audioButtonText}>Share</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
 
-                  <TouchableOpacity
-                    style={[styles.audioButton, styles.shareButton]}
-                    onPress={handleShareAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="share-social"
-                        size={16}
-                        color="#fff"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.audioButtonText}>Share</Text>
-                    </View>
-                  </TouchableOpacity>
-                </>
+              {savedAudioPath && (
+                <Text style={styles.savedPathText}>
+                  Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
+                  {'\n'}
+                  {getDisplayPath(savedAudioPath)}
+                </Text>
               )}
             </View>
+          )}
 
-            {savedAudioPath && (
-              <Text style={styles.savedPathText}>
-                Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
-                {'\n'}
-                {getDisplayPath(savedAudioPath)}
+          {generatedSubtitles && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Subtitles / Timestamps</Text>
+              <Text style={styles.sectionDescription}>
+                {subtitleEstimated
+                  ? 'Estimated word timings based on output duration.'
+                  : 'Model-provided timings.'}
               </Text>
-            )}
-          </View>
-        )}
-
-        {generatedSubtitles && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Subtitles / Timestamps</Text>
-            <Text style={styles.sectionDescription}>
-              {subtitleEstimated
-                ? 'Estimated word timings based on output duration.'
-                : 'Model-provided timings.'}
-            </Text>
-            <View style={styles.resultContainer}>
-              {generatedSubtitles.map((item, index) => (
-                <Text key={`${item.text}-${index}`} style={styles.resultText}>
-                  {item.text} {item.start.toFixed(2)}s - {item.end.toFixed(2)}s
+              <View style={styles.resultContainer}>
+                {generatedSubtitles.map((item, index) => (
+                  <Text key={`${item.text}-${index}`} style={styles.resultText}>
+                    {item.text} {item.start.toFixed(2)}s - {item.end.toFixed(2)}
+                    s
+                  </Text>
+                ))}
+              </View>
+              <View style={styles.subtitleActions}>
+                <TouchableOpacity
+                  style={[styles.audioButton, styles.exportButton]}
+                  onPress={handleShareSrt}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.audioButtonText}>Share SRT</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.audioButton, styles.saveSubtitleButton]}
+                  onPress={handleSaveSrtToFolder}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.audioButtonText}>Save SRT</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {savedSubtitlePath && (
+                <Text style={styles.savedPathText}>
+                  Subtitles:{' '}
+                  {getDisplayPath(savedSubtitlePath).split('/').pop()}
+                  {'\n'}
+                  {getDisplayPath(savedSubtitlePath)}
                 </Text>
-              ))}
+              )}
             </View>
-            <View style={styles.subtitleActions}>
-              <TouchableOpacity
-                style={[styles.audioButton, styles.exportButton]}
-                onPress={handleShareSrt}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.audioButtonText}>Share SRT</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.audioButton, styles.saveSubtitleButton]}
-                onPress={handleSaveSrtToFolder}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.audioButtonText}>Save SRT</Text>
-                )}
-              </TouchableOpacity>
+          )}
+
+          {/* Error Display */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
-            {savedSubtitlePath && (
-              <Text style={styles.savedPathText}>
-                Subtitles: {getDisplayPath(savedSubtitlePath).split('/').pop()}
-                {'\n'}
-                {getDisplayPath(savedSubtitlePath)}
+          )}
+
+          {/* Cleanup Button */}
+          {currentModelFolder && (
+            <TouchableOpacity
+              style={styles.cleanupButton}
+              onPress={handleCleanup}
+            >
+              <Text style={styles.cleanupButtonText}>Release Resources</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <View style={styles.rowAlignCenter}>
+              <Ionicons name="bulb" size={16} style={styles.iconInline} />
+              <Text style={styles.footerText}>
+                Tip: Models must be placed in assets/models/ directory
               </Text>
-            )}
+            </View>
           </View>
-        )}
-
-        {/* Error Display */}
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
-        {/* Cleanup Button */}
-        {currentModelFolder && (
-          <TouchableOpacity
-            style={styles.cleanupButton}
-            onPress={handleCleanup}
-          >
-            <Text style={styles.cleanupButtonText}>Release Resources</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <View style={styles.rowAlignCenter}>
-            <Ionicons name="bulb" size={16} style={styles.iconInline} />
-            <Text style={styles.footerText}>
-              Tip: Models must be placed in assets/models/ directory
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1787,6 +1794,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  body: {
+    flex: 1,
   },
   scrollView: {
     flex: 1,

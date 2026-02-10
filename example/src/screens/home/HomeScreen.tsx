@@ -11,7 +11,6 @@ import type { ComponentProps } from 'react';
 import { StatusBar } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, Feature } from '../../types/navigation';
-import AdsBanner from '../../ads/AdsBanner';
 
 const FEATURES: Feature[] = [
   {
@@ -126,14 +125,15 @@ export default function HomeScreen({ navigation }: Props) {
           Offline speech processing on device
         </Text>
       </View>
-      <FlatList
-        data={FEATURES}
-        renderItem={renderFeatureCard}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListFooterComponent={<AdsBanner />}
-        showsVerticalScrollIndicator={false}
-      />
+      <View style={styles.body}>
+        <FlatList
+          data={FEATURES}
+          renderItem={renderFeatureCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -142,6 +142,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  body: {
+    flex: 1,
   },
   header: {
     paddingHorizontal: 20,

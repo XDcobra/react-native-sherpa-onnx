@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AdsConsent } from 'react-native-google-mobile-ads';
+import {
+  AdsConsent,
+  AdsConsentDebugGeography,
+} from 'react-native-google-mobile-ads';
 import type {
   AdsConsentInfo,
   AdsConsentStatus,
@@ -29,11 +32,19 @@ export function useAdsConsent(enabled: boolean) {
 
     const gather = async () => {
       try {
-        const info = await AdsConsent.gatherConsent();
+        const info = await AdsConsent.gatherConsent(
+          __DEV__ && enabled
+            ? {
+                debugGeography: AdsConsentDebugGeography.EEA,
+                testDeviceIdentifiers: ['7AD2B5CA89598BFC56FF84922842E661'],
+              }
+            : undefined
+        );
+        const refreshedInfo = await AdsConsent.getConsentInfo();
         if (cancelled) {
           return;
         }
-        setConsentInfo(info);
+        setConsentInfo(refreshedInfo ?? info);
       } catch (err) {
         if (cancelled) {
           return;

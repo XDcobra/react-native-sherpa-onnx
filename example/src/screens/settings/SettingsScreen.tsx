@@ -34,31 +34,33 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.section}>
-        <Text style={styles.title}>Advertising</Text>
-        <Text style={styles.body}>
-          Ads are {adsEnabled ? 'enabled' : 'disabled'} for this build.
-        </Text>
-        <Text style={styles.body}>Consent status: {statusLabel}</Text>
-        <Text style={styles.body}>
-          Can request ads: {canRequestAds ? 'yes' : 'no'}
-        </Text>
-        {error ? (
-          <Text style={styles.errorText}>Consent error: {error.message}</Text>
-        ) : null}
-      </View>
+      <View style={styles.body}>
+        <View style={styles.section}>
+          <Text style={styles.title}>Advertising</Text>
+          <Text style={styles.bodyText}>
+            Ads are {adsEnabled ? 'enabled' : 'disabled'} for this build.
+          </Text>
+          <Text style={styles.bodyText}>Consent status: {statusLabel}</Text>
+          <Text style={styles.bodyText}>
+            Can request ads: {canRequestAds ? 'yes' : 'no'}
+          </Text>
+          {error ? (
+            <Text style={styles.errorText}>Consent error: {error.message}</Text>
+          ) : null}
+        </View>
 
-      <TouchableOpacity
-        style={[styles.button, !adsEnabled && styles.buttonDisabled]}
-        onPress={handlePrivacyOptions}
-        disabled={!adsEnabled || loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.buttonText}>Privacy Options</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.button, !adsEnabled && styles.buttonDisabled]}
+          onPress={handlePrivacyOptions}
+          disabled={!adsEnabled || loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>Privacy Options</Text>
+          )}
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -68,6 +70,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F2F2F7',
     padding: 16,
+  },
+  body: {
+    flex: 1,
   },
   section: {
     backgroundColor: '#FFFFFF',
@@ -81,7 +86,7 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginBottom: 8,
   },
-  body: {
+  bodyText: {
     fontSize: 14,
     color: '#444444',
     marginBottom: 6,

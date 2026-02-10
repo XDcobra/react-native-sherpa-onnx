@@ -333,239 +333,331 @@ export default function STTScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. Initialize Model</Text>
-          <Text style={styles.hint}>
-            Select a model to initialize. Available models are discovered
-            automatically from your assets folder.
-          </Text>
+      <View style={styles.body}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>1. Initialize Model</Text>
+            <Text style={styles.hint}>
+              Select a model to initialize. Available models are discovered
+              automatically from your assets folder.
+            </Text>
 
-          {currentModelFolder && (
-            <View style={styles.currentModelContainer}>
-              <Text style={styles.currentModelText}>
-                Current: {getModelDisplayName(currentModelFolder)}
-              </Text>
-            </View>
-          )}
-
-          {loadingModels ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>
-                Discovering available models...
-              </Text>
-            </View>
-          ) : availableModels.length === 0 ? (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                No models found in assets/models/ folder. Please add STT models
-                first. See STT_MODEL_SETUP.md for details.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.modelButtons}>
-              {availableModels.map((modelFolder) => (
-                <TouchableOpacity
-                  key={modelFolder}
-                  style={[
-                    styles.modelButton,
-                    currentModelFolder === modelFolder &&
-                      styles.modelButtonActive,
-                    loading && styles.buttonDisabled,
-                  ]}
-                  onPress={() => handleInitialize(modelFolder)}
-                  disabled={loading}
-                >
-                  <Text
-                    style={[
-                      styles.modelButtonText,
-                      currentModelFolder === modelFolder &&
-                        styles.modelButtonTextActive,
-                    ]}
-                  >
-                    {getModelDisplayName(modelFolder)}
-                  </Text>
-                  <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {initResult && (
-            <View
-              style={[styles.resultContainer, error && styles.errorContainer]}
-            >
-              <Text style={[styles.resultLabel, error && styles.errorLabel]}>
-                {error ? 'Error' : 'Result'}:
-              </Text>
-              <Text style={[styles.resultText, error && styles.errorText]}>
-                {initResult}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {error && !initResult && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorLabel}>Error:</Text>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. Select Model Type</Text>
-          <Text style={styles.hint}>
-            If multiple model types were detected, select which one to use for
-            transcription.
-          </Text>
-
-          {!currentModelFolder && (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                Please initialize a model directory first
-              </Text>
-            </View>
-          )}
-
-          {currentModelFolder && detectedModels.length === 0 && (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                No models detected. Please try another directory.
-              </Text>
-            </View>
-          )}
-
-          {detectedModels.length > 0 && (
-            <View style={styles.detectedModelsContainer}>
-              {detectedModels.map((model, index) => (
-                <TouchableOpacity
-                  key={`${model.type}-${index}`}
-                  style={[
-                    styles.detectedModelButton,
-                    selectedModelType === model.type &&
-                      styles.detectedModelButtonActive,
-                  ]}
-                  onPress={() => setSelectedModelType(model.type)}
-                >
-                  <Text
-                    style={[
-                      styles.detectedModelButtonText,
-                      selectedModelType === model.type &&
-                        styles.detectedModelButtonTextActive,
-                    ]}
-                  >
-                    {model.type.toUpperCase()}
-                  </Text>
-                  <Text style={styles.detectedModelPath}>{model.modelDir}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {currentModelFolder &&
-            detectedModels.length > 0 &&
-            !selectedModelType && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  Please select a model type above
+            {currentModelFolder && (
+              <View style={styles.currentModelContainer}>
+                <Text style={styles.currentModelText}>
+                  Current: {getModelDisplayName(currentModelFolder)}
                 </Text>
               </View>
             )}
-        </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
-          <Text style={styles.hint}>
-            Select an audio source and transcribe it using the selected model.
-          </Text>
+            {loadingModels ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>
+                  Discovering available models...
+                </Text>
+              </View>
+            ) : availableModels.length === 0 ? (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  No models found in assets/models/ folder. Please add STT
+                  models first. See STT_MODEL_SETUP.md for details.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.modelButtons}>
+                {availableModels.map((modelFolder) => (
+                  <TouchableOpacity
+                    key={modelFolder}
+                    style={[
+                      styles.modelButton,
+                      currentModelFolder === modelFolder &&
+                        styles.modelButtonActive,
+                      loading && styles.buttonDisabled,
+                    ]}
+                    onPress={() => handleInitialize(modelFolder)}
+                    disabled={loading}
+                  >
+                    <Text
+                      style={[
+                        styles.modelButtonText,
+                        currentModelFolder === modelFolder &&
+                          styles.modelButtonTextActive,
+                      ]}
+                    >
+                      {getModelDisplayName(modelFolder)}
+                    </Text>
+                    <Text style={styles.modelFolderText}>{modelFolder}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
-          {!selectedModelType && (
-            <View style={styles.warningContainer}>
-              <Text style={styles.warningText}>
-                Please select a model type first
-              </Text>
+            {initResult && (
+              <View
+                style={[styles.resultContainer, error && styles.errorContainer]}
+              >
+                <Text style={[styles.resultLabel, error && styles.errorLabel]}>
+                  {error ? 'Error' : 'Result'}:
+                </Text>
+                <Text style={[styles.resultText, error && styles.errorText]}>
+                  {initResult}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {error && !initResult && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorLabel}>Error:</Text>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          {selectedModelType && !audioSourceType && (
-            <>
-              <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
-              <View style={styles.sourceChoiceRow}>
-                <TouchableOpacity
-                  style={[styles.sourceChoiceButton, styles.flex1, styles.mr12]}
-                  onPress={() => setAudioSourceType('example')}
-                >
-                  <View style={styles.rowCenter}>
-                    <Ionicons
-                      name="folder-outline"
-                      size={18}
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.sourceChoiceButtonText}>
-                      Example Audio
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.sourceChoiceButton, styles.flex1]}
-                  onPress={() => setAudioSourceType('own')}
-                >
-                  <View style={styles.rowCenter}>
-                    <Ionicons
-                      name="musical-notes"
-                      size={18}
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.sourceChoiceButtonText}>
-                      Select Your Own Audio
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>2. Select Model Type</Text>
+            <Text style={styles.hint}>
+              If multiple model types were detected, select which one to use for
+              transcription.
+            </Text>
+
+            {!currentModelFolder && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  Please initialize a model directory first
+                </Text>
               </View>
-            </>
-          )}
+            )}
 
-          {selectedModelType &&
-            audioSourceType === 'example' &&
-            availableAudioFiles.length > 0 && (
-              <>
-                <Text style={styles.subsectionTitle}>Select Audio File:</Text>
-                <View style={styles.audioFilesContainer}>
-                  {availableAudioFiles.map((audioFile) => (
-                    <TouchableOpacity
-                      key={audioFile.id}
+            {currentModelFolder && detectedModels.length === 0 && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  No models detected. Please try another directory.
+                </Text>
+              </View>
+            )}
+
+            {detectedModels.length > 0 && (
+              <View style={styles.detectedModelsContainer}>
+                {detectedModels.map((model, index) => (
+                  <TouchableOpacity
+                    key={`${model.type}-${index}`}
+                    style={[
+                      styles.detectedModelButton,
+                      selectedModelType === model.type &&
+                        styles.detectedModelButtonActive,
+                    ]}
+                    onPress={() => setSelectedModelType(model.type)}
+                  >
+                    <Text
                       style={[
-                        styles.audioFileButton,
-                        selectedAudio?.id === audioFile.id &&
-                          styles.audioFileButtonActive,
+                        styles.detectedModelButtonText,
+                        selectedModelType === model.type &&
+                          styles.detectedModelButtonTextActive,
                       ]}
-                      onPress={() => setSelectedAudio(audioFile)}
                     >
-                      <Text
-                        style={[
-                          styles.audioFileButtonText,
-                          selectedAudio?.id === audioFile.id &&
-                            styles.audioFileButtonTextActive,
-                        ]}
-                      >
-                        {audioFile.name}
-                      </Text>
-                      <Text style={styles.audioFileDescription}>
-                        {audioFile.description}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                      {model.type.toUpperCase()}
+                    </Text>
+                    <Text style={styles.detectedModelPath}>
+                      {model.modelDir}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
-                {selectedAudio && (
+            {currentModelFolder &&
+              detectedModels.length > 0 &&
+              !selectedModelType && (
+                <View style={styles.warningContainer}>
+                  <Text style={styles.warningText}>
+                    Please select a model type above
+                  </Text>
+                </View>
+              )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
+            <Text style={styles.hint}>
+              Select an audio source and transcribe it using the selected model.
+            </Text>
+
+            {!selectedModelType && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  Please select a model type first
+                </Text>
+              </View>
+            )}
+
+            {selectedModelType && !audioSourceType && (
+              <>
+                <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
+                <View style={styles.sourceChoiceRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.sourceChoiceButton,
+                      styles.flex1,
+                      styles.mr12,
+                    ]}
+                    onPress={() => setAudioSourceType('example')}
+                  >
+                    <View style={styles.rowCenter}>
+                      <Ionicons
+                        name="folder-outline"
+                        size={18}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.sourceChoiceButtonText}>
+                        Example Audio
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.sourceChoiceButton, styles.flex1]}
+                    onPress={() => setAudioSourceType('own')}
+                  >
+                    <View style={styles.rowCenter}>
+                      <Ionicons
+                        name="musical-notes"
+                        size={18}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.sourceChoiceButtonText}>
+                        Select Your Own Audio
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {selectedModelType &&
+              audioSourceType === 'example' &&
+              availableAudioFiles.length > 0 && (
+                <>
+                  <Text style={styles.subsectionTitle}>Select Audio File:</Text>
+                  <View style={styles.audioFilesContainer}>
+                    {availableAudioFiles.map((audioFile) => (
+                      <TouchableOpacity
+                        key={audioFile.id}
+                        style={[
+                          styles.audioFileButton,
+                          selectedAudio?.id === audioFile.id &&
+                            styles.audioFileButtonActive,
+                        ]}
+                        onPress={() => setSelectedAudio(audioFile)}
+                      >
+                        <Text
+                          style={[
+                            styles.audioFileButtonText,
+                            selectedAudio?.id === audioFile.id &&
+                              styles.audioFileButtonTextActive,
+                          ]}
+                        >
+                          {audioFile.name}
+                        </Text>
+                        <Text style={styles.audioFileDescription}>
+                          {audioFile.description}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {selectedAudio && (
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        (transcribing || loading) && styles.buttonDisabled,
+                      ]}
+                      onPress={handleTranscribe}
+                      disabled={transcribing || loading}
+                    >
+                      {transcribing ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.buttonText}>Transcribe Audio</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.mt15]}
+                    onPress={() => {
+                      setAudioSourceType(null);
+                      setSelectedAudio(null);
+                      setTranscriptionResult(null);
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      ← Change Audio Source
+                    </Text>
+                  </TouchableOpacity>
+
+                  {transcriptionResult && (
+                    <View style={styles.resultContainer}>
+                      <Text style={styles.resultLabel}>Transcription:</Text>
+                      <Text style={styles.resultText}>
+                        {transcriptionResult}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+
+            {selectedModelType && audioSourceType === 'own' && (
+              <>
+                <Text style={styles.subsectionTitle}>
+                  Select Local WAV File:
+                </Text>
+                <TouchableOpacity
+                  style={[styles.button, loading && styles.buttonDisabled]}
+                  onPress={handlePickLocalFile}
+                  disabled={loading}
+                >
+                  <View style={styles.rowCenter}>
+                    <Ionicons
+                      name="folder-open-outline"
+                      size={16}
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.buttonText}>Choose Local WAV</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {customAudioName && (
+                  <View style={styles.selectedFileContainer}>
+                    <Text style={styles.selectedFileLabel}>Selected file:</Text>
+                    <Text style={styles.selectedFileName}>
+                      {customAudioName}
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[styles.playButton]}
+                      onPress={handlePlayAudio}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name="play"
+                          size={16}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.playButtonText}>Play Audio</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {customAudioPath && (
                   <TouchableOpacity
                     style={[
                       styles.button,
                       (transcribing || loading) && styles.buttonDisabled,
+                      styles.mt12,
                     ]}
                     onPress={handleTranscribe}
                     disabled={transcribing || loading}
@@ -582,8 +674,14 @@ export default function STTScreen() {
                   style={[styles.secondaryButton, styles.mt15]}
                   onPress={() => {
                     setAudioSourceType(null);
-                    setSelectedAudio(null);
+                    setCustomAudioPath(null);
+                    setCustomAudioName(null);
                     setTranscriptionResult(null);
+                    if (soundPlayer) {
+                      soundPlayer.stop();
+                      soundPlayer.release();
+                      setSoundPlayer(null);
+                    }
                   }}
                 >
                   <Text style={styles.secondaryButtonText}>
@@ -600,102 +698,18 @@ export default function STTScreen() {
               </>
             )}
 
-          {selectedModelType && audioSourceType === 'own' && (
-            <>
-              <Text style={styles.subsectionTitle}>Select Local WAV File:</Text>
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handlePickLocalFile}
-                disabled={loading}
-              >
-                <View style={styles.rowCenter}>
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={16}
-                    style={styles.iconInline}
-                  />
-                  <Text style={styles.buttonText}>Choose Local WAV</Text>
-                </View>
-              </TouchableOpacity>
-
-              {customAudioName && (
-                <View style={styles.selectedFileContainer}>
-                  <Text style={styles.selectedFileLabel}>Selected file:</Text>
-                  <Text style={styles.selectedFileName}>{customAudioName}</Text>
-
-                  <TouchableOpacity
-                    style={[styles.playButton]}
-                    onPress={handlePlayAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="play"
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.playButtonText}>Play Audio</Text>
-                    </View>
-                  </TouchableOpacity>
+            {selectedModelType &&
+              audioSourceType === 'example' &&
+              availableAudioFiles.length === 0 && (
+                <View style={styles.warningContainer}>
+                  <Text style={styles.warningText}>
+                    No audio files available for this model
+                  </Text>
                 </View>
               )}
-
-              {customAudioPath && (
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    (transcribing || loading) && styles.buttonDisabled,
-                    styles.mt12,
-                  ]}
-                  onPress={handleTranscribe}
-                  disabled={transcribing || loading}
-                >
-                  {transcribing ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Transcribe Audio</Text>
-                  )}
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity
-                style={[styles.secondaryButton, styles.mt15]}
-                onPress={() => {
-                  setAudioSourceType(null);
-                  setCustomAudioPath(null);
-                  setCustomAudioName(null);
-                  setTranscriptionResult(null);
-                  if (soundPlayer) {
-                    soundPlayer.stop();
-                    soundPlayer.release();
-                    setSoundPlayer(null);
-                  }
-                }}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  ← Change Audio Source
-                </Text>
-              </TouchableOpacity>
-
-              {transcriptionResult && (
-                <View style={styles.resultContainer}>
-                  <Text style={styles.resultLabel}>Transcription:</Text>
-                  <Text style={styles.resultText}>{transcriptionResult}</Text>
-                </View>
-              )}
-            </>
-          )}
-
-          {selectedModelType &&
-            audioSourceType === 'example' &&
-            availableAudioFiles.length === 0 && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No audio files available for this model
-                </Text>
-              </View>
-            )}
-        </View>
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -704,6 +718,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  body: {
+    flex: 1,
   },
   scrollContent: {
     padding: 20,
