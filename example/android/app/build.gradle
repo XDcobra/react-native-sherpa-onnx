@@ -116,12 +116,15 @@ android {
         }
         release {
             def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
-            if (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty()) {
+            def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+            if (isReleaseTask && (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty())) {
                 throw new RuntimeException("ADMOB_APP_ID_ANDROID is required for release builds")
             }
-            manifestPlaceholders = [
-                admobAppId: releaseAdmobAppId
-            ]
+            if (releaseAdmobAppId != null && !releaseAdmobAppId.toString().trim().isEmpty()) {
+                manifestPlaceholders = [
+                    admobAppId: releaseAdmobAppId
+                ]
+            }
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.release

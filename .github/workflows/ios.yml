@@ -1,0 +1,373 @@
+name: SDK - Build iOS example app
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Lint files
+        run: yarn lint
+
+      - name: Typecheck files
+        run: yarn typecheck
+
+  build-ios:
+    runs-on: macos-15
+    needs: lint
+
+    env:
+      XCODE_VERSION: 16.4
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Setup SherpaOnnx assets (headers and framework)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Setting up SherpaOnnx assets..."
+          yarn setup-assets
+
+      - name: Use appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd example
+          bundle install
+
+          echo "Running pod install (vendored_frameworks handles XCFramework linking automatically)..."
+          echo ""
+
+          # Run pod install and capture output to show post_install messages
+          # Pod install will also download the sherpa-onnx framework from github releases
+          bundle exec pod install --project-directory=ios 2>&1 | tee /tmp/pod_install.log
+
+          echo ""
+          echo "=== Filtering SherpaOnnx messages from pod install ==="
+          grep -E "\[SherpaOnnx\]" /tmp/pod_install.log || echo "No SherpaOnnx messages found in pod install output"
+
+          # Verify installation
+          if [ ! -f "ios/SherpaOnnxExample.xcworkspace/contents.xcworkspacedata" ]; then
+            echo "Error: Xcode workspace not created"
+            exit 1
+          fi
+
+          echo ""
+          echo "[OK] CocoaPods dependencies installed"
+
+      - name: Verify xcconfig is applied
+        run: |
+          echo "=== Checking Pod Target xcconfig ==="
+          PODS_XCCONFIG="example/ios/Pods/Target Support Files/SherpaOnnx/SherpaOnnx.debug.xcconfig"
+          if [ -f "$PODS_XCCONFIG" ]; then
+            echo "Pod xcconfig found. Checking key settings..."
+            
+            if grep -q "HEADER_SEARCH_PATHS" "$PODS_XCCONFIG"; then
+              echo "[OK] HEADER_SEARCH_PATHS found"
+            fi
+            
+            if grep -q "LIBRARY_SEARCH_PATHS" "$PODS_XCCONFIG"; then
+              echo "[OK] LIBRARY_SEARCH_PATHS found in pod xcconfig"
+              grep "LIBRARY_SEARCH_PATHS" "$PODS_XCCONFIG"
+            else
+              echo "[WARNING] LIBRARY_SEARCH_PATHS not found in pod xcconfig"
+            fi
+          fi
+
+          echo ""
+          echo "=== Checking App Target xcconfig (vendored_frameworks handles linking automatically) ==="
+          # The aggregated settings for the app are in Pods-SherpaOnnxExample
+          APP_XCCONFIG="example/ios/Pods/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample.debug.xcconfig"
+          if [ -f "$APP_XCCONFIG" ]; then
+            echo "App xcconfig found at: $APP_XCCONFIG"
+            echo ""
+            
+            # Show the last 15 lines
+            echo "Last 15 lines of xcconfig:"
+            tail -15 "$APP_XCCONFIG"
+            echo ""
+            
+            # Check for FRAMEWORK_SEARCH_PATHS containing sherpa_onnx (vendored_frameworks adds this)
+            echo "Checking for XCFramework linking configuration:"
+            if grep -q "sherpa_onnx" "$APP_XCCONFIG"; then
+              echo "[OK] sherpa_onnx framework referenced in app xcconfig"
+              grep "sherpa_onnx" "$APP_XCCONFIG" | head -3
+            else
+              echo "[WARNING] sherpa_onnx framework not directly referenced in xcconfig"
+              echo "Note: vendored_frameworks may handle linking automatically via OTHER_LDFLAGS"
+            fi
+            
+            # Check FRAMEWORK_SEARCH_PATHS
+            if grep -q "FRAMEWORK_SEARCH_PATHS.*sherpa" "$APP_XCCONFIG"; then
+              echo "[OK] FRAMEWORK_SEARCH_PATHS contains sherpa_onnx path"
+            else
+              echo "[INFO] FRAMEWORK_SEARCH_PATHS check (vendored_frameworks may handle this differently)"
+            fi
+            
+            # Note: force_load is no longer needed - vendored_frameworks handles linking automatically
+            if grep -q "force_load" "$APP_XCCONFIG"; then
+              echo "[INFO] force_load found (may be from other pods or legacy config)"
+              grep "force_load" "$APP_XCCONFIG" | head -3
+            else
+              echo "[OK] force_load not found (expected - vendored_frameworks handles linking automatically)"
+            fi
+          else
+            echo "Error: App xcconfig not found at expected path"
+            echo "Available xcconfig files:"
+            find example/ios/Pods -name "*.xcconfig" -type f | head -20
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Verifying header file locations ==="
+          HEADER1="ios/include/sherpa-onnx/c-api/cxx-api.h"
+          HEADER2="ios/include/sherpa-onnx/c-api/c-api.h"
+          HEADER_MISSING=0
+
+          if [ -f "$HEADER1" ]; then
+            echo "[OK] Header file exists: $HEADER1"
+          else
+            echo "[ERROR] Header file missing: $HEADER1"
+            HEADER_MISSING=1
+          fi
+
+          if [ -f "$HEADER2" ]; then
+            echo "[OK] Header file exists: $HEADER2"
+          else
+            echo "[ERROR] Header file missing: $HEADER2"
+            HEADER_MISSING=1
+          fi
+
+          if [ $HEADER_MISSING -eq 0 ]; then
+            echo "[OK] All required header files exist"
+          else
+            echo "[ERROR] One or more required header files are missing!"
+          fi
+
+      - name: Show resolved Xcode build settings
+        run: |
+          echo "=== Checking Xcode resolved build settings for OTHER_LDFLAGS ==="
+          cd example
+
+          # List available simulators first
+          echo "Available simulators:"
+          xcrun simctl list devices available | grep -E "iPhone|iPad" | head -10 || true
+
+          # Show the resolved OTHER_LDFLAGS for the app target on simulator
+          # Use generic destination to avoid simulator availability issues
+          echo ""
+          echo "Resolved OTHER_LDFLAGS for Debug-iphonesimulator:"
+          xcodebuild -workspace ios/SherpaOnnxExample.xcworkspace \
+            -scheme SherpaOnnxExample \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -showBuildSettings 2>&1 | grep -A2 "OTHER_LDFLAGS" | head -20 || echo "Could not get build settings"
+
+          echo ""
+          echo "Checking if sherpa_onnx framework is linked (vendored_frameworks handles this):"
+          SETTINGS=$(xcodebuild -workspace ios/SherpaOnnxExample.xcworkspace \
+            -scheme SherpaOnnxExample \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -showBuildSettings 2>&1) || true
+
+          if echo "$SETTINGS" | grep -q "sherpa_onnx"; then
+            echo "[OK] sherpa_onnx framework found in resolved build settings"
+            echo "$SETTINGS" | grep "sherpa_onnx" | head -5
+          else
+            echo "[INFO] sherpa_onnx not found in resolved settings (vendored_frameworks may handle linking differently)"
+          fi
+
+          # Check for force_load (may be from other pods, but not required for sherpa_onnx)
+          if echo "$SETTINGS" | grep -q "force_load"; then
+            echo "[INFO] force_load found in resolved build settings (may be from other pods)"
+            echo "$SETTINGS" | grep "force_load" | head -5
+          else
+            echo "[OK] force_load not found (expected - vendored_frameworks handles sherpa_onnx linking automatically)"
+          fi
+
+          echo ""
+          echo "All OTHER_LDFLAGS entries:"
+          echo "$SETTINGS" | grep "OTHER_LDFLAGS" | head -10 || echo "No OTHER_LDFLAGS found"
+
+          echo ""
+          echo "FRAMEWORK_SEARCH_PATHS:"
+          echo "$SETTINGS" | grep "FRAMEWORK_SEARCH_PATHS" | head -5 || echo "No FRAMEWORK_SEARCH_PATHS found"
+
+          echo ""
+          echo "LIBRARY_SEARCH_PATHS:"
+          echo "$SETTINGS" | grep "LIBRARY_SEARCH_PATHS" | head -5 || echo "No LIBRARY_SEARCH_PATHS found"
+
+          # Check the Xcode project file directly for build settings
+          echo ""
+          echo "=== Checking Xcode project for framework linking ==="
+          if grep -q "sherpa_onnx" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj"; then
+            echo "[OK] sherpa_onnx framework found in Xcode project file"
+            grep "sherpa_onnx" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj" | head -5
+          else
+            echo "[INFO] sherpa_onnx not found directly in Xcode project file"
+            echo "This is expected - vendored_frameworks handles linking via CocoaPods"
+          fi
+
+          # Note about force_load
+          if grep -q "force_load" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj"; then
+            echo "[INFO] force_load found in Xcode project file (may be from other pods)"
+            grep "force_load" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj" | head -5
+          else
+            echo "[OK] force_load not found directly in Xcode project file (expected for sherpa_onnx)"
+          fi
+        continue-on-error: true
+
+      - name: Build example for iOS
+        run: |
+          set -o pipefail
+          echo "Building iOS example app for simulator..."
+
+          cd example
+
+          # Build for simulator using -sdk flag (more reliable than -destination)
+          # This builds for the current architecture of the Mac runner
+          if ! xcodebuild \
+            -workspace ios/SherpaOnnxExample.xcworkspace \
+            -scheme SherpaOnnxExample \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -arch arm64 \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            > /tmp/build.full.log 2>&1; then
+            BUILD_FAILED=1
+          fi
+
+          # Display filtered output (errors, warnings, important messages)
+          echo "=== Filtered Build Output ==="
+          grep -E "(: error:|: warning:|BUILD SUCCEEDED|BUILD FAILED|Undefined symbols|fatal error)" /tmp/build.full.log | head -100 || true
+
+          if [ "${BUILD_FAILED:-0}" = "1" ]; then
+            echo ""
+            echo "=== Build failed. Full error analysis ==="
+            
+            # Show all lines containing "error:" with context
+            echo ""
+            echo "--- Compilation/Linker Errors ---"
+            grep -B 2 -A 5 ": error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
+            
+            # Show fatal errors
+            echo ""
+            echo "--- Fatal Errors ---"
+            grep -B 2 -A 5 "fatal error" /tmp/build.full.log | head -50 || echo "No fatal errors found"
+            
+            # Check for undefined symbols (linking)
+            echo ""
+            echo "--- Undefined Symbols ---"
+            grep -B 2 -A 10 "Undefined symbols" /tmp/build.full.log | head -50 || echo "No undefined symbols"
+            
+            # Show the CompileC failure details
+            echo ""
+            echo "--- Failed Commands ---"
+            grep -B 5 -A 2 "following build commands failed" /tmp/build.full.log | head -30 || true
+            
+            # Last part of log for context
+            echo ""
+            echo "--- Last 50 lines of build log ---"
+            tail -50 /tmp/build.full.log
+            exit 1
+          fi
+
+          echo "[OK] iOS build completed successfully"
+
+      - name: Verify build artifacts
+        run: |
+          echo "Verifying build artifacts..."
+
+          if [ -d "example/ios/build" ]; then
+            echo "[OK] Build directory exists"
+            
+            # Check for the app
+            APP_PATH=$(find example/ios/build -name "*.app" -type d | head -1)
+            if [ -n "$APP_PATH" ]; then
+              echo "[OK] App bundle found: $APP_PATH"
+            else
+              echo "Warning: App bundle not found in build directory"
+            fi
+          else
+            echo "Warning: Build directory not found"
+          fi
+
+      - name: Create iOS IPA file
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "Creating iOS IPA file..."
+
+          # Find the app bundle
+          APP_PATH=$(find example/ios/build -name "*.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: App bundle not found"
+            exit 1
+          fi
+
+          echo "Found app bundle: $APP_PATH"
+
+          # Create IPA structure
+          IPA_DIR="example/ios/build/ipa"
+          PAYLOAD_DIR="$IPA_DIR/Payload"
+
+          mkdir -p "$PAYLOAD_DIR"
+
+          # Copy app bundle to Payload directory
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+
+          # Create IPA file (ZIP archive)
+          IPA_NAME="SherpaOnnxExample.ipa"
+          IPA_PATH="$IPA_DIR/$IPA_NAME"
+
+          cd "$IPA_DIR"
+          zip -r "$IPA_NAME" Payload
+          cd - > /dev/null
+
+          if [ -f "$IPA_PATH" ]; then
+            IPA_SIZE=$(stat -f%z "$IPA_PATH" 2>/dev/null || stat -c%s "$IPA_PATH")
+            IPA_SIZE_MB=$((IPA_SIZE / 1024 / 1024))
+            echo "[OK] IPA file created: $IPA_PATH (${IPA_SIZE_MB}MB)"
+          else
+            echo "Error: IPA file was not created at $IPA_PATH"
+            echo "Checking for IPA files in build directory:"
+            find example/ios/build -name "*.ipa" -type f || echo "No IPA files found"
+            exit 1
+          fi
+
+      - name: Upload iOS IPA artifact
+        if: startsWith(github.ref, 'refs/tags/sdk-v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-bundle
+          path: example/ios/build/ipa/*.ipa
+          retention-days: 7
+          if-no-files-found: error
