@@ -1,19 +1,7 @@
 name: App - Release Android
 
 on:
-  push:
-    tags:
-      - 'app-v*'
   workflow_dispatch:
-    inputs:
-      version_name:
-        description: 'Version name (e.g., 1.0.0). If empty, derived from tag or example/package.json'
-        required: false
-        type: string
-      build_number:
-        description: 'Build number (e.g., 123). If empty, derived from git commit count'
-        required: false
-        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
