@@ -30,6 +30,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Ensure Gradle wrapper is executable
+        run: |
+          if [ -f example/android/gradlew ]; then
+            chmod +x example/android/gradlew
+          fi
+
       - name: Setup
         uses: ./.github/actions/setup
 
