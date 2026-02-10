@@ -97,9 +97,9 @@
 - [x] Tag-Schema final und mit Team abgestimmt.
 - [x] release-it fuer SDK angepasst.
 - [x] Neuer App-Release-Workflow definiert.
-- [ ] Alle Secrets in GitHub gesetzt.
+- [x] Alle Secrets in GitHub gesetzt.
 - [x] Debug/Release Ad-Logik klar getrennt.
-- [ ] Consent-Flows definiert.
+- [x] Consent-Flows definiert.
 - [ ] Fastlane Zugang getestet.
 
 ## Risiken und Gegenmassnahmen

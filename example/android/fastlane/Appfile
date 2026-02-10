@@ -1,0 +1,2 @@
+package_name("sherpaonnx.example")
+json_key_file("fastlane/fastlane.json")

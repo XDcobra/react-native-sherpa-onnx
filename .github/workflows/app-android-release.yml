@@ -137,11 +137,27 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      # Fastlane upload will be enabled after fastlane config is added in Phase 3/5.
-      # - name: Upload to Play Store (Closed Testing)
-      #   env:
-      #     FASTLANE_JSON_KEY: ${{ secrets.FASTLANE_JSON_KEY }}
-      #   run: |
-      #     cd example/android
-      #     bundle install
-      #     bundle exec fastlane closed_testing
+      - name: Set up Ruby (Fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: example/android
+
+      - name: Prepare Fastlane JSON key
+        env:
+          FASTLANE_JSON_KEY: ${{ secrets.FASTLANE_JSON_KEY }}
+        run: |
+          if [ -z "$FASTLANE_JSON_KEY" ]; then
+            echo "Error: FASTLANE_JSON_KEY is not set"
+            exit 1
+          fi
+
+          mkdir -p example/android/fastlane
+          printf '%s' "$FASTLANE_JSON_KEY" > example/android/fastlane/fastlane.json
+          chmod 600 example/android/fastlane/fastlane.json
+
+      - name: Upload to Play Store (Closed Testing)
+        run: |
+          cd example/android
+          bundle exec fastlane closed_testing
