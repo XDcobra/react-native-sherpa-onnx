@@ -5,6 +5,15 @@ on:
     tags:
       - 'app-v*'
   workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version name (e.g., 1.0.0). If empty, derived from tag or example/package.json'
+        required: false
+        type: string
+      build_number:
+        description: 'Build number (e.g., 123). If empty, derived from git commit count'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,12 +61,42 @@ jobs:
 
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > example/android/app/release.keystore
 
+      - name: Derive version
+        id: version
+        run: |
+          set -euo pipefail
+
+          VERSION_NAME_INPUT="${{ inputs.version_name }}"
+          BUILD_NUMBER_INPUT="${{ inputs.build_number }}"
+
+          if [ -n "$VERSION_NAME_INPUT" ]; then
+            VERSION_NAME="$VERSION_NAME_INPUT"
+          else
+            if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [[ "${GITHUB_REF_NAME:-}" =~ ^app-v(.+)$ ]]; then
+              VERSION_NAME="${BASH_REMATCH[1]}"
+            else
+              VERSION_NAME=$(node -p "require('./example/package.json').version")
+            fi
+          fi
+
+          if [ -n "$BUILD_NUMBER_INPUT" ]; then
+            BUILD_NUMBER="$BUILD_NUMBER_INPUT"
+          else
+            BUILD_NUMBER=$(git rev-list --count HEAD)
+          fi
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Resolved version_name=$VERSION_NAME build_number=$BUILD_NUMBER"
+
       - name: Build Android release AAB
         env:
           ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: ${{ github.workspace }}/example/android/app/release.keystore
           ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_VERSION_CODE: ${{ steps.version.outputs.build_number }}
+          ORG_GRADLE_PROJECT_VERSION_NAME: ${{ steps.version.outputs.version_name }}
           ORG_GRADLE_PROJECT_ADMOB_APP_ID_ANDROID: ${{ secrets.ADMOB_APP_ID_ANDROID }}
           ORG_GRADLE_PROJECT_ADMOB_BANNER_ID_ANDROID: ${{ secrets.ADMOB_BANNER_ID_ANDROID }}
         run: |

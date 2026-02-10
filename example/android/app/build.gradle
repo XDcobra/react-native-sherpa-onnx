@@ -82,8 +82,10 @@ android {
         applicationId "com.xdcobra.voicelab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        def resolvedVersionCode = project.findProperty('VERSION_CODE') ?: "1"
+        def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "1.0"
+        versionCode resolvedVersionCode.toInteger()
+        versionName resolvedVersionName.toString()
         manifestPlaceholders = [
             admobAppId: "ca-app-pub-3940256099942544~3347511713"
         ]
