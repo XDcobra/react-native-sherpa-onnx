@@ -5,6 +5,7 @@ platform :android do
   lane :closed_testing do
     supply(
       aab: "app/build/outputs/bundle/release/app-release.aab",
+      mapping: "app/build/outputs/mapping/release/mapping.txt",
       track: "closed_testing",
       skip_upload_metadata: true,
       skip_upload_images: true,

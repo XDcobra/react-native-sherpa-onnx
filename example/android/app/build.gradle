@@ -57,7 +57,7 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -83,7 +83,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         def resolvedVersionCode = project.findProperty('VERSION_CODE') ?: "1"
-        def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "1.0"
+        def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "0.0.1"
         versionCode resolvedVersionCode.toInteger()
         versionName resolvedVersionName.toString()
         manifestPlaceholders = [
