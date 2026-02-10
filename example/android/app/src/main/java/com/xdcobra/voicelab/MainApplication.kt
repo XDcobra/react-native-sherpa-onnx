@@ -1,4 +1,4 @@
-package sherpaonnx.example
+package com.xdcobra.voicelab
 
 import android.app.Application
 import com.facebook.react.PackageList
