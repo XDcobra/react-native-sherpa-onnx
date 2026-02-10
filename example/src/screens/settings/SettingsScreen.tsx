@@ -5,6 +5,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AdsConsent, AdsConsentStatus } from 'react-native-google-mobile-ads';
@@ -27,6 +28,21 @@ export default function SettingsScreen() {
       await refreshConsent();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openPrivacyWeb = async () => {
+    const url =
+      'https://xdcobra.github.io/voice-lab-offline-tools/privacy-policy.html';
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        console.warn('Cannot open URL:', url);
+      }
+    } catch (e) {
+      console.warn('Failed to open URL', e);
     }
   };
 
@@ -59,6 +75,10 @@ export default function SettingsScreen() {
           ) : (
             <Text style={styles.buttonText}>Privacy Options</Text>
           )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.linkButton} onPress={openPrivacyWeb}>
+          <Text style={styles.linkText}>Open Privacy Policy (web)</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -106,6 +126,15 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  linkButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  linkText: {
+    color: '#007AFF',
     fontWeight: '600',
   },
 });
