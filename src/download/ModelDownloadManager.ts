@@ -239,6 +239,71 @@ function getReleaseUrl(category: ModelCategory): string {
   return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
 }
 
+/**
+ * Retry helper with exponential backoff
+ * @param fn - The async function to retry
+ * @param options - Retry configuration
+ * @returns The result of the function
+ * @throws The last error if all retries fail or AbortError if aborted
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  options: {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    backoffFactor?: number;
+    signal?: AbortSignal;
+  } = {}
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? 3;
+  const initialDelayMs = options.initialDelayMs ?? 1000;
+  const maxDelayMs = options.maxDelayMs ?? 10000;
+  const backoffFactor = options.backoffFactor ?? 2;
+
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (options.signal?.aborted) {
+      const abortError = new Error('Operation aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on abort
+      if (lastError.name === 'AbortError' || options.signal?.aborted) {
+        throw lastError;
+      }
+
+      // If this was the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw lastError;
+      }
+
+      // Calculate delay with exponential backoff
+      const delayMs = Math.min(
+        initialDelayMs * Math.pow(backoffFactor, attempt),
+        maxDelayMs
+      );
+
+      console.warn(
+        `Retry attempt ${attempt + 1}/${maxRetries} after ${delayMs}ms due to:`,
+        lastError.message
+      );
+
+      // Wait before retrying
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError ?? new Error('Retry failed with no error');
+}
+
 async function fetchChecksumsFromRelease(
   category: ModelCategory
 ): Promise<Map<string, string>> {
@@ -248,19 +313,27 @@ async function fetchChecksumsFromRelease(
   }
 
   try {
-    const response = await fetch(
-      `https://github.com/k2-fsa/sherpa-onnx/releases/download/${CATEGORY_CONFIG[category].tag}/checksum.txt`
+    const checksums = await retryWithBackoff(
+      async () => {
+        const response = await fetch(
+          `https://github.com/k2-fsa/sherpa-onnx/releases/download/${CATEGORY_CONFIG[category].tag}/checksum.txt`
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch checksum.txt for ${category}: ${response.status}`
+          );
+        }
+
+        const content = await response.text();
+        return parseChecksumFile(content);
+      },
+      {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+      }
     );
 
-    if (!response.ok) {
-      console.warn(
-        `SherpaOnnxChecksum: Failed to fetch checksum.txt for ${category}: ${response.status}`
-      );
-      return new Map();
-    }
-
-    const content = await response.text();
-    const checksums = parseChecksumFile(content);
     checksumCacheByCategory[category] = checksums;
     return checksums;
   } catch (error) {
@@ -449,6 +522,8 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
   options?: {
     forceRefresh?: boolean;
     cacheTtlMinutes?: number;
+    maxRetries?: number;
+    signal?: AbortSignal;
   }
 ): Promise<T[]> {
   const ttl = options?.cacheTtlMinutes ?? CACHE_TTL_MINUTES;
@@ -458,41 +533,61 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
     return cached.models;
   }
 
-  const response = await fetch(getReleaseUrl(category));
-  if (!response.ok) {
-    if (cached) return cached.models;
-    throw new Error(`Failed to fetch models: ${response.status}`);
-  }
+  try {
+    const body = await retryWithBackoff(
+      async () => {
+        const response = await fetch(getReleaseUrl(category));
+        if (!response.ok) {
+          throw new Error(`Failed to fetch models: ${response.status}`);
+        }
+        return response.json();
+      },
+      {
+        maxRetries: options?.maxRetries ?? 3,
+        initialDelayMs: 1000,
+        signal: options?.signal,
+      }
+    );
 
-  const body = await response.json();
-  const assets = Array.isArray(body?.assets) ? body.assets : [];
-  const models: T[] = assets
-    .map((asset: any) =>
-      toModelMeta(category, {
-        name: asset.name,
-        size: asset.size,
-        browser_download_url: asset.browser_download_url,
-      })
-    )
-    .filter((model: ModelMetaBase | null): model is T => Boolean(model));
+    const assets = Array.isArray(body?.assets) ? body.assets : [];
+    const models: T[] = assets
+      .map((asset: any) =>
+        toModelMeta(category, {
+          name: asset.name,
+          size: asset.size,
+          browser_download_url: asset.browser_download_url,
+        })
+      )
+      .filter((model: ModelMetaBase | null): model is T => Boolean(model));
 
-  // Load and attach SHA256 checksums from checksum.txt
-  const checksums = await fetchChecksumsFromRelease(category);
-  for (const model of models) {
-    const archiveFilename = `${model.id}${MODEL_ARCHIVE_EXT}`;
-    const sha256 = checksums.get(archiveFilename);
-    if (sha256) {
-      model.sha256 = sha256;
+    // Load and attach SHA256 checksums from checksum.txt
+    const checksums = await fetchChecksumsFromRelease(category);
+    for (const model of models) {
+      const archiveFilename = `${model.id}${MODEL_ARCHIVE_EXT}`;
+      const sha256 = checksums.get(archiveFilename);
+      if (sha256) {
+        model.sha256 = sha256;
+      }
     }
-  }
 
-  const payload: CachePayload<T> = {
-    lastUpdated: new Date().toISOString(),
-    models,
-  };
-  await saveCache(category, payload);
-  emitModelsListUpdated(category, models as ModelMetaBase[]);
-  return models;
+    const payload: CachePayload<T> = {
+      lastUpdated: new Date().toISOString(),
+      models,
+    };
+    await saveCache(category, payload);
+    emitModelsListUpdated(category, models as ModelMetaBase[]);
+    return models;
+  } catch (error) {
+    // If retry failed and we have cached data, return it as fallback
+    if (cached) {
+      console.warn(
+        `Failed to refresh models for ${category}, using cached data:`,
+        error
+      );
+      return cached.models;
+    }
+    throw error;
+  }
 }
 
 export async function getModelsCacheStatusByCategory(
@@ -664,60 +759,75 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     // Archive existence check for ${archivePath}: ${archiveExists}
     if (!archiveExists) {
       // Starting download for ${category}:${id} from ${model.downloadUrl}
-      const download = RNFS.downloadFile({
-        fromUrl: model.downloadUrl,
-        toFile: archivePath,
-        progressDivider: 1,
-        progress: (data) => {
-          if (isAborted()) {
-            return;
-          }
-          const total = data.contentLength || model.bytes || 0;
-          const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
-          const progress: DownloadProgress = {
-            bytesDownloaded: data.bytesWritten,
-            totalBytes: total,
-            percent,
-            phase: 'downloading',
+      const maxRetries = opts?.maxRetries ?? 2;
+
+      await retryWithBackoff(
+        async () => {
+          const download = RNFS.downloadFile({
+            fromUrl: model.downloadUrl,
+            toFile: archivePath,
+            progressDivider: 1,
+            progress: (data) => {
+              if (isAborted()) {
+                return;
+              }
+              const total = data.contentLength || model.bytes || 0;
+              const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
+              const progress: DownloadProgress = {
+                bytesDownloaded: data.bytesWritten,
+                totalBytes: total,
+                percent,
+                phase: 'downloading',
+              };
+              opts?.onProgress?.(progress);
+              emitDownloadProgress(category, id, progress);
+            },
+          });
+
+          let downloadFinished = false;
+          let aborted = false;
+          const onAbort = () => {
+            aborted = true;
+            if (downloadFinished) return;
+            try {
+              RNFS.stopDownload(download.jobId);
+            } catch {
+              // Swallow stop errors to avoid crashing the app on cancel.
+            }
           };
-          opts?.onProgress?.(progress);
-          emitDownloadProgress(category, id, progress);
+
+          if (opts?.signal) {
+            opts.signal.addEventListener('abort', onAbort);
+          }
+
+          let result: any;
+          try {
+            result = await download.promise;
+          } finally {
+            downloadFinished = true;
+            if (opts?.signal) {
+              opts.signal.removeEventListener('abort', onAbort);
+            }
+          }
+          if (aborted || opts?.signal?.aborted) {
+            const abortError = new Error('Download aborted');
+            abortError.name = 'AbortError';
+            throw abortError;
+          }
+          if (result.statusCode && result.statusCode >= 400) {
+            // Clean up failed download before retry
+            if (await RNFS.exists(archivePath)) {
+              await RNFS.unlink(archivePath);
+            }
+            throw new Error(`Download failed: ${result.statusCode}`);
+          }
         },
-      });
-
-      let downloadFinished = false;
-      let aborted = false;
-      const onAbort = () => {
-        aborted = true;
-        if (downloadFinished) return;
-        try {
-          RNFS.stopDownload(download.jobId);
-        } catch {
-          // Swallow stop errors to avoid crashing the app on cancel.
+        {
+          maxRetries,
+          initialDelayMs: 2000,
+          signal: opts?.signal,
         }
-      };
-
-      if (opts?.signal) {
-        opts.signal.addEventListener('abort', onAbort);
-      }
-
-      let result: any;
-      try {
-        result = await download.promise;
-      } finally {
-        downloadFinished = true;
-        if (opts?.signal) {
-          opts.signal.removeEventListener('abort', onAbort);
-        }
-      }
-      if (aborted || opts?.signal?.aborted) {
-        const abortError = new Error('Download aborted');
-        abortError.name = 'AbortError';
-        throw abortError;
-      }
-      if (result.statusCode && result.statusCode >= 400) {
-        throw new Error(`Download failed: ${result.statusCode}`);
-      }
+      );
     }
 
     if (opts?.signal?.aborted) {
