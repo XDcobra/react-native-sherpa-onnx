@@ -10,12 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  deleteTtsModel,
-  downloadTtsModel,
-  filterTtsModels,
-  listDownloadedTtsModels,
-  refreshTtsModels,
+  deleteModelByCategory,
+  downloadModelByCategory,
+  listDownloadedModelsByCategory,
+  refreshModelsByCategory,
+  ModelCategory,
   type DownloadProgress,
+  type ModelMetaBase,
   type TtsModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -34,6 +35,43 @@ const DEFAULT_FILTERS: FilterState = {
   sizeTier: 'Any',
 };
 
+const CATEGORY_OPTIONS: Array<{
+  key: ModelCategory;
+  label: string;
+  helper: string;
+}> = [
+  {
+    key: ModelCategory.Tts,
+    label: 'TTS',
+    helper: 'Text-to-speech voices',
+  },
+  {
+    key: ModelCategory.Stt,
+    label: 'STT',
+    helper: 'Speech-to-text models',
+  },
+  {
+    key: ModelCategory.Vad,
+    label: 'VAD',
+    helper: 'Voice activity detection',
+  },
+  {
+    key: ModelCategory.Diarization,
+    label: 'Diarization',
+    helper: 'Who-spoke-when models',
+  },
+  {
+    key: ModelCategory.Enhancement,
+    label: 'Enhancement',
+    helper: 'Speech denoise/enhance',
+  },
+  {
+    key: ModelCategory.Separation,
+    label: 'Separation',
+    helper: 'Source separation',
+  },
+];
+
 const formatBytes = (bytes: number) => {
   if (!bytes) return 'Unknown size';
   const mb = bytes / 1024 / 1024;
@@ -45,16 +83,30 @@ const toOptionList = (values: string[]) => {
   return ['Any', ...unique];
 };
 
+const normalizeFilter = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === 'any') return null;
+  return trimmed.toLowerCase();
+};
+
 export default function ModelManagementScreen() {
-  const [models, setModels] = useState<TtsModelMeta[]>([]);
-  const [filteredModels, setFilteredModels] = useState<TtsModelMeta[]>([]);
-  const [downloadedModels, setDownloadedModels] = useState<TtsModelMeta[]>([]);
+  const [category, setCategory] = useState<ModelCategory>(ModelCategory.Tts);
+  const [models, setModels] = useState<ModelMetaBase[]>([]);
+  const [filteredModels, setFilteredModels] = useState<ModelMetaBase[]>([]);
+  const [downloadedModels, setDownloadedModels] = useState<ModelMetaBase[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progressById, setProgressById] = useState<
     Record<string, DownloadProgress>
   >({});
+
+  const isTtsCategory = category === ModelCategory.Tts;
+  const ttsModels = useMemo(
+    () => (isTtsCategory ? (models as TtsModelMeta[]) : []),
+    [isTtsCategory, models]
+  );
 
   const downloadedIds = useMemo(() => {
     return new Set(downloadedModels.map((model) => model.id));
@@ -63,37 +115,47 @@ export default function ModelManagementScreen() {
   const languages = useMemo(
     () =>
       toOptionList(
-        models.flatMap((model) => model.languages.map((lang) => lang))
+        ttsModels.flatMap((model) =>
+          (model.languages ?? []).map((lang) => lang)
+        )
       ),
-    [models]
+    [ttsModels]
   );
 
   const types = useMemo(
-    () => toOptionList(models.map((model) => model.type)),
-    [models]
+    () => toOptionList(ttsModels.map((model) => model.type)),
+    [ttsModels]
   );
 
   const quantizations = useMemo(
-    () => toOptionList(models.map((model) => model.quantization)),
-    [models]
+    () => toOptionList(ttsModels.map((model) => model.quantization)),
+    [ttsModels]
   );
 
   const sizeTiers = useMemo(
-    () => toOptionList(models.map((model) => model.sizeTier)),
-    [models]
+    () => toOptionList(ttsModels.map((model) => model.sizeTier)),
+    [ttsModels]
   );
 
   const loadDownloaded = useCallback(async () => {
-    const downloaded = await listDownloadedTtsModels();
+    const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
+      category
+    );
     setDownloadedModels(downloaded);
-  }, []);
+  }, [category]);
 
   const loadModels = useCallback(
     async (forceRefresh = false) => {
       setLoading(true);
       setError(null);
       try {
-        const registry = await refreshTtsModels({ forceRefresh });
+        const registry = isTtsCategory
+          ? await refreshModelsByCategory<TtsModelMeta>(category, {
+              forceRefresh,
+            })
+          : await refreshModelsByCategory<ModelMetaBase>(category, {
+              forceRefresh,
+            });
         setModels(registry);
         await loadDownloaded();
       } catch (err) {
@@ -103,32 +165,64 @@ export default function ModelManagementScreen() {
         setLoading(false);
       }
     },
-    [loadDownloaded]
+    [category, isTtsCategory, loadDownloaded]
   );
 
-  const applyFilters = useCallback(async () => {
-    const filtered = await filterTtsModels({
-      language: filters.language,
-      type: filters.type,
-      quantization: filters.quantization,
-      sizeTier: filters.sizeTier,
+  const applyFilters = useCallback(() => {
+    if (!isTtsCategory) {
+      setFilteredModels(models);
+      return;
+    }
+
+    const language = normalizeFilter(filters.language);
+    const type = normalizeFilter(filters.type);
+    const quantization = normalizeFilter(filters.quantization);
+    const sizeTier = normalizeFilter(filters.sizeTier);
+
+    const filtered = (models as TtsModelMeta[]).filter((model) => {
+      const modelLanguages = model.languages ?? [];
+      if (type && model.type !== type) return false;
+      if (quantization && model.quantization !== quantization) return false;
+      if (sizeTier && model.sizeTier !== sizeTier) return false;
+      if (
+        language &&
+        !modelLanguages.map((lang) => lang.toLowerCase()).includes(language)
+      ) {
+        return false;
+      }
+      return true;
     });
+
     setFilteredModels(filtered);
-  }, [filters]);
+  }, [filters, isTtsCategory, models]);
 
   useEffect(() => {
     loadModels().catch(() => undefined);
-  }, [loadModels]);
+  }, [loadModels, category]);
 
   useEffect(() => {
-    applyFilters().catch(() => undefined);
+    applyFilters();
   }, [applyFilters]);
 
   const updateFilter = (key: keyof FilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleDownload = async (model: TtsModelMeta) => {
+  const handleCategoryChange = (next: ModelCategory) => {
+    if (next === category) return;
+    setCategory(next);
+    setFilters(DEFAULT_FILTERS);
+    setProgressById({});
+    setModels([]);
+    setFilteredModels([]);
+    setDownloadedModels([]);
+  };
+
+  const currentCategory = CATEGORY_OPTIONS.find(
+    (option) => option.key === category
+  );
+
+  const handleDownload = async (model: ModelMetaBase) => {
     if (downloadedIds.has(model.id)) {
       return;
     }
@@ -139,7 +233,7 @@ export default function ModelManagementScreen() {
     }));
 
     try {
-      await downloadTtsModel(model.id, {
+      await downloadModelByCategory<ModelMetaBase>(category, model.id, {
         onProgress: (progress) => {
           setProgressById((prev) => ({ ...prev, [model.id]: progress }));
         },
@@ -157,14 +251,14 @@ export default function ModelManagementScreen() {
     }
   };
 
-  const handleDelete = async (model: TtsModelMeta) => {
+  const handleDelete = async (model: ModelMetaBase) => {
     Alert.alert('Delete model', `Remove ${model.displayName}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await deleteTtsModel(model.id);
+          await deleteModelByCategory(category, model.id);
           await loadDownloaded();
         },
       },
@@ -212,7 +306,9 @@ export default function ModelManagementScreen() {
           <View>
             <Text style={styles.title}>Model Management</Text>
             <Text style={styles.subtitle}>
-              Download, filter, and delete TTS models
+              {currentCategory
+                ? `Download and manage ${currentCategory.label} models`
+                : 'Download and manage models'}
             </Text>
           </View>
           <TouchableOpacity
@@ -234,38 +330,80 @@ export default function ModelManagementScreen() {
         {error && <Text style={styles.errorText}>{error}</Text>}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Filters</Text>
-          {renderFilterRow('Language', languages, filters.language, (next) =>
-            updateFilter('language', next)
-          )}
-          {renderFilterRow('Type', types, filters.type, (next) =>
-            updateFilter('type', next)
-          )}
-          {renderFilterRow(
-            'Quantization',
-            quantizations,
-            filters.quantization,
-            (next) => updateFilter('quantization', next)
-          )}
-          {renderFilterRow('Size', sizeTiers, filters.sizeTier, (next) =>
-            updateFilter('sizeTier', next)
+          <Text style={styles.sectionTitle}>Categories</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.filterOptions}>
+              {CATEGORY_OPTIONS.map((option) => {
+                const isActive = option.key === category;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.filterPill,
+                      isActive && styles.filterPillActive,
+                    ]}
+                    onPress={() => handleCategoryChange(option.key)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterPillText,
+                        isActive && styles.filterPillTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+          {currentCategory && (
+            <Text style={styles.categoryHelper}>{currentCategory.helper}</Text>
           )}
         </View>
+
+        {isTtsCategory && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Filters</Text>
+            {renderFilterRow('Language', languages, filters.language, (next) =>
+              updateFilter('language', next)
+            )}
+            {renderFilterRow('Type', types, filters.type, (next) =>
+              updateFilter('type', next)
+            )}
+            {renderFilterRow(
+              'Quantization',
+              quantizations,
+              filters.quantization,
+              (next) => updateFilter('quantization', next)
+            )}
+            {renderFilterRow('Size', sizeTiers, filters.sizeTier, (next) =>
+              updateFilter('sizeTier', next)
+            )}
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Models</Text>
           {filteredModels.length === 0 ? (
-            <Text style={styles.emptyText}>No models match these filters.</Text>
+            <Text style={styles.emptyText}>
+              {isTtsCategory
+                ? 'No models match these filters.'
+                : 'No models available for this category.'}
+            </Text>
           ) : (
             filteredModels.map((model) => {
               const progress = progressById[model.id];
               const isDownloaded = downloadedIds.has(model.id);
+              const ttsModel = model as TtsModelMeta;
               return (
                 <View key={model.id} style={styles.modelRow}>
                   <View style={styles.modelInfo}>
                     <Text style={styles.modelName}>{model.displayName}</Text>
                     <Text style={styles.modelMeta}>
-                      {model.type} · {formatBytes(model.bytes)}
+                      {isTtsCategory
+                        ? `${ttsModel.type} · ${formatBytes(model.bytes)}`
+                        : formatBytes(model.bytes)}
                     </Text>
                   </View>
                   {isDownloaded ? (
@@ -365,6 +503,11 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#C62828',
     marginBottom: 12,
+  },
+  categoryHelper: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 8,
   },
   section: {
     backgroundColor: '#FFFFFF',
