@@ -16,6 +16,15 @@ import {
   resolveModelPath,
 } from 'react-native-sherpa-onnx';
 import {
+  listDownloadedModelsByCategory,
+  ModelCategory,
+} from 'react-native-sherpa-onnx/download';
+import {
+  getSizeHint,
+  getQualityHint,
+  RECOMMENDED_MODEL_IDS,
+} from '../../utils/recommendedModels';
+import {
   initializeSTT,
   unloadSTT,
   transcribeFile,
@@ -74,29 +83,52 @@ export default function STTScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const models = await listAssetModels();
-      const sttFolders = models
+      // 1. Try to load downloaded models first
+      const downloadedModels = await listDownloadedModelsByCategory(
+        ModelCategory.Stt
+      );
+
+      if (downloadedModels.length > 0) {
+        const downloadedFolders = downloadedModels.map(
+          (model: any) => model.modelDir
+        );
+        console.log('STTScreen: Found downloaded models:', downloadedFolders);
+        setAvailableModels(downloadedFolders);
+        return;
+      }
+
+      // 2. Fallback to asset models
+      const assetModels = await listAssetModels();
+      const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
-      const ttsFolders = models
-        .filter((model) => model.hint === 'tts')
-        .map((model) => model.folder);
-      const unknownFolders = models.filter((model) => model.hint === 'unknown');
 
-      console.log('STTScreen: Found model folders:', models);
-      setAvailableModels(sttFolders);
-      if (sttFolders.length === 0) {
+      if (sttFolders.length > 0) {
+        console.log('STTScreen: Using asset models:', sttFolders);
+        setAvailableModels(sttFolders);
+        return;
+      }
+
+      // 3. No models available - show recommended models as guidance
+      const hasRecommendedModels =
+        (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
+
+      if (hasRecommendedModels) {
         setError(
-          ttsFolders.length > 0
-            ? 'No STT models found. Only TTS models detected in assets/models/. See STT_MODEL_SETUP.md'
-            : unknownFolders.length > 0
-            ? 'No STT models found. Some models have unknown type hints. See STT_MODEL_SETUP.md'
-            : 'No STT models found in assets. See STT_MODEL_SETUP.md'
+          'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
         );
+        setAvailableModels([]); // Clear to show empty state
+        console.log(
+          'STTScreen: No models available. Recommended models available for download.'
+        );
+      } else {
+        setError('No STT models found. See STT_MODEL_SETUP.md');
+        setAvailableModels([]);
       }
     } catch (err) {
-      console.error('STTScreen: Failed to list models:', err);
-      setError('Failed to list available models');
+      console.error('STTScreen: Failed to load models:', err);
+      setError('Failed to load available models');
+      setAvailableModels([]);
     } finally {
       setLoadingModels(false);
     }
@@ -365,30 +397,62 @@ export default function STTScreen() {
               </View>
             ) : (
               <View style={styles.modelButtons}>
-                {availableModels.map((modelFolder) => (
-                  <TouchableOpacity
-                    key={modelFolder}
-                    style={[
-                      styles.modelButton,
-                      currentModelFolder === modelFolder &&
-                        styles.modelButtonActive,
-                      loading && styles.buttonDisabled,
-                    ]}
-                    onPress={() => handleInitialize(modelFolder)}
-                    disabled={loading}
-                  >
-                    <Text
+                {availableModels.map((modelFolder) => {
+                  return (
+                    <TouchableOpacity
+                      key={modelFolder}
                       style={[
-                        styles.modelButtonText,
+                        styles.modelButton,
                         currentModelFolder === modelFolder &&
-                          styles.modelButtonTextActive,
+                          styles.modelButtonActive,
+                        loading && styles.buttonDisabled,
                       ]}
+                      onPress={() => handleInitialize(modelFolder)}
+                      disabled={loading}
                     >
-                      {getModelDisplayName(modelFolder)}
-                    </Text>
-                    <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.modelButtonText,
+                          currentModelFolder === modelFolder &&
+                            styles.modelButtonTextActive,
+                        ]}
+                      >
+                        {getModelDisplayName(modelFolder)}
+                      </Text>
+                      {(() => {
+                        const sizeHintInfo = getSizeHint(modelFolder);
+                        const qualityHintInfo = getQualityHint(modelFolder);
+
+                        return (
+                          <View style={styles.modelHintRow}>
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={sizeHintInfo.iconName as any}
+                                size={12}
+                                color={sizeHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {sizeHintInfo.tier}
+                              </Text>
+                            </View>
+
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={qualityHintInfo.iconName as any}
+                                size={12}
+                                color={qualityHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {qualityHintInfo.text.split(',')[0]}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
+                      <Text style={styles.modelFolderText}>{modelFolder}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
 
@@ -1018,5 +1082,25 @@ const styles = StyleSheet.create({
   detectedModelPath: {
     fontSize: 12,
     color: '#999',
+  },
+  modelHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  modelHintGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginRight: 12,
+  },
+  modelHintText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 0,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });

@@ -31,8 +31,17 @@ import {
   shareAudioFile,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  listDownloadedModelsByCategory,
+  ModelCategory,
+} from 'react-native-sherpa-onnx/download';
 import { listAssetModels } from 'react-native-sherpa-onnx';
 import { getModelDisplayName } from '../../modelConfig';
+import {
+  getSizeHint,
+  getQualityHint,
+  RECOMMENDED_MODEL_IDS,
+} from '../../utils/recommendedModels';
 import RNFS from 'react-native-fs';
 import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -408,29 +417,52 @@ export default function TTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const models = await listAssetModels();
-      const ttsFolders = models
+      // 1. Try to load downloaded models first
+      const downloadedModels = await listDownloadedModelsByCategory(
+        ModelCategory.Tts
+      );
+
+      if (downloadedModels.length > 0) {
+        const downloadedFolders = downloadedModels.map(
+          (model: any) => model.modelDir
+        );
+        console.log('TTSScreen: Found downloaded models:', downloadedFolders);
+        setAvailableModels(downloadedFolders);
+        return;
+      }
+
+      // 2. Fallback to asset models
+      const assetModels = await listAssetModels();
+      const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
-      const sttFolders = models
-        .filter((model) => model.hint === 'stt')
-        .map((model) => model.folder);
-      const unknownFolders = models.filter((model) => model.hint === 'unknown');
 
-      console.log('TTSScreen: Found model folders:', models);
-      setAvailableModels(ttsFolders);
-      if (ttsFolders.length === 0) {
+      if (ttsFolders.length > 0) {
+        console.log('TTSScreen: Using asset models:', ttsFolders);
+        setAvailableModels(ttsFolders);
+        return;
+      }
+
+      // 3. No models available - show recommended models as guidance
+      const hasRecommendedModels =
+        (RECOMMENDED_MODEL_IDS[ModelCategory.Tts] || []).length > 0;
+
+      if (hasRecommendedModels) {
         setError(
-          sttFolders.length > 0
-            ? 'No TTS models found. Only STT models detected in assets/models/. See TTS_MODEL_SETUP.md'
-            : unknownFolders.length > 0
-            ? 'No TTS models found. Some models have unknown type hints. See TTS_MODEL_SETUP.md'
-            : 'No TTS models found in assets. See TTS_MODEL_SETUP.md'
+          'No TTS models found. Consider downloading one of the recommended models in the Model Management screen.'
         );
+        setAvailableModels([]); // Clear to show empty state
+        console.log(
+          'TTSScreen: No models available. Recommended models available for download.'
+        );
+      } else {
+        setError('No TTS models found. See TTS_MODEL_SETUP.md');
+        setAvailableModels([]);
       }
     } catch (err) {
-      console.error('TTSScreen: Failed to list models:', err);
-      setError('Failed to list available models');
+      console.error('TTSScreen: Failed to load models:', err);
+      setError('Failed to load available models');
+      setAvailableModels([]);
     } finally {
       setLoadingModels(false);
     }
@@ -1381,6 +1413,36 @@ export default function TTSScreen() {
                       >
                         {getModelDisplayName(modelFolder)}
                       </Text>
+                      {(() => {
+                        const sizeHintInfo = getSizeHint(modelFolder);
+                        const qualityHintInfo = getQualityHint(modelFolder);
+
+                        return (
+                          <View style={styles.modelHintRow}>
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={sizeHintInfo.iconName as any}
+                                size={12}
+                                color={sizeHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {sizeHintInfo.tier}
+                              </Text>
+                            </View>
+
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={qualityHintInfo.iconName as any}
+                                size={12}
+                                color={qualityHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {qualityHintInfo.text.split(',')[0]}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
                       <Text style={styles.modelButtonSubtext}>
                         {modelFolder}
                       </Text>
@@ -2089,6 +2151,26 @@ const styles = StyleSheet.create({
   rowAlignCenter: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  modelHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  modelHintGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginRight: 12,
+  },
+  modelHintText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 0,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   separator: {
     height: 1,

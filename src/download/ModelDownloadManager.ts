@@ -56,6 +56,7 @@ export type DownloadProgress = {
   bytesDownloaded: number;
   totalBytes: number;
   percent: number;
+  phase?: 'downloading' | 'extracting';
 };
 
 export type DownloadResult = {
@@ -524,6 +525,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           bytesDownloaded: data.bytesWritten,
           totalBytes: total,
           percent,
+          phase: 'downloading',
         });
       },
     });
@@ -562,6 +564,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
         bytesDownloaded: evt.bytes,
         totalBytes: evt.totalBytes,
         percent: evt.percent,
+        phase: 'extracting',
       });
     }
   });

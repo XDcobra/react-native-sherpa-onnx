@@ -101,13 +101,47 @@ export async function validateExtractedFiles(
       );
     }
 
-    // List directory contents
-    const files = await RNFS.readDir(modelDir);
+    const isModelLikeFile = (name: string) => {
+      const lower = name.toLowerCase();
+      return (
+        lower.endsWith('.onnx') ||
+        lower.endsWith('.txt') ||
+        lower.endsWith('.bin') ||
+        lower.endsWith('.json')
+      );
+    };
 
-    // Filter out directories, we need actual files
-    const actualFiles = files.filter((f) => !f.isDirectory());
+    const collectFilesRecursive = async (
+      dir: string,
+      depth = 0,
+      maxDepth = 4
+    ): Promise<RNFS.ReadDirItem[]> => {
+      if (depth > maxDepth) return [];
 
-    if (actualFiles.length === 0) {
+      const entries = await RNFS.readDir(dir);
+      const files: RNFS.ReadDirItem[] = [];
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const nested = await collectFilesRecursive(
+            entry.path,
+            depth + 1,
+            maxDepth
+          );
+          files.push(...nested);
+        } else {
+          files.push(entry);
+        }
+      }
+
+      return files;
+    };
+
+    const entries = await RNFS.readDir(modelDir);
+    const actualFiles = entries.filter((entry) => !entry.isDirectory());
+    const subdirs = entries.filter((entry) => entry.isDirectory());
+
+    if (actualFiles.length === 0 && subdirs.length === 0) {
       return new ValidationResult(
         false,
         'MISSING_FILES',
@@ -115,20 +149,22 @@ export async function validateExtractedFiles(
       );
     }
 
-    // Verify there are some model-related files
-    // (don't be too strict about specific names - the native detect functions will validate)
-    const hasModelLikeFiles = actualFiles.some(
-      (f) =>
-        f.name.endsWith('.onnx') ||
-        f.name.endsWith('.txt') ||
-        f.name.endsWith('.bin')
+    let hasModelLikeFiles = actualFiles.some((file) =>
+      isModelLikeFile(file.name)
     );
+
+    if (!hasModelLikeFiles) {
+      const nestedFiles = await collectFilesRecursive(modelDir);
+      hasModelLikeFiles = nestedFiles.some((file) =>
+        isModelLikeFile(file.name)
+      );
+    }
 
     if (!hasModelLikeFiles) {
       return new ValidationResult(
         false,
         'MISSING_FILES',
-        `Extraction may have failed: no model files (.onnx/.txt/.bin) found in ${modelDir}`
+        `Extraction may have failed: no model files (.onnx/.txt/.bin/.json) found under ${modelDir}`
       );
     }
 

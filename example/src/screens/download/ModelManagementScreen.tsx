@@ -474,28 +474,17 @@ export default function ModelManagementScreen() {
       const totalCount = filteredModels.length;
       const isLast = index === totalCount - 1;
 
+      const wrapperStyles: any[] = [styles.availableItemsWrapper];
+      if (index === 0) wrapperStyles.push(styles.availableItemsWrapperFirst);
+      if (isLast) wrapperStyles.push(styles.availableItemsWrapperLast);
+
+      const rowStyles: any[] = [styles.modelRow];
+      rowStyles.push(styles.modelRowPadded);
+      if (isLast) rowStyles.push(styles.modelRowNoBorder);
+
       return (
-        <View
-          style={[
-            styles.availableItemsWrapper,
-            {
-              marginHorizontal: 16,
-              marginTop: index === 0 ? -16 : 0,
-              borderBottomLeftRadius: isLast ? 12 : 0,
-              borderBottomRightRadius: isLast ? 12 : 0,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.modelRow,
-              {
-                marginHorizontal: 0,
-                paddingHorizontal: 16,
-                borderBottomWidth: isLast ? 0 : 1,
-              },
-            ]}
-          >
+        <View style={wrapperStyles}>
+          <View style={rowStyles}>
             <View style={styles.modelInfo}>
               <Text style={styles.modelName}>{item.displayName}</Text>
               <Text style={styles.modelMeta}>
@@ -538,7 +527,9 @@ export default function ModelManagementScreen() {
               >
                 {progress ? (
                   <Text style={styles.downloadButtonText}>
-                    {Math.round(progress.percent)}%
+                    {progress.phase === 'extracting'
+                      ? `Extracting ${Math.round(progress.percent)}%`
+                      : `Downloading ${Math.round(progress.percent)}%`}
                   </Text>
                 ) : (
                   <Text style={styles.downloadButtonText}>Download</Text>
@@ -751,7 +742,7 @@ export default function ModelManagementScreen() {
             </View>
 
             {/* Downloaded Models Section */}
-            <View style={[styles.section, { marginHorizontal: 16 }]}>
+            <View style={[styles.section, styles.sectionInset]}>
               <TouchableOpacity
                 style={styles.sectionHeaderRow}
                 onPress={() => setDownloadedExpanded((s) => !s)}
@@ -775,7 +766,7 @@ export default function ModelManagementScreen() {
                 />
               </TouchableOpacity>
               {downloadedExpanded && (
-                <View style={{ marginTop: 8 }}>
+                <View style={styles.sectionInnerMarginTop}>
                   {downloadedModels.length === 0 ? (
                     <Text style={styles.emptyText}>No cached models yet.</Text>
                   ) : (
@@ -804,19 +795,9 @@ export default function ModelManagementScreen() {
             <View
               style={[
                 styles.section,
-                {
-                  marginHorizontal: 16,
-                  marginBottom: 16,
-                  borderBottomLeftRadius:
-                    availableExpanded && filteredModels.length > 0 ? 0 : 12,
-                  borderBottomRightRadius:
-                    availableExpanded && filteredModels.length > 0 ? 0 : 12,
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  paddingTop: 16,
-                  paddingBottom:
-                    availableExpanded && filteredModels.length > 0 ? 0 : 16,
-                },
+                availableExpanded && filteredModels.length > 0
+                  ? styles.availableSectionExpanded
+                  : styles.availableSectionCollapsed,
               ]}
             >
               <TouchableOpacity
@@ -846,7 +827,7 @@ export default function ModelManagementScreen() {
         }
         ListEmptyComponent={
           availableExpanded && filteredModels.length === 0 ? (
-            <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+            <View style={styles.emptyWrapper}>
               <Text style={styles.emptyText}>
                 {isTtsCategory
                   ? 'No models match these filters.'
@@ -855,7 +836,7 @@ export default function ModelManagementScreen() {
             </View>
           ) : null
         }
-        ListFooterComponent={<View style={{ height: 16 }} />}
+        ListFooterComponent={<View style={styles.footerSpacer} />}
       />
     </SafeAreaView>
   );
@@ -1012,6 +993,21 @@ const styles = StyleSheet.create({
   availableItemsWrapper: {
     backgroundColor: '#FFFFFF',
     overflow: 'hidden',
+    marginHorizontal: 16,
+  },
+  availableItemsWrapperFirst: {
+    marginTop: -16,
+  },
+  availableItemsWrapperLast: {
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  modelRowPadded: {
+    marginHorizontal: 0,
+    paddingHorizontal: 16,
+  },
+  modelRowNoBorder: {
+    borderBottomWidth: 0,
   },
   modelInfo: {
     flex: 1,
@@ -1051,5 +1047,38 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 12,
     color: '#8E8E93',
+  },
+  sectionInset: {
+    marginHorizontal: 16,
+  },
+  sectionInnerMarginTop: {
+    marginTop: 8,
+  },
+  availableSectionExpanded: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingLeft: 16,
+    paddingRight: 16,
+    paddingTop: 16,
+    paddingBottom: 0,
+  },
+  availableSectionCollapsed: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    paddingLeft: 16,
+    paddingRight: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  emptyWrapper: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  footerSpacer: {
+    height: 16,
   },
 });
