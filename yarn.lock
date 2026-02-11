@@ -10314,6 +10314,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-hashkit@npm:^0.2.0":
+  version: 0.2.0
+  resolution: "react-native-hashkit@npm:0.2.0"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/32a083f64b3b2b6b5e0ef24fa3b3c24450e8940d816facb9e33e52cb870bc0d3ad7de2739b73187c44dfbe5bb05c2b89ac4aaa4c153012cce44f290175849111
+  languageName: node
+  linkType: hard
+
 "react-native-monorepo-config@npm:^0.3.1":
   version: 0.3.2
   resolution: "react-native-monorepo-config@npm:0.3.2"
@@ -10403,6 +10413,7 @@ __metadata:
     react-native: "npm:0.83.0"
     react-native-builder-bob: "npm:^0.40.13"
     react-native-fs: "npm:^2.20.0"
+    react-native-hashkit: "npm:^0.2.0"
     release-it: "npm:^19.0.4"
     turbo: "npm:^2.5.6"
     typescript: "npm:^5.9.2"

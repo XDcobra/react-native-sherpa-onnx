@@ -1,6 +1,12 @@
 import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import { extractTarBz2 } from './extractTarBz2';
+import {
+  parseChecksumFile,
+  validateChecksum,
+  validateExtractedFiles,
+  checkDiskSpace,
+} from './validation';
 
 const RELEASE_API_BASE =
   'https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags';
@@ -71,6 +77,10 @@ const memoryCacheByCategory: Partial<
   Record<ModelCategory, CachePayload<ModelMetaBase>>
 > = {};
 
+const checksumCacheByCategory: Partial<
+  Record<ModelCategory, Map<string, string>>
+> = {};
+
 const CATEGORY_CONFIG: Record<
   ModelCategory,
   { tag: string; cacheFile: string; baseDir: string }
@@ -137,6 +147,39 @@ function getManifestPath(category: ModelCategory, modelId: string): string {
 
 function getReleaseUrl(category: ModelCategory): string {
   return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
+}
+
+async function fetchChecksumsFromRelease(
+  category: ModelCategory
+): Promise<Map<string, string>> {
+  // Return cached if available
+  if (checksumCacheByCategory[category]) {
+    return checksumCacheByCategory[category]!;
+  }
+
+  try {
+    const response = await fetch(
+      `https://github.com/k2-fsa/sherpa-onnx/releases/download/${CATEGORY_CONFIG[category].tag}/checksum.txt`
+    );
+
+    if (!response.ok) {
+      console.warn(
+        `SherpaOnnxChecksum: Failed to fetch checksum.txt for ${category}: ${response.status}`
+      );
+      return new Map();
+    }
+
+    const content = await response.text();
+    const checksums = parseChecksumFile(content);
+    checksumCacheByCategory[category] = checksums;
+    return checksums;
+  } catch (error) {
+    console.warn(
+      `SherpaOnnxChecksum: Error fetching checksums for ${category}:`,
+      error
+    );
+    return new Map();
+  }
 }
 
 function toTitleCase(value: string): string {
@@ -343,6 +386,16 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
     )
     .filter((model: ModelMetaBase | null): model is T => Boolean(model));
 
+  // Load and attach SHA256 checksums from checksum.txt
+  const checksums = await fetchChecksumsFromRelease(category);
+  for (const model of models) {
+    const archiveFilename = `${model.id}${MODEL_ARCHIVE_EXT}`;
+    const sha256 = checksums.get(archiveFilename);
+    if (sha256) {
+      model.sha256 = sha256;
+    }
+  }
+
   const payload: CachePayload<T> = {
     lastUpdated: new Date().toISOString(),
     models,
@@ -443,6 +496,12 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   const archivePath = getArchivePath(category, id);
   const modelDir = getModelDir(category, id);
 
+  // Step 1: Check available disk space
+  const diskSpaceCheck = await checkDiskSpace(model.bytes);
+  if (!diskSpaceCheck.success) {
+    throw new Error(`Insufficient disk space: ${diskSpaceCheck.message}`);
+  }
+
   if (opts?.overwrite) {
     if (await RNFS.exists(modelDir)) {
       await RNFS.unlink(modelDir);
@@ -452,6 +511,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
   }
 
+  // Step 2: Download archive if not exists
   if (!(await RNFS.exists(archivePath))) {
     const download = RNFS.downloadFile({
       fromUrl: model.downloadUrl,
@@ -478,6 +538,21 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     if (result.statusCode && result.statusCode >= 400) {
       throw new Error(`Download failed: ${result.statusCode}`);
     }
+
+    // Step 3: Validate checksum if available
+    if (model.sha256) {
+      const checksumValidation = await validateChecksum(
+        archivePath,
+        model.sha256
+      );
+      if (!checksumValidation.success) {
+        // Clean up corrupt download
+        await RNFS.unlink(archivePath);
+        throw new Error(
+          `Checksum validation failed: ${checksumValidation.message}`
+        );
+      }
+    }
   }
 
   await RNFS.mkdir(modelDir);
@@ -490,6 +565,16 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       });
     }
   });
+
+  // Step 4: Validate extracted files exist
+  const filesValidation = await validateExtractedFiles(modelDir, category);
+  if (!filesValidation.success) {
+    // Clean up failed extraction
+    await RNFS.unlink(modelDir);
+    throw new Error(
+      `Extracted files validation failed: ${filesValidation.message}`
+    );
+  }
 
   await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
   await RNFS.writeFile(

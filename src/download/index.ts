@@ -23,3 +23,13 @@ export type {
   DownloadProgress,
   DownloadResult,
 } from './ModelDownloadManager';
+export {
+  validateChecksum,
+  validateExtractedFiles,
+  checkDiskSpace,
+  setExpectedFilesForCategory,
+  getExpectedFilesForCategory,
+  parseChecksumFile,
+  calculateFileChecksum,
+} from './validation';
+export type { ValidationError } from './validation';

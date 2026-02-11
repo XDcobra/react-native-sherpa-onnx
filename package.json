@@ -225,5 +225,8 @@
       "release-it"
     ],
     "version": "0.57.0"
+  },
+  "dependencies": {
+    "react-native-hashkit": "^0.2.0"
   }
 }
