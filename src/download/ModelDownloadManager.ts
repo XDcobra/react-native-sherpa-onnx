@@ -3,7 +3,6 @@ import RNFS from 'react-native-fs';
 import { extractTarBz2 } from './extractTarBz2';
 import {
   parseChecksumFile,
-  validateChecksum,
   validateExtractedFiles,
   checkDiskSpace,
 } from './validation';
@@ -56,7 +55,7 @@ export type DownloadProgress = {
   bytesDownloaded: number;
   totalBytes: number;
   percent: number;
-  phase?: 'downloading' | 'extracting' | 'validating';
+  phase?: 'downloading' | 'extracting';
 };
 
 export type DownloadResult = {
@@ -657,50 +656,6 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       if (result.statusCode && result.statusCode >= 400) {
         throw new Error(`Download failed: ${result.statusCode}`);
       }
-
-      // Step 3: Validate checksum if available
-      if (model.sha256) {
-        const checksumValidation = await validateChecksum(
-          archivePath,
-          model.sha256,
-          (bytesProcessed, totalBytes, percent) => {
-            if (isAborted()) {
-              return;
-            }
-            opts?.onProgress?.({
-              bytesDownloaded: bytesProcessed,
-              totalBytes,
-              percent,
-              phase: 'validating',
-            });
-          }
-        );
-        if (!checksumValidation.success) {
-          const issue: ChecksumIssue = {
-            category,
-            id,
-            archivePath,
-            expected: model.sha256,
-            message:
-              checksumValidation.message ?? 'Checksum validation failed.',
-            reason:
-              checksumValidation.error === 'CHECKSUM_FAILED'
-                ? 'CHECKSUM_FAILED'
-                : 'CHECKSUM_MISMATCH',
-          };
-
-          const keepFile = opts?.onChecksumIssue
-            ? await opts.onChecksumIssue(issue)
-            : await promptChecksumFallback(issue);
-
-          if (!keepFile) {
-            await RNFS.unlink(archivePath);
-            throw new Error(
-              `Checksum validation failed: ${checksumValidation.message}`
-            );
-          }
-        }
-      }
     }
 
     if (opts?.signal?.aborted) {
@@ -710,7 +665,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     await RNFS.mkdir(modelDir);
-    await extractTarBz2(
+    const extractResult = await extractTarBz2(
       archivePath,
       modelDir,
       true,
@@ -729,6 +684,49 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       },
       opts?.signal
     );
+
+    // Step 3: Validate checksum if available (native SHA-256 from extraction)
+    if (model.sha256) {
+      const nativeSha = extractResult.sha256?.toLowerCase();
+      const expectedSha = model.sha256.toLowerCase();
+      let issue: ChecksumIssue | null = null;
+
+      if (!nativeSha) {
+        issue = {
+          category,
+          id,
+          archivePath,
+          expected: model.sha256,
+          message: 'Native SHA-256 not available after extraction.',
+          reason: 'CHECKSUM_FAILED',
+        };
+      } else if (nativeSha !== expectedSha) {
+        issue = {
+          category,
+          id,
+          archivePath,
+          expected: model.sha256,
+          message: `Checksum mismatch: expected ${model.sha256}, got ${extractResult.sha256}`,
+          reason: 'CHECKSUM_MISMATCH',
+        };
+      }
+
+      if (issue) {
+        const keepFile = opts?.onChecksumIssue
+          ? await opts.onChecksumIssue(issue)
+          : await promptChecksumFallback(issue);
+
+        if (!keepFile) {
+          if (await RNFS.exists(modelDir)) {
+            await RNFS.unlink(modelDir);
+          }
+          if (await RNFS.exists(archivePath)) {
+            await RNFS.unlink(archivePath);
+          }
+          throw new Error(`Checksum validation failed: ${issue.message}`);
+        }
+      }
+    }
 
     if (opts?.signal?.aborted) {
       const abortError = new Error('Download aborted');

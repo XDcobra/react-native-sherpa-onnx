@@ -91,6 +91,7 @@ set(SOURCES
     jni/sherpa-onnx-stt-wrapper.cpp
     jni/sherpa-onnx-tts-wrapper.cpp
     jni/sherpa-onnx-archive-helper.cpp
+    crypto/sha256.cpp
 )
 
 # Build libarchive from bundled source

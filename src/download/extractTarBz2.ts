@@ -10,6 +10,7 @@ export type ExtractProgressEvent = {
 type ExtractResult = {
   success: boolean;
   path?: string;
+  sha256?: string;
   reason?: string;
 };
 

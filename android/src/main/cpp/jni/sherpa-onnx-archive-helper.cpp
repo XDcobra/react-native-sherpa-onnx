@@ -2,16 +2,83 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <cstdio>
 #include <android/log.h>
+#include "crypto/sha256.h"
 
 // TAG is defined but may not be used depending on logging configuration
 
 // Global cancellation flag
 volatile bool ArchiveHelper::cancel_requested_ = false;
+
+namespace {
+struct ArchiveReadContext {
+  FILE* file = nullptr;
+  std::array<unsigned char, 64 * 1024> buffer{};
+  Sha256Context sha_ctx{};
+  long long bytes_read = 0;
+};
+
+static la_ssize_t ArchiveReadCallback(struct archive* archive, void* client_data, const void** buff) {
+  auto* ctx = static_cast<ArchiveReadContext*>(client_data);
+  if (!ctx || !ctx->file) {
+    archive_set_error(archive, EINVAL, "Invalid read context");
+    return -1;
+  }
+
+  size_t bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file);
+  if (bytes > 0) {
+    sha256_update(&ctx->sha_ctx, ctx->buffer.data(), bytes);
+    ctx->bytes_read += static_cast<long long>(bytes);
+    *buff = ctx->buffer.data();
+    return static_cast<la_ssize_t>(bytes);
+  }
+
+  if (feof(ctx->file)) {
+    return 0;
+  }
+
+  archive_set_error(archive, errno, "Read error");
+  return -1;
+}
+
+static int ArchiveCloseCallback(struct archive* /* archive */, void* client_data) {
+  (void)client_data;
+  return ARCHIVE_OK;
+}
+
+static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
+  if (!ctx || !ctx->file) {
+    return;
+  }
+
+  size_t bytes = 0;
+  while ((bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file)) > 0) {
+    sha256_update(&ctx->sha_ctx, ctx->buffer.data(), bytes);
+    ctx->bytes_read += static_cast<long long>(bytes);
+  }
+
+  fclose(ctx->file);
+  ctx->file = nullptr;
+}
+
+static std::string ToHex(const unsigned char* data, size_t size) {
+  static const char* kHex = "0123456789abcdef";
+  std::string out;
+  out.reserve(size * 2);
+  for (size_t i = 0; i < size; ++i) {
+    unsigned char value = data[i];
+    out.push_back(kHex[value >> 4]);
+    out.push_back(kHex[value & 0x0F]);
+  }
+  return out;
+}
+}  // namespace
 
 bool ArchiveHelper::IsCancelled() {
   return cancel_requested_;
@@ -26,7 +93,8 @@ bool ArchiveHelper::ExtractTarBz2(
     const std::string& target_path,
     bool force,
     std::function<void(long long, long long, double)> on_progress,
-    std::string* out_error) {
+  std::string* out_error,
+  std::string* out_sha256) {
   cancel_requested_ = false;
 
   // Validate source file exists
@@ -73,7 +141,7 @@ bool ArchiveHelper::ExtractTarBz2(
     return false;
   }
 
-  // Open archive for reading
+  // Open archive for reading with hashing reader
   struct archive* archive = archive_read_new();
   if (!archive) {
     if (out_error) *out_error = "Failed to create archive reader";
@@ -86,12 +154,24 @@ bool ArchiveHelper::ExtractTarBz2(
   archive_read_support_filter_gzip(archive);  // Also support gzip for compatibility
   archive_read_support_filter_xz(archive);    // And xz
 
-  // Open source file
-  if (archive_read_open_filename(archive, source_path.c_str(), 65536) != ARCHIVE_OK) {
+  ArchiveReadContext read_ctx;
+  read_ctx.file = fopen(source_path.c_str(), "rb");
+  if (!read_ctx.file) {
+    if (out_error) *out_error = std::string("Failed to open archive file: ") + std::strerror(errno);
+    archive_read_free(archive);
+    return false;
+  }
+  auto close_reader = [&read_ctx]() {
+    DrainRemainingAndClose(&read_ctx);
+  };
+  sha256_init(&read_ctx.sha_ctx);
+
+  if (archive_read_open(archive, &read_ctx, nullptr, ArchiveReadCallback, ArchiveCloseCallback) != ARCHIVE_OK) {
     const char* err = archive_error_string(archive);
     if (out_error) {
       *out_error = err ? std::string("Failed to open archive: ") + err : "Failed to open archive";
     }
+    close_reader();
     archive_read_free(archive);
     return false;
   }
@@ -123,6 +203,7 @@ bool ArchiveHelper::ExtractTarBz2(
       if (out_error) *out_error = "Extraction cancelled";
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return false;
     }
 
@@ -131,6 +212,7 @@ bool ArchiveHelper::ExtractTarBz2(
     if (!current_path) {
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       if (out_error) *out_error = "Invalid entry path";
       return false;
     }
@@ -170,6 +252,7 @@ bool ArchiveHelper::ExtractTarBz2(
     if (canonical_entry.find(canonical_target) != 0) {
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       if (out_error) *out_error = "Blocked path traversal: " + entry_path;
       return false;
     }
@@ -186,6 +269,7 @@ bool ArchiveHelper::ExtractTarBz2(
       }
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return false;
     }
 
@@ -199,6 +283,7 @@ bool ArchiveHelper::ExtractTarBz2(
         if (out_error) *out_error = "Extraction cancelled";
         archive_read_free(archive);
         archive_write_free(disk);
+        close_reader();
         return false;
       }
 
@@ -210,6 +295,7 @@ bool ArchiveHelper::ExtractTarBz2(
         }
         archive_read_free(archive);
         archive_write_free(disk);
+        close_reader();
         return false;
       }
 
@@ -246,12 +332,21 @@ bool ArchiveHelper::ExtractTarBz2(
       }
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return false;
     }
   }
 
   archive_read_free(archive);
   archive_write_free(disk);
+
+  close_reader();
+
+  if (out_sha256) {
+    unsigned char digest[32];
+    sha256_final(&read_ctx.sha_ctx, digest);
+    *out_sha256 = ToHex(digest, sizeof(digest));
+  }
 
   // Final progress
   if (on_progress && total_bytes > 0) {

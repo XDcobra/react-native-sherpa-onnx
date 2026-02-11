@@ -16,6 +16,7 @@ class ArchiveHelper {
    * @param targetPath Destination directory path
    * @param force Whether to overwrite existing target directory
    * @param onProgress Callback for progress updates (bytesExtracted, totalBytes, percent)
+    * @param outSha256 Optional output SHA-256 hex of the archive file
    * @return true if extraction succeeded, false otherwise
    */
   static bool ExtractTarBz2(
@@ -23,7 +24,8 @@ class ArchiveHelper {
       const std::string& target_path,
       bool force,
       std::function<void(long long, long long, double)> on_progress = nullptr,
-      std::string* out_error = nullptr);
+      std::string* out_error = nullptr,
+      std::string* out_sha256 = nullptr);
 
   /**
    * Check if extraction has been cancelled

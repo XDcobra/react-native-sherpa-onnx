@@ -23,7 +23,12 @@ export interface Spec extends TurboModule {
     sourcePath: string,
     targetPath: string,
     force: boolean
-  ): Promise<{ success: boolean; path?: string; reason?: string }>;
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
 
   /**
    * Cancel any in-progress tar.bz2 extraction.

@@ -1,9 +1,76 @@
 #import "SherpaOnnxArchiveHelper.h"
 #import <archive.h>
 #import <archive_entry.h>
+#import <CommonCrypto/CommonCrypto.h>
+#include <array>
 #include <atomic>
+#include <cstdio>
 
 static std::atomic_bool g_cancelExtract(false);
+
+namespace {
+struct ArchiveReadContext {
+  FILE* file = nullptr;
+  std::array<unsigned char, 64 * 1024> buffer{};
+  CC_SHA256_CTX sha_ctx{};
+  long long bytes_read = 0;
+};
+
+static la_ssize_t ArchiveReadCallback(struct archive* archive, void* client_data, const void** buff) {
+  auto* ctx = static_cast<ArchiveReadContext*>(client_data);
+  if (!ctx || !ctx->file) {
+    archive_set_error(archive, EINVAL, "Invalid read context");
+    return -1;
+  }
+
+  size_t bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file);
+  if (bytes > 0) {
+    CC_SHA256_Update(&ctx->sha_ctx, ctx->buffer.data(), (CC_LONG)bytes);
+    ctx->bytes_read += (long long)bytes;
+    *buff = ctx->buffer.data();
+    return (la_ssize_t)bytes;
+  }
+
+  if (feof(ctx->file)) {
+    return 0;
+  }
+
+  archive_set_error(archive, errno, "Read error");
+  return -1;
+}
+
+static int ArchiveCloseCallback(struct archive* /* archive */, void* client_data) {
+  (void)client_data;
+  return ARCHIVE_OK;
+}
+
+static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
+  if (!ctx || !ctx->file) {
+    return;
+  }
+
+  size_t bytes = 0;
+  while ((bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file)) > 0) {
+    CC_SHA256_Update(&ctx->sha_ctx, ctx->buffer.data(), (CC_LONG)bytes);
+    ctx->bytes_read += (long long)bytes;
+  }
+
+  fclose(ctx->file);
+  ctx->file = nullptr;
+}
+
+static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
+  static const char* kHex = "0123456789abcdef";
+  std::string out;
+  out.reserve(size * 2);
+  for (size_t i = 0; i < size; ++i) {
+    unsigned char value = digest[i];
+    out.push_back(kHex[value >> 4]);
+    out.push_back(kHex[value & 0x0F]);
+  }
+  return [NSString stringWithUTF8String:out.c_str()];
+}
+}  // namespace
 
 @implementation SherpaOnnxArchiveHelper
 
@@ -51,9 +118,20 @@ static std::atomic_bool g_cancelExtract(false);
   archive_read_support_format_tar(archive);
   archive_read_support_filter_bzip2(archive);
 
-  if (archive_read_open_filename(archive, [sourcePath UTF8String], 10240) != ARCHIVE_OK) {
+  ArchiveReadContext read_ctx;
+  read_ctx.file = fopen([sourcePath UTF8String], "rb");
+  if (!read_ctx.file) {
+    return @{ @"success": @NO, @"reason": @"Failed to open archive file" };
+  }
+  auto close_reader = [&read_ctx]() {
+    DrainRemainingAndClose(&read_ctx);
+  };
+  CC_SHA256_Init(&read_ctx.sha_ctx);
+
+  if (archive_read_open(archive, &read_ctx, nullptr, ArchiveReadCallback, ArchiveCloseCallback) != ARCHIVE_OK) {
     const char *errorStr = archive_error_string(archive);
     NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to open archive";
+    close_reader();
     archive_read_free(archive);
     return @{ @"success": @NO, @"reason": reason };
   }
@@ -71,6 +149,7 @@ static std::atomic_bool g_cancelExtract(false);
     if (g_cancelExtract.load()) {
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
     }
     const char *currentPath = archive_entry_pathname(entry);
@@ -80,6 +159,7 @@ static std::atomic_bool g_cancelExtract(false);
     if (![fullPath hasPrefix:canonicalTarget]) {
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return @{ @"success": @NO, @"reason": @"Blocked path traversal" };
     }
 
@@ -90,6 +170,7 @@ static std::atomic_bool g_cancelExtract(false);
       NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to write entry";
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return @{ @"success": @NO, @"reason": reason };
     }
 
@@ -100,6 +181,7 @@ static std::atomic_bool g_cancelExtract(false);
       if (g_cancelExtract.load()) {
         archive_read_free(archive);
         archive_write_free(disk);
+        close_reader();
         return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
       }
       result = archive_write_data_block(disk, buff, size, offset);
@@ -108,14 +190,20 @@ static std::atomic_bool g_cancelExtract(false);
         NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to write data";
         archive_read_free(archive);
         archive_write_free(disk);
+        close_reader();
         return @{ @"success": @NO, @"reason": reason };
       }
 
       extractedBytes += (long long)size;
       if (progress) {
         if (totalBytes > 0) {
-          long long compressedBytes = archive_filter_bytes(archive, 0);
+          long long compressedBytes = archive_filter_bytes(archive, -1);
           int percent = (int)((compressedBytes * 100) / totalBytes);
+          if (percent > 100) {
+            percent = 100;
+          } else if (percent < 0) {
+            percent = 0;
+          }
           if (percent != lastPercent) {
             lastPercent = percent;
             progress(compressedBytes, totalBytes, (double)percent);
@@ -132,6 +220,7 @@ static std::atomic_bool g_cancelExtract(false);
       NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to read data";
       archive_read_free(archive);
       archive_write_free(disk);
+      close_reader();
       return @{ @"success": @NO, @"reason": reason };
     }
   }
@@ -143,7 +232,13 @@ static std::atomic_bool g_cancelExtract(false);
     progress(totalBytes, totalBytes, 100.0);
   }
 
-  return @{ @"success": @YES, @"path": targetPath };
+  close_reader();
+
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digest, &read_ctx.sha_ctx);
+  NSString *sha256Hex = HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
+
+  return @{ @"success": @YES, @"path": targetPath, @"sha256": sha256Hex ?: @"" };
 }
 
 @end

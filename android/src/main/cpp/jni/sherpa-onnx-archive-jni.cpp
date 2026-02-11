@@ -66,10 +66,16 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
     }
   };
 
-  // Perform extraction
-  std::string error_msg;
-  bool success = ArchiveHelper::ExtractTarBz2(
-      source_str, target_str, j_force == JNI_TRUE, on_progress, &error_msg);
+    // Perform extraction
+    std::string error_msg;
+    std::string sha256;
+    bool success = ArchiveHelper::ExtractTarBz2(
+      source_str,
+      target_str,
+      j_force == JNI_TRUE,
+      on_progress,
+      &error_msg,
+      &sha256);
 
   // Build result map
   env->CallVoidMethod(result_map, put_boolean_method,
@@ -78,6 +84,10 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
   if (success) {
     env->CallVoidMethod(result_map, put_string_method,
                         env->NewStringUTF("path"), env->NewStringUTF(target_str.c_str()));
+    if (!sha256.empty()) {
+      env->CallVoidMethod(result_map, put_string_method,
+                          env->NewStringUTF("sha256"), env->NewStringUTF(sha256.c_str()));
+    }
     env->CallVoidMethod(j_promise, resolve_method, result_map);
   } else {
     env->CallVoidMethod(result_map, put_string_method,
