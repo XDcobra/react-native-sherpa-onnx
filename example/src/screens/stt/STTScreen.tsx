@@ -30,12 +30,17 @@ import {
   transcribeFile,
   type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
-import { getModelDisplayName } from '../../modelConfig';
+import {
+  getAssetModelPath,
+  getFileModelPath,
+  getModelDisplayName,
+} from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
@@ -83,51 +88,52 @@ export default function STTScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      // 1. Try to load downloaded models first
       const downloadedModels = await listDownloadedModelsByCategory(
         ModelCategory.Stt
       );
+      const downloadedIds = downloadedModels
+        .map((model) => model.id)
+        .filter(Boolean);
 
-      if (downloadedModels.length > 0) {
-        const downloadedFolders = downloadedModels.map(
-          (model: any) => model.modelDir
-        );
-        console.log('STTScreen: Found downloaded models:', downloadedFolders);
-        setAvailableModels(downloadedFolders);
-        return;
-      }
-
-      // 2. Fallback to asset models
       const assetModels = await listAssetModels();
       const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
 
+      const combined = [
+        ...downloadedIds,
+        ...sttFolders.filter((folder) => !downloadedIds.includes(folder)),
+      ];
+
+      if (downloadedIds.length > 0) {
+        console.log('STTScreen: Found downloaded models:', downloadedIds);
+      }
       if (sttFolders.length > 0) {
-        console.log('STTScreen: Using asset models:', sttFolders);
-        setAvailableModels(sttFolders);
-        return;
+        console.log('STTScreen: Found asset models:', sttFolders);
       }
 
-      // 3. No models available - show recommended models as guidance
-      const hasRecommendedModels =
-        (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
+      setDownloadedModelIds(downloadedIds);
+      setAvailableModels(combined);
 
-      if (hasRecommendedModels) {
-        setError(
-          'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
-        );
-        setAvailableModels([]); // Clear to show empty state
-        console.log(
-          'STTScreen: No models available. Recommended models available for download.'
-        );
-      } else {
-        setError('No STT models found. See STT_MODEL_SETUP.md');
-        setAvailableModels([]);
+      if (combined.length === 0) {
+        const hasRecommendedModels =
+          (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
+
+        if (hasRecommendedModels) {
+          setError(
+            'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
+          );
+          console.log(
+            'STTScreen: No models available. Recommended models available for download.'
+          );
+        } else {
+          setError('No STT models found. See STT_MODEL_SETUP.md');
+        }
       }
     } catch (err) {
       console.error('STTScreen: Failed to load models:', err);
       setError('Failed to load available models');
+      setDownloadedModelIds([]);
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
@@ -149,7 +155,9 @@ export default function STTScreen() {
 
       // Initialize new model
       const result = await initializeSTT({
-        modelPath: { type: 'asset', path: `models/${modelFolder}` },
+        modelPath: downloadedModelIds.includes(modelFolder)
+          ? getFileModelPath(modelFolder)
+          : getAssetModelPath(modelFolder),
       });
 
       if (result.success && result.detectedModels.length > 0) {

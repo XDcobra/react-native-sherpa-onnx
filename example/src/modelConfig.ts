@@ -21,6 +21,7 @@ const titleCase = (value: string) =>
  * Convert a model folder name into a more readable display name.
  */
 export function getModelDisplayName(modelFolder: string): string {
+  if (!modelFolder) return 'Unknown model';
   const cleaned = modelFolder.replace(/^sherpa-onnx-/, '');
   const tokens = cleaned.split(/[-_]+/g).filter(Boolean);
 

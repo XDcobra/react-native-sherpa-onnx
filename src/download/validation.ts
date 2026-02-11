@@ -1,8 +1,9 @@
 import RNFS from 'react-native-fs';
-import { sha256 } from 'react-native-hashkit';
+import QuickCrypto from 'react-native-quick-crypto';
 
 export type ValidationError =
   | 'CHECKSUM_MISMATCH'
+  | 'CHECKSUM_FAILED'
   | 'MISSING_FILES'
   | 'INSUFFICIENT_DISK_SPACE';
 
@@ -40,13 +41,33 @@ export function parseChecksumFile(content: string): Map<string, string> {
 }
 
 /**
- * Calculate SHA256 hash of a file
- * Uses react-native-hashkit for efficient SHA256 calculation
+ * Calculate SHA256 hash of a file in chunks to avoid OOM
+ * Reads file in 1MB chunks and processes them efficiently
  */
 export async function calculateFileChecksum(filePath: string): Promise<string> {
   try {
-    const hash = await sha256(filePath);
-    return hash.toLowerCase();
+    const stat = await RNFS.stat(filePath);
+    const fileSize = stat.size;
+    const chunkSize = 1024 * 1024; // 1MB chunks
+    const hash = QuickCrypto.createHash('sha256');
+
+    console.log(
+      `[Checksum] Computing SHA256 for ${filePath} (${fileSize} bytes) in ${Math.ceil(
+        fileSize / chunkSize
+      )} chunks`
+    );
+
+    for (let offset = 0; offset < fileSize; offset += chunkSize) {
+      const length = Math.min(chunkSize, fileSize - offset);
+      const chunk = await RNFS.read(filePath, length, offset, 'base64');
+      hash.update(chunk, 'base64');
+    }
+
+    // According to the package implementation, when an encoding (e.g. 'hex') is
+    // provided `digest()` returns a string. Cast to string for TypeScript.
+    const digest = hash.digest('hex') as unknown as string;
+    console.log(`[Checksum] SHA256 computed successfully: ${digest}`);
+    return digest.toLowerCase();
   } catch (error) {
     throw new Error(`Failed to calculate checksum: ${error}`);
   }
@@ -61,6 +82,9 @@ export async function validateChecksum(
 ): Promise<ValidationResult> {
   try {
     const actualChecksum = await calculateFileChecksum(filePath);
+    console.log(
+      `[Checksum] File: ${filePath}\nExpected: ${expectedChecksum}\nActual: ${actualChecksum}`
+    );
     if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
       return new ValidationResult(
         false,
@@ -72,7 +96,7 @@ export async function validateChecksum(
   } catch (error) {
     return new ValidationResult(
       false,
-      'CHECKSUM_MISMATCH',
+      'CHECKSUM_FAILED',
       `Failed to validate checksum: ${error}`
     );
   }

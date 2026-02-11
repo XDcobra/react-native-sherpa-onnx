@@ -26,6 +26,11 @@ export interface Spec extends TurboModule {
   ): Promise<{ success: boolean; path?: string; reason?: string }>;
 
   /**
+   * Cancel any in-progress tar.bz2 extraction.
+   */
+  cancelExtractTarBz2(): Promise<void>;
+
+  /**
    * Initialize sherpa-onnx with model directory.
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param modelDir - Absolute path to model directory

@@ -38,29 +38,41 @@ export interface SizeHintInfo {
 }
 
 export const MODEL_SIZE_HINTS: Record<string, SizeHintInfo> = {
+  low: {
+    tier: 'Low',
+    description: 'Smaller, faster, lower quality',
+    iconName: 'speedometer',
+    iconColor: '#2E7D32',
+  },
   tiny: {
     tier: 'Tiny',
     description: 'Very small (~10-50MB), fast, suitable for basic use',
     iconName: 'flash',
-    iconColor: '#00AA00',
+    iconColor: '#388E3C',
   },
   small: {
     tier: 'Small',
     description: 'Compact (~50-150MB), good speed, decent quality',
-    iconColor: '#FFAA00',
+    iconColor: '#F9A825',
     iconName: 'checkmark-circle',
   },
   medium: {
     tier: 'Medium',
     description: 'Moderate size (~150-300MB), balanced quality & speed',
-    iconName: 'settings',
-    iconColor: '#FF8800',
+    iconName: 'options',
+    iconColor: '#FB8C00',
+  },
+  high: {
+    tier: 'High',
+    description: 'High quality, larger and slower',
+    iconName: 'diamond',
+    iconColor: '#D32F2F',
   },
   large: {
     tier: 'Large',
     description: 'Large (>300MB), slower, best quality & accuracy',
     iconName: 'star',
-    iconColor: '#FF0000',
+    iconColor: '#C62828',
   },
   unknown: {
     tier: 'Unknown',
@@ -84,11 +96,13 @@ export function getSizeHint(id: string, bytes?: number): SizeHintInfo {
   };
 
   // Try to infer from ID
+  if (idLower.includes('low')) return MODEL_SIZE_HINTS.low ?? unknownFallback;
   if (idLower.includes('tiny')) return MODEL_SIZE_HINTS.tiny ?? unknownFallback;
   if (idLower.includes('small') || idLower.includes('small-2024'))
     return MODEL_SIZE_HINTS.small ?? unknownFallback;
   if (idLower.includes('medium'))
     return MODEL_SIZE_HINTS.medium ?? unknownFallback;
+  if (idLower.includes('high')) return MODEL_SIZE_HINTS.high ?? unknownFallback;
   if (idLower.includes('large'))
     return MODEL_SIZE_HINTS.large ?? unknownFallback;
 
@@ -119,6 +133,14 @@ export interface QualityHintInfo {
 export function getQualityHint(id: string): QualityHintInfo {
   const idLower = id.toLowerCase();
 
+  if (idLower.includes('low')) {
+    return {
+      text: 'Fast, smaller, lower quality',
+      iconName: 'speedometer',
+      iconColor: '#2E7D32',
+    };
+  }
+
   if (
     idLower.includes('tiny') ||
     idLower.includes('small-2024') ||
@@ -127,7 +149,7 @@ export function getQualityHint(id: string): QualityHintInfo {
     return {
       text: 'Fast, good for real-time',
       iconName: 'flash',
-      iconColor: '#FFA500',
+      iconColor: '#F57C00',
     };
   }
 
@@ -135,15 +157,23 @@ export function getQualityHint(id: string): QualityHintInfo {
     return {
       text: 'Balanced speed & quality',
       iconName: 'swap-horizontal',
-      iconColor: '#4CAF50',
+      iconColor: '#43A047',
     };
   }
 
   if (idLower.includes('medium')) {
     return {
       text: 'Good quality, moderate speed',
-      iconName: 'aperture',
-      iconColor: '#2196F3',
+      iconName: 'options',
+      iconColor: '#1E88E5',
+    };
+  }
+
+  if (idLower.includes('high')) {
+    return {
+      text: 'Best quality, slower',
+      iconName: 'diamond',
+      iconColor: '#D32F2F',
     };
   }
 
@@ -151,7 +181,7 @@ export function getQualityHint(id: string): QualityHintInfo {
     return {
       text: 'Best quality, slower',
       iconName: 'star',
-      iconColor: '#FFD700',
+      iconColor: '#C62828',
     };
   }
 

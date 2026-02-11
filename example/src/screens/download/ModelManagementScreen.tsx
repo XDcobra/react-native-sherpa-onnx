@@ -175,6 +175,96 @@ const getLanguageCodeFromModelId = (modelId: string) => {
   return normalizeLanguageCode(code);
 };
 
+type DownloadTrackerSnapshot = Record<string, DownloadProgress>;
+
+type DownloadedListItem = {
+  id: string;
+  displayName: string;
+  isActive: boolean;
+  isAborted?: boolean;
+  progress?: DownloadProgress;
+};
+
+const downloadTrackerByCategory: Partial<
+  Record<ModelCategory, DownloadTrackerSnapshot>
+> = {};
+
+const downloadTrackerListeners = new Set<
+  (category: ModelCategory, snapshot: DownloadTrackerSnapshot) => void
+>();
+const downloadAbortControllers = new Map<string, AbortController>();
+
+const getDownloadTrackerSnapshot = (category: ModelCategory) => {
+  if (!downloadTrackerByCategory[category]) {
+    downloadTrackerByCategory[category] = {};
+  }
+  return downloadTrackerByCategory[category]!;
+};
+
+const emitDownloadTracker = (category: ModelCategory) => {
+  const snapshot = { ...getDownloadTrackerSnapshot(category) };
+  downloadTrackerByCategory[category] = snapshot;
+  downloadTrackerListeners.forEach((listener) => listener(category, snapshot));
+};
+
+const setDownloadTrackerProgress = (
+  category: ModelCategory,
+  modelId: string,
+  progress: DownloadProgress
+) => {
+  const current = getDownloadTrackerSnapshot(category);
+  downloadTrackerByCategory[category] = { ...current, [modelId]: progress };
+  emitDownloadTracker(category);
+};
+
+const clearDownloadTrackerProgress = (
+  category: ModelCategory,
+  modelId: string
+) => {
+  const current = getDownloadTrackerSnapshot(category);
+  const next = { ...current };
+  delete next[modelId];
+  downloadTrackerByCategory[category] = next;
+  emitDownloadTracker(category);
+};
+
+const subscribeDownloadTracker = (
+  listener: (category: ModelCategory, snapshot: DownloadTrackerSnapshot) => void
+) => {
+  downloadTrackerListeners.add(listener);
+  return () => {
+    downloadTrackerListeners.delete(listener);
+  };
+};
+
+const makeDownloadKey = (category: ModelCategory, modelId: string) =>
+  `${category}:${modelId}`;
+
+const setDownloadAbortController = (
+  category: ModelCategory,
+  modelId: string,
+  controller: AbortController
+) => {
+  downloadAbortControllers.set(makeDownloadKey(category, modelId), controller);
+};
+
+const clearDownloadAbortController = (
+  category: ModelCategory,
+  modelId: string
+) => {
+  downloadAbortControllers.delete(makeDownloadKey(category, modelId));
+};
+
+const cancelDownloadById = (category: ModelCategory, modelId: string) => {
+  const key = makeDownloadKey(category, modelId);
+  const controller = downloadAbortControllers.get(key);
+  if (controller) {
+    controller.abort();
+    downloadAbortControllers.delete(key);
+  }
+  clearDownloadTrackerProgress(category, modelId);
+};
+
 export default function ModelManagementScreen() {
   const [category, setCategory] = useState<ModelCategory>(ModelCategory.Tts);
   const [models, setModels] = useState<ModelMetaBase[]>([]);
@@ -189,6 +279,10 @@ export default function ModelManagementScreen() {
   >({});
   const [downloadedExpanded, setDownloadedExpanded] = useState(true);
   const [availableExpanded, setAvailableExpanded] = useState(true);
+  const [abortingById, setAbortingById] = useState<Record<string, boolean>>({});
+  const [recentlyAbortedById, setRecentlyAbortedById] = useState<
+    Record<string, { id: string; displayName: string }>
+  >({});
 
   const isTtsCategory = category === ModelCategory.Tts;
   const isSttCategory = category === ModelCategory.Stt;
@@ -204,6 +298,59 @@ export default function ModelManagementScreen() {
   const downloadedIds = useMemo(() => {
     return new Set(downloadedModels.map((model) => model.id));
   }, [downloadedModels]);
+
+  const modelsById = useMemo(() => {
+    return new Map(models.map((model) => [model.id, model]));
+  }, [models]);
+
+  const hasActiveDownloads = useMemo(
+    () => Object.keys(progressById).length > 0,
+    [progressById]
+  );
+
+  const downloadedListItems = useMemo<DownloadedListItem[]>(() => {
+    const activeItems = Object.entries(progressById)
+      .filter(([id]) => !downloadedIds.has(id))
+      .map(([id, progress]) => {
+        const meta = modelsById.get(id);
+        return {
+          id,
+          displayName: meta?.displayName ?? id,
+          progress,
+          isActive: true,
+        };
+      });
+
+    const abortedItems = Object.values(recentlyAbortedById).filter(
+      (item) => !downloadedIds.has(item.id) && !progressById[item.id]
+    );
+
+    const downloadedItems = downloadedModels.map((model) => ({
+      id: model.id,
+      displayName: model.displayName,
+      isActive: false,
+    }));
+
+    return [
+      ...activeItems,
+      ...abortedItems.map((item) => ({
+        id: item.id,
+        displayName: item.displayName,
+        isActive: false,
+        isAborted: true,
+      })),
+      ...downloadedItems.map((item) => ({
+        ...item,
+        isActive: false,
+      })),
+    ];
+  }, [
+    downloadedIds,
+    downloadedModels,
+    modelsById,
+    progressById,
+    recentlyAbortedById,
+  ]);
 
   const languages = useMemo(
     () =>
@@ -397,6 +544,15 @@ export default function ModelManagementScreen() {
   }, [loadModels, category]);
 
   useEffect(() => {
+    setProgressById(getDownloadTrackerSnapshot(category));
+    const unsubscribe = subscribeDownloadTracker((nextCategory, snapshot) => {
+      if (nextCategory !== category) return;
+      setProgressById(snapshot);
+    });
+    return unsubscribe;
+  }, [category]);
+
+  useEffect(() => {
     applyFilters();
   }, [applyFilters]);
 
@@ -425,34 +581,46 @@ export default function ModelManagementScreen() {
         return;
       }
 
-      setProgressById((prev) => ({
-        ...prev,
-        [model.id]: { bytesDownloaded: 0, totalBytes: model.bytes, percent: 0 },
-      }));
+      const controller = new AbortController();
+      setDownloadAbortController(category, model.id, controller);
+
+      setDownloadTrackerProgress(category, model.id, {
+        bytesDownloaded: 0,
+        totalBytes: model.bytes,
+        percent: 0,
+        phase: 'downloading',
+      });
 
       try {
         await downloadModelByCategory<ModelMetaBase>(category, model.id, {
           onProgress: (progress) => {
-            setProgressById((prev) => ({ ...prev, [model.id]: progress }));
+            setDownloadTrackerProgress(category, model.id, progress);
           },
+          signal: controller.signal,
         });
         await loadDownloaded();
       } catch (err) {
+        if (
+          err instanceof Error &&
+          (err.name === 'AbortError' ||
+            err.message.toLowerCase().includes('abort'))
+        ) {
+          // User cancelled - do nothing, handleCancelDownload already set up the UI
+          return;
+        }
         const message = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Download error (not abort):', err);
         Alert.alert('Download failed', message);
       } finally {
-        setProgressById((prev) => {
-          const next = { ...prev };
-          delete next[model.id];
-          return next;
-        });
+        clearDownloadTrackerProgress(category, model.id);
+        clearDownloadAbortController(category, model.id);
       }
     },
     [category, downloadedIds, loadDownloaded]
   );
 
-  const handleDelete = async (model: ModelMetaBase) => {
-    Alert.alert('Delete model', `Remove ${model.displayName}?`, [
+  const handleDelete = async (model: { id: string; displayName?: string }) => {
+    Alert.alert('Delete model', `Remove ${model.displayName ?? model.id}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -464,6 +632,35 @@ export default function ModelManagementScreen() {
       },
     ]);
   };
+
+  const handleCancelDownload = useCallback(
+    (model: { id: string; displayName?: string }) => {
+      setAbortingById((prev) => ({ ...prev, [model.id]: true }));
+      setRecentlyAbortedById((prev) => ({
+        ...prev,
+        [model.id]: {
+          id: model.id,
+          displayName: model.displayName ?? model.id,
+        },
+      }));
+
+      cancelDownloadById(category, model.id);
+
+      setTimeout(() => {
+        setAbortingById((prev) => {
+          const next = { ...prev };
+          delete next[model.id];
+          return next;
+        });
+        setRecentlyAbortedById((prev) => {
+          const next = { ...prev };
+          delete next[model.id];
+          return next;
+        });
+      }, 1500);
+    },
+    [category]
+  );
 
   const renderAvailableModel = useCallback(
     ({ item, index }: { item: ModelMetaBase; index: number }) => {
@@ -625,7 +822,7 @@ export default function ModelManagementScreen() {
                 </TouchableOpacity>
               </View>
 
-              {loading && (
+              {loading && !hasActiveDownloads && (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator size="small" color="#007AFF" />
                   <Text style={styles.loadingText}>Loading models...</Text>
@@ -755,7 +952,7 @@ export default function ModelManagementScreen() {
                   </Text>
                   <View style={styles.countBadge}>
                     <Text style={styles.countBadgeText}>
-                      {downloadedModels.length}
+                      {downloadedListItems.length}
                     </Text>
                   </View>
                 </View>
@@ -767,25 +964,68 @@ export default function ModelManagementScreen() {
               </TouchableOpacity>
               {downloadedExpanded && (
                 <View style={styles.sectionInnerMarginTop}>
-                  {downloadedModels.length === 0 ? (
+                  {downloadedListItems.length === 0 ? (
                     <Text style={styles.emptyText}>No cached models yet.</Text>
                   ) : (
-                    downloadedModels.map((model) => (
-                      <View key={model.id} style={styles.modelRow}>
-                        <View style={styles.modelInfo}>
-                          <Text style={styles.modelName}>
-                            {model.displayName}
-                          </Text>
-                          <Text style={styles.modelMeta}>{model.id}</Text>
+                    downloadedListItems.map((model) => {
+                      const activeProgress = progressById[model.id];
+                      const isAborting = Boolean(abortingById[model.id]);
+                      return (
+                        <View key={model.id} style={styles.modelRow}>
+                          <View style={styles.modelInfo}>
+                            <Text style={styles.modelName}>
+                              {model.displayName}
+                            </Text>
+                            <Text style={styles.modelMeta}>{model.id}</Text>
+                            {model.isActive && activeProgress && (
+                              <Text style={styles.modelMeta}>
+                                {activeProgress.phase === 'extracting'
+                                  ? `Extracting ${Math.round(
+                                      activeProgress.percent
+                                    )}%`
+                                  : `Downloading ${Math.round(
+                                      activeProgress.percent
+                                    )}%`}
+                              </Text>
+                            )}
+                          </View>
+                          {model.isActive ? (
+                            <View style={styles.rowActions}>
+                              <Text style={styles.downloadedLabel}>
+                                In progress
+                              </Text>
+                              <TouchableOpacity
+                                style={[
+                                  styles.cancelButton,
+                                  isAborting && styles.cancelButtonDisabled,
+                                ]}
+                                onPress={() => handleCancelDownload(model)}
+                                disabled={isAborting}
+                              >
+                                <Ionicons
+                                  name="close"
+                                  size={16}
+                                  color="#FFFFFF"
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          ) : model.isAborted ? (
+                            <Text style={styles.abortedLabel}>Canceled</Text>
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.deleteButton}
+                              onPress={() => handleDelete(model)}
+                            >
+                              <Ionicons
+                                name="trash"
+                                size={18}
+                                color="#FFFFFF"
+                              />
+                            </TouchableOpacity>
+                          )}
                         </View>
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={() => handleDelete(model)}
-                        >
-                          <Ionicons name="trash" size={18} color="#FFFFFF" />
-                        </TouchableOpacity>
-                      </View>
-                    ))
+                      );
+                    })
                   )}
                 </View>
               )}
@@ -1037,6 +1277,25 @@ const styles = StyleSheet.create({
   downloadedLabel: {
     fontSize: 12,
     color: '#34C759',
+    fontWeight: '600',
+  },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  cancelButtonDisabled: {
+    opacity: 0.5,
+  },
+  abortedLabel: {
+    fontSize: 12,
+    color: '#8E8E93',
     fontWeight: '600',
   },
   deleteButton: {

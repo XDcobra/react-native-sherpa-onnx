@@ -36,7 +36,11 @@ import {
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
 import { listAssetModels } from 'react-native-sherpa-onnx';
-import { getModelDisplayName } from '../../modelConfig';
+import {
+  getAssetModelPath,
+  getFileModelPath,
+  getModelDisplayName,
+} from '../../modelConfig';
 import {
   getSizeHint,
   getQualityHint,
@@ -49,6 +53,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
@@ -417,51 +422,52 @@ export default function TTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      // 1. Try to load downloaded models first
       const downloadedModels = await listDownloadedModelsByCategory(
         ModelCategory.Tts
       );
+      const downloadedIds = downloadedModels
+        .map((model) => model.id)
+        .filter(Boolean);
 
-      if (downloadedModels.length > 0) {
-        const downloadedFolders = downloadedModels.map(
-          (model: any) => model.modelDir
-        );
-        console.log('TTSScreen: Found downloaded models:', downloadedFolders);
-        setAvailableModels(downloadedFolders);
-        return;
-      }
-
-      // 2. Fallback to asset models
       const assetModels = await listAssetModels();
       const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
 
+      const combined = [
+        ...downloadedIds,
+        ...ttsFolders.filter((folder) => !downloadedIds.includes(folder)),
+      ];
+
+      if (downloadedIds.length > 0) {
+        console.log('TTSScreen: Found downloaded models:', downloadedIds);
+      }
       if (ttsFolders.length > 0) {
-        console.log('TTSScreen: Using asset models:', ttsFolders);
-        setAvailableModels(ttsFolders);
-        return;
+        console.log('TTSScreen: Found asset models:', ttsFolders);
       }
 
-      // 3. No models available - show recommended models as guidance
-      const hasRecommendedModels =
-        (RECOMMENDED_MODEL_IDS[ModelCategory.Tts] || []).length > 0;
+      setDownloadedModelIds(downloadedIds);
+      setAvailableModels(combined);
 
-      if (hasRecommendedModels) {
-        setError(
-          'No TTS models found. Consider downloading one of the recommended models in the Model Management screen.'
-        );
-        setAvailableModels([]); // Clear to show empty state
-        console.log(
-          'TTSScreen: No models available. Recommended models available for download.'
-        );
-      } else {
-        setError('No TTS models found. See TTS_MODEL_SETUP.md');
-        setAvailableModels([]);
+      if (combined.length === 0) {
+        const hasRecommendedModels =
+          (RECOMMENDED_MODEL_IDS[ModelCategory.Tts] || []).length > 0;
+
+        if (hasRecommendedModels) {
+          setError(
+            'No TTS models found. Consider downloading one of the recommended models in the Model Management screen.'
+          );
+          console.log(
+            'TTSScreen: No models available. Recommended models available for download.'
+          );
+        } else {
+          setError('No TTS models found. See TTS_MODEL_SETUP.md');
+        }
       }
     } catch (err) {
       console.error('TTSScreen: Failed to load models:', err);
       setError('Failed to load available models');
+      setDownloadedModelIds([]);
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
@@ -499,10 +505,9 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      const modelPath = {
-        type: 'asset',
-        path: `models/${modelFolder}`,
-      } as const;
+      const modelPath = downloadedModelIds.includes(modelFolder)
+        ? getFileModelPath(modelFolder)
+        : getAssetModelPath(modelFolder);
 
       const noiseScaleValue = noiseScale.trim();
       const noiseScaleWValue = noiseScaleW.trim();
