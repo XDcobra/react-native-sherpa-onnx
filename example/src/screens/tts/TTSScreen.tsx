@@ -30,10 +30,6 @@ import {
   copyContentUriToCache,
   shareAudioFile,
 } from 'react-native-sherpa-onnx/tts';
-import {
-  extractTarBz2,
-  type ExtractProgressEvent,
-} from 'react-native-sherpa-onnx/download';
 import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
 import { getModelDisplayName } from '../../modelConfig';
 import RNFS from 'react-native-fs';
@@ -88,9 +84,6 @@ export default function TTSScreen() {
     null
   );
   const [saving, setSaving] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [extractStatus, setExtractStatus] = useState<string | null>(null);
-  const [extractProgress, setExtractProgress] = useState<number | null>(null);
   const [soundInstance, setSoundInstance] = useState<Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loadingSound, setLoadingSound] = useState(false);
@@ -1272,58 +1265,6 @@ export default function TTSScreen() {
     }
   };
 
-  const handleTestExtract = async () => {
-    if (Platform.OS !== 'android') {
-      Alert.alert('Not supported', 'This test asset is Android-only.');
-      return;
-    }
-
-    setExtracting(true);
-    setExtractStatus(null);
-    setExtractProgress(0);
-
-    const assetName = 'vits-piper-vi_VN-vivos-x_low-int8.tar.bz2';
-    const cacheRoot = RNFS.CachesDirectoryPath;
-    const archivePath = `${cacheRoot}/${assetName}`;
-    const targetDir = `${cacheRoot}/tts-test-extract`;
-
-    try {
-      if (await RNFS.exists(targetDir)) {
-        await RNFS.unlink(targetDir);
-      }
-      if (await RNFS.exists(archivePath)) {
-        await RNFS.unlink(archivePath);
-      }
-
-      await RNFS.copyFileAssets(assetName, archivePath);
-      await RNFS.mkdir(targetDir);
-
-      const result = await extractTarBz2(
-        archivePath,
-        targetDir,
-        true,
-        (evt: ExtractProgressEvent) => {
-          if (evt.totalBytes > 0) {
-            setExtractProgress(evt.percent);
-          }
-        }
-      );
-      if (result.success) {
-        setExtractProgress(100);
-        setExtractStatus(`Extracted to: ${result.path ?? targetDir}`);
-      } else {
-        setExtractProgress(null);
-        setExtractStatus(`Extract failed: ${result.reason ?? 'Unknown error'}`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setExtractProgress(null);
-      setExtractStatus(`Extract failed: ${message}`);
-    } finally {
-      setExtracting(false);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.body}>
@@ -1451,30 +1392,6 @@ export default function TTSScreen() {
                 <ActivityIndicator size="large" color="#007AFF" />
                 <Text style={styles.loadingText}>Initializing model...</Text>
               </View>
-            )}
-
-            <View style={styles.separator} />
-            <Text style={styles.sectionDescription}>
-              Test tar.bz2 extraction:
-            </Text>
-            <TouchableOpacity
-              style={[styles.testButton, extracting && styles.buttonDisabled]}
-              onPress={handleTestExtract}
-              disabled={extracting}
-            >
-              {extracting ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.testButtonText}>Run Extract Test</Text>
-              )}
-            </TouchableOpacity>
-            {extractStatus && (
-              <Text style={styles.noteText}>{extractStatus}</Text>
-            )}
-            {extractProgress !== null && (
-              <Text style={styles.noteText}>
-                Extract progress: {Math.round(extractProgress)}%
-              </Text>
             )}
 
             {initResult && (
@@ -2059,17 +1976,6 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     marginTop: 10,
-  },
-  testButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  testButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   generateButtonText: {
     fontSize: 16,
