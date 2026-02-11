@@ -53,7 +53,9 @@ endif()
 set(SOURCES
     jni/sherpa-onnx-stt-jni.cpp
     jni/sherpa-onnx-tts-jni.cpp
-    jni/sherpa-onnx-model-detect.cpp
+    jni/sherpa-onnx-model-detect-helper.cpp
+    jni/sherpa-onnx-model-detect-stt.cpp
+    jni/sherpa-onnx-model-detect-tts.cpp
     jni/sherpa-onnx-stt-wrapper.cpp
     jni/sherpa-onnx-tts-wrapper.cpp
 )
