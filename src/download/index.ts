@@ -1,25 +1,25 @@
 export { extractTarBz2 } from './extractTarBz2';
 export type { ExtractProgressEvent } from './extractTarBz2';
 export {
-  listTtsModels,
-  refreshTtsModels,
-  getTtsModelsCacheStatus,
-  filterTtsModels,
-  getTtsModelById,
-  listDownloadedTtsModels,
-  isModelDownloaded,
-  getLocalModelPath,
-  downloadTtsModel,
-  deleteTtsModel,
-  clearModelCache,
+  listModelsByCategory,
+  refreshModelsByCategory,
+  getModelsCacheStatusByCategory,
+  getModelByIdByCategory,
+  listDownloadedModelsByCategory,
+  isModelDownloadedByCategory,
+  getLocalModelPathByCategory,
+  downloadModelByCategory,
+  deleteModelByCategory,
+  clearModelCacheByCategory,
   getDownloadStorageBase,
+  ModelCategory,
 } from './ModelDownloadManager';
 export type {
+  ModelMetaBase,
   TtsModelMeta,
   TtsModelType,
   Quantization,
   SizeTier,
-  FilterOptions,
   DownloadProgress,
   DownloadResult,
 } from './ModelDownloadManager';

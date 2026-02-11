@@ -2,10 +2,19 @@ import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import { extractTarBz2 } from './extractTarBz2';
 
-const RELEASE_API_URL =
-  'https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/tts-models';
+const RELEASE_API_BASE =
+  'https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags';
 const CACHE_TTL_MINUTES = 24 * 60;
 const MODEL_ARCHIVE_EXT = '.tar.bz2';
+
+export enum ModelCategory {
+  Tts = 'tts',
+  Stt = 'stt',
+  Vad = 'vad',
+  Diarization = 'diarization',
+  Enhancement = 'enhancement',
+  Separation = 'separation',
+}
 
 export type TtsModelType =
   | 'vits'
@@ -19,24 +28,22 @@ export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
 
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
 
-export type TtsModelMeta = {
+export type ModelMetaBase = {
   id: string;
   displayName: string;
-  type: TtsModelType;
-  languages: string[];
-  quantization: Quantization;
-  sizeTier: SizeTier;
   downloadUrl: string;
   archiveExt: 'tar.bz2';
   bytes: number;
   sha256?: string;
+  category: ModelCategory;
 };
 
-export type FilterOptions = {
-  language?: string;
-  type?: string;
-  quantization?: string;
-  sizeTier?: string;
+export type TtsModelMeta = ModelMetaBase & {
+  type: TtsModelType;
+  languages: string[];
+  quantization: Quantization;
+  sizeTier: SizeTier;
+  category: ModelCategory.Tts;
 };
 
 export type DownloadProgress = {
@@ -50,9 +57,9 @@ export type DownloadResult = {
   localPath: string;
 };
 
-type CachePayload = {
+type CachePayload<T extends ModelMetaBase> = {
   lastUpdated: string;
-  models: TtsModelMeta[];
+  models: T[];
 };
 
 type CacheStatus = {
@@ -60,42 +67,76 @@ type CacheStatus = {
   source: 'cache' | 'remote';
 };
 
-let memoryCache: CachePayload | null = null;
+const memoryCacheByCategory: Partial<
+  Record<ModelCategory, CachePayload<ModelMetaBase>>
+> = {};
 
-function normalizeFilter(value?: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.toLowerCase() === 'any') return null;
-  return trimmed.toLowerCase();
-}
+const CATEGORY_CONFIG: Record<
+  ModelCategory,
+  { tag: string; cacheFile: string; baseDir: string }
+> = {
+  [ModelCategory.Tts]: {
+    tag: 'tts-models',
+    cacheFile: 'tts-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/tts`,
+  },
+  [ModelCategory.Stt]: {
+    tag: 'asr-models',
+    cacheFile: 'asr-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/stt`,
+  },
+  [ModelCategory.Vad]: {
+    tag: 'vad-models',
+    cacheFile: 'vad-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/vad`,
+  },
+  [ModelCategory.Diarization]: {
+    tag: 'speaker-diarization-models',
+    cacheFile: 'diarization-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/diarization`,
+  },
+  [ModelCategory.Enhancement]: {
+    tag: 'speech-enhancement-models',
+    cacheFile: 'enhancement-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/enhancement`,
+  },
+  [ModelCategory.Separation]: {
+    tag: 'source-separation-models',
+    cacheFile: 'separation-models.json',
+    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/separation`,
+  },
+};
 
 function getCacheDir(): string {
   return `${RNFS.DocumentDirectoryPath}/sherpa-onnx/cache`;
 }
 
-function getCachePath(): string {
-  return `${getCacheDir()}/tts-models.json`;
+function getCachePath(category: ModelCategory): string {
+  return `${getCacheDir()}/${CATEGORY_CONFIG[category].cacheFile}`;
 }
 
-function getModelsBaseDir(): string {
-  return `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/tts`;
+function getModelsBaseDir(category: ModelCategory): string {
+  return CATEGORY_CONFIG[category].baseDir;
 }
 
-function getModelDir(modelId: string): string {
-  return `${getModelsBaseDir()}/${modelId}`;
+function getModelDir(category: ModelCategory, modelId: string): string {
+  return `${getModelsBaseDir(category)}/${modelId}`;
 }
 
-function getArchivePath(modelId: string): string {
-  return `${getModelsBaseDir()}/${modelId}${MODEL_ARCHIVE_EXT}`;
+function getArchivePath(category: ModelCategory, modelId: string): string {
+  return `${getModelsBaseDir(category)}/${modelId}${MODEL_ARCHIVE_EXT}`;
 }
 
-function getReadyMarkerPath(modelId: string): string {
-  return `${getModelDir(modelId)}/.ready`;
+function getReadyMarkerPath(category: ModelCategory, modelId: string): string {
+  return `${getModelDir(category, modelId)}/.ready`;
 }
 
-function getManifestPath(modelId: string): string {
-  return `${getModelDir(modelId)}/manifest.json`;
+function getManifestPath(category: ModelCategory, modelId: string): string {
+  return `${getModelDir(category, modelId)}/manifest.json`;
+}
+
+function getReleaseUrl(category: ModelCategory): string {
+  return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
 }
 
 function toTitleCase(value: string): string {
@@ -160,7 +201,7 @@ function deriveLanguages(id: string): string[] {
   return Array.from(languages);
 }
 
-function toModelMeta(asset: {
+function toTtsModelMeta(asset: {
   name: string;
   size: number;
   browser_download_url: string;
@@ -185,52 +226,106 @@ function toModelMeta(asset: {
     downloadUrl: asset.browser_download_url,
     archiveExt: 'tar.bz2',
     bytes: asset.size,
+    category: ModelCategory.Tts,
   };
 }
 
-async function loadCacheFromDisk(): Promise<CachePayload | null> {
+function toGenericModelMeta(
+  category: ModelCategory,
+  asset: {
+    name: string;
+    size: number;
+    browser_download_url: string;
+  }
+): ModelMetaBase | null {
+  if (!asset.name.endsWith(MODEL_ARCHIVE_EXT)) {
+    return null;
+  }
+
+  const id = asset.name.replace(MODEL_ARCHIVE_EXT, '');
+  return {
+    id,
+    displayName: deriveDisplayName(id),
+    downloadUrl: asset.browser_download_url,
+    archiveExt: 'tar.bz2',
+    bytes: asset.size,
+    category,
+  };
+}
+
+function toModelMeta(
+  category: ModelCategory,
+  asset: {
+    name: string;
+    size: number;
+    browser_download_url: string;
+  }
+): ModelMetaBase | null {
+  if (category === ModelCategory.Tts) {
+    return toTtsModelMeta(asset);
+  }
+  return toGenericModelMeta(category, asset);
+}
+
+async function loadCacheFromDisk<T extends ModelMetaBase>(
+  category: ModelCategory
+): Promise<CachePayload<T> | null> {
+  const memoryCache = memoryCacheByCategory[category] as
+    | CachePayload<T>
+    | undefined;
   if (memoryCache) return memoryCache;
-  const cachePath = getCachePath();
+  const cachePath = getCachePath(category);
   const exists = await RNFS.exists(cachePath);
   if (!exists) return null;
 
   const raw = await RNFS.readFile(cachePath, 'utf8');
-  const parsed = JSON.parse(raw) as CachePayload;
-  memoryCache = parsed;
+  const parsed = JSON.parse(raw) as CachePayload<T>;
+  memoryCacheByCategory[category] = parsed as CachePayload<ModelMetaBase>;
   return parsed;
 }
 
-async function saveCache(payload: CachePayload): Promise<void> {
+async function saveCache<T extends ModelMetaBase>(
+  category: ModelCategory,
+  payload: CachePayload<T>
+): Promise<void> {
   const cacheDir = getCacheDir();
   await RNFS.mkdir(cacheDir);
-  await RNFS.writeFile(getCachePath(), JSON.stringify(payload), 'utf8');
-  memoryCache = payload;
+  await RNFS.writeFile(getCachePath(category), JSON.stringify(payload), 'utf8');
+  memoryCacheByCategory[category] = payload as CachePayload<ModelMetaBase>;
 }
 
-function isCacheFresh(payload: CachePayload, ttlMinutes: number): boolean {
+function isCacheFresh<T extends ModelMetaBase>(
+  payload: CachePayload<T>,
+  ttlMinutes: number
+): boolean {
   const updated = new Date(payload.lastUpdated).getTime();
   if (!updated) return false;
   const ageMs = Date.now() - updated;
   return ageMs < ttlMinutes * 60 * 1000;
 }
 
-export async function listTtsModels(): Promise<TtsModelMeta[]> {
-  const cache = await loadCacheFromDisk();
+export async function listModelsByCategory<T extends ModelMetaBase>(
+  category: ModelCategory
+): Promise<T[]> {
+  const cache = await loadCacheFromDisk<T>(category);
   return cache?.models ?? [];
 }
 
-export async function refreshTtsModels(options?: {
-  forceRefresh?: boolean;
-  cacheTtlMinutes?: number;
-}): Promise<TtsModelMeta[]> {
+export async function refreshModelsByCategory<T extends ModelMetaBase>(
+  category: ModelCategory,
+  options?: {
+    forceRefresh?: boolean;
+    cacheTtlMinutes?: number;
+  }
+): Promise<T[]> {
   const ttl = options?.cacheTtlMinutes ?? CACHE_TTL_MINUTES;
-  const cached = await loadCacheFromDisk();
+  const cached = await loadCacheFromDisk<T>(category);
 
   if (!options?.forceRefresh && cached && isCacheFresh(cached, ttl)) {
     return cached.models;
   }
 
-  const response = await fetch(RELEASE_API_URL);
+  const response = await fetch(getReleaseUrl(category));
   if (!response.ok) {
     if (cached) return cached.models;
     throw new Error(`Failed to fetch models: ${response.status}`);
@@ -238,80 +333,60 @@ export async function refreshTtsModels(options?: {
 
   const body = await response.json();
   const assets = Array.isArray(body?.assets) ? body.assets : [];
-  const models: TtsModelMeta[] = assets
+  const models: T[] = assets
     .map((asset: any) =>
-      toModelMeta({
+      toModelMeta(category, {
         name: asset.name,
         size: asset.size,
         browser_download_url: asset.browser_download_url,
       })
     )
-    .filter((model: TtsModelMeta | null): model is TtsModelMeta =>
-      Boolean(model)
-    );
+    .filter((model: ModelMetaBase | null): model is T => Boolean(model));
 
-  const payload: CachePayload = {
+  const payload: CachePayload<T> = {
     lastUpdated: new Date().toISOString(),
     models,
   };
-  await saveCache(payload);
+  await saveCache(category, payload);
   return models;
 }
 
-export async function getTtsModelsCacheStatus(): Promise<CacheStatus> {
-  const cached = await loadCacheFromDisk();
+export async function getModelsCacheStatusByCategory(
+  category: ModelCategory
+): Promise<CacheStatus> {
+  const cached = await loadCacheFromDisk(category);
   if (!cached) {
     return { lastUpdated: null, source: 'cache' };
   }
   return { lastUpdated: cached.lastUpdated, source: 'cache' };
 }
 
-export async function filterTtsModels(
-  options: FilterOptions
-): Promise<TtsModelMeta[]> {
-  const models = await listTtsModels();
-  const language = normalizeFilter(options.language);
-  const type = normalizeFilter(options.type);
-  const quantization = normalizeFilter(options.quantization);
-  const sizeTier = normalizeFilter(options.sizeTier);
-
-  return models.filter((model) => {
-    if (type && model.type !== type) return false;
-    if (quantization && model.quantization !== quantization) return false;
-    if (sizeTier && model.sizeTier !== sizeTier) return false;
-    if (
-      language &&
-      !model.languages.map((l) => l.toLowerCase()).includes(language)
-    ) {
-      return false;
-    }
-    return true;
-  });
-}
-
-export async function getTtsModelById(
+export async function getModelByIdByCategory<T extends ModelMetaBase>(
+  category: ModelCategory,
   id: string
-): Promise<TtsModelMeta | null> {
-  const models = await listTtsModels();
+): Promise<T | null> {
+  const models = await listModelsByCategory<T>(category);
   return models.find((model) => model.id === id) ?? null;
 }
 
-export async function listDownloadedTtsModels(): Promise<TtsModelMeta[]> {
-  const baseDir = getModelsBaseDir();
+export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
+  category: ModelCategory
+): Promise<T[]> {
+  const baseDir = getModelsBaseDir(category);
   const exists = await RNFS.exists(baseDir);
   if (!exists) return [];
 
   const entries = await RNFS.readDir(baseDir);
-  const models: TtsModelMeta[] = [];
+  const models: T[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const manifestPath = getManifestPath(entry.name);
+    const manifestPath = getManifestPath(category, entry.name);
     const manifestExists = await RNFS.exists(manifestPath);
     if (manifestExists) {
       try {
         const raw = await RNFS.readFile(manifestPath, 'utf8');
-        const manifest = JSON.parse(raw) as { model?: TtsModelMeta };
+        const manifest = JSON.parse(raw) as { model?: T };
         if (manifest.model) {
           models.push(manifest.model);
           continue;
@@ -321,7 +396,7 @@ export async function listDownloadedTtsModels(): Promise<TtsModelMeta[]> {
       }
     }
 
-    const model = await getTtsModelById(entry.name);
+    const model = await getModelByIdByCategory<T>(category, entry.name);
     if (model) {
       models.push(model);
     }
@@ -330,18 +405,25 @@ export async function listDownloadedTtsModels(): Promise<TtsModelMeta[]> {
   return models;
 }
 
-export async function isModelDownloaded(id: string): Promise<boolean> {
-  const readyPath = getReadyMarkerPath(id);
+export async function isModelDownloadedByCategory(
+  category: ModelCategory,
+  id: string
+): Promise<boolean> {
+  const readyPath = getReadyMarkerPath(category, id);
   return RNFS.exists(readyPath);
 }
 
-export async function getLocalModelPath(id: string): Promise<string | null> {
-  const ready = await isModelDownloaded(id);
+export async function getLocalModelPathByCategory(
+  category: ModelCategory,
+  id: string
+): Promise<string | null> {
+  const ready = await isModelDownloadedByCategory(category, id);
   if (!ready) return null;
-  return getModelDir(id);
+  return getModelDir(category, id);
 }
 
-export async function downloadTtsModel(
+export async function downloadModelByCategory<T extends ModelMetaBase>(
+  category: ModelCategory,
   id: string,
   opts?: {
     onProgress?: (progress: DownloadProgress) => void;
@@ -350,16 +432,16 @@ export async function downloadTtsModel(
     maxRetries?: number;
   }
 ): Promise<DownloadResult> {
-  const model = await getTtsModelById(id);
+  const model = await getModelByIdByCategory<T>(category, id);
   if (!model) {
     throw new Error(`Unknown model id: ${id}`);
   }
 
-  const baseDir = getModelsBaseDir();
+  const baseDir = getModelsBaseDir(category);
   await RNFS.mkdir(baseDir);
 
-  const archivePath = getArchivePath(id);
-  const modelDir = getModelDir(id);
+  const archivePath = getArchivePath(category, id);
+  const modelDir = getModelDir(category, id);
 
   if (opts?.overwrite) {
     if (await RNFS.exists(modelDir)) {
@@ -409,9 +491,9 @@ export async function downloadTtsModel(
     }
   });
 
-  await RNFS.writeFile(getReadyMarkerPath(id), 'ready', 'utf8');
+  await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
   await RNFS.writeFile(
-    getManifestPath(id),
+    getManifestPath(category, id),
     JSON.stringify({
       downloadedAt: new Date().toISOString(),
       model,
@@ -422,9 +504,12 @@ export async function downloadTtsModel(
   return { modelId: id, localPath: modelDir };
 }
 
-export async function deleteTtsModel(id: string): Promise<void> {
-  const modelDir = getModelDir(id);
-  const archivePath = getArchivePath(id);
+export async function deleteModelByCategory(
+  category: ModelCategory,
+  id: string
+): Promise<void> {
+  const modelDir = getModelDir(category, id);
+  const archivePath = getArchivePath(category, id);
   if (await RNFS.exists(modelDir)) {
     await RNFS.unlink(modelDir);
   }
@@ -433,12 +518,14 @@ export async function deleteTtsModel(id: string): Promise<void> {
   }
 }
 
-export async function clearModelCache(): Promise<void> {
-  const cachePath = getCachePath();
+export async function clearModelCacheByCategory(
+  category: ModelCategory
+): Promise<void> {
+  const cachePath = getCachePath(category);
   if (await RNFS.exists(cachePath)) {
     await RNFS.unlink(cachePath);
   }
-  memoryCache = null;
+  delete memoryCacheByCategory[category];
 }
 
 export async function getDownloadStorageBase(): Promise<string> {
