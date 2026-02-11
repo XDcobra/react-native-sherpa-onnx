@@ -697,24 +697,22 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     });
 
   const cleanupPartial = async () => {
+    // Only clean up extracted model dir, preserve archive for download resume
     if (await RNFS.exists(modelDir)) {
       await RNFS.unlink(modelDir);
-    }
-    if (await RNFS.exists(archivePath)) {
-      await RNFS.unlink(archivePath);
     }
   };
 
   const cleanupPartialWithRetry = async () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await cleanupPartial();
-      if (!(await RNFS.exists(modelDir)) && !(await RNFS.exists(archivePath))) {
+      if (!(await RNFS.exists(modelDir))) {
         return;
       }
       await sleep(400);
     }
 
-    if ((await RNFS.exists(modelDir)) || (await RNFS.exists(archivePath))) {
+    if (await RNFS.exists(modelDir)) {
       console.warn(
         `Model cleanup after abort did not fully complete for ${category}:${id}`
       );
@@ -735,17 +733,13 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       await RNFS.unlink(archivePath);
     }
   } else {
-    // Clean up incomplete downloads from previous aborted attempts
+    // Clean up incomplete extractions but preserve partial downloads for resume
     const readyMarkerExists = await RNFS.exists(
       getReadyMarkerPath(category, id)
     );
     if (!readyMarkerExists) {
-      // No ready marker found; cleaning up partial files
-      if (await RNFS.exists(archivePath)) {
-        // Found partial archive; will delete
-        await RNFS.unlink(archivePath);
-        // Deleted archive. stillExists: ${stillExists}
-      }
+      // No ready marker found; only clean up extracted model dir
+      // Keep archive file to support download resume
       if (await RNFS.exists(modelDir)) {
         // Removing partial model dir
         await RNFS.unlink(modelDir);
@@ -754,11 +748,23 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   }
 
   try {
-    // Step 2: Download archive if not exists
+    // Step 2: Download archive (with resume support)
     const archiveExists = await RNFS.exists(archivePath);
-    // Archive existence check for ${archivePath}: ${archiveExists}
-    if (!archiveExists) {
-      // Starting download for ${category}:${id} from ${model.downloadUrl}
+    let partialDownload = false;
+
+    if (archiveExists) {
+      // Check if this is a complete download or partial
+      const stat = await RNFS.stat(archivePath);
+      const currentSize = stat.size;
+      if (currentSize < model.bytes) {
+        partialDownload = true;
+        console.log(
+          `[Download] Resuming partial download for ${category}:${id} (${currentSize}/${model.bytes} bytes)`
+        );
+      }
+    }
+
+    if (!archiveExists || partialDownload) {
       const maxRetries = opts?.maxRetries ?? 2;
 
       await retryWithBackoff(
@@ -767,6 +773,10 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
             fromUrl: model.downloadUrl,
             toFile: archivePath,
             progressDivider: 1,
+            resumable: () => {
+              // iOS only: Called when download is resumed
+              console.log(`[Download] Resuming download for ${category}:${id}`);
+            },
             progress: (data) => {
               if (isAborted()) {
                 return;
@@ -815,8 +825,16 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
             throw abortError;
           }
           if (result.statusCode && result.statusCode >= 400) {
-            // Clean up failed download before retry
-            if (await RNFS.exists(archivePath)) {
+            // For certain errors, delete partial download as resume won't help
+            const isNonResumableError =
+              result.statusCode === 404 || // Not found
+              result.statusCode === 410 || // Gone
+              result.statusCode === 451 || // Unavailable for legal reasons
+              result.statusCode === 416; // Range not satisfiable
+            if (isNonResumableError && (await RNFS.exists(archivePath))) {
+              console.warn(
+                `[Download] Non-resumable error ${result.statusCode}, removing partial download`
+              );
               await RNFS.unlink(archivePath);
             }
             throw new Error(`Download failed: ${result.statusCode}`);
