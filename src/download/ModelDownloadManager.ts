@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import { extractTarBz2 } from './extractTarBz2';
 import {
@@ -63,6 +63,37 @@ export type DownloadResult = {
   modelId: string;
   localPath: string;
 };
+
+type ChecksumIssue = {
+  category: ModelCategory;
+  id: string;
+  archivePath: string;
+  expected?: string;
+  message: string;
+  reason: 'CHECKSUM_FAILED' | 'CHECKSUM_MISMATCH';
+};
+
+const promptChecksumFallback = (issue: ChecksumIssue): Promise<boolean> =>
+  new Promise((resolve) => {
+    const reasonText =
+      issue.reason === 'CHECKSUM_FAILED'
+        ? 'Failed to compute checksum.'
+        : 'Computed checksum does not match the expected value.';
+    const body = `${reasonText}\n\n${issue.message}\n\nDo you want to keep the file and continue?`;
+
+    Alert.alert('Checksum Problem', body, [
+      {
+        text: 'Delete and cancel',
+        style: 'destructive',
+        onPress: () => resolve(false),
+      },
+      {
+        text: 'Keep file',
+        style: 'default',
+        onPress: () => resolve(true),
+      },
+    ]);
+  });
 
 type CachePayload<T extends ModelMetaBase> = {
   lastUpdated: string;
@@ -484,8 +515,17 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     overwrite?: boolean;
     signal?: AbortSignal;
     maxRetries?: number;
+    onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
   }
 ): Promise<DownloadResult> {
+  const isAborted = () => Boolean(opts?.signal?.aborted);
+
+  if (opts?.signal?.aborted) {
+    const abortError = new Error('Download aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+
   const model = await getModelByIdByCategory<T>(category, id);
   if (!model) {
     throw new Error(`Unknown model id: ${id}`);
@@ -496,6 +536,36 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
 
   const archivePath = getArchivePath(category, id);
   const modelDir = getModelDir(category, id);
+
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  const cleanupPartial = async () => {
+    if (await RNFS.exists(modelDir)) {
+      await RNFS.unlink(modelDir);
+    }
+    if (await RNFS.exists(archivePath)) {
+      await RNFS.unlink(archivePath);
+    }
+  };
+
+  const cleanupPartialWithRetry = async () => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await cleanupPartial();
+      if (!(await RNFS.exists(modelDir)) && !(await RNFS.exists(archivePath))) {
+        return;
+      }
+      await sleep(400);
+    }
+
+    if ((await RNFS.exists(modelDir)) || (await RNFS.exists(archivePath))) {
+      console.warn(
+        `Model cleanup after abort did not fully complete for ${category}:${id}`
+      );
+    }
+  };
 
   // Step 1: Check available disk space
   const diskSpaceCheck = await checkDiskSpace(model.bytes);
@@ -510,86 +580,195 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     if (await RNFS.exists(archivePath)) {
       await RNFS.unlink(archivePath);
     }
-  }
-
-  // Step 2: Download archive if not exists
-  if (!(await RNFS.exists(archivePath))) {
-    const download = RNFS.downloadFile({
-      fromUrl: model.downloadUrl,
-      toFile: archivePath,
-      progressDivider: 1,
-      progress: (data) => {
-        const total = data.contentLength || model.bytes || 0;
-        const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
-        opts?.onProgress?.({
-          bytesDownloaded: data.bytesWritten,
-          totalBytes: total,
-          percent,
-          phase: 'downloading',
-        });
-      },
-    });
-
-    if (opts?.signal) {
-      opts.signal.addEventListener('abort', () => {
-        RNFS.stopDownload(download.jobId);
-      });
-    }
-
-    const result = await download.promise;
-    if (result.statusCode && result.statusCode >= 400) {
-      throw new Error(`Download failed: ${result.statusCode}`);
-    }
-
-    // Step 3: Validate checksum if available
-    if (model.sha256) {
-      const checksumValidation = await validateChecksum(
-        archivePath,
-        model.sha256
+  } else {
+    // Clean up incomplete downloads from previous aborted attempts
+    const readyMarkerExists = await RNFS.exists(
+      getReadyMarkerPath(category, id)
+    );
+    if (!readyMarkerExists) {
+      console.log(
+        `[ModelDownload] No ready marker found for ${category}:${id}, cleaning up partial files`
       );
-      if (!checksumValidation.success) {
-        // Clean up corrupt download
-        await RNFS.unlink(archivePath);
-        throw new Error(
-          `Checksum validation failed: ${checksumValidation.message}`
+      if (await RNFS.exists(archivePath)) {
+        const statBefore = await RNFS.stat(archivePath);
+        console.log(
+          `[ModelDownload] Found partial archive: ${archivePath} (${statBefore.size} bytes)`
         );
+        await RNFS.unlink(archivePath);
+        const stillExists = await RNFS.exists(archivePath);
+        console.log(
+          `[ModelDownload] Deleted archive. Still exists: ${stillExists}`
+        );
+      }
+      if (await RNFS.exists(modelDir)) {
+        console.log(`[ModelDownload] Removing partial model dir: ${modelDir}`);
+        await RNFS.unlink(modelDir);
       }
     }
   }
 
-  await RNFS.mkdir(modelDir);
-  await extractTarBz2(archivePath, modelDir, true, (evt) => {
-    if (model.bytes > 0) {
-      opts?.onProgress?.({
-        bytesDownloaded: evt.bytes,
-        totalBytes: evt.totalBytes,
-        percent: evt.percent,
-        phase: 'extracting',
-      });
-    }
-  });
-
-  // Step 4: Validate extracted files exist
-  const filesValidation = await validateExtractedFiles(modelDir, category);
-  if (!filesValidation.success) {
-    // Clean up failed extraction
-    await RNFS.unlink(modelDir);
-    throw new Error(
-      `Extracted files validation failed: ${filesValidation.message}`
+  try {
+    // Step 2: Download archive if not exists
+    const archiveExists = await RNFS.exists(archivePath);
+    console.log(
+      `[ModelDownload] Archive exists check for ${archivePath}: ${archiveExists}`
     );
+    if (!archiveExists) {
+      console.log(
+        `[ModelDownload] Starting download for ${category}:${id} from ${model.downloadUrl}`
+      );
+      const download = RNFS.downloadFile({
+        fromUrl: model.downloadUrl,
+        toFile: archivePath,
+        progressDivider: 1,
+        progress: (data) => {
+          if (isAborted()) {
+            return;
+          }
+          const total = data.contentLength || model.bytes || 0;
+          const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
+          opts?.onProgress?.({
+            bytesDownloaded: data.bytesWritten,
+            totalBytes: total,
+            percent,
+            phase: 'downloading',
+          });
+        },
+      });
+
+      let downloadFinished = false;
+      let aborted = false;
+      const onAbort = () => {
+        aborted = true;
+        if (downloadFinished) return;
+        try {
+          RNFS.stopDownload(download.jobId);
+        } catch {
+          // Swallow stop errors to avoid crashing the app on cancel.
+        }
+      };
+
+      if (opts?.signal) {
+        opts.signal.addEventListener('abort', onAbort);
+      }
+
+      let result: any;
+      try {
+        result = await download.promise;
+      } finally {
+        downloadFinished = true;
+        if (opts?.signal) {
+          opts.signal.removeEventListener('abort', onAbort);
+        }
+      }
+      if (aborted || opts?.signal?.aborted) {
+        const abortError = new Error('Download aborted');
+        abortError.name = 'AbortError';
+        throw abortError;
+      }
+      if (result.statusCode && result.statusCode >= 400) {
+        throw new Error(`Download failed: ${result.statusCode}`);
+      }
+
+      const downloadedStat = await RNFS.stat(archivePath);
+      console.log(
+        `[ModelDownload] Download complete. File size: ${downloadedStat.size} bytes, expected: ${model.bytes} bytes`
+      );
+
+      // Step 3: Validate checksum if available
+      if (model.sha256) {
+        const checksumValidation = await validateChecksum(
+          archivePath,
+          model.sha256
+        );
+        if (!checksumValidation.success) {
+          const issue: ChecksumIssue = {
+            category,
+            id,
+            archivePath,
+            expected: model.sha256,
+            message:
+              checksumValidation.message ?? 'Checksum validation failed.',
+            reason:
+              checksumValidation.error === 'CHECKSUM_FAILED'
+                ? 'CHECKSUM_FAILED'
+                : 'CHECKSUM_MISMATCH',
+          };
+
+          const keepFile = opts?.onChecksumIssue
+            ? await opts.onChecksumIssue(issue)
+            : await promptChecksumFallback(issue);
+
+          if (!keepFile) {
+            await RNFS.unlink(archivePath);
+            throw new Error(
+              `Checksum validation failed: ${checksumValidation.message}`
+            );
+          }
+        }
+      }
+    }
+
+    if (opts?.signal?.aborted) {
+      const abortError = new Error('Download aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    await RNFS.mkdir(modelDir);
+    await extractTarBz2(
+      archivePath,
+      modelDir,
+      true,
+      (evt) => {
+        if (isAborted()) {
+          return;
+        }
+        if (model.bytes > 0) {
+          opts?.onProgress?.({
+            bytesDownloaded: evt.bytes,
+            totalBytes: evt.totalBytes,
+            percent: evt.percent,
+            phase: 'extracting',
+          });
+        }
+      },
+      opts?.signal
+    );
+
+    if (opts?.signal?.aborted) {
+      const abortError = new Error('Download aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    // Step 4: Validate extracted files exist
+    const filesValidation = await validateExtractedFiles(modelDir, category);
+    if (!filesValidation.success) {
+      // Clean up failed extraction
+      await RNFS.unlink(modelDir);
+      throw new Error(
+        `Extracted files validation failed: ${filesValidation.message}`
+      );
+    }
+
+    await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
+    await RNFS.writeFile(
+      getManifestPath(category, id),
+      JSON.stringify({
+        downloadedAt: new Date().toISOString(),
+        model,
+      }),
+      'utf8'
+    );
+
+    return { modelId: id, localPath: modelDir };
+  } catch (err) {
+    if ((err instanceof Error && err.name === 'AbortError') || isAborted()) {
+      await cleanupPartialWithRetry();
+    }
+    throw err;
   }
-
-  await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
-  await RNFS.writeFile(
-    getManifestPath(category, id),
-    JSON.stringify({
-      downloadedAt: new Date().toISOString(),
-      model,
-    }),
-    'utf8'
-  );
-
-  return { modelId: id, localPath: modelDir };
 }
 
 export async function deleteModelByCategory(
