@@ -25,15 +25,19 @@ The TTS module supports both full-buffer generation (return the entire sample bu
 ## Quick Start
 
 ```typescript
-import { resolveModelPath } from 'react-native-sherpa-onnx';
 import {
   initializeTTS,
   generateSpeech,
   unloadTTS,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
-await initializeTTS({ modelPath, numThreads: 2 });
+await initializeTTS({
+  modelPath: {
+    type: 'asset',
+    path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
+  },
+  numThreads: 2,
+});
 
 const audio = await generateSpeech('Hello, world!');
 console.log('sampleRate:', audio.sampleRate, 'samples:', audio.samples.length);
@@ -93,7 +97,7 @@ await stopTtsPcmPlayer();
 
 ### `initializeTTS(options)`
 
-Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory (use `resolveModelPath` for assets).
+Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed).
 
 Noise/Noise W/Length scale tuning (model-dependent):
 
@@ -156,7 +160,6 @@ iOS notes:
 
 ```typescript
 import {
-  resolveModelPath,
   initializeTTS,
   generateSpeechStream,
   cancelSpeechStream,
@@ -167,8 +170,13 @@ import {
   saveTtsAudioToFile,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
-await initializeTTS({ modelPath, numThreads: 2 });
+await initializeTTS({
+  modelPath: {
+    type: 'asset',
+    path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
+  },
+  numThreads: 2,
+});
 
 const sampleRate = await getTtsSampleRate();
 await startTtsPcmPlayer(sampleRate, 1);
