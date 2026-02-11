@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,7 @@ import {
   type TtsModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
+import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 type FilterState = {
@@ -149,6 +150,16 @@ const getModelSizeTier = (modelId: string): SizeTier => {
   return 'unknown';
 };
 
+const getTtsModelType = (modelId: string): TTSModelType | null => {
+  const lower = modelId.toLowerCase();
+  if (lower.includes('vits')) return 'vits';
+  if (lower.includes('matcha')) return 'matcha';
+  if (lower.includes('kokoro')) return 'kokoro';
+  if (lower.includes('kitten')) return 'kitten';
+  if (lower.includes('zipvoice')) return 'zipvoice';
+  return null;
+};
+
 const getSttModelType = (modelId: string): STTModelType | null => {
   const lower = modelId.toLowerCase();
   if (lower.includes('whisper')) return 'whisper';
@@ -174,6 +185,20 @@ const getLanguageCodeFromModelId = (modelId: string) => {
   if (!code) return null;
   return normalizeLanguageCode(code);
 };
+
+const isUnsupportedModel = (model: ModelMetaBase, category: ModelCategory) => {
+  if (category === ModelCategory.Tts) {
+    return getTtsModelType(model.id) === null;
+  }
+  if (category === ModelCategory.Stt) {
+    return getSttModelType(model.id) === null;
+  }
+  // For other categories, assume supported for now
+  return false;
+};
+
+const getUnsupportedMessage = () =>
+  'This model is not yet supported. We are working to add support in a future version.';
 
 type DownloadTrackerSnapshot = Record<string, DownloadProgress>;
 
@@ -283,6 +308,7 @@ export default function ModelManagementScreen() {
   const [recentlyAbortedById, setRecentlyAbortedById] = useState<
     Record<string, { id: string; displayName: string }>
   >({});
+  const loggedUnsupportedRef = useRef<Set<string>>(new Set());
 
   const isTtsCategory = category === ModelCategory.Tts;
   const isSttCategory = category === ModelCategory.Stt;
@@ -556,6 +582,20 @@ export default function ModelManagementScreen() {
     applyFilters();
   }, [applyFilters]);
 
+  useEffect(() => {
+    const logged = loggedUnsupportedRef.current;
+    models.forEach((model) => {
+      if (isUnsupportedModel(model, category) && !logged.has(model.id)) {
+        console.log(
+          `[Models] Unsupported model listed: ${model.id} (${
+            model.displayName ?? model.id
+          })`
+        );
+        logged.add(model.id);
+      }
+    });
+  }, [models, category]);
+
   const updateFilter = (key: keyof FilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
@@ -666,6 +706,7 @@ export default function ModelManagementScreen() {
     ({ item, index }: { item: ModelMetaBase; index: number }) => {
       const progress = progressById[item.id];
       const isDownloaded = downloadedIds.has(item.id);
+      const isUnsupported = isUnsupportedModel(item, category);
       const ttsModel = item as TtsModelMeta;
       const sttType = getSttModelType(item.id);
       const totalCount = filteredModels.length;
@@ -678,6 +719,7 @@ export default function ModelManagementScreen() {
       const rowStyles: any[] = [styles.modelRow];
       rowStyles.push(styles.modelRowPadded);
       if (isLast) rowStyles.push(styles.modelRowNoBorder);
+      if (isUnsupported) rowStyles.push(styles.modelRowUnsupported);
 
       return (
         <View style={wrapperStyles}>
@@ -716,6 +758,18 @@ export default function ModelManagementScreen() {
             </View>
             {isDownloaded ? (
               <Text style={styles.downloadedLabel}>Downloaded</Text>
+            ) : isUnsupported ? (
+              <TouchableOpacity
+                style={[
+                  styles.downloadButton,
+                  styles.downloadButtonUnsupported,
+                ]}
+                onPress={() =>
+                  Alert.alert('Model not supported', getUnsupportedMessage())
+                }
+              >
+                <Text style={styles.downloadButtonText}>Not supported</Text>
+              </TouchableOpacity>
             ) : (
               <TouchableOpacity
                 style={styles.downloadButton}
@@ -738,6 +792,7 @@ export default function ModelManagementScreen() {
       );
     },
     [
+      category,
       downloadedIds,
       handleDownload,
       isSttCategory,
@@ -965,7 +1020,9 @@ export default function ModelManagementScreen() {
               {downloadedExpanded && (
                 <View style={styles.sectionInnerMarginTop}>
                   {downloadedListItems.length === 0 ? (
-                    <Text style={styles.emptyText}>No cached models yet.</Text>
+                    <Text style={styles.emptyText}>
+                      No downloaded models yet.
+                    </Text>
                   ) : (
                     downloadedListItems.map((model) => {
                       const activeProgress = progressById[model.id];
@@ -1249,6 +1306,9 @@ const styles = StyleSheet.create({
   modelRowNoBorder: {
     borderBottomWidth: 0,
   },
+  modelRowUnsupported: {
+    opacity: 0.55,
+  },
   modelInfo: {
     flex: 1,
     paddingRight: 12,
@@ -1268,6 +1328,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  downloadButtonUnsupported: {
+    backgroundColor: '#C7C7CC',
   },
   downloadButtonText: {
     color: '#FFFFFF',
