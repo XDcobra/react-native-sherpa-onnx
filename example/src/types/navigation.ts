@@ -7,6 +7,7 @@ export type RootStackParamList = {
   Enhancement: undefined;
   Separation: undefined;
   Settings: undefined;
+  ModelManagement: undefined;
 };
 
 export type FeatureId =
