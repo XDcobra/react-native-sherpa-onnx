@@ -17,9 +17,17 @@ export async function extractTarBz2(
   sourcePath: string,
   targetPath: string,
   force = true,
-  onProgress?: (event: ExtractProgressEvent) => void
+  onProgress?: (event: ExtractProgressEvent) => void,
+  signal?: AbortSignal
 ): Promise<ExtractResult> {
   let subscription: { remove: () => void } | null = null;
+  let removeAbortListener: (() => void) | null = null;
+
+  if (signal?.aborted) {
+    const abortError = new Error('Extraction aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
 
   if (onProgress) {
     subscription = DeviceEventEmitter.addListener(
@@ -28,9 +36,35 @@ export async function extractTarBz2(
     );
   }
 
+  if (signal) {
+    const onAbort = () => {
+      try {
+        SherpaOnnx.cancelExtractTarBz2();
+      } catch {
+        // Ignore cancel errors to avoid crashing on abort.
+      }
+    };
+    signal.addEventListener('abort', onAbort);
+    removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+  }
+
   try {
-    return await SherpaOnnx.extractTarBz2(sourcePath, targetPath, force);
+    const result = await SherpaOnnx.extractTarBz2(
+      sourcePath,
+      targetPath,
+      force
+    );
+    if (!result.success) {
+      const message = result.reason || 'Extraction failed';
+      const error = new Error(message);
+      if (signal?.aborted || /cancel/i.test(message)) {
+        error.name = 'AbortError';
+      }
+      throw error;
+    }
+    return result;
   } finally {
     subscription?.remove();
+    removeAbortListener?.();
   }
 }

@@ -211,6 +211,13 @@
     resolve(result);
 }
 
+- (void)cancelExtractTarBz2:(RCTPromiseResolveBlock)resolve
+               withRejecter:(RCTPromiseRejectBlock)reject
+{
+    [SherpaOnnxArchiveHelper cancelExtractTarBz2];
+    resolve(nil);
+}
+
 - (void)listAssetModels:(RCTPromiseResolveBlock)resolve
           withRejecter:(RCTPromiseRejectBlock)reject
 {

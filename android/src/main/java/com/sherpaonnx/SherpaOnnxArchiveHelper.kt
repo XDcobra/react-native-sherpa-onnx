@@ -10,8 +10,16 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class SherpaOnnxArchiveHelper {
+  private val cancelRequested = AtomicBoolean(false)
+
+  fun cancelExtractTarBz2() {
+    cancelRequested.set(true)
+  }
+
   fun extractTarBz2(
     sourcePath: String,
     targetPath: String,
@@ -22,6 +30,7 @@ class SherpaOnnxArchiveHelper {
     val result = Arguments.createMap()
 
     try {
+      cancelRequested.set(false)
       val sourceFile = File(sourcePath)
       if (!sourceFile.exists()) {
         result.putBoolean("success", false)
@@ -61,6 +70,9 @@ class SherpaOnnxArchiveHelper {
             TarArchiveInputStream(bzIn).use { tarIn ->
               var entry: TarArchiveEntry? = tarIn.nextTarEntry
               while (entry != null) {
+                if (cancelRequested.get()) {
+                  throw CancellationException("Extraction cancelled")
+                }
                 val entryFile = File(targetDir, entry.name)
                 val canonicalEntry = entryFile.canonicalPath
                 if (!canonicalEntry.startsWith(canonicalTarget)) {
@@ -80,6 +92,9 @@ class SherpaOnnxArchiveHelper {
                     val buffer = ByteArray(32 * 1024)
                     var read = tarIn.read(buffer)
                     while (read != -1) {
+                      if (cancelRequested.get()) {
+                        throw CancellationException("Extraction cancelled")
+                      }
                       out.write(buffer, 0, read)
                       extractedBytes += read.toLong()
 

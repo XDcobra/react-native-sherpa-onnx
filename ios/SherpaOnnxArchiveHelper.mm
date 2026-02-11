@@ -1,14 +1,23 @@
 #import "SherpaOnnxArchiveHelper.h"
 #import <archive.h>
 #import <archive_entry.h>
+#include <atomic>
+
+static std::atomic_bool g_cancelExtract(false);
 
 @implementation SherpaOnnxArchiveHelper
+
++ (void)cancelExtractTarBz2
+{
+  g_cancelExtract.store(true);
+}
 
 - (NSDictionary *)extractTarBz2:(NSString *)sourcePath
          targetPath:(NSString *)targetPath
            force:(BOOL)force
            progress:(SherpaOnnxArchiveProgressBlock)progress
 {
+  g_cancelExtract.store(false);
   NSFileManager *fileManager = [NSFileManager defaultManager];
 
   if (![fileManager fileExistsAtPath:sourcePath]) {
@@ -59,6 +68,11 @@
   int lastPercent = -1;
   long long lastEmitBytes = 0;
   while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
+    if (g_cancelExtract.load()) {
+      archive_read_free(archive);
+      archive_write_free(disk);
+      return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
+    }
     const char *currentPath = archive_entry_pathname(entry);
     NSString *entryPath = currentPath ? [NSString stringWithUTF8String:currentPath] : @"";
     NSString *fullPath = [[targetPath stringByAppendingPathComponent:entryPath] stringByStandardizingPath];
@@ -83,6 +97,11 @@
     size_t size = 0;
     la_int64_t offset = 0;
     while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
+      if (g_cancelExtract.load()) {
+        archive_read_free(archive);
+        archive_write_free(disk);
+        return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
+      }
       result = archive_write_data_block(disk, buff, size, offset);
       if (result != ARCHIVE_OK) {
         const char *errorStr = archive_error_string(disk);

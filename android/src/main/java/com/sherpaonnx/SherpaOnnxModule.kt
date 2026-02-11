@@ -135,6 +135,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun cancelExtractTarBz2(promise: Promise) {
+    archiveHelper.cancelExtractTarBz2()
+    promise.resolve(null)
+  }
+
   private fun emitExtractProgress(bytes: Long, totalBytes: Long, percent: Double) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
