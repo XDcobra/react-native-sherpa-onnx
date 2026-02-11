@@ -56,6 +56,8 @@ export type DownloadProgress = {
   totalBytes: number;
   percent: number;
   phase?: 'downloading' | 'extracting';
+  speed?: number; // bytes per second
+  eta?: number; // estimated seconds remaining
 };
 
 export type DownloadResult = {
@@ -786,6 +788,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
 
       await retryWithBackoff(
         async () => {
+          const downloadStartTime = Date.now();
+
           const download = RNFS.downloadFile({
             fromUrl: model.downloadUrl,
             toFile: archivePath,
@@ -800,11 +804,32 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
               }
               const total = data.contentLength || model.bytes || 0;
               const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
+
+              // Calculate speed and ETA
+              const now = Date.now();
+              const elapsedSeconds = (now - downloadStartTime) / 1000;
+
+              let speed: number | undefined;
+              let eta: number | undefined;
+
+              if (elapsedSeconds > 0.5) {
+                // Calculate overall speed (bytes per second)
+                speed = data.bytesWritten / elapsedSeconds;
+
+                // Calculate ETA based on current speed
+                const remainingBytes = total - data.bytesWritten;
+                if (speed > 0) {
+                  eta = remainingBytes / speed;
+                }
+              }
+
               const progress: DownloadProgress = {
                 bytesDownloaded: data.bytesWritten,
                 totalBytes: total,
                 percent,
                 phase: 'downloading',
+                speed,
+                eta,
               };
               opts?.onProgress?.(progress);
               emitDownloadProgress(category, id, progress);
@@ -872,6 +897,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     await RNFS.mkdir(modelDir);
+    const extractStartTime = Date.now();
     const extractResult = await extractTarBz2(
       archivePath,
       modelDir,
@@ -881,11 +907,28 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           return;
         }
         if (model.bytes > 0) {
+          // Calculate extraction speed and ETA
+          const now = Date.now();
+          const elapsedSeconds = (now - extractStartTime) / 1000;
+
+          let speed: number | undefined;
+          let eta: number | undefined;
+
+          if (elapsedSeconds > 0.5) {
+            speed = evt.bytes / elapsedSeconds;
+            const remainingBytes = evt.totalBytes - evt.bytes;
+            if (speed > 0) {
+              eta = remainingBytes / speed;
+            }
+          }
+
           const progress: DownloadProgress = {
             bytesDownloaded: evt.bytes,
             totalBytes: evt.totalBytes,
             percent: evt.percent,
             phase: 'extracting',
+            speed,
+            eta,
           };
           opts?.onProgress?.(progress);
           emitDownloadProgress(category, id, progress);

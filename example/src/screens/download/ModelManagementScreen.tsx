@@ -85,6 +85,38 @@ const formatBytes = (bytes: number) => {
   return `${mb.toFixed(1)} MB`;
 };
 
+const formatSpeed = (bytesPerSecond: number | undefined) => {
+  if (!bytesPerSecond) return '';
+  const mbps = bytesPerSecond / 1024 / 1024;
+  return `${mbps.toFixed(1)} MB/s`;
+};
+
+const formatEta = (seconds: number | undefined) => {
+  if (!seconds || seconds <= 0) return '';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+};
+
+const formatProgressText = (progress: DownloadProgress) => {
+  const phase = progress.phase === 'extracting' ? 'Extracting' : 'Downloading';
+  const percent = `${Math.round(progress.percent)}%`;
+  const speed = formatSpeed(progress.speed);
+  const eta = formatEta(progress.eta);
+
+  const parts = [phase, percent];
+  if (speed) parts.push(speed);
+  if (eta) parts.push(eta);
+
+  return parts.join(' • ');
+};
+
 const toOptionList = (values: string[]) => {
   const unique = Array.from(new Set(values)).filter(Boolean).sort();
   return ['Any', ...unique];
@@ -739,9 +771,7 @@ export default function ModelManagementScreen() {
               >
                 {progress ? (
                   <Text style={styles.downloadButtonText}>
-                    {progress.phase === 'extracting'
-                      ? `Extracting ${Math.round(progress.percent)}%`
-                      : `Downloading ${Math.round(progress.percent)}%`}
+                    {formatProgressText(progress)}
                   </Text>
                 ) : (
                   <Text style={styles.downloadButtonText}>Download</Text>
@@ -997,13 +1027,7 @@ export default function ModelManagementScreen() {
                             <Text style={styles.modelMeta}>{model.id}</Text>
                             {model.isActive && activeProgress && (
                               <Text style={styles.modelMeta}>
-                                {activeProgress.phase === 'extracting'
-                                  ? `Extracting ${Math.round(
-                                      activeProgress.percent
-                                    )}%`
-                                  : `Downloading ${Math.round(
-                                      activeProgress.percent
-                                    )}%`}
+                                {formatProgressText(activeProgress)}
                               </Text>
                             )}
                           </View>
