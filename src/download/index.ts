@@ -14,6 +14,9 @@ export {
   getDownloadStorageBase,
   subscribeDownloadProgress,
   subscribeModelsListUpdated,
+  updateModelLastUsed,
+  listDownloadedModelsWithMetadata,
+  cleanupLeastRecentlyUsed,
   ModelCategory,
 } from './ModelDownloadManager';
 export type {
@@ -26,6 +29,7 @@ export type {
   DownloadProgressListener,
   ModelsListUpdatedListener,
   DownloadResult,
+  ModelWithMetadata,
 } from './ModelDownloadManager';
 export {
   validateChecksum,

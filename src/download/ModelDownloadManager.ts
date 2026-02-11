@@ -74,6 +74,19 @@ export type ModelsListUpdatedListener = (
   models: ModelMetaBase[]
 ) => void;
 
+type ModelManifest<T extends ModelMetaBase = ModelMetaBase> = {
+  downloadedAt: string;
+  lastUsed?: string;
+  model: T;
+};
+
+export type ModelWithMetadata<T extends ModelMetaBase = ModelMetaBase> = {
+  model: T;
+  downloadedAt: string;
+  lastUsed: string | null;
+  sizeOnDisk?: number;
+};
+
 type ChecksumIssue = {
   category: ModelCategory;
   id: string;
@@ -625,7 +638,7 @@ export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
     if (manifestExists) {
       try {
         const raw = await RNFS.readFile(manifestPath, 'utf8');
-        const manifest = JSON.parse(raw) as { model?: T };
+        const manifest = JSON.parse(raw) as ModelManifest<T>;
         if (manifest.model) {
           models.push(manifest.model);
           continue;
@@ -658,6 +671,10 @@ export async function getLocalModelPathByCategory(
 ): Promise<string | null> {
   const ready = await isModelDownloadedByCategory(category, id);
   if (!ready) return null;
+
+  // Update lastUsed timestamp when model is accessed
+  await updateModelLastUsed(category, id);
+
   return getModelDir(category, id);
 }
 
@@ -937,12 +954,14 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
+    const now = new Date().toISOString();
     await RNFS.writeFile(
       getManifestPath(category, id),
       JSON.stringify({
-        downloadedAt: new Date().toISOString(),
+        downloadedAt: now,
+        lastUsed: now,
         model,
-      }),
+      } as ModelManifest),
       'utf8'
     );
 
@@ -953,6 +972,138 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
     throw err;
   }
+}
+
+/**
+ * Update the lastUsed timestamp for a downloaded model
+ */
+export async function updateModelLastUsed(
+  category: ModelCategory,
+  id: string
+): Promise<void> {
+  const manifestPath = getManifestPath(category, id);
+  const exists = await RNFS.exists(manifestPath);
+  if (!exists) return;
+
+  try {
+    const raw = await RNFS.readFile(manifestPath, 'utf8');
+    const manifest = JSON.parse(raw) as ModelManifest;
+    manifest.lastUsed = new Date().toISOString();
+    await RNFS.writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+  } catch (error) {
+    console.warn(`Failed to update lastUsed for ${category}:${id}:`, error);
+  }
+}
+
+/**
+ * Get all downloaded models with LRU metadata
+ */
+export async function listDownloadedModelsWithMetadata<T extends ModelMetaBase>(
+  category: ModelCategory
+): Promise<ModelWithMetadata<T>[]> {
+  const baseDir = getModelsBaseDir(category);
+  const exists = await RNFS.exists(baseDir);
+  if (!exists) return [];
+
+  const entries = await RNFS.readDir(baseDir);
+  const modelsWithMetadata: ModelWithMetadata<T>[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const manifestPath = getManifestPath(category, entry.name);
+    const manifestExists = await RNFS.exists(manifestPath);
+
+    if (manifestExists) {
+      try {
+        const raw = await RNFS.readFile(manifestPath, 'utf8');
+        const manifest = JSON.parse(raw) as ModelManifest<T>;
+        if (manifest.model) {
+          modelsWithMetadata.push({
+            model: manifest.model,
+            downloadedAt: manifest.downloadedAt,
+            lastUsed: manifest.lastUsed ?? null,
+            sizeOnDisk: entry.size,
+          });
+        }
+      } catch (error) {
+        console.warn(
+          `Failed to read manifest for ${category}:${entry.name}:`,
+          error
+        );
+      }
+    }
+  }
+
+  return modelsWithMetadata;
+}
+
+/**
+ * Remove least recently used models to free up disk space
+ * @param category - Model category
+ * @param targetBytes - Target amount of bytes to free (optional)
+ * @param maxModelsToDelete - Maximum number of models to delete (default: no limit)
+ * @returns Array of deleted model IDs
+ */
+export async function cleanupLeastRecentlyUsed(
+  category: ModelCategory,
+  options?: {
+    targetBytes?: number;
+    maxModelsToDelete?: number;
+    keepCount?: number;
+  }
+): Promise<string[]> {
+  const modelsWithMetadata = await listDownloadedModelsWithMetadata(category);
+
+  if (modelsWithMetadata.length === 0) {
+    return [];
+  }
+
+  // Keep at least this many models
+  const keepCount = options?.keepCount ?? 1;
+  if (modelsWithMetadata.length <= keepCount) {
+    return [];
+  }
+
+  // Sort by lastUsed (oldest first), then by downloadedAt if no lastUsed
+  const sorted = modelsWithMetadata.sort((a, b) => {
+    const aTime = a.lastUsed ?? a.downloadedAt;
+    const bTime = b.lastUsed ?? b.downloadedAt;
+    return new Date(aTime).getTime() - new Date(bTime).getTime();
+  });
+
+  const deletedIds: string[] = [];
+  let bytesFreed = 0;
+  const targetBytes = options?.targetBytes ?? 0;
+  const maxToDelete = options?.maxModelsToDelete ?? sorted.length - keepCount;
+
+  for (let i = 0; i < sorted.length - keepCount && i < maxToDelete; i++) {
+    const item = sorted[i];
+    if (!item) continue;
+
+    try {
+      await deleteModelByCategory(category, item.model.id);
+      deletedIds.push(item.model.id);
+      bytesFreed += item.sizeOnDisk ?? 0;
+
+      console.log(
+        `[LRU Cleanup] Deleted ${category}:${item.model.id} (freed ${
+          (item.sizeOnDisk ?? 0) / 1024 / 1024
+        } MB)`
+      );
+
+      if (targetBytes > 0 && bytesFreed >= targetBytes) {
+        break;
+      }
+    } catch (error) {
+      console.warn(
+        `[LRU Cleanup] Failed to delete ${category}:${item.model.id}:`,
+        error
+      );
+    }
+  }
+
+  return deletedIds;
 }
 
 export async function deleteModelByCategory(
