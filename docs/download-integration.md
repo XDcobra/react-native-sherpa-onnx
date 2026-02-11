@@ -50,30 +50,24 @@ Add an SDK module, e.g. src/download/ModelDownloadManager.ts
 Interfaces:
 - TtsModelMeta
 	- id, displayName, type, languages, quantization, sizeTier, downloadUrl, sha256
-- FilterOptions
-	- language?: string
-	- type?: string
-	- quantization?: string
-	- sizeTier?: string
 - DownloadProgress
 	- bytesDownloaded, totalBytes, percent
 - DownloadResult
 	- modelId, localPath
 
 ### 4.2 Public functions
-- listTtsModels(): TtsModelMeta[]
-- refreshTtsModels(options?): Promise<TtsModelMeta[]>
+- listModelsByCategory(category): Promise<TtsModelMeta[]>
+- refreshModelsByCategory(category, options?): Promise<TtsModelMeta[]>
 	- options: forceRefresh, cacheTtlMinutes
-- getTtsModelsCacheStatus(): Promise<{ lastUpdated: string | null, source: "cache" | "remote" }>
-- filterTtsModels(options: FilterOptions): TtsModelMeta[]
-- getTtsModelById(id: string): TtsModelMeta | null
-- listDownloadedTtsModels(): Promise<TtsModelMeta[]>
-- isModelDownloaded(id: string): Promise<boolean>
-- getLocalModelPath(id: string): Promise<string | null>
-- downloadTtsModel(id: string, opts?): Promise<DownloadResult>
+- getModelsCacheStatusByCategory(category): Promise<{ lastUpdated: string | null, source: "cache" | "remote" }>
+- getModelByIdByCategory(category, id): Promise<TtsModelMeta | null>
+- listDownloadedModelsByCategory(category): Promise<TtsModelMeta[]>
+- isModelDownloadedByCategory(category, id): Promise<boolean>
+- getLocalModelPathByCategory(category, id): Promise<string | null>
+- downloadModelByCategory(category, id, opts?): Promise<DownloadResult>
 	- opts: onProgress, overwrite, signal, maxRetries
-- deleteTtsModel(id: string): Promise<void>
-- clearModelCache(): Promise<void>
+- deleteModelByCategory(category, id): Promise<void>
+- clearModelCacheByCategory(category): Promise<void>
 
 ### 4.3 Events (optional)
 - Use an event emitter for progress updates when the UI is open.
@@ -129,15 +123,15 @@ Use the app's documents directory (per platform):
 
 ### 7.2 Workflow
 - Model Management screen:
-	- On screen open, call refreshTtsModels().
+	- On screen open, call refreshModelsByCategory(...).
 	- If cache is empty due to API failure, show an error message and a "Reload" button.
-	- Use filterTtsModels() to populate the available list.
-	- On download confirm, call downloadTtsModel(id).
+	- Use UI filters to populate the available list.
+	- On download confirm, call downloadModelByCategory(...).
 	- After download success, update the downloaded list and show ready state.
-	- On delete, call deleteTtsModel(id) and refresh lists.
+	- On delete, call deleteModelByCategory(...) and refresh lists.
 - Feature screens (tts/stt/etc.):
-	- On screen open, call listDownloadedTtsModels() (or cached manifest) and show only local models.
-	- On selection, call getLocalModelPath(id) and initialize the pipeline.
+	- On screen open, call listDownloadedModelsByCategory(...) (or cached manifest) and show only local models.
+	- On selection, call getLocalModelPathByCategory(...) and initialize the pipeline.
 	- If no local models exist, show a prompt to open Model Management.
 
 ## 8) Error handling and retries
@@ -169,7 +163,7 @@ Use the app's documents directory (per platform):
 1) Implement GitHub API fetch for tts-models release assets
 2) Add model list cache (JSON + timestamp + TTL)
 3) Parse asset names into model metadata (type, language, quantization, sizeTier)
-4) Add filtering utilities with "Any" support
+4) Add filtering utilities in the UI ("Any" handled by the app)
 5) Implement download + progress (react-native-fs)
 6) Implement tar.bz2 extraction helper
 7) Add checksum validation and expected file checks (if available)

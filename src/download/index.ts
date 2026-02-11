@@ -12,6 +12,8 @@ export {
   deleteModelByCategory,
   clearModelCacheByCategory,
   getDownloadStorageBase,
+  subscribeDownloadProgress,
+  subscribeModelsListUpdated,
   ModelCategory,
 } from './ModelDownloadManager';
 export type {
@@ -21,6 +23,8 @@ export type {
   Quantization,
   SizeTier,
   DownloadProgress,
+  DownloadProgressListener,
+  ModelsListUpdatedListener,
   DownloadResult,
 } from './ModelDownloadManager';
 export {

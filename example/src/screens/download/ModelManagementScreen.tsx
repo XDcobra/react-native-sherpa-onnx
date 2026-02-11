@@ -16,6 +16,7 @@ import {
   downloadModelByCategory,
   listDownloadedModelsByCategory,
   refreshModelsByCategory,
+  subscribeDownloadProgress,
   ModelCategory,
   type DownloadProgress,
   type ModelMetaBase,
@@ -200,8 +201,6 @@ const isUnsupportedModel = (model: ModelMetaBase, category: ModelCategory) => {
 const getUnsupportedMessage = () =>
   'This model is not yet supported. We are working to add support in a future version.';
 
-type DownloadTrackerSnapshot = Record<string, DownloadProgress>;
-
 type DownloadedListItem = {
   id: string;
   displayName: string;
@@ -209,58 +208,7 @@ type DownloadedListItem = {
   isAborted?: boolean;
   progress?: DownloadProgress;
 };
-
-const downloadTrackerByCategory: Partial<
-  Record<ModelCategory, DownloadTrackerSnapshot>
-> = {};
-
-const downloadTrackerListeners = new Set<
-  (category: ModelCategory, snapshot: DownloadTrackerSnapshot) => void
->();
 const downloadAbortControllers = new Map<string, AbortController>();
-
-const getDownloadTrackerSnapshot = (category: ModelCategory) => {
-  if (!downloadTrackerByCategory[category]) {
-    downloadTrackerByCategory[category] = {};
-  }
-  return downloadTrackerByCategory[category]!;
-};
-
-const emitDownloadTracker = (category: ModelCategory) => {
-  const snapshot = { ...getDownloadTrackerSnapshot(category) };
-  downloadTrackerByCategory[category] = snapshot;
-  downloadTrackerListeners.forEach((listener) => listener(category, snapshot));
-};
-
-const setDownloadTrackerProgress = (
-  category: ModelCategory,
-  modelId: string,
-  progress: DownloadProgress
-) => {
-  const current = getDownloadTrackerSnapshot(category);
-  downloadTrackerByCategory[category] = { ...current, [modelId]: progress };
-  emitDownloadTracker(category);
-};
-
-const clearDownloadTrackerProgress = (
-  category: ModelCategory,
-  modelId: string
-) => {
-  const current = getDownloadTrackerSnapshot(category);
-  const next = { ...current };
-  delete next[modelId];
-  downloadTrackerByCategory[category] = next;
-  emitDownloadTracker(category);
-};
-
-const subscribeDownloadTracker = (
-  listener: (category: ModelCategory, snapshot: DownloadTrackerSnapshot) => void
-) => {
-  downloadTrackerListeners.add(listener);
-  return () => {
-    downloadTrackerListeners.delete(listener);
-  };
-};
 
 const makeDownloadKey = (category: ModelCategory, modelId: string) =>
   `${category}:${modelId}`;
@@ -278,16 +226,6 @@ const clearDownloadAbortController = (
   modelId: string
 ) => {
   downloadAbortControllers.delete(makeDownloadKey(category, modelId));
-};
-
-const cancelDownloadById = (category: ModelCategory, modelId: string) => {
-  const key = makeDownloadKey(category, modelId);
-  const controller = downloadAbortControllers.get(key);
-  if (controller) {
-    controller.abort();
-    downloadAbortControllers.delete(key);
-  }
-  clearDownloadTrackerProgress(category, modelId);
 };
 
 export default function ModelManagementScreen() {
@@ -309,6 +247,27 @@ export default function ModelManagementScreen() {
     Record<string, { id: string; displayName: string }>
   >({});
   const loggedUnsupportedRef = useRef<Set<string>>(new Set());
+
+  const clearProgress = useCallback((modelId: string) => {
+    setProgressById((prev) => {
+      const next = { ...prev };
+      delete next[modelId];
+      return next;
+    });
+  }, []);
+
+  const cancelDownloadById = useCallback(
+    (modelId: string) => {
+      const key = makeDownloadKey(category, modelId);
+      const controller = downloadAbortControllers.get(key);
+      if (controller) {
+        controller.abort();
+        downloadAbortControllers.delete(key);
+      }
+      clearProgress(modelId);
+    },
+    [category, clearProgress]
+  );
 
   const isTtsCategory = category === ModelCategory.Tts;
   const isSttCategory = category === ModelCategory.Stt;
@@ -570,11 +529,13 @@ export default function ModelManagementScreen() {
   }, [loadModels, category]);
 
   useEffect(() => {
-    setProgressById(getDownloadTrackerSnapshot(category));
-    const unsubscribe = subscribeDownloadTracker((nextCategory, snapshot) => {
-      if (nextCategory !== category) return;
-      setProgressById(snapshot);
-    });
+    setProgressById({});
+    const unsubscribe = subscribeDownloadProgress(
+      (nextCategory, modelId, progress) => {
+        if (nextCategory !== category) return;
+        setProgressById((prev) => ({ ...prev, [modelId]: progress }));
+      }
+    );
     return unsubscribe;
   }, [category]);
 
@@ -624,18 +585,18 @@ export default function ModelManagementScreen() {
       const controller = new AbortController();
       setDownloadAbortController(category, model.id, controller);
 
-      setDownloadTrackerProgress(category, model.id, {
-        bytesDownloaded: 0,
-        totalBytes: model.bytes,
-        percent: 0,
-        phase: 'downloading',
-      });
+      setProgressById((prev) => ({
+        ...prev,
+        [model.id]: {
+          bytesDownloaded: 0,
+          totalBytes: model.bytes,
+          percent: 0,
+          phase: 'downloading',
+        },
+      }));
 
       try {
         await downloadModelByCategory<ModelMetaBase>(category, model.id, {
-          onProgress: (progress) => {
-            setDownloadTrackerProgress(category, model.id, progress);
-          },
           signal: controller.signal,
         });
         await loadDownloaded();
@@ -652,11 +613,11 @@ export default function ModelManagementScreen() {
         console.error('Download error (not abort):', err);
         Alert.alert('Download failed', message);
       } finally {
-        clearDownloadTrackerProgress(category, model.id);
+        clearProgress(model.id);
         clearDownloadAbortController(category, model.id);
       }
     },
-    [category, downloadedIds, loadDownloaded]
+    [category, downloadedIds, loadDownloaded, clearProgress]
   );
 
   const handleDelete = async (model: { id: string; displayName?: string }) => {
@@ -684,7 +645,7 @@ export default function ModelManagementScreen() {
         },
       }));
 
-      cancelDownloadById(category, model.id);
+      cancelDownloadById(model.id);
 
       setTimeout(() => {
         setAbortingById((prev) => {
@@ -699,7 +660,7 @@ export default function ModelManagementScreen() {
         });
       }, 1500);
     },
-    [category]
+    [cancelDownloadById]
   );
 
   const renderAvailableModel = useCallback(

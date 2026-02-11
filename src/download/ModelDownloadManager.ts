@@ -63,6 +63,17 @@ export type DownloadResult = {
   localPath: string;
 };
 
+export type DownloadProgressListener = (
+  category: ModelCategory,
+  modelId: string,
+  progress: DownloadProgress
+) => void;
+
+export type ModelsListUpdatedListener = (
+  category: ModelCategory,
+  models: ModelMetaBase[]
+) => void;
+
 type ChecksumIssue = {
   category: ModelCategory;
   id: string;
@@ -111,6 +122,54 @@ const memoryCacheByCategory: Partial<
 const checksumCacheByCategory: Partial<
   Record<ModelCategory, Map<string, string>>
 > = {};
+
+const downloadProgressListeners = new Set<DownloadProgressListener>();
+const modelsListUpdatedListeners = new Set<ModelsListUpdatedListener>();
+
+export const subscribeDownloadProgress = (
+  listener: DownloadProgressListener
+): (() => void) => {
+  downloadProgressListeners.add(listener);
+  return () => {
+    downloadProgressListeners.delete(listener);
+  };
+};
+
+const emitDownloadProgress = (
+  category: ModelCategory,
+  modelId: string,
+  progress: DownloadProgress
+) => {
+  for (const listener of downloadProgressListeners) {
+    try {
+      listener(category, modelId, progress);
+    } catch (error) {
+      console.warn('Download progress listener error:', error);
+    }
+  }
+};
+
+export const subscribeModelsListUpdated = (
+  listener: ModelsListUpdatedListener
+): (() => void) => {
+  modelsListUpdatedListeners.add(listener);
+  return () => {
+    modelsListUpdatedListeners.delete(listener);
+  };
+};
+
+const emitModelsListUpdated = (
+  category: ModelCategory,
+  models: ModelMetaBase[]
+) => {
+  for (const listener of modelsListUpdatedListeners) {
+    try {
+      listener(category, models);
+    } catch (error) {
+      console.warn('Models list listener error:', error);
+    }
+  }
+};
 
 const CATEGORY_CONFIG: Record<
   ModelCategory,
@@ -432,6 +491,7 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
     models,
   };
   await saveCache(category, payload);
+  emitModelsListUpdated(category, models as ModelMetaBase[]);
   return models;
 }
 
@@ -614,12 +674,14 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           }
           const total = data.contentLength || model.bytes || 0;
           const percent = total > 0 ? (data.bytesWritten / total) * 100 : 0;
-          opts?.onProgress?.({
+          const progress: DownloadProgress = {
             bytesDownloaded: data.bytesWritten,
             totalBytes: total,
             percent,
             phase: 'downloading',
-          });
+          };
+          opts?.onProgress?.(progress);
+          emitDownloadProgress(category, id, progress);
         },
       });
 
@@ -674,12 +736,14 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           return;
         }
         if (model.bytes > 0) {
-          opts?.onProgress?.({
+          const progress: DownloadProgress = {
             bytesDownloaded: evt.bytes,
             totalBytes: evt.totalBytes,
             percent: evt.percent,
             phase: 'extracting',
-          });
+          };
+          opts?.onProgress?.(progress);
+          emitDownloadProgress(category, id, progress);
         }
       },
       opts?.signal
