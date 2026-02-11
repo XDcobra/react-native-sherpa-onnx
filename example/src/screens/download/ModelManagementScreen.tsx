@@ -780,6 +780,8 @@ export default function ModelManagementScreen() {
                   <Text style={styles.downloadButtonText}>
                     {progress.phase === 'extracting'
                       ? `Extracting ${Math.round(progress.percent)}%`
+                      : progress.phase === 'validating'
+                      ? `Validating ${Math.round(progress.percent)}%`
                       : `Downloading ${Math.round(progress.percent)}%`}
                   </Text>
                 ) : (
@@ -1038,6 +1040,10 @@ export default function ModelManagementScreen() {
                               <Text style={styles.modelMeta}>
                                 {activeProgress.phase === 'extracting'
                                   ? `Extracting ${Math.round(
+                                      activeProgress.percent
+                                    )}%`
+                                  : activeProgress.phase === 'validating'
+                                  ? `Validating ${Math.round(
                                       activeProgress.percent
                                     )}%`
                                   : `Downloading ${Math.round(

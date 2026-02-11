@@ -56,7 +56,7 @@ export type DownloadProgress = {
   bytesDownloaded: number;
   totalBytes: number;
   percent: number;
-  phase?: 'downloading' | 'extracting';
+  phase?: 'downloading' | 'extracting' | 'validating';
 };
 
 export type DownloadResult = {
@@ -662,7 +662,18 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       if (model.sha256) {
         const checksumValidation = await validateChecksum(
           archivePath,
-          model.sha256
+          model.sha256,
+          (bytesProcessed, totalBytes, percent) => {
+            if (isAborted()) {
+              return;
+            }
+            opts?.onProgress?.({
+              bytesDownloaded: bytesProcessed,
+              totalBytes,
+              percent,
+              phase: 'validating',
+            });
+          }
         );
         if (!checksumValidation.success) {
           const issue: ChecksumIssue = {

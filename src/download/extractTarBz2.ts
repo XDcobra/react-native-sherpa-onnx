@@ -32,7 +32,10 @@ export async function extractTarBz2(
   if (onProgress) {
     subscription = DeviceEventEmitter.addListener(
       'extractTarBz2Progress',
-      onProgress
+      (event) => {
+        const safePercent = Math.max(0, Math.min(100, event.percent));
+        onProgress({ ...event, percent: safePercent });
+      }
     );
   }
 

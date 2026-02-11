@@ -44,7 +44,14 @@ export function parseChecksumFile(content: string): Map<string, string> {
  * Calculate SHA256 hash of a file in chunks to avoid OOM
  * Reads file in 1MB chunks and processes them efficiently
  */
-export async function calculateFileChecksum(filePath: string): Promise<string> {
+export async function calculateFileChecksum(
+  filePath: string,
+  onProgress?: (
+    bytesProcessed: number,
+    totalBytes: number,
+    percent: number
+  ) => void
+): Promise<string> {
   try {
     const stat = await RNFS.stat(filePath);
     const fileSize = stat.size;
@@ -53,10 +60,23 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
 
     // computing checksum
 
+    let lastPercent = -1;
     for (let offset = 0; offset < fileSize; offset += chunkSize) {
       const length = Math.min(chunkSize, fileSize - offset);
       const chunk = await RNFS.read(filePath, length, offset, 'base64');
       hash.update(chunk, 'base64');
+
+      if (onProgress && fileSize > 0) {
+        const processed = Math.min(offset + length, fileSize);
+        const percent = Math.max(
+          0,
+          Math.min(100, Math.floor((processed * 100) / fileSize))
+        );
+        if (percent != lastPercent) {
+          lastPercent = percent;
+          onProgress(processed, fileSize, percent);
+        }
+      }
     }
 
     // According to the package implementation, when an encoding (e.g. 'hex') is
@@ -74,10 +94,15 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
  */
 export async function validateChecksum(
   filePath: string,
-  expectedChecksum: string
+  expectedChecksum: string,
+  onProgress?: (
+    bytesProcessed: number,
+    totalBytes: number,
+    percent: number
+  ) => void
 ): Promise<ValidationResult> {
   try {
-    const actualChecksum = await calculateFileChecksum(filePath);
+    const actualChecksum = await calculateFileChecksum(filePath, onProgress);
     // checksum comparison logged
     if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
       return new ValidationResult(
