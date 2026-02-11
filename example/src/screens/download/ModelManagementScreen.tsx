@@ -273,28 +273,32 @@ export default function ModelManagementScreen() {
   ) => (
     <View style={styles.filterRow}>
       <Text style={styles.filterLabel}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={styles.filterOptions}>
-          {options.map((option) => {
-            const isActive = option === value;
-            return (
-              <TouchableOpacity
-                key={`${label}-${option}`}
-                style={[styles.filterPill, isActive && styles.filterPillActive]}
-                onPress={() => onChange(option)}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterOptions}
+        directionalLockEnabled
+        nestedScrollEnabled
+      >
+        {options.map((option) => {
+          const isActive = option === value;
+          return (
+            <TouchableOpacity
+              key={`${label}-${option}`}
+              style={[styles.filterPill, isActive && styles.filterPillActive]}
+              onPress={() => onChange(option)}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  isActive && styles.filterPillTextActive,
+                ]}
               >
-                <Text
-                  style={[
-                    styles.filterPillText,
-                    isActive && styles.filterPillTextActive,
-                  ]}
-                >
-                  {option}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                {option}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -331,31 +335,35 @@ export default function ModelManagementScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Categories</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.filterOptions}>
-              {CATEGORY_OPTIONS.map((option) => {
-                const isActive = option.key === category;
-                return (
-                  <TouchableOpacity
-                    key={option.key}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterOptions}
+            directionalLockEnabled
+            nestedScrollEnabled
+          >
+            {CATEGORY_OPTIONS.map((option) => {
+              const isActive = option.key === category;
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  style={[
+                    styles.filterPill,
+                    isActive && styles.filterPillActive,
+                  ]}
+                  onPress={() => handleCategoryChange(option.key)}
+                >
+                  <Text
                     style={[
-                      styles.filterPill,
-                      isActive && styles.filterPillActive,
+                      styles.filterPillText,
+                      isActive && styles.filterPillTextActive,
                     ]}
-                    onPress={() => handleCategoryChange(option.key)}
                   >
-                    <Text
-                      style={[
-                        styles.filterPillText,
-                        isActive && styles.filterPillTextActive,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
           {currentCategory && (
             <Text style={styles.categoryHelper}>{currentCategory.helper}</Text>
