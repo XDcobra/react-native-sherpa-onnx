@@ -218,9 +218,14 @@ bool ArchiveHelper::ExtractTarBz2(
       // Progress callback
       if (on_progress) {
         if (total_bytes > 0) {
-          // Use compressed bytes as more accurate progress indicator
-          long long compressed_bytes = archive_filter_bytes(archive, 0);
+          // Use bytes read from source (filter -1) to align with archive file size.
+          long long compressed_bytes = archive_filter_bytes(archive, -1);
           int percent = static_cast<int>((compressed_bytes * 100) / total_bytes);
+          if (percent > 100) {
+            percent = 100;
+          } else if (percent < 0) {
+            percent = 0;
+          }
           
           if (percent != last_percent) {
             last_percent = percent;
