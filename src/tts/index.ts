@@ -2,6 +2,7 @@ import { NativeEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
+  TTSModelType,
   TtsUpdateOptions,
   SynthesisOptions,
   GeneratedAudio,
@@ -11,7 +12,7 @@ import type {
   TtsStreamEnd,
   TtsStreamError,
 } from './types';
-import type { InitializeOptions } from '../types';
+import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
 /**
@@ -33,8 +34,8 @@ import { resolveModelPath } from '../utils';
  * @returns Promise resolving to result with success and detected models
  * @example
  * ```typescript
- * // Simple string (auto-detect)
- * const result = await initializeTTS('models/sherpa-onnx-vits-piper-en_US-lessac-medium');
+ * // Auto-detect model path
+ * const result = await initializeTTS({ type: 'auto', path: 'models/sherpa-onnx-vits-piper-en_US-lessac-medium' });
  * console.log('Detected models:', result.detectedModels);
  *
  * // Asset model
@@ -57,21 +58,21 @@ import { resolveModelPath } from '../utils';
  * ```
  */
 export async function initializeTTS(
-  options: TTSInitializeOptions | InitializeOptions['modelPath']
+  options: TTSInitializeOptions | ModelPathConfig
 ): Promise<{
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
 }> {
-  // Handle both object syntax and direct path syntax
-  let modelPath: InitializeOptions['modelPath'];
-  let modelType: string | undefined;
+  // Handle both object syntax and direct config syntax
+  let modelPath: ModelPathConfig;
+  let modelType: TTSModelType | undefined;
   let numThreads: number | undefined;
   let debug: boolean | undefined;
   let noiseScale: number | undefined;
   let noiseScaleW: number | undefined;
   let lengthScale: number | undefined;
 
-  if (typeof options === 'object' && 'modelPath' in options) {
+  if ('modelPath' in options) {
     modelPath = options.modelPath;
     modelType = options.modelType;
     numThreads = options.numThreads;
@@ -80,7 +81,7 @@ export async function initializeTTS(
     noiseScaleW = options.noiseScaleW;
     lengthScale = options.lengthScale;
   } else {
-    modelPath = options as InitializeOptions['modelPath'];
+    modelPath = options;
     modelType = undefined;
     numThreads = undefined;
     debug = undefined;
@@ -260,7 +261,7 @@ export function stopTtsPcmPlayer(): Promise<void> {
  * @returns Promise resolving to model information
  * @example
  * ```typescript
- * await initializeTTS('models/kokoro-en');
+ * await initializeTTS({ type: 'auto', path: 'models/kokoro-en' });
  * const info = await getModelInfo();
  *
  * console.log(`Sample rate: ${info.sampleRate} Hz`);
@@ -331,7 +332,7 @@ export function getNumSpeakers(): Promise<number> {
  *
  * @example
  * ```typescript
- * await initializeTTS('models/vits-piper-en');
+ * await initializeTTS({ type: 'auto', path: 'models/vits-piper-en' });
  * const audio = await generateSpeech('Hello');
  * // ... use audio
  * await unloadTTS(); // Free resources

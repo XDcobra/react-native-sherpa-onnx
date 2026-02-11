@@ -224,7 +224,7 @@ await initializeTTS({
 import { initializeTTS, generateSpeech } from 'react-native-sherpa-onnx/tts';
 
 // Auto-detect model type from files
-await initializeTTS('models/vits-piper-en_US-lessac-medium');
+await initializeTTS({ type: 'auto', path: 'models/vits-piper-en_US-lessac-medium' });
 
 const audio = await generateSpeech('Hello, world!');
 console.log(`Generated ${audio.samples.length} samples at ${audio.sampleRate} Hz`);

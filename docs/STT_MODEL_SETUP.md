@@ -265,7 +265,7 @@ await initializeSTT({
 import { initializeSTT, transcribeFile } from 'react-native-sherpa-onnx/stt';
 
 // Auto-detect model type and prefer int8 quantization
-await initializeSTT('models/sherpa-onnx-zipformer-en-2023-06-26');
+await initializeSTT({ type: 'auto', path: 'models/sherpa-onnx-zipformer-en-2023-06-26' });
 
 const transcription = await transcribeFile('path/to/audio.wav');
 console.log('Transcription:', transcription);

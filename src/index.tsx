@@ -1,7 +1,7 @@
 import SherpaOnnx from './NativeSherpaOnnx';
 
 // Export common types and utilities
-export type { InitializeOptions, ModelPathConfig, ModelType } from './types';
+export type { ModelPathConfig } from './types';
 export {
   assetModelPath,
   autoModelPath,

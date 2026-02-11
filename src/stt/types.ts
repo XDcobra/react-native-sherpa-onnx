@@ -1,4 +1,17 @@
-import type { InitializeOptions, ModelType } from '../types';
+import type { ModelPathConfig } from '../types';
+
+/**
+ * Supported STT model types.
+ */
+export type STTModelType =
+  | 'transducer'
+  | 'paraformer'
+  | 'nemo_ctc'
+  | 'whisper'
+  | 'wenet_ctc'
+  | 'sense_voice'
+  | 'funasr_nano'
+  | 'auto';
 
 /**
  * STT-specific initialization options
@@ -7,7 +20,7 @@ export interface STTInitializeOptions {
   /**
    * Model directory path configuration
    */
-  modelPath: InitializeOptions['modelPath'];
+  modelPath: ModelPathConfig;
 
   /**
    * Model quantization preference
@@ -28,7 +41,7 @@ export interface STTInitializeOptions {
    * - 'funasr_nano': Force detection as FunASR Nano model
    * - 'auto': Automatic detection based on files (default)
    */
-  modelType?: ModelType;
+  modelType?: STTModelType;
 }
 
 /**

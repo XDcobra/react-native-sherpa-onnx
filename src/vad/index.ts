@@ -10,16 +10,18 @@
  * // Future usage:
  * import { initializeVAD, detectVoiceActivity } from 'react-native-sherpa-onnx/vad';
  *
- * await initializeVAD({ modelPath: 'models/vad-model' });
+ * await initializeVAD({ modelPath: { type: 'auto', path: 'models/vad-model' } });
  * const segments = await detectVoiceActivity('path/to/audio.wav');
  * ```
  */
+
+import type { ModelPathConfig } from '../types';
 
 /**
  * VAD initialization options (placeholder)
  */
 export interface VADInitializeOptions {
-  modelPath: string;
+  modelPath: ModelPathConfig;
   // Additional VAD-specific options will be added here
 }
 
