@@ -37,7 +37,7 @@ SttDetectResult DetectSttModel(
         return result;
     }
 
-    const auto files = ListFiles(modelDir);
+    const auto files = ListFilesRecursive(modelDir, 2);
 
     std::string encoderPath = FindOnnxByAnyToken(files, {"encoder"}, preferInt8);
     std::string decoderPath = FindOnnxByAnyToken(files, {"decoder"}, preferInt8);
@@ -71,7 +71,7 @@ SttDetectResult DetectSttModel(
         ctcModelPath = FindLargestOnnxExcludingTokens(files, modelExcludes);
     }
 
-    std::string tokensPath = modelDir + "/tokens.txt";
+    std::string tokensPath = FindFileByName(modelDir, "tokens.txt", 2);
 
     bool hasTransducer = !encoderPath.empty() && !decoderPath.empty() && !joinerPath.empty();
 
@@ -201,10 +201,10 @@ SttDetectResult DetectSttModel(
         result.paths.funasrTokenizer = funasrTokenizerDir + "/vocab.json";
     }
 
-    if (FileExists(tokensPath)) {
+    if (!tokensPath.empty() && FileExists(tokensPath)) {
         result.paths.tokens = tokensPath;
     } else if (result.tokensRequired) {
-        result.error = "Tokens file not found at " + tokensPath;
+        result.error = "Tokens file not found in " + modelDir;
         return result;
     }
 

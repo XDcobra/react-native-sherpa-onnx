@@ -30,12 +30,12 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         return result;
     }
 
-    const auto files = ListFiles(modelDir);
+    const auto files = ListFilesRecursive(modelDir, 2);
 
-    std::string tokensFile = modelDir + "/tokens.txt";
-    std::string lexiconFile = modelDir + "/lexicon.txt";
-    std::string dataDirPath = modelDir + "/espeak-ng-data";
-    std::string voicesFile = modelDir + "/voices.bin";
+    std::string tokensFile = FindFileByName(modelDir, "tokens.txt", 2);
+    std::string lexiconFile = FindFileByName(modelDir, "lexicon.txt", 2);
+    std::string dataDirPath = FindDirectoryByName(modelDir, "espeak-ng-data", 2);
+    std::string voicesFile = FindFileByName(modelDir, "voices.bin", 2);
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
     std::string vocoder = FindOnnxByAnyToken(files, {"vocoder"}, std::nullopt);
@@ -57,9 +57,9 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
-    bool hasVoicesFile = FileExists(voicesFile);
+    bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
-    bool hasDataDir = IsDirectory(dataDirPath);
+    bool hasDataDir = !dataDirPath.empty() && IsDirectory(dataDirPath);
 
     std::string modelDirLower = ToLower(modelDir);
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
@@ -158,7 +158,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = FileExists(lexiconFile) ? lexiconFile : "";
+    result.paths.lexicon = !lexiconFile.empty() && FileExists(lexiconFile) ? lexiconFile : "";
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;
@@ -166,7 +166,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.paths.encoder = encoder;
     result.paths.decoder = decoder;
 
-    if (!FileExists(tokensFile)) {
+    if (tokensFile.empty() || !FileExists(tokensFile)) {
         result.error = "TTS: tokens.txt not found in " + modelDir;
         return result;
     }

@@ -32,6 +32,12 @@ bool IsOnnxFile(const FileEntry& entry) {
     return EndsWith(entry.nameLower, ".onnx");
 }
 
+std::string BaseName(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return path;
+    return path.substr(pos + 1);
+}
+
 std::string ChooseLargest(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& excludeTokens,
@@ -180,11 +186,71 @@ std::vector<FileEntry> ListFiles(const std::string& path) {
     return results;
 }
 
+std::vector<FileEntry> ListFilesRecursive(const std::string& path, int maxDepth) {
+    std::vector<FileEntry> results = ListFiles(path);
+    if (maxDepth <= 0) return results;
+
+    for (const auto& dir : ListDirectories(path)) {
+        auto nested = ListFilesRecursive(dir, maxDepth - 1);
+        results.insert(results.end(), nested.begin(), nested.end());
+    }
+
+    return results;
+}
+
 std::string ToLower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
     return value;
+}
+
+std::string FindFileByName(const std::string& baseDir, const std::string& fileName, int maxDepth) {
+    std::string target = ToLower(fileName);
+    auto files = ListFilesRecursive(baseDir, maxDepth);
+    for (const auto& entry : files) {
+        if (entry.nameLower == target) {
+            return entry.path;
+        }
+    }
+    return "";
+}
+
+std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth) {
+    std::string target = ToLower(dirName);
+    std::vector<std::string> toVisit = ListDirectories(baseDir);
+    int depth = 0;
+
+    while (!toVisit.empty() && depth <= maxDepth) {
+        std::vector<std::string> next;
+        for (const auto& dir : toVisit) {
+            std::string name = dir;
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+            try {
+                name = fs::path(dir).filename().string();
+            } catch (const std::exception&) {
+            }
+#elif __has_include(<experimental/filesystem>)
+            try {
+                name = fs::path(dir).filename().string();
+            } catch (const std::exception&) {
+            }
+#else
+            name = BaseName(dir);
+#endif
+            if (ToLower(name) == target) {
+                return dir;
+            }
+            if (depth < maxDepth) {
+                auto nested = ListDirectories(dir);
+                next.insert(next.end(), nested.begin(), nested.end());
+            }
+        }
+        toVisit.swap(next);
+        depth += 1;
+    }
+
+    return "";
 }
 
 std::string ResolveTokenizerDir(const std::string& modelDir) {
@@ -193,28 +259,40 @@ std::string ResolveTokenizerDir(const std::string& modelDir) {
         return modelDir;
     }
 
-    for (const auto& dir : ListDirectories(modelDir)) {
-        std::string dirName = dir;
+    std::vector<std::string> toVisit = ListDirectories(modelDir);
+    int depth = 0;
+    while (!toVisit.empty() && depth <= 2) {
+        std::vector<std::string> next;
+        for (const auto& dir : toVisit) {
+            std::string dirName = dir;
 #if __cplusplus >= 201703L && __has_include(<filesystem>)
-        try {
-            dirName = fs::path(dir).filename().string();
-        } catch (const std::exception&) {
-        }
+            try {
+                dirName = fs::path(dir).filename().string();
+            } catch (const std::exception&) {
+            }
 #elif __has_include(<experimental/filesystem>)
-        try {
-            dirName = fs::path(dir).filename().string();
-        } catch (const std::exception&) {
-        }
+            try {
+                dirName = fs::path(dir).filename().string();
+            } catch (const std::exception&) {
+            }
 #else
-        // best effort: use full path if we cannot parse the filename
+            dirName = BaseName(dir);
 #endif
-        std::string dirNameLower = ToLower(dirName);
-        if (dirNameLower.find("qwen3") != std::string::npos) {
-            std::string vocabPath = dir + "/vocab.json";
-            if (FileExists(vocabPath)) {
-                return dir;
+            std::string dirNameLower = ToLower(dirName);
+            if (dirNameLower.find("qwen3") != std::string::npos) {
+                std::string vocabPath = dir + "/vocab.json";
+                if (FileExists(vocabPath)) {
+                    return dir;
+                }
+            }
+
+            if (depth < 2) {
+                auto nested = ListDirectories(dir);
+                next.insert(next.end(), nested.begin(), nested.end());
             }
         }
+        toVisit.swap(next);
+        depth += 1;
     }
 
     return "";

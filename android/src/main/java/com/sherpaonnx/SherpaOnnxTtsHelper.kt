@@ -125,7 +125,13 @@ internal class SherpaOnnxTtsHelper(
         )
         promise.resolve(resultMap)
       } else {
-        promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS")
+        val reason = result["error"] as? String
+        val message = if (!reason.isNullOrBlank()) {
+          "Failed to initialize TTS: $reason"
+        } else {
+          "Failed to initialize TTS"
+        }
+        promise.reject("TTS_INIT_ERROR", message)
       }
     } catch (e: Exception) {
       promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS", e)
