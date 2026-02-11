@@ -1,0 +1,99 @@
+#include <jni.h>
+#include <string>
+#include <memory>
+#include "sherpa-onnx-archive-helper.h"
+
+static JavaVM* g_vm = nullptr;
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /* reserved */) {
+  g_vm = vm;
+  JNIEnv* env = nullptr;
+  if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+    return -1;
+  }
+  return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
+    JNIEnv* env,
+    jobject /* jthis */,
+    jstring j_source_path,
+    jstring j_target_path,
+    jboolean j_force,
+    jobject j_progress_callback,
+    jobject j_promise) {
+  const char* source_path = env->GetStringUTFChars(j_source_path, nullptr);
+  const char* target_path = env->GetStringUTFChars(j_target_path, nullptr);
+  std::string source_str(source_path);
+  std::string target_str(target_path);
+  env->ReleaseStringUTFChars(j_source_path, source_path);
+  env->ReleaseStringUTFChars(j_target_path, target_path);
+
+  // Get method for onProgress if callback provided
+  jmethodID on_progress_method = nullptr;
+  if (j_progress_callback != nullptr) {
+    jclass callback_class = env->GetObjectClass(j_progress_callback);
+    on_progress_method = env->GetMethodID(
+        callback_class, "invoke", "(JJD)V");
+    env->DeleteLocalRef(callback_class);
+  }
+
+  // Get Promise.resolve and reject methods
+  jclass promise_class = env->GetObjectClass(j_promise);
+  jmethodID resolve_method = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
+  jmethodID reject_method = env->GetMethodID(promise_class, "reject", 
+                                              "(Ljava/lang/String;Ljava/lang/String;)V");
+
+  // Get WritableMap from Arguments
+  jclass arguments_class = env->FindClass("com/facebook/react/bridge/Arguments");
+  jmethodID create_map_method = env->GetStaticMethodID(
+      arguments_class, "createMap", "()Lcom/facebook/react/bridge/WritableMap;");
+  jobject result_map = env->CallStaticObjectMethod(arguments_class, create_map_method);
+
+  jclass writeable_map_class = env->FindClass("com/facebook/react/bridge/WritableMap");
+  jmethodID put_boolean_method = env->GetMethodID(
+      writeable_map_class, "putBoolean", "(Ljava/lang/String;Z)V");
+  jmethodID put_string_method = env->GetMethodID(
+      writeable_map_class, "putString", "(Ljava/lang/String;Ljava/lang/String;)V");
+
+  // Progress callback wrapper
+  auto on_progress = [env, j_progress_callback, on_progress_method](
+      long long bytes_extracted, long long total_bytes, double percent) {
+    if (j_progress_callback != nullptr && on_progress_method != nullptr) {
+      env->CallVoidMethod(j_progress_callback, on_progress_method,
+                          bytes_extracted, total_bytes, percent);
+    }
+  };
+
+  // Perform extraction
+  std::string error_msg;
+  bool success = ArchiveHelper::ExtractTarBz2(
+      source_str, target_str, j_force == JNI_TRUE, on_progress, &error_msg);
+
+  // Build result map
+  env->CallVoidMethod(result_map, put_boolean_method,
+                      env->NewStringUTF("success"), success ? JNI_TRUE : JNI_FALSE);
+
+  if (success) {
+    env->CallVoidMethod(result_map, put_string_method,
+                        env->NewStringUTF("path"), env->NewStringUTF(target_str.c_str()));
+    env->CallVoidMethod(j_promise, resolve_method, result_map);
+  } else {
+    env->CallVoidMethod(result_map, put_string_method,
+                        env->NewStringUTF("reason"), env->NewStringUTF(error_msg.c_str()));
+    env->CallVoidMethod(j_promise, reject_method,
+                        env->NewStringUTF("ARCHIVE_ERROR"),
+                        env->NewStringUTF(error_msg.c_str()));
+  }
+
+  env->DeleteLocalRef(result_map);
+  env->DeleteLocalRef(promise_class);
+  env->DeleteLocalRef(arguments_class);
+  env->DeleteLocalRef(writeable_map_class);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeCancelExtract(JNIEnv* /* env */, jobject /* jthis */) {
+  ArchiveHelper::Cancel();
+}
