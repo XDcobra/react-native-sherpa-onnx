@@ -1,5 +1,6 @@
 sherpa-onnx/
 **/sherpa-onnx/
+android/src/main/cpp/libarchive/
 node_modules/
 android/.cxx/
 android/build/

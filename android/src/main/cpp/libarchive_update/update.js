@@ -12,7 +12,7 @@ const path = require('path');
 const https = require('https');
 const { spawnSync } = require('child_process');
 
-const rootDir = path.resolve(__dirname, '..', '..');
+const rootDir = path.resolve(__dirname, '..');
 const version = process.argv[2] || '3.8.5';
 
 const workDir = path.join(rootDir, '.libarchive_tmp');
@@ -23,16 +23,10 @@ const archivePath = path.join(workDir, archiveName);
 const libarchiveDir = path.join(rootDir, 'libarchive');
 const templateCmake = path.join(
   rootDir,
-  'jni',
   'libarchive_update',
   'CMakeLists-base.txt'
 );
-const templateConfig = path.join(
-  rootDir,
-  'jni',
-  'libarchive_update',
-  'config-base.h'
-);
+const templateConfig = path.join(rootDir, 'libarchive_update', 'config-base.h');
 
 function log(message) {
   process.stdout.write(`${message}\n`);
