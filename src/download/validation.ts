@@ -51,11 +51,7 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
     const chunkSize = 1024 * 1024; // 1MB chunks
     const hash = QuickCrypto.createHash('sha256');
 
-    console.log(
-      `[Checksum] Computing SHA256 for ${filePath} (${fileSize} bytes) in ${Math.ceil(
-        fileSize / chunkSize
-      )} chunks`
-    );
+    // computing checksum
 
     for (let offset = 0; offset < fileSize; offset += chunkSize) {
       const length = Math.min(chunkSize, fileSize - offset);
@@ -66,7 +62,7 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
     // According to the package implementation, when an encoding (e.g. 'hex') is
     // provided `digest()` returns a string. Cast to string for TypeScript.
     const digest = hash.digest('hex') as unknown as string;
-    console.log(`[Checksum] SHA256 computed successfully: ${digest}`);
+    // checksum computed
     return digest.toLowerCase();
   } catch (error) {
     throw new Error(`Failed to calculate checksum: ${error}`);
@@ -82,9 +78,7 @@ export async function validateChecksum(
 ): Promise<ValidationResult> {
   try {
     const actualChecksum = await calculateFileChecksum(filePath);
-    console.log(
-      `[Checksum] File: ${filePath}\nExpected: ${expectedChecksum}\nActual: ${actualChecksum}`
-    );
+    // checksum comparison logged
     if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
       return new ValidationResult(
         false,

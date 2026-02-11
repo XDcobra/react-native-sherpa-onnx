@@ -586,22 +586,14 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       getReadyMarkerPath(category, id)
     );
     if (!readyMarkerExists) {
-      console.log(
-        `[ModelDownload] No ready marker found for ${category}:${id}, cleaning up partial files`
-      );
+      // No ready marker found; cleaning up partial files
       if (await RNFS.exists(archivePath)) {
-        const statBefore = await RNFS.stat(archivePath);
-        console.log(
-          `[ModelDownload] Found partial archive: ${archivePath} (${statBefore.size} bytes)`
-        );
+        // Found partial archive; will delete
         await RNFS.unlink(archivePath);
-        const stillExists = await RNFS.exists(archivePath);
-        console.log(
-          `[ModelDownload] Deleted archive. Still exists: ${stillExists}`
-        );
+        // Deleted archive. stillExists: ${stillExists}
       }
       if (await RNFS.exists(modelDir)) {
-        console.log(`[ModelDownload] Removing partial model dir: ${modelDir}`);
+        // Removing partial model dir
         await RNFS.unlink(modelDir);
       }
     }
@@ -610,13 +602,9 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   try {
     // Step 2: Download archive if not exists
     const archiveExists = await RNFS.exists(archivePath);
-    console.log(
-      `[ModelDownload] Archive exists check for ${archivePath}: ${archiveExists}`
-    );
+    // Archive existence check for ${archivePath}: ${archiveExists}
     if (!archiveExists) {
-      console.log(
-        `[ModelDownload] Starting download for ${category}:${id} from ${model.downloadUrl}`
-      );
+      // Starting download for ${category}:${id} from ${model.downloadUrl}
       const download = RNFS.downloadFile({
         fromUrl: model.downloadUrl,
         toFile: archivePath,
@@ -669,11 +657,6 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       if (result.statusCode && result.statusCode >= 400) {
         throw new Error(`Download failed: ${result.statusCode}`);
       }
-
-      const downloadedStat = await RNFS.stat(archivePath);
-      console.log(
-        `[ModelDownload] Download complete. File size: ${downloadedStat.size} bytes, expected: ${model.bytes} bytes`
-      );
 
       // Step 3: Validate checksum if available
       if (model.sha256) {
