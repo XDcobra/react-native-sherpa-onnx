@@ -506,7 +506,7 @@ export default function TTSScreen() {
       }
 
       const modelPath = downloadedModelIds.includes(modelFolder)
-        ? getFileModelPath(modelFolder)
+        ? getFileModelPath(modelFolder, ModelCategory.Tts)
         : getAssetModelPath(modelFolder);
 
       const noiseScaleValue = noiseScale.trim();

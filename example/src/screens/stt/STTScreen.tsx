@@ -156,7 +156,7 @@ export default function STTScreen() {
       // Initialize new model
       const result = await initializeSTT({
         modelPath: downloadedModelIds.includes(modelFolder)
-          ? getFileModelPath(modelFolder)
+          ? getFileModelPath(modelFolder, ModelCategory.Stt)
           : getAssetModelPath(modelFolder),
       });
 
