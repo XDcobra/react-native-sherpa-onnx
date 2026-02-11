@@ -12,13 +12,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
   autoModelPath,
-  resolveModelPath,
   listAssetModels,
+  resolveModelPath,
 } from 'react-native-sherpa-onnx';
 import {
   initializeSTT,
   unloadSTT,
   transcribeFile,
+  type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
 import { getModelDisplayName } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
@@ -32,11 +33,10 @@ export default function STTScreen() {
     null
   );
   const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: string; modelDir: string }>
+    Array<{ type: STTModelType; modelDir: string }>
   >([]);
-  const [selectedModelType, setSelectedModelType] = useState<string | null>(
-    null
-  );
+  const [selectedModelType, setSelectedModelType] =
+    useState<STTModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioSourceType, setAudioSourceType] = useState<
@@ -115,24 +115,20 @@ export default function STTScreen() {
         await unloadSTT();
       }
 
-      // Resolve model path
-      const modelPath = await resolveModelPath({
-        type: 'asset',
-        path: `models/${modelFolder}`,
-      });
-
       // Initialize new model
       const result = await initializeSTT({
-        modelPath: { type: 'file', path: modelPath },
+        modelPath: { type: 'asset', path: `models/${modelFolder}` },
       });
 
       if (result.success && result.detectedModels.length > 0) {
-        setDetectedModels(result.detectedModels);
+        const normalizedDetected = result.detectedModels.map((model) => ({
+          ...model,
+          type: model.type as STTModelType,
+        }));
+        setDetectedModels(normalizedDetected);
         setCurrentModelFolder(modelFolder);
 
-        const detectedTypes = result.detectedModels
-          .map((m) => m.type)
-          .join(', ');
+        const detectedTypes = normalizedDetected.map((m) => m.type).join(', ');
         setInitResult(
           `Initialized: ${getModelDisplayName(
             modelFolder
@@ -140,8 +136,8 @@ export default function STTScreen() {
         );
 
         // Auto-select first detected model
-        if (result.detectedModels.length === 1 && result.detectedModels[0]) {
-          setSelectedModelType(result.detectedModels[0].type);
+        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+          setSelectedModelType(normalizedDetected[0].type);
         }
       } else {
         setError('No models detected in the directory');

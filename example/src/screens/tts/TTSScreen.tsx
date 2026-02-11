@@ -29,8 +29,9 @@ import {
   saveTextToContentUri,
   copyContentUriToCache,
   shareAudioFile,
+  type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
-import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+import { listAssetModels } from 'react-native-sherpa-onnx';
 import { getModelDisplayName } from '../../modelConfig';
 import RNFS from 'react-native-fs';
 import Sound from 'react-native-sound';
@@ -45,11 +46,10 @@ export default function TTSScreen() {
     null
   );
   const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: string; modelDir: string }>
+    Array<{ type: TTSModelType; modelDir: string }>
   >([]);
-  const [selectedModelType, setSelectedModelType] = useState<string | null>(
-    null
-  );
+  const [selectedModelType, setSelectedModelType] =
+    useState<TTSModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializingModel, setInitializingModel] = useState<string | null>(
     null
@@ -467,13 +467,10 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      // Resolve model path
-      const modelPath = await resolveModelPath({
+      const modelPath = {
         type: 'asset',
         path: `models/${modelFolder}`,
-      });
-
-      console.log('TTSScreen: Resolved model path:', modelPath);
+      } as const;
 
       const noiseScaleValue = noiseScale.trim();
       const noiseScaleWValue = noiseScaleW.trim();
@@ -543,11 +540,17 @@ export default function TTSScreen() {
       }
 
       if (result.success && result.detectedModels.length > 0) {
-        setDetectedModels(result.detectedModels);
+        const normalizedDetected = result.detectedModels.map(
+          (model: { type: string; modelDir: string }) => ({
+            ...model,
+            type: model.type as TTSModelType,
+          })
+        );
+        setDetectedModels(normalizedDetected);
         setCurrentModelFolder(modelFolder);
 
-        const detectedTypes = result.detectedModels
-          .map((m: { type: string }) => m.type)
+        const detectedTypes = normalizedDetected
+          .map((m: { type: TTSModelType }) => m.type)
           .join(', ');
         setInitResult(
           `Initialized: ${getModelDisplayName(
@@ -556,8 +559,8 @@ export default function TTSScreen() {
         );
 
         // Auto-select first detected model
-        if (result.detectedModels.length === 1 && result.detectedModels[0]) {
-          setSelectedModelType(result.detectedModels[0].type);
+        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+          setSelectedModelType(normalizedDetected[0].type);
         }
 
         // Get model info

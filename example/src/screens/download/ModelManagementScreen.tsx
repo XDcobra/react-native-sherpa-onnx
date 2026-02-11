@@ -19,6 +19,7 @@ import {
   type ModelMetaBase,
   type TtsModelMeta,
 } from 'react-native-sherpa-onnx/download';
+import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 type FilterState = {
@@ -90,6 +91,24 @@ const normalizeFilter = (value: string) => {
   return trimmed.toLowerCase();
 };
 
+const getSttModelType = (modelId: string): STTModelType | null => {
+  const lower = modelId.toLowerCase();
+  if (lower.includes('whisper')) return 'whisper';
+  if (lower.includes('paraformer')) return 'paraformer';
+  if (lower.includes('zipformer') || lower.includes('transducer')) {
+    return 'transducer';
+  }
+  if (lower.includes('wenet')) return 'wenet_ctc';
+  if (lower.includes('sense-voice') || lower.includes('sensevoice')) {
+    return 'sense_voice';
+  }
+  if (lower.includes('funasr')) return 'funasr_nano';
+  if (lower.includes('nemo') || lower.includes('parakeet')) {
+    return 'nemo_ctc';
+  }
+  return null;
+};
+
 export default function ModelManagementScreen() {
   const [category, setCategory] = useState<ModelCategory>(ModelCategory.Tts);
   const [models, setModels] = useState<ModelMetaBase[]>([]);
@@ -103,9 +122,14 @@ export default function ModelManagementScreen() {
   >({});
 
   const isTtsCategory = category === ModelCategory.Tts;
+  const isSttCategory = category === ModelCategory.Stt;
   const ttsModels = useMemo(
     () => (isTtsCategory ? (models as TtsModelMeta[]) : []),
     [isTtsCategory, models]
+  );
+  const sttModels = useMemo(
+    () => (isSttCategory ? models : []),
+    [isSttCategory, models]
   );
 
   const downloadedIds = useMemo(() => {
@@ -136,6 +160,13 @@ export default function ModelManagementScreen() {
     () => toOptionList(ttsModels.map((model) => model.sizeTier)),
     [ttsModels]
   );
+
+  const sttTypes = useMemo(() => {
+    const types = sttModels
+      .map((model) => getSttModelType(model.id))
+      .filter((value): value is STTModelType => Boolean(value));
+    return toOptionList(types);
+  }, [sttModels]);
 
   const loadDownloaded = useCallback(async () => {
     const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
@@ -170,6 +201,16 @@ export default function ModelManagementScreen() {
 
   const applyFilters = useCallback(() => {
     if (!isTtsCategory) {
+      if (isSttCategory) {
+        const type = normalizeFilter(filters.type);
+        const filtered = models.filter((model) => {
+          if (!type) return true;
+          return getSttModelType(model.id) === type;
+        });
+        setFilteredModels(filtered);
+        return;
+      }
+
       setFilteredModels(models);
       return;
     }
@@ -194,7 +235,7 @@ export default function ModelManagementScreen() {
     });
 
     setFilteredModels(filtered);
-  }, [filters, isTtsCategory, models]);
+  }, [filters, isSttCategory, isTtsCategory, models]);
 
   useEffect(() => {
     loadModels().catch(() => undefined);
@@ -391,6 +432,15 @@ export default function ModelManagementScreen() {
           </View>
         )}
 
+        {isSttCategory && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Filters</Text>
+            {renderFilterRow('Type', sttTypes, filters.type, (next) =>
+              updateFilter('type', next)
+            )}
+          </View>
+        )}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Models</Text>
           {filteredModels.length === 0 ? (
@@ -404,6 +454,7 @@ export default function ModelManagementScreen() {
               const progress = progressById[model.id];
               const isDownloaded = downloadedIds.has(model.id);
               const ttsModel = model as TtsModelMeta;
+              const sttType = getSttModelType(model.id);
               return (
                 <View key={model.id} style={styles.modelRow}>
                   <View style={styles.modelInfo}>
@@ -411,6 +462,8 @@ export default function ModelManagementScreen() {
                     <Text style={styles.modelMeta}>
                       {isTtsCategory
                         ? `${ttsModel.type} · ${formatBytes(model.bytes)}`
+                        : isSttCategory && sttType
+                        ? `${sttType} · ${formatBytes(model.bytes)}`
                         : formatBytes(model.bytes)}
                     </Text>
                   </View>
