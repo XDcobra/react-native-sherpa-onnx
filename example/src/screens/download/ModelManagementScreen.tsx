@@ -9,6 +9,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TextInput } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import {
   deleteModelByCategory,
   downloadModelByCategory,
@@ -17,6 +19,8 @@ import {
   ModelCategory,
   type DownloadProgress,
   type ModelMetaBase,
+  type Quantization,
+  type SizeTier,
   type TtsModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
@@ -84,11 +88,65 @@ const toOptionList = (values: string[]) => {
   return ['Any', ...unique];
 };
 
+const normalizeLanguageCode = (value: string | null | undefined) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const primary = trimmed.toLowerCase().split(/[-_]/)[0] ?? '';
+  if (primary.length !== 2) return null;
+  if (!/^[a-z]{2}$/.test(primary)) return null;
+  return primary;
+};
+
+const toLanguageOptionList = (values: Array<string | null | undefined>) => {
+  const normalized = values
+    .map((value) => normalizeLanguageCode(value))
+    .filter((value): value is string => Boolean(value));
+  return toOptionList(normalized);
+};
+
+const getFlagEmoji = (code: string) => {
+  if (!/^[a-z]{2}$/i.test(code)) return null;
+  const upper = code.toUpperCase();
+  const base = 0x1f1e6;
+  const first = upper.charCodeAt(0) - 65 + base;
+  const second = upper.charCodeAt(1) - 65 + base;
+  return String.fromCodePoint(first, second);
+};
+
+const getLanguageLabel = (code: string) => {
+  if (code.toLowerCase() === 'any') return 'Any';
+  const normalized = normalizeLanguageCode(code) ?? code.toLowerCase();
+  const flag = getFlagEmoji(normalized);
+  const upper = normalized.toUpperCase();
+  return flag ? `${flag} ${upper}` : upper;
+};
+
 const normalizeFilter = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (trimmed.toLowerCase() === 'any') return null;
   return trimmed.toLowerCase();
+};
+
+const getModelQuantization = (modelId: string): Quantization => {
+  const lower = modelId.toLowerCase();
+  if (lower.includes('int8') && lower.includes('quant')) {
+    return 'int8-quantized';
+  }
+  if (lower.includes('int8')) return 'int8';
+  if (lower.includes('fp16')) return 'fp16';
+  return 'unknown';
+};
+
+const getModelSizeTier = (modelId: string): SizeTier => {
+  const lower = modelId.toLowerCase();
+  if (lower.includes('tiny')) return 'tiny';
+  if (lower.includes('small')) return 'small';
+  if (lower.includes('medium')) return 'medium';
+  if (lower.includes('large')) return 'large';
+  if (lower.includes('low')) return 'small';
+  return 'unknown';
 };
 
 const getSttModelType = (modelId: string): STTModelType | null => {
@@ -109,17 +167,28 @@ const getSttModelType = (modelId: string): STTModelType | null => {
   return null;
 };
 
+const getLanguageCodeFromModelId = (modelId: string) => {
+  const normalized = modelId.toLowerCase();
+  const match = normalized.match(/(?:^|[_-])([a-z]{2})(?:[_-]|$)/);
+  const code = match?.[1];
+  if (!code) return null;
+  return normalizeLanguageCode(code);
+};
+
 export default function ModelManagementScreen() {
   const [category, setCategory] = useState<ModelCategory>(ModelCategory.Tts);
   const [models, setModels] = useState<ModelMetaBase[]>([]);
   const [filteredModels, setFilteredModels] = useState<ModelMetaBase[]>([]);
   const [downloadedModels, setDownloadedModels] = useState<ModelMetaBase[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progressById, setProgressById] = useState<
     Record<string, DownloadProgress>
   >({});
+  const [downloadedExpanded, setDownloadedExpanded] = useState(true);
+  const [availableExpanded, setAvailableExpanded] = useState(true);
 
   const isTtsCategory = category === ModelCategory.Tts;
   const isSttCategory = category === ModelCategory.Stt;
@@ -138,7 +207,7 @@ export default function ModelManagementScreen() {
 
   const languages = useMemo(
     () =>
-      toOptionList(
+      toLanguageOptionList(
         ttsModels.flatMap((model) =>
           (model.languages ?? []).map((lang) => lang)
         )
@@ -162,10 +231,29 @@ export default function ModelManagementScreen() {
   );
 
   const sttTypes = useMemo(() => {
-    const types = sttModels
+    const sttTypeValues = sttModels
       .map((model) => getSttModelType(model.id))
       .filter((value): value is STTModelType => Boolean(value));
-    return toOptionList(types);
+    return toOptionList(sttTypeValues);
+  }, [sttModels]);
+
+  const sttLanguages = useMemo(() => {
+    const sttLanguageValues = sttModels
+      .map((model) => getLanguageCodeFromModelId(model.id))
+      .filter((value): value is string => Boolean(value));
+    return toLanguageOptionList(sttLanguageValues);
+  }, [sttModels]);
+
+  const sttQuantizations = useMemo(() => {
+    const sttQuantValues = sttModels.map((model) =>
+      getModelQuantization(model.id)
+    );
+    return toOptionList(sttQuantValues);
+  }, [sttModels]);
+
+  const sttSizeTiers = useMemo(() => {
+    const sizes = sttModels.map((model) => getModelSizeTier(model.id));
+    return toOptionList(sizes);
   }, [sttModels]);
 
   const loadDownloaded = useCallback(async () => {
@@ -203,9 +291,47 @@ export default function ModelManagementScreen() {
     if (!isTtsCategory) {
       if (isSttCategory) {
         const type = normalizeFilter(filters.type);
+        const language = normalizeFilter(filters.language);
+        const search = (searchQuery || '').trim().toLowerCase();
+        const quantization = normalizeFilter(filters.quantization);
+        const sizeTier = normalizeFilter(filters.sizeTier);
         const filtered = models.filter((model) => {
-          if (!type) return true;
-          return getSttModelType(model.id) === type;
+          if (language) {
+            const modelLanguage = getLanguageCodeFromModelId(model.id);
+            if (modelLanguage !== language) return false;
+          }
+          if (type && getSttModelType(model.id) !== type) return false;
+          if (quantization && getModelQuantization(model.id) !== quantization) {
+            return false;
+          }
+          if (sizeTier && getModelSizeTier(model.id) !== sizeTier) return false;
+          if (search) {
+            const queryTokensArr = Array.from(
+              new Set(
+                search
+                  .split(/\s+/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              )
+            );
+            const name = model.displayName?.toLowerCase() ?? '';
+            const nameTokens = name
+              .split(/\s+|[-_.]+/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            if (queryTokensArr.length > 1) {
+              // require all query tokens to appear in the model name
+              const allQueryInName = queryTokensArr.every((q) =>
+                nameTokens.includes(q)
+              );
+              if (!allQueryInName) return false;
+            } else {
+              const q = queryTokensArr[0];
+              if (q && !nameTokens.some((t) => t.includes(q))) return false;
+            }
+          }
+          return true;
         });
         setFilteredModels(filtered);
         return;
@@ -219,6 +345,7 @@ export default function ModelManagementScreen() {
     const type = normalizeFilter(filters.type);
     const quantization = normalizeFilter(filters.quantization);
     const sizeTier = normalizeFilter(filters.sizeTier);
+    const search = (searchQuery || '').trim().toLowerCase();
 
     const filtered = (models as TtsModelMeta[]).filter((model) => {
       const modelLanguages = model.languages ?? [];
@@ -227,15 +354,43 @@ export default function ModelManagementScreen() {
       if (sizeTier && model.sizeTier !== sizeTier) return false;
       if (
         language &&
-        !modelLanguages.map((lang) => lang.toLowerCase()).includes(language)
+        !modelLanguages
+          .map((lang) => normalizeLanguageCode(lang))
+          .filter((lang): lang is string => Boolean(lang))
+          .includes(language)
       ) {
         return false;
+      }
+      if (search) {
+        const queryTokensArr = Array.from(
+          new Set(
+            search
+              .split(/\s+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          )
+        );
+        const name = model.displayName?.toLowerCase() ?? '';
+        const nameTokens = name
+          .split(/\s+|[-_.]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        if (queryTokensArr.length > 1) {
+          const allQueryInName = queryTokensArr.every((q) =>
+            nameTokens.includes(q)
+          );
+          if (!allQueryInName) return false;
+        } else {
+          const q = queryTokensArr[0];
+          if (q && !nameTokens.some((t) => t.includes(q))) return false;
+        }
       }
       return true;
     });
 
     setFilteredModels(filtered);
-  }, [filters, isSttCategory, isTtsCategory, models]);
+  }, [filters, isSttCategory, isTtsCategory, models, searchQuery]);
 
   useEffect(() => {
     loadModels().catch(() => undefined);
@@ -253,6 +408,7 @@ export default function ModelManagementScreen() {
     if (next === category) return;
     setCategory(next);
     setFilters(DEFAULT_FILTERS);
+    setSearchQuery('');
     setProgressById({});
     setModels([]);
     setFilteredModels([]);
@@ -263,34 +419,37 @@ export default function ModelManagementScreen() {
     (option) => option.key === category
   );
 
-  const handleDownload = async (model: ModelMetaBase) => {
-    if (downloadedIds.has(model.id)) {
-      return;
-    }
+  const handleDownload = useCallback(
+    async (model: ModelMetaBase) => {
+      if (downloadedIds.has(model.id)) {
+        return;
+      }
 
-    setProgressById((prev) => ({
-      ...prev,
-      [model.id]: { bytesDownloaded: 0, totalBytes: model.bytes, percent: 0 },
-    }));
+      setProgressById((prev) => ({
+        ...prev,
+        [model.id]: { bytesDownloaded: 0, totalBytes: model.bytes, percent: 0 },
+      }));
 
-    try {
-      await downloadModelByCategory<ModelMetaBase>(category, model.id, {
-        onProgress: (progress) => {
-          setProgressById((prev) => ({ ...prev, [model.id]: progress }));
-        },
-      });
-      await loadDownloaded();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      Alert.alert('Download failed', message);
-    } finally {
-      setProgressById((prev) => {
-        const next = { ...prev };
-        delete next[model.id];
-        return next;
-      });
-    }
-  };
+      try {
+        await downloadModelByCategory<ModelMetaBase>(category, model.id, {
+          onProgress: (progress) => {
+            setProgressById((prev) => ({ ...prev, [model.id]: progress }));
+          },
+        });
+        await loadDownloaded();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        Alert.alert('Download failed', message);
+      } finally {
+        setProgressById((prev) => {
+          const next = { ...prev };
+          delete next[model.id];
+          return next;
+        });
+      }
+    },
+    [category, downloadedIds, loadDownloaded]
+  );
 
   const handleDelete = async (model: ModelMetaBase) => {
     Alert.alert('Delete model', `Remove ${model.displayName}?`, [
@@ -306,11 +465,106 @@ export default function ModelManagementScreen() {
     ]);
   };
 
+  const renderAvailableModel = useCallback(
+    ({ item, index }: { item: ModelMetaBase; index: number }) => {
+      const progress = progressById[item.id];
+      const isDownloaded = downloadedIds.has(item.id);
+      const ttsModel = item as TtsModelMeta;
+      const sttType = getSttModelType(item.id);
+      const totalCount = filteredModels.length;
+      const isLast = index === totalCount - 1;
+
+      return (
+        <View
+          style={[
+            styles.availableItemsWrapper,
+            {
+              marginHorizontal: 16,
+              marginTop: index === 0 ? -16 : 0,
+              borderBottomLeftRadius: isLast ? 12 : 0,
+              borderBottomRightRadius: isLast ? 12 : 0,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.modelRow,
+              {
+                marginHorizontal: 0,
+                paddingHorizontal: 16,
+                borderBottomWidth: isLast ? 0 : 1,
+              },
+            ]}
+          >
+            <View style={styles.modelInfo}>
+              <Text style={styles.modelName}>{item.displayName}</Text>
+              <Text style={styles.modelMeta}>
+                {(() => {
+                  const parts: string[] = [];
+
+                  if (isTtsCategory) {
+                    if (ttsModel.type && ttsModel.type !== 'unknown') {
+                      parts.push(ttsModel.type);
+                    }
+                    if (
+                      ttsModel.quantization &&
+                      ttsModel.quantization !== 'unknown'
+                    ) {
+                      parts.push(ttsModel.quantization);
+                    }
+                    if (ttsModel.sizeTier && ttsModel.sizeTier !== 'unknown') {
+                      parts.push(ttsModel.sizeTier);
+                    }
+                  } else if (isSttCategory && sttType) {
+                    parts.push(sttType);
+                    const q = getModelQuantization(item.id);
+                    if (q && q !== 'unknown') parts.push(q);
+                    const s = getModelSizeTier(item.id);
+                    if (s && s !== 'unknown') parts.push(s);
+                  }
+
+                  parts.push(formatBytes(item.bytes));
+                  return parts.join(' · ');
+                })()}
+              </Text>
+            </View>
+            {isDownloaded ? (
+              <Text style={styles.downloadedLabel}>Downloaded</Text>
+            ) : (
+              <TouchableOpacity
+                style={styles.downloadButton}
+                onPress={() => handleDownload(item)}
+                disabled={Boolean(progress)}
+              >
+                {progress ? (
+                  <Text style={styles.downloadButtonText}>
+                    {Math.round(progress.percent)}%
+                  </Text>
+                ) : (
+                  <Text style={styles.downloadButtonText}>Download</Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      );
+    },
+    [
+      downloadedIds,
+      handleDownload,
+      isSttCategory,
+      isTtsCategory,
+      progressById,
+      filteredModels.length,
+    ]
+  );
+
   const renderFilterRow = (
     label: string,
     options: string[],
     value: string,
-    onChange: (next: string) => void
+    onChange: (next: string) => void,
+    getLabel?: (option: string) => string
   ) => (
     <View style={styles.filterRow}>
       <Text style={styles.filterLabel}>{label}</Text>
@@ -335,7 +589,7 @@ export default function ModelManagementScreen() {
                   isActive && styles.filterPillTextActive,
                 ]}
               >
-                {option}
+                {getLabel ? getLabel(option) : option}
               </Text>
             </TouchableOpacity>
           );
@@ -346,172 +600,263 @@ export default function ModelManagementScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.headerRow}>
+      <FlashList
+        data={availableExpanded ? filteredModels : []}
+        renderItem={renderAvailableModel}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        extraData={{
+          downloadedIds,
+          isSttCategory,
+          isTtsCategory,
+          progressById,
+        }}
+        ListHeaderComponent={
           <View>
-            <Text style={styles.title}>Model Management</Text>
-            <Text style={styles.subtitle}>
-              {currentCategory
-                ? `Download and manage ${currentCategory.label} models`
-                : 'Download and manage models'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.reloadButton}
-            onPress={() => loadModels(true)}
-            disabled={loading}
-          >
-            <Ionicons name="refresh" size={18} color="#007AFF" />
-          </TouchableOpacity>
-        </View>
-
-        {loading && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color="#007AFF" />
-            <Text style={styles.loadingText}>Loading models...</Text>
-          </View>
-        )}
-
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Categories</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterOptions}
-            directionalLockEnabled
-            nestedScrollEnabled
-          >
-            {CATEGORY_OPTIONS.map((option) => {
-              const isActive = option.key === category;
-              return (
-                <TouchableOpacity
-                  key={option.key}
-                  style={[
-                    styles.filterPill,
-                    isActive && styles.filterPillActive,
-                  ]}
-                  onPress={() => handleCategoryChange(option.key)}
-                >
-                  <Text
-                    style={[
-                      styles.filterPillText,
-                      isActive && styles.filterPillTextActive,
-                    ]}
-                  >
-                    {option.label}
+            {/* Header */}
+            <View style={styles.content}>
+              <View style={styles.headerRow}>
+                <View>
+                  <Text style={styles.title}>Model Management</Text>
+                  <Text style={styles.subtitle}>
+                    {currentCategory
+                      ? `Download and manage ${currentCategory.label} models`
+                      : 'Download and manage models'}
                   </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          {currentCategory && (
-            <Text style={styles.categoryHelper}>{currentCategory.helper}</Text>
-          )}
-        </View>
-
-        {isTtsCategory && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Filters</Text>
-            {renderFilterRow('Language', languages, filters.language, (next) =>
-              updateFilter('language', next)
-            )}
-            {renderFilterRow('Type', types, filters.type, (next) =>
-              updateFilter('type', next)
-            )}
-            {renderFilterRow(
-              'Quantization',
-              quantizations,
-              filters.quantization,
-              (next) => updateFilter('quantization', next)
-            )}
-            {renderFilterRow('Size', sizeTiers, filters.sizeTier, (next) =>
-              updateFilter('sizeTier', next)
-            )}
-          </View>
-        )}
-
-        {isSttCategory && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Filters</Text>
-            {renderFilterRow('Type', sttTypes, filters.type, (next) =>
-              updateFilter('type', next)
-            )}
-          </View>
-        )}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Models</Text>
-          {filteredModels.length === 0 ? (
-            <Text style={styles.emptyText}>
-              {isTtsCategory
-                ? 'No models match these filters.'
-                : 'No models available for this category.'}
-            </Text>
-          ) : (
-            filteredModels.map((model) => {
-              const progress = progressById[model.id];
-              const isDownloaded = downloadedIds.has(model.id);
-              const ttsModel = model as TtsModelMeta;
-              const sttType = getSttModelType(model.id);
-              return (
-                <View key={model.id} style={styles.modelRow}>
-                  <View style={styles.modelInfo}>
-                    <Text style={styles.modelName}>{model.displayName}</Text>
-                    <Text style={styles.modelMeta}>
-                      {isTtsCategory
-                        ? `${ttsModel.type} · ${formatBytes(model.bytes)}`
-                        : isSttCategory && sttType
-                        ? `${sttType} · ${formatBytes(model.bytes)}`
-                        : formatBytes(model.bytes)}
-                    </Text>
-                  </View>
-                  {isDownloaded ? (
-                    <Text style={styles.downloadedLabel}>Downloaded</Text>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={() => handleDownload(model)}
-                      disabled={Boolean(progress)}
-                    >
-                      {progress ? (
-                        <Text style={styles.downloadButtonText}>
-                          {Math.round(progress.percent)}%
-                        </Text>
-                      ) : (
-                        <Text style={styles.downloadButtonText}>Download</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Downloaded Models</Text>
-          {downloadedModels.length === 0 ? (
-            <Text style={styles.emptyText}>No cached models yet.</Text>
-          ) : (
-            downloadedModels.map((model) => (
-              <View key={model.id} style={styles.modelRow}>
-                <View style={styles.modelInfo}>
-                  <Text style={styles.modelName}>{model.displayName}</Text>
-                  <Text style={styles.modelMeta}>{model.id}</Text>
                 </View>
                 <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => handleDelete(model)}
+                  style={styles.reloadButton}
+                  onPress={() => loadModels(true)}
+                  disabled={loading}
                 >
-                  <Ionicons name="trash" size={18} color="#FFFFFF" />
+                  <Ionicons name="refresh" size={18} color="#007AFF" />
                 </TouchableOpacity>
               </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
+
+              {loading && (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator size="small" color="#007AFF" />
+                  <Text style={styles.loadingText}>Loading models...</Text>
+                </View>
+              )}
+
+              {error && <Text style={styles.errorText}>{error}</Text>}
+
+              {/* Categories Section */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Categories</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.filterOptions}
+                  directionalLockEnabled
+                  nestedScrollEnabled
+                >
+                  {CATEGORY_OPTIONS.map((option) => {
+                    const isActive = option.key === category;
+                    return (
+                      <TouchableOpacity
+                        key={option.key}
+                        style={[
+                          styles.filterPill,
+                          isActive && styles.filterPillActive,
+                        ]}
+                        onPress={() => handleCategoryChange(option.key)}
+                      >
+                        <Text
+                          style={[
+                            styles.filterPillText,
+                            isActive && styles.filterPillTextActive,
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+                {currentCategory && (
+                  <Text style={styles.categoryHelper}>
+                    {currentCategory.helper}
+                  </Text>
+                )}
+              </View>
+
+              {/* Filters Section */}
+              {(isTtsCategory || isSttCategory) && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Filters</Text>
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search models..."
+                    placeholderTextColor="#333333"
+                    value={searchQuery}
+                    onChangeText={(t) => setSearchQuery(t)}
+                    returnKeyType="search"
+                  />
+                  {isTtsCategory ? (
+                    <>
+                      {renderFilterRow(
+                        'Language',
+                        languages,
+                        filters.language,
+                        (next) => updateFilter('language', next),
+                        getLanguageLabel
+                      )}
+                      {renderFilterRow('Type', types, filters.type, (next) =>
+                        updateFilter('type', next)
+                      )}
+                      {renderFilterRow(
+                        'Quantization',
+                        quantizations,
+                        filters.quantization,
+                        (next) => updateFilter('quantization', next)
+                      )}
+                      {renderFilterRow(
+                        'Size',
+                        sizeTiers,
+                        filters.sizeTier,
+                        (next) => updateFilter('sizeTier', next)
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {renderFilterRow(
+                        'Language',
+                        sttLanguages,
+                        filters.language,
+                        (next) => updateFilter('language', next),
+                        getLanguageLabel
+                      )}
+                      {renderFilterRow('Type', sttTypes, filters.type, (next) =>
+                        updateFilter('type', next)
+                      )}
+                      {renderFilterRow(
+                        'Quantization',
+                        sttQuantizations,
+                        filters.quantization,
+                        (next) => updateFilter('quantization', next)
+                      )}
+                      {renderFilterRow(
+                        'Size',
+                        sttSizeTiers,
+                        filters.sizeTier,
+                        (next) => updateFilter('sizeTier', next)
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Downloaded Models Section */}
+            <View style={[styles.section, { marginHorizontal: 16 }]}>
+              <TouchableOpacity
+                style={styles.sectionHeaderRow}
+                onPress={() => setDownloadedExpanded((s) => !s)}
+              >
+                <View style={styles.sectionHeaderLeft}>
+                  <Text
+                    style={[styles.sectionTitle, styles.sectionTitleInline]}
+                  >
+                    Downloaded Models
+                  </Text>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>
+                      {downloadedModels.length}
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons
+                  name={downloadedExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color="#8E8E93"
+                />
+              </TouchableOpacity>
+              {downloadedExpanded && (
+                <View style={{ marginTop: 8 }}>
+                  {downloadedModels.length === 0 ? (
+                    <Text style={styles.emptyText}>No cached models yet.</Text>
+                  ) : (
+                    downloadedModels.map((model) => (
+                      <View key={model.id} style={styles.modelRow}>
+                        <View style={styles.modelInfo}>
+                          <Text style={styles.modelName}>
+                            {model.displayName}
+                          </Text>
+                          <Text style={styles.modelMeta}>{model.id}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.deleteButton}
+                          onPress={() => handleDelete(model)}
+                        >
+                          <Ionicons name="trash" size={18} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      </View>
+                    ))
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Available Models Section */}
+            <View
+              style={[
+                styles.section,
+                {
+                  marginHorizontal: 16,
+                  marginBottom: 16,
+                  borderBottomLeftRadius:
+                    availableExpanded && filteredModels.length > 0 ? 0 : 12,
+                  borderBottomRightRadius:
+                    availableExpanded && filteredModels.length > 0 ? 0 : 12,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  paddingTop: 16,
+                  paddingBottom:
+                    availableExpanded && filteredModels.length > 0 ? 0 : 16,
+                },
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.sectionHeaderRow}
+                onPress={() => setAvailableExpanded((s) => !s)}
+              >
+                <View style={styles.sectionHeaderLeft}>
+                  <Text
+                    style={[styles.sectionTitle, styles.sectionTitleInline]}
+                  >
+                    Available Models
+                  </Text>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>
+                      {filteredModels.length}
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons
+                  name={availableExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color="#8E8E93"
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
+        ListEmptyComponent={
+          availableExpanded && filteredModels.length === 0 ? (
+            <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+              <Text style={styles.emptyText}>
+                {isTtsCategory
+                  ? 'No models match these filters.'
+                  : 'No models available for this category.'}
+              </Text>
+            </View>
+          ) : null
+        }
+        ListFooterComponent={<View style={{ height: 16 }} />}
+      />
     </SafeAreaView>
   );
 }
@@ -520,6 +865,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  listContent: {
+    padding: 0,
   },
   content: {
     padding: 16,
@@ -582,6 +930,38 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginBottom: 12,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  countBadge: {
+    backgroundColor: '#E5E5EA',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  countBadgeText: {
+    fontSize: 12,
+    color: '#1C1C1E',
+    fontWeight: '600',
+  },
+  sectionTitleInline: {
+    marginBottom: 0,
+    lineHeight: 20,
+  },
+  searchInput: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
   filterRow: {
     marginBottom: 12,
   },
@@ -618,6 +998,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#EFEFF4',
+  },
+  availableItemsContainer: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+  },
+  availableRowContainer: {
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    marginBottom: 0,
+  },
+  availableItemsWrapper: {
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
   modelInfo: {
     flex: 1,
