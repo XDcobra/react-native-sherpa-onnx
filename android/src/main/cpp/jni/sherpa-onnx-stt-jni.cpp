@@ -312,25 +312,45 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
     JNIEnv *env,
     jobject /* this */,
     jstring filePath) {
+    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
+        LOGE("STT JNI: Not initialized. Call initialize() first.");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "STT not initialized. Call initialize() first.");
+        }
+        return nullptr;
+    }
+
+    const char *filePathStr = env->GetStringUTFChars(filePath, nullptr);
+    if (filePathStr == nullptr) {
+        LOGE("STT JNI: Failed to get filePath string");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "Failed to get file path string");
+        }
+        return nullptr;
+    }
+
     try {
-        if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-            LOGE("STT JNI: Not initialized. Call initialize() first.");
-            return env->NewStringUTF("");
-        }
-
-        const char *filePathStr = env->GetStringUTFChars(filePath, nullptr);
-        if (filePathStr == nullptr) {
-            LOGE("STT JNI: Failed to get filePath string");
-            return env->NewStringUTF("");
-        }
-
         std::string result = g_stt_wrapper->transcribeFile(std::string(filePathStr));
         env->ReleaseStringUTFChars(filePath, filePathStr);
-
         return env->NewStringUTF(result.c_str());
     } catch (const std::exception &e) {
+        env->ReleaseStringUTFChars(filePath, filePathStr);
         LOGE("Exception in nativeTranscribeFile: %s", e.what());
-        return env->NewStringUTF("");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, e.what());
+        }
+        return nullptr;
+    } catch (...) {
+        env->ReleaseStringUTFChars(filePath, filePathStr);
+        LOGE("Unknown exception in nativeTranscribeFile");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "Unknown error during transcription");
+        }
+        return nullptr;
     }
 }
 

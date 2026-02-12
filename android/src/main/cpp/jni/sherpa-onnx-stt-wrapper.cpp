@@ -161,55 +161,56 @@ SttInitializeResult SttWrapper::initialize(
 std::string SttWrapper::transcribeFile(const std::string& filePath) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
         LOGE("Not initialized. Call initialize() first.");
-        return "";
+        throw std::runtime_error("STT not initialized. Call initialize() first.");
+    }
+
+    auto fileExists = [](const std::string& path) -> bool {
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+        return std::filesystem::exists(path);
+#elif __has_include(<experimental/filesystem>)
+        return std::experimental::filesystem::exists(path);
+#else
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0);
+#endif
+    };
+
+    LOGI("Transcribe: file=%s", filePath.c_str());
+    if (!fileExists(filePath)) {
+        LOGE("Audio file not found: %s", filePath.c_str());
+        throw std::runtime_error(std::string("Audio file not found: ") + filePath);
+    }
+
+    sherpa_onnx::cxx::Wave wave;
+    try {
+        wave = sherpa_onnx::cxx::ReadWave(filePath);
+    } catch (const std::exception& e) {
+        LOGE("Transcribe: ReadWave failed: %s", e.what());
+        throw;
+    } catch (...) {
+        LOGE("Transcribe: ReadWave failed (unknown exception)");
+        throw std::runtime_error(std::string("Failed to read audio file: ") + filePath);
+    }
+
+    if (wave.samples.empty()) {
+        LOGE("Audio file is empty or failed to read: %s", filePath.c_str());
+        throw std::runtime_error(std::string("Audio file is empty or could not be read: ") + filePath);
     }
 
     try {
-        // Helper function to check if file exists
-        auto fileExists = [](const std::string& path) -> bool {
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
-            return std::filesystem::exists(path);
-#elif __has_include(<experimental/filesystem>)
-            return std::experimental::filesystem::exists(path);
-#else
-            struct stat buffer;
-            return (stat(path.c_str(), &buffer) == 0);
-#endif
-        };
-
-        // Check if file exists
-        if (!fileExists(filePath)) {
-            LOGE("Audio file not found: %s", filePath.c_str());
-            return "";
-        }
-
-        // Read audio file using cxx-api
-        sherpa_onnx::cxx::Wave wave = sherpa_onnx::cxx::ReadWave(filePath);
-
-        if (wave.samples.empty()) {
-            LOGE("Audio file is empty or failed to read: %s", filePath.c_str());
-            return "";
-        }
-
-        // Create a stream
         auto stream = pImpl->recognizer.value().CreateStream();
-
-        // Feed audio data to the stream (all samples at once for offline recognition)
         stream.AcceptWaveform(wave.sample_rate, wave.samples.data(), wave.samples.size());
-
-        // Decode the stream
         pImpl->recognizer.value().Decode(&stream);
-
-        // Get result
         auto result = pImpl->recognizer.value().GetResult(&stream);
-
         return result.text;
     } catch (const std::exception& e) {
-        LOGE("Exception during transcription: %s", e.what());
-        return "";
+        LOGE("Transcribe: recognition failed: %s", e.what());
+        throw;
     } catch (...) {
-        LOGE("Unknown exception during transcription");
-        return "";
+        LOGE("Transcribe: recognition failed (unknown exception)");
+        throw std::runtime_error(
+            "Recognition failed. Ensure the model supports offline decoding and audio is 16 kHz mono WAV."
+        );
     }
 }
 

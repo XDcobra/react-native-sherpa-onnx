@@ -99,7 +99,9 @@ internal class SherpaOnnxSttHelper(
       val result = native.nativeSttTranscribe(filePath)
       promise.resolve(result)
     } catch (e: Exception) {
-      promise.reject("TRANSCRIBE_ERROR", "Failed to transcribe file", e)
+      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
+      Log.e(logTag, "transcribeFile error: $message", e)
+      promise.reject("TRANSCRIBE_ERROR", message, e)
     }
   }
 
