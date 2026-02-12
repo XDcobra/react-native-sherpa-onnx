@@ -11,10 +11,7 @@ const API_BASE =
 const ARCHIVE_EXTENSIONS = ['.tar.bz2', '.onnx'];
 
 const args = parseArgs(process.argv.slice(2));
-const platform = args.platform || 'android';
 const outputDir = args.output ? path.resolve(args.output) : null;
-
-const repoRoot = path.resolve(__dirname, '..', '..');
 const exampleRoot = path.resolve(__dirname, '..');
 const cacheDir = path.resolve(
   args.cache || path.join(exampleRoot, '.model-cache')
@@ -133,7 +130,7 @@ async function downloadModelToCache(modelId, tag, cacheModelDir) {
     execFileSync('tar', ['-xjf', archivePath, '-C', extractDir], {
       stdio: 'inherit',
     });
-  } catch (error) {
+  } catch {
     throw new Error(
       `Failed to extract ${path.basename(
         archivePath
@@ -256,7 +253,7 @@ function fetchJson(url) {
         try {
           const parsed = JSON.parse(data);
           resolve(parsed);
-        } catch (error) {
+        } catch {
           reject(new Error('Failed to parse GitHub API response.'));
         }
       });

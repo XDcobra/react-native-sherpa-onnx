@@ -13,8 +13,7 @@ import { adsEnabled } from '../../ads/adsConfig';
 import { useAdsConsent } from '../../ads/useAdsConsent';
 
 export default function SettingsScreen() {
-  const { status, error, refreshConsent } =
-    useAdsConsent(adsEnabled);
+  const { status, error, refreshConsent } = useAdsConsent(adsEnabled);
   const [loading, setLoading] = useState(false);
 
   const handlePrivacyOptions = async () => {
