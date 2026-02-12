@@ -8,10 +8,10 @@ ios_include_path = File.join(pod_root, 'ios', 'include')
 ios_path = File.join(pod_root, 'ios')
 framework_path = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
 libarchive_dir = File.join(pod_root, 'third_party', 'libarchive', 'libarchive')
-# Libarchive C sources for iOS: exclude test/, and Windows-specific (use POSIX/Darwin only)
+# Libarchive C sources for iOS: exclude test/, Windows, and non-Darwin platform files
 libarchive_sources = Dir.glob(File.join(libarchive_dir, '*.c'))
   .reject { |f| File.basename(f) =~ /^test\./ }
-  .reject { |f| File.basename(f, '.c').to_s.include?('windows') }
+  .reject { |f| base = File.basename(f, '.c'); base.include?('windows') || base.include?('linux') || base.include?('sunos') || base.include?('freebsd') }
   .map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub('\\', '/') }
 
 Pod::Spec.new do |s|

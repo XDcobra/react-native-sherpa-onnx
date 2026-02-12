@@ -106,7 +106,10 @@
 #define HAVE_STRING_H 1
 #define HAVE_STRRCHR 1
 #define HAVE_STRUCT_STAT_ST_BLKSIZE 1
-#define HAVE_STRUCT_STAT_ST_MTIME_NSEC 1
+/* Darwin uses struct timespec (st_atimespec etc.), not st_*time_nsec */
+#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
+#define HAVE_STRUCT_STAT_ST_MTIME_NSEC 0
+#define HAVE_STRUCT_STAT_ST_BIRTHTIMESPEC_TV_NSEC 1
 #define HAVE_STRUCT_TM_TM_GMTOFF 1
 #define HAVE_SYMLINK 1
 #define HAVE_SYS_CDEFS_H 1
