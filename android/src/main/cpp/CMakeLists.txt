@@ -55,9 +55,11 @@ set(SHERPA_ONNX_LIB "")
 foreach(lib_path ${SHERPA_ONNX_LIB_PATHS})
     if(NOT SHERPA_ONNX_LIB)
         get_filename_component(lib_name "${lib_path}" NAME_WE)
+        # Strip leading "lib" to avoid find_library() searching for "liblib*.so"
+        string(REGEX REPLACE "^lib" "" lib_name_without_prefix "${lib_name}")
         unset(found_lib CACHE)
         find_library(found_lib
-            NAMES ${lib_name}
+            NAMES ${lib_name_without_prefix}
             PATHS "${EXTRACTED_LIBS_DIR}"
             NO_DEFAULT_PATH
         )
