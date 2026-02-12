@@ -13,7 +13,7 @@ import { adsEnabled } from '../../ads/adsConfig';
 import { useAdsConsent } from '../../ads/useAdsConsent';
 
 export default function SettingsScreen() {
-  const { status, canRequestAds, error, refreshConsent } =
+  const { status, error, refreshConsent } =
     useAdsConsent(adsEnabled);
   const [loading, setLoading] = useState(false);
 
@@ -53,13 +53,7 @@ export default function SettingsScreen() {
       <View style={styles.body}>
         <View style={styles.section}>
           <Text style={styles.title}>Advertising</Text>
-          <Text style={styles.bodyText}>
-            Ads are {adsEnabled ? 'enabled' : 'disabled'} for this build.
-          </Text>
           <Text style={styles.bodyText}>Consent status: {statusLabel}</Text>
-          <Text style={styles.bodyText}>
-            Can request ads: {canRequestAds ? 'yes' : 'no'}
-          </Text>
           {error ? (
             <Text style={styles.errorText}>Consent error: {error.message}</Text>
           ) : null}
