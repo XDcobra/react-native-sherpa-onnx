@@ -8,6 +8,7 @@ This guide covers the STT APIs for offline transcription.
 | Offline file transcription | Supported | `transcribeFile()` |
 | Unload resources | Supported | `unloadSTT()` |
 | Model discovery helpers | Supported | `listAssetModels()` / `resolveModelPath()` |
+| Model downloads | Supported | Download Manager API |
 | Streaming/online recognition | Planned | C API supports online recognizers (model-dependent) |
 | Endpointing / VAD-based segmentation | Planned | C API supports endpointing + VAD (model-dependent) |
 | Timestamps (segment/word) | Planned | Model-dependent |
@@ -29,7 +30,7 @@ const models = await listAssetModels();
 // 2) Initialize with a ModelPathConfig (no string path needed)
 await initializeSTT({
   modelPath: { type: 'asset', path: 'models/sherpa-onnx-whisper-tiny-en' },
-  modelType: 'whisper',
+  modelType: 'auto',
   preferInt8: true,
 });
 
@@ -44,10 +45,11 @@ await unloadSTT();
 
 ### `initializeSTT(options)`
 
-Initialize the speech-to-text engine with a model.
+Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to let the SDK detect the model based on files.
 
 Notes and common pitfalls:
 - `modelPath` must point to the model directory containing the expected files for the chosen `modelType` (e.g. `encoder.onnx/decoder.onnx/joiner.onnx` for transducer, `model.onnx` + `tokens.txt` for paraformer).
+- Auto-detection is file-based. Folder names are no longer required to match model types.
 - If you need a concrete file path (e.g. for audio files), use `resolveModelPath` on a `ModelPathConfig`. Android will return a path inside the APK extraction area; iOS will return the bundle path.
 - `preferInt8: true` will attempt to load quantized models when available — faster and smaller, but may affect accuracy.
 
@@ -76,16 +78,15 @@ See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup ste
 ```typescript
 const models = await listAssetModels();
 for (const m of models) {
-  if (m.hint === 'stt' || m.folder.includes('zipformer') || m.folder.includes('paraformer') || m.folder.includes('whisper')) {
-    const r = await initializeSTT({
-      modelPath: { type: 'asset', path: `models/${m.folder}` },
-      preferInt8: true,
-      modelType: 'auto',
-    });
-    if (r.success) {
-      console.log('Loaded', m.folder, r.detectedModels);
-      break;
-    }
+  if (m.hint !== 'stt') continue;
+  const r = await initializeSTT({
+    modelPath: { type: 'asset', path: `models/${m.folder}` },
+    preferInt8: true,
+    modelType: 'auto',
+  });
+  if (r.success) {
+    console.log('Loaded', m.folder, r.detectedModels);
+    break;
   }
 }
 ```
