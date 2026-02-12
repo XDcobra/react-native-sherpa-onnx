@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { STTInitializeOptions } from './types';
-import type { InitializeOptions } from '../types';
+import type { STTInitializeOptions, STTModelType } from './types';
+import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
 /**
@@ -15,10 +15,9 @@ import { resolveModelPath } from '../utils';
  * @returns Object with success status and array of detected models (each with type and modelDir)
  * @example
  * ```typescript
- * // Simple string (auto-detect)
- * const result = await initializeSTT('models/sherpa-onnx-model');
+ * // Auto-detect model path
+ * const result = await initializeSTT({ type: 'auto', path: 'models/sherpa-onnx-model' });
  * console.log('Detected models:', result.detectedModels);
- * // result.detectedModels = [{ type: 'transducer', modelDir: '/path/to/model' }]
  *
  * // Asset model
  * const result = await initializeSTT({
@@ -39,22 +38,22 @@ import { resolveModelPath } from '../utils';
  * ```
  */
 export async function initializeSTT(
-  options: STTInitializeOptions | InitializeOptions['modelPath']
+  options: STTInitializeOptions | ModelPathConfig
 ): Promise<{
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
 }> {
-  // Handle both object syntax and direct path syntax
-  let modelPath: InitializeOptions['modelPath'];
+  // Handle both object syntax and direct config syntax
+  let modelPath: ModelPathConfig;
   let preferInt8: boolean | undefined;
-  let modelType: string | undefined;
+  let modelType: STTModelType | undefined;
 
-  if (typeof options === 'object' && 'modelPath' in options) {
+  if ('modelPath' in options) {
     modelPath = options.modelPath;
     preferInt8 = options.preferInt8;
     modelType = options.modelType;
   } else {
-    modelPath = options as InitializeOptions['modelPath'];
+    modelPath = options;
     preferInt8 = undefined;
     modelType = undefined;
   }
@@ -86,4 +85,8 @@ export function unloadSTT(): Promise<void> {
 }
 
 // Export types
-export type { STTInitializeOptions, TranscriptionResult } from './types';
+export type {
+  STTInitializeOptions,
+  STTModelType,
+  TranscriptionResult,
+} from './types';

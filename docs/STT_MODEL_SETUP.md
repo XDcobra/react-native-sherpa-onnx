@@ -6,7 +6,7 @@ This guide explains how to download, configure, and use STT models with `react-n
 
 - [Overview](#overview)
 - [Supported Model Types](#supported-model-types)
-- [Model Download Links](#model-download-links)
+- [Download models with the SDK](#download-models-with-the-sdk)
 - [File Structure Requirements](#file-structure-requirements)
 - [Platform-Specific Setup](#platform-specific-setup)
 - [Model Configuration Examples](#model-configuration-examples)
@@ -16,7 +16,7 @@ This guide explains how to download, configure, and use STT models with `react-n
 
 The STT module supports multiple model architectures for offline speech recognition. Models are **not bundled** with the library - you must download and configure them yourself.
 
-**Auto-Detection**: The library can automatically detect model types based on the files present in the model directory. You can also explicitly specify the model type if needed.
+**Auto-Detection**: The library detects model types based on files present in the model directory. Folder names do not need to match model types.
 
 **Quantization Support**: Most models support int8 quantization for reduced size and faster inference with minimal accuracy loss.
 
@@ -32,82 +32,34 @@ The STT module supports multiple model architectures for offline speech recognit
 | **SenseVoice** | High-quality ASR with emotion | Multilingual, emotion detection | `model.onnx`, `tokens.txt` |
 | **FunASR Nano** | Lightweight streaming ASR | Edge devices, low latency | `encoder_adaptor.onnx`, `llm.onnx`, `embedding.onnx`, `tokenizer/` |
 
-## Model Download Links
+## Download models with the SDK
 
-### Zipformer/Transducer Models
+You can download STT models directly in-app using the download API and then initialize with the local path.
 
-**English**:
-- **Zipformer Transducer (Small)**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-en-2023-06-26.tar.bz2) - ~66MB
-- **Zipformer Transducer (Medium)**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-en-2023-06-21.tar.bz2) - ~200MB
-- More models: [Zipformer Collection](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-transducer/index.html)
+See [download-manager.md](./download-manager.md) for the full API surface.
 
-**Chinese**:
-- **Zipformer Chinese**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-zh-2023-10-24.tar.bz2)
+```typescript
+import {
+  ModelCategory,
+  downloadModelByCategory,
+  getLocalModelPathByCategory,
+} from 'react-native-sherpa-onnx/download';
+import { initializeSTT } from 'react-native-sherpa-onnx/stt';
 
-**Multilingual**:
-- **Zipformer Multilingual**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-multi-zh-hans-2023-9-2.tar.bz2)
+await downloadModelByCategory(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
-### Paraformer Models
+const localPath = await getLocalModelPathByCategory(
+  ModelCategory.Stt,
+  'sherpa-onnx-whisper-tiny'
+);
 
-**Chinese**:
-- **Paraformer Chinese**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2)
-- **Paraformer Chinese (Small)**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2)
-
-**Multilingual**:
-- **Paraformer Trilingual** (Chinese/English/Japanese): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-trilingual-zh-cantonese-en-2024-03-20.tar.bz2)
-
-More models: [Paraformer Collection](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-paraformer/index.html)
-
-### NeMo CTC Models
-
-**English**:
-- **NeMo Parakeet TDT CTC** (0.6B params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-ctc-en-v1.17.0.tar.bz2) - ~700MB
-- **NeMo Parakeet CTC** (1.1B params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-ctc-en-v1.17.0.tar.bz2) - ~1.2GB
-
-More models: [NeMo CTC Collection](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/nemo/index.html)
-
-### Whisper Models
-
-**All Languages**:
-- **Tiny** (~39M params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2) - ~74MB
-- **Base** (~74M params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2) - ~140MB
-- **Small** (~244M params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2) - ~460MB
-- **Medium** (~769M params): [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-medium.tar.bz2) - ~1.5GB
-- **Large-v2**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-large-v2.tar.bz2) - ~2.9GB
-- **Large-v3**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-large-v3.tar.bz2) - ~2.9GB
-
-**English-Only** (higher accuracy for English):
-- **Tiny.en**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2)
-- **Base.en**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.en.tar.bz2)
-- **Small.en**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2)
-- **Medium.en**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-medium.en.tar.bz2)
-
-More info: [Whisper Models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html)
-
-### WeNet CTC Models
-
-**Chinese**:
-- **WeNet Chinese**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zh-wenet-wenetspeech.tar.bz2)
-- **WeNet Aishell**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zh-wenet-aishell.tar.bz2)
-
-**English**:
-- **WeNet Gigaspeech**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-en-wenet-gigaspeech.tar.bz2)
-
-More models: [WeNet CTC Collection](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/wenet/index.html)
-
-### SenseVoice Models
-
-**Multilingual** (Chinese, English, Japanese, Korean, Cantonese):
-- **SenseVoice Small**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2) - ~150MB
-
-More info: [SenseVoice Models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/sense-voice/index.html)
-
-### FunASR Nano Models
-
-**Chinese/English**:
-- **FunASR Nano**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-funasr-nano-zh-en-2024-12-11.tar.bz2) - ~65MB
-
-More info: [FunASR Nano Models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/funasr-nano/index.html)
+if (localPath) {
+  await initializeSTT({
+    modelPath: { type: 'file', path: localPath },
+    modelType: 'auto',
+  });
+}
+```
 
 ## File Structure Requirements
 
@@ -265,7 +217,7 @@ await initializeSTT({
 import { initializeSTT, transcribeFile } from 'react-native-sherpa-onnx/stt';
 
 // Auto-detect model type and prefer int8 quantization
-await initializeSTT('models/sherpa-onnx-zipformer-en-2023-06-26');
+await initializeSTT({ type: 'auto', path: 'models/sherpa-onnx-zipformer-en-2023-06-26' });
 
 const transcription = await transcribeFile('path/to/audio.wav');
 console.log('Transcription:', transcription);

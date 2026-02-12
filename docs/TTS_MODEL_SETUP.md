@@ -6,7 +6,7 @@ This guide explains how to download, configure, and use TTS models with `react-n
 
 - [Overview](#overview)
 - [Supported Model Types](#supported-model-types)
-- [Model Download Links](#model-download-links)
+- [Download models with the SDK](#download-models-with-the-sdk)
 - [File Structure Requirements](#file-structure-requirements)
 - [Platform-Specific Setup](#platform-specific-setup)
 - [Model Configuration Examples](#model-configuration-examples)
@@ -16,7 +16,7 @@ This guide explains how to download, configure, and use TTS models with `react-n
 
 The TTS module supports multiple model architectures, each with specific file requirements. Models are **not bundled** with the library - you must download and configure them yourself.
 
-**Auto-Detection**: The library can automatically detect model types based on the files present in the model directory. You can also explicitly specify the model type if needed.
+**Auto-Detection**: The library detects model types based on the files present in the model directory. Folder names do not need to match model types.
 
 ## Supported Model Types
 
@@ -28,41 +28,34 @@ The TTS module supports multiple model architectures, each with specific file re
 | **KittenTTS** | Lightweight, multi-speaker | Resource-constrained devices | `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/` |
 | **Zipvoice** | Voice cloning capable | Custom voice synthesis | `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt` |
 
-## Model Download Links
+## Download models with the SDK
 
-### VITS Models
+You can download TTS models directly in-app using the download API and then initialize with the local path.
 
-**Piper Models** (Recommended for production):
-- **English (US)** - Lessac Medium: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2)
-- **English (US)** - Amy Low: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2)
-- **English (GB)** - Alba Medium: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alba-medium.tar.bz2)
-- **German**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-de_DE-thorsten-medium.tar.bz2)
-- **Spanish**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_ES-sharvard-medium.tar.bz2)
-- **French**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-siwis-medium.tar.bz2)
-- More languages: [Piper Models Collection](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)
+See [download-manager.md](./download-manager.md) for the full API surface.
 
-**Coqui/MeloTTS Models**:
-- See [sherpa-onnx TTS documentation](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/index.html)
+```typescript
+import {
+  ModelCategory,
+  downloadModelByCategory,
+  getLocalModelPathByCategory,
+} from 'react-native-sherpa-onnx/download';
+import { initializeTTS } from 'react-native-sherpa-onnx/tts';
 
-### Kokoro Models
+await downloadModelByCategory(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
 
-- **Kokoro EN v0.19**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2)
-  - Multi-speaker English model
-  - High quality, expressive voices
+const localPath = await getLocalModelPathByCategory(
+  ModelCategory.Tts,
+  'vits-piper-en_US-lessac-medium'
+);
 
-### KittenTTS Models
-
-- **KittenTTS**: [Download](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-tts.tar.bz2)
-  - Lightweight, efficient
-  - Multiple speakers
-
-### Matcha Models
-
-- See [sherpa-onnx Matcha documentation](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html)
-
-### Zipvoice Models
-
-- See [sherpa-onnx Zipvoice documentation](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html)
+if (localPath) {
+  await initializeTTS({
+    modelPath: { type: 'file', path: localPath },
+    modelType: 'auto',
+  });
+}
+```
 
 ## File Structure Requirements
 
@@ -224,7 +217,7 @@ await initializeTTS({
 import { initializeTTS, generateSpeech } from 'react-native-sherpa-onnx/tts';
 
 // Auto-detect model type from files
-await initializeTTS('models/vits-piper-en_US-lessac-medium');
+await initializeTTS({ type: 'auto', path: 'models/vits-piper-en_US-lessac-medium' });
 
 const audio = await generateSpeech('Hello, world!');
 console.log(`Generated ${audio.samples.length} samples at ${audio.sampleRate} Hz`);

@@ -2,6 +2,8 @@
 
 React Native SDK for sherpa-onnx - providing offline speech processing capabilities
 
+![Banner](./docs/images/banner.png)
+
 [![npm version](https://img.shields.io/npm/v/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![npm downloads](https://img.shields.io/npm/dm/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![npm license](https://img.shields.io/npm/l/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
@@ -28,16 +30,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
 | **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>✅ GitHub Actions builds pass<br/>❌ **No local Xcode testing** *(Windows-only dev)* |
 
-### 🔧 **iOS Contributors WANTED!**
-
 **Full iOS support is a priority!** Help bring sherpa-onnx to iOS devices.
-
-**What's ready:**
-- ✅ XCFramework integration
-- ✅ Podspec configuration  
-- ✅ GitHub Actions CI (macOS runner) 
-- ✅ TypeScript bindings
-
 **What's needed:**
 - **Local Xcode testing** (Simulator + Device)
 - **iOS example app** (beyond CI)
@@ -77,7 +70,6 @@ A React Native TurboModule that provides offline speech processing capabilities 
 - ✅ **Android Support** - Fully supported on Android
 - ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
 - ✅ **TypeScript Support** - Full TypeScript definitions included
-- 🚧 **Additional Features Coming Soon** - Speaker Diarization, Speech Enhancement, Source Separation, and VAD support are planned for future releases
 
 ## Installation
 
@@ -144,6 +136,7 @@ Then run `pod install` as usual.
 
 - [Speech-to-Text (STT)](./docs/stt.md)
 - [Text-to-Speech (TTS)](./docs/tts.md)
+- [Model Download Manager](./docs/download-manager.md)
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Speech Enhancement](./docs/enhancement.md)
@@ -193,10 +186,12 @@ yarn install
 yarn android  # or yarn ios
 ```
 
-<div align="center">
-  <img src="./docs/images/example_home_screen.png" alt="Model selection home screen" width="30%" />
-  <img src="./docs/images/example_english.png" alt="Transcribe english audio" width="30%" />
-  <img src="./docs/images/example_multilanguage.png" alt="Transcribe english and chinese audio" width="30%" />
+<div align="center" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
+  <img src="./docs/images/example_home_screen.png" alt="Model selection home screen" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_stt_1.png" alt="Transcribe english audio" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_tts_1.png" alt="Text to speech settings" style="flex:0 0 32%;max-width:32%;" />
+  <img src="./docs/images/example_tts_2.png" alt="Text to speech generation" style="flex:0 0 32%;max-width:32%;" />
 </div>
 
 ### Video to Text Comparison App

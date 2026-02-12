@@ -78,7 +78,12 @@ internal class SherpaOnnxSttHelper(
         resultMap.putArray("detectedModels", detectedModelsArray)
         promise.resolve(resultMap)
       } else {
-        val errorMsg = "Failed to initialize sherpa-onnx. Check native logs for details."
+        val reason = result["error"] as? String
+        val errorMsg = if (!reason.isNullOrBlank()) {
+          "Failed to initialize sherpa-onnx: $reason"
+        } else {
+          "Failed to initialize sherpa-onnx. Check native logs for details."
+        }
         Log.e(logTag, "Native initialization returned false for modelDir: $modelDir")
         promise.reject("INIT_ERROR", errorMsg)
       }
@@ -94,7 +99,9 @@ internal class SherpaOnnxSttHelper(
       val result = native.nativeSttTranscribe(filePath)
       promise.resolve(result)
     } catch (e: Exception) {
-      promise.reject("TRANSCRIBE_ERROR", "Failed to transcribe file", e)
+      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
+      Log.e(logTag, "transcribeFile error: $message", e)
+      promise.reject("TRANSCRIBE_ERROR", message, e)
     }
   }
 

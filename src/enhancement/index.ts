@@ -10,16 +10,18 @@
  * // Future usage:
  * import { initializeEnhancement, enhanceAudio } from 'react-native-sherpa-onnx/enhancement';
  *
- * await initializeEnhancement({ modelPath: 'models/enhancement-model' });
+ * await initializeEnhancement({ modelPath: { type: 'auto', path: 'models/enhancement-model' } });
  * const enhancedPath = await enhanceAudio('path/to/noisy-audio.wav');
  * ```
  */
+
+import type { ModelPathConfig } from '../types';
 
 /**
  * Enhancement initialization options (placeholder)
  */
 export interface EnhancementInitializeOptions {
-  modelPath: string;
+  modelPath: ModelPathConfig;
   // Additional enhancement-specific options will be added here
 }
 

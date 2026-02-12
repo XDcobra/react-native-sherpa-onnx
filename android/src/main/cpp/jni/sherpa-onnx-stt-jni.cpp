@@ -163,6 +163,28 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         env->DeleteLocalRef(successObj);
         env->DeleteLocalRef(booleanClass);
 
+        if (!result.error.empty()) {
+            jstring errorKey = env->NewStringUTF("error");
+            jstring errorValue = env->NewStringUTF(result.error.c_str());
+            if (errorKey != nullptr && errorValue != nullptr) {
+                env->CallObjectMethod(hashMap, putMethod, errorKey, errorValue);
+            }
+            if (env->ExceptionCheck()) {
+                LOGE("STT JNI: Exception while putting error field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
+            if (errorKey) {
+                env->DeleteLocalRef(errorKey);
+            }
+            if (errorValue) {
+                env->DeleteLocalRef(errorValue);
+            }
+        }
+
         // Put detectedModels array
         LOGI("STT JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");
@@ -290,25 +312,45 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
     JNIEnv *env,
     jobject /* this */,
     jstring filePath) {
+    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
+        LOGE("STT JNI: Not initialized. Call initialize() first.");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "STT not initialized. Call initialize() first.");
+        }
+        return nullptr;
+    }
+
+    const char *filePathStr = env->GetStringUTFChars(filePath, nullptr);
+    if (filePathStr == nullptr) {
+        LOGE("STT JNI: Failed to get filePath string");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "Failed to get file path string");
+        }
+        return nullptr;
+    }
+
     try {
-        if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-            LOGE("STT JNI: Not initialized. Call initialize() first.");
-            return env->NewStringUTF("");
-        }
-
-        const char *filePathStr = env->GetStringUTFChars(filePath, nullptr);
-        if (filePathStr == nullptr) {
-            LOGE("STT JNI: Failed to get filePath string");
-            return env->NewStringUTF("");
-        }
-
         std::string result = g_stt_wrapper->transcribeFile(std::string(filePathStr));
         env->ReleaseStringUTFChars(filePath, filePathStr);
-
         return env->NewStringUTF(result.c_str());
     } catch (const std::exception &e) {
+        env->ReleaseStringUTFChars(filePath, filePathStr);
         LOGE("Exception in nativeTranscribeFile: %s", e.what());
-        return env->NewStringUTF("");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, e.what());
+        }
+        return nullptr;
+    } catch (...) {
+        env->ReleaseStringUTFChars(filePath, filePathStr);
+        LOGE("Unknown exception in nativeTranscribeFile");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "Unknown error during transcription");
+        }
+        return nullptr;
     }
 }
 

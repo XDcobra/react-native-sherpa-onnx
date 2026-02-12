@@ -1,4 +1,18 @@
-import type { InitializeOptions, ModelType } from '../types';
+import type { ModelPathConfig } from '../types';
+
+/**
+ * Supported STT model types.
+ */
+export type STTModelType =
+  | 'transducer'
+  | 'zipformer'
+  | 'paraformer'
+  | 'nemo_ctc'
+  | 'whisper'
+  | 'wenet_ctc'
+  | 'sense_voice'
+  | 'funasr_nano'
+  | 'auto';
 
 /**
  * STT-specific initialization options
@@ -7,7 +21,7 @@ export interface STTInitializeOptions {
   /**
    * Model directory path configuration
    */
-  modelPath: InitializeOptions['modelPath'];
+  modelPath: ModelPathConfig;
 
   /**
    * Model quantization preference
@@ -19,7 +33,8 @@ export interface STTInitializeOptions {
 
   /**
    * Explicit model type specification for STT models
-   * - 'transducer': Force detection as Zipformer/Transducer model
+   * - 'transducer': Force detection as Transducer model
+   * - 'zipformer': Force detection as Zipformer (streaming) model
    * - 'paraformer': Force detection as Paraformer model
    * - 'nemo_ctc': Force detection as NeMo CTC model
    * - 'whisper': Force detection as Whisper model
@@ -28,7 +43,7 @@ export interface STTInitializeOptions {
    * - 'funasr_nano': Force detection as FunASR Nano model
    * - 'auto': Automatic detection based on files (default)
    */
-  modelType?: ModelType;
+  modelType?: STTModelType;
 }
 
 /**

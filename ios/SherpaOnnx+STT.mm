@@ -73,26 +73,30 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
           withResolver:(RCTPromiseResolveBlock)resolve
           withRejecter:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-            reject(@"TRANSCRIBE_ERROR", @"Sherpa-onnx not initialized. Call initializeSherpaOnnx first.", nil);
-            return;
-        }
+    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
+        NSString *errorMsg = @"STT not initialized. Call initialize() first.";
+        RCTLogError(@"Transcribe error: %@", errorMsg);
+        reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
+        return;
+    }
 
+    try {
         std::string filePathStr = [filePath UTF8String];
         std::string result = g_stt_wrapper->transcribeFile(filePathStr);
 
-        // Convert result to NSString - empty strings are valid (e.g., silence)
         NSString *transcribedText = [NSString stringWithUTF8String:result.c_str()];
         if (transcribedText == nil) {
-            // If conversion fails, treat as empty string
             transcribedText = @"";
         }
-
         resolve(transcribedText);
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception during transcription: %@", exception.reason];
-        RCTLogError(@"%@", errorMsg);
+    } catch (const std::exception& e) {
+        NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
+        if (!errorMsg) errorMsg = @"Recognition failed.";
+        RCTLogError(@"Transcribe error: %@", errorMsg);
+        reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
+    } catch (...) {
+        NSString *errorMsg = @"Unknown error during transcription";
+        RCTLogError(@"Transcribe error: %@", errorMsg);
         reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
     }
 }

@@ -54,6 +54,7 @@ SttInitializeResult SttWrapper::initialize(
 ) {
     SttInitializeResult result;
     result.success = false;
+    result.error = "";
 
     if (pImpl->initialized) {
         release();
@@ -61,6 +62,7 @@ SttInitializeResult SttWrapper::initialize(
 
     if (modelDir.empty()) {
         LOGE("Model directory is empty");
+        result.error = "Model directory is empty";
         return result;
     }
 
@@ -72,6 +74,7 @@ SttInitializeResult SttWrapper::initialize(
         auto detect = DetectSttModel(modelDir, preferInt8, modelType);
         if (!detect.ok) {
             LOGE("%s", detect.error.c_str());
+            result.error = detect.error;
             return result;
         }
 
@@ -109,6 +112,7 @@ SttInitializeResult SttWrapper::initialize(
             case SttModelKind::kUnknown:
             default:
                 LOGE("No compatible model type detected in %s", modelDir.c_str());
+                result.error = "No compatible model type detected in " + modelDir;
                 return result;
         }
 
@@ -132,6 +136,7 @@ SttInitializeResult SttWrapper::initialize(
             pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
         } catch (const std::exception& e) {
             LOGE("Failed to create recognizer: %s", e.what());
+            result.error = std::string("Failed to create recognizer: ") + e.what();
             return result;
         }
 
@@ -144,9 +149,11 @@ SttInitializeResult SttWrapper::initialize(
         return result;
     } catch (const std::exception& e) {
         LOGE("Exception during initialization: %s", e.what());
+        result.error = std::string("Exception during initialization: ") + e.what();
         return result;
     } catch (...) {
         LOGE("Unknown exception during initialization");
+        result.error = "Unknown exception during initialization";
         return result;
     }
 }
@@ -154,55 +161,56 @@ SttInitializeResult SttWrapper::initialize(
 std::string SttWrapper::transcribeFile(const std::string& filePath) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
         LOGE("Not initialized. Call initialize() first.");
-        return "";
+        throw std::runtime_error("STT not initialized. Call initialize() first.");
+    }
+
+    auto fileExists = [](const std::string& path) -> bool {
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+        return std::filesystem::exists(path);
+#elif __has_include(<experimental/filesystem>)
+        return std::experimental::filesystem::exists(path);
+#else
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0);
+#endif
+    };
+
+    LOGI("Transcribe: file=%s", filePath.c_str());
+    if (!fileExists(filePath)) {
+        LOGE("Audio file not found: %s", filePath.c_str());
+        throw std::runtime_error(std::string("Audio file not found: ") + filePath);
+    }
+
+    sherpa_onnx::cxx::Wave wave;
+    try {
+        wave = sherpa_onnx::cxx::ReadWave(filePath);
+    } catch (const std::exception& e) {
+        LOGE("Transcribe: ReadWave failed: %s", e.what());
+        throw;
+    } catch (...) {
+        LOGE("Transcribe: ReadWave failed (unknown exception)");
+        throw std::runtime_error(std::string("Failed to read audio file: ") + filePath);
+    }
+
+    if (wave.samples.empty()) {
+        LOGE("Audio file is empty or failed to read: %s", filePath.c_str());
+        throw std::runtime_error(std::string("Audio file is empty or could not be read: ") + filePath);
     }
 
     try {
-        // Helper function to check if file exists
-        auto fileExists = [](const std::string& path) -> bool {
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
-            return std::filesystem::exists(path);
-#elif __has_include(<experimental/filesystem>)
-            return std::experimental::filesystem::exists(path);
-#else
-            struct stat buffer;
-            return (stat(path.c_str(), &buffer) == 0);
-#endif
-        };
-
-        // Check if file exists
-        if (!fileExists(filePath)) {
-            LOGE("Audio file not found: %s", filePath.c_str());
-            return "";
-        }
-
-        // Read audio file using cxx-api
-        sherpa_onnx::cxx::Wave wave = sherpa_onnx::cxx::ReadWave(filePath);
-
-        if (wave.samples.empty()) {
-            LOGE("Audio file is empty or failed to read: %s", filePath.c_str());
-            return "";
-        }
-
-        // Create a stream
         auto stream = pImpl->recognizer.value().CreateStream();
-
-        // Feed audio data to the stream (all samples at once for offline recognition)
         stream.AcceptWaveform(wave.sample_rate, wave.samples.data(), wave.samples.size());
-
-        // Decode the stream
         pImpl->recognizer.value().Decode(&stream);
-
-        // Get result
         auto result = pImpl->recognizer.value().GetResult(&stream);
-
         return result.text;
     } catch (const std::exception& e) {
-        LOGE("Exception during transcription: %s", e.what());
-        return "";
+        LOGE("Transcribe: recognition failed: %s", e.what());
+        throw;
     } catch (...) {
-        LOGE("Unknown exception during transcription");
-        return "";
+        LOGE("Transcribe: recognition failed (unknown exception)");
+        throw std::runtime_error(
+            "Recognition failed. Ensure the model supports offline decoding and audio is 16 kHz mono WAV."
+        );
     }
 }
 

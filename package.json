@@ -40,6 +40,11 @@
       "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
     },
+    "./download": {
+      "source": "./src/download/index.ts",
+      "types": "./lib/typescript/src/download/index.d.ts",
+      "default": "./lib/module/download/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -125,13 +130,15 @@
     "react": "19.2.0",
     "react-native": "0.83.0",
     "react-native-builder-bob": "^0.40.13",
+    "react-native-fs": "^2.20.0",
     "release-it": "^19.0.4",
     "turbo": "^2.5.6",
     "typescript": "^5.9.2"
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-fs": "*"
   },
   "workspaces": [
     "example"
@@ -192,19 +199,20 @@
   "release-it": {
     "git": {
       "commitMessage": "chore: release ${version}",
-      "tagName": "v${version}"
+      "tagName": "sdk-v${version}"
     },
     "npm": {
       "publish": true
     },
     "github": {
-      "release": true
+      "release": false
     },
     "plugins": {
       "@release-it/conventional-changelog": {
         "preset": {
           "name": "angular"
-        }
+        },
+        "infile": "CHANGELOG.md"
       }
     }
   },

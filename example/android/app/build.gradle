@@ -57,7 +57,7 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -77,13 +77,18 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "sherpaonnx.example"
+    namespace "com.xdcobra.voicelab"
     defaultConfig {
-        applicationId "sherpaonnx.example"
+        applicationId "com.xdcobra.voicelab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        def resolvedVersionCode = project.findProperty('VERSION_CODE') ?: "1"
+        def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "0.0.1"
+        versionCode resolvedVersionCode.toInteger()
+        versionName resolvedVersionName.toString()
+        manifestPlaceholders = [
+            admobAppId: "ca-app-pub-3940256099942544~3347511713"
+        ]
     }
     signingConfigs {
         debug {
@@ -92,15 +97,49 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (project.hasProperty('RELEASE_STORE_FILE')) {
+                storeFile file(RELEASE_STORE_FILE)
+            }
+            if (project.hasProperty('RELEASE_STORE_PASSWORD')) {
+                storePassword RELEASE_STORE_PASSWORD
+            }
+            if (project.hasProperty('RELEASE_KEY_ALIAS')) {
+                keyAlias RELEASE_KEY_ALIAS
+            }
+            if (project.hasProperty('RELEASE_KEY_PASSWORD')) {
+                keyPassword RELEASE_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "boolean", "ADS_ENABLED", "false"
+            buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"ca-app-pub-3940256099942544/6300978111\""
         }
         release {
+            def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
+            def releaseAdmobBannerId = project.findProperty('ADMOB_BANNER_ID_ANDROID')
+            def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+            if (isReleaseTask && (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty())) {
+                throw new RuntimeException("ADMOB_APP_ID_ANDROID is required for release builds")
+            }
+            if (isReleaseTask && (releaseAdmobBannerId == null || releaseAdmobBannerId.toString().trim().isEmpty())) {
+                throw new RuntimeException("ADMOB_BANNER_ID_ANDROID is required for release builds")
+            }
+            if (releaseAdmobAppId != null && !releaseAdmobAppId.toString().trim().isEmpty()) {
+                manifestPlaceholders = [
+                    admobAppId: releaseAdmobAppId
+                ]
+            }
+            if (releaseAdmobBannerId != null && !releaseAdmobBannerId.toString().trim().isEmpty()) {
+                buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"${releaseAdmobBannerId}\""
+            }
+            buildConfigField "boolean", "ADS_ENABLED", "true"
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -117,3 +156,24 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+def sherpaModelsOutputDir = file("${projectDir}/src/main/assets/models")
+def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
+def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
+def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
+
+tasks.register("downloadSherpaModels", Exec) {
+    workingDir file("${rootDir}/..")
+    commandLine "node",
+        sherpaModelsScript.absolutePath,
+        "--platform",
+        "android",
+        "--output",
+        sherpaModelsOutputDir.absolutePath,
+        "--cache",
+        sherpaModelsCacheDir.absolutePath,
+        "--config",
+        sherpaModelsConfig.absolutePath
+}
+
+preBuild.dependsOn(tasks.named("downloadSherpaModels"))

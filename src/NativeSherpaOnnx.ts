@@ -16,6 +16,31 @@ export interface Spec extends TurboModule {
   resolveModelPath(config: { type: string; path: string }): Promise<string>;
 
   /**
+   * Extract a .tar.bz2 archive to a target folder.
+   * Returns { success, path } or { success, reason }.
+   */
+  extractTarBz2(
+    sourcePath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Cancel any in-progress tar.bz2 extraction.
+   */
+  cancelExtractTarBz2(): Promise<void>;
+
+  /**
+   * Compute SHA-256 of a file and return the hex digest.
+   */
+  computeFileSha256(filePath: string): Promise<string>;
+
+  /**
    * Initialize sherpa-onnx with model directory.
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param modelDir - Absolute path to model directory

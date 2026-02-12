@@ -102,6 +102,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ::emitTtsStreamError,
     ::emitTtsStreamEnd
   )
+  private val archiveHelper = SherpaOnnxArchiveHelper()
 
   override fun getName(): String {
     return NAME
@@ -126,6 +127,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun resolveModelPath(config: ReadableMap, promise: Promise) {
     coreHelper.resolveModelPath(config, promise)
+  }
+
+  override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
+    archiveHelper.extractTarBz2(sourcePath, targetPath, force, promise) { bytes, total, percent ->
+      emitExtractProgress(bytes, total, percent)
+    }
+  }
+
+  override fun cancelExtractTarBz2(promise: Promise) {
+    archiveHelper.cancelExtractTarBz2()
+    promise.resolve(null)
+  }
+
+  override fun computeFileSha256(filePath: String, promise: Promise) {
+    archiveHelper.computeFileSha256(filePath, promise)
+  }
+
+  private fun emitExtractProgress(bytes: Long, totalBytes: Long, percent: Double) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putDouble("bytes", bytes.toDouble())
+    payload.putDouble("totalBytes", totalBytes.toDouble())
+    payload.putDouble("percent", percent)
+    eventEmitter.emit("extractTarBz2Progress", payload)
   }
 
   /**

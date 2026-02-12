@@ -13,6 +13,8 @@ import {
   getDefaultModelPath,
   type ModelPathConfig,
 } from 'react-native-sherpa-onnx';
+import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import RNFS from 'react-native-fs';
 
 const titleCase = (value: string) =>
   value.length > 0 ? value[0]!.toUpperCase() + value.slice(1) : value;
@@ -21,6 +23,7 @@ const titleCase = (value: string) =>
  * Convert a model folder name into a more readable display name.
  */
 export function getModelDisplayName(modelFolder: string): string {
+  if (!modelFolder) return 'Unknown model';
   const cleaned = modelFolder.replace(/^sherpa-onnx-/, '');
   const tokens = cleaned.split(/[-_]+/g).filter(Boolean);
 
@@ -75,10 +78,14 @@ export function getAssetModelPath(modelName: string): ModelPathConfig {
  */
 export function getFileModelPath(
   modelName: string,
+  category?: ModelCategory,
   basePath?: string
 ): ModelPathConfig {
-  const path = basePath
-    ? `${basePath}/${modelName}`
-    : `${getDefaultModelPath()}/${modelName}`;
+  const resolvedBase = basePath
+    ? basePath
+    : category
+    ? `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/${category}`
+    : getDefaultModelPath();
+  const path = `${resolvedBase}/${modelName}`;
   return fileModelPath(path);
 }

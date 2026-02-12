@@ -111,18 +111,38 @@ export default function HomeScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Sherpa-ONNX Features</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Voice Lab - Offline Tools</Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => navigation.navigate('ModelManagement')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="download-outline" size={22} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => navigation.navigate('Settings')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="settings-outline" size={22} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
         <Text style={styles.headerSubtitle}>
           Offline speech processing on device
         </Text>
       </View>
-      <FlatList
-        data={FEATURES}
-        renderItem={renderFeatureCard}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      <View style={styles.body}>
+        <FlatList
+          data={FEATURES}
+          renderItem={renderFeatureCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -132,6 +152,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F2F2F7',
   },
+  body: {
+    flex: 1,
+  },
   header: {
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -140,11 +163,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#000000',
     marginBottom: 4,
+  },
+  settingsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerSubtitle: {
     fontSize: 14,

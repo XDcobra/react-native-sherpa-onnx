@@ -196,6 +196,28 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         env->DeleteLocalRef(successObj);
         env->DeleteLocalRef(booleanClass);
 
+        if (!result.error.empty()) {
+            jstring errorKey = env->NewStringUTF("error");
+            jstring errorValue = env->NewStringUTF(result.error.c_str());
+            if (errorKey != nullptr && errorValue != nullptr) {
+                env->CallObjectMethod(hashMap, putMethod, errorKey, errorValue);
+            }
+            if (env->ExceptionCheck()) {
+                LOGE("TTS JNI: Exception while putting error field");
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+                env->DeleteLocalRef(hashMap);
+                env->DeleteLocalRef(hashMapClass);
+                return nullptr;
+            }
+            if (errorKey) {
+                env->DeleteLocalRef(errorKey);
+            }
+            if (errorValue) {
+                env->DeleteLocalRef(errorValue);
+            }
+        }
+
         // Put detectedModels array
         LOGI("TTS JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");

@@ -40,6 +40,13 @@ project.xcworkspace
 .settings
 local.properties
 android.iml
+app-voicelab-*.json
+
+# CMake build artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+android/test_build/
 
 # Cocoapods
 #
@@ -92,6 +99,8 @@ nitrogen/
 example/android/app/src/main/assets/models/**
 !example/android/app/src/main/assets/models/**/README.md
 !example/android/app/src/main/assets/models/README.md
+example/.model-cache/
+example/models/
 
 # sherpa-onnx source (if cloned for building)
 sherpa-onnx/

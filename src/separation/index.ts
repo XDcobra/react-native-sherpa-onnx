@@ -10,16 +10,18 @@
  * // Future usage:
  * import { initializeSeparation, separateSources } from 'react-native-sherpa-onnx/separation';
  *
- * await initializeSeparation({ modelPath: 'models/separation-model' });
+ * await initializeSeparation({ modelPath: { type: 'auto', path: 'models/separation-model' } });
  * const sources = await separateSources('path/to/mixed-audio.wav');
  * ```
  */
+
+import type { ModelPathConfig } from '../types';
 
 /**
  * Separation initialization options (placeholder)
  */
 export interface SeparationInitializeOptions {
-  modelPath: string;
+  modelPath: ModelPathConfig;
   // Additional separation-specific options will be added here
 }
 

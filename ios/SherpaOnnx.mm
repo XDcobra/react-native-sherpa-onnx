@@ -4,13 +4,14 @@
  */
 
 #import "SherpaOnnx.h"
+#import "SherpaOnnxArchiveHelper.h"
 #import <React/RCTLog.h>
 
 @implementation SherpaOnnx
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError" ];
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress" ];
 }
 
 - (void)resolveModelPath:(NSDictionary *)config
@@ -189,6 +190,46 @@
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during test: %@", exception.reason];
         reject(@"TEST_ERROR", errorMsg, nil);
     }
+}
+
+- (void)extractTarBz2:(NSString *)sourcePath
+           targetPath:(NSString *)targetPath
+                force:(BOOL)force
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSDictionary *result = [helper extractTarBz2:sourcePath
+                                     targetPath:targetPath
+                                          force:force
+                                       progress:^(long long bytes, long long totalBytes, double percent) {
+        [self sendEventWithName:@"extractTarBz2Progress"
+                           body:@{ @"bytes": @(bytes),
+                                   @"totalBytes": @(totalBytes),
+                                   @"percent": @(percent) }];
+    }];
+    resolve(result);
+}
+
+- (void)cancelExtractTarBz2:(RCTPromiseResolveBlock)resolve
+               withRejecter:(RCTPromiseRejectBlock)reject
+{
+    [SherpaOnnxArchiveHelper cancelExtractTarBz2];
+    resolve(nil);
+}
+
+- (void)computeFileSha256:(NSString *)filePath
+             withResolver:(RCTPromiseResolveBlock)resolve
+             withRejecter:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSError *error = nil;
+    NSString *digest = [helper computeFileSha256:filePath error:&error];
+    if (error || !digest) {
+        reject(@"CHECKSUM_ERROR", error.localizedDescription ?: @"Failed to compute SHA-256", error);
+        return;
+    }
+    resolve(digest);
 }
 
 - (void)listAssetModels:(RCTPromiseResolveBlock)resolve

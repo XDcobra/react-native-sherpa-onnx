@@ -26,7 +26,7 @@ export interface TTSInitializeOptions {
    * Path to the model directory.
    * Can be an asset path, file system path, or auto-detection path.
    */
-  modelPath: ModelPathConfig | string;
+  modelPath: ModelPathConfig;
 
   /**
    * Model type to use.
