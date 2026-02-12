@@ -140,3 +140,33 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeCancelExtract(JNIEnv* /* env */, jobject /* jthis */) {
   ArchiveHelper::Cancel();
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeComputeFileSha256(
+    JNIEnv* env,
+    jobject /* jthis */,
+    jstring j_file_path,
+    jobject j_promise) {
+  const char* file_path = env->GetStringUTFChars(j_file_path, nullptr);
+  std::string file_str(file_path);
+  env->ReleaseStringUTFChars(j_file_path, file_path);
+
+  jclass promise_class = env->GetObjectClass(j_promise);
+  jmethodID resolve_method = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
+  jmethodID reject_method = env->GetMethodID(
+      promise_class, "reject", "(Ljava/lang/String;Ljava/lang/String;)V");
+
+  std::string error_msg;
+  std::string sha256;
+  bool success = ArchiveHelper::ComputeFileSha256(file_str, &error_msg, &sha256);
+
+  if (success) {
+    env->CallVoidMethod(j_promise, resolve_method, env->NewStringUTF(sha256.c_str()));
+  } else {
+    env->CallVoidMethod(j_promise, reject_method,
+                        env->NewStringUTF("CHECKSUM_ERROR"),
+                        env->NewStringUTF(error_msg.c_str()));
+  }
+
+  env->DeleteLocalRef(promise_class);
+}

@@ -70,6 +70,44 @@ static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
   }
   return [NSString stringWithUTF8String:out.c_str()];
 }
+
+static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
+  const char* path = [filePath UTF8String];
+  FILE* file = fopen(path, "rb");
+  if (!file) {
+    if (error) {
+      *error = [NSError errorWithDomain:@"SherpaOnnx"
+                                   code:5
+                               userInfo:@{NSLocalizedDescriptionKey: @"Failed to open file"}];
+    }
+    return nil;
+  }
+
+  CC_SHA256_CTX sha_ctx;
+  CC_SHA256_Init(&sha_ctx);
+
+  std::array<unsigned char, 64 * 1024> buffer{};
+  size_t bytes = 0;
+  while ((bytes = fread(buffer.data(), 1, buffer.size(), file)) > 0) {
+    CC_SHA256_Update(&sha_ctx, buffer.data(), (CC_LONG)bytes);
+  }
+
+  if (ferror(file)) {
+    fclose(file);
+    if (error) {
+      *error = [NSError errorWithDomain:@"SherpaOnnx"
+                                   code:6
+                               userInfo:@{NSLocalizedDescriptionKey: @"Read error while hashing file"}];
+    }
+    return nil;
+  }
+
+  fclose(file);
+
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digest, &sha_ctx);
+  return HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
+}
 }  // namespace
 
 @implementation SherpaOnnxArchiveHelper
@@ -239,6 +277,12 @@ static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
   NSString *sha256Hex = HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
 
   return @{ @"success": @YES, @"path": targetPath, @"sha256": sha256Hex ?: @"" };
+}
+
+- (NSString *)computeFileSha256:(NSString *)filePath
+                           error:(NSError * _Nullable * _Nullable)error
+{
+  return ComputeFileSha256(filePath, error);
 }
 
 @end

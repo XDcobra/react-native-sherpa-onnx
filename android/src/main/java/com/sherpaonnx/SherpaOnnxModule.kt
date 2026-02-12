@@ -140,6 +140,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  override fun computeFileSha256(filePath: String, promise: Promise) {
+    archiveHelper.computeFileSha256(filePath, promise)
+  }
+
   private fun emitExtractProgress(bytes: Long, totalBytes: Long, percent: Double) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)

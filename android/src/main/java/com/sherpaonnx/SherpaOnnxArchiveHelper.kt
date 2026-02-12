@@ -53,6 +53,10 @@ class SherpaOnnxArchiveHelper {
     }
   }
 
+  fun computeFileSha256(filePath: String, promise: Promise) {
+    nativeComputeFileSha256(filePath, promise)
+  }
+
   // Native JNI methods
   private external fun nativeExtractTarBz2(
     sourcePath: String,
@@ -63,5 +67,10 @@ class SherpaOnnxArchiveHelper {
   )
 
   private external fun nativeCancelExtract()
+
+  private external fun nativeComputeFileSha256(
+    filePath: String,
+    promise: Promise
+  )
 }
 

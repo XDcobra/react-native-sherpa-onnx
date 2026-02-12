@@ -218,6 +218,20 @@
     resolve(nil);
 }
 
+- (void)computeFileSha256:(NSString *)filePath
+             withResolver:(RCTPromiseResolveBlock)resolve
+             withRejecter:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSError *error = nil;
+    NSString *digest = [helper computeFileSha256:filePath error:&error];
+    if (error || !digest) {
+        reject(@"CHECKSUM_ERROR", error.localizedDescription ?: @"Failed to compute SHA-256", error);
+        return;
+    }
+    resolve(digest);
+}
+
 - (void)listAssetModels:(RCTPromiseResolveBlock)resolve
           withRejecter:(RCTPromiseRejectBlock)reject
 {

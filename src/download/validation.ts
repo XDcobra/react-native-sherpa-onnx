@@ -1,5 +1,5 @@
 import RNFS from 'react-native-fs';
-import QuickCrypto from 'react-native-quick-crypto';
+import SherpaOnnx from '../NativeSherpaOnnx';
 
 export type ValidationError =
   | 'CHECKSUM_MISMATCH'
@@ -53,36 +53,12 @@ export async function calculateFileChecksum(
   ) => void
 ): Promise<string> {
   try {
-    const stat = await RNFS.stat(filePath);
-    const fileSize = stat.size;
-    const chunkSize = 1024 * 1024; // 1MB chunks
-    const hash = QuickCrypto.createHash('sha256');
-
-    // computing checksum
-
-    let lastPercent = -1;
-    for (let offset = 0; offset < fileSize; offset += chunkSize) {
-      const length = Math.min(chunkSize, fileSize - offset);
-      const chunk = await RNFS.read(filePath, length, offset, 'base64');
-      hash.update(chunk, 'base64');
-
-      if (onProgress && fileSize > 0) {
-        const processed = Math.min(offset + length, fileSize);
-        const percent = Math.max(
-          0,
-          Math.min(100, Math.floor((processed * 100) / fileSize))
-        );
-        if (percent != lastPercent) {
-          lastPercent = percent;
-          onProgress(processed, fileSize, percent);
-        }
-      }
+    const digest = await SherpaOnnx.computeFileSha256(filePath);
+    if (onProgress) {
+      const stat = await RNFS.stat(filePath);
+      const total = stat.size;
+      onProgress(total, total, 100);
     }
-
-    // According to the package implementation, when an encoding (e.g. 'hex') is
-    // provided `digest()` returns a string. Cast to string for TypeScript.
-    const digest = hash.digest('hex') as unknown as string;
-    // checksum computed
     return digest.toLowerCase();
   } catch (error) {
     throw new Error(`Failed to calculate checksum: ${error}`);

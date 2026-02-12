@@ -11,6 +11,9 @@ typedef void (^SherpaOnnxArchiveProgressBlock)(long long bytes, long long totalB
                           force:(BOOL)force
                        progress:(nullable SherpaOnnxArchiveProgressBlock)progress;
 
+- (nullable NSString *)computeFileSha256:(NSString *)filePath
+                                   error:(NSError * _Nullable * _Nullable)error;
+
 + (void)cancelExtractTarBz2;
 
 @end

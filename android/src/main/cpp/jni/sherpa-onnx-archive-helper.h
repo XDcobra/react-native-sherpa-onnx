@@ -28,6 +28,19 @@ class ArchiveHelper {
       std::string* out_error = nullptr,
       std::string* out_sha256 = nullptr);
 
+    /**
+     * Compute SHA-256 of a file.
+     *
+     * @param file_path Path to the file
+     * @param out_error Optional error message
+     * @param out_sha256 Output SHA-256 hex
+     * @return true if successful, false otherwise
+     */
+    static bool ComputeFileSha256(
+      const std::string& file_path,
+      std::string* out_error,
+      std::string* out_sha256);
+
   /**
    * Check if extraction has been cancelled
    */

@@ -355,3 +355,44 @@ bool ArchiveHelper::ExtractTarBz2(
 
   return true;
 }
+
+bool ArchiveHelper::ComputeFileSha256(
+    const std::string& file_path,
+    std::string* out_error,
+    std::string* out_sha256) {
+  if (!std::filesystem::exists(file_path)) {
+    if (out_error) *out_error = "File does not exist";
+    return false;
+  }
+
+  FILE* file = fopen(file_path.c_str(), "rb");
+  if (!file) {
+    if (out_error) *out_error = std::string("Failed to open file: ") + std::strerror(errno);
+    return false;
+  }
+
+  Sha256Context ctx;
+  sha256_init(&ctx);
+  std::array<unsigned char, 64 * 1024> buffer{};
+
+  size_t bytes = 0;
+  while ((bytes = fread(buffer.data(), 1, buffer.size(), file)) > 0) {
+    sha256_update(&ctx, buffer.data(), bytes);
+  }
+
+  if (ferror(file)) {
+    if (out_error) *out_error = "Read error while hashing file";
+    fclose(file);
+    return false;
+  }
+
+  fclose(file);
+
+  unsigned char digest[32];
+  sha256_final(&ctx, digest);
+  if (out_sha256) {
+    *out_sha256 = ToHex(digest, sizeof(digest));
+  }
+
+  return true;
+}

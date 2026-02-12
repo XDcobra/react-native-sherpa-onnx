@@ -36,6 +36,11 @@ export interface Spec extends TurboModule {
   cancelExtractTarBz2(): Promise<void>;
 
   /**
+   * Compute SHA-256 of a file and return the hex digest.
+   */
+  computeFileSha256(filePath: string): Promise<string>;
+
+  /**
    * Initialize sherpa-onnx with model directory.
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param modelDir - Absolute path to model directory
