@@ -90,7 +90,7 @@
 #define HAVE_INTTYPES_H 1
 #define HAVE_LCHOWN 1
 #define HAVE_LGETXATTR 1
-#define HAVE_LIBLZMA 1
+#define HAVE_LIBLZMA 0
 #define HAVE_LIBZ 1
 #define HAVE_LIMITS_H 1
 #define HAVE_LINK 1
