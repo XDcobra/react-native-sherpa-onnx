@@ -81,6 +81,11 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
         callback_env->CallVoidMethod(j_progress_callback_global, on_progress_method,
                             bytes_extracted, total_bytes, percent);
         
+        // Check and clear any exceptions from the callback
+        if (callback_env->ExceptionCheck()) {
+          callback_env->ExceptionClear();
+        }
+        
         // Detach if we attached in this call
         if (should_detach) {
           g_vm->DetachCurrentThread();
