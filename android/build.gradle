@@ -1,5 +1,5 @@
-// Configurable sherpa-onnx version (default: 1.12.23)
-def sherpaOnnxVersion = project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.23'
+// Configurable sherpa-onnx version (default: 1.12.24)
+def sherpaOnnxVersion = project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.24'
 
 buildscript {
   ext.SherpaOnnx = [

@@ -4,7 +4,7 @@
 # Can be called manually or by Podfile during pod install
 # Usage:
 #   ./scripts/setup-ios-framework.sh          # Downloads/updates framework (auto mode, no interactive)
-#   ./scripts/setup-ios-framework.sh 1.12.23  # Downloads specific version
+#   ./scripts/setup-ios-framework.sh 1.12.24  # Downloads specific version
 #   ./scripts/setup-ios-framework.sh --interactive  # Interactive mode with prompts
 
 set -e
@@ -41,7 +41,7 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
-# Function to compare semantic versions (e.g., "1.12.23" vs "1.12.24")
+# Function to compare semantic versions (e.g., "1.12.24" vs "1.12.24")
 compare_versions() {
   local v1=$1
   local v2=$2

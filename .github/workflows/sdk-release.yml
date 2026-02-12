@@ -460,7 +460,7 @@ jobs:
             - [Download Latest Framework Release](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework)
             - [iOS Setup Instructions](https://github.com/XDcobra/react-native-sherpa-onnx#ios)
 
-            **Note:** The iOS Framework is NOT included in this release. It is published separately with tags like `framework-v1.12.23`.
+            **Note:** The iOS Framework is NOT included in this release. It is published separately with tags like `framework-v1.12.24`.
 
             ---
 

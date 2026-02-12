@@ -125,7 +125,7 @@ If you want to build the XCFramework yourself instead of using the prebuilt rele
 # Clone sherpa-onnx repository
 git clone https://github.com/k2-fsa/sherpa-onnx.git
 cd sherpa-onnx
-git checkout v1.12.23
+git checkout v1.12.24
 
 # Build the iOS XCFramework (requires macOS, Xcode, CMake, and ONNX Runtime)
 ./build-ios.sh

@@ -4,16 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       sherpa_onnx_version:
-        description: 'sherpa-onnx version/tag to build (e.g., v1.12.23 or main)'
+        description: 'sherpa-onnx version/tag to build (e.g., v1.12.24 or main)'
         required: true
-        default: 'v1.12.23'
-      commit_to_repo:
-        description: 'Commit framework to repo? (default: true)'
-        type: boolean
-        default: true
+        default: 'v1.12.24'
+
 
 env:
-  SHERPA_ONNX_VERSION: ${{ github.event.inputs.sherpa_onnx_version || 'v1.12.23' }}
+  SHERPA_ONNX_VERSION: ${{ github.event.inputs.sherpa_onnx_version || 'v1.12.24' }}
   XCODE_VERSION: '16.3'
 
 jobs:
@@ -254,7 +251,7 @@ jobs:
       - name: Extract version number from tag
         id: extract_version
         run: |
-          # Extract version from SHERPA_ONNX_VERSION (e.g., "v1.12.23" -> "1.12.23")
+          # Extract version from SHERPA_ONNX_VERSION (e.g., "v1.12.24" -> "1.12.24")
           VERSION="${{ env.SHERPA_ONNX_VERSION }}"
           if [[ $VERSION == v* ]]; then
             VERSION="${VERSION:1}"  # Remove leading 'v'
