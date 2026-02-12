@@ -41,7 +41,7 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
-# Function to compare semantic versions (e.g., "1.12.24" vs "1.12.24")
+# Function to compare semantic versions (e.g., "1.12.23" vs "1.12.24")
 compare_versions() {
   local v1=$1
   local v2=$2
