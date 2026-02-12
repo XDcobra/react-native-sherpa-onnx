@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <string>
 
 static std::atomic_bool g_cancelExtract(false);
 
@@ -222,8 +223,8 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
         close_reader();
         return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
       }
-      result = archive_write_data_block(disk, buff, size, offset);
-      if (result != ARCHIVE_OK) {
+      la_ssize_t writeResult = archive_write_data_block(disk, buff, size, offset);
+      if (writeResult != ARCHIVE_OK) {
         const char *errorStr = archive_error_string(disk);
         NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to write data";
         archive_read_free(archive);
