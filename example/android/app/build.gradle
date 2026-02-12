@@ -156,3 +156,24 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+def sherpaModelsOutputDir = file("${projectDir}/src/main/assets/models")
+def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
+def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
+def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
+
+tasks.register("downloadSherpaModels", Exec) {
+    workingDir file("${rootDir}/..")
+    commandLine "node",
+        sherpaModelsScript.absolutePath,
+        "--platform",
+        "android",
+        "--output",
+        sherpaModelsOutputDir.absolutePath,
+        "--cache",
+        sherpaModelsCacheDir.absolutePath,
+        "--config",
+        sherpaModelsConfig.absolutePath
+}
+
+preBuild.dependsOn(tasks.named("downloadSherpaModels"))

@@ -197,9 +197,8 @@ const getSttModelType = (modelId: string): STTModelType | null => {
   const lower = modelId.toLowerCase();
   if (lower.includes('whisper')) return 'whisper';
   if (lower.includes('paraformer')) return 'paraformer';
-  if (lower.includes('zipformer') || lower.includes('transducer')) {
-    return 'transducer';
-  }
+  if (lower.includes('zipformer')) return 'zipformer';
+  if (lower.includes('transducer')) return 'transducer';
   if (lower.includes('wenet')) return 'wenet_ctc';
   if (lower.includes('sense-voice') || lower.includes('sensevoice')) {
     return 'sense_voice';

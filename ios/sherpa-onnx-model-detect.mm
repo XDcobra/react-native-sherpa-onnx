@@ -57,7 +57,7 @@ std::string ResolveTokenizerDir(const std::string& modelDir) {
 }
 
 SttModelKind ParseSttModelType(const std::string& modelType) {
-    if (modelType == "transducer") return SttModelKind::kTransducer;
+    if (modelType == "transducer" || modelType == "zipformer") return SttModelKind::kTransducer;
     if (modelType == "paraformer") return SttModelKind::kParaformer;
     if (modelType == "nemo_ctc") return SttModelKind::kNemoCtc;
     if (modelType == "wenet_ctc") return SttModelKind::kWenetCtc;
@@ -183,9 +183,10 @@ SttDetectResult DetectSttModel(
                               modelDir.find("sensevoice") != std::string::npos;
     bool isLikelyFunAsrNano = modelDir.find("funasr") != std::string::npos ||
                               modelDir.find("funasr-nano") != std::string::npos;
+    bool isLikelyZipformer = modelDir.find("zipformer") != std::string::npos;
 
     if (hasTransducer) {
-        result.detectedModels.push_back({"transducer", modelDir});
+        result.detectedModels.push_back({isLikelyZipformer ? "zipformer" : "transducer", modelDir});
     }
 
     if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {

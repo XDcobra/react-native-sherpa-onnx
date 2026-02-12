@@ -5,6 +5,7 @@ import type { ModelPathConfig } from '../types';
  */
 export type STTModelType =
   | 'transducer'
+  | 'zipformer'
   | 'paraformer'
   | 'nemo_ctc'
   | 'whisper'
@@ -32,7 +33,8 @@ export interface STTInitializeOptions {
 
   /**
    * Explicit model type specification for STT models
-   * - 'transducer': Force detection as Zipformer/Transducer model
+   * - 'transducer': Force detection as Transducer model
+   * - 'zipformer': Force detection as Zipformer (streaming) model
    * - 'paraformer': Force detection as Paraformer model
    * - 'nemo_ctc': Force detection as NeMo CTC model
    * - 'whisper': Force detection as Whisper model
