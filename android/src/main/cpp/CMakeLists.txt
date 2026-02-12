@@ -89,10 +89,10 @@ set(SOURCES
     crypto/sha256.cpp
 )
 
-# Build libarchive from bundled source
-# This is the robustest solution: no downloads, no extraction issues, deterministic builds
+# Build libarchive from bundled source (shared by Android and iOS)
+# PROJECT_ROOT is android/; third_party is at repo root (one level above PROJECT_ROOT)
 message(STATUS "Building libarchive from bundled source...")
-add_subdirectory(libarchive)
+add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
 message(STATUS "libarchive built successfully")
 
 # Create shared library

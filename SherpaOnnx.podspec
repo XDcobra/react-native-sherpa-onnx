@@ -7,7 +7,7 @@ pod_root = __dir__
 ios_include_path = File.join(pod_root, 'ios', 'include')
 ios_path = File.join(pod_root, 'ios')
 framework_path = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
-libarchive_dir = File.join(pod_root, 'android', 'src', 'main', 'cpp', 'libarchive', 'libarchive')
+libarchive_dir = File.join(pod_root, 'third_party', 'libarchive', 'libarchive')
 # Libarchive C sources (exclude test/) for vendored build on iOS (no system libarchive)
 libarchive_sources = Dir.glob(File.join(libarchive_dir, '*.c')).map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub('\\', '/') }
 

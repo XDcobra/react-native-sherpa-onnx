@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Short description:
 // This script downloads a libarchive release tarball, unpacks it,
-// and replaces the bundled source code under android/src/main/cpp/libarchive.
+// and replaces the bundled source code under third_party/libarchive.
 // When to run: Before a release or when libarchive in the project needs to be
 // updated to a new version (e.g., to fix build/linker errors).
 // Usage: node update.js <version> (e.g., node update.js 3.8.5)
+// Run from repo root or from third_party/libarchive_update.
 'use strict';
 
 const fs = require('fs');
@@ -12,7 +13,8 @@ const path = require('path');
 const https = require('https');
 const { spawnSync } = require('child_process');
 
-const rootDir = path.resolve(__dirname, '..');
+// Repo root (parent of third_party)
+const rootDir = path.resolve(__dirname, '..', '..');
 const version = process.argv[2] || '3.8.5';
 
 const workDir = path.join(rootDir, '.libarchive_tmp');
@@ -20,13 +22,19 @@ const archiveName = `libarchive-${version}.tar.xz`;
 const archiveUrl = `https://github.com/libarchive/libarchive/releases/download/v${version}/${archiveName}`;
 const archivePath = path.join(workDir, archiveName);
 
-const libarchiveDir = path.join(rootDir, 'libarchive');
+const libarchiveDir = path.join(rootDir, 'third_party', 'libarchive');
 const templateCmake = path.join(
   rootDir,
+  'third_party',
   'libarchive_update',
   'CMakeLists-base.txt'
 );
-const templateConfig = path.join(rootDir, 'libarchive_update', 'config-base.h');
+const templateConfig = path.join(
+  rootDir,
+  'third_party',
+  'libarchive_update',
+  'config-base.h'
+);
 
 function log(message) {
   process.stdout.write(`${message}\n`);
