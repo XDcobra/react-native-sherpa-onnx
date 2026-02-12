@@ -8,8 +8,11 @@ ios_include_path = File.join(pod_root, 'ios', 'include')
 ios_path = File.join(pod_root, 'ios')
 framework_path = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
 libarchive_dir = File.join(pod_root, 'third_party', 'libarchive', 'libarchive')
-# Libarchive C sources (exclude test/) for vendored build on iOS (no system libarchive)
-libarchive_sources = Dir.glob(File.join(libarchive_dir, '*.c')).map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub('\\', '/') }
+# Libarchive C sources for iOS: exclude test/, and Windows-specific (use POSIX/Darwin only)
+libarchive_sources = Dir.glob(File.join(libarchive_dir, '*.c'))
+  .reject { |f| File.basename(f) =~ /^test\./ }
+  .reject { |f| File.basename(f, '.c').to_s.include?('windows') }
+  .map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub('\\', '/') }
 
 Pod::Spec.new do |s|
   s.name         = "SherpaOnnx"
@@ -79,7 +82,8 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY' => 'libc++',
     'HEADER_SEARCH_PATHS' => "$(inherited) \"#{ios_include_path}\" \"#{libarchive_dir}\" \"#{ios_path}\"",
-    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) PLATFORM_CONFIG_H="libarchive_darwin_config.h"',
+    # Quotes in macro value must be escaped so #include PLATFORM_CONFIG_H becomes #include "libarchive_darwin_config.h"
+    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
   }
   
   s.user_target_xcconfig = {
