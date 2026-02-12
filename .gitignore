@@ -42,6 +42,12 @@ local.properties
 android.iml
 app-voicelab-*.json
 
+# CMake build artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+android/test_build/
+
 # Cocoapods
 #
 example/ios/Pods

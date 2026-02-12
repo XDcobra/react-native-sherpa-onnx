@@ -6,13 +6,6 @@ project("sherpaonnx")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
-
-# Android specific settings
-set(CMAKE_ANDROID_ARCH_ABI ${ANDROID_ABI})
-set(CMAKE_SYSTEM_NAME Android)
-set(CMAKE_SYSTEM_VERSION ${ANDROID_PLATFORM_LEVEL})
-
 # ANDROID_ABI MUST be set by Gradle - it should never be empty
 if(NOT ANDROID_ABI)
     message(FATAL_ERROR "ANDROID_ABI not set. This is a normal error.\n\n"
@@ -77,8 +70,8 @@ if(NOT SHERPA_ONNX_LIB)
     message(WARNING "sherpa-onnx library not found at CMake configure time")
     message(WARNING "This is normal for Gradle builds where extractNativeLibs runs in parallel")
     message(WARNING "Library must be available at link time in: ${EXTRACTED_LIBS_DIR}")
-    # Use the expected CXX path as fallback - CMake will validate at link time
-    set(SHERPA_ONNX_LIB "${EXTRACTED_LIBS_DIR}/libsherpa-onnx-cxx-api.so")
+    # Use the first path from priority list as fallback - CMake will validate at link time
+    list(GET SHERPA_ONNX_LIB_PATHS 0 SHERPA_ONNX_LIB)
     message(STATUS "Using fallback library path (will be validated at link time): ${SHERPA_ONNX_LIB}")
 endif()
 
