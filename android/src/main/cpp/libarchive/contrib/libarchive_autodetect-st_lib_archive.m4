@@ -108,8 +108,8 @@ if test "$st_lib_archive_ENABLED" = "yes" ; then
 		AC_CHECK_LIB(archive, archive_read_new, [st_lib_archive_found_lib=yes], [st_lib_archive_found_lib=no])
 		AC_CHECK_HEADER(archive.h, [st_lib_archive_found_hdr=yes], [st_lib_archive_found_hdr=no])
 		if test "x$st_lib_archive_found_lib" = "xyes" && test "x$st_lib_archive_found_hdr" = "xyes"; then
-			LIBARCHIVE_CPPFLAGS="-I$dir/include"
-			LIBARCHIVE_LDFLAGS="-L$dir/$st_lib_archive_LIB"
+			LIBARCHIVE_CPPFLAGS="-I$st_lib_archive_DIR/include"
+			LIBARCHIVE_LDFLAGS="-L$st_lib_archive_DIR/$st_lib_archive_LIB"
 		else
 			AC_MSG_ERROR([could not find libarchive in the requested location])
 		fi
