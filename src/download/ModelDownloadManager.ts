@@ -3,6 +3,7 @@ import RNFS from 'react-native-fs';
 import { extractTarBz2 } from './extractTarBz2';
 import {
   parseChecksumFile,
+  validateChecksum,
   validateExtractedFiles,
   checkDiskSpace,
 } from './validation';
@@ -11,6 +12,7 @@ const RELEASE_API_BASE =
   'https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags';
 const CACHE_TTL_MINUTES = 24 * 60;
 const MODEL_ARCHIVE_EXT = '.tar.bz2';
+const MODEL_ONNX_EXT = '.onnx';
 
 export enum ModelCategory {
   Tts = 'tts',
@@ -33,11 +35,13 @@ export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
 
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
 
+type ModelArchiveExt = 'tar.bz2' | 'onnx';
+
 export type ModelMetaBase = {
   id: string;
   displayName: string;
   downloadUrl: string;
-  archiveExt: 'tar.bz2';
+  archiveExt: ModelArchiveExt;
   bytes: number;
   sha256?: string;
   category: ModelCategory;
@@ -201,12 +205,12 @@ const CATEGORY_CONFIG: Record<
     baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/stt`,
   },
   [ModelCategory.Vad]: {
-    tag: 'vad-models',
+    tag: 'asr-models',
     cacheFile: 'vad-models.json',
     baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/vad`,
   },
   [ModelCategory.Diarization]: {
-    tag: 'speaker-diarization-models',
+    tag: 'speaker-segmentation-models',
     cacheFile: 'diarization-models.json',
     baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/diarization`,
   },
@@ -238,8 +242,31 @@ function getModelDir(category: ModelCategory, modelId: string): string {
   return `${getModelsBaseDir(category)}/${modelId}`;
 }
 
-function getArchivePath(category: ModelCategory, modelId: string): string {
-  return `${getModelsBaseDir(category)}/${modelId}${MODEL_ARCHIVE_EXT}`;
+function getArchiveFilename(
+  modelId: string,
+  archiveExt: ModelArchiveExt
+): string {
+  return `${modelId}.${archiveExt}`;
+}
+
+function getArchivePath(
+  category: ModelCategory,
+  modelId: string,
+  archiveExt: ModelArchiveExt
+): string {
+  const filename = getArchiveFilename(modelId, archiveExt);
+  if (archiveExt === 'onnx') {
+    return `${getModelDir(category, modelId)}/${filename}`;
+  }
+  return `${getModelsBaseDir(category)}/${filename}`;
+}
+
+function getTarArchivePath(category: ModelCategory, modelId: string): string {
+  return getArchivePath(category, modelId, 'tar.bz2');
+}
+
+function getOnnxPath(category: ModelCategory, modelId: string): string {
+  return getArchivePath(category, modelId, 'onnx');
 }
 
 function getReadyMarkerPath(category: ModelCategory, modelId: string): string {
@@ -422,16 +449,62 @@ function deriveLanguages(id: string): string[] {
   return Array.from(languages);
 }
 
-function toTtsModelMeta(asset: {
-  name: string;
-  size: number;
-  browser_download_url: string;
-}): TtsModelMeta | null {
-  if (!asset.name.endsWith(MODEL_ARCHIVE_EXT)) {
+function getAssetExtension(name: string): ModelArchiveExt | null {
+  if (name.endsWith(MODEL_ARCHIVE_EXT)) return 'tar.bz2';
+  if (name.endsWith(MODEL_ONNX_EXT)) return 'onnx';
+  return null;
+}
+
+function stripAssetExtension(name: string, ext: ModelArchiveExt): string {
+  const suffix = `.${ext}`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
+function isAssetSupportedForCategory(
+  category: ModelCategory,
+  name: string,
+  ext: ModelArchiveExt
+): boolean {
+  const lower = name.toLowerCase();
+
+  switch (category) {
+    case ModelCategory.Tts:
+      return ext === 'tar.bz2';
+    case ModelCategory.Stt:
+      return ext === 'tar.bz2' && !lower.includes('vad');
+    case ModelCategory.Vad:
+      return ext === 'onnx' && lower.includes('vad');
+    case ModelCategory.Diarization:
+      return ext === 'tar.bz2';
+    case ModelCategory.Enhancement:
+      return ext === 'onnx';
+    case ModelCategory.Separation:
+      return ext === 'tar.bz2' || ext === 'onnx';
+    default:
+      return false;
+  }
+}
+
+function parseDigestSha256(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^sha256:([a-f0-9]{64})$/i);
+  return match?.[1]?.toLowerCase();
+}
+
+function toTtsModelMeta(
+  asset: {
+    name: string;
+    size: number;
+    browser_download_url: string;
+    digest?: string | null;
+  },
+  archiveExt: ModelArchiveExt
+): TtsModelMeta | null {
+  if (archiveExt !== 'tar.bz2') {
     return null;
   }
 
-  const id = asset.name.replace(MODEL_ARCHIVE_EXT, '');
+  const id = stripAssetExtension(asset.name, archiveExt);
   const type = deriveType(id);
   if (type === 'unknown') {
     console.warn('SherpaOnnxModelList: Unsupported model', id);
@@ -445,8 +518,9 @@ function toTtsModelMeta(asset: {
     quantization: deriveQuantization(id),
     sizeTier: deriveSizeTier(id),
     downloadUrl: asset.browser_download_url,
-    archiveExt: 'tar.bz2',
+    archiveExt,
     bytes: asset.size,
+    sha256: parseDigestSha256(asset.digest),
     category: ModelCategory.Tts,
   };
 }
@@ -457,19 +531,18 @@ function toGenericModelMeta(
     name: string;
     size: number;
     browser_download_url: string;
-  }
+    digest?: string | null;
+  },
+  archiveExt: ModelArchiveExt
 ): ModelMetaBase | null {
-  if (!asset.name.endsWith(MODEL_ARCHIVE_EXT)) {
-    return null;
-  }
-
-  const id = asset.name.replace(MODEL_ARCHIVE_EXT, '');
+  const id = stripAssetExtension(asset.name, archiveExt);
   return {
     id,
     displayName: deriveDisplayName(id),
     downloadUrl: asset.browser_download_url,
-    archiveExt: 'tar.bz2',
+    archiveExt,
     bytes: asset.size,
+    sha256: parseDigestSha256(asset.digest),
     category,
   };
 }
@@ -480,12 +553,19 @@ function toModelMeta(
     name: string;
     size: number;
     browser_download_url: string;
+    digest?: string | null;
   }
 ): ModelMetaBase | null {
-  if (category === ModelCategory.Tts) {
-    return toTtsModelMeta(asset);
+  const archiveExt = getAssetExtension(asset.name);
+  if (!archiveExt) return null;
+  if (!isAssetSupportedForCategory(category, asset.name, archiveExt)) {
+    return null;
   }
-  return toGenericModelMeta(category, asset);
+
+  if (category === ModelCategory.Tts) {
+    return toTtsModelMeta(asset, archiveExt);
+  }
+  return toGenericModelMeta(category, asset, archiveExt);
 }
 
 async function loadCacheFromDisk<T extends ModelMetaBase>(
@@ -571,6 +651,7 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
           name: asset.name,
           size: asset.size,
           browser_download_url: asset.browser_download_url,
+          digest: asset.digest,
         })
       )
       .filter((model: ModelMetaBase | null): model is T => Boolean(model));
@@ -578,10 +659,12 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
     // Load and attach SHA256 checksums from checksum.txt
     const checksums = await fetchChecksumsFromRelease(category);
     for (const model of models) {
-      const archiveFilename = `${model.id}${MODEL_ARCHIVE_EXT}`;
+      const archiveFilename = getArchiveFilename(model.id, model.archiveExt);
       const sha256 = checksums.get(archiveFilename);
       if (sha256) {
         model.sha256 = sha256;
+      } else if (model.sha256) {
+        model.sha256 = model.sha256.toLowerCase();
       }
     }
 
@@ -707,7 +790,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   const baseDir = getModelsBaseDir(category);
   await RNFS.mkdir(baseDir);
 
-  const archivePath = getArchivePath(category, id);
+  const downloadPath = getArchivePath(category, id, model.archiveExt);
+  const isArchive = model.archiveExt === 'tar.bz2';
   const modelDir = getModelDir(category, id);
 
   const sleep = (ms: number) =>
@@ -716,6 +800,10 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     });
 
   const cleanupPartial = async () => {
+    if (!isArchive) {
+      return;
+    }
+
     // Only clean up extracted model dir, preserve archive for download resume
     if (await RNFS.exists(modelDir)) {
       await RNFS.unlink(modelDir);
@@ -748,8 +836,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     if (await RNFS.exists(modelDir)) {
       await RNFS.unlink(modelDir);
     }
-    if (await RNFS.exists(archivePath)) {
-      await RNFS.unlink(archivePath);
+    if (await RNFS.exists(downloadPath)) {
+      await RNFS.unlink(downloadPath);
     }
   } else {
     // Clean up incomplete extractions but preserve partial downloads for resume
@@ -757,23 +845,29 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       getReadyMarkerPath(category, id)
     );
     if (!readyMarkerExists) {
-      // No ready marker found; only clean up extracted model dir
-      // Keep archive file to support download resume
-      if (await RNFS.exists(modelDir)) {
-        // Removing partial model dir
-        await RNFS.unlink(modelDir);
+      if (isArchive) {
+        // No ready marker found; only clean up extracted model dir
+        // Keep archive file to support download resume
+        if (await RNFS.exists(modelDir)) {
+          // Removing partial model dir
+          await RNFS.unlink(modelDir);
+        }
       }
     }
   }
 
   try {
-    // Step 2: Download archive (with resume support)
-    const archiveExists = await RNFS.exists(archivePath);
+    // Step 2: Download archive or onnx file (with resume support)
+    if (!isArchive) {
+      await RNFS.mkdir(modelDir);
+    }
+
+    const archiveExists = await RNFS.exists(downloadPath);
     let partialDownload = false;
 
     if (archiveExists) {
       // Check if this is a complete download or partial
-      const stat = await RNFS.stat(archivePath);
+      const stat = await RNFS.stat(downloadPath);
       const currentSize = stat.size;
       if (currentSize < model.bytes) {
         partialDownload = true;
@@ -792,7 +886,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
 
           const download = RNFS.downloadFile({
             fromUrl: model.downloadUrl,
-            toFile: archivePath,
+            toFile: downloadPath,
             progressDivider: 1,
             resumable: () => {
               // iOS only: Called when download is resumed
@@ -873,11 +967,11 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
               result.statusCode === 410 || // Gone
               result.statusCode === 451 || // Unavailable for legal reasons
               result.statusCode === 416; // Range not satisfiable
-            if (isNonResumableError && (await RNFS.exists(archivePath))) {
+            if (isNonResumableError && (await RNFS.exists(downloadPath))) {
               console.warn(
                 `[Download] Non-resumable error ${result.statusCode}, removing partial download`
               );
-              await RNFS.unlink(archivePath);
+              await RNFS.unlink(downloadPath);
             }
             throw new Error(`Download failed: ${result.statusCode}`);
           }
@@ -896,71 +990,95 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       throw abortError;
     }
 
-    await RNFS.mkdir(modelDir);
-    const extractStartTime = Date.now();
-    const extractResult = await extractTarBz2(
-      archivePath,
-      modelDir,
-      true,
-      (evt) => {
-        if (isAborted()) {
-          return;
-        }
-        if (model.bytes > 0) {
-          // Calculate extraction speed and ETA
-          const now = Date.now();
-          const elapsedSeconds = (now - extractStartTime) / 1000;
+    let extractResult: { sha256?: string } | null = null;
 
-          let speed: number | undefined;
-          let eta: number | undefined;
-
-          if (elapsedSeconds > 0.5) {
-            speed = evt.bytes / elapsedSeconds;
-            const remainingBytes = evt.totalBytes - evt.bytes;
-            if (speed > 0) {
-              eta = remainingBytes / speed;
-            }
+    if (isArchive) {
+      await RNFS.mkdir(modelDir);
+      const extractStartTime = Date.now();
+      extractResult = await extractTarBz2(
+        downloadPath,
+        modelDir,
+        true,
+        (evt) => {
+          if (isAborted()) {
+            return;
           }
+          if (model.bytes > 0) {
+            // Calculate extraction speed and ETA
+            const now = Date.now();
+            const elapsedSeconds = (now - extractStartTime) / 1000;
 
-          const progress: DownloadProgress = {
-            bytesDownloaded: evt.bytes,
-            totalBytes: evt.totalBytes,
-            percent: evt.percent,
-            phase: 'extracting',
-            speed,
-            eta,
-          };
-          opts?.onProgress?.(progress);
-          emitDownloadProgress(category, id, progress);
-        }
-      },
-      opts?.signal
-    );
+            let speed: number | undefined;
+            let eta: number | undefined;
 
-    // Step 3: Validate checksum if available (native SHA-256 from extraction)
+            if (elapsedSeconds > 0.5) {
+              speed = evt.bytes / elapsedSeconds;
+              const remainingBytes = evt.totalBytes - evt.bytes;
+              if (speed > 0) {
+                eta = remainingBytes / speed;
+              }
+            }
+
+            const progress: DownloadProgress = {
+              bytesDownloaded: evt.bytes,
+              totalBytes: evt.totalBytes,
+              percent: evt.percent,
+              phase: 'extracting',
+              speed,
+              eta,
+            };
+            opts?.onProgress?.(progress);
+            emitDownloadProgress(category, id, progress);
+          }
+        },
+        opts?.signal
+      );
+    }
+
+    // Step 3: Validate checksum if available
     if (model.sha256) {
-      const nativeSha = extractResult.sha256?.toLowerCase();
       const expectedSha = model.sha256.toLowerCase();
       let issue: ChecksumIssue | null = null;
 
-      if (!nativeSha) {
-        issue = {
-          category,
-          id,
-          archivePath,
-          expected: model.sha256,
-          message: 'Native SHA-256 not available after extraction.',
-          reason: 'CHECKSUM_FAILED',
-        };
-      } else if (nativeSha !== expectedSha) {
-        issue = {
-          category,
-          id,
-          archivePath,
-          expected: model.sha256,
-          message: `Checksum mismatch: expected ${model.sha256}, got ${extractResult.sha256}`,
-          reason: 'CHECKSUM_MISMATCH',
-        };
+      if (isArchive) {
+        const nativeSha = extractResult?.sha256?.toLowerCase();
+        if (!nativeSha) {
+          issue = {
+            category,
+            id,
+            archivePath: downloadPath,
+            expected: model.sha256,
+            message: 'Native SHA-256 not available after extraction.',
+            reason: 'CHECKSUM_FAILED',
+          };
+        } else if (nativeSha !== expectedSha) {
+          issue = {
+            category,
+            id,
+            archivePath: downloadPath,
+            expected: model.sha256,
+            message: `Checksum mismatch: expected ${model.sha256}, got ${extractResult?.sha256}`,
+            reason: 'CHECKSUM_MISMATCH',
+          };
+        }
+      } else {
+        const checksumResult = await validateChecksum(
+          downloadPath,
+          expectedSha
+        );
+        if (!checksumResult.success) {
+          issue = {
+            category,
+            id,
+            archivePath: downloadPath,
+            expected: model.sha256,
+            message: checksumResult.message ?? 'Checksum validation failed.',
+            reason:
+              checksumResult.error === 'CHECKSUM_MISMATCH'
+                ? 'CHECKSUM_MISMATCH'
+                : 'CHECKSUM_FAILED',
+          };
+        }
       }
 
       if (issue) {
@@ -972,8 +1090,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           if (await RNFS.exists(modelDir)) {
             await RNFS.unlink(modelDir);
           }
-          if (await RNFS.exists(archivePath)) {
-            await RNFS.unlink(archivePath);
+          if (await RNFS.exists(downloadPath)) {
+            await RNFS.unlink(downloadPath);
           }
           throw new Error(`Checksum validation failed: ${issue.message}`);
         }
@@ -1154,12 +1272,16 @@ export async function deleteModelByCategory(
   id: string
 ): Promise<void> {
   const modelDir = getModelDir(category, id);
-  const archivePath = getArchivePath(category, id);
+  const tarPath = getTarArchivePath(category, id);
+  const onnxPath = getOnnxPath(category, id);
   if (await RNFS.exists(modelDir)) {
     await RNFS.unlink(modelDir);
   }
-  if (await RNFS.exists(archivePath)) {
-    await RNFS.unlink(archivePath);
+  if (await RNFS.exists(tarPath)) {
+    await RNFS.unlink(tarPath);
+  }
+  if (await RNFS.exists(onnxPath)) {
+    await RNFS.unlink(onnxPath);
   }
 }
 
