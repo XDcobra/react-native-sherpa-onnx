@@ -31,7 +31,7 @@ Pod::Spec.new do |s|
   # Link with required frameworks and libraries
   # CoreML is required by ONNX Runtime's CoreML execution provider
   s.frameworks = 'Foundation', 'Accelerate', 'CoreML'
-  s.libraries = 'c++'
+  s.libraries = 'c++', 'archive'
   
   # Note: Header files and framework are set up by postinstall script (yarn setup-assets)
   # This runs automatically after yarn/npm install and handles all setup tasks

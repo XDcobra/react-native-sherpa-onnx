@@ -12,6 +12,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Timestamps (estimated) | Supported | `generateSpeechWithTimestamps()` |
 | Noise/Noise W/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
 | Runtime param updates | Supported | `updateTtsParams()` |
+| Model downloads | Supported | Download Manager API |
 | Batch generation | Planned | C API supports multi-text generation |
 | SSML | Planned | Model-dependent |
 | Real-time factor (RTF) | Planned | Performance metrics |
@@ -25,15 +26,20 @@ The TTS module supports both full-buffer generation (return the entire sample bu
 ## Quick Start
 
 ```typescript
-import { resolveModelPath } from 'react-native-sherpa-onnx';
 import {
   initializeTTS,
   generateSpeech,
   unloadTTS,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
-await initializeTTS({ modelPath, numThreads: 2 });
+await initializeTTS({
+  modelPath: {
+    type: 'asset',
+    path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
+  },
+  modelType: 'auto',
+  numThreads: 2,
+});
 
 const audio = await generateSpeech('Hello, world!');
 console.log('sampleRate:', audio.sampleRate, 'samples:', audio.samples.length);
@@ -93,7 +99,8 @@ await stopTtsPcmPlayer();
 
 ### `initializeTTS(options)`
 
-Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory (use `resolveModelPath` for assets).
+Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files.
+Auto-detection is file-based, so folder names do not need to match model types.
 
 Noise/Noise W/Length scale tuning (model-dependent):
 
@@ -156,7 +163,6 @@ iOS notes:
 
 ```typescript
 import {
-  resolveModelPath,
   initializeTTS,
   generateSpeechStream,
   cancelSpeechStream,
@@ -167,8 +173,13 @@ import {
   saveTtsAudioToFile,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = await resolveModelPath({ type: 'asset', path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium' });
-await initializeTTS({ modelPath, numThreads: 2 });
+await initializeTTS({
+  modelPath: {
+    type: 'asset',
+    path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
+  },
+  numThreads: 2,
+});
 
 const sampleRate = await getTtsSampleRate();
 await startTtsPcmPlayer(sampleRate, 1);

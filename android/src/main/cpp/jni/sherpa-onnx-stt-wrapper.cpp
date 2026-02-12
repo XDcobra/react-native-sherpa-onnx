@@ -54,6 +54,7 @@ SttInitializeResult SttWrapper::initialize(
 ) {
     SttInitializeResult result;
     result.success = false;
+    result.error = "";
 
     if (pImpl->initialized) {
         release();
@@ -61,6 +62,7 @@ SttInitializeResult SttWrapper::initialize(
 
     if (modelDir.empty()) {
         LOGE("Model directory is empty");
+        result.error = "Model directory is empty";
         return result;
     }
 
@@ -72,6 +74,7 @@ SttInitializeResult SttWrapper::initialize(
         auto detect = DetectSttModel(modelDir, preferInt8, modelType);
         if (!detect.ok) {
             LOGE("%s", detect.error.c_str());
+            result.error = detect.error;
             return result;
         }
 
@@ -109,6 +112,7 @@ SttInitializeResult SttWrapper::initialize(
             case SttModelKind::kUnknown:
             default:
                 LOGE("No compatible model type detected in %s", modelDir.c_str());
+                result.error = "No compatible model type detected in " + modelDir;
                 return result;
         }
 
@@ -132,6 +136,7 @@ SttInitializeResult SttWrapper::initialize(
             pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
         } catch (const std::exception& e) {
             LOGE("Failed to create recognizer: %s", e.what());
+            result.error = std::string("Failed to create recognizer: ") + e.what();
             return result;
         }
 
@@ -144,9 +149,11 @@ SttInitializeResult SttWrapper::initialize(
         return result;
     } catch (const std::exception& e) {
         LOGE("Exception during initialization: %s", e.what());
+        result.error = std::string("Exception during initialization: ") + e.what();
         return result;
     } catch (...) {
         LOGE("Unknown exception during initialization");
+        result.error = "Unknown exception during initialization";
         return result;
     }
 }

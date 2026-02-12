@@ -12,31 +12,45 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
   autoModelPath,
-  resolveModelPath,
   listAssetModels,
+  resolveModelPath,
 } from 'react-native-sherpa-onnx';
+import {
+  listDownloadedModelsByCategory,
+  ModelCategory,
+} from 'react-native-sherpa-onnx/download';
+import {
+  getSizeHint,
+  getQualityHint,
+  RECOMMENDED_MODEL_IDS,
+} from '../../utils/recommendedModels';
 import {
   initializeSTT,
   unloadSTT,
   transcribeFile,
+  type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
-import { getModelDisplayName } from '../../modelConfig';
+import {
+  getAssetModelPath,
+  getFileModelPath,
+  getModelDisplayName,
+} from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
   );
   const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: string; modelDir: string }>
+    Array<{ type: STTModelType; modelDir: string }>
   >([]);
-  const [selectedModelType, setSelectedModelType] = useState<string | null>(
-    null
-  );
+  const [selectedModelType, setSelectedModelType] =
+    useState<STTModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioSourceType, setAudioSourceType] = useState<
@@ -74,29 +88,53 @@ export default function STTScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const models = await listAssetModels();
-      const sttFolders = models
+      const downloadedModels = await listDownloadedModelsByCategory(
+        ModelCategory.Stt
+      );
+      const downloadedIds = downloadedModels
+        .map((model) => model.id)
+        .filter(Boolean);
+
+      const assetModels = await listAssetModels();
+      const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
-      const ttsFolders = models
-        .filter((model) => model.hint === 'tts')
-        .map((model) => model.folder);
-      const unknownFolders = models.filter((model) => model.hint === 'unknown');
 
-      console.log('STTScreen: Found model folders:', models);
-      setAvailableModels(sttFolders);
-      if (sttFolders.length === 0) {
-        setError(
-          ttsFolders.length > 0
-            ? 'No STT models found. Only TTS models detected in assets/models/. See STT_MODEL_SETUP.md'
-            : unknownFolders.length > 0
-            ? 'No STT models found. Some models have unknown type hints. See STT_MODEL_SETUP.md'
-            : 'No STT models found in assets. See STT_MODEL_SETUP.md'
-        );
+      const combined = [
+        ...downloadedIds,
+        ...sttFolders.filter((folder) => !downloadedIds.includes(folder)),
+      ];
+
+      if (downloadedIds.length > 0) {
+        console.log('STTScreen: Found downloaded models:', downloadedIds);
+      }
+      if (sttFolders.length > 0) {
+        console.log('STTScreen: Found asset models:', sttFolders);
+      }
+
+      setDownloadedModelIds(downloadedIds);
+      setAvailableModels(combined);
+
+      if (combined.length === 0) {
+        const hasRecommendedModels =
+          (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
+
+        if (hasRecommendedModels) {
+          setError(
+            'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
+          );
+          console.log(
+            'STTScreen: No models available. Recommended models available for download.'
+          );
+        } else {
+          setError('No STT models found. See STT_MODEL_SETUP.md');
+        }
       }
     } catch (err) {
-      console.error('STTScreen: Failed to list models:', err);
-      setError('Failed to list available models');
+      console.error('STTScreen: Failed to load models:', err);
+      setError('Failed to load available models');
+      setDownloadedModelIds([]);
+      setAvailableModels([]);
     } finally {
       setLoadingModels(false);
     }
@@ -115,24 +153,22 @@ export default function STTScreen() {
         await unloadSTT();
       }
 
-      // Resolve model path
-      const modelPath = await resolveModelPath({
-        type: 'asset',
-        path: `models/${modelFolder}`,
-      });
-
       // Initialize new model
       const result = await initializeSTT({
-        modelPath: { type: 'file', path: modelPath },
+        modelPath: downloadedModelIds.includes(modelFolder)
+          ? getFileModelPath(modelFolder, ModelCategory.Stt)
+          : getAssetModelPath(modelFolder),
       });
 
       if (result.success && result.detectedModels.length > 0) {
-        setDetectedModels(result.detectedModels);
+        const normalizedDetected = result.detectedModels.map((model) => ({
+          ...model,
+          type: model.type as STTModelType,
+        }));
+        setDetectedModels(normalizedDetected);
         setCurrentModelFolder(modelFolder);
 
-        const detectedTypes = result.detectedModels
-          .map((m) => m.type)
-          .join(', ');
+        const detectedTypes = normalizedDetected.map((m) => m.type).join(', ');
         setInitResult(
           `Initialized: ${getModelDisplayName(
             modelFolder
@@ -140,8 +176,8 @@ export default function STTScreen() {
         );
 
         // Auto-select first detected model
-        if (result.detectedModels.length === 1 && result.detectedModels[0]) {
-          setSelectedModelType(result.detectedModels[0].type);
+        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+          setSelectedModelType(normalizedDetected[0].type);
         }
       } else {
         setError('No models detected in the directory');
@@ -369,30 +405,62 @@ export default function STTScreen() {
               </View>
             ) : (
               <View style={styles.modelButtons}>
-                {availableModels.map((modelFolder) => (
-                  <TouchableOpacity
-                    key={modelFolder}
-                    style={[
-                      styles.modelButton,
-                      currentModelFolder === modelFolder &&
-                        styles.modelButtonActive,
-                      loading && styles.buttonDisabled,
-                    ]}
-                    onPress={() => handleInitialize(modelFolder)}
-                    disabled={loading}
-                  >
-                    <Text
+                {availableModels.map((modelFolder) => {
+                  return (
+                    <TouchableOpacity
+                      key={modelFolder}
                       style={[
-                        styles.modelButtonText,
+                        styles.modelButton,
                         currentModelFolder === modelFolder &&
-                          styles.modelButtonTextActive,
+                          styles.modelButtonActive,
+                        loading && styles.buttonDisabled,
                       ]}
+                      onPress={() => handleInitialize(modelFolder)}
+                      disabled={loading}
                     >
-                      {getModelDisplayName(modelFolder)}
-                    </Text>
-                    <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.modelButtonText,
+                          currentModelFolder === modelFolder &&
+                            styles.modelButtonTextActive,
+                        ]}
+                      >
+                        {getModelDisplayName(modelFolder)}
+                      </Text>
+                      {(() => {
+                        const sizeHintInfo = getSizeHint(modelFolder);
+                        const qualityHintInfo = getQualityHint(modelFolder);
+
+                        return (
+                          <View style={styles.modelHintRow}>
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={sizeHintInfo.iconName as any}
+                                size={12}
+                                color={sizeHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {sizeHintInfo.tier}
+                              </Text>
+                            </View>
+
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={qualityHintInfo.iconName as any}
+                                size={12}
+                                color={qualityHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {qualityHintInfo.text.split(',')[0]}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
+                      <Text style={styles.modelFolderText}>{modelFolder}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
 
@@ -1022,5 +1090,25 @@ const styles = StyleSheet.create({
   detectedModelPath: {
     fontSize: 12,
     color: '#999',
+  },
+  modelHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  modelHintGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginRight: 12,
+  },
+  modelHintText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 0,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });

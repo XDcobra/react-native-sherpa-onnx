@@ -7,16 +7,6 @@ import SherpaOnnx from './NativeSherpaOnnx';
  */
 
 /**
- * Predefined model identifiers
- */
-export const MODELS = {
-  ZIPFORMER_EN: 'sherpa-onnx-zipformer-small-en',
-  PARAFORMER_ZH: 'sherpa-onnx-paraformer-zh-small',
-} as const;
-
-export type ModelId = (typeof MODELS)[keyof typeof MODELS];
-
-/**
  * Get the default model directory path for the current platform.
  * This is a helper for apps that want to use a standard location.
  *
@@ -79,20 +69,12 @@ export function autoModelPath(path: string): ModelPathConfig {
  * This handles different path types (asset, file, auto) and returns
  * a platform-specific absolute path that can be used by native code.
  *
- * @param config - Model path configuration or simple string path
+ * @param config - Model path configuration
  * @returns Promise resolving to absolute path usable by native code
  */
 export async function resolveModelPath(
-  config: ModelPathConfig | string
+  config: ModelPathConfig
 ): Promise<string> {
-  // Backward compatibility: if string is passed, treat as auto
-  if (typeof config === 'string') {
-    return SherpaOnnx.resolveModelPath({
-      type: 'auto',
-      path: config,
-    });
-  }
-
   return SherpaOnnx.resolveModelPath(config);
 }
 

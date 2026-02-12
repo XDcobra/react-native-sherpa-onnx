@@ -29,9 +29,23 @@ import {
   saveTextToContentUri,
   copyContentUriToCache,
   shareAudioFile,
+  type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
-import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
-import { getModelDisplayName } from '../../modelConfig';
+import {
+  listDownloadedModelsByCategory,
+  ModelCategory,
+} from 'react-native-sherpa-onnx/download';
+import { listAssetModels } from 'react-native-sherpa-onnx';
+import {
+  getAssetModelPath,
+  getFileModelPath,
+  getModelDisplayName,
+} from '../../modelConfig';
+import {
+  getSizeHint,
+  getQualityHint,
+  RECOMMENDED_MODEL_IDS,
+} from '../../utils/recommendedModels';
 import RNFS from 'react-native-fs';
 import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -39,17 +53,17 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
   );
   const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: string; modelDir: string }>
+    Array<{ type: TTSModelType; modelDir: string }>
   >([]);
-  const [selectedModelType, setSelectedModelType] = useState<string | null>(
-    null
-  );
+  const [selectedModelType, setSelectedModelType] =
+    useState<TTSModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializingModel, setInitializingModel] = useState<string | null>(
     null
@@ -408,29 +422,53 @@ export default function TTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const models = await listAssetModels();
-      const ttsFolders = models
+      const downloadedModels = await listDownloadedModelsByCategory(
+        ModelCategory.Tts
+      );
+      const downloadedIds = downloadedModels
+        .map((model) => model.id)
+        .filter(Boolean);
+
+      const assetModels = await listAssetModels();
+      const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
-      const sttFolders = models
-        .filter((model) => model.hint === 'stt')
-        .map((model) => model.folder);
-      const unknownFolders = models.filter((model) => model.hint === 'unknown');
 
-      console.log('TTSScreen: Found model folders:', models);
-      setAvailableModels(ttsFolders);
-      if (ttsFolders.length === 0) {
-        setError(
-          sttFolders.length > 0
-            ? 'No TTS models found. Only STT models detected in assets/models/. See TTS_MODEL_SETUP.md'
-            : unknownFolders.length > 0
-            ? 'No TTS models found. Some models have unknown type hints. See TTS_MODEL_SETUP.md'
-            : 'No TTS models found in assets. See TTS_MODEL_SETUP.md'
-        );
+      const combined = [
+        ...downloadedIds,
+        ...ttsFolders.filter((folder) => !downloadedIds.includes(folder)),
+      ];
+
+      if (downloadedIds.length > 0) {
+        console.log('TTSScreen: Found downloaded models:', downloadedIds);
+      }
+      if (ttsFolders.length > 0) {
+        console.log('TTSScreen: Found asset models:', ttsFolders);
+      }
+
+      setDownloadedModelIds(downloadedIds);
+      setAvailableModels(combined);
+
+      if (combined.length === 0) {
+        const hasRecommendedModels =
+          (RECOMMENDED_MODEL_IDS[ModelCategory.Tts] || []).length > 0;
+
+        if (hasRecommendedModels) {
+          setError(
+            'No TTS models found. Consider downloading one of the recommended models in the Model Management screen.'
+          );
+          console.log(
+            'TTSScreen: No models available. Recommended models available for download.'
+          );
+        } else {
+          setError('No TTS models found. See TTS_MODEL_SETUP.md');
+        }
       }
     } catch (err) {
-      console.error('TTSScreen: Failed to list models:', err);
-      setError('Failed to list available models');
+      console.error('TTSScreen: Failed to load models:', err);
+      setError('Failed to load available models');
+      setDownloadedModelIds([]);
+      setAvailableModels([]);
     } finally {
       setLoadingModels(false);
     }
@@ -467,13 +505,9 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      // Resolve model path
-      const modelPath = await resolveModelPath({
-        type: 'asset',
-        path: `models/${modelFolder}`,
-      });
-
-      console.log('TTSScreen: Resolved model path:', modelPath);
+      const modelPath = downloadedModelIds.includes(modelFolder)
+        ? getFileModelPath(modelFolder, ModelCategory.Tts)
+        : getAssetModelPath(modelFolder);
 
       const noiseScaleValue = noiseScale.trim();
       const noiseScaleWValue = noiseScaleW.trim();
@@ -543,11 +577,17 @@ export default function TTSScreen() {
       }
 
       if (result.success && result.detectedModels.length > 0) {
-        setDetectedModels(result.detectedModels);
+        const normalizedDetected = result.detectedModels.map(
+          (model: { type: string; modelDir: string }) => ({
+            ...model,
+            type: model.type as TTSModelType,
+          })
+        );
+        setDetectedModels(normalizedDetected);
         setCurrentModelFolder(modelFolder);
 
-        const detectedTypes = result.detectedModels
-          .map((m: { type: string }) => m.type)
+        const detectedTypes = normalizedDetected
+          .map((m: { type: TTSModelType }) => m.type)
           .join(', ');
         setInitResult(
           `Initialized: ${getModelDisplayName(
@@ -556,8 +596,8 @@ export default function TTSScreen() {
         );
 
         // Auto-select first detected model
-        if (result.detectedModels.length === 1 && result.detectedModels[0]) {
-          setSelectedModelType(result.detectedModels[0].type);
+        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+          setSelectedModelType(normalizedDetected[0].type);
         }
 
         // Get model info
@@ -1378,6 +1418,36 @@ export default function TTSScreen() {
                       >
                         {getModelDisplayName(modelFolder)}
                       </Text>
+                      {(() => {
+                        const sizeHintInfo = getSizeHint(modelFolder);
+                        const qualityHintInfo = getQualityHint(modelFolder);
+
+                        return (
+                          <View style={styles.modelHintRow}>
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={sizeHintInfo.iconName as any}
+                                size={12}
+                                color={sizeHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {sizeHintInfo.tier}
+                              </Text>
+                            </View>
+
+                            <View style={styles.modelHintGroup}>
+                              <Ionicons
+                                name={qualityHintInfo.iconName as any}
+                                size={12}
+                                color={qualityHintInfo.iconColor}
+                              />
+                              <Text style={styles.modelHintText}>
+                                {qualityHintInfo.text.split(',')[0]}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
                       <Text style={styles.modelButtonSubtext}>
                         {modelFolder}
                       </Text>
@@ -2086,6 +2156,26 @@ const styles = StyleSheet.create({
   rowAlignCenter: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  modelHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  modelHintGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginRight: 12,
+  },
+  modelHintText: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 0,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   separator: {
     height: 1,

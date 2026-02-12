@@ -62,6 +62,7 @@ TtsInitializeResult TtsWrapper::initialize(
 ) {
     TtsInitializeResult result;
     result.success = false;
+    result.error = "";
 
     if (pImpl->initialized) {
         release();
@@ -69,6 +70,7 @@ TtsInitializeResult TtsWrapper::initialize(
 
     if (modelDir.empty()) {
         LOGE("TTS: Model directory is empty");
+        result.error = "TTS: Model directory is empty";
         return result;
     }
 
@@ -80,6 +82,7 @@ TtsInitializeResult TtsWrapper::initialize(
         auto detect = DetectTtsModel(modelDir, modelType);
         if (!detect.ok) {
             LOGE("%s", detect.error.c_str());
+            result.error = detect.error;
             return result;
         }
 
@@ -141,6 +144,7 @@ TtsInitializeResult TtsWrapper::initialize(
             case TtsModelKind::kUnknown:
             default:
                 LOGE("TTS: Unknown model type: %s", modelType.c_str());
+                result.error = "TTS: Unknown model type: " + modelType;
                 return result;
         }
 
@@ -150,6 +154,7 @@ TtsInitializeResult TtsWrapper::initialize(
 
         if (!pImpl->tts.has_value()) {
             LOGE("TTS: Failed to create OfflineTts instance");
+            result.error = "TTS: Failed to create OfflineTts instance";
             return result;
         }
 
@@ -166,9 +171,11 @@ TtsInitializeResult TtsWrapper::initialize(
         return result;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during initialization: %s", e.what());
+        result.error = std::string("TTS: Exception during initialization: ") + e.what();
         return result;
     } catch (...) {
         LOGE("TTS: Unknown exception during initialization");
+        result.error = "TTS: Unknown exception during initialization";
         return result;
     }
 }
