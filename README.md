@@ -2,13 +2,19 @@
 
 React Native SDK for sherpa-onnx - providing offline speech processing capabilities
 
-![Banner](./docs/images/banner.png)
+<div align="center">
+  <img src="./docs/images/banner.png" alt="Banner" width="560" />
+</div>
+
+<div align="center">
 
 [![npm version](https://img.shields.io/npm/v/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![npm downloads](https://img.shields.io/npm/dm/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![npm license](https://img.shields.io/npm/l/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![Android](https://img.shields.io/badge/Android-Supported-green)](https://www.android.com/)
 [![iOS](https://img.shields.io/badge/iOS-Supported-blue)](https://www.apple.com/ios/)
+
+</div>
 
 A React Native TurboModule that provides offline speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
@@ -186,12 +192,19 @@ yarn install
 yarn android  # or yarn ios
 ```
 
-<div align="center" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
-  <img src="./docs/images/example_home_screen.png" alt="Model selection home screen" style="flex:0 0 32%;max-width:32%;" />
-  <img src="./docs/images/example_stt_1.png" alt="Transcribe english audio" style="flex:0 0 32%;max-width:32%;" />
-  <img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" style="flex:0 0 32%;max-width:32%;" />
-  <img src="./docs/images/example_tts_1.png" alt="Text to speech settings" style="flex:0 0 32%;max-width:32%;" />
-  <img src="./docs/images/example_tts_2.png" alt="Text to speech generation" style="flex:0 0 32%;max-width:32%;" />
+<div align="center">
+<table>
+<tr>
+<td><img src="./docs/images/example_home_screen.png" alt="Model selection home screen" width="240" /></td>
+<td><img src="./docs/images/example_stt_1.png" alt="Transcribe english audio" width="240" /></td>
+<td><img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" width="240" /></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example_tts_1.png" alt="Text to speech settings" width="240" /></td>
+<td><img src="./docs/images/example_tts_2.png" alt="Text to speech generation" width="240" /></td>
+<td></td>
+</tr>
+</table>
 </div>
 
 ### Video to Text Comparison App
