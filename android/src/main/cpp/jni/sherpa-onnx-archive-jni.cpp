@@ -32,11 +32,14 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
 
   // Get method for onProgress if callback provided
   jmethodID on_progress_method = nullptr;
+  jobject j_progress_callback_global = nullptr;
   if (j_progress_callback != nullptr) {
     jclass callback_class = env->GetObjectClass(j_progress_callback);
     on_progress_method = env->GetMethodID(
         callback_class, "invoke", "(JJD)V");
     env->DeleteLocalRef(callback_class);
+    // Store as global reference to ensure validity across potential thread boundaries
+    j_progress_callback_global = env->NewGlobalRef(j_progress_callback);
   }
 
   // Get Promise.resolve and reject methods
@@ -57,12 +60,32 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
   jmethodID put_string_method = env->GetMethodID(
       writeable_map_class, "putString", "(Ljava/lang/String;Ljava/lang/String;)V");
 
-  // Progress callback wrapper
-  auto on_progress = [env, j_progress_callback, on_progress_method](
+  // Progress callback wrapper - JNI-safe version
+  auto on_progress = [j_progress_callback_global, on_progress_method](
       long long bytes_extracted, long long total_bytes, double percent) {
-    if (j_progress_callback != nullptr && on_progress_method != nullptr) {
-      env->CallVoidMethod(j_progress_callback, on_progress_method,
-                          bytes_extracted, total_bytes, percent);
+    if (j_progress_callback_global != nullptr && on_progress_method != nullptr) {
+      // Get JNIEnv for current thread
+      JNIEnv* callback_env = nullptr;
+      bool should_detach = false;
+      
+      if (g_vm->GetEnv(reinterpret_cast<void**>(&callback_env), JNI_VERSION_1_6) == JNI_EDETACHED) {
+        // Thread not attached, attach it
+        if (g_vm->AttachCurrentThread(&callback_env, nullptr) == JNI_OK) {
+          should_detach = true;
+        } else {
+          return; // Failed to attach, skip callback
+        }
+      }
+      
+      if (callback_env != nullptr) {
+        callback_env->CallVoidMethod(j_progress_callback_global, on_progress_method,
+                            bytes_extracted, total_bytes, percent);
+        
+        // Detach if we attached in this call
+        if (should_detach) {
+          g_vm->DetachCurrentThread();
+        }
+      }
     }
   };
 
@@ -95,6 +118,11 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
     env->CallVoidMethod(j_promise, reject_method,
                         env->NewStringUTF("ARCHIVE_ERROR"),
                         env->NewStringUTF(error_msg.c_str()));
+  }
+
+  // Clean up global reference
+  if (j_progress_callback_global != nullptr) {
+    env->DeleteGlobalRef(j_progress_callback_global);
   }
 
   env->DeleteLocalRef(result_map);

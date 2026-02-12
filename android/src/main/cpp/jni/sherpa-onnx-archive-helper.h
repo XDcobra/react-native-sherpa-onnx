@@ -2,6 +2,7 @@
 
 #include <string>
 #include <functional>
+#include <atomic>
 
 /**
  * Archive extraction helper using libarchive for fast tar.bz2 extraction
@@ -38,5 +39,5 @@ class ArchiveHelper {
   static void Cancel();
 
  private:
-  static volatile bool cancel_requested_;
+  static std::atomic<bool> cancel_requested_;
 };

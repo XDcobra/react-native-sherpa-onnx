@@ -14,7 +14,7 @@
 // TAG is defined but may not be used depending on logging configuration
 
 // Global cancellation flag
-volatile bool ArchiveHelper::cancel_requested_ = false;
+std::atomic<bool> ArchiveHelper::cancel_requested_(false);
 
 namespace {
 struct ArchiveReadContext {
@@ -81,11 +81,11 @@ static std::string ToHex(const unsigned char* data, size_t size) {
 }  // namespace
 
 bool ArchiveHelper::IsCancelled() {
-  return cancel_requested_;
+  return cancel_requested_.load();
 }
 
 void ArchiveHelper::Cancel() {
-  cancel_requested_ = true;
+  cancel_requested_.store(true);
 }
 
 bool ArchiveHelper::ExtractTarBz2(
@@ -95,7 +95,7 @@ bool ArchiveHelper::ExtractTarBz2(
     std::function<void(long long, long long, double)> on_progress,
   std::string* out_error,
   std::string* out_sha256) {
-  cancel_requested_ = false;
+  cancel_requested_.store(false);
 
   // Validate source file exists
   if (!std::filesystem::exists(source_path)) {
@@ -199,7 +199,7 @@ bool ArchiveHelper::ExtractTarBz2(
   long long last_emit_bytes = 0;
 
   while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
-    if (cancel_requested_) {
+    if (cancel_requested_.load()) {
       if (out_error) *out_error = "Extraction cancelled";
       archive_read_free(archive);
       archive_write_free(disk);
@@ -279,7 +279,7 @@ bool ArchiveHelper::ExtractTarBz2(
     la_int64_t offset = 0;
 
     while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
-      if (cancel_requested_) {
+      if (cancel_requested_.load()) {
         if (out_error) *out_error = "Extraction cancelled";
         archive_read_free(archive);
         archive_write_free(disk);

@@ -96,15 +96,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len) {
     archive_entry_set_gid(entry, 1000);
     archive_entry_set_mtime(entry, consumer.consume_i64(), 0);
 
+    // Prepare data and size for regular files before writing the header
+    uint8_t data_buf[256];
+    size_t data_len = 0;
+    if (S_ISREG(mode)) {
+      data_len = consumer.consume_bytes(data_buf, sizeof(data_buf));
+      archive_entry_set_size(entry, data_len);
+    }
+
     // Write the entry header
     if (archive_write_header(disk, entry) == ARCHIVE_OK) {
-      if (S_ISREG(mode)) {
-        uint8_t data_buf[256];
-        size_t data_len = consumer.consume_bytes(data_buf, 256);
-        archive_entry_set_size(entry, data_len);
-        if (data_len > 0) {
-          archive_write_data(disk, data_buf, data_len);
-        }
+      if (S_ISREG(mode) && data_len > 0) {
+        archive_write_data(disk, data_buf, data_len);
       }
       archive_write_finish_entry(disk);
     }
