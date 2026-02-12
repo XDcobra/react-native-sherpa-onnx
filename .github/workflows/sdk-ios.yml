@@ -81,7 +81,7 @@ jobs:
           grep -E "\[SherpaOnnx\]" /tmp/pod_install.log || echo "No SherpaOnnx messages found in pod install output"
 
           # Verify installation
-          if [ ! -f "ios/SherpaOnnxExample.xcworkspace/contents.xcworkspacedata" ]; then
+          if [ ! -f "ios/VoiceLabOfflineTools.xcworkspace/contents.xcworkspacedata" ]; then
             echo "Error: Xcode workspace not created"
             exit 1
           fi
@@ -110,8 +110,8 @@ jobs:
 
           echo ""
           echo "=== Checking App Target xcconfig (vendored_frameworks handles linking automatically) ==="
-          # The aggregated settings for the app are in Pods-SherpaOnnxExample
-          APP_XCCONFIG="example/ios/Pods/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample.debug.xcconfig"
+          # The aggregated settings for the app are in Pods-VoiceLabOfflineTools
+          APP_XCCONFIG="example/ios/Pods/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools.debug.xcconfig"
           if [ -f "$APP_XCCONFIG" ]; then
             echo "App xcconfig found at: $APP_XCCONFIG"
             echo ""
@@ -191,16 +191,16 @@ jobs:
           # Use generic destination to avoid simulator availability issues
           echo ""
           echo "Resolved OTHER_LDFLAGS for Debug-iphonesimulator:"
-          xcodebuild -workspace ios/SherpaOnnxExample.xcworkspace \
-            -scheme SherpaOnnxExample \
+          xcodebuild -workspace ios/VoiceLabOfflineTools.xcworkspace \
+            -scheme VoiceLabOfflineTools \
             -configuration Debug \
             -sdk iphonesimulator \
             -showBuildSettings 2>&1 | grep -A2 "OTHER_LDFLAGS" | head -20 || echo "Could not get build settings"
 
           echo ""
           echo "Checking if sherpa_onnx framework is linked (vendored_frameworks handles this):"
-          SETTINGS=$(xcodebuild -workspace ios/SherpaOnnxExample.xcworkspace \
-            -scheme SherpaOnnxExample \
+          SETTINGS=$(xcodebuild -workspace ios/VoiceLabOfflineTools.xcworkspace \
+            -scheme VoiceLabOfflineTools \
             -configuration Debug \
             -sdk iphonesimulator \
             -showBuildSettings 2>&1) || true
@@ -235,18 +235,18 @@ jobs:
           # Check the Xcode project file directly for build settings
           echo ""
           echo "=== Checking Xcode project for framework linking ==="
-          if grep -q "sherpa_onnx" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj"; then
+          if grep -q "sherpa_onnx" "ios/VoiceLabOfflineTools.xcodeproj/project.pbxproj"; then
             echo "[OK] sherpa_onnx framework found in Xcode project file"
-            grep "sherpa_onnx" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj" | head -5
+            grep "sherpa_onnx" "ios/VoiceLabOfflineTools.xcodeproj/project.pbxproj" | head -5
           else
             echo "[INFO] sherpa_onnx not found directly in Xcode project file"
             echo "This is expected - vendored_frameworks handles linking via CocoaPods"
           fi
 
           # Note about force_load
-          if grep -q "force_load" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj"; then
+          if grep -q "force_load" "ios/VoiceLabOfflineTools.xcodeproj/project.pbxproj"; then
             echo "[INFO] force_load found in Xcode project file (may be from other pods)"
-            grep "force_load" "ios/SherpaOnnxExample.xcodeproj/project.pbxproj" | head -5
+            grep "force_load" "ios/VoiceLabOfflineTools.xcodeproj/project.pbxproj" | head -5
           else
             echo "[OK] force_load not found directly in Xcode project file (expected for sherpa_onnx)"
           fi
@@ -262,8 +262,8 @@ jobs:
           # Build for simulator using -sdk flag (more reliable than -destination)
           # This builds for the current architecture of the Mac runner
           if ! xcodebuild \
-            -workspace ios/SherpaOnnxExample.xcworkspace \
-            -scheme SherpaOnnxExample \
+            -workspace ios/VoiceLabOfflineTools.xcworkspace \
+            -scheme VoiceLabOfflineTools \
             -configuration Debug \
             -sdk iphonesimulator \
             -arch arm64 \
@@ -353,7 +353,7 @@ jobs:
           cp -R "$APP_PATH" "$PAYLOAD_DIR/"
 
           # Create IPA file (ZIP archive)
-          IPA_NAME="SherpaOnnxExample.ipa"
+          IPA_NAME="VoiceLabOfflineTools.ipa"
           IPA_PATH="$IPA_DIR/$IPA_NAME"
 
           cd "$IPA_DIR"
