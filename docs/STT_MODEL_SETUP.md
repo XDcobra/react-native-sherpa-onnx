@@ -138,23 +138,26 @@ models/sherpa-onnx-funasr-nano-zh-en/
 
 ## Platform-Specific Setup
 
-### Android Setup
+### Android Setup (example app with Play Asset Delivery)
 
-1. **Create model directory**:
-   ```
-   android/app/src/main/assets/models/
-   ```
+The example app uses [Play Asset Delivery](https://developer.android.com/guide/playcore/asset-delivery) so models live in the `sherpa_models` asset pack, not in the main app assets. This keeps the base APK small.
 
-2. **Extract model files** to the directory:
+1. **Model directory** (example app):
+   ```
+   android/sherpa_models/src/main/assets/models/
+   ```
+   When you build the example app, models are downloaded here automatically (see `example/scripts/download-models.js`). For manual setup:
+
+2. **Extract model files** into the asset pack directory:
    ```bash
-   # Example: Extract Zipformer model
-   cd android/app/src/main/assets/models/
+   # Example: Extract Zipformer model into the sherpa_models asset pack
+   cd android/sherpa_models/src/main/assets/models/
    tar -xjf sherpa-onnx-zipformer-en-2023-06-26.tar.bz2
    ```
 
-3. **Directory structure should be**:
+3. **Directory structure**:
    ```
-   android/app/src/main/assets/models/
+   android/sherpa_models/src/main/assets/models/
    └── sherpa-onnx-zipformer-en-2023-06-26/
        ├── encoder.onnx
        ├── decoder.onnx
@@ -320,7 +323,7 @@ const chineseResult = await transcribeFile('chinese.wav');
 **Solutions**:
 - Verify model files are correctly extracted
 - Check path spelling and case sensitivity
-- For Android: Ensure files are in `assets/models/`
+- For Android (example app): Ensure files are in `android/sherpa_models/src/main/assets/models/` (asset pack)
 - For iOS: Verify folder is added as "folder reference" (blue folder icon)
 
 ### Initialization Failed

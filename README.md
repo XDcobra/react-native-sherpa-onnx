@@ -152,18 +152,20 @@ Then run `pod install` as usual.
 
 ### Example Model READMEs
 
-- [kokoro (US) README](./example/android/app/src/main/assets/models/kokoro-us/README.md)
-- [kokoro (ZH) README](./example/android/app/src/main/assets/models/kokoro-zh/README.md)
-- [funasr-nano README](./example/android/app/src/main/assets/models/sherpa-onnx-funasr-nano-int8/README.md)
-- [kitten-nano README](./example/android/app/src/main/assets/models/sherpa-onnx-kitten-nano-en-v0_1-fp16/README.md)
-- [matcha README](./example/android/app/src/main/assets/models/sherpa-onnx-matcha-icefall-en_US-ljspeech/README.md)
-- [nemo-ctc README](./example/android/app/src/main/assets/models/sherpa-onnx-nemo-parakeet-tdt-ctc-en/README.md)
-- [paraformer README](./example/android/app/src/main/assets/models/sherpa-onnx-paraformer-zh-small/README.md)
-- [sense-voice README](./example/android/app/src/main/assets/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8/README.md)
-- [vits README](./example/android/app/src/main/assets/models/sherpa-onnx-vits-piper-en_US-libritts_r-medium/README.md)
-- [wenet-ctc README](./example/android/app/src/main/assets/models/sherpa-onnx-wenetspeech-ctc-zh-en-cantonese/README.md)
-- [whisper-tiny README](./example/android/app/src/main/assets/models/sherpa-onnx-whisper-tiny-en/README.md)
-- [zipformer README](./example/android/app/src/main/assets/models/sherpa-onnx-zipformer-small-en/README.md)
+Model READMEs in the example app live in the Play Asset Delivery pack at `example/android/sherpa_models/src/main/assets/models/`:
+
+- [kokoro (US) README](./example/android/sherpa_models/src/main/assets/models/kokoro-us/README.md)
+- [kokoro (ZH) README](./example/android/sherpa_models/src/main/assets/models/kokoro-zh/README.md)
+- [funasr-nano README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-funasr-nano-int8/README.md)
+- [kitten-nano README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-kitten-nano-en-v0_1-fp16/README.md)
+- [matcha README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-matcha-icefall-en_US-ljspeech/README.md)
+- [nemo-ctc README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-nemo-parakeet-tdt-ctc-en/README.md)
+- [paraformer README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-paraformer-zh-small/README.md)
+- [sense-voice README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8/README.md)
+- [vits README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-vits-piper-en_US-libritts_r-medium/README.md)
+- [wenet-ctc README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-wenetspeech-ctc-zh-en-cantonese/README.md)
+- [whisper-tiny README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-whisper-tiny-en/README.md)
+- [zipformer README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-zipformer-small-en/README.md)
 
 ## Requirements
 
