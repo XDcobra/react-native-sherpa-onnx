@@ -20,6 +20,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Cache SherpaOnnx models
+        uses: actions/cache@v4
+        with:
+          path: example/.model-cache
+          key: ${{ runner.os }}-sherpa-models-${{ hashFiles('example/scripts/model-download-config.json', 'example/scripts/download-models.js') }}
+          restore-keys: |
+            ${{ runner.os }}-sherpa-models-
+
+      - name: Lint files
+        run: yarn lint
+
+      - name: Typecheck files
+        run: yarn typecheck
+        
   pack-package:
     name: Pack npm package
     runs-on: ubuntu-latest
@@ -48,9 +72,17 @@ jobs:
       - name: Create package tarball
         id: create_package_tarball
         run: |
+          set -euo pipefail
           mkdir -p artifacts
-          # Use npm pack to create tarball from package.json
-          TARFILE=$(npm pack)
+          # Run npm pack and extract the last non-empty line as the tarball name
+          PACK_OUTPUT=$(npm pack 2>&1 || true)
+          TARFILE=$(printf "%s" "$PACK_OUTPUT" | awk 'NF{line=$0} END{print line}')
+          TARFILE=$(printf "%s" "$TARFILE" | tr -d '\r')
+          if [ -z "$TARFILE" ]; then
+            echo "Error: npm pack did not produce a tarball name. Full output:" >&2
+            printf "%s\n" "$PACK_OUTPUT" >&2
+            exit 1
+          fi
           echo "Created tarball: $TARFILE"
           mv "$TARFILE" artifacts/
           echo "artifact_path=artifacts/$TARFILE" >> $GITHUB_OUTPUT
