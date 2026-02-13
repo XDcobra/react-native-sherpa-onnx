@@ -336,7 +336,7 @@ jobs:
           fi
 
       - name: Create iOS IPA file
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/sdk-v')
         run: |
           echo "Creating iOS IPA file..."
 

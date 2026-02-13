@@ -64,7 +64,7 @@ jobs:
             });
             console.log('Triggered SDK workflow');
 
-      - name: Wait for iOS and Android workflows to complete
+      - name: Wait for iOS, Android, SDK workflows to complete
         id: wait-workflows
         uses: actions/github-script@v7
         with:
