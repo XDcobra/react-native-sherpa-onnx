@@ -162,18 +162,28 @@ def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
 def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
 def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
 
-tasks.register("downloadSherpaModels", Exec) {
-    workingDir file("${rootDir}/..")
-    commandLine "node",
-        sherpaModelsScript.absolutePath,
-        "--platform",
-        "android",
-        "--output",
-        sherpaModelsOutputDir.absolutePath,
-        "--cache",
-        sherpaModelsCacheDir.absolutePath,
-        "--config",
-        sherpaModelsConfig.absolutePath
+// The project used to download/copy models into the app assets. For Play Asset Delivery
+// we create a separate asset-pack module `:sherpa_models` and move the models there during build.
+def sherpaModelsSrcDir = file("${projectDir}/src/main/assets/models")
+def sherpaModelsTargetDir = file("${rootDir}/sherpa_models/src/main/assets/models")
+
+tasks.register("moveSherpaModels", Copy) {
+    description = "Copy existing sherpa models into the asset-pack module"
+    from(sherpaModelsSrcDir)
+    into(sherpaModelsTargetDir)
+    doFirst {
+        file(sherpaModelsTargetDir).mkdirs()
+    }
 }
 
-preBuild.dependsOn(tasks.named("downloadSherpaModels"))
+tasks.register("removeAppModels", Delete) {
+    description = "Remove models from app assets to avoid packaging them into base module"
+    delete sherpaModelsSrcDir
+}
+
+// Ensure removal runs after copy
+tasks.named("removeAppModels").configure { it.mustRunAfter(tasks.named("moveSherpaModels")) }
+
+// Run copy before building the app; then remove models from app assets so base module stays small
+preBuild.dependsOn(tasks.named("moveSherpaModels"))
+preBuild.finalizedBy(tasks.named("removeAppModels"))
