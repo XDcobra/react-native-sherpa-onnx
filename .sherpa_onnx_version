@@ -1,0 +1,9 @@
+# Pinned sherpa-onnx framework version used by this SDK.
+#
+# This file is read by `android/build.gradle` and
+# `scripts/setup-ios-framework.sh` to determine which
+# sherpa-onnx XCFramework version should be used when
+# building or installing the SDK. Update this file when
+# releasing a new SDK to pin the framework version.
+1.12.24
+
