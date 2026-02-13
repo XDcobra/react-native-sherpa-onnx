@@ -150,33 +150,29 @@ jobs:
         run: |
           echo "Locating nlohmann include directory (searching sherpa-onnx build and repo)..."
 
-          # Candidate locations (in priority order)
-          CANDIDATES=(
-            "sherpa-onnx-source/${json_SOURCE_DIR:-}" # placeholder, will not match but keep for clarity
-            "sherpa-onnx-source/include/nlohmann"
-            "sherpa-onnx-source/single_include/nlohmann"
-            "sherpa-onnx-source/${json_SOURCE_DIR:-}/include/nlohmann"
-          )
-
-          # Find the first existing candidate directory
+          # Locate nlohmann include dir under sherpa-onnx-source, preferring
+          # paths that include 'include' or 'single_include' to avoid picking
+          # the repo root or build output directories.
           NLOHMANN_DIR=""
-          for c in "${CANDIDATES[@]}"; do
-            if [ -d "$c" ]; then
-              NLOHMANN_DIR="$c"
-              break
-            fi
+          for d in $(cd sherpa-onnx-source || exit 1; find . -type d -name 'nlohmann' -print 2>/dev/null); do
+            case "$d" in
+              */include/*|*/single_include/*|./include/*|./single_include/*)
+                NLOHMANN_DIR="sherpa-onnx-source/${d#./}"
+                break
+                ;;
+            esac
           done
 
+          # If not found, try a specific search for include/nlohmann or single_include/nlohmann
           if [ -z "$NLOHMANN_DIR" ]; then
-            # Try a broader search inside the cloned repo
-            NLOHMANN_DIR=$(cd sherpa-onnx-source || exit 1; find . -type d -path "*/nlohmann" | head -n1 || true)
-            if [ -n "$NLOHMANN_DIR" ]; then
-              NLOHMANN_DIR="sherpa-onnx-source/${NLOHMANN_DIR#./}"
+            D=$(cd sherpa-onnx-source || exit 1; find . -type d \( -path './**/include/nlohmann' -o -path './**/single_include/nlohmann' \) 2>/dev/null | head -n1 || true)
+            if [ -n "$D" ]; then
+              NLOHMANN_DIR="sherpa-onnx-source/${D#./}"
             fi
           fi
 
           if [ -z "$NLOHMANN_DIR" ]; then
-            echo "Warning: could not find nlohmann include directory; skipping header copy"
+            echo "Warning: could not find nlohmann include directory inside sherpa-onnx-source; skipping header copy"
             exit 0
           fi
 
@@ -192,15 +188,18 @@ jobs:
             exit 0
           fi
 
-          # Copy entire nlohmann directory into each Headers/nlohmann/
+          # Copy only header files (.hpp/.h) to avoid dragging binaries/build artifacts
           for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
             echo "Installing nlohmann headers into $HDR_DIR/nlohmann/"
             mkdir -p "$HDR_DIR/nlohmann"
-            # Use rsync if available for verbose copy, otherwise cp -R
             if command -v rsync >/dev/null 2>&1; then
-              rsync -a "$NLOHMANN_DIR/" "$HDR_DIR/nlohmann/"
+              rsync -a --include='*/' --include='*.hpp' --include='*.h' --exclude='*' "$NLOHMANN_DIR/" "$HDR_DIR/nlohmann/"
             else
-              cp -R "$NLOHMANN_DIR/"* "$HDR_DIR/nlohmann/" || true
+              # Fallback: copy only matching files
+              (cd "$NLOHMANN_DIR" && find . -type f \( -name '*.hpp' -o -name '*.h' \) -print0) | while IFS= read -r -d '' file; do
+                mkdir -p "$HDR_DIR/nlohmann/$(dirname "$file")"
+                cp -v "$NLOHMANN_DIR/$file" "$HDR_DIR/nlohmann/$file" || true
+              done
             fi
           done
 
