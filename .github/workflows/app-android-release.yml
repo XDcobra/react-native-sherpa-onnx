@@ -1,4 +1,4 @@
-name: App - Release Android
+name: App - Android Playstore Release
 
 on:
   push:
