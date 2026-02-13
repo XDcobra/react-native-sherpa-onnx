@@ -146,6 +146,35 @@ jobs:
           echo "Final framework size:"
           du -sh "$FRAMEWORK_NAME"
 
+      - name: Include nlohmann/json.hpp in XCFramework
+        run: |
+          echo "Searching for nlohmann/json.hpp in sherpa-onnx source..."
+          JSON_H=$(cd sherpa-onnx-source || exit 1; find . -type f -name json.hpp | head -n1 || true)
+          if [ -n "$JSON_H" ]; then
+            JSON_H="sherpa-onnx-source/${JSON_H#./}"
+            echo "Found nlohmann header: $JSON_H"
+            if [ -d "sherpa-onnx-source/build-ios" ]; then
+              if [ -d "sherpa-onnx-source/build-ios/sherpa-onnx.xcframework" ]; then
+                FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa-onnx.xcframework"
+              elif [ -d "sherpa-onnx-source/build-ios/sherpa_onnx.xcframework" ]; then
+                FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa_onnx.xcframework"
+              else
+                echo "Build output XCFramework not found, skipping json.hpp copy"
+                exit 0
+              fi
+
+              for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
+                echo "Installing json.hpp into $HDR_DIR/nlohmann/"
+                mkdir -p "$HDR_DIR/nlohmann"
+                cp -v "$JSON_H" "$HDR_DIR/nlohmann/json.hpp" || true
+              done
+            else
+              echo "sherpa-onnx build-ios directory not found, skipping json.hpp copy"
+            fi
+          else
+            echo "Warning: nlohmann/json.hpp not found in sherpa-onnx source"
+          fi
+
       - name: Prepare framework directory
         run: |
           mkdir -p ios/Frameworks
