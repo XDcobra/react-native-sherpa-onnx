@@ -146,34 +146,63 @@ jobs:
           echo "Final framework size:"
           du -sh "$FRAMEWORK_NAME"
 
-      - name: Include nlohmann/json.hpp in XCFramework
+      - name: Include nlohmann headers in XCFramework
         run: |
-          echo "Searching for nlohmann/json.hpp in sherpa-onnx source..."
-          JSON_H=$(cd sherpa-onnx-source || exit 1; find . -type f -name json.hpp | head -n1 || true)
-          if [ -n "$JSON_H" ]; then
-            JSON_H="sherpa-onnx-source/${JSON_H#./}"
-            echo "Found nlohmann header: $JSON_H"
-            if [ -d "sherpa-onnx-source/build-ios" ]; then
-              if [ -d "sherpa-onnx-source/build-ios/sherpa-onnx.xcframework" ]; then
-                FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa-onnx.xcframework"
-              elif [ -d "sherpa-onnx-source/build-ios/sherpa_onnx.xcframework" ]; then
-                FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa_onnx.xcframework"
-              else
-                echo "Build output XCFramework not found, skipping json.hpp copy"
-                exit 0
-              fi
+          echo "Locating nlohmann include directory (searching sherpa-onnx build and repo)..."
 
-              for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
-                echo "Installing json.hpp into $HDR_DIR/nlohmann/"
-                mkdir -p "$HDR_DIR/nlohmann"
-                cp -v "$JSON_H" "$HDR_DIR/nlohmann/json.hpp" || true
-              done
-            else
-              echo "sherpa-onnx build-ios directory not found, skipping json.hpp copy"
+          # Candidate locations (in priority order)
+          CANDIDATES=(
+            "sherpa-onnx-source/${json_SOURCE_DIR:-}" # placeholder, will not match but keep for clarity
+            "sherpa-onnx-source/include/nlohmann"
+            "sherpa-onnx-source/single_include/nlohmann"
+            "sherpa-onnx-source/${json_SOURCE_DIR:-}/include/nlohmann"
+          )
+
+          # Find the first existing candidate directory
+          NLOHMANN_DIR=""
+          for c in "${CANDIDATES[@]}"; do
+            if [ -d "$c" ]; then
+              NLOHMANN_DIR="$c"
+              break
             fi
-          else
-            echo "Warning: nlohmann/json.hpp not found in sherpa-onnx source"
+          done
+
+          if [ -z "$NLOHMANN_DIR" ]; then
+            # Try a broader search inside the cloned repo
+            NLOHMANN_DIR=$(cd sherpa-onnx-source || exit 1; find . -type d -path "*/nlohmann" | head -n1 || true)
+            if [ -n "$NLOHMANN_DIR" ]; then
+              NLOHMANN_DIR="sherpa-onnx-source/${NLOHMANN_DIR#./}"
+            fi
           fi
+
+          if [ -z "$NLOHMANN_DIR" ]; then
+            echo "Warning: could not find nlohmann include directory; skipping header copy"
+            exit 0
+          fi
+
+          echo "Found nlohmann include dir: $NLOHMANN_DIR"
+
+          # Determine built XCFramework dir
+          if [ -d "sherpa-onnx-source/build-ios/sherpa-onnx.xcframework" ]; then
+            FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa-onnx.xcframework"
+          elif [ -d "sherpa-onnx-source/build-ios/sherpa_onnx.xcframework" ]; then
+            FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa_onnx.xcframework"
+          else
+            echo "Build output XCFramework not found, skipping nlohmann copy"
+            exit 0
+          fi
+
+          # Copy entire nlohmann directory into each Headers/nlohmann/
+          for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
+            echo "Installing nlohmann headers into $HDR_DIR/nlohmann/"
+            mkdir -p "$HDR_DIR/nlohmann"
+            # Use rsync if available for verbose copy, otherwise cp -R
+            if command -v rsync >/dev/null 2>&1; then
+              rsync -a "$NLOHMANN_DIR/" "$HDR_DIR/nlohmann/"
+            else
+              cp -R "$NLOHMANN_DIR/"* "$HDR_DIR/nlohmann/" || true
+            fi
+          done
 
       - name: Prepare framework directory
         run: |
