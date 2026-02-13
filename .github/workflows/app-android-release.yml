@@ -99,6 +99,7 @@ jobs:
 
       - name: Build Android release AAB
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: ${{ github.workspace }}/example/android/app/release.keystore
           ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

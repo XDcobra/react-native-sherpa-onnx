@@ -11,8 +11,18 @@ const API_BASE =
 const ARCHIVE_EXTENSIONS = ['.tar.bz2', '.onnx'];
 
 const args = parseArgs(process.argv.slice(2));
-const outputDir = args.output ? path.resolve(args.output) : null;
 const exampleRoot = path.resolve(__dirname, '..');
+// Default output: copy models into the sherpa_models asset-pack used by the example app
+const defaultOutput = path.join(
+  exampleRoot,
+  'android',
+  'sherpa_models',
+  'src',
+  'main',
+  'assets',
+  'models'
+);
+const outputDir = args.output ? path.resolve(args.output) : defaultOutput;
 const cacheDir = path.resolve(
   args.cache || path.join(exampleRoot, '.model-cache')
 );
@@ -21,8 +31,9 @@ const configPath = path.resolve(
   args.config || path.join(__dirname, 'model-download-config.json')
 );
 
+// Ensure output is defined (we use a sensible default pointing at the asset-pack)
 if (!outputDir) {
-  console.error('[SherpaOnnx] Missing --output <dir> argument.');
+  console.error('[SherpaOnnx] Internal error: output dir undefined.');
   process.exit(1);
 }
 

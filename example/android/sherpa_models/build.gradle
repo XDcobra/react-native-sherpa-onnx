@@ -1,16 +1,8 @@
 apply plugin: 'com.android.asset-pack'
 
-android {
-  compileSdk rootProject.ext.compileSdkVersion
-
-  defaultConfig {
-    minSdk rootProject.ext.minSdkVersion
-  }
-
-  // Use the module's own src/main/assets; we'll copy the models there during build
-  sourceSets {
-    main {
-      assets.srcDirs = ['src/main/assets']
-    }
+assetPack {
+  packName = "sherpa_models"
+  dynamicDelivery {
+    deliveryType = "install-time"
   }
 }

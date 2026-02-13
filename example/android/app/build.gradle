@@ -77,6 +77,8 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    assetPacks = [":sherpa_models"]
+
     namespace "com.xdcobra.voicelab"
     defaultConfig {
         applicationId "com.xdcobra.voicelab"
@@ -137,9 +139,14 @@ android {
                 buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"${releaseAdmobBannerId}\""
             }
             buildConfigField "boolean", "ADS_ENABLED", "true"
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.release
+                // Caution! In production, you need to generate your own keystore file.
+                // see https://reactnative.dev/docs/signed-apk-android.
+                // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
+                if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
+                    println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
+                } else {
+                    signingConfig signingConfigs.release
+                }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -157,33 +164,22 @@ dependencies {
     }
 }
 
-def sherpaModelsOutputDir = file("${projectDir}/src/main/assets/models")
+// Play Asset Delivery: models live in the :sherpa_models asset-pack only.
+// Download models into that folder before build so the asset pack has content (local + CI).
+def sherpaModelsOutputDir = file("${rootDir}/sherpa_models/src/main/assets/models")
 def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
 def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
 def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
 
-// The project used to download/copy models into the app assets. For Play Asset Delivery
-// we create a separate asset-pack module `:sherpa_models` and move the models there during build.
-def sherpaModelsSrcDir = file("${projectDir}/src/main/assets/models")
-def sherpaModelsTargetDir = file("${rootDir}/sherpa_models/src/main/assets/models")
-
-tasks.register("moveSherpaModels", Copy) {
-    description = "Copy existing sherpa models into the asset-pack module"
-    from(sherpaModelsSrcDir)
-    into(sherpaModelsTargetDir)
-    doFirst {
-        file(sherpaModelsTargetDir).mkdirs()
-    }
+tasks.register("downloadSherpaModels", Exec) {
+    description = "Download SherpaOnnx models into the sherpa_models asset-pack"
+    workingDir file("${rootDir}/..")
+    commandLine "node",
+        sherpaModelsScript.absolutePath,
+        "--platform", "android",
+        "--output", sherpaModelsOutputDir.absolutePath,
+        "--cache", sherpaModelsCacheDir.absolutePath,
+        "--config", sherpaModelsConfig.absolutePath
 }
 
-tasks.register("removeAppModels", Delete) {
-    description = "Remove models from app assets to avoid packaging them into base module"
-    delete sherpaModelsSrcDir
-}
-
-// Ensure removal runs after copy
-tasks.named("removeAppModels").configure { it.mustRunAfter(tasks.named("moveSherpaModels")) }
-
-// Run copy before building the app; then remove models from app assets so base module stays small
-preBuild.dependsOn(tasks.named("moveSherpaModels"))
-preBuild.finalizedBy(tasks.named("removeAppModels"))
+preBuild.dependsOn(tasks.named("downloadSherpaModels"))
