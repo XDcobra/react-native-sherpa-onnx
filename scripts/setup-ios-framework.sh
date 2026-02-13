@@ -41,6 +41,23 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
+# If SHERPA_ONNX_VERSION is set, treat it as the desired framework version
+# and do not perform the usual "auto-upgrade to latest" behavior. This helps
+# prevent accidental upgrades during CI or automated installs.
+if [ -n "$SHERPA_ONNX_VERSION" ]; then
+  DESIRED_VERSION="$SHERPA_ONNX_VERSION"
+fi
+ # If no env var was provided, prefer a repo-level pinned version file
+ # so each SDK release can pin a specific framework version.
+ if [ -z "$DESIRED_VERSION" ]; then
+  REPO_VER_FILE="$PROJECT_ROOT/.sherpa_onnx_version"
+  if [ -f "$REPO_VER_FILE" ]; then
+    # Read first semantic version-like token from file, ignoring comments
+    DESIRED_VERSION=$(grep -Eo '([0-9]+\.)+[0-9]+' "$REPO_VER_FILE" | head -n1 || true)
+    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using repo-pinned framework version: $DESIRED_VERSION${NC}" >&2
+  fi
+ fi
+
 # Function to compare semantic versions (e.g., "1.12.23" vs "1.12.24")
 compare_versions() {
   local v1=$1
@@ -231,57 +248,69 @@ download_and_extract_framework() {
 
 # Main logic
 if [ -n "$1" ]; then
-  # User provided a specific version
+  # User provided a specific version -> explicit, always honor
   download_and_extract_framework "$1"
 else
-  # Auto mode: check version and download only if needed
-  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Checking framework version...${NC}" >&2
-  
-  local_version=$(get_local_framework_version)
-
-  if ! latest_version=$(get_latest_framework_version); then
-    if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-      echo -e "${YELLOW}Warning: Could not fetch latest framework version, using existing local framework.${NC}" >&2
-      exit 0
+  # If env var was set, enforce that version and do not auto-upgrade to latest
+  if [ -n "$DESIRED_VERSION" ]; then
+    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using SHERPA_ONNX_VERSION=$DESIRED_VERSION${NC}" >&2
+    local_version=$(get_local_framework_version)
+    if [ "$local_version" != "$DESIRED_VERSION" ]; then
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Local framework v$local_version differs, downloading v$DESIRED_VERSION...${NC}" >&2
+      download_and_extract_framework "$DESIRED_VERSION" || exit 1
+    else
+      [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is already v$local_version${NC}" >&2
     fi
-    exit 1
-  fi
-
-  if [ -z "$latest_version" ]; then
-    echo -e "${RED}Error: Could not fetch framework version from GitHub${NC}" >&2
-    exit 1
-  fi
-  
-  [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Latest framework version: $latest_version${NC}" >&2
-  
-  # Check if framework exists
-  if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-    [ "$INTERACTIVE" = true ] && echo "Framework not found locally, downloading..." >&2
-    download_and_extract_framework "$latest_version" || exit 1
-  elif [ -z "$local_version" ]; then
-    # Framework exists but no version file
-    [ "$INTERACTIVE" = true ] && echo "Framework exists but no version info, updating version file..." >&2
-    echo "$latest_version" > "$VERSION_FILE"
   else
-    # Compare versions
-    version_cmp=$(compare_versions "$local_version" "$latest_version")
+    # Auto mode: check version and download only if needed
+    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Checking framework version...${NC}" >&2
+
+    local_version=$(get_local_framework_version)
+
+    if ! latest_version=$(get_latest_framework_version); then
+      if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
+        echo -e "${YELLOW}Warning: Could not fetch latest framework version, using existing local framework.${NC}" >&2
+        exit 0
+      fi
+      exit 1
+    fi
+
+    if [ -z "$latest_version" ]; then
+      echo -e "${RED}Error: Could not fetch framework version from GitHub${NC}" >&2
+      exit 1
+    fi
     
-    if [ "$version_cmp" = "0" ]; then
-      [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
-    elif [ "$version_cmp" = "-1" ]; then
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version → v$latest_version${NC}" >&2
-      if [ "$INTERACTIVE" = true ]; then
-        read -p "Do you want to update? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+    [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Latest framework version: $latest_version${NC}" >&2
+    
+    # Check if framework exists
+    if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
+      [ "$INTERACTIVE" = true ] && echo "Framework not found locally, downloading..." >&2
+      download_and_extract_framework "$latest_version" || exit 1
+    elif [ -z "$local_version" ]; then
+      # Framework exists but no version file
+      [ "$INTERACTIVE" = true ] && echo "Framework exists but no version info, updating version file..." >&2
+      echo "$latest_version" > "$VERSION_FILE"
+    else
+      # Compare versions
+      version_cmp=$(compare_versions "$local_version" "$latest_version")
+      
+      if [ "$version_cmp" = "0" ]; then
+        [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
+      elif [ "$version_cmp" = "-1" ]; then
+        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version → v$latest_version${NC}" >&2
+        if [ "$INTERACTIVE" = true ]; then
+          read -p "Do you want to update? (y/N): " -n 1 -r
+          echo
+          if [[ $REPLY =~ ^[Yy]$ ]]; then
+            download_and_extract_framework "$latest_version" || exit 1
+          fi
+        else
+          # Auto-update in non-interactive mode (e.g., from Podfile)
           download_and_extract_framework "$latest_version" || exit 1
         fi
       else
-        # Auto-update in non-interactive mode (e.g., from Podfile)
-        download_and_extract_framework "$latest_version" || exit 1
+        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Local version (v$local_version) is newer than latest release (v$latest_version)${NC}" >&2
       fi
-    else
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Local version (v$local_version) is newer than latest release (v$latest_version)${NC}" >&2
     fi
   fi
 fi

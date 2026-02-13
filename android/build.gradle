@@ -1,5 +1,29 @@
 // Configurable sherpa-onnx version (default: 1.12.24)
-def sherpaOnnxVersion = project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.24'
+// Allow overriding the sherpa-onnx version via environment variable `SHERPA_ONNX_VERSION`.
+// This lets CI or local devs set a single env var that influences both Android and iOS setup.
+// Resolve sherpaOnnxVersion with the following precedence:
+// 1. SHERPA_ONNX_VERSION env var (for special development use)
+// 2. repo-level .sherpa_onnx_version file (pin per SDK release)
+// 3. project property `sherpaOnnxVersion`
+// 4. hardcoded default
+def sherpaOnnxVersion = System.getenv('SHERPA_ONNX_VERSION')
+if (!sherpaOnnxVersion) {
+  def repoVerFile = new File(rootDir, '.sherpa_onnx_version')
+  if (repoVerFile.exists()) {
+    // Extract first semantic version token from the file (ignore comments)
+    def matcher = (repoVerFile.text =~ /([0-9]+(\.[0-9]+)+)/)
+    if (matcher) {
+      sherpaOnnxVersion = matcher[0][0]
+    } else {
+      // fallback to project prop or default
+      sherpaOnnxVersion = project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.24'
+    }
+  } else if (project.hasProperty('sherpaOnnxVersion')) {
+    sherpaOnnxVersion = project.sherpaOnnxVersion
+  } else {
+    sherpaOnnxVersion = '1.12.24'
+  }
+}
 
 buildscript {
   ext.SherpaOnnx = [
