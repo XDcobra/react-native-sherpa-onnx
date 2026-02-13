@@ -35,7 +35,7 @@ jobs:
             const response = await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'ios.yml',
+              workflow_id: 'sdk-ios.yml',
               ref: '${{ github.ref }}'
             });
             console.log('Triggered iOS workflow');
@@ -47,7 +47,7 @@ jobs:
             const response = await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'android.yml',
+              workflow_id: 'sdk-android.yml',
               ref: '${{ github.ref }}'
             });
             console.log('Triggered Android workflow');
