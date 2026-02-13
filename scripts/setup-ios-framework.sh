@@ -114,11 +114,27 @@ get_latest_framework_version() {
 
 # Function to get local framework version
 get_local_framework_version() {
+  # Prefer explicit version file written by this script
   if [ -f "$VERSION_FILE" ]; then
     cat "$VERSION_FILE"
-  else
-    echo ""
+    return 0
   fi
+
+  # If .framework-version missing, try to read VERSION.txt from the XCFramework
+  for f in "sherpa_onnx.xcframework" "sherpa-onnx.xcframework"; do
+    if [ -f "$FRAMEWORKS_DIR/$f/VERSION.txt" ]; then
+      # Extract first semantic version-like token (e.g. 1.12.24)
+      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/$f/VERSION.txt" | head -n1 || true)
+      if [ -n "$ver" ]; then
+        # Cache it for future runs
+        echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
+        echo "$ver"
+        return 0
+      fi
+    fi
+  done
+
+  echo ""
 }
 
 # Function to download and extract framework
@@ -248,7 +264,7 @@ else
     echo "$latest_version" > "$VERSION_FILE"
   else
     # Compare versions
-    local version_cmp=$(compare_versions "$local_version" "$latest_version")
+    version_cmp=$(compare_versions "$local_version" "$latest_version")
     
     if [ "$version_cmp" = "0" ]; then
       [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
