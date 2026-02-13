@@ -15,6 +15,7 @@ jobs:
     outputs:
       ios_run_id: ${{ steps.find-runs.outputs.ios_run_id }}
       android_run_id: ${{ steps.find-runs.outputs.android_run_id }}
+      sdk_run_id: ${{ steps.find-runs.outputs.sdk_run_id }}
 
     steps:
       - name: Checkout
@@ -51,6 +52,18 @@ jobs:
             });
             console.log('Triggered Android workflow');
 
+      - name: Trigger SDK workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'sdk-sdk.yml',
+              ref: '${{ github.ref }}'
+            });
+            console.log('Triggered SDK workflow');
+
       - name: Wait for iOS and Android workflows to complete
         id: wait-workflows
         uses: actions/github-script@v7
@@ -62,8 +75,9 @@ jobs:
 
             let iosRunId = null;
             let androidRunId = null;
+            let sdkRunId = null;
 
-            console.log('Waiting for iOS and Android workflows to complete...');
+            console.log('Waiting for iOS, Android and SDK workflows to complete...');
 
             while (Date.now() - startTime < maxWaitTime) {
               // Check iOS workflow
@@ -75,12 +89,11 @@ jobs:
                   ref: '${{ github.ref }}',
                   per_page: 5
                 });
-                
-                // Find the most recent run that was triggered after we started
+
                 const recentIosRun = iosRuns.data.workflow_runs.find(run => 
-                  new Date(run.created_at) >= new Date(startTime - 60000) // 1 minute buffer
+                  new Date(run.created_at) >= new Date(startTime - 60000)
                 );
-                
+
                 if (recentIosRun) {
                   if (recentIosRun.status === 'completed') {
                     if (recentIosRun.conclusion === 'success') {
@@ -94,7 +107,7 @@ jobs:
                   }
                 }
               }
-              
+
               // Check Android workflow
               if (!androidRunId) {
                 const androidRuns = await github.rest.actions.listWorkflowRuns({
@@ -104,12 +117,11 @@ jobs:
                   ref: '${{ github.ref }}',
                   per_page: 5
                 });
-                
-                // Find the most recent run that was triggered after we started
+
                 const recentAndroidRun = androidRuns.data.workflow_runs.find(run => 
-                  new Date(run.created_at) >= new Date(startTime - 60000) // 1 minute buffer
+                  new Date(run.created_at) >= new Date(startTime - 60000)
                 );
-                
+
                 if (recentAndroidRun) {
                   if (recentAndroidRun.status === 'completed') {
                     if (recentAndroidRun.conclusion === 'success') {
@@ -123,12 +135,40 @@ jobs:
                   }
                 }
               }
-              
-              // If both workflows are complete, break
-              if (iosRunId && androidRunId) {
+
+              // Check SDK workflow
+              if (!sdkRunId) {
+                const sdkRuns = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'sdk-sdk.yml',
+                  ref: '${{ github.ref }}',
+                  per_page: 5
+                });
+
+                const recentSdkRun = sdkRuns.data.workflow_runs.find(run => 
+                  new Date(run.created_at) >= new Date(startTime - 60000)
+                );
+
+                if (recentSdkRun) {
+                  if (recentSdkRun.status === 'completed') {
+                    if (recentSdkRun.conclusion === 'success') {
+                      sdkRunId = recentSdkRun.id;
+                      console.log(`SDK workflow completed successfully: ${sdkRunId}`);
+                    } else {
+                      throw new Error(`SDK workflow failed with conclusion: ${recentSdkRun.conclusion}`);
+                    }
+                  } else {
+                    console.log(`SDK workflow status: ${recentSdkRun.status} (run ${recentSdkRun.id})`);
+                  }
+                }
+              }
+
+              // If all workflows are complete, break
+              if (iosRunId && androidRunId && sdkRunId) {
                 break;
               }
-              
+
               // Wait before next check
               await new Promise(resolve => setTimeout(resolve, checkInterval));
             }
@@ -141,11 +181,17 @@ jobs:
               throw new Error('Android workflow did not complete within timeout period');
             }
 
+            if (!sdkRunId) {
+              throw new Error('SDK workflow did not complete within timeout period');
+            }
+
             core.setOutput('ios_run_id', iosRunId);
             core.setOutput('android_run_id', androidRunId);
-            console.log(`\nBoth workflows completed successfully!`);
+            core.setOutput('sdk_run_id', sdkRunId);
+            console.log(`\nAll workflows completed successfully!`);
             console.log(`  iOS run ID: ${iosRunId}`);
             console.log(`  Android run ID: ${androidRunId}`);
+            console.log(`  SDK run ID: ${sdkRunId}`);
 
       # DISABLED: For debugging purposes - use existing workflow runs instead of waiting
       # Set if: false to true and comment out the "Wait for iOS and Android workflows to complete", "Trigger iOS workflow" and "Trigger Android workflow" steps
@@ -207,6 +253,7 @@ jobs:
         run: |
           echo "ios_run_id=${{ steps.wait-workflows.outputs.ios_run_id }}" >> $GITHUB_OUTPUT
           echo "android_run_id=${{ steps.wait-workflows.outputs.android_run_id }}" >> $GITHUB_OUTPUT
+          echo "sdk_run_id=${{ steps.wait-workflows.outputs.sdk_run_id }}" >> $GITHUB_OUTPUT
 
   create-release:
     runs-on: ubuntu-latest
@@ -357,12 +404,59 @@ jobs:
               console.log(`Found android-debug-apk artifact (ID: ${androidArtifact.id})`);
             }
 
+      - name: List available artifacts for SDK run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sdkRunId = '${{ needs.trigger-builds.outputs.sdk_run_id }}';
+            const expectedTag = '${{ github.ref }}';
+            const expectedTagName = expectedTag.replace('refs/tags/', '');
+
+            console.log(`Checking artifacts for SDK run ID: ${sdkRunId}`);
+
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: parseInt(sdkRunId)
+            });
+
+            console.log(`  - Head SHA: ${run.data.head_sha}`);
+            console.log(`  - Status: ${run.data.status}, Conclusion: ${run.data.conclusion}`);
+
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: parseInt(sdkRunId)
+            });
+
+            console.log(`\nFound ${artifacts.data.artifacts.length} artifact(s):`);
+            artifacts.data.artifacts.forEach(a => {
+              console.log(`  - Name: "${a.name}" (ID: ${a.id}, Size: ${a.size_in_bytes} bytes, Created: ${a.created_at})`);
+            });
+
+            const sdkArtifact = artifacts.data.artifacts.find(a => a.name === 'sdk-package');
+            if (!sdkArtifact) {
+              console.error('ERROR: Artifact "sdk-package" not found!');
+              console.error('Available artifact names:', artifacts.data.artifacts.map(a => a.name).join(', '));
+              throw new Error(`Artifact "sdk-package" not found in run ${sdkRunId} for tag ${expectedTagName}`);
+            } else {
+              console.log(`Found sdk-package artifact (ID: ${sdkArtifact.id})`);
+            }
+
       - name: Download Android APK artifact
         uses: actions/download-artifact@v7
         with:
           name: android-debug-apk
           run-id: ${{ needs.trigger-builds.outputs.android_run_id }}
           path: artifacts/android
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download SDK package artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sdk-package
+          run-id: ${{ needs.trigger-builds.outputs.sdk_run_id }}
+          path: artifacts/sdk
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify and organize Android artifact
@@ -429,6 +523,18 @@ jobs:
             find artifacts/android -type f || echo "No files found"
           fi
 
+          # Copy SDK package tarball (from sdk workflow)
+          SDK_TGZ=$(find artifacts/sdk -name "*.tgz" -type f | head -1)
+          if [ -n "$SDK_TGZ" ]; then
+            SDK_NAME=$(basename "$SDK_TGZ")
+            cp "$SDK_TGZ" "release-assets/$SDK_NAME"
+            echo "[OK] SDK package copied from: $SDK_TGZ -> release-assets/$SDK_NAME"
+          else
+            echo "Warning: SDK package (.tgz) not found in artifacts/sdk"
+            echo "Contents of artifacts/sdk:"
+            find artifacts/sdk -type f || echo "No files found"
+          fi
+
           # List release assets
           echo ""
           echo "Release assets prepared:"
@@ -442,6 +548,11 @@ jobs:
           body: |
             ## Release ${{ steps.tag.outputs.tag_name }}
 
+            ### Installation
+
+            - **npm:** `npm install react-native-sherpa-onnx`
+            - **yarn:** `yarn add react-native-sherpa-onnx`
+
             ### Example Apps
 
             #### iOS
@@ -449,6 +560,11 @@ jobs:
 
             #### Android
             - **Debug APK**: `SherpaOnnxExample-android-debug.apk` - Debug build for testing
+
+            ---
+
+            ### SDK Package
+            - **NPM tarball**: `react-native-sherpa-onnx-<version>.tgz` - Installable package archive (use `yarn add <file>` or `npm install <file>`)
 
             ---
 
@@ -468,6 +584,7 @@ jobs:
           files: |
             release-assets/*.ipa
             release-assets/*.apk
+            release-assets/*.tgz
           draft: false
           prerelease: false
         env:

@@ -1,0 +1,67 @@
+name: SDK - Pack NPM Package
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'readme.md'
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack-package:
+    name: Pack npm package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Enable Corepack and Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@stable --activate || true
+
+      - name: Install dependencies
+        run: |
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Build package (prepare)
+        run: |
+          # run prepare script (builds lib) so package includes built files
+          yarn prepare
+
+      - name: Create package tarball
+        id: create_package_tarball
+        run: |
+          mkdir -p artifacts
+          # Use npm pack to create tarball from package.json
+          TARFILE=$(npm pack)
+          echo "Created tarball: $TARFILE"
+          mv "$TARFILE" artifacts/
+          echo "artifact_path=artifacts/$TARFILE" >> $GITHUB_OUTPUT
+
+      - name: Upload package artifact
+        if: startsWith(github.ref, 'refs/tags/sdk-v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-package
+          path: ${{ steps.create_package_tarball.outputs.artifact_path }}
+          retention-days: 7
+          if-no-files-found: error
