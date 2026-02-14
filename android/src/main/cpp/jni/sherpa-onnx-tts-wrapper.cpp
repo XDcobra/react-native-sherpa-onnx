@@ -499,9 +499,7 @@ bool TtsWrapper::saveToWavFile(
         }
 
         outfile.close();
-        if (pImpl->debug) {
-            LOGI("TTS: Successfully saved %zu samples to %s", samples.size(), filePath.c_str());
-        }
+        LOGI("TTS: Successfully saved %zu samples to %s", samples.size(), filePath.c_str());
         return true;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception while saving WAV file: %s", e.what());
