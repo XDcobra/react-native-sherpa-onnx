@@ -75,11 +75,26 @@ if(NOT SHERPA_ONNX_LIB)
     message(STATUS "Using fallback library path (will be validated at link time): ${SHERPA_ONNX_LIB}")
 endif()
 
+# FFmpeg prebuilts (required). third_party/ffmpeg_prebuilt/android from repo root.
+# PROJECT_ROOT = android/; repo root = PROJECT_ROOT/..
+set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android")
+set(FFMPEG_ABI_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+if(NOT EXISTS "${FFMPEG_PREBUILT_BASE}/include")
+    message(FATAL_ERROR "FFmpeg prebuilts missing: ${FFMPEG_PREBUILT_BASE}/include not found.\n"
+                        "Build them with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 (Windows) or ./build_ffmpeg.sh (Linux/macOS)")
+endif()
+if(NOT EXISTS "${FFMPEG_ABI_LIB}")
+    message(FATAL_ERROR "FFmpeg prebuilts missing for ABI ${ANDROID_ABI}: ${FFMPEG_ABI_LIB} not found.\n"
+                        "Build for all ABIs with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 or ./build_ffmpeg.sh")
+endif()
+message(STATUS "FFmpeg prebuilts found: ${FFMPEG_PREBUILT_BASE}")
+
 # Source files
 set(SOURCES
     jni/sherpa-onnx-stt-jni.cpp
     jni/sherpa-onnx-tts-jni.cpp
     jni/sherpa-onnx-archive-jni.cpp
+    jni/sherpa-onnx-audio-convert-jni.cpp
     jni/sherpa-onnx-model-detect-helper.cpp
     jni/sherpa-onnx-model-detect-stt.cpp
     jni/sherpa-onnx-model-detect-tts.cpp
@@ -145,7 +160,9 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${SHERPA_ONNX_INCLUDE_DIRS}
+    ${FFMPEG_PREBUILT_BASE}/include
 )
+target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
 # Also link onnxruntime (required dependency) - lazy binding for Gradle parallel extraction
 set(ONNXRUNTIME_LIB "${EXTRACTED_LIBS_DIR}/libonnxruntime.so")
@@ -156,9 +173,14 @@ target_link_libraries(sherpaonnx
     ${SHERPA_ONNX_LIB}
     ${ONNXRUNTIME_LIB}
     archive
+    avcodec
+    avformat
+    avutil
+    swresample
     log
     android
 )
+target_link_directories(sherpaonnx PRIVATE ${FFMPEG_ABI_LIB})
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

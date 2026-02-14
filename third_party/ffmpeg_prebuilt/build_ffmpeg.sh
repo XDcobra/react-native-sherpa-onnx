@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Build minimal FFmpeg (audio-only) for Android using NDK.
+# Used by: Linux/macOS directly, or from build_ffmpeg.ps1 on Windows via MSYS2 bash.
+# Requires: NDK (ANDROID_NDK_HOME or ANDROID_NDK_ROOT), FFmpeg source in ../../third_party/ffmpeg (submodule).
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FFMPEG_SRC="$REPO_ROOT/third_party/ffmpeg"
+WORK_DIR="$SCRIPT_DIR"
+OUTPUT_BASE="$WORK_DIR/android"
+ANDROID_API="${ANDROID_API:-21}"
+
+# NDK path
+if [ -n "$ANDROID_NDK_HOME" ]; then
+    NDK="$ANDROID_NDK_HOME"
+elif [ -n "$ANDROID_NDK_ROOT" ]; then
+    NDK="$ANDROID_NDK_ROOT"
+else
+    echo "Error: Set ANDROID_NDK_HOME or ANDROID_NDK_ROOT to your Android NDK path."
+    exit 1
+fi
+
+# Host tag for NDK prebuilt toolchain (linux-x86_64, darwin-x86_64, windows-x86_64)
+if [[ "$(uname -s)" == "Linux" ]]; then
+    HOST_TAG="linux-x86_64"
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+    HOST_TAG="darwin-x86_64"
+else
+    HOST_TAG="windows-x86_64"
+fi
+TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
+if [ ! -d "$TOOLCHAIN" ]; then
+    echo "Error: NDK toolchain not found at: $TOOLCHAIN"
+    exit 1
+fi
+
+if [ ! -d "$FFMPEG_SRC" ] || [ ! -f "$FFMPEG_SRC/configure" ]; then
+    echo "Error: FFmpeg source not found at: $FFMPEG_SRC"
+    echo "Run: git submodule update --init third_party/ffmpeg"
+    exit 1
+fi
+
+# Minimal audio-only: decoders/demuxers for common formats; output WAV 16kHz mono uses swresample
+# --prefix is set per ABI below
+COMMON_CONFIGURE=(
+    --enable-shared
+    --disable-static
+    --disable-programs
+    --disable-doc
+    --disable-debug
+    --disable-avdevice
+    --disable-postproc
+    --disable-swscale
+    --disable-everything
+    --enable-decoder=aac,mp3,mpeg4aac,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
+    --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
+    --enable-muxer=wav
+    --enable-encoder=pcm_s16le
+    --enable-parser=aac,mpegaudio,vorbis,flac
+    --enable-protocol=file
+    --enable-swresample
+    --enable-avcodec
+    --enable-avformat
+    --enable-avutil
+    --cross-prefix=
+    --target-os=android
+    --extra-cflags="-O3 -fPIC"
+    --extra-ldflags=""
+)
+
+build_abi() {
+    local ABI=$1
+    local ARCH="" CPU="" CC="" CXX="" CROSS_PREFIX=""
+
+    case "$ABI" in
+        armeabi-v7a)
+            ARCH=arm
+            CPU=armv7-a
+            CROSS_PREFIX="$TOOLCHAIN/bin/armv7a-linux-androideabi-"
+            CC="$TOOLCHAIN/bin/armv7a-linux-androideabi${ANDROID_API}-clang"
+            CXX="$TOOLCHAIN/bin/armv7a-linux-androideabi${ANDROID_API}-clang++"
+            ;;
+        arm64-v8a)
+            ARCH=aarch64
+            CPU=armv8-a
+            CROSS_PREFIX="$TOOLCHAIN/bin/aarch64-linux-android-"
+            CC="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
+            CXX="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+            ;;
+        x86)
+            ARCH=x86
+            CPU=atom
+            CROSS_PREFIX="$TOOLCHAIN/bin/i686-linux-android-"
+            CC="$TOOLCHAIN/bin/i686-linux-android${ANDROID_API}-clang"
+            CXX="$TOOLCHAIN/bin/i686-linux-android${ANDROID_API}-clang++"
+            ;;
+        x86_64)
+            ARCH=x86_64
+            CPU=x86-64
+            CROSS_PREFIX="$TOOLCHAIN/bin/x86_64-linux-android-"
+            CC="$TOOLCHAIN/bin/x86_64-linux-android${ANDROID_API}-clang"
+            CXX="$TOOLCHAIN/bin/x86_64-linux-android${ANDROID_API}-clang++"
+            ;;
+        *)
+            echo "Unknown ABI: $ABI"
+            return 1
+            ;;
+    esac
+
+    local PREFIX_ABI="$OUTPUT_BASE/$ABI"
+    mkdir -p "$PREFIX_ABI"
+
+    echo "===== Building FFmpeg for $ABI ====="
+    cd "$FFMPEG_SRC"
+
+    # Install to ABI-specific prefix so we get per-ABI libs
+    ./configure \
+        --prefix="$PREFIX_ABI" \
+        "${COMMON_CONFIGURE[@]}" \
+        --arch="$ARCH" \
+        --cpu="$CPU" \
+        --cross-prefix="$CROSS_PREFIX" \
+        --cc="$CC" \
+        --cxx="$CXX" \
+        --sysroot="$TOOLCHAIN/sysroot" \
+        --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include" \
+        --extra-ldflags=""
+
+    make -j"$(nproc 2>/dev/null || echo 4)"
+    make install
+    make distclean 2>/dev/null || true
+
+    echo "Successfully built FFmpeg for $ABI"
+}
+
+# Build all ABIs used by the SDK (match android defaultConfig.ndk.abiFilters)
+for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+    build_abi "$ABI"
+done
+
+# Unify include: copy from first ABI so we have a single include/ for CMake
+INCLUDE_UNIFIED="$OUTPUT_BASE/include"
+mkdir -p "$INCLUDE_UNIFIED"
+if [ -d "$OUTPUT_BASE/arm64-v8a/include" ]; then
+    cp -R "$OUTPUT_BASE/arm64-v8a/include/"* "$INCLUDE_UNIFIED/" 2>/dev/null || true
+fi
+
+echo ""
+echo "Build completed. Output: $OUTPUT_BASE"
+echo "  - include/  (use this in CMake)"
+echo "  - arm64-v8a/lib/*.so, armeabi-v7a/lib/*.so, x86/lib/*.so, x86_64/lib/*.so"

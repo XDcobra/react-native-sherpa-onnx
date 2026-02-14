@@ -106,6 +106,12 @@ example/models/
 # sherpa-onnx source (if cloned for building)
 sherpa-onnx/
 
+# FFmpeg build artifacts (when building prebuilts locally)
+# (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")
+third_party/ffmpeg_prebuilt/ffmpeg-*/
+third_party/ffmpeg_prebuilt/build/
+third_party/ffmpeg_prebuilt/*.tar.bz2
+
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
 # They should be obtained via:

@@ -55,6 +55,8 @@
     "scripts/**",
     "scripts/**/*",
     "cpp",
+    "third_party/ffmpeg_prebuilt",
+    "third_party/libarchive",
     "*.podspec",
     "react-native.config.js",
     "!ios/build",
@@ -69,6 +71,8 @@
     "!**/.*",
     "!./sherpa-onnx",
     "!./sherpa-onnx/**",
+    "!./third_party/ffmpeg",
+    "!./third_party/ffmpeg/**",
     "!ios/Frameworks/.gitkeep"
   ],
   "scripts": {

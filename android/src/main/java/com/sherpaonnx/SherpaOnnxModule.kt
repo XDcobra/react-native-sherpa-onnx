@@ -520,5 +520,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       sampleRate: Int,
       filePath: String
     ): Boolean
+
+    /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
+    @JvmStatic
+    private external fun nativeConvertAudioToWav16k(inputPath: String, outputPath: String): String
   }
 }
