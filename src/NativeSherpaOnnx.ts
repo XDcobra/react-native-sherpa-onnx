@@ -271,6 +271,22 @@ export interface Spec extends TurboModule {
   listAssetModels(): Promise<
     Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
   >;
+
+  /**
+   * List model folders under a specific filesystem path.
+   * When recursive is true, returns relative folder paths under the base path.
+   */
+  listModelsAtPath(
+    path: string,
+    recursive: boolean
+  ): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>;
+
+  /**
+   * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory
+   * of an Android asset pack, or null if the pack is not available (e.g. not installed).
+   * Use this to list and load models that are delivered via PAD instead of bundled app assets.
+   */
+  getAssetPackPath(packName: string): Promise<string | null>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

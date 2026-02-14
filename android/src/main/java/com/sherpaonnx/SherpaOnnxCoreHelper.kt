@@ -5,6 +5,9 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
+import com.google.android.play.core.assetpacks.AssetPackLocation
+import com.google.android.play.core.assetpacks.AssetPackManagerFactory
+import com.google.android.play.core.assetpacks.model.AssetPackStorageMethod
 import java.io.File
 import java.io.FileOutputStream
 
@@ -61,6 +64,83 @@ internal class SherpaOnnxCoreHelper(
       promise.resolve(result)
     } catch (e: Exception) {
       promise.reject("LIST_ASSETS_ERROR", "Failed to list asset models: ${e.message}", e)
+    }
+  }
+
+  fun listModelsAtPath(path: String, recursive: Boolean, promise: Promise) {
+    try {
+      val baseDir = File(path)
+      if (!baseDir.exists()) {
+        throw IllegalArgumentException("Path does not exist: $path")
+      }
+      if (!baseDir.isDirectory) {
+        throw IllegalArgumentException("Path is not a directory: $path")
+      }
+
+      val folders = mutableListOf<String>()
+
+      if (recursive) {
+        val basePath = baseDir.toPath()
+        baseDir.walkTopDown().forEach { file ->
+          if (file.isDirectory && file != baseDir) {
+            val rel = basePath.relativize(file.toPath()).toString()
+              .replace(File.separatorChar, '/')
+            if (rel.isNotEmpty()) {
+              folders.add(rel)
+            }
+          }
+        }
+      } else {
+        val children = baseDir.listFiles() ?: emptyArray()
+        for (child in children) {
+          if (child.isDirectory) {
+            folders.add(child.name)
+          }
+        }
+      }
+
+      val result = Arguments.createArray()
+      folders.distinct().forEach { folder ->
+        val hintName = folder.substringAfterLast('/')
+        val modelMap = Arguments.createMap()
+        modelMap.putString("folder", folder)
+        modelMap.putString("hint", inferModelHint(hintName))
+        result.pushMap(modelMap)
+      }
+
+      promise.resolve(result)
+    } catch (e: Exception) {
+      promise.reject("LIST_MODELS_ERROR", "Failed to list models at path: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Returns the filesystem path to the "models" directory inside a Play Asset Delivery (PAD) pack,
+   * or null if the pack is not available.
+   */
+  fun getAssetPackPath(packName: String, promise: Promise) {
+    try {
+      val assetPackManager = AssetPackManagerFactory.getInstance(context)
+      val location: AssetPackLocation? = assetPackManager.getPackLocation(packName)
+      if (location == null) {
+        promise.resolve(null)
+        return
+      }
+      if (location.packStorageMethod() != AssetPackStorageMethod.STORAGE_FILES) {
+        promise.resolve(null)
+        return
+      }
+      val assetsPath = location.assetsPath()
+      val path = location.path()
+      val modelsDir = when {
+        assetsPath != null && assetsPath.isNotEmpty() -> File(assetsPath, "models").absolutePath
+        path != null && path.isNotEmpty() -> File(path, "assets/models").absolutePath
+        else -> null
+      }
+      promise.resolve(modelsDir)
+    } catch (e: Exception) {
+      Log.w(logTag, "getAssetPackPath failed: ${e.message}")
+      promise.resolve(null)
     }
   }
 

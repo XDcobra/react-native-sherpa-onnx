@@ -111,3 +111,31 @@ export async function listAssetModels(): Promise<
 > {
   return SherpaOnnx.listAssetModels();
 }
+
+/**
+ * List model folders under a specific filesystem path.
+ * When recursive is true, returns relative folder paths under the base path.
+ */
+export async function listModelsAtPath(
+  path: string,
+  recursive = false
+): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>> {
+  return SherpaOnnx.listModelsAtPath(path, recursive);
+}
+
+/**
+ * **Play Asset Delivery (PAD):** Returns the path to the models directory inside an
+ * Android asset pack, or null if the pack is not available.
+ * Use this to list and load models delivered via PAD (e.g. pack "sherpa_models").
+ * On iOS returns null.
+ */
+export async function getAssetPackPath(
+  packName: string
+): Promise<string | null> {
+  return SherpaOnnx.getAssetPackPath(packName);
+}
+
+/**
+ * Alias for {@link getAssetPackPath}. Use for PAD (Play Asset Delivery) model discovery.
+ */
+export const getPlayAssetDeliveryModelsPath = getAssetPackPath;

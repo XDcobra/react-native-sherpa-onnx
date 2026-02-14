@@ -24,6 +24,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 |---------|--------|
 | Offline Speech-to-Text | ✅ **Supported** |
 | Text-to-Speech | ✅ **Supported** |
+| Play Asset Delivery (PAD) | ✅ **Supported** (Android; see [PAD doc](./docs/PAD.md)) |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
 | Source Separation | ❌ Not yet supported |
@@ -76,6 +77,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 - ✅ **Android Support** - Fully supported on Android
 - ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
 - ✅ **TypeScript Support** - Full TypeScript definitions included
+- ✅ **Play Asset Delivery (PAD)** - Ship large models in an Android asset pack; [debug with Metro and release builds](./docs/PAD.md) are supported
 
 ## Installation
 
@@ -149,6 +151,7 @@ Then run `pod install` as usual.
 - [Source Separation](./docs/separation.md)
 - [General STT Model Setup](./docs/STT_MODEL_SETUP.md)
 - [General TTS Model Setup](./docs/TTS_MODEL_SETUP.md)
+- [Play Asset Delivery (PAD)](./docs/PAD.md) – PAD setup, debug with Metro, release, and API quick reference
 
 ### Example Model READMEs
 
@@ -166,6 +169,8 @@ Model READMEs in the example app live in the Play Asset Delivery pack at `exampl
 - [wenet-ctc README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-wenetspeech-ctc-zh-en-cantonese/README.md)
 - [whisper-tiny README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-whisper-tiny-en/README.md)
 - [zipformer README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-zipformer-small-en/README.md)
+
+Note: If your app delivers models via Play Asset Delivery (PAD) or stores models on the device file system (for example under the app's files directory at `DocumentDirectoryPath/models`), you can enumerate those extracted model folders using the native helper exposed as `listModelsAtPath(path, recursive)` (available from JS as `listModelsAtPath`). Use this function as an alternative to `listAssetModels()` when models are not bundled in the APK assets. The example app demonstrates merging results from `listAssetModels()` and `listModelsAtPath()` so both bundled and PAD-extracted models are visible.
 
 ## Requirements
 

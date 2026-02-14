@@ -35,7 +35,11 @@ import {
   listDownloadedModelsByCategory,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import {
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -51,9 +55,13 @@ import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+const PAD_PACK_NAME = 'sherpa_models';
+
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
+  const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
@@ -433,14 +441,81 @@ export default function TTSScreen() {
       const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
+      console.log(
+        '[TTSScreen PAD debug] listAssetModels: total=',
+        assetModels.length,
+        'tts=',
+        ttsFolders.length,
+        'folders=',
+        ttsFolders
+      );
 
+      // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
+      let padFolders: string[] = [];
+      let resolvedPadPath: string | null = null;
+      try {
+        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+        console.log(
+          '[TTSScreen PAD debug] getAssetPackPath("' +
+            PAD_PACK_NAME +
+            '") returned:',
+          padPathFromNative ?? 'null'
+        );
+        const fallbackPath = `${RNFS.DocumentDirectoryPath}/models`;
+        const padPath = padPathFromNative ?? fallbackPath;
+        console.log(
+          '[TTSScreen PAD debug] using path for listModelsAtPath:',
+          padPath,
+          padPathFromNative
+            ? '(PAD)'
+            : '(fallback DocumentDirectoryPath/models)'
+        );
+        const padResults = await listModelsAtPath(padPath);
+        console.log(
+          '[TTSScreen PAD debug] listModelsAtPath raw result count:',
+          padResults?.length ?? 0,
+          'entries:',
+          JSON.stringify(padResults ?? [])
+        );
+        padFolders = (padResults || [])
+          .filter((m) => m.hint === 'tts')
+          .map((m) => m.folder);
+        console.log(
+          '[TTSScreen PAD debug] after filter hint===tts:',
+          padFolders.length,
+          'folders:',
+          padFolders
+        );
+        if (padFolders.length > 0) {
+          resolvedPadPath = padPath;
+          console.log(
+            'TTSScreen: Found PAD/filesystem TTS models:',
+            padFolders,
+            'at',
+            padPath
+          );
+        }
+      } catch (e) {
+        console.warn('TTSScreen: PAD/listModelsAtPath failed', e);
+        padFolders = [];
+      }
+      setPadModelsPath(resolvedPadPath);
+      setPadModelIds(padFolders);
+
+      // Merge: downloaded, then PAD/filesystem, then bundled assets (no duplicates)
       const combined = [
         ...downloadedIds,
-        ...ttsFolders.filter((folder) => !downloadedIds.includes(folder)),
+        ...padFolders.filter((f) => !downloadedIds.includes(f)),
+        ...ttsFolders.filter(
+          (f) => !downloadedIds.includes(f) && !padFolders.includes(f)
+        ),
       ];
 
       if (downloadedIds.length > 0) {
         console.log('TTSScreen: Found downloaded models:', downloadedIds);
+      }
+      if (padFolders.length > 0) {
+        console.log('TTSScreen: Found PAD/filesystem models:', padFolders);
       }
       if (ttsFolders.length > 0) {
         console.log('TTSScreen: Found asset models:', ttsFolders);
@@ -505,8 +580,13 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      const modelPath = downloadedModelIds.includes(modelFolder)
-        ? getFileModelPath(modelFolder, ModelCategory.Tts)
+      const useFilePath =
+        downloadedModelIds.includes(modelFolder) ||
+        padModelIds.includes(modelFolder);
+      const modelPath = useFilePath
+        ? padModelIds.includes(modelFolder) && padModelsPath
+          ? getFileModelPath(modelFolder, undefined, padModelsPath)
+          : getFileModelPath(modelFolder, ModelCategory.Tts)
         : getAssetModelPath(modelFolder);
 
       const noiseScaleValue = noiseScale.trim();
@@ -600,12 +680,31 @@ export default function TTSScreen() {
           setSelectedModelType(normalizedDetected[0].type);
         }
 
-        // Get model info
-        try {
-          const info = await getModelInfo();
-          setModelInfo(info);
-        } catch (infoErr) {
-          console.warn('Failed to get model info:', infoErr);
+        // Get model info only when we can safely call the native API. For file-path models
+        // (PAD/downloaded), getModelInfo() can crash (sherpa-onnx). Only set modelInfo when we have
+        // valid data; otherwise leave null so the UI does not show a "Model Information" section
+        // with wrong placeholder values.
+        const isFilePath =
+          padModelIds.includes(modelFolder) ||
+          downloadedModelIds.includes(modelFolder);
+        if (!isFilePath) {
+          try {
+            const info = await getModelInfo();
+            if (
+              info &&
+              typeof info.sampleRate === 'number' &&
+              typeof info.numSpeakers === 'number'
+            ) {
+              setModelInfo(info);
+            } else {
+              setModelInfo(null);
+            }
+          } catch (infoErr) {
+            console.warn('getModelInfo not available for this model:', infoErr);
+            setModelInfo(null);
+          }
+        } else {
+          setModelInfo(null);
         }
       } else {
         setError('No models detected in the directory');
@@ -1526,10 +1625,10 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Model Information</Text>
               <View style={styles.infoContainer}>
                 <Text style={styles.infoText}>
-                  Sample Rate: {modelInfo.sampleRate} Hz
+                  Sample Rate: {modelInfo?.sampleRate ?? 0} Hz
                 </Text>
                 <Text style={styles.infoText}>
-                  Speakers: {modelInfo.numSpeakers}
+                  Speakers: {modelInfo?.numSpeakers ?? 0}
                 </Text>
               </View>
             </View>

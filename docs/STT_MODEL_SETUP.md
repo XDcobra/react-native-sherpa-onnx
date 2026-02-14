@@ -170,6 +170,14 @@ The example app uses [Play Asset Delivery](https://developer.android.com/guide/p
    await initializeSTT({
      modelPath: { type: 'asset', path: 'models/sherpa-onnx-zipformer-en-2023-06-26' }
    });
+
+   // Note
+   // If your STT models are delivered via Play Asset Delivery (PAD) or stored on the device filesystem
+   // (for example under the app's files directory at `DocumentDirectoryPath/models`), you can enumerate
+   // those extracted model folders using the native helper exposed as `listModelsAtPath(path, recursive)`
+   // (available from JS as `listModelsAtPath`). Use this function instead of `listAssetModels()` when
+   // models are not bundled in the APK assets. The example app shows how to merge results from
+   // `listAssetModels()` and `listModelsAtPath()` so both bundled and PAD-extracted models are visible.
    ```
 
 ### iOS Setup

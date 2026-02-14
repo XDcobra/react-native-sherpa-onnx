@@ -127,6 +127,9 @@ dependencies {
   // sherpa-onnx prebuilt AAR from JitPack
   // This includes the native .so libraries for all ABIs
   implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
+
+  // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
+  implementation "com.google.android.play:asset-delivery:2.2.1"
 }
 
 // Create resolvable configuration for extraction

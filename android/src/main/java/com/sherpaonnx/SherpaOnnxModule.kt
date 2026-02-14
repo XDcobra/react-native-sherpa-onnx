@@ -410,6 +410,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun listAssetModels(promise: Promise) {
     coreHelper.listAssetModels(promise)
   }
+
+  /**
+   * List model folders under a specific filesystem path.
+   */
+  override fun listModelsAtPath(path: String, recursive: Boolean, promise: Promise) {
+    coreHelper.listModelsAtPath(path, recursive, promise)
+  }
+
+  override fun getAssetPackPath(packName: String, promise: Promise) {
+    coreHelper.getAssetPackPath(packName, promise)
+  }
+
   companion object {
     const val NAME = "SherpaOnnx"
 
