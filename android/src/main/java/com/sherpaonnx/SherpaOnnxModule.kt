@@ -24,9 +24,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         modelDir: String,
         preferInt8: Boolean,
         hasPreferInt8: Boolean,
-        modelType: String
+        modelType: String,
+        debug: Boolean
       ): HashMap<String, Any>? {
-        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType)
+        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType, debug)
       }
 
       override fun nativeSttTranscribe(filePath: String): String {
@@ -166,9 +167,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
+    debug: Boolean?,
     promise: Promise
   ) {
-    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, promise)
+    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, debug, promise)
   }
 
   /**
@@ -457,7 +459,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
-      modelType: String
+      modelType: String,
+      debug: Boolean
     ): HashMap<String, Any>?
 
     @JvmStatic

@@ -33,12 +33,14 @@ public:
      * @param modelDir Path to the model directory
      * @param preferInt8 Optional: true = prefer int8 models, false = prefer regular models, nullopt = try int8 first (default)
      * @param modelType Optional: explicit model type ("transducer", "paraformer", "nemo_ctc"), nullopt = auto-detect (default)
+     * @param debug If true, set config.model_config.debug and emit verbose wrapper logs (default: false)
      * @return SttInitializeResult with success status and list of detected usable models
      */
     SttInitializeResult initialize(
         const std::string& modelDir,
         const std::optional<bool>& preferInt8 = std::nullopt,
-        const std::optional<std::string>& modelType = std::nullopt
+        const std::optional<std::string>& modelType = std::nullopt,
+        bool debug = false
     );
 
     /**

@@ -1,5 +1,10 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include <android/log.h>
+
+#define LOG_TAG "SttModelDetect"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace sherpaonnx {
 namespace {
@@ -27,21 +32,35 @@ SttDetectResult DetectSttModel(
 
     SttDetectResult result;
 
+    LOGI("DetectSttModel: modelDir=%s, modelType=%s, preferInt8=%s",
+         modelDir.c_str(),
+         modelType.has_value() ? modelType->c_str() : "auto",
+         preferInt8.has_value() ? (preferInt8.value() ? "true" : "false") : "unset");
+
     if (modelDir.empty()) {
         result.error = "Model directory is empty";
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
     if (!FileExists(modelDir) || !IsDirectory(modelDir)) {
         result.error = "Model directory does not exist or is not a directory: " + modelDir;
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
     const auto files = ListFilesRecursive(modelDir, 2);
+    LOGI("DetectSttModel: Found %zu files in %s", files.size(), modelDir.c_str());
+    for (const auto& f : files) {
+        LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+    }
 
     std::string encoderPath = FindOnnxByAnyToken(files, {"encoder"}, preferInt8);
     std::string decoderPath = FindOnnxByAnyToken(files, {"decoder"}, preferInt8);
     std::string joinerPath = FindOnnxByAnyToken(files, {"joiner"}, preferInt8);
+
+    LOGI("DetectSttModel: encoder=%s, decoder=%s, joiner=%s",
+         encoderPath.c_str(), decoderPath.c_str(), joinerPath.c_str());
 
     std::string funasrEncoderAdaptor = FindOnnxByAnyToken(files, {"encoder_adaptor", "encoder-adaptor"}, preferInt8);
     std::string funasrLLM = FindOnnxByAnyToken(files, {"llm"}, preferInt8);
@@ -71,7 +90,10 @@ SttDetectResult DetectSttModel(
         ctcModelPath = FindLargestOnnxExcludingTokens(files, modelExcludes);
     }
 
-    std::string tokensPath = FindFileByName(modelDir, "tokens.txt", 2);
+    // Search for tokens file: first try exact "tokens.txt", then suffix match
+    // (e.g. "tiny-tokens.txt" for Whisper models)
+    std::string tokensPath = FindFileEndingWith(modelDir, "tokens.txt", 2);
+    LOGI("DetectSttModel: tokens=%s", tokensPath.c_str());
 
     bool hasTransducer = !encoderPath.empty() && !decoderPath.empty() && !joinerPath.empty();
 
@@ -176,11 +198,16 @@ SttDetectResult DetectSttModel(
 
     if (selected == SttModelKind::kUnknown) {
         result.error = "No compatible model type detected in " + modelDir;
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
+    LOGI("DetectSttModel: selected kind=%d", static_cast<int>(selected));
     result.selectedKind = selected;
-    result.tokensRequired = !(selected == SttModelKind::kWhisper || selected == SttModelKind::kFunAsrNano);
+    // sherpa-onnx's OfflineModelConfig::Validate() requires tokens for ALL models
+    // except FunASR-nano (which uses its own tokenizer directory).
+    // Whisper models also need tokens.txt despite seeming self-contained.
+    result.tokensRequired = (selected != SttModelKind::kFunAsrNano);
 
     if (selected == SttModelKind::kTransducer) {
         result.paths.encoder = encoderPath;
@@ -205,9 +232,12 @@ SttDetectResult DetectSttModel(
         result.paths.tokens = tokensPath;
     } else if (result.tokensRequired) {
         result.error = "Tokens file not found in " + modelDir;
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
+    LOGI("DetectSttModel: detection OK for %s — tokens=%s",
+         modelDir.c_str(), result.paths.tokens.c_str());
     result.ok = true;
     return result;
 }

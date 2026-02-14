@@ -112,9 +112,16 @@ internal class SherpaOnnxTtsHelper(
           }
         }
 
+        // Forward sampleRate and numSpeakers from native init result
+        val sampleRate = (result["sampleRate"] as? Number)?.toInt() ?: -1
+        val numSpeakers = (result["numSpeakers"] as? Number)?.toInt() ?: -1
+        Log.i("SherpaOnnxTts", "initializeTts: sampleRate=$sampleRate, numSpeakers=$numSpeakers")
+
         val resultMap = Arguments.createMap()
         resultMap.putBoolean("success", true)
         resultMap.putArray("detectedModels", modelsArray)
+        resultMap.putInt("sampleRate", sampleRate)
+        resultMap.putInt("numSpeakers", numSpeakers)
         ttsInitState = TtsInitState(
           modelDir,
           modelType,
@@ -205,9 +212,14 @@ internal class SherpaOnnxTtsHelper(
         }
       }
 
+      val sampleRate2 = (result["sampleRate"] as? Number)?.toInt() ?: -1
+      val numSpeakers2 = (result["numSpeakers"] as? Number)?.toInt() ?: -1
+
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
       resultMap.putArray("detectedModels", modelsArray)
+      resultMap.putInt("sampleRate", sampleRate2)
+      resultMap.putInt("numSpeakers", numSpeakers2)
       ttsInitState = TtsInitState(
         state.modelDir,
         state.modelType,

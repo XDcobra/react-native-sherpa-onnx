@@ -216,6 +216,26 @@ std::string FindFileByName(const std::string& baseDir, const std::string& fileNa
     return "";
 }
 
+std::string FindFileEndingWith(const std::string& baseDir, const std::string& suffix, int maxDepth) {
+    std::string targetSuffix = ToLower(suffix);
+    auto files = ListFilesRecursive(baseDir, maxDepth);
+    // First try exact match (e.g. "tokens.txt")
+    for (const auto& entry : files) {
+        if (entry.nameLower == targetSuffix) {
+            return entry.path;
+        }
+    }
+    // Then try suffix match (e.g. "tiny-tokens.txt" ends with "-tokens.txt")
+    for (const auto& entry : files) {
+        if (entry.nameLower.size() >= targetSuffix.size() &&
+            entry.nameLower.compare(entry.nameLower.size() - targetSuffix.size(),
+                                     targetSuffix.size(), targetSuffix) == 0) {
+            return entry.path;
+        }
+    }
+    return "";
+}
+
 std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth) {
     std::string target = ToLower(dirName);
     std::vector<std::string> toVisit = ListDirectories(baseDir);

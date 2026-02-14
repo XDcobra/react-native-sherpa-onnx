@@ -25,6 +25,7 @@ std::string ToLower(std::string value);
 std::string ResolveTokenizerDir(const std::string& modelDir);
 
 std::string FindFileByName(const std::string& baseDir, const std::string& fileName, int maxDepth = 2);
+std::string FindFileEndingWith(const std::string& baseDir, const std::string& suffix, int maxDepth = 2);
 std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth = 2);
 
 std::string FindOnnxByToken(

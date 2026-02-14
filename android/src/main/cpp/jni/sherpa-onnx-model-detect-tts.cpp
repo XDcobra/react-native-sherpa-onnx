@@ -1,5 +1,10 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include <android/log.h>
+
+#define LOG_TAG "TtsModelDetect"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace sherpaonnx {
 namespace {
@@ -20,27 +25,41 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     TtsDetectResult result;
 
+    LOGI("DetectTtsModel: modelDir=%s, modelType=%s", modelDir.c_str(), modelType.c_str());
+
     if (modelDir.empty()) {
         result.error = "TTS: Model directory is empty";
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
     if (!FileExists(modelDir) || !IsDirectory(modelDir)) {
         result.error = "TTS: Model directory does not exist or is not a directory: " + modelDir;
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
     const auto files = ListFilesRecursive(modelDir, 2);
+    LOGI("DetectTtsModel: Found %zu files in %s", files.size(), modelDir.c_str());
+    for (const auto& f : files) {
+        LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+    }
 
     std::string tokensFile = FindFileByName(modelDir, "tokens.txt", 2);
     std::string lexiconFile = FindFileByName(modelDir, "lexicon.txt", 2);
     std::string dataDirPath = FindDirectoryByName(modelDir, "espeak-ng-data", 2);
     std::string voicesFile = FindFileByName(modelDir, "voices.bin", 2);
 
+    LOGI("DetectTtsModel: tokens=%s, lexicon=%s, dataDir=%s, voices=%s",
+         tokensFile.c_str(), lexiconFile.c_str(), dataDirPath.c_str(), voicesFile.c_str());
+
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
     std::string vocoder = FindOnnxByAnyToken(files, {"vocoder"}, std::nullopt);
     std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, std::nullopt);
     std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, std::nullopt);
+
+    LOGI("DetectTtsModel: acousticModel=%s, vocoder=%s, encoder=%s, decoder=%s",
+         acousticModel.c_str(), vocoder.c_str(), encoder.c_str(), decoder.c_str());
 
     std::vector<std::string> modelExcludes = {
         "acoustic",
@@ -54,6 +73,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     if (ttsModel.empty()) {
         ttsModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
     }
+    LOGI("DetectTtsModel: ttsModel=%s", ttsModel.c_str());
 
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
@@ -166,12 +186,19 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.paths.encoder = encoder;
     result.paths.decoder = decoder;
 
+    LOGI("DetectTtsModel: selected kind=%d, ttsModel=%s",
+         static_cast<int>(selected), ttsModel.c_str());
+    LOGI("DetectTtsModel: final paths — tokens=%s, dataDir=%s",
+         result.paths.tokens.c_str(), result.paths.dataDir.c_str());
+
     if (tokensFile.empty() || !FileExists(tokensFile)) {
         result.error = "TTS: tokens.txt not found in " + modelDir;
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
     result.ok = true;
+    LOGI("DetectTtsModel: detection OK for %s", modelDir.c_str());
     return result;
 }
 

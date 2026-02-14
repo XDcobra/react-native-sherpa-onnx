@@ -21,6 +21,8 @@ internal class SherpaOnnxCoreHelper(
       val path = config.getString("path")
         ?: throw IllegalArgumentException("Path is required")
 
+      Log.i(logTag, "resolveModelPath: type=$type, path=$path")
+
       val resolvedPath = when (type) {
         "asset" -> resolveAssetPath(path)
         "file" -> resolveFilePath(path)
@@ -28,6 +30,7 @@ internal class SherpaOnnxCoreHelper(
         else -> throw IllegalArgumentException("Unknown path type: $type")
       }
 
+      Log.i(logTag, "resolveModelPath: resolved=$resolvedPath")
       promise.resolve(resolvedPath)
     } catch (e: Exception) {
       val errorMessage = "Failed to resolve model path: ${e.message ?: e.javaClass.simpleName}"
@@ -120,13 +123,18 @@ internal class SherpaOnnxCoreHelper(
    */
   fun getAssetPackPath(packName: String, promise: Promise) {
     try {
+      Log.i(logTag, "getAssetPackPath: packName=$packName")
       val assetPackManager = AssetPackManagerFactory.getInstance(context)
       val location: AssetPackLocation? = assetPackManager.getPackLocation(packName)
       if (location == null) {
+        Log.i(logTag, "getAssetPackPath: location is null for pack '$packName'")
         promise.resolve(null)
         return
       }
+      Log.i(logTag, "getAssetPackPath: storageMethod=${location.packStorageMethod()}, " +
+        "assetsPath=${location.assetsPath()}, path=${location.path()}")
       if (location.packStorageMethod() != AssetPackStorageMethod.STORAGE_FILES) {
+        Log.i(logTag, "getAssetPackPath: storage method is not STORAGE_FILES, returning null")
         promise.resolve(null)
         return
       }
@@ -137,6 +145,15 @@ internal class SherpaOnnxCoreHelper(
         path != null && path.isNotEmpty() -> File(path, "assets/models").absolutePath
         else -> null
       }
+      Log.i(logTag, "getAssetPackPath: resolved modelsDir=$modelsDir")
+      if (modelsDir != null) {
+        val dir = File(modelsDir)
+        Log.i(logTag, "getAssetPackPath: modelsDir exists=${dir.exists()}, isDir=${dir.isDirectory}")
+        if (dir.exists() && dir.isDirectory) {
+          val children = dir.listFiles()?.map { it.name } ?: emptyList()
+          Log.i(logTag, "getAssetPackPath: modelsDir contents=$children")
+        }
+      }
       promise.resolve(modelsDir)
     } catch (e: Exception) {
       Log.w(logTag, "getAssetPackPath failed: ${e.message}")
@@ -145,6 +162,7 @@ internal class SherpaOnnxCoreHelper(
   }
 
   private fun resolveAssetPath(assetPath: String): String {
+    Log.i(logTag, "resolveAssetPath: assetPath=$assetPath")
     val assetManager = context.assets
 
     val pathParts = assetPath.split("/")
@@ -152,6 +170,7 @@ internal class SherpaOnnxCoreHelper(
 
     val targetBaseDir = File(context.filesDir, baseDir)
     targetBaseDir.mkdirs()
+    Log.i(logTag, "resolveAssetPath: targetBaseDir=${targetBaseDir.absolutePath}, exists=${targetBaseDir.exists()}")
 
     val isFilePath = pathParts.any { it.contains(".") && !it.startsWith(".") }
 
@@ -249,13 +268,18 @@ internal class SherpaOnnxCoreHelper(
   }
 
   private fun resolveFilePath(filePath: String): String {
+    Log.i(logTag, "resolveFilePath: filePath=$filePath")
     val file = File(filePath)
     if (!file.exists()) {
+      Log.e(logTag, "resolveFilePath: path does not exist: $filePath")
       throw IllegalArgumentException("File path does not exist: $filePath")
     }
     if (!file.isDirectory) {
+      Log.e(logTag, "resolveFilePath: path is not a directory: $filePath")
       throw IllegalArgumentException("Path is not a directory: $filePath")
     }
+    val children = file.listFiles()?.map { it.name } ?: emptyList()
+    Log.i(logTag, "resolveFilePath: resolved=${file.absolutePath}, contents=$children")
     return file.absolutePath
   }
 

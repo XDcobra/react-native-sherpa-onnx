@@ -58,8 +58,14 @@ export async function initializeSTT(
     modelType = undefined;
   }
 
+  const debug = 'modelPath' in options ? options.debug : undefined;
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeSherpaOnnx(resolvedPath, preferInt8, modelType);
+  return SherpaOnnx.initializeSherpaOnnx(
+    resolvedPath,
+    preferInt8,
+    modelType,
+    debug
+  );
 }
 
 /**

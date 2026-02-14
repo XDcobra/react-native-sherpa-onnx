@@ -46,12 +46,14 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
    * @param modelType - Optional: explicit model type ('transducer', 'paraformer', 'nemo_ctc', 'auto'), undefined = auto (default)
+   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeSherpaOnnx(
     modelDir: string,
     preferInt8?: boolean,
-    modelType?: string
+    modelType?: string,
+    debug?: boolean
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;

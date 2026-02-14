@@ -18,6 +18,8 @@ struct TtsInitializeResult {
     bool success;
     std::string error;
     std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+    int32_t sampleRate = -1;   // -1 = not available / query failed
+    int32_t numSpeakers = -1;  // -1 = not available / query failed
 };
 
 /**

@@ -13,11 +13,16 @@
 // TTS wrapper
 #include "sherpa-onnx-tts-wrapper.h"
 
-#define LOG_TAG "SherpaOnnxJNI"
+#define LOG_TAG "TtsJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGD(...) do { if (g_tts_debug) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
 
 using namespace sherpaonnx;
+
+// When true, verbose TTS JNI logs are emitted (init flow, HashMap building, release, etc.)
+static bool g_tts_debug = false;
 
 namespace {
 std::vector<std::string> SplitTtsTokens(const std::string &text) {
@@ -34,10 +39,15 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 }
 
-// Global TTS wrapper instance
+// Global TTS wrapper instance — once created, the wrapper is NEVER destroyed.
+// Only the underlying model resources are released/re-initialized.
+// This prevents React useEffect cleanup race conditions from nulling the pointer.
 static std::unique_ptr<TtsWrapper> g_tts_wrapper = nullptr;
 static std::atomic<bool> g_tts_stream_cancelled{false};
 static std::atomic<uint64_t> g_tts_active_stream_id{0};
+
+// Race-condition guard (same pattern as STT — see sherpa-onnx-stt-jni.cpp)
+static bool g_tts_skip_next_release = false;
 
 extern "C" {
 
@@ -53,7 +63,17 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
     jdouble noiseScaleW,
     jdouble lengthScale) {
     try {
-        if (g_tts_wrapper == nullptr) {
+        g_tts_debug = (debug == JNI_TRUE);
+        LOGD("TTS JNI: nativeTtsInitialize called (debug=%d)", (int)debug);
+
+        // Clear the skip flag — we're starting a fresh init cycle
+        g_tts_skip_next_release = false;
+
+        // Reuse existing wrapper if possible; only create if null
+        if (g_tts_wrapper != nullptr) {
+            LOGD("TTS JNI: Releasing previous TTS model before re-init");
+            g_tts_wrapper->release();
+        } else {
             g_tts_wrapper = std::make_unique<TtsWrapper>();
         }
 
@@ -72,6 +92,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
 
         std::string modelDirPath(modelDirStr);
         std::string modelTypePath(modelTypeStr);
+
+        LOGD("TTS JNI: modelDir=%s, modelType=%s, numThreads=%d, debug=%d",
+             modelDirPath.c_str(), modelTypePath.c_str(), (int)numThreads, (int)debug);
 
         std::optional<float> noiseScaleOpt = std::nullopt;
         std::optional<float> noiseScaleWOpt = std::nullopt;
@@ -99,15 +122,17 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
-        LOGI("TTS JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
+        LOGD("TTS JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
         if (!result.success) {
             LOGE("TTS JNI: Native initialization failed for: %s", modelDirPath.c_str());
         } else {
-            LOGI("TTS JNI: Successfully initialized model at: %s", modelDirPath.c_str());
+            LOGD("TTS JNI: Successfully initialized model at: %s", modelDirPath.c_str());
+            // Arm the stale-release guard (same pattern as STT)
+            g_tts_skip_next_release = true;
         }
 
         // Create HashMap to return (same structure as STT)
-        LOGI("TTS JNI: Creating HashMap for result");
+        LOGD("TTS JNI: Creating HashMap for result");
         jclass hashMapClass = env->FindClass("java/util/HashMap");
         if (hashMapClass == nullptr || env->ExceptionCheck()) {
             LOGE("TTS JNI: Failed to find HashMap class");
@@ -152,7 +177,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         }
 
         // Put success boolean
-        LOGI("TTS JNI: Adding success field to HashMap");
+        LOGD("TTS JNI: Adding success field to HashMap");
         jclass booleanClass = env->FindClass("java/lang/Boolean");
         if (booleanClass == nullptr || env->ExceptionCheck()) {
             LOGE("TTS JNI: Failed to find Boolean class");
@@ -219,7 +244,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         }
 
         // Put detectedModels array
-        LOGI("TTS JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
+        LOGD("TTS JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");
         if (arrayListClass == nullptr || env->ExceptionCheck()) {
             LOGE("TTS JNI: Failed to find ArrayList class");
@@ -319,9 +344,37 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsInitialize(
         env->DeleteLocalRef(detectedModelsKey);
         env->DeleteLocalRef(detectedModelsList);
         env->DeleteLocalRef(arrayListClass);
+
+        // Add sampleRate and numSpeakers to result so JS can use them without extra native calls
+        {
+            jclass integerClass = env->FindClass("java/lang/Integer");
+            if (integerClass != nullptr) {
+                jmethodID intInit = env->GetMethodID(integerClass, "<init>", "(I)V");
+                if (intInit != nullptr) {
+                    // sampleRate (-1 means not available)
+                    jstring srKey = env->NewStringUTF("sampleRate");
+                    jobject srVal = env->NewObject(integerClass, intInit, static_cast<jint>(result.sampleRate));
+                    if (srKey && srVal) env->CallObjectMethod(hashMap, putMethod, srKey, srVal);
+                    if (srKey) env->DeleteLocalRef(srKey);
+                    if (srVal) env->DeleteLocalRef(srVal);
+
+                    // numSpeakers (-1 means not available)
+                    jstring nsKey = env->NewStringUTF("numSpeakers");
+                    jobject nsVal = env->NewObject(integerClass, intInit, static_cast<jint>(result.numSpeakers));
+                    if (nsKey && nsVal) env->CallObjectMethod(hashMap, putMethod, nsKey, nsVal);
+                    if (nsKey) env->DeleteLocalRef(nsKey);
+                    if (nsVal) env->DeleteLocalRef(nsVal);
+
+                    LOGD("TTS JNI: Added sampleRate=%d numSpeakers=%d to result",
+                         result.sampleRate, result.numSpeakers);
+                }
+                env->DeleteLocalRef(integerClass);
+            }
+        }
+
         env->DeleteLocalRef(hashMapClass);
 
-        LOGI("TTS JNI: Successfully created result HashMap, returning to Java");
+        LOGD("TTS JNI: Successfully created result HashMap, returning to Java");
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeInitializeTts: %s", e.what());
@@ -791,9 +844,18 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTtsRelease(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {
+        // Detect stale React cleanup (same pattern as STT)
+        if (g_tts_skip_next_release) {
+            g_tts_skip_next_release = false;
+            LOGW("TTS JNI: Skipping stale release — a fresh init just completed. "
+                 "This is normal when switching models on the same screen.");
+            return;
+        }
+
+        LOGD("TTS JNI: Releasing TTS resources");
         if (g_tts_wrapper != nullptr) {
             g_tts_wrapper->release();
-            g_tts_wrapper.reset();
+            // Note: we intentionally do NOT reset g_tts_wrapper to nullptr.
         }
     } catch (const std::exception &e) {
         LOGE("TTS JNI: Exception in nativeReleaseTts: %s", e.what());
