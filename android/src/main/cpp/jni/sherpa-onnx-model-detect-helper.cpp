@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 
 #if __cplusplus >= 201703L && __has_include(<filesystem>)
 #include <filesystem>
@@ -219,18 +220,61 @@ std::string FindFileByName(const std::string& baseDir, const std::string& fileNa
 std::string FindFileEndingWith(const std::string& baseDir, const std::string& suffix, int maxDepth) {
     std::string targetSuffix = ToLower(suffix);
     auto files = ListFilesRecursive(baseDir, maxDepth);
-    // First try exact match (e.g. "tokens.txt")
+    // 1) exact match (e.g. "tokens.txt")
     for (const auto& entry : files) {
         if (entry.nameLower == targetSuffix) {
             return entry.path;
         }
     }
-    // Then try suffix match (e.g. "tiny-tokens.txt" ends with "-tokens.txt")
+
+    // 2) match anywhere in filename (prefix/infix/suffix)
     for (const auto& entry : files) {
-        if (entry.nameLower.size() >= targetSuffix.size() &&
-            entry.nameLower.compare(entry.nameLower.size() - targetSuffix.size(),
-                                     targetSuffix.size(), targetSuffix) == 0) {
+        if (entry.nameLower.find(targetSuffix) != std::string::npos) {
             return entry.path;
+        }
+    }
+
+    // 3) If we are looking for tokens, fallback to inspecting .txt files' contents.
+    //    Heuristic: many token files are plain text with lines like "token <index>".
+    if (targetSuffix.find("tokens") != std::string::npos) {
+        auto IsLikelyTokensFile = [](const std::string& path) -> bool {
+            std::ifstream ifs(path);
+            if (!ifs.is_open()) return false;
+            std::string line;
+            int total = 0;
+            int matched = 0;
+            const int maxLines = 2000;
+
+            while (total < maxLines && std::getline(ifs, line)) {
+                ++total;
+                if (line.empty()) continue;
+                // Trim trailing CR if present
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+
+                // Check if the line ends with an integer index (common token format)
+                size_t sp = line.find_last_of(" \t");
+                if (sp != std::string::npos && sp + 1 < line.size()) {
+                    std::string idx = line.substr(sp + 1);
+                    bool allDigits = !idx.empty();
+                    for (char c : idx) {
+                        if (!std::isdigit(static_cast<unsigned char>(c))) { allDigits = false; break; }
+                    }
+                    if (allDigits) ++matched;
+                }
+            }
+
+            ifs.close();
+            if (total < 2) return false;
+            // Heuristic: at least half of non-empty lines should match the token pattern
+            return matched >= std::max(1, total / 2);
+        };
+
+        for (const auto& entry : files) {
+            if (EndsWith(entry.nameLower, ".txt")) {
+                if (IsLikelyTokensFile(entry.path)) {
+                    return entry.path;
+                }
+            }
         }
     }
     return "";
