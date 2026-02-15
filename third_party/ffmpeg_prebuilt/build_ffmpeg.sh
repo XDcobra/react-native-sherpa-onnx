@@ -186,6 +186,29 @@ PC
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
 
+    # 32-bit ARM: FFmpeg adds -mfp16-format=ieee which NDK clang does not support. Use a compiler
+    # wrapper that strips that flag so we don't have to patch FFmpeg.
+    if [ "$ARCH" = "arm" ]; then
+        WRAPPER_DIR="$WORK_DIR/cc_wrapper_$$"
+        mkdir -p "$WRAPPER_DIR"
+        export REAL_CC="$CC"
+        export REAL_CXX="$CXX"
+        for role in CC CXX; do
+            w="$WRAPPER_DIR/$role"
+            printf '%s\n' '#!/usr/bin/env bash' \
+                'args=()' \
+                'for arg in "$@"; do' \
+                '  case "$arg" in -mfp16-format=*) ;; *) args+=("$arg") ;; esac' \
+                'done' \
+                "exec \"\$REAL_$role\" \"\${args[@]}\"" > "$w"
+            chmod +x "$w"
+        done
+        CC="$WRAPPER_DIR/CC"
+        CXX="$WRAPPER_DIR/CXX"
+        trap 'rm -rf "$WRAPPER_DIR"' RETURN
+        echo "Using CC/CXX wrapper for arm (filter -mfp16-format=ieee)"
+    fi
+
     # NDK r23+ only has llvm-nm, llvm-ar, llvm-ranlib — pass them explicitly so configure does not use cross_prefix+nm
     CONFIG_LOG="$FFMPEG_SRC/ffbuild/config.log"
 
