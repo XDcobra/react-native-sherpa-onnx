@@ -133,7 +133,8 @@ build_abi() {
     echo "Found libshine prebuilts at $SHINE_PREFIX — enabling libshine"
     SHINE_CFLAGS="-I$SHINE_PREFIX/include"
     # -lpthread so __register_atfork (referenced by libshine.so) is resolved when configure links its test
-    SHINE_LDFLAGS="-L$SHINE_PREFIX/lib -lshine -lm -lpthread"
+    # Ensure the Android NDK sysroot lib path is present so the cross-linker can find libpthread
+    SHINE_LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -L$SHINE_PREFIX/lib -lshine -lm -lpthread"
 
     # FFmpeg requires <shine/layer3.h> — ensure it exists (build_shine.sh installs to include/shine/; some layouts use include/src/lib)
     if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then
