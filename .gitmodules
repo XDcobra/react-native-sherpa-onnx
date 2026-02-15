@@ -5,3 +5,6 @@
 [submodule "third_party/ffmpeg"]
 	path = third_party/ffmpeg
 	url = https://github.com/FFmpeg/FFmpeg.git
+[submodule "third_party/shine"]
+	path = third_party/shine
+	url = https://github.com/toots/shine
