@@ -132,7 +132,8 @@ build_abi() {
 
     echo "Found libshine prebuilts at $SHINE_PREFIX — enabling libshine"
     SHINE_CFLAGS="-I$SHINE_PREFIX/include"
-    SHINE_LDFLAGS="-L$SHINE_PREFIX/lib -lshine -lm"
+    # -lpthread so __register_atfork (referenced by libshine.so) is resolved when configure links its test
+    SHINE_LDFLAGS="-L$SHINE_PREFIX/lib -lshine -lm -lpthread"
 
     # FFmpeg requires <shine/layer3.h> — ensure it exists (build_shine.sh installs to include/shine/; some layouts use include/src/lib)
     if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then
@@ -163,7 +164,7 @@ includedir=\${prefix}/include
 Name: shine
 Description: libshine MP3 encoder
 Version: 1.0
-Libs: -L\${libdir} -lshine -lm
+Libs: -L\${libdir} -lshine -lm -lpthread
 Cflags: -I\${includedir}
 PC
     export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
