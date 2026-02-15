@@ -43,8 +43,8 @@ if [ ! -d "$FFMPEG_SRC" ] || [ ! -f "$FFMPEG_SRC/configure" ]; then
     exit 1
 fi
 
-# Minimal audio-only: decoders/demuxers for common formats;
-# --prefix is set per ABI below
+# Minimal audio-only: decoders/demuxers for common formats.
+# --prefix, --extra-cflags, --extra-ldflags are set per ABI below (so not duplicated here).
 COMMON_CONFIGURE=(
     --enable-shared
     --disable-static
@@ -66,8 +66,6 @@ COMMON_CONFIGURE=(
     --enable-avutil
     --cross-prefix=
     --target-os=android
-    --extra-cflags="-O3 -fPIC"
-    --extra-ldflags=""
 )
 
 build_abi() {
