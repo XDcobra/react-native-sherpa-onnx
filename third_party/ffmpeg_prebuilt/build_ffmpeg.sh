@@ -221,7 +221,13 @@ PC
         tail -200 "$FFMPEG_BUILD_LOG"
         exit 1
     fi
-    make install
+    # NDK r23+ has no ${cross_prefix}strip; force llvm-strip so install-lib*-shared succeeds
+    make install STRIP="${TOOLCHAIN}/bin/llvm-strip" 2>&1 | tee -a "$FFMPEG_BUILD_LOG"
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo "===== FFmpeg make install failed for $ABI ====="
+        tail -80 "$FFMPEG_BUILD_LOG"
+        exit 1
+    fi
     make distclean 2>/dev/null || true
 
     echo "Successfully built FFmpeg for $ABI"
