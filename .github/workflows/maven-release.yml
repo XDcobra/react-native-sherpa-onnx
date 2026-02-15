@@ -7,11 +7,11 @@ name: Maven Release AAR
 on:
   workflow_dispatch:
   push:
-    #branches: [main]
-    #paths:
-    #  - 'android/**'
-    #  - 'third_party/**'
-    #  - '.github/workflows/maven-release.yml'
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'third_party/**'
+      - '.github/workflows/maven-release.yml'
 
 env:
   ANDROID_API: "24"
@@ -44,6 +44,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config
 
       - name: Set up Android NDK
+        id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27d
@@ -61,7 +62,8 @@ jobs:
           chmod +x build_shine.sh
           ./build_shine.sh
         env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Build FFmpeg (with libshine)
         run: |
@@ -69,8 +71,8 @@ jobs:
           chmod +x build_ffmpeg.sh
           ./build_ffmpeg.sh
         env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Copy prebuilts to SDK jniLibs
         run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
