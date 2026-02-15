@@ -115,9 +115,18 @@ third_party/ffmpeg_prebuilt/*.tar.bz2
 # shine build artifacts (when building prebuilts locally)
 # ignore everything under shine_prebuilt by default
 third_party/shine_prebuilt/*
-# but allow the README, build scripts and .gitkeep placeholder to be tracked
+# but allow the README, build scripts to be tracked
 !third_party/shine_prebuilt/README.md
 !third_party/shine_prebuilt/build_shine_msys2.sh
+
+# ffmpeg build artifacts (when building prebuilts locally)
+# ignore everything under ffmpeg_prebuilt by default
+third_party/ffmpeg_prebuilt/*
+# but allow the README, build scripts to be tracked
+!third_party/ffmpeg_prebuilt/README.md
+!third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
+!third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
+!third_party/ffmpeg_prebuilt/build_ffmpeg.sh
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
