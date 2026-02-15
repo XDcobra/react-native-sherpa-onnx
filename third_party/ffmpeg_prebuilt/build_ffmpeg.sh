@@ -171,12 +171,10 @@ PC
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
 
-    # NDK r23+ only provides llvm-nm, llvm-ar, llvm-ranlib (no armv7a-linux-androideabi-nm etc.)
-    export NM="${TOOLCHAIN}/bin/llvm-nm"
-    export AR="${TOOLCHAIN}/bin/llvm-ar"
-    export RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
+    # NDK r23+ only has llvm-nm, llvm-ar, llvm-ranlib — pass them explicitly so configure does not use cross_prefix+nm
+    CONFIG_LOG="$FFMPEG_SRC/ffbuild/config.log"
 
-    # Install to ABI-specific prefix so we get per-ABI libs (log for diagnostics on failure)
+    # Install to ABI-specific prefix so we get per-ABI libs
     ./configure \
         --prefix="$PREFIX_ABI" \
         "${COMMON_CONFIGURE[@]}" \
@@ -185,13 +183,16 @@ PC
         --cross-prefix="$CROSS_PREFIX" \
         --cc="$CC" \
         --cxx="$CXX" \
+        --nm="${TOOLCHAIN}/bin/llvm-nm" \
+        --ar="${TOOLCHAIN}/bin/llvm-ar" \
+        --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
         --sysroot="$TOOLCHAIN/sysroot" \
         --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-}" \
         --extra-ldflags="${SHINE_LDFLAGS:-}" \
         2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
-        echo "===== FFmpeg configure failed for $ABI — last 200 lines of build log ====="
-        tail -200 "$FFMPEG_BUILD_LOG"
+        echo "===== FFmpeg configure failed for $ABI — ffbuild/config.log ====="
+        if [ -f "$CONFIG_LOG" ]; then cat "$CONFIG_LOG"; else echo "(config.log not found)"; fi
         exit 1
     fi
 
