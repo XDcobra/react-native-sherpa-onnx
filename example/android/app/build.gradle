@@ -151,6 +151,15 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    
+
+}
+
+task printJniLibs {
+  doLast {
+    println "jniLibs.srcDirs:"
+    android.sourceSets.main.jniLibs.srcDirs.each { println it.absolutePath }
+  }
 }
 
 dependencies {

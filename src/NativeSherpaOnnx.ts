@@ -289,6 +289,23 @@ export interface Spec extends TurboModule {
    * Use this to list and load models that are delivered via PAD instead of bundled app assets.
    */
   getAssetPackPath(packName: string): Promise<string | null>;
+
+  /**
+   * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
+   * Requires FFmpeg prebuilts when called on Android.
+   * Resolves when conversion succeeds, rejects with an error message on failure.
+   */
+  convertAudioToFormat(
+    inputPath: string,
+    outputPath: string,
+    format: string
+  ): Promise<void>;
+
+  /**
+   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM.
+   * Requires FFmpeg prebuilts when called on Android.
+   */
+  convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

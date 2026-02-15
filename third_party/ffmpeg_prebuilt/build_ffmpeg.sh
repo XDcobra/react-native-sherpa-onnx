@@ -54,10 +54,10 @@ COMMON_CONFIGURE=(
     --disable-postproc
     --disable-swscale
     --disable-everything
-    --enable-decoder=aac,mp3,mpeg4aac,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
+    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
-    --enable-muxer=wav
-    --enable-encoder=pcm_s16le
+    --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
+    --enable-encoder=pcm_s16le,flac,mp3,aac,alac
     --enable-parser=aac,mpegaudio,vorbis,flac
     --enable-protocol=file
     --enable-swresample

@@ -65,9 +65,13 @@ build_abi() {
     cd "$FFMPEG_SRC"
     export CFLAGS="-O3 -fPIC -std=c17 -I$SYSROOT/usr/include"
     export LDFLAGS="-Wl,-z,max-page-size=16384"
-    # x86/x86_64 assembly uses R_386_32 relocations; disable it for shared libs (PIC).
+    export ASFLAGS="-fPIC"
+    # x86 assembly may produce non-PIC R_386_32 relocations; disable it for i686.
     local DISABLE_ASM=""
-    case "$ARCH" in i686|x86_64) DISABLE_ASM="--disable-x86asm" ;; esac
+    case "$ARCH" in
+        i686) DISABLE_ASM="--disable-asm" ;;
+        x86_64) DISABLE_ASM="--disable-x86asm" ;;
+    esac
     echo "Running ./configure... (this can take 15-30 min on MSYS2/Windows)"
     echo "  CC:  $CC"
     echo "  CXX: $CXX"
@@ -78,8 +82,8 @@ build_abi() {
         --extra-cflags="$CFLAGS" \
         --extra-ldflags="$LDFLAGS" \
         --disable-avdevice --disable-swscale --disable-everything \
-        --enable-decoder=aac,mp3,mpeg4aac,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8 \
-        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav --enable-encoder=pcm_s16le \
+        --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8 \
+        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,mp3,aac,alac \
         --enable-parser=aac,mpegaudio,vorbis,flac --enable-protocol=file --enable-swresample \
         --enable-avcodec --enable-avformat --enable-avutil \
         --target-os=android --enable-cross-compile \

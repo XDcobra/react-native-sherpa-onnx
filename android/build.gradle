@@ -109,6 +109,43 @@ android {
     sourceCompatibility JavaVersion.VERSION_1_8
     targetCompatibility JavaVersion.VERSION_1_8
   }
+
+  // The build expects prebuilt .so files to exist under this module's
+  // `src/main/jniLibs/<abi>/` directory. Use the helper script
+  // `third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js` to install
+  // the required .so files before running Gradle.
+
+  def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+
+  task checkJniLibs {
+    doLast {
+      // Explicitly require FFmpeg shared libraries to be present for each ABI.
+      def requiredSoFiles = [
+        'libavcodec.so',
+        'libavformat.so',
+        'libavutil.so',
+        'libswresample.so',
+        'libavfilter.so'
+      ]
+
+      requiredAbis.each { abi ->
+        def dir = file("${projectDir}/src/main/jniLibs/${abi}")
+        if (!dir.exists()) {
+          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure the sherpa-onnx AAR provides FFmpeg .so files.")
+        }
+
+        requiredSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure the sherpa-onnx AAR provides it.")
+          }
+        }
+      }
+    }
+  }
+
+  // Ensure JNI libs exist before build (fail fast with clear message)
+  preBuild.dependsOn checkJniLibs
 }
 
 
@@ -117,6 +154,7 @@ repositories {
   google()
   maven { url 'https://jitpack.io' }
 }
+
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
 

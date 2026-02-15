@@ -189,6 +189,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     sttHelper.transcribeFile(filePath, promise)
   }
 
+  /**
+   * Convert any supported audio file to a requested format using native FFmpeg prebuilts.
+   * Resolves with null on success, rejects with an error message on failure.
+   */
+  override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, promise: Promise) {
+    try {
+      val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format)
+      if (err.isEmpty()) {
+        promise.resolve(null)
+      } else {
+        promise.reject("CONVERT_ERROR", err)
+      }
+    } catch (e: Exception) {
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM using native FFmpeg prebuilts.
+   * Resolves with null on success, rejects with an error message on failure.
+   */
+  override fun convertAudioToWav16k(inputPath: String, outputPath: String, promise: Promise) {
+    try {
+      val err = Companion.nativeConvertAudioToWav16k(inputPath, outputPath)
+      if (err.isEmpty()) {
+        promise.resolve(null)
+      } else {
+        promise.reject("CONVERT_ERROR", err)
+      }
+    } catch (e: Exception) {
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
+    }
+  }
+
   // ==================== TTS Methods ====================
 
   /**
@@ -520,6 +554,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       sampleRate: Int,
       filePath: String
     ): Boolean
+
+    /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
+     * Returns empty string on success, or an error message otherwise.
+     * Requires FFmpeg prebuilts when called on Android.
+     */
+    @JvmStatic
+    private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String): String
 
     /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
     @JvmStatic
