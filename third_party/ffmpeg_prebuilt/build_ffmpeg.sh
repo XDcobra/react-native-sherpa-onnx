@@ -111,18 +111,25 @@ build_abi() {
 
     local PREFIX_ABI="$OUTPUT_BASE/$ABI"
     mkdir -p "$PREFIX_ABI"
-#
-    # If libshine prebuilts exist for this ABI, add include and link flags
-    SHINE_PREFIX="$SCRIPT_DIR/../shine_prebuilt/android/$ABI"
-    if [ -d "$SHINE_PREFIX" ]; then
-        echo "Found libshine prebuilts at $SHINE_PREFIX — enabling libshine"
-        SHINE_CFLAGS="-I$SHINE_PREFIX/include"
-        # libshine depends on math functions; add libm to link flags
-        SHINE_LDFLAGS="-L$SHINE_PREFIX/lib -lshine -lm"
-        # Create a minimal pkg-config file so FFmpeg's configure can find libshine
-        PKGDIR="$SHINE_PREFIX/lib/pkgconfig"
-        mkdir -p "$PKGDIR"
-        # Ensure headers are available as include/shine for pkg-config and FFmpeg configure
+
+    # Libshine: same path logic as build_ffmpeg_msys2.sh (REPO_ROOT/third_party/shine_prebuilt/android/ABI)
+    SHINE_PREFIX="$REPO_ROOT/third_party/shine_prebuilt/android/$ABI"
+    if [ ! -d "$SHINE_PREFIX" ]; then
+        echo "Error: libshine prebuilts not found for ABI $ABI at: $SHINE_PREFIX"
+        echo "Build libshine first using: third_party/shine_prebuilt/build_shine.sh (or build_shine_msys2.sh on Windows)"
+        exit 1
+    fi
+    if [ ! -d "$SHINE_PREFIX/lib" ] || { [ ! -f "$SHINE_PREFIX/lib/libshine.so" ] && [ ! -f "$SHINE_PREFIX/lib/libshine.a" ]; }; then
+        echo "Error: libshine library not found at $SHINE_PREFIX/lib (expected libshine.so or libshine.a)"
+        exit 1
+    fi
+
+    echo "Found libshine prebuilts at $SHINE_PREFIX — enabling libshine"
+    SHINE_CFLAGS="-I$SHINE_PREFIX/include"
+    SHINE_LDFLAGS="-L$SHINE_PREFIX/lib -lshine -lm"
+
+    # FFmpeg requires <shine/layer3.h> — ensure it exists (build_shine.sh installs to include/shine/; some layouts use include/src/lib)
+    if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then
         if [ -d "$SHINE_PREFIX/include/src/lib" ]; then
             mkdir -p "$SHINE_PREFIX/include/shine"
             cp -f "$SHINE_PREFIX/include/src/lib/"*.h "$SHINE_PREFIX/include/shine/" 2>/dev/null || true
@@ -131,42 +138,44 @@ build_abi() {
             mkdir -p "$SHINE_PREFIX/include/shine"
             cp -f "$SHINE_PREFIX/include/src/bin/"*.h "$SHINE_PREFIX/include/shine/" 2>/dev/null || true
         fi
-        cat > "$PKGDIR/shine.pc" <<PC
-    prefix=$SHINE_PREFIX
-    exec_prefix=\${prefix}
-    libdir=\${prefix}/lib
-    includedir=\${prefix}/include
-
-    Name: shine
-    Description: libshine MP3 encoder
-    Version: 1.0
-    Libs: -L\${libdir} -lshine -lm
-    Cflags: -I\${includedir}
-PC
-        export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
-        # Diagnostic: ensure pkg-config can see shine (helpful on CI/host systems)
-        if command -v pkg-config >/dev/null 2>&1; then
-            echo "pkg-config present: $(pkg-config --version 2>/dev/null || echo '?')"
-            echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-            if pkg-config --exists shine; then
-                echo "pkg-config: found shine -> $(pkg-config --modversion shine 2>/dev/null || echo 'unknown')"
-            else
-                echo "pkg-config: cannot find 'shine' via PKG_CONFIG_PATH. Listing $PKGDIR:"
-                ls -la "$PKGDIR" || true
-                echo "Full PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-                echo "Aborting; FFmpeg configure will not find libshine."
-                exit 1
-            fi
-        else
-            echo "Warning: pkg-config not found in PATH. Install pkg-config or set PKG_CONFIG_PATH appropriately."
-            exit 1
-        fi
-        COMMON_CONFIGURE+=(--enable-libshine)
-    else
-        echo "Error: libshine prebuilts not found for ABI $ABI at: $SHINE_PREFIX"
-        echo "Build libshine first using: third_party/shine_prebuilt/build_shine_msys2.sh"
+    fi
+    if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then
+        echo "Error: shine/layer3.h not found at $SHINE_PREFIX/include/shine/layer3.h (required by FFmpeg configure)"
+        echo "Ensure libshine was built with third_party/shine_prebuilt/build_shine.sh which installs headers to include/shine/"
         exit 1
     fi
+
+    # pkg-config file so FFmpeg's configure can find libshine (and so test compilation gets correct -I/-L)
+    PKGDIR="$SHINE_PREFIX/lib/pkgconfig"
+    mkdir -p "$PKGDIR"
+    cat > "$PKGDIR/shine.pc" <<PC
+prefix=$SHINE_PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: shine
+Description: libshine MP3 encoder
+Version: 1.0
+Libs: -L\${libdir} -lshine -lm
+Cflags: -I\${includedir}
+PC
+    export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
+
+    if ! command -v pkg-config >/dev/null 2>&1; then
+        echo "Error: pkg-config not found. Install it (e.g. apt install pkg-config)."
+        exit 1
+    fi
+    echo "pkg-config present: $(pkg-config --version 2>/dev/null || echo '?')"
+    echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+    if ! pkg-config --exists shine; then
+        echo "pkg-config: cannot find 'shine'. Listing $PKGDIR:"
+        ls -la "$PKGDIR" || true
+        exit 1
+    fi
+    echo "pkg-config: found shine -> $(pkg-config --modversion shine 2>/dev/null || echo 'unknown')"
+
+    COMMON_CONFIGURE+=(--enable-libshine)
 
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
