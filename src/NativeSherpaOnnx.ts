@@ -293,12 +293,14 @@ export interface Spec extends TurboModule {
   /**
    * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
    * Requires FFmpeg prebuilts when called on Android.
-   * Resolves when conversion succeeds, rejects with an error message on failure.
+   * For MP3 (libshine), outputSampleRateHz can be 32000, 44100, or 48000; 0 or omitted = 44100.
+   * WAV output is always 16 kHz mono (sherpa-onnx). Resolves when conversion succeeds, rejects with an error message on failure.
    */
   convertAudioToFormat(
     inputPath: string,
     outputPath: string,
-    format: string
+    format: string,
+    outputSampleRateHz?: number
   ): Promise<void>;
 
   /**

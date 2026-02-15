@@ -191,11 +191,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   /**
    * Convert any supported audio file to a requested format using native FFmpeg prebuilts.
+   * For MP3, outputSampleRateHz can be 32000, 44100, or 48000; null/0 = 44100. WAV output is always 16 kHz mono.
    * Resolves with null on success, rejects with an error message on failure.
    */
-  override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, promise: Promise) {
+  override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Double?, promise: Promise) {
     try {
-      val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format)
+      val rate = (outputSampleRateHz?.toInt() ?: 0).coerceIn(0, 48000)
+      val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format, rate)
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
@@ -556,11 +558,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): Boolean
 
     /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
-     * Returns empty string on success, or an error message otherwise.
-     * Requires FFmpeg prebuilts when called on Android.
+     * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.
+     * Returns empty string on success, or an error message otherwise. Requires FFmpeg prebuilts when called on Android.
      */
     @JvmStatic
-    private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String): String
+    private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Int): String
 
     /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
     @JvmStatic

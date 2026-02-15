@@ -125,7 +125,9 @@ android {
         'libavformat.so',
         'libavutil.so',
         'libswresample.so',
-        'libavfilter.so'
+        'libavfilter.so',
+        // libshine is needed when FFmpeg was built with libshine (MP3 encoder)
+        'libshine.so'
       ]
 
       requiredAbis.each { abi ->

@@ -65,6 +65,52 @@ build_abi() {
     cd "$FFMPEG_SRC"
     export CFLAGS="-O3 -fPIC -std=c17 -I$SYSROOT/usr/include"
     export LDFLAGS="-Wl,-z,max-page-size=16384"
+    # If libshine prebuilts exist (from third_party/shine_prebuilt), add include/lib flags
+    SHINE_PREFIX="$REPO_ROOT/third_party/shine_prebuilt/android/$ABI"
+    if [ -d "$SHINE_PREFIX" ]; then
+        echo "Adding libshine flags from: $SHINE_PREFIX"
+        export CFLAGS="$CFLAGS -I$SHINE_PREFIX/include"
+        # libshine uses math functions; add -lm so configure/link tests succeed
+        export LDFLAGS="$LDFLAGS -L$SHINE_PREFIX/lib -lshine -lm"
+        EXTRA_ENABLE_LIBSHINE="--enable-libshine"
+        # Create minimal pkg-config file so FFmpeg's configure can find libshine
+        PKGDIR="$SHINE_PREFIX/lib/pkgconfig"
+        mkdir -p "$PKGDIR"
+        cat > "$PKGDIR/shine.pc" <<PC
+    prefix=$SHINE_PREFIX
+    exec_prefix=
+    libdir=
+    includedir=
+
+    Name: shine
+    Description: libshine MP3 encoder
+    Version: 1.0
+    Libs: -L\${prefix}/lib -lshine -lm
+    Cflags: -I\${prefix}/include
+PC
+        export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
+        # Diagnostic: ensure pkg-config can see shine
+        if command -v pkg-config >/dev/null 2>&1; then
+            echo "pkg-config present: $(pkg-config --version 2>/dev/null || echo '?')"
+            echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+            if pkg-config --exists shine; then
+                echo "pkg-config: found shine -> $(pkg-config --modversion shine 2>/dev/null || echo 'unknown')"
+            else
+                echo "pkg-config: cannot find 'shine' via PKG_CONFIG_PATH. Listing $PKGDIR:"
+                ls -la "$PKGDIR" || true
+                echo "Full PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+                echo "Aborting; FFmpeg configure will not find libshine."
+                exit 1
+            fi
+        else
+            echo "Warning: pkg-config not found in PATH. Install pkg-config in MSYS2 (pacman -S pkgconf) or use manual flags."
+            exit 1
+        fi
+    else
+        echo "Error: libshine prebuilts not found for ABI $ABI at: $SHINE_PREFIX"
+        echo "Run third_party/shine_prebuilt/build_shine_msys2.sh in MSYS2 to build libshine prebuilts first."
+        exit 1
+    fi
     export ASFLAGS="-fPIC"
     # x86 assembly may produce non-PIC R_386_32 relocations; disable it for i686.
     local DISABLE_ASM=""
@@ -83,7 +129,7 @@ build_abi() {
         --extra-ldflags="$LDFLAGS" \
         --disable-avdevice --disable-swscale --disable-everything \
         --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8 \
-        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,mp3,aac,alac \
+        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,libshine,aac,alac \
         --enable-parser=aac,mpegaudio,vorbis,flac --enable-protocol=file --enable-swresample \
         --enable-avcodec --enable-avformat --enable-avutil \
         --target-os=android --enable-cross-compile \
@@ -91,7 +137,8 @@ build_abi() {
         --strip="$TOOLCHAIN/bin/llvm-strip" \
         --arch="$ARCH" --cpu="$CPU" \
         --sysroot="$SYSROOT" --sysinclude="$SYSROOT/usr/include/" \
-        --cc="$CC" --cxx="$CXX" || exit 1
+        --cc="$CC" --cxx="$CXX" \
+        $EXTRA_ENABLE_LIBSHINE || exit 1
     echo "Running make..."
     make -j"$NPROC" || exit 1
     echo "Running make install..."

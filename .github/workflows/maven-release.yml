@@ -1,0 +1,92 @@
+# Build Android AAR for Maven release (artifact only; no publish).
+# Builds: libshine (shine_prebuilt), FFmpeg (ffmpeg_prebuilt, with libshine), libarchive (via CMake),
+# then produces the react-native-sherpa-onnx Android library .aar.
+
+name: Maven Release AAR
+
+on:
+  workflow_dispatch:
+  push:
+    #branches: [main]
+    #paths:
+    #  - 'android/**'
+    #  - 'third_party/**'
+    #  - '.github/workflows/maven-release.yml'
+
+env:
+  ANDROID_API: "24"
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  build-aar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "yarn"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install pkg-config
+        run: sudo apt-get update && sudo apt-get install -y pkg-config
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27d
+          add-to-path: true
+
+      - name: Yarn install
+        run: yarn install --frozen-lockfile
+        env:
+          # Headers are copied from sherpa-onnx submodule by setup-assets/copy-headers
+          CI: "true"
+
+      - name: Build libshine
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine.sh
+          ./build_shine.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+
+      - name: Build FFmpeg (with libshine)
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg.sh
+          ./build_ffmpeg.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+
+      - name: Copy prebuilts to SDK jniLibs
+        run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
+
+      - name: Copy Gradle wrapper to root
+        run: |
+          cp example/android/gradlew .
+          cp example/android/gradlew.bat .
+          chmod +x gradlew
+          cp -r example/android/gradle .
+
+      - name: Build Android AAR
+        run: ./gradlew :android:assembleRelease --no-daemon --console=plain
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-onnx-android-aar
+          path: android/build/outputs/aar/*.aar

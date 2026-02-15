@@ -10,6 +10,12 @@ const repoRoot = path.resolve(__dirname, '..', '..')
 const prebuiltRoot = path.join(__dirname, 'android')
 const sdkJniLibsRoot = path.join(repoRoot, 'android', 'src', 'main', 'jniLibs')
 
+// Additional standalone libraries that may be built separately (e.g. libshine)
+const extraSoFiles = ['libshine.so']
+
+// Shine prebuilt root (sibling under third_party)
+const shinePrebuiltRoot = path.join(__dirname, '..', 'shine_prebuilt', 'android')
+
 function copyDir(srcDir, dstDir) {
   if (!fs.existsSync(srcDir)) return false
   fs.mkdirSync(dstDir, { recursive: true })
@@ -40,6 +46,36 @@ function main() {
     console.log(`Installing ABI ${abi}`)
     const ok = copyDir(srcLibDir, dstLibDir)
     if (ok) any = true
+
+    // Ensure extra standalone .so files (like libshine.so) are copied if present
+    extraSoFiles.forEach(soName => {
+      const dstSoPath = path.join(dstLibDir, soName)
+      if (fs.existsSync(dstSoPath)) return // already copied
+
+      // Known ABI-specific locations for extra libs (no recursive search needed)
+      const ffmpegAbiSo = path.join(prebuiltRoot, abi, 'lib', soName)
+      const ffmpegRootSo = path.join(prebuiltRoot, 'lib', soName)
+      const shineAbiSo = path.join(shinePrebuiltRoot, abi, 'lib', soName)
+      const shineRootSo = path.join(shinePrebuiltRoot, 'lib', soName)
+
+      let found = null
+      if (fs.existsSync(ffmpegAbiSo)) found = ffmpegAbiSo
+      else if (fs.existsSync(ffmpegRootSo)) found = ffmpegRootSo
+      else if (fs.existsSync(shineAbiSo)) found = shineAbiSo
+      else if (fs.existsSync(shineRootSo)) found = shineRootSo
+
+      if (found) {
+        try {
+          fs.copyFileSync(found, dstSoPath)
+          console.log(`copied extra ${found} -> ${dstSoPath}`)
+          any = true
+        } catch (err) {
+          console.warn(`Failed to copy ${found} -> ${dstSoPath}: ${err}`)
+        }
+      } else {
+        console.log(`Extra library ${soName} not found for ABI ${abi}`)
+      }
+    })
   })
 
   if (!any) {

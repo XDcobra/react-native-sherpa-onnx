@@ -1,0 +1,5 @@
+// Root settings for standalone AAR build (e.g. CI / Maven release).
+// Includes only the Android library module.
+rootProject.name = 'sherpa-onnx-aar'
+include ':android'
+project(':android').projectDir = file('android')

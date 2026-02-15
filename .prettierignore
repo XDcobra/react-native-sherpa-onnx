@@ -1,7 +1,7 @@
 sherpa-onnx/
 **/sherpa-onnx/
 android/src/main/cpp/libarchive/
-third_party/ffmpeg_prebuilt
+third_party/
 node_modules/
 android/.cxx/
 android/build/

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Build libshine for Android on Linux (e.g. GitHub Actions).
+# Usage: ANDROID_NDK_ROOT=/path/to/ndk ./build_shine_linux.sh
+# Analog to build_shine_msys2.sh but uses NDK Linux host toolchain.
+
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,8 +26,26 @@ NDK_ROOT="${NDK_ROOT//$'\n'/}"
 
 API="${ANDROID_API:-24}"
 NPROC="${NPROC:-$(nproc 2>/dev/null || echo 4)}"
-TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64"
+
+# NDK host: linux-x86_64 (GitHub Actions ubuntu) or linux-aarch64 (e.g. ARM runners)
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH" in
+  x86_64|amd64) NDK_HOST="linux-x86_64" ;;
+  aarch64|arm64) NDK_HOST="linux-aarch64" ;;
+  *)
+    echo "Warning: Unknown host $HOST_ARCH, using linux-x86_64"
+    NDK_HOST="linux-x86_64"
+    ;;
+esac
+
+TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/$NDK_HOST"
 SYSROOT="$TOOLCHAIN/sysroot"
+
+if [ ! -d "$TOOLCHAIN" ]; then
+  echo "Error: NDK toolchain not found at: $TOOLCHAIN"
+  echo "NDK_ROOT=$NDK_ROOT NDK_HOST=$NDK_HOST"
+  exit 1
+fi
 
 if [ ! -d "$SHINE_SRC" ]; then
   echo "Error: shine source not found at: $SHINE_SRC"
@@ -31,8 +53,9 @@ if [ ! -d "$SHINE_SRC" ]; then
   exit 1
 fi
 
-echo "Building libshine for Android"
+echo "Building libshine for Android (Linux host)"
 echo "NDK: $NDK_ROOT"
+echo "Host: $NDK_HOST"
 echo "API: $API"
 
 build_abi() {

@@ -1,5 +1,5 @@
 {
-  "exclude": ["sherpa-onnx/**", "node_modules/**", "lib/**"],
+  "exclude": ["sherpa-onnx/**", "node_modules/**", "lib/**", "third_party/**"],
   "compilerOptions": {
     "rootDir": ".",
     "baseUrl": ".",

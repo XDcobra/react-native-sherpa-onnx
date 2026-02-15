@@ -2,14 +2,22 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 
 /**
  * Convert any supported audio file to a requested format (e.g. "mp3", "flac", "wav").
- * On Android this requires FFmpeg prebuilts. Resolves on success, rejects with an error message on failure.
+ * On Android this requires FFmpeg prebuilts. WAV output is always 16 kHz mono (sherpa-onnx).
+ * For MP3, optional outputSampleRateHz: 32000, 44100, or 48000; 0/undefined = 44100.
+ * Resolves on success, rejects with an error message on failure.
  */
 export function convertAudioToFormat(
   inputPath: string,
   outputPath: string,
-  format: string
+  format: string,
+  outputSampleRateHz?: number
 ): Promise<void> {
-  return SherpaOnnx.convertAudioToFormat(inputPath, outputPath, format);
+  return SherpaOnnx.convertAudioToFormat(
+    inputPath,
+    outputPath,
+    format,
+    outputSampleRateHz ?? 0
+  );
 }
 
 /**
