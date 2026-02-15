@@ -86,9 +86,11 @@ $Msys2RootMsys = To-Msys2Path $Msys2Root
 # Bash script: all $VAR that must be expanded by bash must be written as `$VAR (PowerShell escape)
 $BuildScriptContent = @"
 set -e
+exec 2>&1
+echo "MSYS2 build script started."
 # Use MinGW gcc for host (configure) checks so C11 is available; NDK clang is set via --cc/--cxx for target
 export MSYS2_ROOT='$Msys2RootMsys'
-export PATH="`$MSYS2_ROOT/mingw64/bin:`$PATH"
+export PATH="`$MSYS2_ROOT/usr/bin:`$MSYS2_ROOT/mingw64/bin:`$PATH"
 export ANDROID_NDK_ROOT='$NdkMsys'
 OutputBaseMsys='$OutputBaseMsys'
 FfmpegSrcMsys='$FfmpegSrcMsys'
@@ -100,6 +102,7 @@ NPROC=$NProc
 build_abi() {
     local ABI="`$1" ARCH="`$2" TOOLCHAIN_ARCH="`$3" CPU="`$4"
     local PREFIX="$OutputBaseMsys/`$ABI"
+    local BUILD_LOG="$OutputBaseMsys/`$ABI/build.log"
     local CC="`$TOOLCHAIN/bin/`${TOOLCHAIN_ARCH}`${API}-clang"
     local CXX="`$TOOLCHAIN/bin/`${TOOLCHAIN_ARCH}`${API}-clang++"
     mkdir -p "`$PREFIX"
@@ -107,8 +110,7 @@ build_abi() {
     cd "$FfmpegSrcMsys"
     export CFLAGS="-O3 -fPIC -I`$SYSROOT/usr/include"
     export LDFLAGS="-Wl,-z,max-page-size=16384"
-    BUILD_LOG="`$OutputBaseMsys/`$ABI/build.log"
-    echo "Running ./configure... (Log: `$BUILD_LOG)"
+    echo "Running ./configure... (log: build.log)"
     ./configure --prefix="`$PREFIX" \
         --enable-shared --disable-static --disable-programs --disable-doc --disable-debug \
         --disable-avdevice --disable-swscale --disable-everything \
@@ -121,14 +123,11 @@ build_abi() {
         --arch="`$ARCH" --cpu="`$CPU" \
         --sysroot="`$SYSROOT" --sysinclude="`$SYSROOT/usr/include/" \
         --cc="`$CC" --cxx="`$CXX" 2>&1 | tee "`$BUILD_LOG"
-    _cfg_exit="`${PIPESTATUS[0]:-0}"
-    if [ "`$_cfg_exit" -ne 0 ]; then exit "`$_cfg_exit"; fi
+    if [ "`${PIPESTATUS[0]:-0}" -ne 0 ]; then exit 1; fi
     make -j"`$NPROC" 2>&1 | tee -a "`$BUILD_LOG"
-    _make_exit="`${PIPESTATUS[0]:-0}"
-    if [ "`$_make_exit" -ne 0 ]; then exit "`$_make_exit"; fi
+    if [ "`${PIPESTATUS[0]:-0}" -ne 0 ]; then exit 1; fi
     make install 2>&1 | tee -a "`$BUILD_LOG"
-    _make_exit="`${PIPESTATUS[0]:-0}"
-    if [ "`$_make_exit" -ne 0 ]; then exit "`$_make_exit"; fi
+    if [ "`${PIPESTATUS[0]:-0}" -ne 0 ]; then exit 1; fi
     make distclean 2>/dev/null || make clean 2>/dev/null || true
     echo "Successfully built FFmpeg for `$ABI"
 }
@@ -148,11 +147,10 @@ $BuildScriptPath = Join-Path $env:TEMP "build_ffmpeg_android_$(Get-Random).sh"
 $BuildScriptContent = $BuildScriptContent -replace "`r`n", "`n" -replace "`r", "`n"
 [System.IO.File]::WriteAllText($BuildScriptPath, $BuildScriptContent, [System.Text.UTF8Encoding]::new($false))
 
-$BuildScriptMsys = To-Msys2Path $BuildScriptPath
-Write-Host "Note: The configure/make outputs are not shown here. In case of abort or errors: View log in third_party\ffmpeg_prebuilt\android\<ABI>\build.log." -ForegroundColor Gray
-Write-Host ""
+# Run script directly so stdout/stderr go to the console (no redirect = you see output)
+Write-Host "Starting MSYS2 build..." -ForegroundColor Cyan
 try {
-    & $Msys2Bash -l -c "bash '$BuildScriptMsys'"
+    & $Msys2Bash -l $BuildScriptPath
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed with exit code $LASTEXITCODE"
     }

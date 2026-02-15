@@ -24,15 +24,22 @@ android/
    - `ANDROID_NDK_HOME` or `ANDROID_NDK_ROOT` (e.g. `C:\Users\...\AppData\Local\Android\Sdk\ndk\27.x.x` on Windows).
 
 3. **Run the build**:
+   - **Windows (MSYS2 MinGW64 shell, recommended):**  
+     Open "MSYS2 MinGW 64-bit", set `ANDROID_NDK_ROOT` (or `ANDROID_NDK_HOME`), then run the script. You get full configure/make output in the terminal.  
+     See **[BUILD_MSYS2.md](BUILD_MSYS2.md)** for required environment variables and steps.
+     ```bash
+     cd third_party/ffmpeg_prebuilt
+     export ANDROID_NDK_ROOT="C:/path/to/your/ndk"
+     ./build_ffmpeg_msys2.sh
+     ```
    - **Windows (PowerShell):**  
-     MSYS2 must be in your PATH. Install build tools and a C11-capable host compiler in the MSYS2 shell:
+     MSYS2 must be in your PATH. Install build tools in the MSYS2 shell:
      `pacman -S --noconfirm make yasm diffutils mingw-w64-x86_64-gcc`
      Then run:
      ```powershell
      cd third_party\ffmpeg_prebuilt
      .\build_ffmpeg.ps1
      ```
-     The script builds FFmpeg entirely in PowerShell (calls bash only for configure/make; does not use build_ffmpeg.sh).
    - **Linux / macOS:**
      ```bash
      cd third_party/ffmpeg_prebuilt
