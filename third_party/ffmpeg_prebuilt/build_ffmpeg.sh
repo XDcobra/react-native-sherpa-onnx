@@ -133,15 +133,15 @@ build_abi() {
         fi
         cat > "$PKGDIR/shine.pc" <<PC
     prefix=$SHINE_PREFIX
-    exec_prefix=
-    libdir=
-    includedir=
+    exec_prefix=\${prefix}
+    libdir=\${prefix}/lib
+    includedir=\${prefix}/include
 
     Name: shine
     Description: libshine MP3 encoder
     Version: 1.0
-    Libs: -L\${prefix}/lib -lshine -lm
-    Cflags: -I\${prefix}/include
+    Libs: -L\${libdir} -lshine -lm
+    Cflags: -I\${includedir}
 PC
         export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
         # Diagnostic: ensure pkg-config can see shine (helpful on CI/host systems)
@@ -191,8 +191,8 @@ PC
         --extra-ldflags="${SHINE_LDFLAGS:-}" \
         2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
-        echo "===== FFmpeg configure failed for $ABI — ffbuild/config.log ====="
-        if [ -f "$CONFIG_LOG" ]; then cat "$CONFIG_LOG"; else echo "(config.log not found)"; fi
+        echo "===== FFmpeg configure failed for $ABI — last 200 lines of ffbuild/config.log ====="
+        if [ -f "$CONFIG_LOG" ]; then tail -200 "$CONFIG_LOG"; else echo "(config.log not found)"; fi
         exit 1
     fi
 
