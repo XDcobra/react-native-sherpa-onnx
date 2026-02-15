@@ -11,6 +11,7 @@ FFMPEG_SRC="$REPO_ROOT/third_party/ffmpeg"
 WORK_DIR="$SCRIPT_DIR"
 OUTPUT_BASE="$WORK_DIR/android"
 ANDROID_API="${ANDROID_API:-21}"
+FFMPEG_BUILD_LOG="${SCRIPT_DIR}/ffmpeg_build.log"
 
 # NDK path
 if [ -n "$ANDROID_NDK_HOME" ]; then
@@ -170,7 +171,12 @@ PC
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
 
-    # Install to ABI-specific prefix so we get per-ABI libs
+    # NDK r23+ only provides llvm-nm, llvm-ar, llvm-ranlib (no armv7a-linux-androideabi-nm etc.)
+    export NM="${TOOLCHAIN}/bin/llvm-nm"
+    export AR="${TOOLCHAIN}/bin/llvm-ar"
+    export RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
+
+    # Install to ABI-specific prefix so we get per-ABI libs (log for diagnostics on failure)
     ./configure \
         --prefix="$PREFIX_ABI" \
         "${COMMON_CONFIGURE[@]}" \
@@ -181,9 +187,20 @@ PC
         --cxx="$CXX" \
         --sysroot="$TOOLCHAIN/sysroot" \
         --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-}" \
-        --extra-ldflags="${SHINE_LDFLAGS:-}"
+        --extra-ldflags="${SHINE_LDFLAGS:-}" \
+        2>&1 | tee -a "$FFMPEG_BUILD_LOG"
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo "===== FFmpeg configure failed for $ABI — last 200 lines of build log ====="
+        tail -200 "$FFMPEG_BUILD_LOG"
+        exit 1
+    fi
 
-    make -j"$(nproc 2>/dev/null || echo 4)"
+    make -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tee -a "$FFMPEG_BUILD_LOG"
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo "===== FFmpeg make failed for $ABI — last 200 lines of build log ====="
+        tail -200 "$FFMPEG_BUILD_LOG"
+        exit 1
+    fi
     make install
     make distclean 2>/dev/null || true
 
@@ -191,6 +208,7 @@ PC
 }
 
 # Build all ABIs used by the SDK (match android defaultConfig.ndk.abiFilters)
+: > "$FFMPEG_BUILD_LOG"
 for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
     build_abi "$ABI"
 done
