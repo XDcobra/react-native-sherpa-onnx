@@ -45,6 +45,11 @@
       "types": "./lib/typescript/src/download/index.d.ts",
       "default": "./lib/module/download/index.js"
     },
+    "./audio": {
+      "source": "./src/audio/index.ts",
+      "types": "./lib/typescript/src/audio/index.d.ts",
+      "default": "./lib/module/audio/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

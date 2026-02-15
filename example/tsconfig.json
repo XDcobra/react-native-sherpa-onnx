@@ -4,6 +4,7 @@
     "baseUrl": ".",
     "paths": {
       "react-native-sherpa-onnx": ["../src/index.tsx"],
+      "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/stt": ["../src/stt/index.ts"],
       "react-native-sherpa-onnx/tts": ["../src/tts/index.ts"],
