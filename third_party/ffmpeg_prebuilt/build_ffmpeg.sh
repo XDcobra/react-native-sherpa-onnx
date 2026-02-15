@@ -42,7 +42,7 @@ if [ ! -d "$FFMPEG_SRC" ] || [ ! -f "$FFMPEG_SRC/configure" ]; then
     exit 1
 fi
 
-# Minimal audio-only: decoders/demuxers for common formats; output WAV 16kHz mono uses swresample
+# Minimal audio-only: decoders/demuxers for common formats;
 # --prefix is set per ABI below
 COMMON_CONFIGURE=(
     --enable-shared
@@ -51,13 +51,12 @@ COMMON_CONFIGURE=(
     --disable-doc
     --disable-debug
     --disable-avdevice
-    --disable-postproc
     --disable-swscale
     --disable-everything
     --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
     --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
-    --enable-encoder=pcm_s16le,flac,mp3,aac,alac
+    --enable-encoder=pcm_s16le,flac,libshine,aac,alac
     --enable-parser=aac,mpegaudio,vorbis,flac
     --enable-protocol=file
     --enable-swresample
