@@ -57,7 +57,11 @@ buildscript {
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
-apply plugin: "com.facebook.react"
+// Only apply React Native plugin when building inside a React Native app (e.g. example app).
+// Omit when building standalone AAR (root build.gradle sets ext.standaloneAarBuild = true).
+if (!rootProject.hasProperty("standaloneAarBuild") || !rootProject.standaloneAarBuild) {
+  apply plugin: "com.facebook.react"
+}
 
 android {
   namespace "com.sherpaonnx"

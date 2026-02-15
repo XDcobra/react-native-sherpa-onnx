@@ -1,5 +1,6 @@
 // Root build for standalone AAR build (e.g. CI / Maven release).
 // Sets NDK and provides repositories for the :android library module.
+ext.standaloneAarBuild = true
 buildscript {
   ext {
     ndkVersion = "28.2.13676358"
