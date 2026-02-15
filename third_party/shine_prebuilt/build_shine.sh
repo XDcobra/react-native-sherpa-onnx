@@ -101,13 +101,13 @@ build_abi() {
   fi
 
   # Basic flags — include shine sources and its lib directory so headers like layer3.h are found
-  CFLAGS_BASE="-O3 -fPIC -std=gnu99 -I$SYSROOT/usr/include -I$SHINE_SRC -I$SHINE_SRC/src -I$SHINE_SRC/src/lib"
+  CFLAGS_BASE="--sysroot=$SYSROOT --target=${TOOLCHAIN_ARCH}${API} -O3 -fPIC -std=gnu99 -I$SYSROOT/usr/include -I$SHINE_SRC -I$SHINE_SRC/src -I$SHINE_SRC/src/lib"
 
   # ABI-specific tuning to enable inline ARM assembly and correct target features
   case "$ABI" in
     armeabi-v7a)
       # Enable ARMv7-A and VFP (common for armeabi-v7a NDK builds)
-      ABI_CFLAGS="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp -D__ARM_ARCH_7A__ -D__ARM_ARCH=7"
+      ABI_CFLAGS="-march=armv7-a"
       ;;
     arm64-v8a)
       # aarch64 typically doesn't need extra march flags for NDK clang
@@ -125,7 +125,7 @@ build_abi() {
   esac
 
   CFLAGS="$CFLAGS_BASE $ABI_CFLAGS"
-  LDFLAGS="-Wl,-z,max-page-size=16384"
+  LDFLAGS="--sysroot=$SYSROOT -Wl,-z,max-page-size=16384"
 
   # Compile each C file to object
   for src in $src_files; do
@@ -136,7 +136,7 @@ build_abi() {
 
   # Link shared lib
   echo "Linking libshine.so"
-  "$CC" -shared -o "$PREFIX/lib/libshine.so" $OBJDIR/*.o $LDFLAGS
+  "$CC" -shared --sysroot="$SYSROOT" -o "$PREFIX/lib/libshine.so" $OBJDIR/*.o $LDFLAGS
 
   # Install public headers so consumers can `#include <shine/...>`
   mkdir -p "$PREFIX/include/shine"
