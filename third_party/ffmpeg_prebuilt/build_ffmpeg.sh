@@ -204,6 +204,7 @@ PC
         --nm="${TOOLCHAIN}/bin/llvm-nm" \
         --ar="${TOOLCHAIN}/bin/llvm-ar" \
         --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
+        --strip="${TOOLCHAIN}/bin/llvm-strip" \
         --sysroot="$TOOLCHAIN/sysroot" \
         --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-}" \
         --extra-ldflags="${SHINE_LDFLAGS:-}" \
