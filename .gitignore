@@ -112,6 +112,13 @@ third_party/ffmpeg_prebuilt/ffmpeg-*/
 third_party/ffmpeg_prebuilt/build/
 third_party/ffmpeg_prebuilt/*.tar.bz2
 
+# shine build artifacts (when building prebuilts locally)
+# ignore everything under shine_prebuilt by default
+third_party/shine_prebuilt/*
+# but allow the README, build scripts and .gitkeep placeholder to be tracked
+!third_party/shine_prebuilt/README.md
+!third_party/shine_prebuilt/build_shine_msys2.sh
+
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
 # They should be obtained via:
@@ -131,3 +138,4 @@ verdaccio.config.yaml
 htpasswd
 storage/
 plugins/
+

@@ -115,8 +115,9 @@ build_abi() {
   echo "Linking libshine.so"
   "$CC" -shared -o "$PREFIX/lib/libshine.so" $OBJDIR/*.o $LDFLAGS
 
-  # Copy headers (any .h files from shine into include/)
-  find "$SHINE_SRC" -name '*.h' -exec cp --parents {} "$PREFIX/include/" \; 2>/dev/null || true
+  # Copy headers (preserve paths relative to the shine source directory)
+  # Run the find from inside the shine tree so --parents does not include the absolute path
+  (cd "$SHINE_SRC" && find . -name '*.h' -exec cp --parents {} "$PREFIX/include/" \;) 2>/dev/null || true
 
   echo "Built libshine -> $PREFIX/lib/libshine.so"
 }
