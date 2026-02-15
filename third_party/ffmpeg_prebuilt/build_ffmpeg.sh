@@ -174,6 +174,14 @@ PC
     # NDK r23+ only has llvm-nm, llvm-ar, llvm-ranlib — pass them explicitly so configure does not use cross_prefix+nm
     CONFIG_LOG="$FFMPEG_SRC/ffbuild/config.log"
 
+    # Cross-compile default is ${cross_prefix}pkg-config (e.g. armv7a-linux-androideabi-pkg-config),
+    # which does not exist; use host pkg-config so libshine and other deps can be found via PKG_CONFIG_PATH.
+    HOST_PKG_CONFIG="pkg-config"
+    if ! command -v "$HOST_PKG_CONFIG" >/dev/null 2>&1; then
+        echo "Error: pkg-config not found. Install it (e.g. apt install pkg-config)."
+        exit 1
+    fi
+
     # Install to ABI-specific prefix so we get per-ABI libs
     ./configure \
         --prefix="$PREFIX_ABI" \
@@ -183,6 +191,7 @@ PC
         --cross-prefix="$CROSS_PREFIX" \
         --cc="$CC" \
         --cxx="$CXX" \
+        --pkg-config="$HOST_PKG_CONFIG" \
         --nm="${TOOLCHAIN}/bin/llvm-nm" \
         --ar="${TOOLCHAIN}/bin/llvm-ar" \
         --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
