@@ -112,10 +112,12 @@ build_abi() {
     local PREFIX_ABI="$OUTPUT_BASE/$ABI"
     mkdir -p "$PREFIX_ABI"
 
-    # Avoid needing nasm: disable x86 hand-optimized assembly for x86/x86_64 (same as build_ffmpeg_msys2.sh)
-    local DISABLE_X86ASM=""
+    # x86: disable all asm to avoid R_386_32 non-PIC relocations in shared libs (same as build_ffmpeg_msys2.sh).
+    # x86_64: disable only x86asm (nasm) so we don't need nasm; inline asm is PIC-safe.
+    local DISABLE_ASM=""
     case "$ARCH" in
-        x86|x86_64) DISABLE_X86ASM="--disable-x86asm" ;;
+        x86)     DISABLE_ASM="--disable-asm" ;;
+        x86_64)  DISABLE_ASM="--disable-x86asm" ;;
     esac
 
     # Libshine: same path logic as build_ffmpeg_msys2.sh (REPO_ROOT/third_party/shine_prebuilt/android/ABI)
@@ -201,7 +203,7 @@ PC
     ./configure \
         --prefix="$PREFIX_ABI" \
         "${COMMON_CONFIGURE[@]}" \
-        $DISABLE_X86ASM \
+        $DISABLE_ASM \
         --arch="$ARCH" \
         --cpu="$CPU" \
         --cross-prefix="$CROSS_PREFIX" \
