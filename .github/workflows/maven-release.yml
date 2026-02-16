@@ -47,7 +47,7 @@ jobs:
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r27d
+          ndk-version: r29
           add-to-path: true
 
       - name: Yarn install
@@ -83,12 +83,3 @@ jobs:
           cp example/android/gradlew.bat .
           chmod +x gradlew
           cp -r example/android/gradle .
-
-      - name: Build Android AAR
-        run: ./gradlew :android:assembleRelease --no-daemon --console=plain
-
-      - name: Upload AAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sherpa-onnx-android-aar
-          path: android/build/outputs/aar/*.aar
