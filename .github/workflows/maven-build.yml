@@ -2,7 +2,7 @@
 # Builds: libshine (shine_prebuilt), FFmpeg (ffmpeg_prebuilt, with libshine), libarchive (via CMake),
 # then produces the react-native-sherpa-onnx Android library .aar.
 
-name: Maven - Release AAR
+name: Maven - Build AAR
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
     paths:
       - 'android/**'
       - 'third_party/**'
-      - '.github/workflows/maven-release.yml'
+      - '.github/workflows/maven-build.yml'
 
 env:
   ANDROID_API: "24"
