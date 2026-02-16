@@ -247,9 +247,14 @@ jobs:
           set -e
           ART_DIR="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/${VERSION}"
           mkdir -p "$ART_DIR"
-          for f in "$GITHUB_WORKSPACE/build-artifact"/*.aar.sha1 "$GITHUB_WORKSPACE/build-artifact"/*.aar.md5; do
-            if [ -f "$f" ]; then
-              cp "$f" "$ART_DIR/$(basename "$f")"
+          # Only copy checksums that match the canonical artifact name produced by Maven
+          ART_NAME="sherpa-onnx-react-native-${VERSION}.aar"
+          for ext in sha1 md5; do
+            SRC="$GITHUB_WORKSPACE/build-artifact/${ART_NAME}.${ext}"
+            if [ -f "$SRC" ]; then
+              cp "$SRC" "$ART_DIR/$(basename "$SRC")"
+            else
+              echo "No precomputed checksum for ${ART_NAME}.${ext} found in build-artifact; skipping"
             fi
           done
 
