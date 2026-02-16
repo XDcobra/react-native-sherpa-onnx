@@ -273,9 +273,10 @@ def checkHeaderSource = tasks.register("checkHeaderSource") {
 apply plugin: 'com.github.node-gradle.node'
 
 // Configure Node (plugin will download if necessary)
-// Resolve desired Node version from project .nvmrc only
+// Resolve desired Node version from library root .nvmrc so codegen uses same Node when built from app or standalone.
 def projectNodeVersion = null
-def nvmrcFile = file("${rootProject.projectDir}/.nvmrc")
+def libraryRootForNode = project.projectDir.parentFile
+def nvmrcFile = file("${libraryRootForNode}/.nvmrc")
 if (nvmrcFile.exists()) {
   projectNodeVersion = nvmrcFile.text.readLines().find { it?.trim() }?.trim()
   if (projectNodeVersion?.startsWith('v')) {
@@ -290,29 +291,31 @@ node {
 
 // Two implementations: NodeTask (runs the codegen script via node) and NpxTask (runs via npx).
 // Toggle between them with -PuseNpx=true (defaults to NodeTask).
-def root = rootProject.projectDir
+// Use the library root (parent of android/), not rootProject, so codegen works when this module
+// is built from the repo root (standalone AAR) or from an app (e.g. example/android).
+def libraryRoot = project.projectDir.parentFile
 // Single path on all platforms: with codegenConfig.includesGeneratedCode=true the script uses -o directly (no nested android/app/build/...).
 def outDir = file("${project.buildDir}/generated/source/codegen")
 
 tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
   onlyIf { !project.hasProperty('useNpx') || project.property('useNpx') != 'true' }
-  workingDir = root
-  inputs.dir(file("${root}/src"))
-  inputs.file(file("${root}/package.json"))
+  workingDir = libraryRoot
+  inputs.dir(file("${libraryRoot}/src"))
+  inputs.file(file("${libraryRoot}/package.json"))
   outputs.dir(outDir)
 
   doFirst {
-    if (!file("${root}/node_modules/react-native").exists()) {
+    if (!file("${libraryRoot}/node_modules/react-native").exists()) {
       throw new RuntimeException(
-        "Standalone AAR build requires node_modules. Run 'yarn install' (or npm install) in the repo root, then rebuild."
+        "Codegen requires node_modules at library root. Run 'yarn install' (or npm install) in ${libraryRoot}, then rebuild."
       )
     }
     outDir.mkdirs()
   }
 
-  script = file("${root}/node_modules/react-native/scripts/generate-codegen-artifacts.js")
+  script = file("${libraryRoot}/node_modules/react-native/scripts/generate-codegen-artifacts.js")
   args = [
-    '-p', root.absolutePath.replace("\\", "/"),
+    '-p', libraryRoot.absolutePath.replace("\\", "/"),
     '-t', 'android',
     '-o', outDir.absolutePath.replace("\\", "/"),
     '-s', 'library'
