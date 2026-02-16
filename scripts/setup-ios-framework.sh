@@ -41,6 +41,12 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
+# Prepare GitHub auth header if GITHUB_TOKEN is provided (helps avoid API rate limits)
+AUTH_ARGS=()
+if [ -n "$GITHUB_TOKEN" ]; then
+  AUTH_ARGS+=("-H" "Authorization: Bearer $GITHUB_TOKEN")
+fi
+
 # If SHERPA_ONNX_VERSION is set, treat it as the desired framework version
 # and do not perform the usual "auto-upgrade to latest" behavior. This helps
 # prevent accidental upgrades during CI or automated installs.
@@ -92,7 +98,7 @@ compare_versions() {
 get_latest_framework_version() {
   echo -e "${YELLOW}Fetching latest framework release from GitHub...${NC}" >&2
 
-  local releases_json=$(curl -s -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases" 2>/dev/null || echo "")
+  local releases_json=$(curl -s "${AUTH_ARGS[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases" 2>/dev/null || echo "")
 
   if [ -z "$releases_json" ]; then
     echo -e "${RED}Error: Could not fetch releases from GitHub API${NC}" >&2
@@ -162,7 +168,7 @@ download_and_extract_framework() {
   echo -e "${YELLOW}Downloading framework version $version...${NC}" >&2
 
   # Get download URL from GitHub API
-  local release_json=$(curl -s -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags/$tag" 2>/dev/null || echo "")
+  local release_json=$(curl -s "${AUTH_ARGS[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags/$tag" 2>/dev/null || echo "")
 
   if [ -z "$release_json" ]; then
     echo -e "${RED}Error: Could not fetch release information for tag $tag${NC}" >&2
@@ -204,7 +210,7 @@ download_and_extract_framework() {
   # Download the zip file
   local zip_path="$FRAMEWORKS_DIR/sherpa_onnx.xcframework.zip"
 
-  if ! curl -L -f -o "$zip_path" "$download_url" 2>/dev/null; then
+  if ! curl -L -f "${AUTH_ARGS[@]}" -o "$zip_path" "$download_url" 2>/dev/null; then
     echo -e "${RED}Error: Failed to download framework from $download_url${NC}" >&2
     rm -f "$zip_path"
     return 1
