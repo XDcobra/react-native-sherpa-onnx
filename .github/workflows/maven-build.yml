@@ -189,6 +189,20 @@ jobs:
           path: maven-repo
           token: ${{ secrets.MAVEN_REPO_PAT }}
 
+      - name: Ensure existing metadata checksums (pre-deploy)
+        env:
+          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
+        run: |
+          set -e
+          META="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/maven-metadata.xml"
+          if [ -f "$META" ]; then
+            sha1sum "$META" | awk '{print $1}' > "$META.sha1"
+            md5sum "$META" | awk '{print $1}' > "$META.md5"
+            echo "Generated checksums for existing metadata: $META"
+          else
+            echo "No existing maven-metadata.xml to checksum"
+          fi
+
       - name: Install Maven
         run: sudo apt-get update && sudo apt-get install -y maven
 
@@ -214,14 +228,35 @@ jobs:
             -Durl="file://$GITHUB_WORKSPACE/maven-repo"
 
       - name: Generate checksum files for deployed artifacts and metadata
+        env:
+          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
+          VERSION: ${{ steps.vars.outputs.version }}
         run: |
           set -e
           cd maven-repo
-          # generate .sha1 and .md5 for all files (skip existing checksums)
-          find . -type f ! -name '*.sha1' ! -name '*.md5' -print0 | while IFS= read -r -d '' f; do
-            sha1sum "$f" | awk '{print $1}' > "$f.sha1"
-            md5sum "$f" | awk '{print $1}' > "$f.md5"
+          # target artifact directory and metadata
+          ART_DIR="${GROUP_PATH}/${VERSION}"
+
+          # create checksums for the AAR and POM in the version dir
+          find "$ART_DIR" -type f \( -name '*.aar' -o -name '*.pom' \) -print0 | while IFS= read -r -d '' f; do
+            if [ ! -f "$f.sha1" ]; then
+              sha1sum "$f" | awk '{print $1}' > "$f.sha1"
+            fi
+            if [ ! -f "$f.md5" ]; then
+              md5sum "$f" | awk '{print $1}' > "$f.md5"
+            fi
           done
+
+          # also ensure checksums exist for group-level maven-metadata.xml
+          META="${GROUP_PATH}/maven-metadata.xml"
+          if [ -f "$META" ]; then
+            if [ ! -f "$META.sha1" ]; then
+              sha1sum "$META" | awk '{print $1}' > "$META.sha1"
+            fi
+            if [ ! -f "$META.md5" ]; then
+              md5sum "$META" | awk '{print $1}' > "$META.md5"
+            fi
+          fi
 
       - name: Commit and push to Maven repo
         env:
@@ -232,5 +267,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Publish sherpa-onnx-react-native:${{ steps.vars.outputs.version }} to GitHub Pages Maven repo" || echo "No changes to commit"
+          # fail if there are no staged changes (treat as error so job aborts)
+          if git diff --cached --quiet; then
+            echo "No changes to commit" >&2
+            exit 1
+          fi
+
+          git commit -m "Publish sherpa-onnx-react-native:${{ steps.vars.outputs.version }} to GitHub Pages Maven repo"
           git push origin HEAD:main
