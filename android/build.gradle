@@ -75,9 +75,11 @@ android {
   // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
   sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
 
-  // Standalone AAR build: run React Native codegen and use generated NativeSherpaOnnxSpec (single source of truth)
+  // Standalone AAR build: run React Native codegen and use generated NativeSherpaOnnxSpec (single source of truth).
+  // Codegen writes to build/generated/codegen/android/app/build/generated/source/codegen[/java]; add both so it works locally and in CI.
   if (isStandaloneAarBuild) {
-    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
+    sourceSets.main.java.srcDirs += file("${buildDir}/generated/codegen/android/app/build/generated/source/codegen/java")
+    sourceSets.main.java.srcDirs += file("${buildDir}/generated/codegen/android/app/build/generated/source/codegen")
   }
 
   defaultConfig {
