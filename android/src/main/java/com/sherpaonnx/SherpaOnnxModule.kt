@@ -196,7 +196,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Double?, promise: Promise) {
     try {
-      val rate = (outputSampleRateHz?.toInt() ?: 0).coerceIn(0, 48000)
+      var rate = outputSampleRateHz?.toInt() ?: 0
+
+      if (rate < 0) {
+        promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
+        return
+      }
+
+      if (format.equals("mp3", ignoreCase = true)) {
+        val allowed = setOf(0, 32000, 44100, 48000)
+        if (!allowed.contains(rate)) {
+          promise.reject(
+            "CONVERT_ERROR",
+            "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate"
+          )
+          return
+        }
+      } else {
+        rate = rate.coerceIn(0, 48000)
+      }
+
       val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format, rate)
       if (err.isEmpty()) {
         promise.resolve(null)
