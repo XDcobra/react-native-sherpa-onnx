@@ -5,6 +5,9 @@
 name: Maven - Build AAR
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
   push:
     branches: [main]
@@ -15,7 +18,7 @@ on:
 
 env:
   ANDROID_API: "24"
-  NDK_VERSION: "28.2.13676358"
+  NDK_VERSION: "29.0.14206865"
 
 jobs:
   build-aar:
