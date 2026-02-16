@@ -21,9 +21,34 @@ env:
   NDK_VERSION: "29.0.14206865"
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Cache SherpaOnnx models
+        uses: actions/cache@v4
+        with:
+          path: example/.model-cache
+          key: ${{ runner.os }}-sherpa-models-${{ hashFiles('example/scripts/model-download-config.json', 'example/scripts/download-models.js') }}
+          restore-keys: |
+            ${{ runner.os }}-sherpa-models-
+
+      - name: Lint files
+        run: yarn lint
+
+      - name: Typecheck files
+        run: yarn typecheck
+
   build-aar:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    needs: lint
 
     steps:
       - name: Checkout
