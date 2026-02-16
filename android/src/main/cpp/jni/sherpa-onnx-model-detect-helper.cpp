@@ -227,9 +227,10 @@ std::string FindFileEndingWith(const std::string& baseDir, const std::string& su
         }
     }
 
-    // 2) match anywhere in filename (prefix/infix/suffix)
+    // 2) true suffix match (preferred over substring to avoid false positives
+    //    like "tokens.txt.bak" or "mytokens.txt.tmp").
     for (const auto& entry : files) {
-        if (entry.nameLower.find(targetSuffix) != std::string::npos) {
+        if (EndsWith(entry.nameLower, targetSuffix)) {
             return entry.path;
         }
     }

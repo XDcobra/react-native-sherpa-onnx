@@ -1,6 +1,9 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include <android/log.h>
+#include <cstdlib>
+#include <string>
+#include <algorithm>
 
 #define LOG_TAG "SttModelDetect"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -26,7 +29,8 @@ SttModelKind ParseSttModelType(const std::string& modelType) {
 SttDetectResult DetectSttModel(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType
+    const std::optional<std::string>& modelType,
+    bool debug /* = false */
 ) {
     using namespace model_detect;
 
@@ -50,9 +54,14 @@ SttDetectResult DetectSttModel(
     }
 
     const auto files = ListFilesRecursive(modelDir, 2);
-    LOGI("DetectSttModel: Found %zu files in %s", files.size(), modelDir.c_str());
-    for (const auto& f : files) {
-        LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+    bool verbose = debug;
+    LOGI("DetectSttModel: Found %zu files in %s (verbose=%d)", files.size(), modelDir.c_str(), (int)verbose);
+    if (verbose) {
+        for (const auto& f : files) {
+            LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+        }
+    } else {
+        LOGI("(detailed file listing suppressed; enable by passing debug=true to initialize())");
     }
 
     std::string encoderPath = FindOnnxByAnyToken(files, {"encoder"}, preferInt8);

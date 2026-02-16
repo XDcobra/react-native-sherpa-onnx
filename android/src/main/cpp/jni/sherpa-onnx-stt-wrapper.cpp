@@ -77,7 +77,7 @@ SttInitializeResult SttWrapper::initialize(
         if (debug) {
             LOGI("STT: Detecting model in dir=%s", modelDir.c_str());
         }
-        auto detect = DetectSttModel(modelDir, preferInt8, modelType);
+        auto detect = DetectSttModel(modelDir, preferInt8, modelType, debug);
         if (!detect.ok) {
             LOGE("STT: Model detection failed: %s", detect.error.c_str());
             result.error = detect.error;

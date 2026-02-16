@@ -76,7 +76,8 @@ struct TtsDetectResult {
 SttDetectResult DetectSttModel(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType
+    const std::optional<std::string>& modelType,
+    bool debug = false
 );
 
 TtsDetectResult DetectTtsModel(

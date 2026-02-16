@@ -47,7 +47,8 @@ SttWrapper::~SttWrapper() {
 SttInitializeResult SttWrapper::initialize(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType
+    const std::optional<std::string>& modelType,
+    bool debug /* = false */
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -66,7 +67,7 @@ SttInitializeResult SttWrapper::initialize(
         config.feat_config.sample_rate = 16000;
         config.feat_config.feature_dim = 80;
 
-        auto detect = DetectSttModel(modelDir, preferInt8, modelType);
+        auto detect = DetectSttModel(modelDir, preferInt8, modelType, debug);
         if (!detect.ok) {
             LOGE("%s", detect.error.c_str());
             return result;
