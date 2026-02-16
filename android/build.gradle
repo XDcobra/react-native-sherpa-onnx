@@ -44,12 +44,15 @@ buildscript {
   repositories {
     google()
     mavenCentral()
+    maven { url 'https://plugins.gradle.org/m2/' }
   }
 
   dependencies {
     classpath "com.android.tools.build:gradle:8.7.2"
     // noinspection DifferentKotlinGradleVersion
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
+    // Node Gradle plugin for running npx reliably from Gradle
+    classpath "com.github.node-gradle:gradle-node-plugin:7.1.0"
   }
 }
 
@@ -72,9 +75,9 @@ android {
   // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
   sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
 
-  // Standalone AAR build: add stub NativeSherpaOnnxSpec (codegen is not run, so we provide it here)
+  // Standalone AAR build: run React Native codegen and use generated NativeSherpaOnnxSpec (single source of truth)
   if (isStandaloneAarBuild) {
-    sourceSets.main.java.srcDirs += file("src/standalone/java")
+    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
   }
 
   defaultConfig {
@@ -251,10 +254,6 @@ def extractNativeLibs = tasks.register("extractNativeLibs") {
   }
 }
 
-// NOTE: Header files are now set up by postinstall script (yarn setup-assets)
-// This runs automatically after yarn/npm install and handles copying headers
-// We no longer need a Gradle task for this - headers will be present when build starts
-
 // Task to check and log header source before CMake runs
 def checkHeaderSource = tasks.register("checkHeaderSource") {
   doLast {
@@ -268,6 +267,64 @@ def checkHeaderSource = tasks.register("checkHeaderSource") {
       throw new RuntimeException("Header files not found. Run 'yarn setup-assets' or 'yarn copy-headers'")
     }
   }
+}
+
+// Standalone AAR build: run React Native codegen so NativeSherpaOnnxSpec is generated (no stub needed)
+
+// Ensure Node plugin is applied (used to run npx reliably)
+apply plugin: 'com.github.node-gradle.node'
+
+// Configure Node (plugin will download if necessary)
+// Resolve desired Node version from project .nvmrc only
+def projectNodeVersion = null
+def nvmrcFile = file("${rootProject.projectDir}/.nvmrc")
+if (nvmrcFile.exists()) {
+  projectNodeVersion = nvmrcFile.text.readLines().find { it?.trim() }?.trim()
+  if (projectNodeVersion?.startsWith('v')) {
+    projectNodeVersion = projectNodeVersion.substring(1)
+  }
+}
+
+node {
+  version = projectNodeVersion
+  download = false // Don't download if not needed - use system Node if it matches the version in .nvmrc (common in dev environments)
+}
+
+// Two implementations: NodeTask (runs the codegen script via node) and NpxTask (runs via npx).
+// Toggle between them with -PuseNpx=true (defaults to NodeTask).
+def root = rootProject.projectDir
+def outDir = file("${project.buildDir}/generated/codegen")
+
+tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
+  onlyIf { isStandaloneAarBuild && (!project.hasProperty('useNpx') || project.property('useNpx') != 'true') }
+  workingDir = root
+  inputs.dir(file("${root}/src"))
+  inputs.file(file("${root}/package.json"))
+  outputs.dir(outDir)
+
+  doFirst {
+    if (!file("${root}/node_modules/react-native").exists()) {
+      throw new RuntimeException(
+        "Standalone AAR build requires node_modules. Run 'yarn install' (or npm install) in the repo root, then rebuild."
+      )
+    }
+    outDir.mkdirs()
+  }
+
+  script = file("${root}/node_modules/react-native/scripts/generate-codegen-artifacts.js")
+  args = [
+    '-p', root.absolutePath.replace("\\", "/"),
+    '-t', 'android',
+    '-o', outDir.absolutePath.replace("\\", "/"),
+    '-s', 'library'
+  ]
+
+  environment = ['CI': 'true']
+}
+
+// Alias task: depend on the Node-based implementation only.
+tasks.register('generateCodegenSpec') {
+  dependsOn tasks.named('generateCodegenSpecNode')
 }
 
 // Make CMake depend on extraction and header verification - ensure they run before any CMake task
@@ -285,4 +342,11 @@ afterEvaluate {
   // Also ensure all extraction and verification tasks run before preBuild
   preBuild.dependsOn extractNativeLibs
   preBuild.dependsOn checkHeaderSource
+
+  // Standalone: compile Kotlin/Java only after codegen has produced NativeSherpaOnnxSpec
+    if (isStandaloneAarBuild) {
+    tasks.matching { it.name == "compileReleaseKotlin" }.configureEach {
+      dependsOn tasks.named('generateCodegenSpec')
+    }
+  }
 }
