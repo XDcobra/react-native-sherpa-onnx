@@ -6,6 +6,8 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <cstdint>
+#include <limits>
 
 // iOS logging
 #ifdef __APPLE__
@@ -180,7 +182,24 @@ std::string SttWrapper::transcribeFile(const std::string& filePath) {
 
     try {
         auto stream = pImpl->recognizer.value().CreateStream();
-        stream.AcceptWaveform(wave.sample_rate, wave.samples.data(), wave.samples.size());
+
+        // Ensure safe conversions: AcceptWaveform expects 32-bit ints
+        if (wave.samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+            LOGE("Audio too large: sample count %zu exceeds int32_t max", wave.samples.size());
+            throw std::runtime_error("Audio too large to process");
+        }
+
+        int32_t sample_rate = 0;
+        if (wave.sample_rate > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+            LOGE("Sample rate too large: %u", wave.sample_rate);
+            throw std::runtime_error("Unsupported sample rate");
+        } else {
+            sample_rate = static_cast<int32_t>(wave.sample_rate);
+        }
+
+        int32_t n_samples = static_cast<int32_t>(wave.samples.size());
+
+        stream.AcceptWaveform(sample_rate, wave.samples.data(), n_samples);
         pImpl->recognizer.value().Decode(&stream);
         auto result = pImpl->recognizer.value().GetResult(&stream);
         return result.text;
