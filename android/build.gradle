@@ -51,7 +51,7 @@ buildscript {
     classpath "com.android.tools.build:gradle:8.7.2"
     // noinspection DifferentKotlinGradleVersion
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
-    // Node Gradle plugin for running npx reliably from Gradle
+    // Node Gradle plugin for running node/npx reliably from Gradle
     classpath "com.github.node-gradle:gradle-node-plugin:7.1.0"
   }
 }
@@ -75,7 +75,7 @@ android {
   // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
   sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
 
-  // Codegen output (run for both example-app and standalone AAR). includesGeneratedCode=true → script writes to this path; app CMake expects build/generated/source/codegen/jni.
+  // Codegen output (run for both example-app and standalone AAR). includesGeneratedCode=true so script writes to this path; app CMake expects build/generated/source/codegen/jni.
   sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
 
   defaultConfig {
@@ -289,8 +289,6 @@ node {
   download = false // Don't download if not needed - use system Node if it matches the version in .nvmrc (common in dev environments)
 }
 
-// Two implementations: NodeTask (runs the codegen script via node) and NpxTask (runs via npx).
-// Toggle between them with -PuseNpx=true (defaults to NodeTask).
 // Use the library root (parent of android/), not rootProject, so codegen works when this module
 // is built from the repo root (standalone AAR) or from an app (e.g. example/android).
 def libraryRoot = project.projectDir.parentFile
@@ -329,7 +327,7 @@ tasks.register('generateCodegenSpec') {
   dependsOn tasks.named('generateCodegenSpecNode')
 }
 
-// Make CMake depend on extraction and header verification - ensure they run before any CMake task
+// Make CMake depend on extraction and header verification to ensure they run before any CMake task
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractNativeLibs
