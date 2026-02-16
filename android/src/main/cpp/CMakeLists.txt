@@ -176,6 +176,7 @@ target_link_libraries(sherpaonnx
     avcodec
     avformat
     avutil
+    avfilter
     swresample
     log
     android
