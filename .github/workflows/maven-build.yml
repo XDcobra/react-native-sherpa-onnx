@@ -213,12 +213,24 @@ jobs:
             -DgeneratePom=true \
             -Durl="file://$GITHUB_WORKSPACE/maven-repo"
 
+      - name: Generate checksum files for deployed artifacts and metadata
+        run: |
+          set -e
+          cd maven-repo
+          # generate .sha1 and .md5 for all files (skip existing checksums)
+          find . -type f ! -name '*.sha1' ! -name '*.md5' -print0 | while IFS= read -r -d '' f; do
+            sha1sum "$f" | awk '{print $1}' > "$f.sha1"
+            md5sum "$f" | awk '{print $1}' > "$f.md5"
+          done
+
       - name: Commit and push to Maven repo
         env:
           MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
         run: |
           set -e
           cd maven-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Publish sherpa-onnx-react-native:${{ steps.vars.outputs.version }} to GitHub Pages Maven repo" || echo "No changes to commit"
           git push origin HEAD:main
