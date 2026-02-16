@@ -6,8 +6,11 @@ export {
   assetModelPath,
   autoModelPath,
   fileModelPath,
+  getAssetPackPath,
   getDefaultModelPath,
+  getPlayAssetDeliveryModelsPath,
   listAssetModels,
+  listModelsAtPath,
   resolveModelPath,
 } from './utils';
 

@@ -12,9 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
   autoModelPath,
+  getAssetPackPath,
   listAssetModels,
   resolveModelPath,
+  listModelsAtPath,
 } from 'react-native-sherpa-onnx';
+import RNFS from 'react-native-fs';
 import {
   listDownloadedModelsByCategory,
   ModelCategory,
@@ -38,9 +41,13 @@ import {
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+const PAD_PACK_NAME = 'sherpa_models';
+
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
+  const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
@@ -100,10 +107,42 @@ export default function STTScreen() {
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
 
+      // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
+      let padFolders: string[] = [];
+      let resolvedPadPath: string | null = null;
+      try {
+        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+        const fallbackPath = `${RNFS.DocumentDirectoryPath}/models`;
+        const padPath = padPathFromNative ?? fallbackPath;
+        const padResults = await listModelsAtPath(padPath);
+        padFolders = (padResults || [])
+          .filter((m) => m.hint === 'stt')
+          .map((m) => m.folder);
+        if (padFolders.length > 0) {
+          resolvedPadPath = padPath;
+          console.log(
+            'STTScreen: Found PAD/filesystem STT models:',
+            padFolders,
+            'at',
+            padPath
+          );
+        }
+      } catch (e) {
+        console.warn('STTScreen: PAD/listModelsAtPath failed', e);
+        padFolders = [];
+      }
+      setPadModelsPath(resolvedPadPath);
+
+      // Merge: prefer downloaded, then PAD folders, then bundled asset folders (avoid duplicates)
       const combined = [
         ...downloadedIds,
-        ...sttFolders.filter((folder) => !downloadedIds.includes(folder)),
+        ...padFolders.filter((f) => !downloadedIds.includes(f)),
+        ...sttFolders.filter(
+          (f) => !downloadedIds.includes(f) && !padFolders.includes(f)
+        ),
       ];
+
+      setPadModelIds(padFolders);
 
       if (downloadedIds.length > 0) {
         console.log('STTScreen: Found downloaded models:', downloadedIds);
@@ -153,10 +192,16 @@ export default function STTScreen() {
         await unloadSTT();
       }
 
-      // Initialize new model
+      // Initialize new model: PAD models use padModelsPath as base; downloaded use default STT path; assets use getAssetModelPath
+      const useFilePath =
+        downloadedModelIds.includes(modelFolder) ||
+        padModelIds.includes(modelFolder);
+
       const result = await initializeSTT({
-        modelPath: downloadedModelIds.includes(modelFolder)
-          ? getFileModelPath(modelFolder, ModelCategory.Stt)
+        modelPath: useFilePath
+          ? padModelIds.includes(modelFolder) && padModelsPath
+            ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
+            : getFileModelPath(modelFolder, ModelCategory.Stt)
           : getAssetModelPath(modelFolder),
       });
 

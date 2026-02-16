@@ -35,6 +35,7 @@ namespace sherpaonnx {
 class TtsWrapper::Impl {
 public:
     bool initialized = false;
+    bool debug = false;
     std::string modelDir;
     std::optional<sherpa_onnx::cxx::OfflineTts> tts;
     // Hold active stream callbacks to ensure they remain alive while native code may call them
@@ -79,11 +80,18 @@ TtsInitializeResult TtsWrapper::initialize(
         config.model.num_threads = numThreads;
         config.model.debug = debug;
 
+        if (debug) {
+            LOGI("TTS: Detecting model in dir=%s with type=%s", modelDir.c_str(), modelType.c_str());
+        }
         auto detect = DetectTtsModel(modelDir, modelType);
         if (!detect.ok) {
-            LOGE("%s", detect.error.c_str());
+            LOGE("TTS: Model detection failed: %s", detect.error.c_str());
             result.error = detect.error;
             return result;
+        }
+        if (debug) {
+            LOGI("TTS: Model detection succeeded, selected kind=%d, detected %zu model(s)",
+                 static_cast<int>(detect.selectedKind), detect.detectedModels.size());
         }
 
         switch (detect.selectedKind) {
@@ -148,25 +156,101 @@ TtsInitializeResult TtsWrapper::initialize(
                 return result;
         }
 
+        if (debug) {
+            LOGI("TTS: === Config before Create() ===");
+            LOGI("TTS: config.model.vits.model=%s", config.model.vits.model.c_str());
+            LOGI("TTS: config.model.vits.tokens=%s", config.model.vits.tokens.c_str());
+            LOGI("TTS: config.model.vits.lexicon=%s", config.model.vits.lexicon.c_str());
+            LOGI("TTS: config.model.vits.data_dir=%s", config.model.vits.data_dir.c_str());
+            LOGI("TTS: config.model.vits.noise_scale=%.3f", config.model.vits.noise_scale);
+            LOGI("TTS: config.model.vits.noise_scale_w=%.3f", config.model.vits.noise_scale_w);
+            LOGI("TTS: config.model.vits.length_scale=%.3f", config.model.vits.length_scale);
+            LOGI("TTS: config.model.matcha.acoustic_model=%s", config.model.matcha.acoustic_model.c_str());
+            LOGI("TTS: config.model.kokoro.model=%s", config.model.kokoro.model.c_str());
+            LOGI("TTS: config.model.num_threads=%d", config.model.num_threads);
+            LOGI("TTS: config.model.debug=%d", config.model.debug);
+            LOGI("TTS: config.model.provider=%s", config.model.provider.c_str());
+            LOGI("TTS: config.max_num_sentences=%d", config.max_num_sentences);
+            LOGI("TTS: config.silence_scale=%.3f", config.silence_scale);
+            LOGI("TTS: config.rule_fsts=%s", config.rule_fsts.c_str());
+            LOGI("TTS: config.rule_fars=%s", config.rule_fars.c_str());
+        }
+
+        if (debug) {
+            auto checkFile = [](const std::string& path, const char* label) {
+                if (path.empty()) return;
+                std::ifstream f(path);
+                if (f.good()) {
+                    __android_log_print(ANDROID_LOG_INFO, "TtsWrapper",
+                        "TTS: ifstream check OK: %s => %s", label, path.c_str());
+                } else {
+                    __android_log_print(ANDROID_LOG_ERROR, "TtsWrapper",
+                        "TTS: ifstream check FAILED: %s => %s", label, path.c_str());
+                }
+            };
+            checkFile(config.model.vits.model, "vits.model");
+            checkFile(config.model.vits.tokens, "vits.tokens");
+            if (!config.model.vits.data_dir.empty()) {
+                checkFile(config.model.vits.data_dir + "/phontab", "data_dir/phontab");
+                checkFile(config.model.vits.data_dir + "/phonindex", "data_dir/phonindex");
+                checkFile(config.model.vits.data_dir + "/phondata", "data_dir/phondata");
+                checkFile(config.model.vits.data_dir + "/intonations", "data_dir/intonations");
+            }
+        }
+
         // Create TTS instance
-        LOGI("TTS: Creating OfflineTts instance...");
+        if (debug) {
+            LOGI("TTS: Creating OfflineTts instance for modelDir=%s ...", modelDir.c_str());
+        }
         pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
 
-        if (!pImpl->tts.has_value()) {
-            LOGE("TTS: Failed to create OfflineTts instance");
-            result.error = "TTS: Failed to create OfflineTts instance";
+        // The cxx-api Create() always returns an object, even on failure.
+        // We must check the underlying C pointer via Get() to detect a failed load.
+        if (!pImpl->tts.has_value() || pImpl->tts->Get() == nullptr) {
+            LOGE("TTS: OfflineTts::Create returned an invalid object "
+                 "(has_value=%d, Get()=%p). Model loading failed for: %s",
+                 pImpl->tts.has_value() ? 1 : 0,
+                 pImpl->tts.has_value() ? (const void*)pImpl->tts->Get() : nullptr,
+                 modelDir.c_str());
+            pImpl->tts.reset();
+            result.error = "TTS: Model loading failed. The sherpa-onnx engine could not "
+                           "create the TTS instance. Verify model files are complete and "
+                           "paths are correct. modelDir=" + modelDir;
             return result;
         }
 
         pImpl->initialized = true;
+        pImpl->debug = debug;
         pImpl->modelDir = modelDir;
 
-        LOGI("TTS: Initialization successful");
-        LOGI("TTS: Sample rate: %d Hz", pImpl->tts.value().SampleRate());
-        LOGI("TTS: Number of speakers: %d", pImpl->tts.value().NumSpeakers());
+        if (debug) {
+            LOGI("TTS: Initialization successful (C ptr=%p)", (const void*)pImpl->tts->Get());
+        }
+
+        // Safely query model capabilities — some models may not support these
+        int32_t sampleRate = 0;
+        int32_t numSpeakers = 0;
+        try {
+            sampleRate = pImpl->tts->SampleRate();
+            if (debug) {
+                LOGI("TTS: Sample rate: %d Hz", sampleRate);
+            }
+        } catch (...) {
+            LOGE("TTS: SampleRate() threw an exception — model may not support it");
+        }
+        try {
+            numSpeakers = pImpl->tts->NumSpeakers();
+            if (debug) {
+                LOGI("TTS: Number of speakers: %d", numSpeakers);
+            }
+        } catch (...) {
+            LOGE("TTS: NumSpeakers() threw an exception — model may not support it");
+        }
 
         // Success - return detected models
         result.success = true;
+        result.sampleRate = sampleRate;
+        result.numSpeakers = numSpeakers;
         result.detectedModels = detect.detectedModels;
         return result;
     } catch (const std::exception& e) {
@@ -188,8 +272,12 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     AudioResult result;
     result.sampleRate = 0;
 
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
-        LOGE("TTS: Not initialized. Call initialize() first.");
+    if (!pImpl->initialized || !pImpl->tts.has_value() || pImpl->tts->Get() == nullptr) {
+        LOGE("TTS: Not initialized or invalid C ptr. Call initialize() first. "
+             "(initialized=%d, has_value=%d, Get()=%p)",
+             pImpl->initialized ? 1 : 0,
+             pImpl->tts.has_value() ? 1 : 0,
+             pImpl->tts.has_value() ? (const void*)pImpl->tts->Get() : nullptr);
         return result;
     }
 
@@ -199,8 +287,10 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     }
 
     try {
-        LOGI("TTS: Generating speech for text: %s (sid=%d, speed=%.2f)",
-             text.c_str(), sid, speed);
+        if (pImpl->debug) {
+            LOGI("TTS: Generating speech for text: %s (sid=%d, speed=%.2f)",
+                 text.c_str(), sid, speed);
+        }
 
         // Generate audio using cxx-api
         auto audio = pImpl->tts.value().Generate(text, sid, speed);
@@ -209,8 +299,10 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         result.samples = std::move(audio.samples);
         result.sampleRate = audio.sample_rate;
 
-        LOGI("TTS: Generated %zu samples at %d Hz",
-             result.samples.size(), result.sampleRate);
+        if (pImpl->debug) {
+            LOGI("TTS: Generated %zu samples at %d Hz",
+                 result.samples.size(), result.sampleRate);
+        }
 
         return result;
     } catch (const std::exception& e) {
@@ -229,8 +321,12 @@ bool TtsWrapper::generateStream(
     StreamId streamId,
     const TtsStreamCallback& callback
 ) {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
-        LOGE("TTS: Not initialized. Call initialize() first.");
+    if (!pImpl->initialized || !pImpl->tts.has_value() || pImpl->tts->Get() == nullptr) {
+        LOGE("TTS: Not initialized or invalid C ptr for streaming. "
+             "(initialized=%d, has_value=%d, Get()=%p)",
+             pImpl->initialized ? 1 : 0,
+             pImpl->tts.has_value() ? 1 : 0,
+             pImpl->tts.has_value() ? (const void*)pImpl->tts->Get() : nullptr);
         return false;
     }
 
@@ -240,8 +336,10 @@ bool TtsWrapper::generateStream(
     }
 
     try {
-        LOGI("TTS: Streaming generation for text: %s (sid=%d, speed=%.2f)",
-             text.c_str(), sid, speed);
+        if (pImpl->debug) {
+            LOGI("TTS: Streaming generation for text: %s (sid=%d, speed=%.2f)",
+                 text.c_str(), sid, speed);
+        }
 
         // Keep a shared_ptr to the callback so it remains valid while native code may call it.
         std::shared_ptr<TtsStreamCallback> cbPtr = nullptr;
@@ -288,27 +386,43 @@ void TtsWrapper::endStream(StreamId streamId) {
 }
 
 int32_t TtsWrapper::getSampleRate() const {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
-        LOGE("TTS: Not initialized. Call initialize() first.");
+    if (!pImpl->initialized || !pImpl->tts.has_value() || pImpl->tts->Get() == nullptr) {
+        LOGE("TTS: Not initialized or invalid. Call initialize() first.");
         return 0;
     }
-    return pImpl->tts.value().SampleRate();
+    try {
+        return pImpl->tts.value().SampleRate();
+    } catch (...) {
+        LOGE("TTS: SampleRate() threw an exception");
+        return 0;
+    }
 }
 
 int32_t TtsWrapper::getNumSpeakers() const {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
-        LOGE("TTS: Not initialized. Call initialize() first.");
+    if (!pImpl->initialized || !pImpl->tts.has_value() || pImpl->tts->Get() == nullptr) {
+        LOGE("TTS: Not initialized or invalid. Call initialize() first.");
         return 0;
     }
-    return pImpl->tts.value().NumSpeakers();
+    try {
+        return pImpl->tts.value().NumSpeakers();
+    } catch (...) {
+        LOGE("TTS: NumSpeakers() threw an exception");
+        return 0;
+    }
 }
 
 bool TtsWrapper::isInitialized() const {
-    return pImpl->initialized;
+    return pImpl->initialized && pImpl->tts.has_value() && pImpl->tts->Get() != nullptr;
 }
 
 void TtsWrapper::release() {
-    if (pImpl->initialized) {
+    if (pImpl->initialized || pImpl->tts.has_value()) {
+        if (pImpl->debug) {
+            LOGI("TTS: Releasing resources (initialized=%d, has_value=%d, Get()=%p)",
+                 pImpl->initialized ? 1 : 0,
+                 pImpl->tts.has_value() ? 1 : 0,
+                 pImpl->tts.has_value() ? (const void*)pImpl->tts->Get() : nullptr);
+        }
         pImpl->tts.reset();
         // Clear any stored callbacks to allow them to be freed
         {
@@ -317,7 +431,9 @@ void TtsWrapper::release() {
         }
         pImpl->initialized = false;
         pImpl->modelDir.clear();
-        LOGI("TTS: Resources released");
+        if (pImpl->debug) {
+            LOGI("TTS: Resources released");
+        }
     }
 }
 

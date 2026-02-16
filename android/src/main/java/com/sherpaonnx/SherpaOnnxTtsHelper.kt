@@ -8,6 +8,7 @@ import android.media.AudioTrack
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -111,9 +112,16 @@ internal class SherpaOnnxTtsHelper(
           }
         }
 
+        // Forward sampleRate and numSpeakers from native init result
+        val sampleRate = (result["sampleRate"] as? Number)?.toInt() ?: -1
+        val numSpeakers = (result["numSpeakers"] as? Number)?.toInt() ?: -1
+        Log.i("SherpaOnnxTts", "initializeTts: sampleRate=$sampleRate, numSpeakers=$numSpeakers")
+
         val resultMap = Arguments.createMap()
         resultMap.putBoolean("success", true)
         resultMap.putArray("detectedModels", modelsArray)
+        resultMap.putInt("sampleRate", sampleRate)
+        resultMap.putInt("numSpeakers", numSpeakers)
         ttsInitState = TtsInitState(
           modelDir,
           modelType,
@@ -204,9 +212,14 @@ internal class SherpaOnnxTtsHelper(
         }
       }
 
+      val sampleRate2 = (result["sampleRate"] as? Number)?.toInt() ?: -1
+      val numSpeakers2 = (result["numSpeakers"] as? Number)?.toInt() ?: -1
+
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
       resultMap.putArray("detectedModels", modelsArray)
+      resultMap.putInt("sampleRate", sampleRate2)
+      resultMap.putInt("numSpeakers", numSpeakers2)
       ttsInitState = TtsInitState(
         state.modelDir,
         state.modelType,
@@ -232,7 +245,7 @@ internal class SherpaOnnxTtsHelper(
         val samples = result["samples"] as? FloatArray
         val sampleRate = result["sampleRate"] as? Int
 
-        if (samples != null && sampleRate != null) {
+        if (samples != null && sampleRate != null && samples.isNotEmpty() && sampleRate > 0) {
           val samplesArray = Arguments.createArray()
           for (sample in samples) {
             samplesArray.pushDouble(sample.toDouble())
@@ -242,13 +255,14 @@ internal class SherpaOnnxTtsHelper(
           map.putInt("sampleRate", sampleRate)
           promise.resolve(map)
         } else {
-          promise.reject("TTS_GENERATE_ERROR", "Invalid result format from native code")
+          promise.reject("TTS_GENERATE_ERROR", "Generated audio was empty. Check model path and espeak-ng-data (e.g. for PAD/filesystem models).")
         }
       } else {
-        promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech")
+        promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech. Native returned no result.")
       }
     } catch (e: Exception) {
-      promise.reject("TTS_GENERATE_ERROR", "Failed to generate speech", e)
+      Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e)
+      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
     }
   }
 

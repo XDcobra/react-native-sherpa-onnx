@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Build minimal FFmpeg (audio-only) for Android.
+# Run this script from the MSYS2 MinGW64 shell (not from PowerShell).
+# See BUILD_MSYS2.md for required environment variables.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FFMPEG_SRC="$REPO_ROOT/third_party/ffmpeg"
+OUTPUT_BASE="$SCRIPT_DIR/android"
+
+# NDK: use ANDROID_NDK_ROOT or ANDROID_NDK_HOME (Windows or MSYS2 path both work)
+if [ -n "$ANDROID_NDK_ROOT" ]; then
+    NDK_ROOT="$ANDROID_NDK_ROOT"
+elif [ -n "$ANDROID_NDK_HOME" ]; then
+    NDK_ROOT="$ANDROID_NDK_HOME"
+else
+    echo "Error: Set ANDROID_NDK_ROOT or ANDROID_NDK_HOME to your Android NDK path."
+    exit 1
+fi
+# Trim CR/LF and surrounding whitespace (e.g. from export or copy-paste)
+NDK_ROOT="${NDK_ROOT//$'\r'/}"
+NDK_ROOT="${NDK_ROOT//$'\n'/}"
+NDK_ROOT="${NDK_ROOT#"${NDK_ROOT%%[![:space:]]*}"}"
+NDK_ROOT="${NDK_ROOT%"${NDK_ROOT##*[![:space:]]}"}"
+
+# Convert Windows path to MSYS2 if necessary (e.g. C:/foo -> /c/foo)
+case "$NDK_ROOT" in
+    [A-Za-z]:*)
+        _drive="${NDK_ROOT%%:*}"
+        _rest="${NDK_ROOT#*:}"
+        NDK_ROOT="/${_drive,,}${_rest//\\/\/}"
+        ;;
+esac
+
+API="${ANDROID_API:-24}"
+NPROC="${NPROC:-$(nproc 2>/dev/null || echo 4)}"
+TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64"
+SYSROOT="$TOOLCHAIN/sysroot"
+
+if [ ! -f "$FFMPEG_SRC/configure" ]; then
+    echo "FFmpeg source not found. Run from repo root: git submodule update --init third_party/ffmpeg"
+    exit 1
+fi
+
+# Normalize configure line endings (CRLF -> LF)
+if [ -x "$FFMPEG_SRC/configure" ]; then
+    sed -i 's/\r$//' "$FFMPEG_SRC/configure" 2>/dev/null || true
+fi
+
+echo "Build configuration:"
+echo "  NDK:    $NDK_ROOT"
+echo "  API:    $API"
+echo "  Output: $OUTPUT_BASE"
+echo ""
+
+build_abi() {
+    local ABI="$1" ARCH="$2" TOOLCHAIN_ARCH="$3" CPU="$4"
+    local PREFIX="$OUTPUT_BASE/$ABI"
+    local CC="$TOOLCHAIN/bin/${TOOLCHAIN_ARCH}${API}-clang"
+    local CXX="$TOOLCHAIN/bin/${TOOLCHAIN_ARCH}${API}-clang++"
+    mkdir -p "$PREFIX"
+    echo "===== Building FFmpeg for $ABI ====="
+    cd "$FFMPEG_SRC"
+    export CFLAGS="-O3 -fPIC -std=c17 -I$SYSROOT/usr/include"
+    export LDFLAGS="-Wl,-z,max-page-size=16384"
+    # If libshine prebuilts exist (from third_party/shine_prebuilt), add include/lib flags
+    SHINE_PREFIX="$REPO_ROOT/third_party/shine_prebuilt/android/$ABI"
+    if [ -d "$SHINE_PREFIX" ]; then
+        echo "Adding libshine flags from: $SHINE_PREFIX"
+        export CFLAGS="$CFLAGS -I$SHINE_PREFIX/include"
+        # libshine uses math functions; add -lm so configure/link tests succeed
+        export LDFLAGS="$LDFLAGS -L$SHINE_PREFIX/lib -lshine -lm"
+        EXTRA_ENABLE_LIBSHINE="--enable-libshine"
+        # Create minimal pkg-config file so FFmpeg's configure can find libshine
+        PKGDIR="$SHINE_PREFIX/lib/pkgconfig"
+        mkdir -p "$PKGDIR"
+        cat > "$PKGDIR/shine.pc" <<PC
+    prefix=$SHINE_PREFIX
+    exec_prefix=
+    libdir=
+    includedir=
+
+    Name: shine
+    Description: libshine MP3 encoder
+    Version: 1.0
+    Libs: -L\${prefix}/lib -lshine -lm
+    Cflags: -I\${prefix}/include
+PC
+        export PKG_CONFIG_PATH="$PKGDIR:$PKG_CONFIG_PATH"
+        # Diagnostic: ensure pkg-config can see shine
+        if command -v pkg-config >/dev/null 2>&1; then
+            echo "pkg-config present: $(pkg-config --version 2>/dev/null || echo '?')"
+            echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+            if pkg-config --exists shine; then
+                echo "pkg-config: found shine -> $(pkg-config --modversion shine 2>/dev/null || echo 'unknown')"
+            else
+                echo "pkg-config: cannot find 'shine' via PKG_CONFIG_PATH. Listing $PKGDIR:"
+                ls -la "$PKGDIR" || true
+                echo "Full PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+                echo "Aborting; FFmpeg configure will not find libshine."
+                exit 1
+            fi
+        else
+            echo "Warning: pkg-config not found in PATH. Install pkg-config in MSYS2 (pacman -S pkgconf) or use manual flags."
+            exit 1
+        fi
+    else
+        echo "Error: libshine prebuilts not found for ABI $ABI at: $SHINE_PREFIX"
+        echo "Run third_party/shine_prebuilt/build_shine_msys2.sh in MSYS2 to build libshine prebuilts first."
+        exit 1
+    fi
+    export ASFLAGS="-fPIC"
+    # x86 assembly may produce non-PIC R_386_32 relocations; disable it for i686.
+    local DISABLE_ASM=""
+    case "$ARCH" in
+        i686) DISABLE_ASM="--disable-asm" ;;
+        x86_64) DISABLE_ASM="--disable-x86asm" ;;
+    esac
+    echo "Running ./configure... (this can take 15-30 min on MSYS2/Windows)"
+    echo "  CC:  $CC"
+    echo "  CXX: $CXX"
+    ./configure --prefix="$PREFIX" \
+        --enable-shared --disable-static --disable-programs --disable-doc --disable-debug \
+        --enable-pic \
+        $DISABLE_ASM \
+        --extra-cflags="$CFLAGS" \
+        --extra-ldflags="$LDFLAGS" \
+        --disable-avdevice --disable-swscale --disable-everything \
+        --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8 \
+        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,libshine,aac,alac \
+        --enable-parser=aac,mpegaudio,vorbis,flac --enable-protocol=file --enable-swresample \
+        --enable-avcodec --enable-avformat --enable-avutil \
+        --target-os=android --enable-cross-compile \
+        --stdc=c17 \
+        --strip="$TOOLCHAIN/bin/llvm-strip" \
+        --arch="$ARCH" --cpu="$CPU" \
+        --sysroot="$SYSROOT" --sysinclude="$SYSROOT/usr/include/" \
+        --cc="$CC" --cxx="$CXX" \
+        $EXTRA_ENABLE_LIBSHINE || exit 1
+    echo "Running make..."
+    make -j"$NPROC" || exit 1
+    echo "Running make install..."
+    make install || exit 1
+    make distclean 2>/dev/null || make clean 2>/dev/null || true
+    echo "Successfully built FFmpeg for $ABI"
+}
+
+build_abi armeabi-v7a  arm    armv7a-linux-androideabi  armv7-a
+build_abi arm64-v8a    aarch64 aarch64-linux-android    armv8-a
+build_abi x86          i686   i686-linux-android        i686
+build_abi x86_64       x86_64 x86_64-linux-android      x86-64
+
+mkdir -p "$OUTPUT_BASE/include"
+cp -R "$OUTPUT_BASE/arm64-v8a/include/"* "$OUTPUT_BASE/include/" 2>/dev/null || true
+echo ""
+echo "Build completed. Output: $OUTPUT_BASE"

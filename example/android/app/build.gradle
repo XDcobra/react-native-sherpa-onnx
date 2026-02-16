@@ -77,6 +77,8 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    assetPacks = [":sherpa_models"]
+
     namespace "com.xdcobra.voicelab"
     defaultConfig {
         applicationId "com.xdcobra.voicelab"
@@ -137,13 +139,27 @@ android {
                 buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"${releaseAdmobBannerId}\""
             }
             buildConfigField "boolean", "ADS_ENABLED", "true"
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.release
+                // Caution! In production, you need to generate your own keystore file.
+                // see https://reactnative.dev/docs/signed-apk-android.
+                // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
+                if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
+                    println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
+                } else {
+                    signingConfig signingConfigs.release
+                }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    
+
+}
+
+task printJniLibs {
+  doLast {
+    println "jniLibs.srcDirs:"
+    android.sourceSets.main.jniLibs.srcDirs.each { println it.absolutePath }
+  }
 }
 
 dependencies {
@@ -157,23 +173,82 @@ dependencies {
     }
 }
 
-def sherpaModelsOutputDir = file("${projectDir}/src/main/assets/models")
+// Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).
+// - assetPacks = [":sherpa_models"] makes the pack part of the app; include ':sherpa_models' in settings.gradle.
+// - At runtime, the pack path is returned by getAssetPackPath("sherpa_models") so the app can list and load models.
+// - Download models into the pack folder before build so the asset pack has content (local + CI).
+def sherpaModelsOutputDir = file("${rootDir}/sherpa_models/src/main/assets/models")
 def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
 def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
 def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
 
 tasks.register("downloadSherpaModels", Exec) {
+    description = "Download SherpaOnnx models into the sherpa_models asset-pack"
     workingDir file("${rootDir}/..")
     commandLine "node",
         sherpaModelsScript.absolutePath,
-        "--platform",
-        "android",
-        "--output",
-        sherpaModelsOutputDir.absolutePath,
-        "--cache",
-        sherpaModelsCacheDir.absolutePath,
-        "--config",
-        sherpaModelsConfig.absolutePath
+        "--platform", "android",
+        "--output", sherpaModelsOutputDir.absolutePath,
+        "--cache", sherpaModelsCacheDir.absolutePath,
+        "--config", sherpaModelsConfig.absolutePath
 }
 
 preBuild.dependsOn(tasks.named("downloadSherpaModels"))
+
+// Play Asset Delivery (PAD) local testing: build AAB, then use bundletool to build APKs with
+// --local-testing and install so getAssetPackPath("sherpa_models") works.
+// Bundletool: in PATH, or set -Pbundletool=C:\path\to\bundletool (Windows) / -Pbundletool=/path/to/bundletool (Unix).
+// See: https://developer.android.com/guide/playcore/asset-delivery/test
+//
+// Usage: ./gradlew installDebugWithPad
+
+def getBundletoolCommandLine(List<String> args) {
+    def exe = project.hasProperty("bundletool") ? project.property("bundletool").toString() : null
+    if (exe == null || exe.isEmpty()) exe = "bundletool"
+    def isWindows = org.gradle.internal.os.OperatingSystem.current().isWindows()
+    // On Windows, Gradle often doesn't see PATH; run via cmd /c with one command string so the shell resolves bundletool
+    if (isWindows && !new File(exe).exists()) {
+        def quote = { String s -> (s.contains(" ") || s.contains("&")) ? "\"${s}\"" : s }
+        def cmdStr = ([exe] + args).collect(quote).join(" ")
+        return ["cmd", "/c", cmdStr]
+    }
+    return [exe] + args
+}
+
+tasks.register("buildApksForPad", Exec) {
+    description = "Build APKs from debug AAB with --local-testing (for PAD)"
+    group = "install"
+    dependsOn tasks.named("bundleDebug")
+    doFirst {
+        def buildDir = layout.buildDirectory.get().asFile
+        def aab = file("${buildDir}/outputs/bundle/debug/app-debug.aab")
+        if (!aab.exists()) aab = file("${buildDir}/outputs/bundles/debug/app-debug.aab")
+        if (!aab.exists()) throw new RuntimeException("AAB not found. Tried outputs/bundle/debug and outputs/bundles/debug.")
+        def apksDir = file("${buildDir}/outputs/apks")
+        apksDir.mkdirs()
+        def apks = new File(apksDir, "app-debug-pad.apks")
+        if (apks.exists()) apks.delete()
+        commandLine getBundletoolCommandLine(["build-apks", "--bundle=${aab.absolutePath}", "--output=${apks.absolutePath}", "--local-testing"])
+    }
+}
+
+tasks.register("installApksForPad", Exec) {
+    description = "Install APKs from buildApksForPad (PAD asset pack included)"
+    group = "install"
+    dependsOn tasks.named("buildApksForPad")
+    doFirst {
+        def buildDir = layout.buildDirectory.get().asFile
+        def apks = file("${buildDir}/outputs/apks/app-debug-pad.apks")
+        if (!apks.exists()) throw new RuntimeException("APKs not found. Run buildApksForPad first.")
+        commandLine getBundletoolCommandLine(["install-apks", "--apks=${apks.absolutePath}"])
+    }
+}
+
+tasks.register("installDebugWithPad") {
+    description = "Build debug AAB, generate APKs with --local-testing via bundletool, install on device (PAD enabled)"
+    group = "install"
+    dependsOn tasks.named("installApksForPad")
+    doLast {
+        println "Installed debug build with PAD (asset pack). getAssetPackPath(\"sherpa_models\") will now return the pack path."
+    }
+}

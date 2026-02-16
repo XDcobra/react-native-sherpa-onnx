@@ -82,10 +82,10 @@ export function getFileModelPath(
   basePath?: string
 ): ModelPathConfig {
   const resolvedBase = basePath
-    ? basePath
+    ? basePath.replace(/\/+$/, '')
     : category
     ? `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/${category}`
     : getDefaultModelPath();
-  const path = `${resolvedBase}/${modelName}`;
+  const path = `${resolvedBase}/${modelName}`.replace(/\/+/g, '/');
   return fileModelPath(path);
 }

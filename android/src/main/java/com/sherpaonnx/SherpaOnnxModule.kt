@@ -24,9 +24,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         modelDir: String,
         preferInt8: Boolean,
         hasPreferInt8: Boolean,
-        modelType: String
+        modelType: String,
+        debug: Boolean
       ): HashMap<String, Any>? {
-        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType)
+        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType, debug)
       }
 
       override fun nativeSttTranscribe(filePath: String): String {
@@ -166,9 +167,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
+    debug: Boolean?,
     promise: Promise
   ) {
-    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, promise)
+    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, debug, promise)
   }
 
   /**
@@ -185,6 +187,61 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun transcribeFile(filePath: String, promise: Promise) {
     sttHelper.transcribeFile(filePath, promise)
+  }
+
+  /**
+   * Convert any supported audio file to a requested format using native FFmpeg prebuilts.
+   * For MP3, outputSampleRateHz can be 32000, 44100, or 48000; null/0 = 44100. WAV output is always 16 kHz mono.
+   * Resolves with null on success, rejects with an error message on failure.
+   */
+  override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Double?, promise: Promise) {
+    try {
+      var rate = outputSampleRateHz?.toInt() ?: 0
+
+      if (rate < 0) {
+        promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
+        return
+      }
+
+      if (format.equals("mp3", ignoreCase = true)) {
+        val allowed = setOf(0, 32000, 44100, 48000)
+        if (!allowed.contains(rate)) {
+          promise.reject(
+            "CONVERT_ERROR",
+            "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate"
+          )
+          return
+        }
+      } else {
+        rate = rate.coerceIn(0, 48000)
+      }
+
+      val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format, rate)
+      if (err.isEmpty()) {
+        promise.resolve(null)
+      } else {
+        promise.reject("CONVERT_ERROR", err)
+      }
+    } catch (e: Exception) {
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM using native FFmpeg prebuilts.
+   * Resolves with null on success, rejects with an error message on failure.
+   */
+  override fun convertAudioToWav16k(inputPath: String, outputPath: String, promise: Promise) {
+    try {
+      val err = Companion.nativeConvertAudioToWav16k(inputPath, outputPath)
+      if (err.isEmpty()) {
+        promise.resolve(null)
+      } else {
+        promise.reject("CONVERT_ERROR", err)
+      }
+    } catch (e: Exception) {
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
+    }
   }
 
   // ==================== TTS Methods ====================
@@ -410,6 +467,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun listAssetModels(promise: Promise) {
     coreHelper.listAssetModels(promise)
   }
+
+  /**
+   * List model folders under a specific filesystem path.
+   */
+  override fun listModelsAtPath(path: String, recursive: Boolean, promise: Promise) {
+    coreHelper.listModelsAtPath(path, recursive, promise)
+  }
+
+  override fun getAssetPackPath(packName: String, promise: Promise) {
+    coreHelper.getAssetPackPath(packName, promise)
+  }
+
   companion object {
     const val NAME = "SherpaOnnx"
 
@@ -445,7 +514,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
-      modelType: String
+      modelType: String,
+      debug: Boolean
     ): HashMap<String, Any>?
 
     @JvmStatic
@@ -505,5 +575,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       sampleRate: Int,
       filePath: String
     ): Boolean
+
+    /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
+     * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.
+     * Returns empty string on success, or an error message otherwise. Requires FFmpeg prebuilts when called on Android.
+     */
+    @JvmStatic
+    private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Int): String
+
+    /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
+    @JvmStatic
+    private external fun nativeConvertAudioToWav16k(inputPath: String, outputPath: String): String
   }
 }

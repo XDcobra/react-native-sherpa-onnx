@@ -99,11 +99,38 @@ nitrogen/
 example/android/app/src/main/assets/models/**
 !example/android/app/src/main/assets/models/**/README.md
 !example/android/app/src/main/assets/models/README.md
+example/android/sherpa_models/src/main/assets/models/**
 example/.model-cache/
 example/models/
 
+# libs - .aar will be used instead
+android/src/main/jniLibs/*
+
 # sherpa-onnx source (if cloned for building)
 sherpa-onnx/
+
+# FFmpeg build artifacts (when building prebuilts locally)
+# (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")
+third_party/ffmpeg_prebuilt/ffmpeg-*/
+third_party/ffmpeg_prebuilt/build/
+third_party/ffmpeg_prebuilt/*.tar.bz2
+
+# shine build artifacts (when building prebuilts locally)
+# ignore everything under shine_prebuilt by default
+third_party/shine_prebuilt/*
+# but allow the README, build scripts to be tracked
+!third_party/shine_prebuilt/README.md
+!third_party/shine_prebuilt/build_shine_msys2.sh
+!third_party/shine_prebuilt/build_shine.sh
+
+# ffmpeg build artifacts (when building prebuilts locally)
+# ignore everything under ffmpeg_prebuilt by default
+third_party/ffmpeg_prebuilt/*
+# but allow the README, build scripts to be tracked
+!third_party/ffmpeg_prebuilt/README.md
+!third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
+!third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
+!third_party/ffmpeg_prebuilt/build_ffmpeg.sh
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
@@ -124,3 +151,4 @@ verdaccio.config.yaml
 htpasswd
 storage/
 plugins/
+

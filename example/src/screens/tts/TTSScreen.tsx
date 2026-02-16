@@ -31,11 +31,16 @@ import {
   shareAudioFile,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import {
   listDownloadedModelsByCategory,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import {
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -51,9 +56,13 @@ import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+const PAD_PACK_NAME = 'sherpa_models';
+
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
+  const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
@@ -75,6 +84,9 @@ export default function TTSScreen() {
   const [noiseScale, setNoiseScale] = useState<string>('');
   const [noiseScaleW, setNoiseScaleW] = useState<string>('');
   const [lengthScale, setLengthScale] = useState<string>('');
+  const [outputFormat, setOutputFormat] = useState<'wav' | 'mp3' | 'flac'>(
+    'wav'
+  );
   const [generatedAudio, setGeneratedAudio] = useState<{
     samples: number[];
     sampleRate: number;
@@ -433,14 +445,81 @@ export default function TTSScreen() {
       const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
+      console.log(
+        '[TTSScreen PAD debug] listAssetModels: total=',
+        assetModels.length,
+        'tts=',
+        ttsFolders.length,
+        'folders=',
+        ttsFolders
+      );
 
+      // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
+      let padFolders: string[] = [];
+      let resolvedPadPath: string | null = null;
+      try {
+        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+        console.log(
+          '[TTSScreen PAD debug] getAssetPackPath("' +
+            PAD_PACK_NAME +
+            '") returned:',
+          padPathFromNative ?? 'null'
+        );
+        const fallbackPath = `${RNFS.DocumentDirectoryPath}/models`;
+        const padPath = padPathFromNative ?? fallbackPath;
+        console.log(
+          '[TTSScreen PAD debug] using path for listModelsAtPath:',
+          padPath,
+          padPathFromNative
+            ? '(PAD)'
+            : '(fallback DocumentDirectoryPath/models)'
+        );
+        const padResults = await listModelsAtPath(padPath);
+        console.log(
+          '[TTSScreen PAD debug] listModelsAtPath raw result count:',
+          padResults?.length ?? 0,
+          'entries:',
+          JSON.stringify(padResults ?? [])
+        );
+        padFolders = (padResults || [])
+          .filter((m) => m.hint === 'tts')
+          .map((m) => m.folder);
+        console.log(
+          '[TTSScreen PAD debug] after filter hint===tts:',
+          padFolders.length,
+          'folders:',
+          padFolders
+        );
+        if (padFolders.length > 0) {
+          resolvedPadPath = padPath;
+          console.log(
+            'TTSScreen: Found PAD/filesystem TTS models:',
+            padFolders,
+            'at',
+            padPath
+          );
+        }
+      } catch (e) {
+        console.warn('TTSScreen: PAD/listModelsAtPath failed', e);
+        padFolders = [];
+      }
+      setPadModelsPath(resolvedPadPath);
+      setPadModelIds(padFolders);
+
+      // Merge: downloaded, then PAD/filesystem, then bundled assets (no duplicates)
       const combined = [
         ...downloadedIds,
-        ...ttsFolders.filter((folder) => !downloadedIds.includes(folder)),
+        ...padFolders.filter((f) => !downloadedIds.includes(f)),
+        ...ttsFolders.filter(
+          (f) => !downloadedIds.includes(f) && !padFolders.includes(f)
+        ),
       ];
 
       if (downloadedIds.length > 0) {
         console.log('TTSScreen: Found downloaded models:', downloadedIds);
+      }
+      if (padFolders.length > 0) {
+        console.log('TTSScreen: Found PAD/filesystem models:', padFolders);
       }
       if (ttsFolders.length > 0) {
         console.log('TTSScreen: Found asset models:', ttsFolders);
@@ -505,8 +584,13 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      const modelPath = downloadedModelIds.includes(modelFolder)
-        ? getFileModelPath(modelFolder, ModelCategory.Tts)
+      const useFilePath =
+        downloadedModelIds.includes(modelFolder) ||
+        padModelIds.includes(modelFolder);
+      const modelPath = useFilePath
+        ? padModelIds.includes(modelFolder) && padModelsPath
+          ? getFileModelPath(modelFolder, undefined, padModelsPath)
+          : getFileModelPath(modelFolder, ModelCategory.Tts)
         : getAssetModelPath(modelFolder);
 
       const noiseScaleValue = noiseScale.trim();
@@ -600,12 +684,31 @@ export default function TTSScreen() {
           setSelectedModelType(normalizedDetected[0].type);
         }
 
-        // Get model info
-        try {
-          const info = await getModelInfo();
-          setModelInfo(info);
-        } catch (infoErr) {
-          console.warn('Failed to get model info:', infoErr);
+        // Get model info only when we can safely call the native API. For file-path models
+        // (PAD/downloaded), getModelInfo() can crash (sherpa-onnx). Only set modelInfo when we have
+        // valid data; otherwise leave null so the UI does not show a "Model Information" section
+        // with wrong placeholder values.
+        const isFilePath =
+          padModelIds.includes(modelFolder) ||
+          downloadedModelIds.includes(modelFolder);
+        if (!isFilePath) {
+          try {
+            const info = await getModelInfo();
+            if (
+              info &&
+              typeof info.sampleRate === 'number' &&
+              typeof info.numSpeakers === 'number'
+            ) {
+              setModelInfo(info);
+            } else {
+              setModelInfo(null);
+            }
+          } catch (infoErr) {
+            console.warn('getModelInfo not available for this model:', infoErr);
+            setModelInfo(null);
+          }
+        } else {
+          setModelInfo(null);
         }
       } else {
         setError('No models detected in the directory');
@@ -929,15 +1032,22 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const filename = `tts_${timestamp}.wav`;
+      const ext = outputFormat;
+      const filename = `tts_${timestamp}.${ext}`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
+        if (ext !== 'wav') {
+          Alert.alert(
+            'Format not supported for content URI',
+            'Saving non-WAV formats to a content URI is not supported. Saving WAV instead.'
+          );
+        }
         const savedUri = await saveAudioToContentUri(
           audio,
           directoryUri,
-          filename
+          `tts_${timestamp}.wav`
         );
         setSavedAudioPath(savedUri);
         setCachedPlaybackPath(null);
@@ -958,20 +1068,60 @@ export default function TTSScreen() {
       }
 
       await RNFS.mkdir(targetDirectory);
-      const filePath = `${targetDirectory}/${filename}`;
+      if (ext === 'wav') {
+        const filePath = `${targetDirectory}/${filename}`;
+        // Save audio to file (WAV)
+        const savedPath = await saveAudioToFile(audio, filePath);
+        setSavedAudioPath(savedPath);
+        setCachedPlaybackPath(null);
+        setCachedPlaybackSource(null);
 
-      // Save audio to file
-      const savedPath = await saveAudioToFile(audio, filePath);
-      setSavedAudioPath(savedPath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
-
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`, [
-        {
-          text: 'OK',
-          onPress: () => console.log('Audio saved:', savedPath),
-        },
-      ]);
+        Alert.alert(
+          'Success',
+          `Audio saved to:\n${getDisplayPath(savedPath)}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => console.log('Audio saved:', savedPath),
+            },
+          ]
+        );
+      } else {
+        // Save as WAV first, then convert to requested format
+        const tempWav = `${targetDirectory}/tts_${timestamp}.wav`;
+        await saveAudioToFile(audio, tempWav);
+        const targetPath = `${targetDirectory}/tts_${timestamp}.${ext}`;
+        try {
+          await convertAudioToFormat(tempWav, targetPath, ext);
+          setSavedAudioPath(targetPath);
+          setCachedPlaybackPath(null);
+          setCachedPlaybackSource(null);
+          // Remove temporary WAV
+          try {
+            await RNFS.unlink(tempWav);
+          } catch {}
+          Alert.alert(
+            'Success',
+            `Audio saved to:\n${getDisplayPath(targetPath)}`,
+            [
+              {
+                text: 'OK',
+                onPress: () => console.log('Audio saved:', targetPath),
+              },
+            ]
+          );
+        } catch (convErr) {
+          // Conversion failed: fall back to WAV
+          console.warn('Conversion failed, saved WAV at', tempWav, convErr);
+          setSavedAudioPath(tempWav);
+          setCachedPlaybackPath(null);
+          setCachedPlaybackSource(null);
+          Alert.alert(
+            'Partial success',
+            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
+          );
+        }
+      }
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -988,6 +1138,84 @@ export default function TTSScreen() {
       return;
     }
     await saveAudioWithData(generatedAudio);
+  };
+
+  // Temporary save helper used by quick-save UI
+  const handleSaveTemporary = async () => {
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to save. Generate speech first.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const timestamp = Date.now();
+      const ext = outputFormat;
+      const directoryPath = RNFS.DocumentDirectoryPath;
+      await RNFS.mkdir(directoryPath);
+
+      if (ext === 'wav') {
+        const filename = `tts_${timestamp}.wav`;
+        const filePath = `${directoryPath}/${filename}`;
+        const savedPath = await saveAudioToFile(generatedAudio, filePath);
+        setSavedAudioPath(savedPath);
+        setCachedPlaybackPath(null);
+        setCachedPlaybackSource(null);
+
+        Alert.alert(
+          'Success',
+          `Audio saved to:\n${getDisplayPath(savedPath)}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => console.log('Audio saved:', savedPath),
+            },
+          ]
+        );
+      } else {
+        // Save WAV first then convert
+        const tempWav = `${directoryPath}/tts_${timestamp}.wav`;
+        await saveAudioToFile(generatedAudio, tempWav);
+        const targetPath = `${directoryPath}/tts_${timestamp}.${ext}`;
+        try {
+          await convertAudioToFormat(tempWav, targetPath, ext);
+          setSavedAudioPath(targetPath);
+          setCachedPlaybackPath(null);
+          setCachedPlaybackSource(null);
+          try {
+            await RNFS.unlink(tempWav);
+          } catch {}
+          Alert.alert(
+            'Success',
+            `Audio saved to:\n${getDisplayPath(targetPath)}`,
+            [
+              {
+                text: 'OK',
+                onPress: () => console.log('Audio saved:', targetPath),
+              },
+            ]
+          );
+        } catch (convErr) {
+          console.warn('Conversion failed, WAV saved at', tempWav, convErr);
+          setSavedAudioPath(tempWav);
+          setCachedPlaybackPath(null);
+          setCachedPlaybackSource(null);
+          Alert.alert(
+            'Partial success',
+            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Save audio error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to save audio: ${errorMessage}`);
+      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const formatSrtTimestamp = (seconds: number) => {
@@ -1121,44 +1349,6 @@ export default function TTSScreen() {
     }
   };
 
-  const handleSaveTemporary = async () => {
-    if (!generatedAudio) {
-      Alert.alert('Error', 'No audio to save. Generate speech first.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const timestamp = Date.now();
-      const filename = `tts_${timestamp}.wav`;
-      const directoryPath = RNFS.DocumentDirectoryPath;
-
-      await RNFS.mkdir(directoryPath);
-      const filePath = `${directoryPath}/${filename}`;
-
-      const savedPath = await saveAudioToFile(generatedAudio, filePath);
-      setSavedAudioPath(savedPath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
-
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`, [
-        {
-          text: 'OK',
-          onPress: () => console.log('Audio saved:', savedPath),
-        },
-      ]);
-    } catch (err) {
-      console.error('Save audio error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Failed to save audio: ${errorMessage}`);
-      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handlePlayAudio = async () => {
     if (!savedAudioPath) {
       Alert.alert('Error', 'No audio file saved. Save audio first.');
@@ -1258,8 +1448,13 @@ export default function TTSScreen() {
 
       const shareUrl = getShareUrl(savedAudioPath);
 
+      // Map selected output format to MIME type. Note: currently we save WAV files only.
+      let mimeType = 'audio/wav';
+      if (outputFormat === 'mp3') mimeType = 'audio/mpeg';
+      if (outputFormat === 'flac') mimeType = 'audio/flac';
+
       if (Platform.OS === 'android') {
-        await shareAudioFile(shareUrl, 'audio/wav');
+        await shareAudioFile(shareUrl, mimeType);
         return;
       }
 
@@ -1339,6 +1534,70 @@ export default function TTSScreen() {
                   placeholder="0.667"
                   placeholderTextColor="#8E8E93"
                 />
+              </View>
+
+              <View style={{ marginTop: 8, marginBottom: 8 }}>
+                <Text style={styles.inputLabel}>Output Format</Text>
+                <View style={{ flexDirection: 'row' }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.detectedModelButton,
+                      outputFormat === 'wav' &&
+                        styles.detectedModelButtonActive,
+                    ]}
+                    onPress={() => setOutputFormat('wav')}
+                  >
+                    <Text
+                      style={[
+                        styles.detectedModelButtonText,
+                        outputFormat === 'wav' &&
+                          styles.detectedModelButtonTextActive,
+                      ]}
+                    >
+                      WAV
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.detectedModelButton,
+                      outputFormat === 'mp3' &&
+                        styles.detectedModelButtonActive,
+                      { marginLeft: 8 },
+                    ]}
+                    onPress={() => setOutputFormat('mp3')}
+                  >
+                    <Text
+                      style={[
+                        styles.detectedModelButtonText,
+                        outputFormat === 'mp3' &&
+                          styles.detectedModelButtonTextActive,
+                      ]}
+                    >
+                      MP3
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.detectedModelButton,
+                      outputFormat === 'flac' &&
+                        styles.detectedModelButtonActive,
+                      { marginLeft: 8 },
+                    ]}
+                    onPress={() => setOutputFormat('flac')}
+                  >
+                    <Text
+                      style={[
+                        styles.detectedModelButtonText,
+                        outputFormat === 'flac' &&
+                          styles.detectedModelButtonTextActive,
+                      ]}
+                    >
+                      FLAC
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <View style={styles.parameterColumn}>
@@ -1526,10 +1785,10 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Model Information</Text>
               <View style={styles.infoContainer}>
                 <Text style={styles.infoText}>
-                  Sample Rate: {modelInfo.sampleRate} Hz
+                  Sample Rate: {modelInfo?.sampleRate ?? 0} Hz
                 </Text>
                 <Text style={styles.infoText}>
-                  Speakers: {modelInfo.numSpeakers}
+                  Speakers: {modelInfo?.numSpeakers ?? 0}
                 </Text>
               </View>
             </View>

@@ -44,6 +44,13 @@ export interface STTInitializeOptions {
    * - 'auto': Automatic detection based on files (default)
    */
   modelType?: STTModelType;
+
+  /**
+   * Enable debug logging in native layer and sherpa-onnx (config.model_config.debug).
+   * When true, wrapper and JNI emit verbose logs (config dumps, file checks, init/transcribe flow).
+   * Default: false.
+   */
+  debug?: boolean;
 }
 
 /**

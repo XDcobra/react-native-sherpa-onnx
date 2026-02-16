@@ -45,6 +45,11 @@
       "types": "./lib/typescript/src/download/index.d.ts",
       "default": "./lib/module/download/index.js"
     },
+    "./audio": {
+      "source": "./src/audio/index.ts",
+      "types": "./lib/typescript/src/audio/index.d.ts",
+      "default": "./lib/module/audio/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -55,6 +60,8 @@
     "scripts/**",
     "scripts/**/*",
     "cpp",
+    "third_party/ffmpeg_prebuilt",
+    "third_party/libarchive",
     "*.podspec",
     "react-native.config.js",
     "!ios/build",
@@ -69,6 +76,8 @@
     "!**/.*",
     "!./sherpa-onnx",
     "!./sherpa-onnx/**",
+    "!./third_party/ffmpeg",
+    "!./third_party/ffmpeg/**",
     "!ios/Frameworks/.gitkeep"
   ],
   "scripts": {

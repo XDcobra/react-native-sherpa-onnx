@@ -14,7 +14,8 @@ internal class SherpaOnnxSttHelper(
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
-      modelType: String
+      modelType: String,
+      debug: Boolean
     ): HashMap<String, Any>?
 
     fun nativeSttTranscribe(filePath: String): String
@@ -26,6 +27,7 @@ internal class SherpaOnnxSttHelper(
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
+    debug: Boolean?,
     promise: Promise
   ) {
     try {
@@ -48,7 +50,8 @@ internal class SherpaOnnxSttHelper(
         modelDir,
         preferInt8 ?: false,
         preferInt8 != null,
-        modelType ?: "auto"
+        modelType ?: "auto",
+        debug ?: false
       )
 
       if (result == null) {

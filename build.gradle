@@ -1,0 +1,24 @@
+// Root build for standalone AAR build (e.g. CI / Maven release).
+// Sets NDK and provides repositories for the :android library module.
+ext.standaloneAarBuild = true
+buildscript {
+  ext {
+    ndkVersion = "28.2.13676358"
+  }
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.7.2"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21"
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+  }
+}

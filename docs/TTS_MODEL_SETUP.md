@@ -134,6 +134,7 @@ models/zipvoice/
 
 ## Platform-Specific Setup
 
+<<<<<<< HEAD
 ### Android Setup
 
 1. **Create model directory**:
@@ -151,6 +152,28 @@ models/zipvoice/
 3. **Directory structure should be**:
    ```
    android/app/src/main/assets/models/
+=======
+### Android Setup (example app with Play Asset Delivery)
+
+The example app uses [Play Asset Delivery](https://developer.android.com/guide/playcore/asset-delivery) so models live in the `sherpa_models` asset pack, not in the main app assets. This keeps the base APK small.
+
+1. **Model directory** (example app):
+   ```
+   android/sherpa_models/src/main/assets/models/
+   ```
+   When you build the example app, models are downloaded here automatically (see `example/scripts/download-models.js`). For manual setup:
+
+2. **Extract model files** into the asset pack directory:
+   ```bash
+   # Example: Extract Piper model into the sherpa_models asset pack
+   cd android/sherpa_models/src/main/assets/models/
+   tar -xjf vits-piper-en_US-lessac-medium.tar.bz2
+   ```
+
+3. **Directory structure**:
+   ```
+   android/sherpa_models/src/main/assets/models/
+>>>>>>> 35952e9 (docs(readme): update TTS Model Setup Documentation and Add Model Readmes)
    └── vits-piper-en_US-lessac-medium/
        ├── model.onnx
        ├── tokens.txt
@@ -163,6 +186,14 @@ models/zipvoice/
    await initializeTTS({
      modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' }
    });
+
+   // Note
+   // If your TTS models are delivered via Play Asset Delivery (PAD) or stored on the device filesystem
+   // (for example under the app's files directory at `DocumentDirectoryPath/models`), you can enumerate
+   // those extracted model folders using the native helper exposed as `listModelsAtPath(path, recursive)`
+   // (available from JS as `listModelsAtPath`). Use this function instead of `listAssetModels()` when
+   // models are not bundled in the APK assets. The example app shows how to merge results from
+   // `listAssetModels()` and `listModelsAtPath()` so both bundled and PAD-extracted models are visible.
    ```
 
 ### iOS Setup
@@ -320,7 +351,11 @@ async function textToSpeechExample() {
 **Solutions**:
 - Verify model files are correctly extracted
 - Check path spelling and case sensitivity
+<<<<<<< HEAD
 - For Android: Ensure files are in `assets/models/`
+=======
+- For Android (example app): Ensure files are in `android/sherpa_models/src/main/assets/models/` (asset pack)
+>>>>>>> 35952e9 (docs(readme): update TTS Model Setup Documentation and Add Model Readmes)
 - For iOS: Verify folder is added as "folder reference" (blue folder icon)
 
 ### Initialization Failed

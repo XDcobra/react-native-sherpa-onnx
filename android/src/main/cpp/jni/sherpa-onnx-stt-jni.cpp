@@ -10,14 +10,28 @@
 // STT wrapper
 #include "sherpa-onnx-stt-wrapper.h"
 
-#define LOG_TAG "SherpaOnnxJNI"
+#define LOG_TAG "SttJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGD(...) do { if (g_stt_debug) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
 
 using namespace sherpaonnx;
 
-// Global wrapper instance
+// When true, verbose JNI logs are emitted (init flow, HashMap building, etc.)
+static bool g_stt_debug = false;
+
+// Global wrapper instance — once created, the wrapper is NEVER destroyed (g_stt_wrapper.reset()
+// is never called).  Only the underlying model resources are released/re-initialized.
+// This prevents React useEffect cleanup race conditions from nulling the pointer.
 static std::unique_ptr<SttWrapper> g_stt_wrapper = nullptr;
+
+// Race-condition guard: when true, the NEXT nativeSttRelease call will be
+// treated as a stale React-cleanup and skipped.  This flag is set at the end
+// of a successful nativeSttInitialize and cleared by the first release that
+// sees it.  Pattern:
+//   release(old) → init(new) [sets flag] → stale release [flag → skip]
+static bool g_stt_skip_next_release = false;
 
 extern "C" {
 
@@ -28,27 +42,41 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
     jstring modelDir,
     jboolean preferInt8,
     jboolean hasPreferInt8,
-    jstring modelType) {
+    jstring modelType,
+    jboolean debug) {
     try {
-        if (g_stt_wrapper == nullptr) {
+        g_stt_debug = (debug == JNI_TRUE);
+        LOGD("STT JNI: nativeSttInitialize called (debug=%d)", (int)debug);
+
+        // Clear the skip flag — we're starting a fresh init cycle
+        g_stt_skip_next_release = false;
+
+        // Reuse existing wrapper if possible; only create if null
+        if (g_stt_wrapper != nullptr) {
+            LOGD("STT JNI: Releasing previous STT model before re-init");
+            g_stt_wrapper->release();
+        } else {
             g_stt_wrapper = std::make_unique<SttWrapper>();
         }
 
         const char *modelDirStr = env->GetStringUTFChars(modelDir, nullptr);
         if (modelDirStr == nullptr) {
-            LOGE("Failed to get modelDir string from JNI");
+            LOGE("STT JNI: Failed to get modelDir string from JNI");
             return nullptr;
         }
 
         const char *modelTypeStr = env->GetStringUTFChars(modelType, nullptr);
         if (modelTypeStr == nullptr) {
-            LOGE("Failed to get modelType string from JNI");
+            LOGE("STT JNI: Failed to get modelType string from JNI");
             env->ReleaseStringUTFChars(modelDir, modelDirStr);
             return nullptr;
         }
 
         std::string modelDirPath(modelDirStr);
         std::string modelTypePath(modelTypeStr);
+
+        LOGD("STT JNI: modelDir=%s, modelType=%s, preferInt8=%d, hasPreferInt8=%d, debug=%d",
+             modelDirPath.c_str(), modelTypePath.c_str(), (int)preferInt8, (int)hasPreferInt8, (int)debug);
 
         // Convert Java boolean to C++ optional<bool>
         std::optional<bool> preferInt8Opt;
@@ -62,19 +90,23 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
             modelTypeOpt = modelTypePath;
         }
 
-        SttInitializeResult result = g_stt_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt);
+        SttInitializeResult result = g_stt_wrapper->initialize(modelDirPath, preferInt8Opt, modelTypeOpt, g_stt_debug);
         env->ReleaseStringUTFChars(modelDir, modelDirStr);
         env->ReleaseStringUTFChars(modelType, modelTypeStr);
 
-        LOGI("STT JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
+        LOGD("STT JNI: Initialization result: success=%d, detected models=%zu", result.success, result.detectedModels.size());
         if (!result.success) {
             LOGE("STT JNI: Native initialization failed for: %s", modelDirPath.c_str());
         } else {
-            LOGI("STT JNI: Successfully initialized model at: %s", modelDirPath.c_str());
+            LOGD("STT JNI: Successfully initialized model at: %s", modelDirPath.c_str());
+            // Arm the stale-release guard: the very next nativeSttRelease call
+            // is almost certainly a stale React useEffect cleanup from the
+            // previous model and should be skipped.
+            g_stt_skip_next_release = true;
         }
 
         // Create HashMap to return
-        LOGI("STT JNI: Creating HashMap for result");
+        LOGD("STT JNI: Creating HashMap for result");
         jclass hashMapClass = env->FindClass("java/util/HashMap");
         if (hashMapClass == nullptr || env->ExceptionCheck()) {
             LOGE("STT JNI: Failed to find HashMap class");
@@ -119,7 +151,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         }
 
         // Put success boolean
-        LOGI("STT JNI: Adding success field to HashMap");
+        LOGD("STT JNI: Adding success field to HashMap");
         jclass booleanClass = env->FindClass("java/lang/Boolean");
         if (booleanClass == nullptr || env->ExceptionCheck()) {
             LOGE("STT JNI: Failed to find Boolean class");
@@ -186,7 +218,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         }
 
         // Put detectedModels array
-        LOGI("STT JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
+        LOGD("STT JNI: Adding detectedModels array (%zu models)", result.detectedModels.size());
         jclass arrayListClass = env->FindClass("java/util/ArrayList");
         if (arrayListClass == nullptr || env->ExceptionCheck()) {
             LOGE("STT JNI: Failed to find ArrayList class");
@@ -288,7 +320,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttInitialize(
         env->DeleteLocalRef(arrayListClass);
         env->DeleteLocalRef(hashMapClass);
 
-        LOGI("STT JNI: Successfully created result HashMap, returning to Java");
+        LOGD("STT JNI: Successfully created result HashMap, returning to Java");
         return hashMap;
     } catch (const std::exception &e) {
         LOGE("Exception in nativeInitialize: %s", e.what());
@@ -312,8 +344,19 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
     JNIEnv *env,
     jobject /* this */,
     jstring filePath) {
-    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-        LOGE("STT JNI: Not initialized. Call initialize() first.");
+    LOGD("STT JNI: nativeSttTranscribe called");
+
+    if (g_stt_wrapper == nullptr) {
+        LOGE("STT JNI: g_stt_wrapper is null — never initialized");
+        jclass exClass = env->FindClass("java/lang/RuntimeException");
+        if (exClass != nullptr) {
+            env->ThrowNew(exClass, "STT not initialized (wrapper is null). Call initialize() first.");
+        }
+        return nullptr;
+    }
+
+    if (!g_stt_wrapper->isInitialized()) {
+        LOGE("STT JNI: wrapper exists but isInitialized()=false");
         jclass exClass = env->FindClass("java/lang/RuntimeException");
         if (exClass != nullptr) {
             env->ThrowNew(exClass, "STT not initialized. Call initialize() first.");
@@ -331,13 +374,16 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
         return nullptr;
     }
 
+    LOGD("STT JNI: Transcribing file: %s", filePathStr);
+
     try {
         std::string result = g_stt_wrapper->transcribeFile(std::string(filePathStr));
         env->ReleaseStringUTFChars(filePath, filePathStr);
+        LOGD("STT JNI: Transcription complete, result length=%zu", result.size());
         return env->NewStringUTF(result.c_str());
     } catch (const std::exception &e) {
         env->ReleaseStringUTFChars(filePath, filePathStr);
-        LOGE("Exception in nativeTranscribeFile: %s", e.what());
+        LOGE("STT JNI: Exception in nativeTranscribeFile: %s", e.what());
         jclass exClass = env->FindClass("java/lang/RuntimeException");
         if (exClass != nullptr) {
             env->ThrowNew(exClass, e.what());
@@ -345,7 +391,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttTranscribe(
         return nullptr;
     } catch (...) {
         env->ReleaseStringUTFChars(filePath, filePathStr);
-        LOGE("Unknown exception in nativeTranscribeFile");
+        LOGE("STT JNI: Unknown exception in nativeTranscribeFile");
         jclass exClass = env->FindClass("java/lang/RuntimeException");
         if (exClass != nullptr) {
             env->ThrowNew(exClass, "Unknown error during transcription");
@@ -359,9 +405,23 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSttRelease(
     JNIEnv * /* env */,
     jobject /* this */) {
     try {
+        // Detect stale React cleanup: if nativeSttInitialize just succeeded,
+        // the very next release is almost certainly the old useEffect cleanup
+        // arriving late — skip it to preserve the freshly initialized model.
+        if (g_stt_skip_next_release) {
+            g_stt_skip_next_release = false;
+            LOGW("STT JNI: Skipping stale release — a fresh init just completed. "
+                 "This is normal when switching models on the same screen.");
+            return;
+        }
+
+        LOGD("STT JNI: Releasing STT resources");
         if (g_stt_wrapper != nullptr) {
             g_stt_wrapper->release();
-            g_stt_wrapper.reset();
+            // Note: we intentionally do NOT reset g_stt_wrapper to nullptr.
+            // Keeping the wrapper alive prevents null pointer issues if a
+            // stale transcribe call arrives. isInitialized() correctly
+            // returns false after release().
         }
     } catch (const std::exception &e) {
         LOGE("Exception in nativeRelease: %s", e.what());

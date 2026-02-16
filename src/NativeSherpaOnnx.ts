@@ -46,12 +46,14 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
    * @param modelType - Optional: explicit model type ('transducer', 'paraformer', 'nemo_ctc', 'auto'), undefined = auto (default)
+   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeSherpaOnnx(
     modelDir: string,
     preferInt8?: boolean,
-    modelType?: string
+    modelType?: string,
+    debug?: boolean
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -271,6 +273,41 @@ export interface Spec extends TurboModule {
   listAssetModels(): Promise<
     Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
   >;
+
+  /**
+   * List model folders under a specific filesystem path.
+   * When recursive is true, returns relative folder paths under the base path.
+   */
+  listModelsAtPath(
+    path: string,
+    recursive: boolean
+  ): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>;
+
+  /**
+   * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory
+   * of an Android asset pack, or null if the pack is not available (e.g. not installed).
+   * Use this to list and load models that are delivered via PAD instead of bundled app assets.
+   */
+  getAssetPackPath(packName: string): Promise<string | null>;
+
+  /**
+   * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
+   * Requires FFmpeg prebuilts when called on Android.
+   * For MP3 (libshine), outputSampleRateHz can be 32000, 44100, or 48000; 0 or omitted = 44100.
+   * WAV output is always 16 kHz mono (sherpa-onnx). Resolves when conversion succeeds, rejects with an error message on failure.
+   */
+  convertAudioToFormat(
+    inputPath: string,
+    outputPath: string,
+    format: string,
+    outputSampleRateHz?: number
+  ): Promise<void>;
+
+  /**
+   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM.
+   * Requires FFmpeg prebuilts when called on Android.
+   */
+  convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
