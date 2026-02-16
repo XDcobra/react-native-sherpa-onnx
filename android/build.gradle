@@ -57,9 +57,10 @@ buildscript {
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
+// Standalone AAR build: set in root build.gradle (ext.standaloneAarBuild = true) or via -PstandaloneAarBuild=true
+def isStandaloneAarBuild = rootProject.findProperty("standaloneAarBuild") in [true, "true"]
 // Only apply React Native plugin when building inside a React Native app (e.g. example app).
-// Omit when building standalone AAR (root build.gradle sets ext.standaloneAarBuild = true).
-if (!rootProject.hasProperty("standaloneAarBuild") || !rootProject.standaloneAarBuild) {
+if (!isStandaloneAarBuild) {
   apply plugin: "com.facebook.react"
 }
 
@@ -67,6 +68,14 @@ android {
   namespace "com.sherpaonnx"
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
+
+  // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
+  sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
+
+  // Standalone AAR build: add stub NativeSherpaOnnxSpec (codegen is not run, so we provide it here)
+  if (isStandaloneAarBuild) {
+    sourceSets.main.java.srcDirs += file("src/standalone/java")
+  }
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
@@ -110,8 +119,12 @@ android {
   }
 
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-    targetCompatibility JavaVersion.VERSION_1_8
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = '17'
   }
 
   // The build expects prebuilt .so files to exist under this module's
@@ -165,9 +178,15 @@ repositories {
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
 dependencies {
-  implementation "com.facebook.react:react-android"
+  // When inside a React Native app: use the app's react-android version.
+  // When building standalone AAR: use a fixed version so the Kotlin/React types compile (your sources reference them).
+  if (isStandaloneAarBuild) {
+    implementation "com.facebook.react:react-android:0.83.0"
+  } else {
+    implementation "com.facebook.react:react-android"
+  }
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-  
+
   // sherpa-onnx prebuilt AAR from JitPack
   // This includes the native .so libraries for all ABIs
   implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
@@ -257,7 +276,12 @@ afterEvaluate {
     dependsOn extractNativeLibs
     dependsOn checkHeaderSource
   }
-  
+
+  // Ensure extracted native libs are available before merge (so AAR contains sherpa-onnx .so)
+  tasks.matching { it.name == "mergeReleaseNativeLibs" }.configureEach {
+    dependsOn extractNativeLibs
+  }
+
   // Also ensure all extraction and verification tasks run before preBuild
   preBuild.dependsOn extractNativeLibs
   preBuild.dependsOn checkHeaderSource
