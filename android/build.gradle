@@ -75,12 +75,8 @@ android {
   // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
   sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
 
-  // Standalone AAR build: run React Native codegen and use generated NativeSherpaOnnxSpec (single source of truth).
-  // Codegen script appends android/app/build/generated/source/codegen to -o, so Java specs land in
-  // build/generated/codegen/android/app/build/generated/source/codegen/java/com/sherpaonnx/.
-  // Add both possible paths so it works on Windows (local) and Linux (CI).
+  // Standalone AAR build: single path; with codegenConfig.includesGeneratedCode=true the RN script writes here (same on Windows/Linux/CI).
   if (isStandaloneAarBuild) {
-    sourceSets.main.java.srcDirs += file("${buildDir}/generated/codegen/android/app/build/generated/source/codegen/java")
     sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
   }
 
@@ -297,7 +293,8 @@ node {
 // Two implementations: NodeTask (runs the codegen script via node) and NpxTask (runs via npx).
 // Toggle between them with -PuseNpx=true (defaults to NodeTask).
 def root = rootProject.projectDir
-def outDir = file("${project.buildDir}/generated/codegen")
+// Single path on all platforms: with codegenConfig.includesGeneratedCode=true the script uses -o directly (no nested android/app/build/...).
+def outDir = file("${project.buildDir}/generated/source/codegen")
 
 tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
   onlyIf { isStandaloneAarBuild && (!project.hasProperty('useNpx') || project.property('useNpx') != 'true') }
@@ -347,10 +344,12 @@ afterEvaluate {
   preBuild.dependsOn extractNativeLibs
   preBuild.dependsOn checkHeaderSource
 
-  // Standalone: compile Kotlin/Java only after codegen has produced NativeSherpaOnnxSpec
-    if (isStandaloneAarBuild) {
+  // Standalone: compile only after codegen has run (output is at build/generated/source/codegen/java on all platforms)
+  if (isStandaloneAarBuild) {
+    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
     tasks.matching { it.name == "compileReleaseKotlin" }.configureEach {
       dependsOn tasks.named('generateCodegenSpec')
+      inputs.dir(codegenJavaDir)
     }
   }
 }
