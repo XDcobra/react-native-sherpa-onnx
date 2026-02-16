@@ -122,10 +122,22 @@ jobs:
         run: ./gradlew :android:assembleRelease -PstandaloneAarBuild=true --no-daemon --console=plain
 
       - name: Upload AAR artifact
+        run: |
+          mkdir -p build-artifact
+          cp android/build/outputs/aar/*.aar build-artifact/ || true
+          # generate checksums for the AAR(s)
+          for f in build-artifact/*.aar; do
+            if [ -f "$f" ]; then
+              sha1sum "$f" | awk '{print $1}' > "$f.sha1"
+              md5sum "$f" | awk '{print $1}' > "$f.md5"
+            fi
+          done
+
+      - name: Upload AAR artifact (with checksums)
         uses: actions/upload-artifact@v4
         with:
           name: sherpa-onnx-android-aar
-          path: android/build/outputs/aar/*.aar
+          path: build-artifact/**
 
   publish-maven:
     runs-on: ubuntu-latest
@@ -227,36 +239,19 @@ jobs:
             -DgeneratePom=true \
             -Durl="file://$GITHUB_WORKSPACE/maven-repo"
 
-      - name: Generate checksum files for deployed artifacts and metadata
+      - name: Copy AAR checksums from build artifact into maven-repo
         env:
           GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
           VERSION: ${{ steps.vars.outputs.version }}
         run: |
           set -e
-          cd maven-repo
-          # target artifact directory and metadata
-          ART_DIR="${GROUP_PATH}/${VERSION}"
-
-          # create checksums for the AAR and POM in the version dir
-          find "$ART_DIR" -type f \( -name '*.aar' -o -name '*.pom' \) -print0 | while IFS= read -r -d '' f; do
-            if [ ! -f "$f.sha1" ]; then
-              sha1sum "$f" | awk '{print $1}' > "$f.sha1"
-            fi
-            if [ ! -f "$f.md5" ]; then
-              md5sum "$f" | awk '{print $1}' > "$f.md5"
+          ART_DIR="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/${VERSION}"
+          mkdir -p "$ART_DIR"
+          for f in "$GITHUB_WORKSPACE/build-artifact"/*.aar.sha1 "$GITHUB_WORKSPACE/build-artifact"/*.aar.md5; do
+            if [ -f "$f" ]; then
+              cp "$f" "$ART_DIR/$(basename "$f")"
             fi
           done
-
-          # also ensure checksums exist for group-level maven-metadata.xml
-          META="${GROUP_PATH}/maven-metadata.xml"
-          if [ -f "$META" ]; then
-            if [ ! -f "$META.sha1" ]; then
-              sha1sum "$META" | awk '{print $1}' > "$META.sha1"
-            fi
-            if [ ! -f "$META.md5" ]; then
-              md5sum "$META" | awk '{print $1}' > "$META.md5"
-            fi
-          fi
 
       - name: Commit and push to Maven repo
         env:
