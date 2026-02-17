@@ -589,6 +589,21 @@ internal class SherpaOnnxTtsHelper(
         numThreads = numThreads,
         debug = debug
       )
+      "zipvoice" -> {
+        // Zipvoice is supported in sherpa-onnx C++ (OfflineTtsZipvoiceModelConfig) but as of
+        // current upstream, the Kotlin API (Tts.kt) does not expose it — OfflineTtsModelConfig
+        // has vits, matcha, kokoro, kitten, pocket only. Once k2-fsa/sherpa-onnx adds
+        // OfflineTtsZipvoiceModelConfig to Tts.kt, use it here with:
+        //   encoder = path(paths, "encoder"), decoder = path(paths, "decoder"),
+        //   vocoder = path(paths, "vocoder"), tokens = path(paths, "tokens"),
+        //   dataDir = path(paths, "dataDir"), lexicon = path(paths, "lexicon").
+        // TODO: Once OfflineTtsZipvoiceModelConfig is added to Tts.kt, use it here.
+        throw UnsupportedOperationException(
+          "Zipvoice TTS is not yet exposed in the sherpa-onnx Kotlin API (Tts.kt). " +
+            "The C++ backend supports it; the Kotlin bindings need OfflineTtsZipvoiceModelConfig. " +
+            "Use vits/matcha/kokoro/kitten, or a newer sherpa-onnx release that adds Zipvoice to the Kotlin API."
+        )
+      }
       else -> {
         if (path(paths, "acousticModel").isNotEmpty()) {
           OfflineTtsModelConfig(
