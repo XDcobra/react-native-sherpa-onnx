@@ -1536,9 +1536,9 @@ export default function TTSScreen() {
                 />
               </View>
 
-              <View style={{ marginTop: 8, marginBottom: 8 }}>
+              <View style={styles.outputFormatContainer}>
                 <Text style={styles.inputLabel}>Output Format</Text>
-                <View style={{ flexDirection: 'row' }}>
+                <View style={styles.outputFormatRow}>
                   <TouchableOpacity
                     style={[
                       styles.detectedModelButton,
@@ -1563,7 +1563,7 @@ export default function TTSScreen() {
                       styles.detectedModelButton,
                       outputFormat === 'mp3' &&
                         styles.detectedModelButtonActive,
-                      { marginLeft: 8 },
+                      styles.outputFormatButtonSpacing,
                     ]}
                     onPress={() => setOutputFormat('mp3')}
                   >
@@ -1583,7 +1583,7 @@ export default function TTSScreen() {
                       styles.detectedModelButton,
                       outputFormat === 'flac' &&
                         styles.detectedModelButtonActive,
-                      { marginLeft: 8 },
+                      styles.outputFormatButtonSpacing,
                     ]}
                     onPress={() => setOutputFormat('flac')}
                   >
@@ -2435,6 +2435,16 @@ const styles = StyleSheet.create({
     marginTop: 0,
     fontStyle: 'italic',
     textAlign: 'center',
+  },
+  outputFormatContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  outputFormatRow: {
+    flexDirection: 'row',
+  },
+  outputFormatButtonSpacing: {
+    marginLeft: 8,
   },
   separator: {
     height: 1,

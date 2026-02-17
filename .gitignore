@@ -38,6 +38,7 @@ project.xcworkspace
 .idea
 .project
 .settings
+.kotlin
 local.properties
 android.iml
 app-voicelab-*.json
