@@ -230,7 +230,7 @@ jobs:
           fi
 
           # deploy-file to local file-based repo (will create proper pom and metadata)
-          mvn org.apache.maven.plugins:maven-deploy-plugin:3.0.0-M1:deploy-file \
+          mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
             -DgroupId=com.xdcobra.sherpa \
             -DartifactId=sherpa-onnx-react-native \
             -Dversion=${VERSION} \
