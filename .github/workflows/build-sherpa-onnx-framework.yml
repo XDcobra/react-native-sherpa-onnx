@@ -1,4 +1,4 @@
-name: Build sherpa-onnx XCFramework
+name: Framework - Build sherpa-onnx XCFramework
 
 on:
   workflow_dispatch:
