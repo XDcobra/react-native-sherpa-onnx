@@ -1,4 +1,5 @@
 name: SDK - Build Android example app
+
 on:
   pull_request:
     branches:
@@ -14,12 +15,17 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Only cancel in-progress runs for the same workflow+ref when running standalone.
+# When called via workflow_call, the caller manages concurrency.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
+  # Lint runs only for standalone triggers (PR, push, dispatch).
+  # When called via workflow_call (from sdk-release.yml), the caller runs lint centrally.
   lint:
+    if: github.event_name != 'workflow_call'
     runs-on: ubuntu-latest
 
     steps:
@@ -45,11 +51,12 @@ jobs:
 
   build-android:
     runs-on: ubuntu-latest
-    needs: lint
+    # Run after lint when standalone; skip lint check when called via workflow_call (lint is skipped)
+    needs: [lint]
+    if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
 
     env:
       JAVA_VERSION: '17'
-      # Pass token so download-models.js can call GitHub API (higher rate limit, avoids 403)
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -80,21 +87,18 @@ jobs:
         run: |
           echo "Verifying required files..."
 
-          # Check header files (already verified in previous step, but double-check)
           if [ ! -f "android/src/main/cpp/include/sherpa-onnx/c-api/c-api.h" ]; then
             echo "Error: Android header files not found at android/src/main/cpp/include/sherpa-onnx/c-api/c-api.h"
             exit 1
           fi
           echo "[OK] Header files found"
 
-          # Check CMakeLists.txt
           if [ ! -f "android/src/main/cpp/CMakeLists.txt" ]; then
             echo "Error: CMakeLists.txt not found at android/src/main/cpp/CMakeLists.txt"
             exit 1
           fi
           echo "[OK] CMakeLists.txt found"
 
-          # Check Android build.gradle files
           if [ ! -f "android/build.gradle" ]; then
             echo "Error: android/build.gradle not found"
             exit 1
@@ -113,7 +117,6 @@ jobs:
           fi
           echo "[OK] example/android/app/build.gradle found"
 
-          # Verify header file structure
           echo ""
           echo "Header file structure:"
           find android/src/main/cpp/include -name "*.h" -type f | head -10 || echo "No header files found"
@@ -142,10 +145,8 @@ jobs:
 
           cd example/android
 
-          # Clean previous builds
           ./gradlew clean
 
-          # Build debug APK
           if ! ./gradlew assembleDebug \
             --stacktrace \
             --info \
@@ -153,7 +154,6 @@ jobs:
             BUILD_FAILED=1
           fi
 
-          # Display filtered output (errors, warnings, important messages)
           echo "=== Filtered Build Output ==="
           grep -E "(FAILED|ERROR|error:|warning:|BUILD SUCCEEDED|BUILD FAILED|FAILURE|Exception)" /tmp/build.full.log | head -100 || true
 
@@ -161,32 +161,26 @@ jobs:
             echo ""
             echo "=== Build failed. Full error analysis ==="
             
-            # Show all lines containing "error:" or "ERROR" with context
             echo ""
             echo "--- Compilation/Linker Errors ---"
             grep -B 2 -A 5 -i "error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
             
-            # Show fatal errors
             echo ""
             echo "--- Fatal Errors ---"
             grep -B 2 -A 5 -i "fatal" /tmp/build.full.log | head -50 || echo "No fatal errors found"
             
-            # Show exceptions
             echo ""
             echo "--- Exceptions ---"
             grep -B 2 -A 10 "Exception" /tmp/build.full.log | head -50 || echo "No exceptions found"
             
-            # Show CMake errors if any
             echo ""
             echo "--- CMake Errors ---"
             grep -B 2 -A 5 -i "cmake" /tmp/build.full.log | grep -i "error\|fail" | head -30 || echo "No CMake errors found"
             
-            # Show the Gradle failure details
             echo ""
             echo "--- Failed Tasks ---"
             grep -B 5 -A 2 "FAILED" /tmp/build.full.log | head -30 || true
             
-            # Last part of log for context
             echo ""
             echo "--- Last 50 lines of build log ---"
             tail -50 /tmp/build.full.log
@@ -204,12 +198,10 @@ jobs:
           if [ -f "$APK_PATH" ]; then
             echo "[OK] APK found: $APK_PATH"
             
-            # Get APK size
             APK_SIZE=$(stat -f%z "$APK_PATH" 2>/dev/null || stat -c%s "$APK_PATH")
             APK_SIZE_MB=$((APK_SIZE / 1024 / 1024))
             echo "  APK size: ${APK_SIZE_MB}MB"
             
-            # Check if APK contains native libraries (optional verification)
             if command -v unzip &> /dev/null; then
               echo ""
               echo "Checking APK contents for native libraries:"
@@ -222,14 +214,7 @@ jobs:
             exit 1
           fi
 
-          # Also check for AAR if building library
-          AAR_PATH="android/build/outputs/aar/android-release.aar"
-          if [ -f "$AAR_PATH" ]; then
-            echo "[OK] AAR found: $AAR_PATH"
-          fi
-
       - name: Upload Android APK artifact
-        if: startsWith(github.ref, 'refs/tags/sdk-v')
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-apk

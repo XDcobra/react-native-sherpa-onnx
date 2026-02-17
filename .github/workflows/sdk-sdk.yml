@@ -17,10 +17,13 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
+  # Lint runs only for standalone triggers (PR, push, dispatch).
+  # When called via workflow_call (from sdk-release.yml), the caller runs lint centrally.
   lint:
+    if: github.event_name != 'workflow_call'
     runs-on: ubuntu-latest
 
     steps:
@@ -43,11 +46,12 @@ jobs:
 
       - name: Typecheck files
         run: yarn typecheck
-        
+
   pack-package:
     name: Pack npm package
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [lint]
+    if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -67,7 +71,6 @@ jobs:
 
       - name: Build package (prepare)
         run: |
-          # run prepare script (builds lib) so package includes built files
           yarn prepare
 
       - name: Create package tarball
@@ -75,7 +78,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          # Run npm pack and extract the last non-empty line as the tarball name
           PACK_OUTPUT=$(npm pack 2>&1 || true)
           TARFILE=$(printf "%s" "$PACK_OUTPUT" | awk 'NF{line=$0} END{print line}')
           TARFILE=$(printf "%s" "$TARFILE" | tr -d '\r')
@@ -89,7 +91,6 @@ jobs:
           echo "artifact_path=artifacts/$TARFILE" >> $GITHUB_OUTPUT
 
       - name: Upload package artifact
-        if: startsWith(github.ref, 'refs/tags/sdk-v')
         uses: actions/upload-artifact@v4
         with:
           name: sdk-package
