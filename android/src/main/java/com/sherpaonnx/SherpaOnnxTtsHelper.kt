@@ -30,14 +30,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 internal class SherpaOnnxTtsHelper(
   private val context: ReactApplicationContext,
-  private val native: NativeTtsBridge,
+  private val detectTtsModel: (modelDir: String, modelType: String) -> HashMap<String, Any>?,
   private val emitChunk: (FloatArray, Int, Float, Boolean) -> Unit,
   private val emitError: (String) -> Unit,
   private val emitEnd: (Boolean) -> Unit
 ) {
-  interface NativeTtsBridge {
-    fun detectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
-  }
 
   private data class TtsInitState(
     val modelDir: String,
@@ -69,7 +66,7 @@ internal class SherpaOnnxTtsHelper(
     promise: Promise
   ) {
     try {
-      val result = native.detectTtsModel(modelDir, modelType)
+      val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
         promise.reject("TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
         return
@@ -155,7 +152,7 @@ internal class SherpaOnnxTtsHelper(
       else -> lengthScale
     }
     try {
-      val result = native.detectTtsModel(state.modelDir, state.modelType)
+      val result = detectTtsModel(state.modelDir, state.modelType)
       if (result == null || result["success"] as? Boolean != true) {
         promise.reject("TTS_UPDATE_ERROR", "Failed to re-detect TTS model")
         return

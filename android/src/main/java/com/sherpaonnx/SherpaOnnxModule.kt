@@ -27,26 +27,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
-    object : SherpaOnnxSttHelper.NativeSttBridge {
-      override fun detectSttModel(
-        modelDir: String,
-        preferInt8: Boolean,
-        hasPreferInt8: Boolean,
-        modelType: String,
-        debug: Boolean
-      ): HashMap<String, Any>? {
-        return Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
-      }
+    { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
+      Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
     },
     NAME
   )
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
-    object : SherpaOnnxTtsHelper.NativeTtsBridge {
-      override fun detectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>? {
-        return Companion.nativeDetectTtsModel(modelDir, modelType)
-      }
-    },
+    { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
     ::emitTtsStreamChunk,
     ::emitTtsStreamError,
     ::emitTtsStreamEnd

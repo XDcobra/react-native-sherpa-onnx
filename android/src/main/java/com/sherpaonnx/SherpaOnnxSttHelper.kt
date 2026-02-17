@@ -20,18 +20,15 @@ import com.k2fsa.sherpa.onnx.WaveReader
 import java.io.File
 
 internal class SherpaOnnxSttHelper(
-  private val native: NativeSttBridge,
+  private val detectSttModel: (
+    modelDir: String,
+    preferInt8: Boolean,
+    hasPreferInt8: Boolean,
+    modelType: String,
+    debug: Boolean
+  ) -> HashMap<String, Any>?,
   private val logTag: String
 ) {
-  interface NativeSttBridge {
-    fun detectSttModel(
-      modelDir: String,
-      preferInt8: Boolean,
-      hasPreferInt8: Boolean,
-      modelType: String,
-      debug: Boolean
-    ): HashMap<String, Any>?
-  }
 
   @Volatile
   private var recognizer: OfflineRecognizer? = null
@@ -59,7 +56,7 @@ internal class SherpaOnnxSttHelper(
         return
       }
 
-      val result = native.detectSttModel(
+      val result = detectSttModel(
         modelDir,
         preferInt8 ?: false,
         preferInt8 != null,
