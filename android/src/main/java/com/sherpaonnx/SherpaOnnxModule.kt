@@ -517,6 +517,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
+    /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
+    @JvmStatic
+    private external fun nativeDetectSttModel(
+      modelDir: String,
+      preferInt8: Boolean,
+      hasPreferInt8: Boolean,
+      modelType: String,
+      debug: Boolean
+    ): HashMap<String, Any>?
+
+    /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
+    @JvmStatic
+    private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
     @JvmStatic
     private external fun nativeSttInitialize(
       modelDir: String,
