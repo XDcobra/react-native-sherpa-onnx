@@ -14,6 +14,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
 
   init {
+    // Load sherpa-onnx JNI first (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
+    try {
+      System.loadLibrary("sherpa-onnx-jni")
+    } catch (e: UnsatisfiedLinkError) {
+      throw RuntimeException("Failed to load sherpa-onnx-jni (from sherpa-onnx AAR): ${e.message}", e)
+    }
+    // Then load our library (Archive, FFmpeg, model detection)
     System.loadLibrary("sherpaonnx")
     instance = this
   }
