@@ -70,8 +70,9 @@ build_abi() {
     if [ -d "$SHINE_PREFIX" ]; then
         echo "Adding libshine flags from: $SHINE_PREFIX"
         export CFLAGS="$CFLAGS -I$SHINE_PREFIX/include"
-        # libshine uses math functions; add -lm so configure/link tests succeed
-        export LDFLAGS="$LDFLAGS -L$SHINE_PREFIX/lib -lshine -lm"
+        # libshine uses math functions; add -lm so configure/link tests succeed.
+        # NDK r23+ ld.lld uses --no-allow-shlib-undefined; allow it for libshine.so (e.g. __register_atfork).
+        export LDFLAGS="$LDFLAGS -L$SHINE_PREFIX/lib -lshine -lm -Wl,--allow-shlib-undefined"
         EXTRA_ENABLE_LIBSHINE="--enable-libshine"
         # Create minimal pkg-config file so FFmpeg's configure can find libshine
         PKGDIR="$SHINE_PREFIX/lib/pkgconfig"
