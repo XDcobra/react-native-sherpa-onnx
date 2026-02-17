@@ -45,7 +45,7 @@ export interface Spec extends TurboModule {
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'paraformer', 'nemo_ctc', 'auto'), undefined = auto (default)
+   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'auto'), undefined = auto (default)
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
@@ -92,6 +92,8 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
+    sampleRate: number;
+    numSpeakers: number;
   }>;
 
   /**
@@ -108,6 +110,8 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
+    sampleRate: number;
+    numSpeakers: number;
   }>;
 
   /**

@@ -421,26 +421,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @Volatile
     private var instance: SherpaOnnxModule? = null
 
-    @JvmStatic
-    fun onTtsStreamChunk(
-      samples: FloatArray,
-      sampleRate: Int,
-      progress: Float,
-      isFinal: Boolean
-    ) {
-      instance?.emitTtsStreamChunk(samples, sampleRate, progress, isFinal)
-    }
-
-    @JvmStatic
-    fun onTtsStreamError(message: String) {
-      instance?.emitTtsStreamError(message)
-    }
-
-    @JvmStatic
-    fun onTtsStreamEnd(cancelled: Boolean) {
-      instance?.emitTtsStreamEnd(cancelled)
-    }
-
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String

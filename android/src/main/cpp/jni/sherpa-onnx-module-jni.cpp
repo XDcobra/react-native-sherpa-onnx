@@ -87,6 +87,7 @@ jobject buildDetectedModelsList(JNIEnv* env, const std::vector<sherpaonnx::Detec
 const char* sttModelKindToString(sherpaonnx::SttModelKind k) {
   switch (k) {
     case sherpaonnx::SttModelKind::kTransducer: return "transducer";
+    case sherpaonnx::SttModelKind::kNemoTransducer: return "nemo_transducer";
     case sherpaonnx::SttModelKind::kParaformer: return "paraformer";
     case sherpaonnx::SttModelKind::kNemoCtc: return "nemo_ctc";
     case sherpaonnx::SttModelKind::kWenetCtc: return "wenet_ctc";
