@@ -252,21 +252,6 @@ def extractNativeLibs = tasks.register("extractNativeLibs") {
   }
 }
 
-// Task to check and log header source before CMake runs
-def checkHeaderSource = tasks.register("checkHeaderSource") {
-  doLast {
-    def cppDir = file("src/main/cpp")
-    def bundledHeaderPath = file("${cppDir}/include/sherpa-onnx/c-api/cxx-api.h")
-    
-    if (bundledHeaderPath.exists()) {
-      println "[SherpaOnnx] Header files present"
-    } else {
-      println "[SherpaOnnx] ERROR: Header files not found at ${bundledHeaderPath.absolutePath}"
-      throw new RuntimeException("Header files not found. Run 'yarn setup-assets' or 'yarn copy-headers'")
-    }
-  }
-}
-
 // Standalone AAR build: run React Native codegen so NativeSherpaOnnxSpec is generated (no stub needed)
 
 // Ensure Node plugin is applied (used to run npx reliably)
@@ -327,11 +312,10 @@ tasks.register('generateCodegenSpec') {
   dependsOn tasks.named('generateCodegenSpecNode')
 }
 
-// Make CMake depend on extraction and header verification to ensure they run before any CMake task
+// Make CMake depend on extraction so extracted native libs exist before any CMake task
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractNativeLibs
-    dependsOn checkHeaderSource
   }
 
   // Ensure extracted native libs are available before merge (so AAR contains sherpa-onnx .so)
@@ -339,9 +323,7 @@ afterEvaluate {
     dependsOn extractNativeLibs
   }
 
-  // Also ensure all extraction and verification tasks run before preBuild
   preBuild.dependsOn extractNativeLibs
-  preBuild.dependsOn checkHeaderSource
 
   // Compile (debug + release) only after codegen; ensures example-app and standalone AAR both see the spec and app CMake finds jni.
   def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
