@@ -30,6 +30,7 @@ public:
         const std::string& modelDir,
         const std::optional<bool>& preferInt8 = std::nullopt,
         const std::optional<std::string>& modelType = std::nullopt
+        , bool debug = false
     );
 
     std::string transcribeFile(const std::string& filePath);
