@@ -72,8 +72,13 @@ android {
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 
-  // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
-  sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
+  // Include extracted sherpa-onnx .so in jniLibs ONLY for standalone AAR builds.
+  // When building as part of an app (e.g. example app), the sherpa-onnx .so files
+  // are provided transitively via the `implementation` dependency — adding them
+  // here too would cause duplicate .so errors at :app:packageDebug.
+  if (isStandaloneAarBuild) {
+    sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
+  }
 
   // Codegen output (run for both example-app and standalone AAR). includesGeneratedCode=true so script writes to this path; app CMake expects build/generated/source/codegen/jni.
   sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
