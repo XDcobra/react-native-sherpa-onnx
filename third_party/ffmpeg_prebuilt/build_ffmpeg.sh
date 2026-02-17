@@ -133,8 +133,10 @@ build_abi() {
     echo "Found libshine prebuilts at $SHINE_PREFIX — enabling libshine"
     SHINE_CFLAGS="-I$SHINE_PREFIX/include"
     # libpthread is typically part of the Android bionic libc; avoid explicit -lpthread
-    # Ensure the Android NDK sysroot lib path is present so the cross-linker can find any native libs
-    SHINE_LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -L$SHINE_PREFIX/lib -lshine -lm"
+    # Ensure the Android NDK sysroot lib path is present so the cross-linker can find any native libs.
+    # NDK r23+ ld.lld uses --no-allow-shlib-undefined; libshine.so has __register_atfork (bionic) unresolved.
+    # Allow it so FFmpeg configure linker tests and final link succeed.
+    SHINE_LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -L$SHINE_PREFIX/lib -lshine -lm -Wl,--allow-shlib-undefined"
 
     # FFmpeg requires <shine/layer3.h> — ensure it exists (build_shine.sh installs to include/shine/; some layouts use include/src/lib)
     if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then

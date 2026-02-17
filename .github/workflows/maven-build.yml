@@ -1,4 +1,4 @@
-# Build Android AAR for Maven release (artifact only; no publish).
+# Build Android AAR (artifact only; publishing handled by sdk-release.yml).
 # Builds: libshine (shine_prebuilt), FFmpeg (ffmpeg_prebuilt, with libshine), libarchive (via CMake),
 # then produces the react-native-sherpa-onnx Android library .aar.
 
@@ -8,26 +8,28 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      maven_version:
-        description: "Optional: tag string in format 'maven-vX.Y.Z' to release (must include 'maven-v')"
-        required: false
   push:
     branches: [main]
-    tags:
-      - 'maven-v*'
     paths:
       - 'android/**'
       - 'third_party/**'
       - '.github/workflows/maven-build.yml'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 env:
   ANDROID_API: "24"
   NDK_VERSION: "29.0.14206865"
 
 jobs:
+  # Lint runs only for standalone triggers (PR, push, dispatch).
+  # When called via workflow_call (from sdk-release.yml), the caller runs lint centrally.
   lint:
+    if: github.event_name != 'workflow_call'
     runs-on: ubuntu-latest
 
     steps:
@@ -54,7 +56,8 @@ jobs:
   build-aar:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: lint
+    needs: [lint]
+    if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -87,7 +90,6 @@ jobs:
       - name: Yarn install
         run: yarn install --frozen-lockfile
         env:
-          # Headers are copied from sherpa-onnx submodule by setup-assets/copy-headers
           CI: "true"
 
       - name: Build libshine
@@ -121,11 +123,10 @@ jobs:
       - name: Build Android AAR
         run: ./gradlew :android:assembleRelease -PstandaloneAarBuild=true --no-daemon --console=plain
 
-      - name: Upload AAR artifact
+      - name: Prepare AAR artifact with checksums
         run: |
           mkdir -p build-artifact
           cp android/build/outputs/aar/*.aar build-artifact/ || true
-          # generate checksums for the AAR(s)
           for f in build-artifact/*.aar; do
             if [ -f "$f" ]; then
               sha1sum "$f" | awk '{print $1}' > "$f.sha1"
@@ -138,140 +139,4 @@ jobs:
         with:
           name: sherpa-onnx-android-aar
           path: build-artifact/**
-
-  publish-maven:
-    runs-on: ubuntu-latest
-    needs: build-aar
-    permissions:
-      contents: write
-    if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/maven-v') ||
-      github.event_name == 'workflow_dispatch' && github.event.inputs.maven_version != ''
-    steps:
-      - name: Checkout source repo (for creating tag if needed)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Determine tag and version
-        id: vars
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            TAG=${GITHUB_REF##*/}
-          else
-            TAG="${{ github.event.inputs.maven_version }}"
-          fi
-
-          if [ -z "$TAG" ]; then
-            echo "No tag provided" >&2
-            exit 1
-          fi
-
-          RAW_VERSION=${TAG#maven-}
-          VERSION=${RAW_VERSION#v}
-
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create tag if dispatched and missing
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          TAG=${{ steps.vars.outputs.tag }}
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG already exists"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "Created and pushed tag $TAG"
-          fi
-
-      - name: Download build artifact (AAR)
-        uses: actions/download-artifact@v4
-        with:
-          name: sherpa-onnx-android-aar
-          path: build-artifact
-
-      - name: Checkout target Maven repo
-        uses: actions/checkout@v4
-        with:
-          repository: 'XDcobra/maven'
-          path: maven-repo
-          token: ${{ secrets.MAVEN_REPO_PAT }}
-
-      - name: Ensure existing metadata checksums (pre-deploy)
-        env:
-          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
-        run: |
-          set -e
-          META="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/maven-metadata.xml"
-          if [ -f "$META" ]; then
-            sha1sum "$META" | awk '{print $1}' > "$META.sha1"
-            md5sum "$META" | awk '{print $1}' > "$META.md5"
-            echo "Generated checksums for existing metadata: $META"
-          else
-            echo "No existing maven-metadata.xml to checksum"
-          fi
-
-      - name: Install Maven
-        run: sudo apt-get update && sudo apt-get install -y maven
-
-      - name: Deploy artifact into checked-out Maven repo (local file URL)
-        env:
-          VERSION: ${{ steps.vars.outputs.version }}
-        run: |
-          set -e
-          AAR=$(ls build-artifact/*.aar | head -n1)
-          if [ -z "$AAR" ]; then
-            echo "AAR not found" >&2
-            exit 1
-          fi
-
-          # deploy-file to local file-based repo (will create proper pom and metadata)
-          mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
-            -DgroupId=com.xdcobra.sherpa \
-            -DartifactId=sherpa-onnx-react-native \
-            -Dversion=${VERSION} \
-            -Dpackaging=aar \
-            -Dfile="${AAR}" \
-            -DgeneratePom=true \
-            -Durl="file://$GITHUB_WORKSPACE/maven-repo"
-
-      - name: Copy AAR checksums from build artifact into maven-repo
-        env:
-          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
-          VERSION: ${{ steps.vars.outputs.version }}
-        run: |
-          set -e
-          ART_DIR="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/${VERSION}"
-          mkdir -p "$ART_DIR"
-          # Only copy checksums that match the canonical artifact name produced by Maven
-          ART_NAME="sherpa-onnx-react-native-${VERSION}.aar"
-          for ext in sha1 md5; do
-            SRC="$GITHUB_WORKSPACE/build-artifact/${ART_NAME}.${ext}"
-            if [ -f "$SRC" ]; then
-              cp "$SRC" "$ART_DIR/$(basename "$SRC")"
-            else
-              echo "No precomputed checksum for ${ART_NAME}.${ext} found in build-artifact; skipping"
-            fi
-          done
-
-      - name: Commit and push to Maven repo
-        env:
-          MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
-        run: |
-          set -e
-          cd maven-repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          # fail if there are no staged changes (treat as error so job aborts)
-          if git diff --cached --quiet; then
-            echo "No changes to commit" >&2
-            exit 1
-          fi
-
-          git commit -m "Publish sherpa-onnx-react-native:${{ steps.vars.outputs.version }} to GitHub Pages Maven repo"
-          git push origin HEAD:main
+          if-no-files-found: error

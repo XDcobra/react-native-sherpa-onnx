@@ -11,6 +11,7 @@ namespace sherpaonnx {
 enum class SttModelKind {
     kUnknown,
     kTransducer,
+    kNemoTransducer,
     kParaformer,
     kNemoCtc,
     kWenetCtc,

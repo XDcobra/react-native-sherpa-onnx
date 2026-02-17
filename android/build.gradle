@@ -72,8 +72,13 @@ android {
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 
-  // Include extracted sherpa-onnx .so (from extractNativeLibs) so they are merged into the AAR
-  sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
+  // Include extracted sherpa-onnx .so in jniLibs ONLY for standalone AAR builds.
+  // When building as part of an app (e.g. example app), the sherpa-onnx .so files
+  // are provided transitively via the `implementation` dependency — adding them
+  // here too would cause duplicate .so errors at :app:packageDebug.
+  if (isStandaloneAarBuild) {
+    sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
+  }
 
   // Codegen output (run for both example-app and standalone AAR). includesGeneratedCode=true so script writes to this path; app CMake expects build/generated/source/codegen/jni.
   sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
@@ -87,7 +92,9 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        arguments "-DANDROID_STL=c++_shared"
+        arguments "-DANDROID_STL=c++_shared",
+                  // Path to sherpa-onnx native libs extracted from AAR (includes libsherpa-onnx-c-api.so for Zipvoice C-API)
+                  "-DSHERPA_ONNX_EXTRACTED_LIBS=${buildDir}/extracted_native_libs/jni".toString()
       }
     }
 
@@ -179,13 +186,10 @@ repositories {
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
 dependencies {
-  // When inside a React Native app: use the app's react-android version.
-  // When building standalone AAR: use a fixed version so the Kotlin/React types compile (your sources reference them).
-  if (isStandaloneAarBuild) {
-    implementation "com.facebook.react:react-android:0.83.0"
-  } else {
-    implementation "com.facebook.react:react-android"
-  }
+  // React Native dependency: explicit version ensures IDE (VS Code Kotlin LSP) and standalone
+  // AAR builds can resolve com.facebook.react types. When consumed by a React Native app,
+  // Gradle's dependency resolution picks the app's react-android version (typically higher).
+  implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
   // sherpa-onnx prebuilt AAR from JitPack
@@ -252,21 +256,6 @@ def extractNativeLibs = tasks.register("extractNativeLibs") {
   }
 }
 
-// Task to check and log header source before CMake runs
-def checkHeaderSource = tasks.register("checkHeaderSource") {
-  doLast {
-    def cppDir = file("src/main/cpp")
-    def bundledHeaderPath = file("${cppDir}/include/sherpa-onnx/c-api/cxx-api.h")
-    
-    if (bundledHeaderPath.exists()) {
-      println "[SherpaOnnx] Header files present"
-    } else {
-      println "[SherpaOnnx] ERROR: Header files not found at ${bundledHeaderPath.absolutePath}"
-      throw new RuntimeException("Header files not found. Run 'yarn setup-assets' or 'yarn copy-headers'")
-    }
-  }
-}
-
 // Standalone AAR build: run React Native codegen so NativeSherpaOnnxSpec is generated (no stub needed)
 
 // Ensure Node plugin is applied (used to run npx reliably)
@@ -327,11 +316,10 @@ tasks.register('generateCodegenSpec') {
   dependsOn tasks.named('generateCodegenSpecNode')
 }
 
-// Make CMake depend on extraction and header verification to ensure they run before any CMake task
+// Make CMake depend on extraction so extracted native libs exist before any CMake task
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractNativeLibs
-    dependsOn checkHeaderSource
   }
 
   // Ensure extracted native libs are available before merge (so AAR contains sherpa-onnx .so)
@@ -339,9 +327,7 @@ afterEvaluate {
     dependsOn extractNativeLibs
   }
 
-  // Also ensure all extraction and verification tasks run before preBuild
   preBuild.dependsOn extractNativeLibs
-  preBuild.dependsOn checkHeaderSource
 
   // Compile (debug + release) only after codegen; ensures example-app and standalone AAR both see the spec and app CMake finds jni.
   def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")

@@ -14,6 +14,7 @@ namespace {
 
 SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "transducer") return SttModelKind::kTransducer;
+    if (modelType == "nemo_transducer") return SttModelKind::kNemoTransducer;
     if (modelType == "paraformer") return SttModelKind::kParaformer;
     if (modelType == "nemo_ctc") return SttModelKind::kNemoCtc;
     if (modelType == "wenet_ctc") return SttModelKind::kWenetCtc;
@@ -116,8 +117,8 @@ SttDetectResult DetectSttModel(
     bool hasFunAsrTokenizer = !funasrTokenizerDir.empty() && FileExists(funasrTokenizerDir + "/vocab.json");
     bool hasFunAsrNano = hasFunAsrEncoderAdaptor && hasFunAsrLLM && hasFunAsrEmbedding && hasFunAsrTokenizer;
 
-    bool isLikelyNemoCtc = modelDir.find("nemo") != std::string::npos ||
-                           modelDir.find("parakeet") != std::string::npos;
+    bool isLikelyNemo = modelDir.find("nemo") != std::string::npos ||
+                        modelDir.find("parakeet") != std::string::npos;
     bool isLikelyWenetCtc = modelDir.find("wenet") != std::string::npos;
     bool isLikelySenseVoice = modelDir.find("sense") != std::string::npos ||
                               modelDir.find("sensevoice") != std::string::npos;
@@ -125,11 +126,15 @@ SttDetectResult DetectSttModel(
                               modelDir.find("funasr-nano") != std::string::npos;
 
     if (hasTransducer) {
-        result.detectedModels.push_back({"transducer", modelDir});
+        if (isLikelyNemo) {
+            result.detectedModels.push_back({"nemo_transducer", modelDir});
+        } else {
+            result.detectedModels.push_back({"transducer", modelDir});
+        }
     }
 
-    if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {
-        if (isLikelyNemoCtc) {
+    if (!ctcModelPath.empty() && (isLikelyNemo || isLikelyWenetCtc || isLikelySenseVoice)) {
+        if (isLikelyNemo) {
             result.detectedModels.push_back({"nemo_ctc", modelDir});
         } else if (isLikelyWenetCtc) {
             result.detectedModels.push_back({"wenet_ctc", modelDir});
@@ -163,6 +168,10 @@ SttDetectResult DetectSttModel(
             result.error = "Transducer model requested but files not found in " + modelDir;
             return result;
         }
+        if (selected == SttModelKind::kNemoTransducer && !hasTransducer) {
+            result.error = "NeMo Transducer model requested but encoder/decoder/joiner not found in " + modelDir;
+            return result;
+        }
         if (selected == SttModelKind::kParaformer && paraformerModelPath.empty()) {
             result.error = "Paraformer model requested but model file not found in " + modelDir;
             return result;
@@ -183,9 +192,9 @@ SttDetectResult DetectSttModel(
         }
     } else {
         if (hasTransducer) {
-            selected = SttModelKind::kTransducer;
-        } else if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {
-            if (isLikelyNemoCtc) {
+            selected = isLikelyNemo ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
+        } else if (!ctcModelPath.empty() && (isLikelyNemo || isLikelyWenetCtc || isLikelySenseVoice)) {
+            if (isLikelyNemo) {
                 selected = SttModelKind::kNemoCtc;
             } else if (isLikelyWenetCtc) {
                 selected = SttModelKind::kWenetCtc;
@@ -218,7 +227,7 @@ SttDetectResult DetectSttModel(
     // Whisper models also need tokens.txt despite seeming self-contained.
     result.tokensRequired = (selected != SttModelKind::kFunAsrNano);
 
-    if (selected == SttModelKind::kTransducer) {
+    if (selected == SttModelKind::kTransducer || selected == SttModelKind::kNemoTransducer) {
         result.paths.encoder = encoderPath;
         result.paths.decoder = decoderPath;
         result.paths.joiner = joinerPath;

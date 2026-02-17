@@ -14,92 +14,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
 
   init {
+    // Load sherpa-onnx JNI first (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
+    try {
+      System.loadLibrary("sherpa-onnx-jni")
+    } catch (e: UnsatisfiedLinkError) {
+      throw RuntimeException("Failed to load sherpa-onnx-jni (from sherpa-onnx AAR): ${e.message}", e)
+    }
+    // Load sherpa-onnx C-API (from AAR; needed at runtime only if Zipvoice TTS is used).
+    // Non-fatal: if the .so is missing, Zipvoice init will fail with a clear error later.
+    try {
+      System.loadLibrary("sherpa-onnx-c-api")
+    } catch (e: UnsatisfiedLinkError) {
+      android.util.Log.w("SherpaOnnx", "sherpa-onnx-c-api not available — Zipvoice TTS will not work: ${e.message}")
+    }
+    // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
   }
 
   private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
-    object : SherpaOnnxSttHelper.NativeSttBridge {
-      override fun nativeSttInitialize(
-        modelDir: String,
-        preferInt8: Boolean,
-        hasPreferInt8: Boolean,
-        modelType: String,
-        debug: Boolean
-      ): HashMap<String, Any>? {
-        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType, debug)
-      }
-
-      override fun nativeSttTranscribe(filePath: String): String {
-        return Companion.nativeSttTranscribe(filePath)
-      }
-
-      override fun nativeSttRelease() {
-        Companion.nativeSttRelease()
-      }
+    { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
+      Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
     },
     NAME
   )
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
-    object : SherpaOnnxTtsHelper.NativeTtsBridge {
-      override fun nativeTtsInitialize(
-        modelDir: String,
-        modelType: String,
-        numThreads: Int,
-        debug: Boolean,
-        noiseScale: Double,
-        noiseScaleW: Double,
-        lengthScale: Double
-      ): HashMap<String, Any>? {
-        return Companion.nativeTtsInitialize(
-          modelDir,
-          modelType,
-          numThreads,
-          debug,
-          noiseScale,
-          noiseScaleW,
-          lengthScale
-        )
-      }
-
-      override fun nativeTtsGenerate(text: String, sid: Int, speed: Float): HashMap<String, Any>? {
-        return Companion.nativeTtsGenerate(text, sid, speed)
-      }
-
-      override fun nativeTtsGenerateWithTimestamps(
-        text: String,
-        sid: Int,
-        speed: Float
-      ): HashMap<String, Any>? {
-        return Companion.nativeTtsGenerateWithTimestamps(text, sid, speed)
-      }
-
-      override fun nativeTtsGenerateStream(text: String, sid: Int, speed: Float): Boolean {
-        return Companion.nativeTtsGenerateStream(text, sid, speed)
-      }
-
-      override fun nativeTtsCancelStream() {
-        Companion.nativeTtsCancelStream()
-      }
-
-      override fun nativeTtsGetSampleRate(): Int {
-        return Companion.nativeTtsGetSampleRate()
-      }
-
-      override fun nativeTtsGetNumSpeakers(): Int {
-        return Companion.nativeTtsGetNumSpeakers()
-      }
-
-      override fun nativeTtsRelease() {
-        Companion.nativeTtsRelease()
-      }
-
-      override fun nativeTtsSaveToWavFile(samples: FloatArray, sampleRate: Int, filePath: String): Boolean {
-        return Companion.nativeTtsSaveToWavFile(samples, sampleRate, filePath)
-      }
-    },
+    { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
     ::emitTtsStreamChunk,
     ::emitTtsStreamError,
     ::emitTtsStreamEnd
@@ -486,32 +428,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @Volatile
     private var instance: SherpaOnnxModule? = null
 
-    @JvmStatic
-    fun onTtsStreamChunk(
-      samples: FloatArray,
-      sampleRate: Int,
-      progress: Float,
-      isFinal: Boolean
-    ) {
-      instance?.emitTtsStreamChunk(samples, sampleRate, progress, isFinal)
-    }
-
-    @JvmStatic
-    fun onTtsStreamError(message: String) {
-      instance?.emitTtsStreamError(message)
-    }
-
-    @JvmStatic
-    fun onTtsStreamEnd(cancelled: Boolean) {
-      instance?.emitTtsStreamEnd(cancelled)
-    }
-
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
+    /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
-    private external fun nativeSttInitialize(
+    private external fun nativeDetectSttModel(
       modelDir: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
@@ -519,63 +442,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       debug: Boolean
     ): HashMap<String, Any>?
 
+    /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
-    private external fun nativeSttTranscribe(filePath: String): String
-
-    @JvmStatic
-    private external fun nativeSttRelease()
-
-    // TTS Native JNI methods
-    @JvmStatic
-    private external fun nativeTtsInitialize(
-      modelDir: String,
-      modelType: String,
-      numThreads: Int,
-      debug: Boolean,
-      noiseScale: Double,
-      noiseScaleW: Double,
-      lengthScale: Double
-    ): java.util.HashMap<String, Any>?
-
-    @JvmStatic
-    private external fun nativeTtsGenerate(
-      text: String,
-      sid: Int,
-      speed: Float
-    ): java.util.HashMap<String, Any>?
-
-    @JvmStatic
-    private external fun nativeTtsGenerateWithTimestamps(
-      text: String,
-      sid: Int,
-      speed: Float
-    ): java.util.HashMap<String, Any>?
-
-    @JvmStatic
-    private external fun nativeTtsGenerateStream(
-      text: String,
-      sid: Int,
-      speed: Float
-    ): Boolean
-
-    @JvmStatic
-    private external fun nativeTtsCancelStream()
-
-    @JvmStatic
-    private external fun nativeTtsGetSampleRate(): Int
-
-    @JvmStatic
-    private external fun nativeTtsGetNumSpeakers(): Int
-
-    @JvmStatic
-    private external fun nativeTtsRelease()
-
-    @JvmStatic
-    private external fun nativeTtsSaveToWavFile(
-      samples: FloatArray,
-      sampleRate: Int,
-      filePath: String
-    ): Boolean
+    private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
 
     /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
      * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.

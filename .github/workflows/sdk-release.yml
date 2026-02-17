@@ -1,543 +1,241 @@
+# SDK Release Orchestrator
+# Triggered by pushing a v* tag (e.g., v1.2.0).
+# Runs lint centrally, then calls sub-workflows in parallel for:
+#   - Android example app build (debug APK)
+#   - NPM package tarball
+#   - Android AAR (Maven artifact)
+# Finally creates a GitHub Release with all artifacts and publishes the AAR to Maven.
+
 name: SDK - Create Release
 
 on:
   push:
     tags:
-      - 'sdk-v*'
+      - 'v*'
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  trigger-builds:
+  # ──────────────────────────────────────────────────────────
+  # 1. Central lint (runs once, sub-workflows skip their own)
+  # ──────────────────────────────────────────────────────────
+  lint:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-      checks: read
-    outputs:
-      ios_run_id: ${{ steps.find-runs.outputs.ios_run_id }}
-      android_run_id: ${{ steps.find-runs.outputs.android_run_id }}
-      sdk_run_id: ${{ steps.find-runs.outputs.sdk_run_id }}
-
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v6
 
-      - name: Extract tag name
-        id: tag
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Tag name: $TAG_NAME"
+      - name: Setup
+        uses: ./.github/actions/setup
 
-      - name: Trigger iOS workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const response = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'sdk-ios.yml',
-              ref: '${{ github.ref }}'
-            });
-            console.log('Triggered iOS workflow');
+      - name: Lint files
+        run: yarn lint
 
-      - name: Trigger Android workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const response = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'sdk-android.yml',
-              ref: '${{ github.ref }}'
-            });
-            console.log('Triggered Android workflow');
+      - name: Typecheck files
+        run: yarn typecheck
 
-      - name: Trigger SDK workflow
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const response = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'sdk-sdk.yml',
-              ref: '${{ github.ref }}'
-            });
-            console.log('Triggered SDK workflow');
+  # ──────────────────────────────────────────────────────────
+  # 2. Parallel builds via reusable workflows (workflow_call)
+  #    Artifacts are shared within this workflow run.
+  # ──────────────────────────────────────────────────────────
 
-      - name: Wait for iOS, Android, SDK workflows to complete
-        id: wait-workflows
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const maxWaitTime = 60 * 60 * 1000; // 60 minutes
-            const checkInterval = 30 * 1000; // 30 seconds
-            const startTime = Date.now();
+  build-android:
+    needs: [lint]
+    uses: ./.github/workflows/sdk-android.yml
+    secrets: inherit
 
-            let iosRunId = null;
-            let androidRunId = null;
-            let sdkRunId = null;
+  build-sdk:
+    needs: [lint]
+    uses: ./.github/workflows/sdk-sdk.yml
+    secrets: inherit
 
-            console.log('Waiting for iOS, Android and SDK workflows to complete...');
+  build-aar:
+    needs: [lint]
+    uses: ./.github/workflows/maven-build.yml
+    secrets: inherit
 
-            while (Date.now() - startTime < maxWaitTime) {
-              // Check iOS workflow
-              if (!iosRunId) {
-                const iosRuns = await github.rest.actions.listWorkflowRuns({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  workflow_id: 'sdk-ios.yml',
-                  ref: '${{ github.ref }}',
-                  per_page: 5
-                });
-
-                const recentIosRun = iosRuns.data.workflow_runs.find(run => 
-                  new Date(run.created_at) >= new Date(startTime - 60000)
-                );
-
-                if (recentIosRun) {
-                  if (recentIosRun.status === 'completed') {
-                    if (recentIosRun.conclusion === 'success') {
-                      iosRunId = recentIosRun.id;
-                      console.log(`iOS workflow completed successfully: ${iosRunId}`);
-                    } else {
-                      throw new Error(`iOS workflow failed with conclusion: ${recentIosRun.conclusion}`);
-                    }
-                  } else {
-                    console.log(`iOS workflow status: ${recentIosRun.status} (run ${recentIosRun.id})`);
-                  }
-                }
-              }
-
-              // Check Android workflow
-              if (!androidRunId) {
-                const androidRuns = await github.rest.actions.listWorkflowRuns({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  workflow_id: 'sdk-android.yml',
-                  ref: '${{ github.ref }}',
-                  per_page: 5
-                });
-
-                const recentAndroidRun = androidRuns.data.workflow_runs.find(run => 
-                  new Date(run.created_at) >= new Date(startTime - 60000)
-                );
-
-                if (recentAndroidRun) {
-                  if (recentAndroidRun.status === 'completed') {
-                    if (recentAndroidRun.conclusion === 'success') {
-                      androidRunId = recentAndroidRun.id;
-                      console.log(`Android workflow completed successfully: ${androidRunId}`);
-                    } else {
-                      throw new Error(`Android workflow failed with conclusion: ${recentAndroidRun.conclusion}`);
-                    }
-                  } else {
-                    console.log(`Android workflow status: ${recentAndroidRun.status} (run ${recentAndroidRun.id})`);
-                  }
-                }
-              }
-
-              // Check SDK workflow
-              if (!sdkRunId) {
-                const sdkRuns = await github.rest.actions.listWorkflowRuns({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  workflow_id: 'sdk-sdk.yml',
-                  ref: '${{ github.ref }}',
-                  per_page: 5
-                });
-
-                const recentSdkRun = sdkRuns.data.workflow_runs.find(run => 
-                  new Date(run.created_at) >= new Date(startTime - 60000)
-                );
-
-                if (recentSdkRun) {
-                  if (recentSdkRun.status === 'completed') {
-                    if (recentSdkRun.conclusion === 'success') {
-                      sdkRunId = recentSdkRun.id;
-                      console.log(`SDK workflow completed successfully: ${sdkRunId}`);
-                    } else {
-                      throw new Error(`SDK workflow failed with conclusion: ${recentSdkRun.conclusion}`);
-                    }
-                  } else {
-                    console.log(`SDK workflow status: ${recentSdkRun.status} (run ${recentSdkRun.id})`);
-                  }
-                }
-              }
-
-              // If all workflows are complete, break
-              if (iosRunId && androidRunId && sdkRunId) {
-                break;
-              }
-
-              // Wait before next check
-              await new Promise(resolve => setTimeout(resolve, checkInterval));
-            }
-
-            if (!iosRunId) {
-              throw new Error('iOS workflow did not complete within timeout period');
-            }
-
-            if (!androidRunId) {
-              throw new Error('Android workflow did not complete within timeout period');
-            }
-
-            if (!sdkRunId) {
-              throw new Error('SDK workflow did not complete within timeout period');
-            }
-
-            core.setOutput('ios_run_id', iosRunId);
-            core.setOutput('android_run_id', androidRunId);
-            core.setOutput('sdk_run_id', sdkRunId);
-            console.log(`\nAll workflows completed successfully!`);
-            console.log(`  iOS run ID: ${iosRunId}`);
-            console.log(`  Android run ID: ${androidRunId}`);
-            console.log(`  SDK run ID: ${sdkRunId}`);
-
-      # DISABLED: For debugging purposes - use existing workflow runs instead of waiting
-      # Set if: false to true and comment out the "Wait for iOS and Android workflows to complete", "Trigger iOS workflow" and "Trigger Android workflow" steps
-      # to use artifacts from workflows that already ran with this tag
-      - name: Find existing iOS and Android workflow runs
-        id: find-existing-runs
-        if: false
-        uses: actions/github-script@v7
-        with:
-          script: |
-            console.log('Finding existing workflow runs for tag: ${{ github.ref }}');
-
-            // Find iOS workflow run
-            const iosRuns = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'ios.yml',
-              ref: '${{ github.ref }}',
-              per_page: 10
-            });
-
-            const completedIosRun = iosRuns.data.workflow_runs.find(run => 
-              run.status === 'completed' && run.conclusion === 'success'
-            );
-
-            if (!completedIosRun) {
-              throw new Error('No completed iOS workflow run found for this tag');
-            }
-
-            console.log(`Found iOS workflow run: ${completedIosRun.id} (${completedIosRun.created_at})`);
-
-            // Find Android workflow run
-            const androidRuns = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'android.yml',
-              ref: '${{ github.ref }}',
-              per_page: 10
-            });
-
-            const completedAndroidRun = androidRuns.data.workflow_runs.find(run => 
-              run.status === 'completed' && run.conclusion === 'success'
-            );
-
-            if (!completedAndroidRun) {
-              throw new Error('No completed Android workflow run found for this tag');
-            }
-
-            console.log(`Found Android workflow run: ${completedAndroidRun.id} (${completedAndroidRun.created_at})`);
-
-            core.setOutput('ios_run_id', completedIosRun.id);
-            core.setOutput('android_run_id', completedAndroidRun.id);
-            console.log(`\nUsing existing workflow runs:`);
-            console.log(`  iOS run ID: ${completedIosRun.id}`);
-            console.log(`  Android run ID: ${completedAndroidRun.id}`);
-
-      - name: Output workflow run IDs
-        id: find-runs
-        run: |
-          echo "ios_run_id=${{ steps.wait-workflows.outputs.ios_run_id }}" >> $GITHUB_OUTPUT
-          echo "android_run_id=${{ steps.wait-workflows.outputs.android_run_id }}" >> $GITHUB_OUTPUT
-          echo "sdk_run_id=${{ steps.wait-workflows.outputs.sdk_run_id }}" >> $GITHUB_OUTPUT
-
-  create-release:
+  # ──────────────────────────────────────────────────────────
+  # 3. Publish AAR to Maven repository
+  # ──────────────────────────────────────────────────────────
+  publish-maven:
     runs-on: ubuntu-latest
-    needs: trigger-builds
+    needs: [build-aar]
     permissions:
       contents: write
-      actions: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract tag name
+      - name: Determine version from tag
+        id: vars
+        run: |
+          TAG=${GITHUB_REF##*/}
+          VERSION=${TAG#v}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Tag: $TAG -> Version: $VERSION"
+
+      - name: Download AAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sherpa-onnx-android-aar
+          path: build-artifact
+
+      - name: Verify AAR exists
+        run: |
+          echo "AAR artifacts:"
+          ls -lh build-artifact/
+          AAR=$(find build-artifact -name "*.aar" -type f | head -1)
+          if [ -z "$AAR" ]; then
+            echo "Error: No AAR file found in build-artifact/"
+            exit 1
+          fi
+          echo "Found AAR: $AAR"
+
+      - name: Checkout Maven repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'XDcobra/maven'
+          path: maven-repo
+          token: ${{ secrets.MAVEN_REPO_PAT }}
+
+      - name: Ensure existing metadata checksums
+        env:
+          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
+        run: |
+          set -e
+          META="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/maven-metadata.xml"
+          if [ -f "$META" ]; then
+            sha1sum "$META" | awk '{print $1}' > "$META.sha1"
+            md5sum "$META" | awk '{print $1}' > "$META.md5"
+            echo "Generated checksums for existing metadata"
+          else
+            echo "No existing maven-metadata.xml"
+          fi
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+
+      - name: Deploy AAR to Maven repository
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -e
+          AAR=$(find build-artifact -name "*.aar" -type f | head -1)
+
+          mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
+            -DgroupId=com.xdcobra.sherpa \
+            -DartifactId=sherpa-onnx-react-native \
+            -Dversion=${VERSION} \
+            -Dpackaging=aar \
+            -Dfile="${AAR}" \
+            -DgeneratePom=true \
+            -Durl="file://$GITHUB_WORKSPACE/maven-repo"
+
+      - name: Copy AAR checksums to Maven repository
+        env:
+          GROUP_PATH: com/xdcobra/sherpa/sherpa-onnx-react-native
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -e
+          ART_DIR="$GITHUB_WORKSPACE/maven-repo/${GROUP_PATH}/${VERSION}"
+          mkdir -p "$ART_DIR"
+          ART_NAME="sherpa-onnx-react-native-${VERSION}.aar"
+          for ext in sha1 md5; do
+            SRC="$GITHUB_WORKSPACE/build-artifact/${ART_NAME}.${ext}"
+            if [ -f "$SRC" ]; then
+              cp "$SRC" "$ART_DIR/$(basename "$SRC")"
+            else
+              echo "No precomputed checksum for ${ART_NAME}.${ext}; skipping"
+            fi
+          done
+
+      - name: Commit and push to Maven repository
+        run: |
+          set -e
+          cd maven-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit" >&2
+            exit 1
+          fi
+          git commit -m "Publish sherpa-onnx-react-native:${{ steps.vars.outputs.version }}"
+          git push origin HEAD:main
+
+  # ──────────────────────────────────────────────────────────
+  # 4. Create GitHub Release with all artifacts
+  # ──────────────────────────────────────────────────────────
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [build-android, build-sdk, build-aar, publish-maven]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
         id: tag
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Tag name: $TAG_NAME"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Tag: $TAG_NAME, Version: $VERSION"
 
-      - name: List available artifacts for iOS run
-        uses: actions/github-script@v7
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          script: |
-            const iosRunId = '${{ needs.trigger-builds.outputs.ios_run_id }}';
-            const expectedTag = '${{ github.ref }}';
-            const expectedTagName = expectedTag.replace('refs/tags/', '');
+          path: artifacts
 
-            console.log(`Checking artifacts for iOS run ID: ${iosRunId}`);
-            console.log(`Expected tag: ${expectedTagName} (${expectedTag})`);
-
-            // Get workflow run details to validate it matches the tag
-            const run = await github.rest.actions.getWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(iosRunId)
-            });
-
-            console.log(`\nWorkflow run details:`);
-            console.log(`  - Head branch/ref: ${run.data.head_branch || run.data.head_repository?.default_branch || 'N/A'}`);
-            console.log(`  - Head SHA: ${run.data.head_sha}`);
-            console.log(`  - Status: ${run.data.status}, Conclusion: ${run.data.conclusion}`);
-            console.log(`  - Created: ${run.data.created_at}`);
-
-            // Validate that the run is for the correct tag
-            // Note: head_branch might be null for tag-triggered runs, so we check head_sha matches
-            const currentSha = '${{ github.sha }}';
-            if (run.data.head_sha !== currentSha) {
-              console.warn(`Warning: Run head SHA (${run.data.head_sha}) does not match current SHA (${currentSha})`);
-            } else {
-              console.log(`Run SHA matches current tag SHA`);
-            }
-
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(iosRunId)
-            });
-
-            console.log(`\nFound ${artifacts.data.artifacts.length} artifact(s):`);
-            artifacts.data.artifacts.forEach(a => {
-              console.log(`  - Name: "${a.name}" (ID: ${a.id}, Size: ${a.size_in_bytes} bytes, Created: ${a.created_at})`);
-            });
-
-            const iosArtifact = artifacts.data.artifacts.find(a => a.name === 'ios-app-bundle');
-            if (!iosArtifact) {
-              console.error('ERROR: Artifact "ios-app-bundle" not found!');
-              console.error('Available artifact names:', artifacts.data.artifacts.map(a => a.name).join(', '));
-              throw new Error(`Artifact "ios-app-bundle" not found in run ${iosRunId} for tag ${expectedTagName}`);
-            } else {
-              console.log(`Found ios-app-bundle artifact (ID: ${iosArtifact.id})`);
-            }
-
-      - name: Download iOS app bundle artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: ios-app-bundle
-          run-id: ${{ needs.trigger-builds.outputs.ios_run_id }}
-          path: artifacts/ios
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify iOS artifact
+      - name: List downloaded artifacts
         run: |
-          echo "Verifying iOS artifact..."
-          if [ ! -d "artifacts/ios" ]; then
-            echo "Error: artifacts/ios directory not found"
-            exit 1
-          fi
-
-          echo "Contents of artifacts/ios:"
-          find artifacts/ios -type f -name "*.ipa" || find artifacts/ios -type d -name "*.app" || ls -la artifacts/ios
-
-          IPA_COUNT=$(find artifacts/ios -name "*.ipa" -type f | wc -l)
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "Warning: No IPA file found in artifacts/ios"
-          else
-            echo "Found $IPA_COUNT IPA file(s)"
-          fi
-
-      - name: List available artifacts for Android run
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const androidRunId = '${{ needs.trigger-builds.outputs.android_run_id }}';
-            const expectedTag = '${{ github.ref }}';
-            const expectedTagName = expectedTag.replace('refs/tags/', '');
-
-            console.log(`Checking artifacts for Android run ID: ${androidRunId}`);
-            console.log(`Expected tag: ${expectedTagName} (${expectedTag})`);
-
-            // Get workflow run details to validate it matches the tag
-            const run = await github.rest.actions.getWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(androidRunId)
-            });
-
-            console.log(`\nWorkflow run details:`);
-            console.log(`  - Head branch/ref: ${run.data.head_branch || run.data.head_repository?.default_branch || 'N/A'}`);
-            console.log(`  - Head SHA: ${run.data.head_sha}`);
-            console.log(`  - Status: ${run.data.status}, Conclusion: ${run.data.conclusion}`);
-            console.log(`  - Created: ${run.data.created_at}`);
-
-            // Validate that the run is for the correct tag
-            const currentSha = '${{ github.sha }}';
-            if (run.data.head_sha !== currentSha) {
-              console.warn(`Warning: Run head SHA (${run.data.head_sha}) does not match current SHA (${currentSha})`);
-            } else {
-              console.log(`Run SHA matches current tag SHA`);
-            }
-
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(androidRunId)
-            });
-
-            console.log(`\nFound ${artifacts.data.artifacts.length} artifact(s):`);
-            artifacts.data.artifacts.forEach(a => {
-              console.log(`  - Name: "${a.name}" (ID: ${a.id}, Size: ${a.size_in_bytes} bytes, Created: ${a.created_at})`);
-            });
-
-            const androidArtifact = artifacts.data.artifacts.find(a => a.name === 'android-debug-apk');
-            if (!androidArtifact) {
-              console.error('ERROR: Artifact "android-debug-apk" not found!');
-              console.error('Available artifact names:', artifacts.data.artifacts.map(a => a.name).join(', '));
-              throw new Error(`Artifact "android-debug-apk" not found in run ${androidRunId} for tag ${expectedTagName}`);
-            } else {
-              console.log(`Found android-debug-apk artifact (ID: ${androidArtifact.id})`);
-            }
-
-      - name: List available artifacts for SDK run
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const sdkRunId = '${{ needs.trigger-builds.outputs.sdk_run_id }}';
-            const expectedTag = '${{ github.ref }}';
-            const expectedTagName = expectedTag.replace('refs/tags/', '');
-
-            console.log(`Checking artifacts for SDK run ID: ${sdkRunId}`);
-
-            const run = await github.rest.actions.getWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(sdkRunId)
-            });
-
-            console.log(`  - Head SHA: ${run.data.head_sha}`);
-            console.log(`  - Status: ${run.data.status}, Conclusion: ${run.data.conclusion}`);
-
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: parseInt(sdkRunId)
-            });
-
-            console.log(`\nFound ${artifacts.data.artifacts.length} artifact(s):`);
-            artifacts.data.artifacts.forEach(a => {
-              console.log(`  - Name: "${a.name}" (ID: ${a.id}, Size: ${a.size_in_bytes} bytes, Created: ${a.created_at})`);
-            });
-
-            const sdkArtifact = artifacts.data.artifacts.find(a => a.name === 'sdk-package');
-            if (!sdkArtifact) {
-              console.error('ERROR: Artifact "sdk-package" not found!');
-              console.error('Available artifact names:', artifacts.data.artifacts.map(a => a.name).join(', '));
-              throw new Error(`Artifact "sdk-package" not found in run ${sdkRunId} for tag ${expectedTagName}`);
-            } else {
-              console.log(`Found sdk-package artifact (ID: ${sdkArtifact.id})`);
-            }
-
-      - name: Download Android APK artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: android-debug-apk
-          run-id: ${{ needs.trigger-builds.outputs.android_run_id }}
-          path: artifacts/android
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download SDK package artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: sdk-package
-          run-id: ${{ needs.trigger-builds.outputs.sdk_run_id }}
-          path: artifacts/sdk
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify and organize Android artifact
-        run: |
-          echo "Verifying Android artifact..."
-          if [ ! -d "artifacts/android" ]; then
-            echo "Error: artifacts/android directory not found"
-            exit 1
-          fi
-
-          cd artifacts/android
-
-          echo "Contents of artifacts/android:"
-          ls -la || echo "Directory is empty"
-
-          # The APK might be in a subdirectory, find and move it to root if needed
-          if [ -f "app-debug.apk" ]; then
-            echo "Found APK at root"
-          else
-            echo "Searching for APK files..."
-            find . -name "*.apk" -type f
-            
-            # Try to find and copy the APK to root
-            APK_FILE=$(find . -name "*.apk" -type f | head -1)
-            if [ -n "$APK_FILE" ]; then
-              # Get just the filename
-              APK_NAME=$(basename "$APK_FILE")
-              if [ "$APK_NAME" != "app-debug.apk" ]; then
-                cp "$APK_FILE" app-debug.apk
-                echo "Copied APK: $APK_FILE -> app-debug.apk"
-              fi
-            else
-              echo "Warning: No APK file found in artifacts/android"
-            fi
-          fi
-
-          APK_COUNT=$(find . -name "*.apk" -type f | wc -l)
-          echo "Found $APK_COUNT APK file(s)"
-          cd ../..
+          echo "All downloaded artifacts:"
+          find artifacts -type f | sort
 
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
 
-          # Find and copy iOS IPA file (already a valid .ipa archive)
-          IPA_FILE=$(find artifacts/ios -name "*.ipa" -type f | head -1)
-          if [ -n "$IPA_FILE" ]; then
-            cp "$IPA_FILE" release-assets/SherpaOnnxExample.ipa
-            echo "[OK] iOS IPA copied from: $IPA_FILE"
-          else
-            echo "Warning: iOS IPA file not found in artifacts"
-            echo "Contents of artifacts/ios:"
-            find artifacts/ios -type f || echo "No files found"
-          fi
-
-          # Copy Android APK (check multiple possible locations)
-          ANDROID_APK=$(find artifacts/android -name "*.apk" -type f | head -1)
+          # Android debug APK
+          ANDROID_APK=$(find artifacts/android-debug-apk -name "*.apk" -type f 2>/dev/null | head -1)
           if [ -n "$ANDROID_APK" ]; then
             cp "$ANDROID_APK" release-assets/SherpaOnnxExample-android-debug.apk
-            echo "[OK] Android APK copied from: $ANDROID_APK"
+            echo "[OK] Android APK: $ANDROID_APK"
           else
-            echo "Warning: Android APK not found in artifacts"
-            echo "Contents of artifacts/android:"
-            find artifacts/android -type f || echo "No files found"
+            echo "[WARN] Android APK not found"
           fi
 
-          # Copy SDK package tarball (from sdk workflow)
-          SDK_TGZ=$(find artifacts/sdk -name "*.tgz" -type f | head -1)
+          # SDK NPM tarball
+          SDK_TGZ=$(find artifacts/sdk-package -name "*.tgz" -type f 2>/dev/null | head -1)
           if [ -n "$SDK_TGZ" ]; then
             SDK_NAME=$(basename "$SDK_TGZ")
             cp "$SDK_TGZ" "release-assets/$SDK_NAME"
-            echo "[OK] SDK package copied from: $SDK_TGZ -> release-assets/$SDK_NAME"
+            echo "[OK] SDK package: $SDK_TGZ"
           else
-            echo "Warning: SDK package (.tgz) not found in artifacts/sdk"
-            echo "Contents of artifacts/sdk:"
-            find artifacts/sdk -type f || echo "No files found"
+            echo "[WARN] SDK package (.tgz) not found"
           fi
 
-          # List release assets
+          # Android AAR (from Maven build)
+          AAR_FILE=$(find artifacts/sherpa-onnx-android-aar -name "*.aar" -type f 2>/dev/null | head -1)
+          if [ -n "$AAR_FILE" ]; then
+            AAR_NAME="sherpa-onnx-react-native-${{ steps.tag.outputs.version }}.aar"
+            cp "$AAR_FILE" "release-assets/$AAR_NAME"
+            echo "[OK] AAR: $AAR_FILE -> $AAR_NAME"
+          else
+            echo "[WARN] AAR file not found"
+          fi
+
           echo ""
-          echo "Release assets prepared:"
+          echo "Release assets:"
           ls -lh release-assets/
 
       - name: Create GitHub Release
@@ -553,38 +251,37 @@ jobs:
             - **npm:** `npm install react-native-sherpa-onnx`
             - **yarn:** `yarn add react-native-sherpa-onnx`
 
-            ### Example Apps
+            ### Artifacts
 
-            #### iOS
-            - **IPA**: `SherpaOnnxExample.ipa` - Debug build for testing on simulator/device
+            | Artifact | Description |
+            |----------|-------------|
+            | `react-native-sherpa-onnx-*.tgz` | NPM package tarball (install via `yarn add <file>` or `npm install <file>`) |
+            | `sherpa-onnx-react-native-*.aar` | Android AAR library (also published to Maven) |
+            | `SherpaOnnxExample-android-debug.apk` | Android example app (debug build) |
 
-            #### Android
-            - **Debug APK**: `SherpaOnnxExample-android-debug.apk` - Debug build for testing
+            ### Maven
 
-            ---
+            The AAR is published to the [Maven repository](https://github.com/XDcobra/maven):
 
-            ### SDK Package
-            - **NPM tarball**: `react-native-sherpa-onnx-<version>.tgz` - Installable package archive (use `yarn add <file>` or `npm install <file>`)
-
-            ---
+            ```gradle
+            repositories {
+                maven { url 'https://xdcobra.github.io/maven' }
+            }
+            dependencies {
+                implementation 'com.xdcobra.sherpa:sherpa-onnx-react-native:${{ steps.tag.outputs.version }}'
+            }
+            ```
 
             ### iOS Framework
-            **Good news**: For a successfull build, the sherpa-onxx ios framework is required. Fortunately the framework is automatically downloaded during `pod install` on first use. No manual setup needed!
 
-
-            In case you need to manually manage the framework, check out these instructions on how to do so:
-            - [Download Latest Framework Release](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework)
-            - [iOS Setup Instructions](https://github.com/XDcobra/react-native-sherpa-onnx#ios)
-
-            **Note:** The iOS Framework is NOT included in this release. It is published separately with tags like `framework-v1.12.24`.
+            The iOS framework is automatically downloaded during `pod install`. No manual setup needed.
+            For manual management: [Download Framework](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework)
 
             ---
 
             Built from commit: ${{ github.sha }}
           files: |
-            release-assets/*.ipa
-            release-assets/*.apk
-            release-assets/*.tgz
+            release-assets/*
           draft: false
           prerelease: false
         env:
