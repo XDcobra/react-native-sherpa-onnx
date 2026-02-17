@@ -72,11 +72,12 @@ Pod::Spec.new do |s|
   # Use vendored_frameworks for the XCFramework
   s.vendored_frameworks = 'ios/Frameworks/sherpa_onnx.xcframework'
   
-  # Preserve headers and config files
-  s.preserve_paths = [
-    'ios/SherpaOnnx.xcconfig',
-    'ios/include/**/*'
-  ]
+  # Explicit library search paths and link flags so the app target actually links
+  # libsherpa-onnx.a (C++ API). CocoaPods does not always add -l for static libs inside
+  # xcframeworks, which can cause "Undefined symbols: sherpa_onnx::cxx::*" on iOS/simulator.
+  xcframework_root = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
+  simulator_slice = File.join(xcframework_root, 'ios-arm64_x86_64-simulator')
+  device_slice = File.join(xcframework_root, 'ios-arm64')
   
   s.pod_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
@@ -84,12 +85,24 @@ Pod::Spec.new do |s|
     'HEADER_SEARCH_PATHS' => "$(inherited) \"#{ios_include_path}\" \"#{libarchive_dir}\" \"#{ios_path}\"",
     # Quotes in macro value must be escaped so #include PLATFORM_CONFIG_H becomes #include "libarchive_darwin_config.h"
     'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
+    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]' => "$(inherited) \"#{device_slice}\"",
+    'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]' => "$(inherited) \"#{simulator_slice}\"",
+    'OTHER_LDFLAGS' => '$(inherited) -lsherpa-onnx',
   }
   
   s.user_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY' => 'libc++',
+    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]' => "$(inherited) \"#{device_slice}\"",
+    'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]' => "$(inherited) \"#{simulator_slice}\"",
+    'OTHER_LDFLAGS' => '$(inherited) -lsherpa-onnx',
   }
+  
+  # Preserve headers and config files
+  s.preserve_paths = [
+    'ios/SherpaOnnx.xcconfig',
+    'ios/include/**/*'
+  ]
   
   install_modules_dependencies(s)
 end
