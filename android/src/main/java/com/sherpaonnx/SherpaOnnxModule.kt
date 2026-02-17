@@ -28,22 +28,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
     object : SherpaOnnxSttHelper.NativeSttBridge {
-      override fun nativeSttInitialize(
+      override fun detectSttModel(
         modelDir: String,
         preferInt8: Boolean,
         hasPreferInt8: Boolean,
         modelType: String,
         debug: Boolean
       ): HashMap<String, Any>? {
-        return Companion.nativeSttInitialize(modelDir, preferInt8, hasPreferInt8, modelType, debug)
-      }
-
-      override fun nativeSttTranscribe(filePath: String): String {
-        return Companion.nativeSttTranscribe(filePath)
-      }
-
-      override fun nativeSttRelease() {
-        Companion.nativeSttRelease()
+        return Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
       }
     },
     NAME
@@ -531,22 +523,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
 
-    @JvmStatic
-    private external fun nativeSttInitialize(
-      modelDir: String,
-      preferInt8: Boolean,
-      hasPreferInt8: Boolean,
-      modelType: String,
-      debug: Boolean
-    ): HashMap<String, Any>?
-
-    @JvmStatic
-    private external fun nativeSttTranscribe(filePath: String): String
-
-    @JvmStatic
-    private external fun nativeSttRelease()
-
-    // TTS Native JNI methods
+    // TTS Native JNI methods (STT uses Kotlin API; detection via nativeDetectSttModel above)
     @JvmStatic
     private external fun nativeTtsInitialize(
       modelDir: String,
