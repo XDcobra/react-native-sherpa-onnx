@@ -282,6 +282,86 @@ function downloadIOSFramework() {
 }
 
 /**
+ * Step 3: Copy FFmpeg prebuilt .so files to android/src/main/jniLibs/
+ *
+ * The FFmpeg prebuilts must be built first (third_party/ffmpeg_prebuilt/build_ffmpeg.sh).
+ * This step is non-fatal: if prebuilts are not built yet, it warns and continues.
+ * CI workflows (sdk-android.yml, maven-build.yml) build FFmpeg from source before this.
+ */
+function copyFfmpegPrebuilts() {
+  log('Step 3: Copying FFmpeg prebuilt .so files...', 'info');
+
+  const prebuiltRoot = path.join(
+    __dirname,
+    '..',
+    'third_party',
+    'ffmpeg_prebuilt',
+    'android'
+  );
+  const jniLibsRoot = path.join(
+    __dirname,
+    '..',
+    'android',
+    'src',
+    'main',
+    'jniLibs'
+  );
+
+  // Check if any prebuilt ABI directory exists with .so files
+  const abis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'];
+  const hasPrebuilts = abis.some((abi) => {
+    const libDir = path.join(prebuiltRoot, abi, 'lib');
+    return fs.existsSync(libDir);
+  });
+
+  if (!hasPrebuilts) {
+    log('FFmpeg prebuilts not found at ' + prebuiltRoot, 'warning');
+    log(
+      'Build them with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.sh',
+      'warning'
+    );
+    log(
+      'Then run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js',
+      'warning'
+    );
+    return true; // non-fatal
+  }
+
+  // Check if jniLibs already populated (idempotent)
+  const sampleSo = path.join(jniLibsRoot, 'arm64-v8a', 'libavcodec.so');
+  if (fs.existsSync(sampleSo)) {
+    log('FFmpeg .so files already present in jniLibs/', 'success');
+    return true;
+  }
+
+  try {
+    const copyScript = path.join(
+      __dirname,
+      '..',
+      'third_party',
+      'ffmpeg_prebuilt',
+      'copy_prebuilts_to_sdk.js'
+    );
+    const copyResult = runCommand(`node "${copyScript}"`, {
+      allowFailure: true,
+    });
+
+    if (copyResult.ok) {
+      log('FFmpeg prebuilt .so files copied to jniLibs/', 'success');
+    } else {
+      log(
+        'Warning: FFmpeg prebuilt copy had issues; check output above',
+        'warning'
+      );
+    }
+    return true;
+  } catch {
+    log('Warning: FFmpeg prebuilt copy failed (non-fatal)', 'warning');
+    return true; // non-fatal — user may not have built FFmpeg yet
+  }
+}
+
+/**
  * Main setup function
  */
 function setup() {
@@ -304,6 +384,11 @@ function setup() {
   if (!downloadIOSFramework()) {
     success = false;
   }
+
+  console.log('');
+
+  // Step 3: Copy FFmpeg prebuilt .so to jniLibs (non-fatal if prebuilts not built yet)
+  copyFfmpegPrebuilts();
 
   console.log('');
   if (success) {

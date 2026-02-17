@@ -54,6 +54,7 @@ jobs:
     # Run after lint when standalone; skip lint check when called via workflow_call (lint is skipped)
     needs: [lint]
     if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
+    timeout-minutes: 60
 
     env:
       JAVA_VERSION: '17'
@@ -62,6 +63,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Setup
         uses: ./.github/actions/setup
@@ -83,6 +86,51 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      # ── FFmpeg prebuilts (cached across runs) ──────────────────────────
+      - name: Cache FFmpeg prebuilts
+        uses: actions/cache@v4
+        id: ffmpeg-cache
+        with:
+          path: |
+            third_party/ffmpeg_prebuilt/android
+            third_party/shine_prebuilt/android
+          key: ffmpeg-android-prebuilt-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh') }}
+
+      - name: Install FFmpeg build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libunistring-dev libaom-dev libdav1d-dev
+
+      - name: Build libshine
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine.sh
+          ./build_shine.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (with libshine)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg.sh
+          ./build_ffmpeg.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Copy FFmpeg prebuilts to jniLibs
+        run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
+
+      # ── Verification ───────────────────────────────────────────────────
       - name: Verify required files exist
         run: |
           echo "Verifying required files..."
@@ -104,6 +152,19 @@ jobs:
             exit 1
           fi
           echo "[OK] android/build.gradle found"
+
+          # Verify FFmpeg prebuilts and jniLibs
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ ! -d "third_party/ffmpeg_prebuilt/android/${abi}/lib" ]; then
+              echo "Error: FFmpeg prebuilt libs missing for ${abi}"
+              exit 1
+            fi
+            if [ ! -f "android/src/main/jniLibs/${abi}/libavcodec.so" ]; then
+              echo "Error: FFmpeg .so missing in jniLibs/${abi}/"
+              exit 1
+            fi
+          done
+          echo "[OK] FFmpeg prebuilts and jniLibs verified"
 
           if [ ! -f "example/android/build.gradle" ]; then
             echo "Error: example/android/build.gradle not found"
