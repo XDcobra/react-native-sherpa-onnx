@@ -20,7 +20,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: UnsatisfiedLinkError) {
       throw RuntimeException("Failed to load sherpa-onnx-jni (from sherpa-onnx AAR): ${e.message}", e)
     }
-    // Then load our library (Archive, FFmpeg, model detection)
+    // Load sherpa-onnx C-API (from AAR; needed at runtime only if Zipvoice TTS is used).
+    // Non-fatal: if the .so is missing, Zipvoice init will fail with a clear error later.
+    try {
+      System.loadLibrary("sherpa-onnx-c-api")
+    } catch (e: UnsatisfiedLinkError) {
+      android.util.Log.w("SherpaOnnx", "sherpa-onnx-c-api not available — Zipvoice TTS will not work: ${e.message}")
+    }
+    // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
   }

@@ -87,7 +87,9 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        arguments "-DANDROID_STL=c++_shared"
+        arguments "-DANDROID_STL=c++_shared",
+                  // Path to sherpa-onnx native libs extracted from AAR (includes libsherpa-onnx-c-api.so for Zipvoice C-API)
+                  "-DSHERPA_ONNX_EXTRACTED_LIBS=${buildDir}/extracted_native_libs/jni".toString()
       }
     }
 
@@ -179,13 +181,10 @@ repositories {
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
 dependencies {
-  // When inside a React Native app: use the app's react-android version.
-  // When building standalone AAR: use a fixed version so the Kotlin/React types compile (your sources reference them).
-  if (isStandaloneAarBuild) {
-    implementation "com.facebook.react:react-android:0.83.0"
-  } else {
-    implementation "com.facebook.react:react-android"
-  }
+  // React Native dependency: explicit version ensures IDE (VS Code Kotlin LSP) and standalone
+  // AAR builds can resolve com.facebook.react types. When consumed by a React Native app,
+  // Gradle's dependency resolution picks the app's react-android version (typically higher).
+  implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
   // sherpa-onnx prebuilt AAR from JitPack

@@ -39,7 +39,7 @@ if(NOT EXISTS "${FFMPEG_ABI_LIB}")
 endif()
 message(STATUS "FFmpeg prebuilts found: ${FFMPEG_PREBUILT_BASE}")
 
-# Source files (Archive, FFmpeg, model detection only; STT/TTS use Kotlin API)
+# Source files (Archive, FFmpeg, model detection, Zipvoice C-API JNI; STT/TTS use Kotlin API)
 set(SOURCES
     jni/sherpa-onnx-module-jni.cpp
     jni/sherpa-onnx-archive-jni.cpp
@@ -47,6 +47,7 @@ set(SOURCES
     jni/sherpa-onnx-model-detect-helper.cpp
     jni/sherpa-onnx-model-detect-stt.cpp
     jni/sherpa-onnx-model-detect-tts.cpp
+    jni/sherpa-onnx-tts-zipvoice-jni.cpp
     jni/sherpa-onnx-archive-helper.cpp
     crypto/sha256.cpp
 )
@@ -62,15 +63,35 @@ add_library(sherpaonnx SHARED
     ${SOURCES}
 )
 
-# Include directories (must be after add_library); no sherpa-onnx headers (STT/TTS use Kotlin API)
+# sherpa-onnx C-API shared library (from AAR, extracted by Gradle extractNativeLibs task).
+# Used by Zipvoice TTS JNI wrapper; the Kotlin API does not expose Zipvoice.
+if(SHERPA_ONNX_EXTRACTED_LIBS)
+    set(SHERPA_ONNX_C_API_SO "${SHERPA_ONNX_EXTRACTED_LIBS}/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
+    if(EXISTS "${SHERPA_ONNX_C_API_SO}")
+        add_library(sherpa-onnx-c-api SHARED IMPORTED)
+        set_target_properties(sherpa-onnx-c-api PROPERTIES
+            IMPORTED_LOCATION "${SHERPA_ONNX_C_API_SO}"
+        )
+        message(STATUS "sherpa-onnx C-API found: ${SHERPA_ONNX_C_API_SO}")
+    else()
+        message(WARNING "sherpa-onnx C-API not found at ${SHERPA_ONNX_C_API_SO}. "
+                        "Zipvoice TTS will not be available. "
+                        "Ensure extractNativeLibs ran before CMake configure.")
+    endif()
+else()
+    message(WARNING "SHERPA_ONNX_EXTRACTED_LIBS not set. Zipvoice TTS will not be available.")
+endif()
+
+# Include directories (must be after add_library)
 target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${FFMPEG_PREBUILT_BASE}/include
 )
 target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
-# Link libraries (no sherpa-onnx/onnxruntime; STT/TTS use Kotlin API from AAR)
+# Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
 target_link_libraries(sherpaonnx
     archive
     avcodec
@@ -80,6 +101,7 @@ target_link_libraries(sherpaonnx
     swresample
     log
     android
+    $<TARGET_NAME_IF_EXISTS:sherpa-onnx-c-api>
 )
 target_link_directories(sherpaonnx PRIVATE ${FFMPEG_ABI_LIB})
 
