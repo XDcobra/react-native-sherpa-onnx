@@ -69,6 +69,12 @@ jobs:
           add-to-path: true
 
       # ── FFmpeg prebuilts (cached across runs) ──────────────────────────
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Cache FFmpeg prebuilts
         uses: actions/cache@v4
         id: ffmpeg-cache
@@ -76,7 +82,7 @@ jobs:
           path: |
             third_party/ffmpeg_prebuilt/android
             third_party/shine_prebuilt/android
-          key: ffmpeg-android-prebuilt-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh') }}
+          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh') }}
 
       - name: Install FFmpeg build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
