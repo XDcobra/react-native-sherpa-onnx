@@ -87,6 +87,9 @@ android {
     minSdkVersion getExtOrDefault("minSdkVersion")
     targetSdkVersion getExtOrDefault("targetSdkVersion")
 
+    // ProGuard rules to preserve classes/methods called from JNI
+    consumerProguardFiles 'proguard-rules.pro'
+
     // NDK configuration
     ndkVersion getExtOrDefault("ndkVersion")
     externalNativeBuild {
