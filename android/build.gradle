@@ -80,8 +80,12 @@ android {
     sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
   }
 
-  // Standalone AAR codegen output. For app builds, RNGP generates codegen (includesGeneratedCode=false).
-  sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
+  // Codegen Java output: RNGP uses flat path; standalone uses nested path (script behaviour with includesGeneratedCode=false).
+  if (isStandaloneAarBuild) {
+    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/android/app/build/generated/source/codegen/java")
+  } else {
+    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
+  }
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
@@ -285,14 +289,16 @@ if (isStandaloneAarBuild) {
   }
 
   def libraryRoot = project.projectDir.parentFile
+  // -o is the base; with includesGeneratedCode=false the script writes to <base>/android/app/build/generated/source/codegen/
   def outDir = file("${project.buildDir}/generated/source/codegen")
+  def codegenOutputBase = file("${project.buildDir}/generated/source/codegen/android/app/build/generated/source/codegen")
 
   tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
     onlyIf { !project.hasProperty('useNpx') || project.property('useNpx') != 'true' }
     workingDir = libraryRoot
     inputs.dir(file("${libraryRoot}/src"))
     inputs.file(file("${libraryRoot}/package.json"))
-    outputs.dir(outDir)
+    outputs.dir(codegenOutputBase)
 
     doFirst {
       if (!file("${libraryRoot}/node_modules/react-native").exists()) {
@@ -330,9 +336,9 @@ afterEvaluate {
 
   preBuild.dependsOn extractNativeLibs
 
-  // Standalone AAR: Kotlin compile depends on custom codegen task.
+  // Standalone AAR: Kotlin compile depends on custom codegen task; input dir = nested path script writes.
   if (isStandaloneAarBuild) {
-    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
+    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/android/app/build/generated/source/codegen/java")
     tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
       dependsOn tasks.named('generateCodegenSpec')
       inputs.dir(codegenJavaDir)
