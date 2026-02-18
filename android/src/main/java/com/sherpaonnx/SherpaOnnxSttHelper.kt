@@ -45,14 +45,14 @@ internal class SherpaOnnxSttHelper(
       if (!modelDirFile.exists()) {
         val errorMsg = "Model directory does not exist: $modelDir"
         Log.e(logTag, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
         return
       }
 
       if (!modelDirFile.isDirectory) {
         val errorMsg = "Model path is not a directory: $modelDir"
         Log.e(logTag, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
         return
       }
 
@@ -67,7 +67,7 @@ internal class SherpaOnnxSttHelper(
       if (result == null) {
         val errorMsg = "Failed to detect STT model. Check native logs for details."
         Log.e(logTag, "Detection returned null for modelDir: $modelDir")
-        promise.reject("INIT_ERROR", errorMsg)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
         return
       }
 
@@ -83,7 +83,7 @@ internal class SherpaOnnxSttHelper(
           "Failed to initialize sherpa-onnx. Check native logs for details."
         }
         Log.e(logTag, "Detection failed for modelDir: $modelDir")
-        promise.reject("INIT_ERROR", errorMsg)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
         return
       }
 
@@ -113,7 +113,7 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMsg, e)
-      promise.reject("INIT_ERROR", errorMsg, e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, e, "stt")
     }
   }
 
@@ -121,7 +121,7 @@ internal class SherpaOnnxSttHelper(
     try {
       val rec = recognizer
       if (rec == null) {
-        promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeSherpaOnnx first.")
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeSherpaOnnx first.", feature = "stt")
         return
       }
       val wave = WaveReader.readWave(filePath)
@@ -133,7 +133,7 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
-      promise.reject("TRANSCRIBE_ERROR", message, e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", message, e, "stt")
     }
   }
 
@@ -143,7 +143,7 @@ internal class SherpaOnnxSttHelper(
       recognizer = null
       promise.resolve(null)
     } catch (e: Exception) {
-      promise.reject("RELEASE_ERROR", "Failed to release resources", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "RELEASE_ERROR", "Failed to release resources", e, "stt")
     }
   }
 

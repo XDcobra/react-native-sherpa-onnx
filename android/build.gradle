@@ -198,6 +198,10 @@ dependencies {
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.2.1"
+
+  // Firebase Crashlytics: compileOnly so the library compiles; at runtime the host app provides it.
+  // If the app does not use Firebase, recording is skipped (see CrashlyticsHelper).
+  compileOnly "com.google.firebase:firebase-crashlytics:19.0.0"
 }
 
 // Create resolvable configuration for extraction

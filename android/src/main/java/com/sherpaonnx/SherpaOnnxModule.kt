@@ -61,7 +61,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val result = nativeTestSherpaInit()
       promise.resolve(result)
     } catch (e: Exception) {
-      promise.reject("INIT_ERROR", "Failed to test sherpa-onnx initialization", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", "Failed to test sherpa-onnx initialization", e, "init")
     }
   }
 
@@ -142,16 +142,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       var rate = outputSampleRateHz?.toInt() ?: 0
 
       if (rate < 0) {
-        promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0", feature = "convert")
         return
       }
 
       if (format.equals("mp3", ignoreCase = true)) {
         val allowed = setOf(0, 32000, 44100, 48000)
         if (!allowed.contains(rate)) {
-          promise.reject(
+          CrashlyticsHelper.rejectWithCrashlytics(
+            promise,
             "CONVERT_ERROR",
-            "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate"
+            "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate",
+            feature = "convert"
           )
           return
         }
@@ -163,10 +165,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
-        promise.reject("CONVERT_ERROR", err)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", err, feature = "convert")
       }
     } catch (e: Exception) {
-      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e, "convert")
     }
   }
 
@@ -180,10 +182,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
-        promise.reject("CONVERT_ERROR", err)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", err, feature = "convert")
       }
     } catch (e: Exception) {
-      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e, "convert")
     }
   }
 
