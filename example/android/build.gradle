@@ -1,13 +1,20 @@
+// Apply shared Android defaults (NDK, SDK versions, Kotlin) so example uses same values as repo root.
+def androidDefaults = file("../../gradle/android-defaults.gradle")
+if (androidDefaults.exists()) {
+    apply from: androidDefaults
+}
 buildscript {
-    // Read common Android defaults from rootProject.ext when available so values stay in sync.
+    // Use values from android-defaults.gradle when applied above; otherwise fallbacks for standalone copy of example.
     ext {
         buildToolsVersion = rootProject.ext.has('buildToolsVersion') ? rootProject.ext.buildToolsVersion : '36.0.0'
         minSdkVersion = rootProject.ext.has('minSdkVersion') ? rootProject.ext.minSdkVersion : 24
         compileSdkVersion = rootProject.ext.has('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
         targetSdkVersion = rootProject.ext.has('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
-        ndkVersion = rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '27.1.12297006'
+        ndkVersion = rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '29.0.14206865'
         kotlinVersion = rootProject.ext.has('kotlinVersion') ? rootProject.ext.kotlinVersion : '2.1.20'
     }
+    def source = androidDefaults.exists() ? "gradle/android-defaults.gradle" : "fallback"
+    println "[example/android build.gradle] Source=${source} -> ndkVersion=${rootProject.ext.ndkVersion}, compileSdkVersion=${rootProject.ext.compileSdkVersion}, kotlinVersion=${rootProject.ext.kotlinVersion}"
     repositories {
         google()
         mavenCentral()

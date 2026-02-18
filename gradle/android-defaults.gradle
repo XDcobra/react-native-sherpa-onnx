@@ -1,0 +1,12 @@
+// Single source of truth for Android build defaults (NDK, SDK versions, Kotlin, etc.).
+// Applied from repo root build.gradle and from example/android/build.gradle so that
+// building the example app (from example/android/) uses the same values as the library.
+ext {
+  ndkVersion = "29.0.14206865"
+  buildToolsVersion = "36.0.0"
+  minSdkVersion = 24
+  compileSdkVersion = 36
+  targetSdkVersion = 36
+  kotlinVersion = "2.0.21"
+}
+println "[android-defaults.gradle] Applied -> ndkVersion=${ext.ndkVersion}, compileSdkVersion=${ext.compileSdkVersion}, kotlinVersion=${ext.kotlinVersion}"

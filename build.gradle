@@ -1,15 +1,8 @@
 // Root build for standalone AAR build (e.g. CI / Maven release).
 // Sets NDK and provides repositories for the :android library module.
 ext.standaloneAarBuild = true
-// Shared Android/build values so subprojects (example/android and android/) can read consistent defaults.
-ext {
-  ndkVersion = "29.0.14206865"
-  buildToolsVersion = "36.0.0"
-  minSdkVersion = 24
-  compileSdkVersion = 36
-  targetSdkVersion = 36
-  kotlinVersion = "2.0.21"
-}
+apply from: file("gradle/android-defaults.gradle")
+println "[root build.gradle] Using gradle/android-defaults.gradle -> ndkVersion=${ext.ndkVersion}, compileSdkVersion=${ext.compileSdkVersion}"
 buildscript {
   ext {}
   repositories {
