@@ -206,19 +206,22 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Prepare Firebase google-services.json (Crashlytics)
-        # Only run this step if the secret is available (e.g., for the main repo, not forks on pull_request)
-        if: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
+        # Secret cannot be referenced in 'if' (invalid in fork PRs). Step runs always; script no-ops when secret is empty.
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          mkdir -p example/android/app
-          printf '%s' "$GOOGLE_SERVICES_JSON" > example/android/app/google-services.json
-          echo "[OK] google-services.json written for Crashlytics"
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            mkdir -p example/android/app
+            printf '%s' "$GOOGLE_SERVICES_JSON" > example/android/app/google-services.json
+            echo "[OK] google-services.json written for Crashlytics"
+          else
+            echo "GOOGLE_SERVICES_JSON not set (e.g. fork PR). Skipping; Firebase/Crashlytics will be disabled."
+          fi
 
       - name: Build Android example app
         run: |
           set -o pipefail
-          echo "Building Android example app..."
+          echo "Building Android example app (NDK: $ANDROID_NDK_HOME)..."
 
           cd example/android
 
