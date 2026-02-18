@@ -5,6 +5,27 @@
 
 static JavaVM* g_vm = nullptr;
 
+// Report native error to Firebase Crashlytics (no-op if Firebase not available).
+static void recordNativeErrorToCrashlytics(JNIEnv* env, const char* code, const char* message) {
+  jclass bridge_class = env->FindClass("com/sherpaonnx/CrashlyticsNativeBridge");
+  if (!bridge_class) return;
+  jmethodID record_method = env->GetStaticMethodID(
+      bridge_class, "recordError", "(Ljava/lang/String;Ljava/lang/String;)V");
+  if (!record_method) {
+    env->DeleteLocalRef(bridge_class);
+    return;
+  }
+  jstring j_code = env->NewStringUTF(code);
+  jstring j_message = env->NewStringUTF(message);
+  if (j_code && j_message) {
+    env->CallStaticVoidMethod(bridge_class, record_method, j_code, j_message);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
+  if (j_code) env->DeleteLocalRef(j_code);
+  if (j_message) env->DeleteLocalRef(j_message);
+  env->DeleteLocalRef(bridge_class);
+}
+
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /* reserved */) {
   g_vm = vm;
   JNIEnv* env = nullptr;
@@ -118,6 +139,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
     }
     env->CallVoidMethod(j_promise, resolve_method, result_map);
   } else {
+    recordNativeErrorToCrashlytics(env, "ARCHIVE_ERROR", error_msg.c_str());
     env->CallVoidMethod(result_map, put_string_method,
                         env->NewStringUTF("reason"), env->NewStringUTF(error_msg.c_str()));
     env->CallVoidMethod(j_promise, reject_method,
@@ -163,6 +185,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeComputeFileSha256(
   if (success) {
     env->CallVoidMethod(j_promise, resolve_method, env->NewStringUTF(sha256.c_str()));
   } else {
+    recordNativeErrorToCrashlytics(env, "CHECKSUM_ERROR", error_msg.c_str());
     env->CallVoidMethod(j_promise, reject_method,
                         env->NewStringUTF("CHECKSUM_ERROR"),
                         env->NewStringUTF(error_msg.c_str()));
