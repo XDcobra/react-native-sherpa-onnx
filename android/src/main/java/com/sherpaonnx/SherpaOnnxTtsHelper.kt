@@ -249,7 +249,7 @@ internal class SherpaOnnxTtsHelper(
       map.putInt("sampleRate", audio.sampleRate)
       promise.resolve(map)
     } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e, "tts")
+      Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e)
       CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e, "tts")
     }
   }
