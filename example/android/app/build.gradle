@@ -1,6 +1,8 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
+apply plugin: "com.google.firebase.crashlytics"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -116,11 +118,19 @@ android {
     }
     buildTypes {
         debug {
+            firebaseCrashlytics {
+                nativeSymbolUploadEnabled true
+                unstrippedNativeLibsDir "build/intermediates/merged_native_libs/debug/out/lib"
+            }
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "ADS_ENABLED", "false"
             buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"ca-app-pub-3940256099942544/6300978111\""
         }
         release {
+            firebaseCrashlytics {
+                nativeSymbolUploadEnabled true
+                unstrippedNativeLibsDir "build/intermediates/merged_native_libs/release/out/lib"
+            }
             def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
             def releaseAdmobBannerId = project.findProperty('ADMOB_BANNER_ID_ANDROID')
             def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
@@ -171,6 +181,11 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Firebase (BoM ensures compatible versions; required for Crashlytics / google-services)
+    implementation platform('com.google.firebase:firebase-bom:34.9.0')
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-crashlytics'
 }
 
 // Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).

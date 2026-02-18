@@ -205,6 +205,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Prepare Firebase google-services.json (Crashlytics)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON secret is not set. Add your Firebase android/app google-services.json content as a repository secret for Crashlytics."
+            exit 1
+          fi
+          mkdir -p example/android/app
+          printf '%s' "$GOOGLE_SERVICES_JSON" > example/android/app/google-services.json
+          echo "[OK] google-services.json written for Crashlytics"
+
       - name: Build Android example app
         run: |
           set -o pipefail

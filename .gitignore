@@ -153,3 +153,5 @@ htpasswd
 storage/
 plugins/
 
+# Firebase
+example/android/app/google-services.json

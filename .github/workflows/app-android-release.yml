@@ -122,6 +122,18 @@ jobs:
 
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > example/android/app/release.keystore
 
+      - name: Prepare Firebase google-services.json (Crashlytics)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON secret is not set. Add your Firebase android/app google-services.json content as a repository secret for Crashlytics."
+            exit 1
+          fi
+          mkdir -p example/android/app
+          printf '%s' "$GOOGLE_SERVICES_JSON" > example/android/app/google-services.json
+          echo "[OK] google-services.json written for Crashlytics"
+
       - name: Derive version
         id: version
         run: |
