@@ -228,9 +228,6 @@ jobs:
           echo "Building Android example app (NDK: $ANDROID_NDK_HOME)..."
           cd example/android
 
-          # No 'clean' — CI starts from a fresh checkout so there are no stale
-          # artifacts to remove. Running clean deletes codegen output that CMake
-          # needs, causing add_subdirectory failures in Android-autolinking.cmake.
           ./gradlew assembleDebug \
             --stacktrace \
             --info \

@@ -176,7 +176,7 @@
     "name": "SherpaOnnxSpec",
     "type": "modules",
     "jsSrcsDir": "src",
-    "includesGeneratedCode": true,
+    "includesGeneratedCode": false,
     "android": {
       "javaPackageName": "com.sherpaonnx"
     }
