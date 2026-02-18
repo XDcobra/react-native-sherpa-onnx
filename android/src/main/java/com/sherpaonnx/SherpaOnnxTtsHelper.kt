@@ -72,6 +72,12 @@ internal class SherpaOnnxTtsHelper(
     promise: Promise
   ) {
     try {
+      CrashlyticsHelper.setContextAttributes(
+        modelDir = modelDir,
+        modelType = modelType,
+        feature = "tts",
+        numThreads = numThreads.toInt()
+      )
       val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
         CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null", feature = "tts")

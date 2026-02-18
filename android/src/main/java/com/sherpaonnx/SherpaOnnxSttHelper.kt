@@ -41,6 +41,12 @@ internal class SherpaOnnxSttHelper(
     promise: Promise
   ) {
     try {
+      CrashlyticsHelper.setContextAttributes(
+        modelDir = modelDir,
+        modelType = modelType,
+        feature = "stt",
+        preferInt8 = preferInt8
+      )
       val modelDirFile = File(modelDir)
       if (!modelDirFile.exists()) {
         val errorMsg = "Model directory does not exist: $modelDir"
