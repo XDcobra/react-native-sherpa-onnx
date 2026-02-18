@@ -80,9 +80,9 @@ jobs:
       - name: Install build deps (pkg-config, FFmpeg deps)
         run: sudo apt-get update && sudo apt-get install -y pkg-config libunistring-dev libaom-dev libdav1d-dev
 
-      - name: Set up Android NDK
+      - name: Setup Android NDK
         id: setup-ndk
-        uses: nttld/setup-ndk@v1
+        uses: ./.github/actions/setup-ndk
         with:
           ndk-version: r29
           add-to-path: true
