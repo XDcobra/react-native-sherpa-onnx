@@ -80,12 +80,9 @@ android {
     sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
   }
 
-  // Codegen Java output: RNGP uses flat path; standalone uses nested path (script behaviour with includesGeneratedCode=false).
-  if (isStandaloneAarBuild) {
-    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/android/app/build/generated/source/codegen/java")
-  } else {
-    sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
-  }
+  // Codegen Java output: always use the flat path. For app builds RNGP writes here directly;
+  // for standalone AAR builds the codegen task normalises the nested output to this path.
+  sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
@@ -289,16 +286,18 @@ if (isStandaloneAarBuild) {
   }
 
   def libraryRoot = project.projectDir.parentFile
-  // -o is the base; with includesGeneratedCode=false the script writes to <base>/android/app/build/generated/source/codegen/
   def outDir = file("${project.buildDir}/generated/source/codegen")
-  def codegenOutputBase = file("${project.buildDir}/generated/source/codegen/android/app/build/generated/source/codegen")
+  def codegenJavaDir = file("${project.buildDir}/generated/source/codegen/java")
+
+  // Gradle 9 eagerly validates inputs.dir; create during configuration so it exists.
+  codegenJavaDir.mkdirs()
 
   tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
     onlyIf { !project.hasProperty('useNpx') || project.property('useNpx') != 'true' }
     workingDir = libraryRoot
     inputs.dir(file("${libraryRoot}/src"))
     inputs.file(file("${libraryRoot}/package.json"))
-    outputs.dir(codegenOutputBase)
+    outputs.dir(codegenJavaDir)
 
     doFirst {
       if (!file("${libraryRoot}/node_modules/react-native").exists()) {
@@ -318,6 +317,22 @@ if (isStandaloneAarBuild) {
     ]
 
     environment = ['CI': 'true']
+
+    doLast {
+      // With includesGeneratedCode=false the script nests output under
+      // <outDir>/android/app/build/generated/source/codegen/.
+      // Copy to the flat codegen/java path so sourceSets and Kotlin compile find it.
+      def nestedJava = file("${outDir}/android/app/build/generated/source/codegen/java")
+      if (nestedJava.exists()) {
+        project.copy {
+          from nestedJava
+          into codegenJavaDir
+        }
+        println "[codegen] Normalised spec output -> ${codegenJavaDir}"
+      } else {
+        println "[codegen] WARNING: expected nested output at ${nestedJava} not found"
+      }
+    }
   }
 
   tasks.register('generateCodegenSpec') {
@@ -336,9 +351,9 @@ afterEvaluate {
 
   preBuild.dependsOn extractNativeLibs
 
-  // Standalone AAR: Kotlin compile depends on custom codegen task; input dir = nested path script writes.
+  // Standalone AAR: Kotlin compile depends on custom codegen task.
   if (isStandaloneAarBuild) {
-    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/android/app/build/generated/source/codegen/java")
+    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
     tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
       dependsOn tasks.named('generateCodegenSpec')
       inputs.dir(codegenJavaDir)
