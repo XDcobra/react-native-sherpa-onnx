@@ -74,7 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
-    CrashlyticsHelper.setContextAttributes(archiveSource = sourcePath, feature = "archive")
+    CrashlyticsHelper.setContextAttributes(archiveSource = sourcePath.substringAfterLast('/'), feature = "archive")
     archiveHelper.extractTarBz2(sourcePath, targetPath, force, promise) { bytes, total, percent ->
       emitExtractProgress(bytes, total, percent)
     }
@@ -86,7 +86,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun computeFileSha256(filePath: String, promise: Promise) {
-    CrashlyticsHelper.setContextAttributes(archiveSource = filePath, feature = "archive")
+    CrashlyticsHelper.setContextAttributes(archiveSource = filePath.substringAfterLast('/'), feature = "archive")
     archiveHelper.computeFileSha256(filePath, promise)
   }
 

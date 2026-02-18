@@ -8,10 +8,14 @@ static JavaVM* g_vm = nullptr;
 // Report native error to Firebase Crashlytics (no-op if Firebase not available).
 static void recordNativeErrorToCrashlytics(JNIEnv* env, const char* code, const char* message) {
   jclass bridge_class = env->FindClass("com/sherpaonnx/CrashlyticsNativeBridge");
-  if (!bridge_class) return;
+  if (!bridge_class) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return;
+  }
   jmethodID record_method = env->GetStaticMethodID(
       bridge_class, "recordError", "(Ljava/lang/String;Ljava/lang/String;)V");
   if (!record_method) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
     env->DeleteLocalRef(bridge_class);
     return;
   }
