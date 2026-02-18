@@ -111,3 +111,6 @@ target_compile_options(sherpaonnx PRIVATE
     -Wextra
     -fvisibility=hidden
 )
+# RN New Architecture autolinking links against react_codegen_<codegenConfig.name> (SherpaOnnxSpec).
+# Without this alias, the app CMake fails with "target ... which is not built by this project".
+add_library(react_codegen_SherpaOnnxSpec ALIAS sherpaonnx)

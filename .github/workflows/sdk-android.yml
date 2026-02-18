@@ -240,30 +240,62 @@ jobs:
           if [ "${BUILD_FAILED:-0}" = "1" ]; then
             echo ""
             echo "=== Build failed. Full error analysis ==="
-            
+
+            echo ""
+            echo "--- Generated Android-autolinking.cmake ---"
+            AUTOLINK_CMAKE="app/build/generated/autolinking/src/main/jni/Android-autolinking.cmake"
+            if [ -f "$AUTOLINK_CMAKE" ]; then
+              cat "$AUTOLINK_CMAKE"
+            else
+              echo "File not found: $AUTOLINK_CMAKE"
+            fi
+
+            echo ""
+            echo "--- Generated autolinking .cpp files ---"
+            find app/build/generated/autolinking -name "*.cpp" -o -name "*.h" 2>/dev/null | while read f; do
+              echo "=== $f ==="
+              cat "$f"
+            done
+
+            echo ""
+            echo "--- CMakeError.log (arm64-v8a) ---"
+            CMAKE_ERR=$(find app/.cxx -name "CMakeError.log" -path "*/arm64-v8a/*" 2>/dev/null | head -1)
+            if [ -n "$CMAKE_ERR" ] && [ -f "$CMAKE_ERR" ]; then
+              cat "$CMAKE_ERR"
+            else
+              echo "No CMakeError.log found for arm64-v8a"
+            fi
+
+            echo ""
+            echo "--- CMakeOutput.log (last 80 lines, arm64-v8a) ---"
+            CMAKE_OUT=$(find app/.cxx -name "CMakeOutput.log" -path "*/arm64-v8a/*" 2>/dev/null | head -1)
+            if [ -n "$CMAKE_OUT" ] && [ -f "$CMAKE_OUT" ]; then
+              tail -80 "$CMAKE_OUT"
+            else
+              echo "No CMakeOutput.log found for arm64-v8a"
+            fi
+
+            echo ""
+            echo "--- Library codegen CMakeLists (react-native-sherpa-onnx) ---"
+            SHERPA_CODEGEN=$(find . -path "*/react-native-sherpa-onnx/build/generated/source/codegen/jni/CMakeLists.txt" 2>/dev/null | head -1)
+            if [ -n "$SHERPA_CODEGEN" ] && [ -f "$SHERPA_CODEGEN" ]; then
+              cat "$SHERPA_CODEGEN"
+            else
+              echo "Not found. Searching for any codegen CMakeLists.txt..."
+              find . -path "*/codegen/jni/CMakeLists.txt" 2>/dev/null || echo "None found"
+            fi
+
             echo ""
             echo "--- Compilation/Linker Errors ---"
             grep -B 2 -A 5 -i "error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
-            
-            echo ""
-            echo "--- Fatal Errors ---"
-            grep -B 2 -A 5 -i "fatal" /tmp/build.full.log | head -50 || echo "No fatal errors found"
-            
-            echo ""
-            echo "--- Exceptions ---"
-            grep -B 2 -A 10 "Exception" /tmp/build.full.log | head -50 || echo "No exceptions found"
-            
-            echo ""
-            echo "--- CMake Errors ---"
-            grep -B 2 -A 5 -i "cmake" /tmp/build.full.log | grep -i "error\|fail" | head -30 || echo "No CMake errors found"
             
             echo ""
             echo "--- Failed Tasks ---"
             grep -B 5 -A 2 "FAILED" /tmp/build.full.log | head -30 || true
             
             echo ""
-            echo "--- Last 50 lines of build log ---"
-            tail -50 /tmp/build.full.log
+            echo "--- Last 80 lines of build log ---"
+            tail -80 /tmp/build.full.log
             exit 1
           fi
 
