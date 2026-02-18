@@ -13,8 +13,6 @@ buildscript {
         ndkVersion = rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '29.0.14206865'
         kotlinVersion = rootProject.ext.has('kotlinVersion') ? rootProject.ext.kotlinVersion : '2.1.20'
     }
-    def source = androidDefaults.exists() ? "gradle/android-defaults.gradle" : "fallback"
-    println "[example/android build.gradle] Source=${source} -> ndkVersion=${rootProject.ext.ndkVersion}, compileSdkVersion=${rootProject.ext.compileSdkVersion}, kotlinVersion=${rootProject.ext.kotlinVersion}"
     repositories {
         google()
         mavenCentral()
@@ -27,5 +25,8 @@ buildscript {
         classpath("com.google.firebase:firebase-crashlytics-gradle:3.0.6")
     }
 }
+
+def source = androidDefaults.exists() ? "gradle/android-defaults.gradle" : "fallback"
+println "[example/android build.gradle] Source=${source} -> ndkVersion=${rootProject.ext.ndkVersion}, compileSdkVersion=${rootProject.ext.compileSdkVersion}, kotlinVersion=${rootProject.ext.kotlinVersion}"
 
 apply plugin: "com.facebook.react.rootproject"
