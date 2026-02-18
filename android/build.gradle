@@ -197,11 +197,11 @@ dependencies {
   implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
-  implementation "com.google.android.play:asset-delivery:2.2.1"
+  implementation "com.google.android.play:asset-delivery:2.3.0"
 
   // Firebase Crashlytics: compileOnly so the library compiles; at runtime the host app provides it.
   // If the app does not use Firebase, recording is skipped (see CrashlyticsHelper).
-  compileOnly "com.google.firebase:firebase-crashlytics:19.0.0"
+  compileOnly "com.google.firebase:firebase-crashlytics:20.0.4"
 }
 
 // Create resolvable configuration for extraction
