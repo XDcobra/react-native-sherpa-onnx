@@ -224,18 +224,20 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
+          set -o pipefail
           echo "Building Android example app (NDK: $ANDROID_NDK_HOME)..."
           cd example/android
 
           # Single Gradle invocation so the task graph resolves cross-module
           # dependencies correctly (app CMake depends on library codegen).
-          # Separate clean + assembleDebug calls caused codegen JNI files to
-          # be missing when CMake ran.
           ./gradlew clean assembleDebug \
             --stacktrace \
             --info \
             2>&1 | tee /tmp/build.full.log | tail -30
-
+          GRADLE_EXIT=$?
+          if [ "$GRADLE_EXIT" -ne 0 ]; then
+            exit "$GRADLE_EXIT"
+          fi
           echo "[OK] Android build completed successfully"
 
       - name: Debug CMake build failure
