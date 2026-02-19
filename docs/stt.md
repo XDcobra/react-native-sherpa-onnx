@@ -148,6 +148,19 @@ Release STT resources and unload the model. Call before re-initializing with a d
 
 See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup steps.
 
+### Model-specific options not yet supported
+
+The Kotlin/C API exposes additional per-model options that are **not yet supported** in this package. They may be added in a later release.
+
+| Model | Options in native API | Description |
+| --- | --- | --- |
+| **Whisper** | language, task, tailPaddings, enableTokenTimestamps, enableSegmentTimestamps | Language, transcribe/translate, padding, timestamp flags |
+| **SenseVoice** | language, useInverseTextNormalization | Language and ITN |
+| **FunASR Nano** | systemPrompt, userPrompt, maxNewTokens, temperature, topP, seed, language, itn, hotwords | LLM/prompt and decoding options |
+| **Canary** | srcLang, tgtLang, usePnc | Source/target language, punctuation |
+
+Use the native sherpa-onnx Kotlin/C API directly if you need these options today.
+
 ## Mapping to Native API
 
 The JS API in `react-native-sherpa-onnx/stt` resolves model paths and normalizes results; prefer it over calling the TurboModule directly. The following describes how the public API maps to the native bridge and underlying engines.

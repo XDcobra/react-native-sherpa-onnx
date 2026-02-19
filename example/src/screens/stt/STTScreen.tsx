@@ -300,7 +300,7 @@ export default function STTScreen() {
 
       // Transcribe the audio file (pathToTranscribe may be an asset path or file URI)
       const result = await transcribeFile(pathToTranscribe);
-      setTranscriptionResult(result);
+      setTranscriptionResult(result.text ?? '');
     } catch (err) {
       console.error('Transcription error:', err);
 
