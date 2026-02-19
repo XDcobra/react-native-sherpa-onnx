@@ -15,22 +15,55 @@ export interface Spec extends TurboModule {
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
    * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'auto'), undefined = auto (default)
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
+   * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
+   * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeStt(
     modelDir: string,
     preferInt8?: boolean,
     modelType?: string,
-    debug?: boolean
+    debug?: boolean,
+    hotwordsFile?: string,
+    hotwordsScore?: number
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
   }>;
 
   /**
-   * Transcribe an audio file.
+   * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
    */
-  transcribeFile(filePath: string): Promise<string>;
+  transcribeFile(filePath: string): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  }>;
+
+  /**
+   * Transcribe from float PCM samples (e.g. from microphone). Same return type as transcribeFile.
+   */
+  transcribeSamples(
+    samples: number[],
+    sampleRate: number
+  ): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  }>;
+
+  /**
+   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty).
+   */
+  setSttConfig(options: Object): Promise<void>;
 
   /**
    * Release STT resources.

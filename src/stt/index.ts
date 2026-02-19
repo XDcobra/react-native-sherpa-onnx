@@ -1,7 +1,34 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { STTInitializeOptions, STTModelType } from './types';
+import type {
+  STTInitializeOptions,
+  STTModelType,
+  SttRecognitionResult,
+  SttRuntimeConfig,
+} from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+
+function normalizeSttResult(raw: {
+  text?: string;
+  tokens?: string[] | unknown;
+  timestamps?: number[] | unknown;
+  lang?: string;
+  emotion?: string;
+  event?: string;
+  durations?: number[] | unknown;
+}): SttRecognitionResult {
+  return {
+    text: typeof raw.text === 'string' ? raw.text : '',
+    tokens: Array.isArray(raw.tokens) ? (raw.tokens as string[]) : [],
+    timestamps: Array.isArray(raw.timestamps)
+      ? (raw.timestamps as number[])
+      : [],
+    lang: typeof raw.lang === 'string' ? raw.lang : '',
+    emotion: typeof raw.emotion === 'string' ? raw.emotion : '',
+    event: typeof raw.event === 'string' ? raw.event : '',
+    durations: Array.isArray(raw.durations) ? (raw.durations as number[]) : [],
+  };
+}
 
 /**
  * Initialize Speech-to-Text (STT) with model directory.
@@ -47,35 +74,83 @@ export async function initializeSTT(
   let modelPath: ModelPathConfig;
   let preferInt8: boolean | undefined;
   let modelType: STTModelType | undefined;
+  let hotwordsFile: string | undefined;
+  let hotwordsScore: number | undefined;
 
   if ('modelPath' in options) {
     modelPath = options.modelPath;
     preferInt8 = options.preferInt8;
     modelType = options.modelType;
+    hotwordsFile = options.hotwordsFile;
+    hotwordsScore = options.hotwordsScore;
   } else {
     modelPath = options;
     preferInt8 = undefined;
     modelType = undefined;
+    hotwordsFile = undefined;
+    hotwordsScore = undefined;
   }
 
   const debug = 'modelPath' in options ? options.debug : undefined;
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeStt(resolvedPath, preferInt8, modelType, debug);
+  return SherpaOnnx.initializeStt(
+    resolvedPath,
+    preferInt8,
+    modelType,
+    debug,
+    hotwordsFile,
+    hotwordsScore
+  );
 }
 
 /**
  * Transcribe an audio file.
  *
  * @param filePath - Path to WAV file (16kHz, mono, 16-bit PCM)
- * @returns Promise resolving to transcribed text
+ * @returns Promise resolving to full recognition result (text, tokens, timestamps, lang, emotion, event, durations)
  * @example
  * ```typescript
- * const transcription = await transcribeFile('path/to/audio.wav');
- * console.log('Transcription:', transcription);
+ * const result = await transcribeFile('path/to/audio.wav');
+ * console.log('Transcription:', result.text);
+ * console.log('Tokens:', result.tokens);
  * ```
  */
-export function transcribeFile(filePath: string): Promise<string> {
-  return SherpaOnnx.transcribeFile(filePath);
+export async function transcribeFile(
+  filePath: string
+): Promise<SttRecognitionResult> {
+  const raw = await SherpaOnnx.transcribeFile(filePath);
+  return normalizeSttResult(raw);
+}
+
+/**
+ * Transcribe from float PCM samples (e.g. from microphone or another decoder).
+ *
+ * @param samples - Float samples in [-1, 1], mono
+ * @param sampleRate - Sample rate in Hz (e.g. 16000)
+ * @returns Promise resolving to full recognition result (same shape as transcribeFile)
+ */
+export async function transcribeSamples(
+  samples: number[],
+  sampleRate: number
+): Promise<SttRecognitionResult> {
+  const raw = await SherpaOnnx.transcribeSamples(samples, sampleRate);
+  return normalizeSttResult(raw);
+}
+
+/**
+ * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty).
+ * Merged with the config from initialization.
+ */
+export function setSttConfig(options: SttRuntimeConfig): Promise<void> {
+  const map: Record<string, string | number> = {};
+  if (options.decodingMethod != null)
+    map.decodingMethod = options.decodingMethod;
+  if (options.maxActivePaths != null)
+    map.maxActivePaths = options.maxActivePaths;
+  if (options.hotwordsFile != null) map.hotwordsFile = options.hotwordsFile;
+  if (options.hotwordsScore != null) map.hotwordsScore = options.hotwordsScore;
+  if (options.blankPenalty != null) map.blankPenalty = options.blankPenalty;
+  return SherpaOnnx.setSttConfig(map);
 }
 
 /**
@@ -89,5 +164,7 @@ export function unloadSTT(): Promise<void> {
 export type {
   STTInitializeOptions,
   STTModelType,
+  SttRecognitionResult,
+  SttRuntimeConfig,
   TranscriptionResult,
 } from './types';
