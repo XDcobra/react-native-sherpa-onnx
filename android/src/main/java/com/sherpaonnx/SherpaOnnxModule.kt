@@ -115,9 +115,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     debug: Boolean?,
     hotwordsFile: String?,
     hotwordsScore: Double?,
+    numThreads: Double?,
+    provider: String?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    dither: Double?,
     promise: Promise
   ) {
-    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, promise)
+    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, promise)
   }
 
   /**

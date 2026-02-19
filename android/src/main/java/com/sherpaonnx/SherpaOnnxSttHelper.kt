@@ -46,6 +46,11 @@ internal class SherpaOnnxSttHelper(
     debug: Boolean?,
     hotwordsFile: String?,
     hotwordsScore: Double?,
+    numThreads: Double?,
+    provider: String?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    dither: Double?,
     promise: Promise
   ) {
     try {
@@ -111,7 +116,12 @@ internal class SherpaOnnxSttHelper(
         pathStrings,
         modelTypeStr,
         hotwordsFile = hotwordsFile.orEmpty(),
-        hotwordsScore = hotwordsScore?.toFloat() ?: 1.5f
+        hotwordsScore = hotwordsScore?.toFloat() ?: 1.5f,
+        numThreads = numThreads?.toInt(),
+        provider = provider,
+        ruleFsts = ruleFsts.orEmpty(),
+        ruleFars = ruleFars.orEmpty(),
+        dither = dither?.toFloat() ?: 0f
       )
       lastRecognizerConfig = config
       recognizer = OfflineRecognizer(config = config)
@@ -194,7 +204,9 @@ internal class SherpaOnnxSttHelper(
         maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else current.maxActivePaths,
         hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") ?: current.hotwordsFile else current.hotwordsFile,
         hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore").toFloat() else current.hotwordsScore,
-        blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty").toFloat() else current.blankPenalty
+        blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty").toFloat() else current.blankPenalty,
+        ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") ?: current.ruleFsts else current.ruleFsts,
+        ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") ?: current.ruleFars else current.ruleFars
       )
       lastRecognizerConfig = merged
       rec.setConfig(merged)
@@ -242,9 +254,14 @@ internal class SherpaOnnxSttHelper(
     paths: Map<String, String>,
     modelType: String,
     hotwordsFile: String = "",
-    hotwordsScore: Float = 1.5f
+    hotwordsScore: Float = 1.5f,
+    numThreads: Int? = null,
+    provider: String? = null,
+    ruleFsts: String = "",
+    ruleFars: String = "",
+    dither: Float = 0f
   ): OfflineRecognizerConfig {
-    val featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80)
+    val featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = dither)
     val modelConfig = when (modelType) {
       "transducer", "nemo_transducer" -> OfflineModelConfig(
         transducer = OfflineTransducerModelConfig(
@@ -323,11 +340,17 @@ internal class SherpaOnnxSttHelper(
         }
       }
     }
+    val finalModelConfig = modelConfig.copy(
+      numThreads = numThreads ?: 1,
+      provider = provider ?: "cpu"
+    )
     return OfflineRecognizerConfig(
       featConfig = featConfig,
-      modelConfig = modelConfig,
+      modelConfig = finalModelConfig,
       hotwordsFile = hotwordsFile,
-      hotwordsScore = hotwordsScore
+      hotwordsScore = hotwordsScore,
+      ruleFsts = ruleFsts,
+      ruleFars = ruleFars
     )
   }
 }

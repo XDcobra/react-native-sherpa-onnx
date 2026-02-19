@@ -42,6 +42,11 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
                debug:(NSNumber *)debug
         hotwordsFile:(NSString *)hotwordsFile
        hotwordsScore:(NSNumber *)hotwordsScore
+          numThreads:(NSNumber *)numThreads
+            provider:(NSString *)provider
+            ruleFsts:(NSString *)ruleFsts
+            ruleFars:(NSString *)ruleFars
+              dither:(NSNumber *)dither
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -76,8 +81,34 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             hotwordsScoreOpt = [hotwordsScore floatValue];
         }
 
+        std::optional<int32_t> numThreadsOpt = std::nullopt;
+        if (numThreads != nil) {
+            numThreadsOpt = [numThreads intValue];
+        }
+
+        std::optional<std::string> providerOpt = std::nullopt;
+        if (provider != nil && [provider length] > 0) {
+            providerOpt = [provider UTF8String];
+        }
+
+        std::optional<std::string> ruleFstsOpt = std::nullopt;
+        if (ruleFsts != nil && [ruleFsts length] > 0) {
+            ruleFstsOpt = [ruleFsts UTF8String];
+        }
+
+        std::optional<std::string> ruleFarsOpt = std::nullopt;
+        if (ruleFars != nil && [ruleFars length] > 0) {
+            ruleFarsOpt = [ruleFars UTF8String];
+        }
+
+        std::optional<float> ditherOpt = std::nullopt;
+        if (dither != nil) {
+            ditherOpt = [dither floatValue];
+        }
+
         sherpaonnx::SttInitializeResult result = g_stt_wrapper->initialize(
-            modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt);
+            modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
+            numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt);
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");
@@ -199,6 +230,12 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         if (options[@"blankPenalty"] != nil) {
             NSNumber *n = options[@"blankPenalty"];
             if ([n isKindOfClass:[NSNumber class]]) opts.blank_penalty = [n floatValue];
+        }
+        if (options[@"ruleFsts"] != nil && [options[@"ruleFsts"] isKindOfClass:[NSString class]]) {
+            opts.rule_fsts = [(NSString *)options[@"ruleFsts"] UTF8String];
+        }
+        if (options[@"ruleFars"] != nil && [options[@"ruleFars"] isKindOfClass:[NSString class]]) {
+            opts.rule_fars = [(NSString *)options[@"ruleFars"] UTF8String];
         }
         g_stt_wrapper->setConfig(opts);
         resolve(nil);

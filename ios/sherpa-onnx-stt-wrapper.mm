@@ -53,7 +53,12 @@ SttInitializeResult SttWrapper::initialize(
     const std::optional<std::string>& modelType,
     bool debug,
     const std::optional<std::string>& hotwordsFile,
-    const std::optional<float>& hotwordsScore
+    const std::optional<float>& hotwordsScore,
+    const std::optional<int32_t>& numThreads,
+    const std::optional<std::string>& provider,
+    const std::optional<std::string>& ruleFsts,
+    const std::optional<std::string>& ruleFars,
+    const std::optional<float>& dither
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -120,14 +125,21 @@ SttInitializeResult SttWrapper::initialize(
         }
 
         config.decoding_method = "greedy_search";
-        config.model_config.num_threads = 4;
-        config.model_config.provider = "cpu";
+        config.model_config.num_threads = numThreads.value_or(1);
+        config.model_config.provider = provider.value_or("cpu");
         if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
             config.hotwords_file = *hotwordsFile;
         }
         if (hotwordsScore.has_value()) {
             config.hotwords_score = *hotwordsScore;
         }
+        if (ruleFsts.has_value() && !ruleFsts->empty()) {
+            config.rule_fsts = *ruleFsts;
+        }
+        if (ruleFars.has_value() && !ruleFars->empty()) {
+            config.rule_fars = *ruleFars;
+        }
+        (void)dither;  // FeatureConfig in bundled cxx-api.h has no dither; reserve for future use
 
         bool isWhisperModel = !config.model_config.whisper.encoder.empty() && !config.model_config.whisper.decoder.empty();
         if (isWhisperModel) {
@@ -278,6 +290,8 @@ void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
     if (options.hotwords_file.has_value()) config.hotwords_file = *options.hotwords_file;
     if (options.hotwords_score.has_value()) config.hotwords_score = *options.hotwords_score;
     if (options.blank_penalty.has_value()) config.blank_penalty = *options.blank_penalty;
+    if (options.rule_fsts.has_value()) config.rule_fsts = *options.rule_fsts;
+    if (options.rule_fars.has_value()) config.rule_fars = *options.rule_fars;
     pImpl->recognizer.value().SetConfig(config);
 }
 

@@ -40,6 +40,8 @@ struct SttRuntimeConfigOptions {
     std::optional<std::string> hotwords_file;
     std::optional<float> hotwords_score;
     std::optional<float> blank_penalty;
+    std::optional<std::string> rule_fsts;
+    std::optional<std::string> rule_fars;
 };
 
 /**
@@ -56,7 +58,12 @@ public:
         const std::optional<std::string>& modelType = std::nullopt,
         bool debug = false,
         const std::optional<std::string>& hotwordsFile = std::nullopt,
-        const std::optional<float>& hotwordsScore = std::nullopt
+        const std::optional<float>& hotwordsScore = std::nullopt,
+        const std::optional<int32_t>& numThreads = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<float>& dither = std::nullopt
     );
 
     SttRecognitionResult transcribeFile(const std::string& filePath);
