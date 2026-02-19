@@ -60,12 +60,7 @@ export async function initializeSTT(
 
   const debug = 'modelPath' in options ? options.debug : undefined;
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeSherpaOnnx(
-    resolvedPath,
-    preferInt8,
-    modelType,
-    debug
-  );
+  return SherpaOnnx.initializeStt(resolvedPath, preferInt8, modelType, debug);
 }
 
 /**
@@ -87,7 +82,7 @@ export function transcribeFile(filePath: string): Promise<string> {
  * Release STT resources.
  */
 export function unloadSTT(): Promise<void> {
-  return SherpaOnnx.unloadSherpaOnnx();
+  return SherpaOnnx.unloadStt();
 }
 
 // Export types

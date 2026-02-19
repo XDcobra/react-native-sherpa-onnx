@@ -11,11 +11,11 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
 
 @implementation SherpaOnnx (STT)
 
-- (void)initializeSherpaOnnx:(NSString *)modelDir
-                  preferInt8:(NSNumber *)preferInt8
-                   modelType:(NSString *)modelType
-                 withResolver:(RCTPromiseResolveBlock)resolve
-                 withRejecter:(RCTPromiseRejectBlock)reject
+- (void)initializeStt:(NSString *)modelDir
+          preferInt8:(NSNumber *)preferInt8
+           modelType:(NSString *)modelType
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
 {
     RCTLogInfo(@"Initializing sherpa-onnx with modelDir: %@", modelDir);
 
@@ -74,7 +74,7 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
           withRejecter:(RCTPromiseRejectBlock)reject
 {
     if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-        NSString *errorMsg = @"STT not initialized. Call initialize() first.";
+        NSString *errorMsg = @"STT not initialized. Call initializeStt first.";
         RCTLogError(@"Transcribe error: %@", errorMsg);
         reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
         return;
@@ -101,8 +101,8 @@ static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
     }
 }
 
-- (void)unloadSherpaOnnxWithResolver:(RCTPromiseResolveBlock)resolve
-                        withRejecter:(RCTPromiseRejectBlock)reject
+- (void)unloadSttWithResolver:(RCTPromiseResolveBlock)resolve
+                withRejecter:(RCTPromiseRejectBlock)reject
 {
     @try {
         if (g_stt_wrapper != nullptr) {

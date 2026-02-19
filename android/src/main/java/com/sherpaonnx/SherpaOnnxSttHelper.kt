@@ -33,7 +33,7 @@ internal class SherpaOnnxSttHelper(
   @Volatile
   private var recognizer: OfflineRecognizer? = null
 
-  fun initializeSherpaOnnx(
+  fun initializeStt(
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
@@ -127,7 +127,7 @@ internal class SherpaOnnxSttHelper(
     try {
       val rec = recognizer
       if (rec == null) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeSherpaOnnx first.", feature = "stt")
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
         return
       }
       val wave = WaveReader.readWave(filePath)
@@ -143,7 +143,7 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun unloadSherpaOnnx(promise: Promise) {
+  fun unloadStt(promise: Promise) {
     try {
       recognizer?.release()
       recognizer = null

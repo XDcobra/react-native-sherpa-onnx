@@ -6,42 +6,10 @@ export interface Spec extends TurboModule {
    */
   testSherpaInit(): Promise<string>;
 
-  /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
-   * Returns an absolute path that can be used by native code.
-   *
-   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
-   */
-  resolveModelPath(config: { type: string; path: string }): Promise<string>;
+  // ==================== STT Methods ====================
 
   /**
-   * Extract a .tar.bz2 archive to a target folder.
-   * Returns { success, path } or { success, reason }.
-   */
-  extractTarBz2(
-    sourcePath: string,
-    targetPath: string,
-    force: boolean
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
-
-  /**
-   * Cancel any in-progress tar.bz2 extraction.
-   */
-  cancelExtractTarBz2(): Promise<void>;
-
-  /**
-   * Compute SHA-256 of a file and return the hex digest.
-   */
-  computeFileSha256(filePath: string): Promise<string>;
-
-  /**
-   * Initialize sherpa-onnx with model directory.
+   * Initialize Speech-to-Text (STT) with model directory.
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
@@ -49,7 +17,7 @@ export interface Spec extends TurboModule {
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
-  initializeSherpaOnnx(
+  initializeStt(
     modelDir: string,
     preferInt8?: boolean,
     modelType?: string,
@@ -59,17 +27,15 @@ export interface Spec extends TurboModule {
     detectedModels: Array<{ type: string; modelDir: string }>;
   }>;
 
-  // ==================== STT Methods ====================
-
   /**
    * Transcribe an audio file.
    */
   transcribeFile(filePath: string): Promise<string>;
 
   /**
-   * Release sherpa-onnx resources.
+   * Release STT resources.
    */
-  unloadSherpaOnnx(): Promise<void>;
+  unloadStt(): Promise<void>;
 
   // ==================== TTS Methods ====================
 
@@ -249,7 +215,16 @@ export interface Spec extends TurboModule {
    */
   shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
 
-  // ==================== Helper Methods ====================
+  // ==================== Helper - Assets ====================
+
+  /**
+   * Resolve model path based on configuration.
+   * Handles asset paths, file system paths, and auto-detection.
+   * Returns an absolute path that can be used by native code.
+   *
+   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
+   */
+  resolveModelPath(config: { type: string; path: string }): Promise<string>;
 
   /**
    * List all model folders in the assets/models directory.
@@ -265,7 +240,7 @@ export interface Spec extends TurboModule {
    * // Then use with resolveModelPath and initialize:
    * for (const model of folders) {
    *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
-   *   const result = await initializeSherpaOnnx(path);
+   *   const result = await initializeStt(path);
    *   if (result.success) {
    *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
    *   }
@@ -291,6 +266,35 @@ export interface Spec extends TurboModule {
    * Use this to list and load models that are delivered via PAD instead of bundled app assets.
    */
   getAssetPackPath(packName: string): Promise<string | null>;
+
+  // ==================== Helper - Extraction ====================
+
+  /**
+   * Extract a .tar.bz2 archive to a target folder.
+   * Returns { success, path } or { success, reason }.
+   */
+  extractTarBz2(
+    sourcePath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Cancel any in-progress tar.bz2 extraction.
+   */
+  cancelExtractTarBz2(): Promise<void>;
+
+  /**
+   * Compute SHA-256 of a file and return the hex digest.
+   */
+  computeFileSha256(filePath: string): Promise<string>;
+
+  // ==================== Helper - Audio conversion ====================
 
   /**
    * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").

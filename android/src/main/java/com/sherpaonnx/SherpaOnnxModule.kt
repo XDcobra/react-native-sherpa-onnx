@@ -106,23 +106,23 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
 
   /**
-   * Initialize sherpa-onnx with model directory.
+   * Initialize Speech-to-Text (STT) with model directory.
    */
-  override fun initializeSherpaOnnx(
+  override fun initializeStt(
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
     debug: Boolean?,
     promise: Promise
   ) {
-    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, debug, promise)
+    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, promise)
   }
 
   /**
-   * Release sherpa-onnx resources.
+   * Release STT resources.
    */
-  override fun unloadSherpaOnnx(promise: Promise) {
-    sttHelper.unloadSherpaOnnx(promise)
+  override fun unloadStt(promise: Promise) {
+    sttHelper.unloadStt(promise)
   }
 
   // ==================== STT Methods ====================
