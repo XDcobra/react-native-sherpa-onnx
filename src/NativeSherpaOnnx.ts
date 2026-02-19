@@ -17,6 +17,11 @@ export interface Spec extends TurboModule {
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
    * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
+   * @param numThreads - Optional: number of threads for inference (default in Kotlin: 1)
+   * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
+   * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
+   * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
+   * @param dither - Optional: dither for feature extraction (default 0)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeStt(
@@ -25,7 +30,12 @@ export interface Spec extends TurboModule {
     modelType?: string,
     debug?: boolean,
     hotwordsFile?: string,
-    hotwordsScore?: number
+    hotwordsScore?: number,
+    numThreads?: number,
+    provider?: string,
+    ruleFsts?: string,
+    ruleFars?: string,
+    dither?: number
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -61,7 +71,7 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty).
+   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
    */
   setSttConfig(options: Object): Promise<void>;
 
