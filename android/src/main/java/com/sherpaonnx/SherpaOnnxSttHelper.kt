@@ -19,6 +19,12 @@ import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.OfflineZipformerCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWenetCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineFunAsrNanoModelConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineDolphinModelConfig
+import com.k2fsa.sherpa.onnx.OfflineFireRedAsrModelConfig
+import com.k2fsa.sherpa.onnx.OfflineCanaryModelConfig
+import com.k2fsa.sherpa.onnx.OfflineOmnilingualAsrCtcModelConfig
+import com.k2fsa.sherpa.onnx.OfflineMedAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
 import java.io.File
 
@@ -304,6 +310,52 @@ internal class SherpaOnnxSttHelper(
         ),
         tokens = path(paths, "tokens"),
         modelType = "whisper"
+      )
+      "fire_red_asr" -> OfflineModelConfig(
+        fireRedAsr = OfflineFireRedAsrModelConfig(
+          encoder = path(paths, "fireRedEncoder"),
+          decoder = path(paths, "fireRedDecoder")
+        ),
+        tokens = path(paths, "tokens"),
+        modelType = "fire_red_asr"
+      )
+      "moonshine" -> OfflineModelConfig(
+        moonshine = OfflineMoonshineModelConfig(
+          preprocessor = path(paths, "moonshinePreprocessor"),
+          encoder = path(paths, "moonshineEncoder"),
+          uncachedDecoder = path(paths, "moonshineUncachedDecoder"),
+          cachedDecoder = path(paths, "moonshineCachedDecoder")
+        ),
+        tokens = path(paths, "tokens"),
+        modelType = "moonshine"
+      )
+      "dolphin" -> OfflineModelConfig(
+        dolphin = OfflineDolphinModelConfig(model = path(paths, "dolphinModel")),
+        tokens = path(paths, "tokens"),
+        modelType = "dolphin"
+      )
+      "canary" -> OfflineModelConfig(
+        canary = OfflineCanaryModelConfig(
+          encoder = path(paths, "canaryEncoder"),
+          decoder = path(paths, "canaryDecoder")
+        ),
+        tokens = path(paths, "tokens"),
+        modelType = "canary"
+      )
+      "omnilingual" -> OfflineModelConfig(
+        omnilingual = OfflineOmnilingualAsrCtcModelConfig(model = path(paths, "omnilingualModel")),
+        tokens = path(paths, "tokens"),
+        modelType = "omnilingual"
+      )
+      "medasr" -> OfflineModelConfig(
+        medasr = OfflineMedAsrCtcModelConfig(model = path(paths, "medasrModel")),
+        tokens = path(paths, "tokens"),
+        modelType = "medasr"
+      )
+      "telespeech_ctc" -> OfflineModelConfig(
+        teleSpeech = path(paths, "telespeechCtcModel"),
+        tokens = path(paths, "tokens"),
+        modelType = "telespeech_ctc"
       )
       "funasr_nano" -> OfflineModelConfig(
         funasrNano = OfflineFunAsrNanoModelConfig(
