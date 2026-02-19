@@ -1,11 +1,17 @@
+// Apply shared Android defaults (NDK, SDK versions, Kotlin) so example uses same values as repo root.
+def androidDefaults = file("../../gradle/android-defaults.gradle")
+if (androidDefaults.exists()) {
+    apply from: androidDefaults
+}
 buildscript {
+    // Use values from android-defaults.gradle when applied above; otherwise fallbacks for standalone copy of example.
     ext {
-        buildToolsVersion = "36.0.0"
-        minSdkVersion = 24
-        compileSdkVersion = 36
-        targetSdkVersion = 36
-        ndkVersion = "27.1.12297006"
-        kotlinVersion = "2.1.20"
+        buildToolsVersion = rootProject.ext.has('buildToolsVersion') ? rootProject.ext.buildToolsVersion : '36.0.0'
+        minSdkVersion = rootProject.ext.has('minSdkVersion') ? rootProject.ext.minSdkVersion : 24
+        compileSdkVersion = rootProject.ext.has('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
+        targetSdkVersion = rootProject.ext.has('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
+        ndkVersion = rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '29.0.14206865'
+        kotlinVersion = rootProject.ext.has('kotlinVersion') ? rootProject.ext.kotlinVersion : '2.1.20'
     }
     repositories {
         google()
@@ -15,7 +21,12 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("com.google.gms:google-services:4.4.4")
+        classpath("com.google.firebase:firebase-crashlytics-gradle:3.0.6")
     }
 }
+
+def source = androidDefaults.exists() ? "gradle/android-defaults.gradle" : "fallback"
+println "[example/android build.gradle] Source=${source} -> ndkVersion=${rootProject.ext.ndkVersion}, compileSdkVersion=${rootProject.ext.compileSdkVersion}, kotlinVersion=${rootProject.ext.kotlinVersion}"
 
 apply plugin: "com.facebook.react.rootproject"

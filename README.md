@@ -24,7 +24,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 |---------|--------|
 | Offline Speech-to-Text | ✅ **Supported** |
 | Text-to-Speech | ✅ **Supported** |
-| Play Asset Delivery (PAD) | ✅ **Supported** (Android; see [PAD doc](./docs/PAD.md)) |
+| Play Asset Delivery (PAD) | ✅ **Supported** (Android; see [Model Setup](./docs/MODEL_SETUP.md)) |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
 | Source Separation | ❌ Not yet supported |
@@ -77,7 +77,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 - ✅ **Android Support** - Fully supported on Android
 - ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
 - ✅ **TypeScript Support** - Full TypeScript definitions included
-- ✅ **Play Asset Delivery (PAD)** - Ship large models in an Android asset pack; [debug with Metro and release builds](./docs/PAD.md) are supported
+- ✅ **Play Asset Delivery (PAD)** - Ship large models in an Android asset pack; [Model Setup](./docs/MODEL_SETUP.md) covers PAD, debug with Metro, and release
 
 ## Installation
 
@@ -149,28 +149,9 @@ Then run `pod install` as usual.
 - [Speaker Diarization](./docs/diarization.md)
 - [Speech Enhancement](./docs/enhancement.md)
 - [Source Separation](./docs/separation.md)
-- [General STT Model Setup](./docs/STT_MODEL_SETUP.md)
-- [General TTS Model Setup](./docs/TTS_MODEL_SETUP.md)
-- [Play Asset Delivery (PAD)](./docs/PAD.md) – PAD setup, debug with Metro, release, and API quick reference
+- [Model Setup](./docs/MODEL_SETUP.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 
-### Example Model READMEs
-
-Model READMEs in the example app live in the Play Asset Delivery pack at `example/android/sherpa_models/src/main/assets/models/`:
-
-- [kokoro (US) README](./example/android/sherpa_models/src/main/assets/models/kokoro-us/README.md)
-- [kokoro (ZH) README](./example/android/sherpa_models/src/main/assets/models/kokoro-zh/README.md)
-- [funasr-nano README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-funasr-nano-int8/README.md)
-- [kitten-nano README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-kitten-nano-en-v0_1-fp16/README.md)
-- [matcha README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-matcha-icefall-en_US-ljspeech/README.md)
-- [nemo-ctc README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-nemo-parakeet-tdt-ctc-en/README.md)
-- [paraformer README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-paraformer-zh-small/README.md)
-- [sense-voice README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8/README.md)
-- [vits README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-vits-piper-en_US-libritts_r-medium/README.md)
-- [wenet-ctc README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-wenetspeech-ctc-zh-en-cantonese/README.md)
-- [whisper-tiny README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-whisper-tiny-en/README.md)
-- [zipformer README](./example/android/sherpa_models/src/main/assets/models/sherpa-onnx-zipformer-small-en/README.md)
-
-Note: If your app delivers models via Play Asset Delivery (PAD) or stores models on the device file system (for example under the app's files directory at `DocumentDirectoryPath/models`), you can enumerate those extracted model folders using the native helper exposed as `listModelsAtPath(path, recursive)` (available from JS as `listModelsAtPath`). Use this function as an alternative to `listAssetModels()` when models are not bundled in the APK assets. The example app demonstrates merging results from `listAssetModels()` and `listModelsAtPath()` so both bundled and PAD-extracted models are visible.
+Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 
 ## Requirements
 

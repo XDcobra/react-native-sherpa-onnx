@@ -80,12 +80,16 @@ android {
     sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
   }
 
-  // Codegen output (run for both example-app and standalone AAR). includesGeneratedCode=true so script writes to this path; app CMake expects build/generated/source/codegen/jni.
+  // Codegen Java output: always use the flat path. For app builds RNGP writes here directly;
+  // for standalone AAR builds the codegen task normalises the nested output to this path.
   sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
     targetSdkVersion getExtOrDefault("targetSdkVersion")
+
+    // ProGuard rules to preserve classes/methods called from JNI
+    consumerProguardFiles 'proguard-rules.pro'
 
     // NDK configuration
     ndkVersion getExtOrDefault("ndkVersion")
@@ -197,7 +201,11 @@ dependencies {
   implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
-  implementation "com.google.android.play:asset-delivery:2.2.1"
+  implementation "com.google.android.play:asset-delivery:2.3.0"
+
+  // Firebase Crashlytics: compileOnly so the library compiles; at runtime the host app provides it.
+  // If the app does not use Firebase, recording is skipped (see CrashlyticsHelper).
+  compileOnly "com.google.firebase:firebase-crashlytics:20.0.4"
 }
 
 // Create resolvable configuration for extraction
@@ -256,80 +264,22 @@ def extractNativeLibs = tasks.register("extractNativeLibs") {
   }
 }
 
-// Standalone AAR build: run React Native codegen so NativeSherpaOnnxSpec is generated (no stub needed)
+// Codegen for TurboModule spec; in separate script to avoid Gradle 9 Groovy "source is null" with NodeTask in main script.
+apply from: file("${project.projectDir}/codegen.gradle")
 
-// Ensure Node plugin is applied (used to run npx reliably)
-apply plugin: 'com.github.node-gradle.node'
-
-// Configure Node (plugin will download if necessary)
-// Resolve desired Node version from library root .nvmrc so codegen uses same Node when built from app or standalone.
-def projectNodeVersion = null
-def libraryRootForNode = project.projectDir.parentFile
-def nvmrcFile = file("${libraryRootForNode}/.nvmrc")
-if (nvmrcFile.exists()) {
-  projectNodeVersion = nvmrcFile.text.readLines().find { it?.trim() }?.trim()
-  if (projectNodeVersion?.startsWith('v')) {
-    projectNodeVersion = projectNodeVersion.substring(1)
-  }
-}
-
-node {
-  version = projectNodeVersion
-  download = false // Don't download if not needed - use system Node if it matches the version in .nvmrc (common in dev environments)
-}
-
-// Use the library root (parent of android/), not rootProject, so codegen works when this module
-// is built from the repo root (standalone AAR) or from an app (e.g. example/android).
-def libraryRoot = project.projectDir.parentFile
-// Single path on all platforms: with codegenConfig.includesGeneratedCode=true the script uses -o directly (no nested android/app/build/...).
-def outDir = file("${project.buildDir}/generated/source/codegen")
-
-tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
-  onlyIf { !project.hasProperty('useNpx') || project.property('useNpx') != 'true' }
-  workingDir = libraryRoot
-  inputs.dir(file("${libraryRoot}/src"))
-  inputs.file(file("${libraryRoot}/package.json"))
-  outputs.dir(outDir)
-
-  doFirst {
-    if (!file("${libraryRoot}/node_modules/react-native").exists()) {
-      throw new RuntimeException(
-        "Codegen requires node_modules at library root. Run 'yarn install' (or npm install) in ${libraryRoot}, then rebuild."
-      )
-    }
-    outDir.mkdirs()
-  }
-
-  script = file("${libraryRoot}/node_modules/react-native/scripts/generate-codegen-artifacts.js")
-  args = [
-    '-p', libraryRoot.absolutePath.replace("\\", "/"),
-    '-t', 'android',
-    '-o', outDir.absolutePath.replace("\\", "/"),
-    '-s', 'library'
-  ]
-
-  environment = ['CI': 'true']
-}
-
-// Alias task: depend on the Node-based implementation only.
-tasks.register('generateCodegenSpec') {
-  dependsOn tasks.named('generateCodegenSpecNode')
-}
-
-// Make CMake depend on extraction so extracted native libs exist before any CMake task
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractNativeLibs
   }
 
-  // Ensure extracted native libs are available before merge (so AAR contains sherpa-onnx .so)
   tasks.matching { it.name == "mergeReleaseNativeLibs" }.configureEach {
     dependsOn extractNativeLibs
   }
 
   preBuild.dependsOn extractNativeLibs
 
-  // Compile (debug + release) only after codegen; ensures example-app and standalone AAR both see the spec and app CMake finds jni.
+  // With includesGeneratedCode=false, codegen is always run by our custom task (not RNGP).
+  // Kotlin compile must depend on it for both standalone AAR and app-dependency builds.
   def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
   tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
     dependsOn tasks.named('generateCodegenSpec')

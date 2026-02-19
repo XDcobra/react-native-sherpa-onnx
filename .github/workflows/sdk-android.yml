@@ -205,56 +205,105 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Prepare Firebase google-services.json (Crashlytics)
+        # Secret cannot be referenced in 'if' (invalid in fork PRs). Step runs always; script no-ops when secret is empty.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            mkdir -p example/android/app
+            printf '%s' "$GOOGLE_SERVICES_JSON" > example/android/app/google-services.json
+            echo "[OK] google-services.json written for Crashlytics"
+          else
+            echo "GOOGLE_SERVICES_JSON not set (e.g. fork PR). Skipping; Firebase/Crashlytics will be disabled."
+          fi
+
       - name: Build Android example app
+        id: build-android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           set -o pipefail
-          echo "Building Android example app..."
-
+          echo "Building Android example app (NDK: $ANDROID_NDK_HOME)..."
           cd example/android
 
-          ./gradlew clean
-
-          if ! ./gradlew assembleDebug \
+          ./gradlew assembleDebug \
             --stacktrace \
             --info \
-            > /tmp/build.full.log 2>&1; then
-            BUILD_FAILED=1
+            2>&1 | tee /tmp/build.full.log | tail -30
+          GRADLE_EXIT=$?
+          if [ "$GRADLE_EXIT" -ne 0 ]; then
+            exit "$GRADLE_EXIT"
           fi
-
-          echo "=== Filtered Build Output ==="
-          grep -E "(FAILED|ERROR|error:|warning:|BUILD SUCCEEDED|BUILD FAILED|FAILURE|Exception)" /tmp/build.full.log | head -100 || true
-
-          if [ "${BUILD_FAILED:-0}" = "1" ]; then
-            echo ""
-            echo "=== Build failed. Full error analysis ==="
-            
-            echo ""
-            echo "--- Compilation/Linker Errors ---"
-            grep -B 2 -A 5 -i "error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
-            
-            echo ""
-            echo "--- Fatal Errors ---"
-            grep -B 2 -A 5 -i "fatal" /tmp/build.full.log | head -50 || echo "No fatal errors found"
-            
-            echo ""
-            echo "--- Exceptions ---"
-            grep -B 2 -A 10 "Exception" /tmp/build.full.log | head -50 || echo "No exceptions found"
-            
-            echo ""
-            echo "--- CMake Errors ---"
-            grep -B 2 -A 5 -i "cmake" /tmp/build.full.log | grep -i "error\|fail" | head -30 || echo "No CMake errors found"
-            
-            echo ""
-            echo "--- Failed Tasks ---"
-            grep -B 5 -A 2 "FAILED" /tmp/build.full.log | head -30 || true
-            
-            echo ""
-            echo "--- Last 50 lines of build log ---"
-            tail -50 /tmp/build.full.log
-            exit 1
-          fi
-
           echo "[OK] Android build completed successfully"
+
+      - name: Debug CMake build failure
+        if: ${{ failure() && steps.build-android.outcome == 'failure' }}
+        working-directory: example/android
+        run: |
+          echo "=== Build failed. Dumping CMake debug info ==="
+
+          echo ""
+          echo "--- Generated Android-autolinking.cmake ---"
+          AUTOLINK_CMAKE="app/build/generated/autolinking/src/main/jni/Android-autolinking.cmake"
+          if [ -f "$AUTOLINK_CMAKE" ]; then
+            cat "$AUTOLINK_CMAKE"
+          else
+            echo "File not found: $AUTOLINK_CMAKE"
+          fi
+
+          echo ""
+          echo "--- Generated autolinking .cpp/.h files ---"
+          find app/build/generated/autolinking -type f \( -name "*.cpp" -o -name "*.h" \) 2>/dev/null | while read f; do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
+          echo ""
+          echo "--- CMakeError.log (arm64-v8a) ---"
+          CMAKE_ERR=$(find app/.cxx -name "CMakeError.log" -path "*/arm64-v8a/*" 2>/dev/null | head -1)
+          if [ -n "$CMAKE_ERR" ] && [ -f "$CMAKE_ERR" ]; then
+            cat "$CMAKE_ERR"
+          else
+            echo "No CMakeError.log found for arm64-v8a"
+          fi
+
+          echo ""
+          echo "--- CMakeOutput.log (last 100 lines, arm64-v8a) ---"
+          CMAKE_OUT=$(find app/.cxx -name "CMakeOutput.log" -path "*/arm64-v8a/*" 2>/dev/null | head -1)
+          if [ -n "$CMAKE_OUT" ] && [ -f "$CMAKE_OUT" ]; then
+            tail -100 "$CMAKE_OUT"
+          else
+            echo "No CMakeOutput.log found for arm64-v8a"
+          fi
+
+          echo ""
+          echo "--- Library codegen directories ---"
+          echo "react-native-sherpa-onnx codegen:"
+          find . -path "*react-native-sherpa-onnx/build/generated/source/codegen*" -type f 2>/dev/null | head -20 || echo "  (none found)"
+          echo ""
+          echo "All codegen jni CMakeLists:"
+          find . -path "*/codegen/jni/CMakeLists.txt" -type f 2>/dev/null | while read f; do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
+          echo ""
+          echo "--- Kotlin / Codegen errors (if any) ---"
+          if [ -f /tmp/build.full.log ]; then
+            grep -E "Unresolved reference|NativeSherpaOnnxSpec|compileDebugKotlin|compileReleaseKotlin|generateCodegenSpec|codegen" /tmp/build.full.log | head -30 || echo "  (none)"
+          fi
+          echo ""
+          echo "--- Filtered errors from build log ---"
+          if [ -f /tmp/build.full.log ]; then
+            grep -E "CMake Error|FAILED|error:" /tmp/build.full.log | head -40 || echo "No error lines"
+            echo ""
+            echo "--- Last 30 lines of build log ---"
+            tail -30 /tmp/build.full.log
+          else
+            echo "/tmp/build.full.log not found"
+          fi
 
       - name: Verify build artifacts
         run: |
