@@ -14,6 +14,7 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
     if (modelType == "matcha") return TtsModelKind::kMatcha;
     if (modelType == "kokoro") return TtsModelKind::kKokoro;
     if (modelType == "kitten") return TtsModelKind::kKitten;
+    if (modelType == "pocket") return TtsModelKind::kPocket;
     if (modelType == "zipvoice") return TtsModelKind::kZipvoice;
     return TtsModelKind::kUnknown;
 }
@@ -57,9 +58,16 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     std::string vocoder = FindOnnxByAnyToken(files, {"vocoder"}, std::nullopt);
     std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, std::nullopt);
     std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, std::nullopt);
+    std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
+    std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, std::nullopt);
+    std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
+    std::string vocabJsonFile = FindFileByName(modelDir, "vocab.json", 2);
+    std::string tokenScoresJsonFile = FindFileByName(modelDir, "token_scores.json", 2);
 
     LOGI("DetectTtsModel: acousticModel=%s, vocoder=%s, encoder=%s, decoder=%s",
          acousticModel.c_str(), vocoder.c_str(), encoder.c_str(), decoder.c_str());
+    LOGI("DetectTtsModel: lmFlow=%s, lmMain=%s, textConditioner=%s, vocabJson=%s, tokenScoresJson=%s",
+         lmFlow.c_str(), lmMain.c_str(), textConditioner.c_str(), vocabJsonFile.c_str(), tokenScoresJsonFile.c_str());
 
     std::vector<std::string> modelExcludes = {
         "acoustic",
@@ -79,6 +87,9 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
     bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
+                     !textConditioner.empty() && !vocabJsonFile.empty() && FileExists(vocabJsonFile) &&
+                     !tokenScoresJsonFile.empty() && FileExists(tokenScoresJsonFile);
     bool hasDataDir = !dataDirPath.empty() && IsDirectory(dataDirPath);
 
     std::string modelDirLower = ToLower(modelDir);
@@ -87,6 +98,9 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     if (hasMatcha) {
         result.detectedModels.push_back({"matcha", modelDir});
+    }
+    if (hasPocket) {
+        result.detectedModels.push_back({"pocket", modelDir});
     }
     if (hasZipvoice && !hasMatcha) {
         result.detectedModels.push_back({"zipvoice", modelDir});
@@ -130,6 +144,8 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     } else {
         if (hasMatcha) {
             selected = TtsModelKind::kMatcha;
+        } else if (hasPocket) {
+            selected = TtsModelKind::kPocket;
         } else if (hasZipvoice) {
             selected = TtsModelKind::kZipvoice;
         } else if (hasVoicesFile) {
@@ -162,6 +178,10 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         result.error = "TTS: Kokoro/Kitten model requested but required files not found in " + modelDir;
         return result;
     }
+    if (selected == TtsModelKind::kPocket && !hasPocket) {
+        result.error = "TTS: Pocket model requested but required files not found in " + modelDir;
+        return result;
+    }
     if (selected == TtsModelKind::kZipvoice && !hasZipvoice) {
         result.error = "TTS: Zipvoice model requested but required files not found in " + modelDir;
         return result;
@@ -185,13 +205,18 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.paths.vocoder = vocoder;
     result.paths.encoder = encoder;
     result.paths.decoder = decoder;
+    result.paths.lmFlow = lmFlow;
+    result.paths.lmMain = lmMain;
+    result.paths.textConditioner = textConditioner;
+    result.paths.vocabJson = vocabJsonFile;
+    result.paths.tokenScoresJson = tokenScoresJsonFile;
 
     LOGI("DetectTtsModel: selected kind=%d, ttsModel=%s",
          static_cast<int>(selected), ttsModel.c_str());
     LOGI("DetectTtsModel: final paths — tokens=%s, dataDir=%s",
          result.paths.tokens.c_str(), result.paths.dataDir.c_str());
 
-    if (tokensFile.empty() || !FileExists(tokensFile)) {
+    if (selected != TtsModelKind::kPocket && (tokensFile.empty() || !FileExists(tokensFile))) {
         result.error = "TTS: tokens.txt not found in " + modelDir;
         LOGE("%s", result.error.c_str());
         return result;

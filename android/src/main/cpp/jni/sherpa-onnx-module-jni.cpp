@@ -105,6 +105,7 @@ const char* ttsModelKindToString(sherpaonnx::TtsModelKind k) {
     case sherpaonnx::TtsModelKind::kMatcha: return "matcha";
     case sherpaonnx::TtsModelKind::kKokoro: return "kokoro";
     case sherpaonnx::TtsModelKind::kKitten: return "kitten";
+    case sherpaonnx::TtsModelKind::kPocket: return "pocket";
     case sherpaonnx::TtsModelKind::kZipvoice: return "zipvoice";
     default: return "unknown";
   }
@@ -240,6 +241,11 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
       putString(env, pathsMap, mapPut, "vocoder", result.paths.vocoder);
       putString(env, pathsMap, mapPut, "encoder", result.paths.encoder);
       putString(env, pathsMap, mapPut, "decoder", result.paths.decoder);
+      putString(env, pathsMap, mapPut, "lmFlow", result.paths.lmFlow);
+      putString(env, pathsMap, mapPut, "lmMain", result.paths.lmMain);
+      putString(env, pathsMap, mapPut, "textConditioner", result.paths.textConditioner);
+      putString(env, pathsMap, mapPut, "vocabJson", result.paths.vocabJson);
+      putString(env, pathsMap, mapPut, "tokenScoresJson", result.paths.tokenScoresJson);
       env->CallObjectMethod(map, mapPut, env->NewStringUTF("paths"), pathsMap);
       env->DeleteLocalRef(pathsMap);
     }
