@@ -4,12 +4,12 @@ This guide covers the STT APIs for offline transcription.
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
-| Model initialization | Supported | Kotlin API | `initializeSTT()`; optional hotwordsFile, hotwordsScore |
+| Model initialization | Supported | Kotlin API | `initializeSTT()`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
 | Offline file transcription | Supported | Kotlin API | `transcribeFile()` → full result object |
 | Transcribe from samples | Supported | Kotlin API | `transcribeSamples(samples, sampleRate)` |
 | Full result (tokens, timestamps, lang, emotion, …) | Supported | Kotlin API | Via `transcribeFile` / `transcribeSamples` return type |
 | Hotwords (init) | Supported | Kotlin API | OfflineRecognizerConfig hotwordsFile, hotwordsScore |
-| Runtime config | Supported | Kotlin API | `setSttConfig()` |
+| Runtime config | Supported | Kotlin API | `setSttConfig()` (decodingMethod, maxActivePaths, hotwords, blankPenalty, ruleFsts, ruleFars) |
 | Unload resources | Supported | Kotlin API | `unloadSTT()` |
 | Model discovery helpers | Supported | This package | `listAssetModels()` / `resolveModelPath()` |
 | Model downloads | Supported | Kotlin API | Download Manager API |
@@ -20,7 +20,7 @@ This guide covers the STT APIs for offline transcription.
 
 ## Overview
 
-The STT module provides offline speech recognition: load a model with `initializeSTT`, then transcribe audio from a file with `transcribeFile` or from float samples with `transcribeSamples`. Both return a full result object (`SttRecognitionResult`) with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, and `durations` (model-dependent). Optional hotwords can be set at init; runtime config is available via `setSttConfig`. Supported model types include transducer, paraformer, whisper, sense_voice, and others (see feature table).
+The STT module provides offline speech recognition: load a model with `initializeSTT`, then transcribe audio from a file with `transcribeFile` or from float samples with `transcribeSamples`. Both return a full result object (`SttRecognitionResult`) with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, and `durations` (model-dependent). Optional init options include hotwords, `numThreads`, `provider`, `ruleFsts`, `ruleFars`, and `dither`; runtime config is available via `setSttConfig` (e.g. decodingMethod, hotwords, ruleFsts, ruleFars). Supported model types include transducer, paraformer, whisper, sense_voice, and others (see feature table).
 
 ## Quick Start
 
@@ -73,6 +73,11 @@ Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to le
 | `debug` | `boolean` | Enable debug logging in native/sherpa-onnx (default: false). |
 | `hotwordsFile` | `string` | Path to hotwords file for keyword boosting. |
 | `hotwordsScore` | `number` | Hotwords score (default in native: 1.5). |
+| `numThreads` | `number` | Number of threads for inference (default in native: 1). |
+| `provider` | `string` | Provider string (e.g. `"cpu"`); stored in config only. |
+| `ruleFsts` | `string` | Comma-separated paths to rule FSTs for inverse text normalization (ITN). |
+| `ruleFars` | `string` | Comma-separated paths to rule FARs for ITN. |
+| `dither` | `number` | Dither for feature extraction (default: 0). |
 
 Notes and common pitfalls:
 - `modelPath` must point to the model directory containing the expected files for the chosen `modelType` (e.g. `encoder.onnx`/`decoder.onnx`/`joiner.onnx` for transducer, `model.onnx` + `tokens.txt` for paraformer).
@@ -134,6 +139,8 @@ Update recognizer config at runtime. Options are merged with the config from ini
 | `hotwordsFile` | `string` | Path to hotwords file. |
 | `hotwordsScore` | `number` | Hotwords score. |
 | `blankPenalty` | `number` | Blank penalty. |
+| `ruleFsts` | `string` | Comma-separated paths to rule FSTs for ITN. |
+| `ruleFars` | `string` | Comma-separated paths to rule FARs for ITN. |
 
 ### `unloadSTT()`
 
@@ -169,10 +176,10 @@ The JS API in `react-native-sherpa-onnx/stt` resolves model paths and normalizes
 
 | JS (public) | TurboModule method | Notes |
 | --- | --- | --- |
-| `initializeSTT(options)` | `initializeStt(modelDir, preferInt8?, modelType?, debug?, hotwordsFile?, hotwordsScore?)` | JS resolves `modelPath` to `modelDir` via `resolveModelPath`. |
+| `initializeSTT(options)` | `initializeStt(modelDir, preferInt8?, modelType?, debug?, hotwordsFile?, hotwordsScore?, numThreads?, provider?, ruleFsts?, ruleFars?, dither?)` | JS resolves `modelPath` to `modelDir` via `resolveModelPath`. |
 | `transcribeFile(filePath)` | `transcribeFile(filePath)` | Returns `Promise<SttRecognitionResult>` (object). |
 | `transcribeSamples(samples, sampleRate)` | `transcribeSamples(samples, sampleRate)` | Same return type as `transcribeFile`. |
-| `setSttConfig(options)` | `setSttConfig(options)` | `options` is a flat object (e.g. `decodingMethod`, `maxActivePaths`, `hotwordsFile`, `hotwordsScore`, `blankPenalty`). |
+| `setSttConfig(options)` | `setSttConfig(options)` | `options` is a flat object (e.g. `decodingMethod`, `maxActivePaths`, `hotwordsFile`, `hotwordsScore`, `blankPenalty`, `ruleFsts`, `ruleFars`). |
 | `unloadSTT()` | `unloadStt()` | No arguments. |
 
 Result normalization: the native layer returns an object with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, `durations`. The JS layer in `src/stt/index.ts` uses `normalizeSttResult(raw)` so that arrays and strings are always in the expected shape (e.g. empty array if missing).
@@ -180,19 +187,19 @@ Result normalization: the native layer returns an object with `text`, `tokens`, 
 ### Android (Kotlin)
 
 - **Module:** `SherpaOnnxModule` implements `NativeSherpaOnnxSpec`; STT logic lives in `SherpaOnnxSttHelper`.
-- **Init:** `initializeStt(...)` builds `OfflineRecognizerConfig` (including `hotwordsFile`, `hotwordsScore`), creates `OfflineRecognizer`, and stores the last config for `setSttConfig`.
+- **Init:** `initializeStt(...)` builds `OfflineRecognizerConfig` (including `hotwordsFile`, `hotwordsScore`, `numThreads`, `provider`, `ruleFsts`, `ruleFars`, and `FeatureConfig.dither`), creates `OfflineRecognizer`, and stores the last config for `setSttConfig`.
 - **Transcribe file:** `transcribeFile(path)` uses sherpa-onnx `ReadWave` → `CreateStream` → `AcceptWaveform` → `Decode` → `GetResult`; the result is converted to a map via `resultToWritableMap(OfflineRecognizerResult)` (text, tokens, timestamps, lang, emotion, event, durations).
 - **Transcribe samples:** `transcribeSamples(samples, sampleRate)` creates a stream, converts `ReadableArray` to `FloatArray`, `AcceptWaveform` → `Decode` → `GetResult` → same map, then releases the stream.
-- **Runtime config:** `setSttConfig(options)` reads the option map, merges into a copy of `lastRecognizerConfig`, and calls `recognizer.setConfig(merged)`.
+- **Runtime config:** `setSttConfig(options)` reads the option map (including `ruleFsts`, `ruleFars`), merges into a copy of `lastRecognizerConfig`, and calls `recognizer.setConfig(merged)`.
 - **Unload:** `unloadStt()` releases the recognizer and clears the stored config.
 
 ### iOS (ObjC + C++)
 
 - **Module:** `SherpaOnnx` (ObjC) conforms to `NativeSherpaOnnxSpec`; STT is implemented in the `SherpaOnnx (STT)` category; C++ wrapper: `sherpaonnx::SttWrapper` in `sherpa-onnx-stt-wrapper.mm`.
-- **Init:** `initializeStt:preferInt8:modelType:debug:hotwordsFile:hotwordsScore:resolve:reject:` calls `SttWrapper::initialize(modelDir, preferInt8, modelType, debug, hotwordsFileOpt, hotwordsScoreOpt)`. Config is built from model detection and optional hotwords; `OfflineRecognizerConfig` is stored for `setConfig`.
+- **Init:** `initializeStt:...:numThreads:provider:ruleFsts:ruleFars:dither:resolve:reject:` calls `SttWrapper::initialize(...)` with the same options. Config is built from model detection, optional hotwords, `numThreads`, `provider`, `ruleFsts`, `ruleFars` (dither is accepted but not applied if the bundled C++ API has no `FeatureConfig.dither`); `OfflineRecognizerConfig` is stored for `setConfig`.
 - **Transcribe file:** `transcribeFile:resolve:reject:` calls `SttWrapper::transcribeFile(path)`, which returns `SttRecognitionResult`; the ObjC layer converts it to an `NSDictionary` (text, tokens, timestamps, lang, emotion, event, durations) and resolves the promise.
 - **Transcribe samples:** `transcribeSamples:sampleRate:resolve:reject:` converts `NSArray` to `std::vector<float>`, calls `SttWrapper::transcribeSamples(samples, sampleRate)`, then same dictionary conversion.
-- **Runtime config:** `setSttConfig:resolve:reject:` maps the options dictionary to `SttRuntimeConfigOptions` (decoding_method, max_active_paths, hotwords_file, hotwords_score, blank_penalty) and calls `SttWrapper::setConfig(opts)`, which merges into the stored `OfflineRecognizerConfig` and calls `recognizer.SetConfig(config)`.
+- **Runtime config:** `setSttConfig:resolve:reject:` maps the options dictionary to `SttRuntimeConfigOptions` (decoding_method, max_active_paths, hotwords_file, hotwords_score, blank_penalty, rule_fsts, rule_fars) and calls `SttWrapper::setConfig(opts)`, which merges into the stored `OfflineRecognizerConfig` and calls `recognizer.SetConfig(config)`.
 - **Unload:** `unloadStt:resolve:reject:` releases the wrapper and clears the stored config.
 
 ### Underlying engine
