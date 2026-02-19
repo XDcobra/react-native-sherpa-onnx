@@ -153,6 +153,19 @@ Then run `pod install` as usual.
 
 Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 
+## Breaking changes (upgrading to 0.3.0)
+
+If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
+
+### Speech-to-Text (STT)
+
+- **`transcribeFile`** now returns `Promise<SttRecognitionResult>` (an object with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, `durations`) instead of `Promise<string>`. For text only, use `(await transcribeFile(path)).text`.
+- **`initializeSTT`** supports two additional optional options: `hotwordsFile` and `hotwordsScore`. The native TurboModule methods were renamed from `initializeSherpaOnnx` / `unloadSherpaOnnx` to `initializeStt` / `unloadStt`.
+
+### Text-to-Speech (TTS)
+
+- The **TTS public JS API** (`initializeTTS`, `unloadTTS`, `generateSpeech`, `generateSpeechStream`, etc.) is unchanged. If you call the **TurboModule directly**, use the new method names: `initializeTts`, `unloadTts`, and the other `Tts`-suffixed names (see [docs/tts.md – Mapping to Native API](./docs/tts.md#mapping-to-native-api)).
+
 ## Requirements
 
 - React Native >= 0.70

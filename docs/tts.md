@@ -256,18 +256,29 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
 - Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
 - Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` and `noiseScaleW` can trade naturalness vs. clarity (model-dependent).
 
-## Mapping to Native API (`src/NativeSherpaOnnx.ts`)
+## Mapping to Native API
 
-For advanced users the TurboModule exposes native primitives used by the JS wrappers. Key methods:
+The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps options; prefer it over calling the TurboModule directly.
 
-- `initializeTts(modelDir, modelType, numThreads, debug, noiseScale, noiseScaleW, lengthScale)` — `modelType`: `'vits'` | `'matcha'` | `'kokoro'` | `'kitten'` | `'pocket'` | `'zipvoice'` | `'auto'`
-- `generateTts(text, options)` — full-buffer generation; `options` is an object (sid, speed, and optionally referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra)
-- `generateTtsWithTimestamps(text, options)` — same as above with subtitles/estimated in the result
-- `generateTtsStream(text, options)` — streaming generation (emits chunk events); same options shape
-- `cancelTtsStream()`
-- `startTtsPcmPlayer(sampleRate, channels)` / `writeTtsPcmChunk(samples)` / `stopTtsPcmPlayer()`
-- `getTtsSampleRate()` / `getTtsNumSpeakers()`
-- `saveTtsAudioToFile(...)` / `saveTtsAudioToContentUri(...)` / `copyTtsContentUriToCache(...)`
+### TurboModule (spec: `src/NativeSherpaOnnx.ts`)
+
+| JS (public) | TurboModule method | Notes |
+| --- | --- | --- |
+| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?)` | JS resolves `modelPath` to `modelDir`; `modelType`: `'vits'` \| `'matcha'` \| `'kokoro'` \| `'kitten'` \| `'pocket'` \| `'zipvoice'` \| `'auto'`. |
+| `updateTtsParams(options)` | `updateTtsParams(noiseScale?, noiseScaleW?, lengthScale?)` | Runtime param updates; pass `null` to reset to default. |
+| `generateSpeech(text, options?)` | `generateTts(text, options)` | Full-buffer generation; `options`: sid, speed, referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra. |
+| `generateSpeechWithTimestamps(text, options?)` | `generateTtsWithTimestamps(text, options)` | Same as above; result includes `subtitles` and `estimated`. |
+| `generateSpeechStream(text, options?, handlers)` | `generateTtsStream(text, options)` | Streaming generation (emits chunk events); same options shape. |
+| `cancelSpeechStream()` | `cancelTtsStream()` | No arguments. |
+| `startTtsPcmPlayer(sampleRate, channels)` | `startTtsPcmPlayer(sampleRate, channels)` | — |
+| `writeTtsPcmChunk(samples)` | `writeTtsPcmChunk(samples)` | Float PCM in [-1, 1]. |
+| `stopTtsPcmPlayer()` | `stopTtsPcmPlayer()` | — |
+| `getSampleRate()` | `getTtsSampleRate()` | — |
+| `getNumSpeakers()` | `getTtsNumSpeakers()` | — |
+| `unloadTTS()` | `unloadTts()` | No arguments. |
+| `saveAudioToFile(audio, filePath)` | `saveTtsAudioToFile(samples, sampleRate, filePath)` | — |
+| `saveAudioToContentUri(...)` | `saveTtsAudioToContentUri(...)` | Android SAF; returns content URI. |
+| `copyContentUriToCache(fileUri, filename)` | `copyTtsContentUriToCache(fileUri, filename)` | — |
 
 The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, sampleRate }`) into a flat options object for the native bridge. Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
 
