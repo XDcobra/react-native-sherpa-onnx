@@ -62,6 +62,33 @@ export interface STTInitializeOptions {
    * Default in Kotlin: 1.5.
    */
   hotwordsScore?: number;
+
+  /**
+   * Number of threads for inference (Kotlin OfflineModelConfig.numThreads).
+   * Default in Kotlin: 1.
+   */
+  numThreads?: number;
+
+  /**
+   * Provider string (e.g. "cpu"). Stored in config only; no special logic on change.
+   * Kotlin OfflineModelConfig.provider.
+   */
+  provider?: string;
+
+  /**
+   * Path to rule FSTs (Kotlin OfflineRecognizerConfig.ruleFsts).
+   */
+  ruleFsts?: string;
+
+  /**
+   * Path to rule FARs (Kotlin OfflineRecognizerConfig.ruleFars).
+   */
+  ruleFars?: string;
+
+  /**
+   * Dither for feature extraction (Kotlin FeatureConfig.dither). Default 0.
+   */
+  dither?: number;
 }
 
 /**
@@ -104,4 +131,8 @@ export interface SttRuntimeConfig {
   hotwordsScore?: number;
   /** Blank penalty. */
   blankPenalty?: number;
+  /** Path to rule FSTs. */
+  ruleFsts?: string;
+  /** Path to rule FARs. */
+  ruleFars?: string;
 }
