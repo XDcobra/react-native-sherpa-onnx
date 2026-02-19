@@ -10,6 +10,8 @@ import {
   Alert,
   Platform,
   Share,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -30,6 +32,7 @@ import {
   copyContentUriToCache,
   shareAudioFile,
   type TTSModelType,
+  type TtsGenerationOptions,
 } from 'react-native-sherpa-onnx/tts';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import {
@@ -58,6 +61,32 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
+/** Minimal WAV parser: 44-byte header, 16-bit PCM LE → float samples in [-1, 1]. Mono or stereo (takes first channel). Path must be readable by RNFS (file path or cache path). */
+async function readWavToFloatSamples(
+  path: string
+): Promise<{ samples: number[]; sampleRate: number }> {
+  const base64 = await RNFS.readFile(path, 'base64');
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  const view = new DataView(bytes.buffer);
+  if (bytes.length < 44) throw new Error('File too short for WAV');
+  const sampleRate = view.getUint32(24, true);
+  const numChannels = view.getUint16(22, true);
+  const bitsPerSample = view.getUint16(34, true);
+  if (bitsPerSample !== 16) throw new Error('Only 16-bit WAV supported');
+
+  const dataOffset = 44;
+  const numSamples = Math.floor((bytes.length - dataOffset) / 2);
+  const samples: number[] = [];
+  for (let i = 0; i < numSamples; i += numChannels) {
+    const v = view.getInt16(dataOffset + i * 2, true);
+    samples.push(v / 32768);
+  }
+  return { samples, sampleRate };
+}
+
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
@@ -81,12 +110,25 @@ export default function TTSScreen() {
   const [inputText, setInputText] = useState<string>('Hello, world!');
   const [speakerId, setSpeakerId] = useState<string>('0');
   const [speed, setSpeed] = useState<string>('1.0');
+  const [silenceScale, setSilenceScale] = useState<string>('');
+  const [numSteps, setNumSteps] = useState<string>('');
+  const [referenceText, setReferenceText] = useState<string>('');
+  const [referenceAudio, setReferenceAudio] = useState<{
+    samples: number[];
+    sampleRate: number;
+  } | null>(null);
+  const [referenceAudioFileName, setReferenceAudioFileName] = useState<
+    string | null
+  >(null);
+  const [extraOptions, setExtraOptions] = useState<string>('');
   const [noiseScale, setNoiseScale] = useState<string>('');
   const [noiseScaleW, setNoiseScaleW] = useState<string>('');
   const [lengthScale, setLengthScale] = useState<string>('');
   const [outputFormat, setOutputFormat] = useState<'wav' | 'mp3' | 'flac'>(
     'wav'
   );
+  const [showOutputFormatPicker, setShowOutputFormatPicker] = useState(false);
+  const [voiceCloningExpanded, setVoiceCloningExpanded] = useState(false);
   const [generatedAudio, setGeneratedAudio] = useState<{
     samples: number[];
     sampleRate: number;
@@ -291,20 +333,73 @@ export default function TTSScreen() {
     return { samples: combined, sampleRate };
   };
 
-  const getSynthesisOptions = useCallback(() => {
+  const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
     const sid = parseInt(speakerId, 10);
     const speedValue = parseFloat(speed);
 
     if (isNaN(sid) || sid < 0) {
-      throw new Error('Invalid speaker ID');
+      throw new Error('Invalid speaker ID (must be ≥ 0)');
+    }
+
+    const numSpeakers = modelInfo?.numSpeakers ?? 0;
+    if (numSpeakers > 0 && sid >= numSpeakers) {
+      throw new Error(
+        `Speaker ID must be between 0 and ${
+          numSpeakers - 1
+        } (model has ${numSpeakers} speaker${numSpeakers === 1 ? '' : 's'})`
+      );
     }
 
     if (isNaN(speedValue) || speedValue <= 0) {
       throw new Error('Invalid speed value');
     }
 
-    return { sid, speed: speedValue };
-  }, [speakerId, speed]);
+    const options: TtsGenerationOptions = { sid, speed: speedValue };
+
+    const silenceScaleVal = silenceScale.trim();
+    if (silenceScaleVal.length > 0) {
+      const v = parseFloat(silenceScaleVal);
+      if (!isNaN(v) && v > 0) options.silenceScale = v;
+    }
+
+    const numStepsVal = numSteps.trim();
+    if (numStepsVal.length > 0) {
+      const v = parseInt(numStepsVal, 10);
+      if (!isNaN(v) && v > 0) options.numSteps = v;
+    }
+
+    if (referenceText.trim().length > 0)
+      options.referenceText = referenceText.trim();
+    if (referenceAudio != null) options.referenceAudio = referenceAudio;
+
+    if (extraOptions.trim().length > 0) {
+      const extra: Record<string, string> = {};
+      extraOptions
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((pair) => {
+          const idx = pair.indexOf(':');
+          if (idx > 0) {
+            const k = pair.slice(0, idx).trim();
+            const v = pair.slice(idx + 1).trim();
+            if (k && v) extra[k] = v;
+          }
+        });
+      if (Object.keys(extra).length > 0) options.extra = extra;
+    }
+
+    return options;
+  }, [
+    speakerId,
+    speed,
+    silenceScale,
+    numSteps,
+    referenceText,
+    referenceAudio,
+    extraOptions,
+    modelInfo?.numSpeakers,
+  ]);
 
   const processStreamQueue = useCallback(async () => {
     if (!streaming || streamInFlightRef.current) {
@@ -316,7 +411,7 @@ export default function TTSScreen() {
       return;
     }
 
-    let options: { sid: number; speed: number };
+    let options: TtsGenerationOptions;
     try {
       options = getSynthesisOptions();
     } catch (err) {
@@ -684,30 +779,21 @@ export default function TTSScreen() {
           setSelectedModelType(normalizedDetected[0].type);
         }
 
-        // Get model info only when we can safely call the native API. For file-path models
-        // (PAD/downloaded), getModelInfo() can crash (sherpa-onnx). Only set modelInfo when we have
-        // valid data; otherwise leave null so the UI does not show a "Model Information" section
-        // with wrong placeholder values.
-        const isFilePath =
-          padModelIds.includes(modelFolder) ||
-          downloadedModelIds.includes(modelFolder);
-        if (!isFilePath) {
-          try {
-            const info = await getModelInfo();
-            if (
-              info &&
-              typeof info.sampleRate === 'number' &&
-              typeof info.numSpeakers === 'number'
-            ) {
-              setModelInfo(info);
-            } else {
-              setModelInfo(null);
-            }
-          } catch (infoErr) {
-            console.warn('getModelInfo not available for this model:', infoErr);
+        // Try to get model info (sample rate, num speakers) for all models.
+        // For some file-path models this may fail; we catch and leave modelInfo null.
+        try {
+          const info = await getModelInfo();
+          if (
+            info &&
+            typeof info.sampleRate === 'number' &&
+            typeof info.numSpeakers === 'number'
+          ) {
+            setModelInfo(info);
+          } else {
             setModelInfo(null);
           }
-        } else {
+        } catch (infoErr) {
+          console.warn('getModelInfo not available for this model:', infoErr);
           setModelInfo(null);
         }
       } else {
@@ -787,21 +873,8 @@ export default function TTSScreen() {
     }
 
     try {
-      const sid = parseInt(speakerId, 10);
-      const speedValue = parseFloat(speed);
-
-      if (isNaN(sid) || sid < 0) {
-        throw new Error('Invalid speaker ID');
-      }
-
-      if (isNaN(speedValue) || speedValue <= 0) {
-        throw new Error('Invalid speed value');
-      }
-
-      const result = await generateSpeech(inputText, {
-        sid,
-        speed: speedValue,
-      });
+      const options = getSynthesisOptions();
+      const result = await generateSpeech(inputText, options);
 
       setGeneratedAudio(result);
       Alert.alert(
@@ -870,21 +943,8 @@ export default function TTSScreen() {
     }
 
     try {
-      const sid = parseInt(speakerId, 10);
-      const speedValue = parseFloat(speed);
-
-      if (isNaN(sid) || sid < 0) {
-        throw new Error('Invalid speaker ID');
-      }
-
-      if (isNaN(speedValue) || speedValue <= 0) {
-        throw new Error('Invalid speed value');
-      }
-
-      const result = await generateSpeechWithTimestamps(inputText, {
-        sid,
-        speed: speedValue,
-      });
+      const options = getSynthesisOptions();
+      const result = await generateSpeechWithTimestamps(inputText, options);
 
       setGeneratedAudio({
         samples: result.samples,
@@ -978,6 +1038,33 @@ export default function TTSScreen() {
         setGeneratedAudio(streamedAudio);
       }
       resetStreamingState(false);
+    }
+  };
+
+  const handlePickReferenceAudio = async () => {
+    setError(null);
+    try {
+      const picked = await DocumentPicker.pick({
+        type: [DocumentPicker.types.audio],
+      });
+      const file = Array.isArray(picked) ? picked[0] : picked;
+      const uri = file?.uri ?? (file as any)?.fileUri ?? file?.name ?? '';
+      const name = file?.name ?? uri?.split('/')?.pop() ?? 'reference.wav';
+      if (!uri) {
+        setError('Could not get file URI from picker');
+        return;
+      }
+      let path = uri.replace(/^file:\/\//, '');
+      if (uri.startsWith('content://')) {
+        path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
+      }
+      const { samples, sampleRate } = await readWavToFloatSamples(path);
+      setReferenceAudio({ samples, sampleRate });
+      setReferenceAudioFileName(name);
+    } catch (err: any) {
+      if ((DocumentPicker as any).isCancel?.(err)) return;
+      console.warn('Pick reference audio failed', err);
+      setError(err?.message ?? 'Failed to load reference WAV (use 16-bit PCM)');
     }
   };
 
@@ -1522,115 +1609,6 @@ export default function TTSScreen() {
             <Text style={styles.sectionDescription}>
               Select a TTS model to load:
             </Text>
-
-            <View style={styles.parameterRow}>
-              <View style={styles.parameterColumn}>
-                <Text style={styles.inputLabel}>Noise Scale (optional):</Text>
-                <TextInput
-                  style={styles.parameterInput}
-                  value={noiseScale}
-                  onChangeText={setNoiseScale}
-                  keyboardType="decimal-pad"
-                  placeholder="0.667"
-                  placeholderTextColor="#8E8E93"
-                />
-              </View>
-
-              <View style={styles.outputFormatContainer}>
-                <Text style={styles.inputLabel}>Output Format</Text>
-                <View style={styles.outputFormatRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.detectedModelButton,
-                      outputFormat === 'wav' &&
-                        styles.detectedModelButtonActive,
-                    ]}
-                    onPress={() => setOutputFormat('wav')}
-                  >
-                    <Text
-                      style={[
-                        styles.detectedModelButtonText,
-                        outputFormat === 'wav' &&
-                          styles.detectedModelButtonTextActive,
-                      ]}
-                    >
-                      WAV
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.detectedModelButton,
-                      outputFormat === 'mp3' &&
-                        styles.detectedModelButtonActive,
-                      styles.outputFormatButtonSpacing,
-                    ]}
-                    onPress={() => setOutputFormat('mp3')}
-                  >
-                    <Text
-                      style={[
-                        styles.detectedModelButtonText,
-                        outputFormat === 'mp3' &&
-                          styles.detectedModelButtonTextActive,
-                      ]}
-                    >
-                      MP3
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.detectedModelButton,
-                      outputFormat === 'flac' &&
-                        styles.detectedModelButtonActive,
-                      styles.outputFormatButtonSpacing,
-                    ]}
-                    onPress={() => setOutputFormat('flac')}
-                  >
-                    <Text
-                      style={[
-                        styles.detectedModelButtonText,
-                        outputFormat === 'flac' &&
-                          styles.detectedModelButtonTextActive,
-                      ]}
-                    >
-                      FLAC
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.parameterColumn}>
-                <Text style={styles.inputLabel}>Noise Scale W (optional):</Text>
-                <TextInput
-                  style={styles.parameterInput}
-                  value={noiseScaleW}
-                  onChangeText={setNoiseScaleW}
-                  keyboardType="decimal-pad"
-                  placeholder="0.8"
-                  placeholderTextColor="#8E8E93"
-                />
-              </View>
-            </View>
-
-            <View style={styles.parameterRow}>
-              <View style={styles.parameterColumn}>
-                <Text style={styles.inputLabel}>Length Scale (optional):</Text>
-                <TextInput
-                  style={styles.parameterInput}
-                  value={lengthScale}
-                  onChangeText={setLengthScale}
-                  keyboardType="decimal-pad"
-                  placeholder="1.0"
-                  placeholderTextColor="#8E8E93"
-                />
-              </View>
-            </View>
-
-            <Text style={styles.hint}>
-              Noise/Noise W/Length scale — leave blank to reset to model
-              defaults.
-            </Text>
             <View style={styles.separator} />
             {loadingModels ? (
               <View style={styles.loadingContainer}>
@@ -1809,9 +1787,130 @@ export default function TTSScreen() {
                 numberOfLines={3}
               />
 
+              <View style={styles.optionsBlock}>
+                <Text style={styles.subsectionTitle}>Options</Text>
+
+                <Text style={styles.inputLabel}>Output format (for save)</Text>
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={() => setShowOutputFormatPicker(true)}
+                >
+                  <Text style={styles.dropdownTriggerText}>
+                    {outputFormat.toUpperCase()}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#8E8E93" />
+                </TouchableOpacity>
+                <Modal
+                  visible={showOutputFormatPicker}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setShowOutputFormatPicker(false)}
+                >
+                  <Pressable
+                    style={styles.dropdownBackdrop}
+                    onPress={() => setShowOutputFormatPicker(false)}
+                  >
+                    <View style={styles.dropdownMenu}>
+                      {(['wav', 'mp3', 'flac'] as const).map((fmt) => (
+                        <TouchableOpacity
+                          key={fmt}
+                          style={[
+                            styles.dropdownItem,
+                            outputFormat === fmt && styles.dropdownItemActive,
+                          ]}
+                          onPress={() => {
+                            setOutputFormat(fmt);
+                            setShowOutputFormatPicker(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              outputFormat === fmt &&
+                                styles.dropdownItemTextActive,
+                            ]}
+                          >
+                            {fmt.toUpperCase()}
+                          </Text>
+                          {outputFormat === fmt && (
+                            <Ionicons
+                              name="checkmark"
+                              size={20}
+                              color="#007AFF"
+                            />
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </Pressable>
+                </Modal>
+
+                <View style={styles.parameterRow}>
+                  <View style={styles.parameterColumn}>
+                    <Text style={styles.inputLabel}>
+                      Noise scale (optional):
+                    </Text>
+                    <TextInput
+                      style={styles.parameterInput}
+                      value={noiseScale}
+                      onChangeText={setNoiseScale}
+                      keyboardType="decimal-pad"
+                      placeholder="0.667"
+                      placeholderTextColor="#8E8E93"
+                    />
+                  </View>
+                  <View style={styles.parameterColumn}>
+                    <Text style={styles.inputLabel}>
+                      Noise scale W (optional):
+                    </Text>
+                    <TextInput
+                      style={styles.parameterInput}
+                      value={noiseScaleW}
+                      onChangeText={setNoiseScaleW}
+                      keyboardType="decimal-pad"
+                      placeholder="0.8"
+                      placeholderTextColor="#8E8E93"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.parameterRow}>
+                  <View style={styles.parameterColumn}>
+                    <Text style={styles.inputLabel}>
+                      Length scale (optional):
+                    </Text>
+                    <TextInput
+                      style={styles.parameterInput}
+                      value={lengthScale}
+                      onChangeText={setLengthScale}
+                      keyboardType="decimal-pad"
+                      placeholder="1.0"
+                      placeholderTextColor="#8E8E93"
+                    />
+                  </View>
+                  <View style={styles.parameterColumn} />
+                </View>
+              </View>
+
+              {modelInfo != null && (
+                <Text style={styles.speakerCountHint}>
+                  Model has {modelInfo.numSpeakers} speaker
+                  {modelInfo.numSpeakers === 1 ? '' : 's'} (use ID 0
+                  {modelInfo.numSpeakers > 1
+                    ? `–${modelInfo.numSpeakers - 1}`
+                    : ''}
+                  )
+                </Text>
+              )}
               <View style={styles.parameterRow}>
                 <View style={styles.parameterColumn}>
-                  <Text style={styles.inputLabel}>Speaker ID:</Text>
+                  <Text style={styles.inputLabel}>
+                    Speaker ID
+                    {modelInfo?.numSpeakers != null && modelInfo.numSpeakers > 0
+                      ? ` (0–${modelInfo.numSpeakers - 1})`
+                      : ' (0 … ?)'}
+                    :
+                  </Text>
                   <TextInput
                     style={styles.parameterInput}
                     value={speakerId}
@@ -1835,6 +1934,146 @@ export default function TTSScreen() {
                 </View>
               </View>
 
+              <View style={styles.parameterRow}>
+                <View style={styles.parameterColumn}>
+                  <Text style={styles.inputLabel}>
+                    Silence scale (optional):
+                  </Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    value={silenceScale}
+                    onChangeText={setSilenceScale}
+                    keyboardType="decimal-pad"
+                    placeholder="—"
+                    placeholderTextColor="#8E8E93"
+                  />
+                </View>
+                <View style={styles.parameterColumn}>
+                  <Text style={styles.inputLabel}>Num steps (optional):</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    value={numSteps}
+                    onChangeText={setNumSteps}
+                    keyboardType="numeric"
+                    placeholder="—"
+                    placeholderTextColor="#8E8E93"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.voiceCloningSection}>
+                <TouchableOpacity
+                  style={styles.voiceCloningHeader}
+                  onPress={() => setVoiceCloningExpanded((prev) => !prev)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.voiceCloningHeaderLeft}>
+                    <Ionicons
+                      name="person-circle-outline"
+                      size={22}
+                      color="#8E8E93"
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.voiceCloningHeaderTitle}>
+                      Voice cloning (optional)
+                    </Text>
+                    {(referenceAudio != null ||
+                      referenceText.trim() !== '') && (
+                      <View style={styles.voiceCloningBadge}>
+                        <Text style={styles.voiceCloningBadgeText}>
+                          {referenceAudio != null ? '1 file' : 'text'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Ionicons
+                    name={voiceCloningExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={24}
+                    color="#8E8E93"
+                  />
+                </TouchableOpacity>
+                {voiceCloningExpanded && (
+                  <View style={styles.voiceCloningContent}>
+                    <Text style={styles.inputLabel}>
+                      Reference text (transcript of reference audio):
+                    </Text>
+                    <TextInput
+                      style={[styles.parameterInput, styles.referenceTextInput]}
+                      value={referenceText}
+                      onChangeText={setReferenceText}
+                      placeholder="Transcript of reference audio…"
+                      placeholderTextColor="#8E8E93"
+                    />
+                    <Text style={styles.inputLabel}>
+                      Reference audio (WAV):
+                    </Text>
+                    {referenceAudio == null ? (
+                      <TouchableOpacity
+                        style={styles.pickRefButtonPrimary}
+                        onPress={handlePickReferenceAudio}
+                      >
+                        <Ionicons
+                          name="add-circle-outline"
+                          size={20}
+                          color="#FFFFFF"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.pickRefButtonPrimaryText}>
+                          Tap to select WAV file
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.referenceAudioSelectedRow}>
+                        <View style={styles.referenceAudioSelectedInfo}>
+                          <Ionicons
+                            name="musical-notes"
+                            size={18}
+                            color="#34C759"
+                            style={styles.iconInline}
+                          />
+                          <Text
+                            style={styles.referenceAudioFileName}
+                            numberOfLines={1}
+                          >
+                            {referenceAudioFileName}
+                          </Text>
+                        </View>
+                        <View style={styles.referenceAudioActions}>
+                          <TouchableOpacity
+                            style={styles.changeRefButton}
+                            onPress={handlePickReferenceAudio}
+                          >
+                            <Text style={styles.changeRefButtonText}>
+                              Change
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.clearRefButton}
+                            onPress={() => {
+                              setReferenceAudio(null);
+                              setReferenceAudioFileName(null);
+                            }}
+                          >
+                            <Text style={styles.clearRefButtonText}>Clear</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+
+              <Text style={styles.inputLabel}>
+                Extra options (optional, key:value, …):
+              </Text>
+              <TextInput
+                style={styles.parameterInput}
+                value={extraOptions}
+                onChangeText={setExtraOptions}
+                placeholder="e.g. temperature:0.7, chunk_size:15"
+                placeholderTextColor="#8E8E93"
+              />
+              <View style={styles.generateActionsSpacer} />
               <TouchableOpacity
                 style={[
                   styles.generateButton,
@@ -2293,6 +2532,206 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#000000',
   },
+  referenceTextInput: {
+    minHeight: 48,
+    marginBottom: 12,
+  },
+  optionsBlock: {
+    marginBottom: 8,
+  },
+  subsectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 12,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  dropdownTriggerText: {
+    fontSize: 16,
+    color: '#000000',
+    fontWeight: '500',
+  },
+  dropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  dropdownMenu: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    minWidth: 200,
+    paddingVertical: 8,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  dropdownItemActive: {
+    backgroundColor: '#E3F2FD',
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: '#000000',
+  },
+  dropdownItemTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  voiceCloningSection: {
+    marginTop: 8,
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    overflow: 'hidden',
+  },
+  voiceCloningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#F2F2F7',
+  },
+  voiceCloningHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+  },
+  voiceCloningHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginLeft: 4,
+  },
+  voiceCloningBadge: {
+    marginLeft: 10,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: '#E3F2FD',
+  },
+  voiceCloningBadgeText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  voiceCloningContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  referenceAudioRow: {
+    marginBottom: 16,
+  },
+  referenceAudioButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  pickRefButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#E3F2FD',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  pickRefButtonText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  pickRefButtonPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  pickRefButtonPrimaryText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  referenceAudioSelectedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#E8F5E9',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    gap: 12,
+  },
+  referenceAudioSelectedInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+  },
+  referenceAudioFileName: {
+    fontSize: 14,
+    color: '#1B5E20',
+    fontWeight: '500',
+    flex: 1,
+  },
+  referenceAudioActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  changeRefButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: '#E3F2FD',
+  },
+  changeRefButtonText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  clearRefButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  clearRefButtonText: {
+    fontSize: 14,
+    color: '#FF3B30',
+    fontWeight: '500',
+  },
+  generateActionsSpacer: {
+    height: 24,
+  },
   generateButton: {
     backgroundColor: '#007AFF',
     borderRadius: 8,
@@ -2403,6 +2842,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     fontStyle: 'italic',
+  },
+  speakerCountHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 12,
   },
   iconInline: {
     marginRight: 12,
