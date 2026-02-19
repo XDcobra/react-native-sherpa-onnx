@@ -4,24 +4,23 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
-| Model initialization | Supported | Kotlin API | `initializeTTS()` |
-| Full-buffer generation | Supported | Kotlin API | `generateSpeech()` |
-| Streaming generation | Supported | Kotlin API | `generateSpeechStream()` |
-| Native PCM playback | Supported | Kotlin API | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
-| Save/share WAV | Supported | Kotlin API | `saveAudioToFile()` / `saveAudioToContentUri()` |
-| Timestamps (estimated) | Supported | Kotlin API | `generateSpeechWithTimestamps()` |
-| Noise/Noise W/Length scale tuning | Supported | Kotlin API | VITS/Matcha/Kokoro/Kitten (model-dependent) |
-| Runtime param updates | Supported | Kotlin API | `updateTtsParams()` |
-| Model downloads | Supported | Kotlin API | Download Manager API |
-| Voice cloning / reference audio | Supported | Kotlin API | Integrated in `generateSpeech()` / `generateSpeechStream()` (Zipvoice + GenerationConfig) |
-| Generate with GenerationConfig | Supported | Kotlin API | Reference audio, silenceScale, numSteps, extra via options |
-| Pocket-TTS model type | Supported | Kotlin API | `modelType: 'pocket'` |
+| Model initialization | ✅ | Kotlin API | `initializeTTS()` |
+| Full-buffer generation | ✅ | Kotlin API | `generateSpeech()` |
+| Streaming generation | ✅ | Kotlin API | `generateSpeechStream()` |
+| Native PCM playback | ✅ | Kotlin API | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
+| Save/share WAV | ✅ | Kotlin API | `saveAudioToFile()` / `saveAudioToContentUri()` |
+| Timestamps (estimated) | ✅ | Kotlin API | `generateSpeechWithTimestamps()` |
+| Noise/Noise W/Length scale tuning | ✅ | Kotlin API | VITS/Matcha/Kokoro/Kitten (model-dependent) |
+| Runtime param updates | ✅ | Kotlin API | `updateTtsParams()` |
+| Model downloads | ✅ | Kotlin API | Download Manager API |
+| Voice cloning / reference audio | ✅ | Kotlin API | Integrated in `generateSpeech()` / `generateSpeechStream()` (Zipvoice + GenerationConfig) |
+| Generate with GenerationConfig | ✅ | Kotlin API | Reference audio, silenceScale, numSteps, extra via options |
+| Additional audio formats (MP3/OGG/FLAC) | ✅ | This package | Use the provided conversion API (e.g. `convertAudioToFormat()` from `react-native-sherpa-onnx/audio`); sherpa-onnx natively outputs WAV/PCM only. |
 | Progress in streaming callback (0..1) | Planned | C-API | Not exposed in Kotlin API |
 | Batch generation | Planned | C-API | C API supports multi-text generation |
 | SSML | Planned | C-API | Model-dependent |
 | Real-time factor (RTF) | Planned | C-API | Performance metrics |
 | Speaker embedding customization | Planned | C-API | Model-dependent |
-| Additional audio formats | Planned | C-API | MP3/OGG/FLAC export |
 
 ## Overview
 
