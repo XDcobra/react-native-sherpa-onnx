@@ -4,7 +4,7 @@ import type {
   TTSInitializeOptions,
   TTSModelType,
   TtsUpdateOptions,
-  SynthesisOptions,
+  TtsGenerationOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TTSModelInfo,
@@ -120,51 +120,77 @@ export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
 }
 
 /**
+ * Convert TtsGenerationOptions to a flat object for the native bridge.
+ * Flattens referenceAudio { samples, sampleRate } to referenceAudio array + referenceSampleRate.
+ */
+function toNativeTtsOptions(
+  options?: TtsGenerationOptions
+): Record<string, unknown> {
+  if (options == null) return {};
+  const out: Record<string, unknown> = {};
+  if (options.sid !== undefined) out.sid = options.sid;
+  if (options.speed !== undefined) out.speed = options.speed;
+  if (options.silenceScale !== undefined)
+    out.silenceScale = options.silenceScale;
+  if (options.referenceAudio != null) {
+    out.referenceAudio = options.referenceAudio.samples;
+    out.referenceSampleRate = options.referenceAudio.sampleRate;
+  }
+  if (options.referenceText !== undefined)
+    out.referenceText = options.referenceText;
+  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.extra != null && Object.keys(options.extra).length > 0)
+    out.extra = options.extra;
+  return out;
+}
+
+/**
  * Generate speech from text.
  *
  * Returns raw audio samples as float array in range [-1.0, 1.0].
- * You can save these samples to a WAV file, stream them, or process them further.
+ * Supports simple options (sid, speed) and voice cloning / GenerationConfig
+ * (referenceAudio, referenceText, numSteps, silenceScale, extra) when the model supports it.
  *
  * @param text - Text to convert to speech
- * @param options - Synthesis options (speaker ID, speed)
+ * @param options - Generation options (maps to Kotlin GenerationConfig when using reference audio)
  * @returns Promise resolving to generated audio data
  * @example
  * ```typescript
  * // Basic usage
  * const audio = await generateSpeech('Hello, world!');
- * console.log(`Generated ${audio.samples.length} samples at ${audio.sampleRate} Hz`);
  *
- * // With options
- * const audio = await generateSpeech('Hello, world!', {
- *   sid: 0,      // Speaker ID (for multi-speaker models)
- *   speed: 1.2   // 20% faster
+ * // With sid/speed
+ * const audio = await generateSpeech('Hello, world!', { sid: 0, speed: 1.2 });
+ *
+ * // Voice cloning (Zipvoice or Kotlin generateWithConfig)
+ * const audio = await generateSpeech('Target text', {
+ *   referenceAudio: { samples: refSamples, sampleRate: 22050 },
+ *   referenceText: 'Transcript of reference',
+ *   numSteps: 20,
  * });
- *
- * // Slower speech
- * const audio = await generateSpeech('Speak slowly', { speed: 0.8 });
  * ```
  */
 export async function generateSpeech(
   text: string,
-  options?: SynthesisOptions
+  options?: TtsGenerationOptions
 ): Promise<GeneratedAudio> {
-  return SherpaOnnx.generateTts(text, options?.sid ?? 0, options?.speed ?? 1.0);
+  return SherpaOnnx.generateTts(text, toNativeTtsOptions(options));
 }
 
 /**
  * Generate speech from text and return subtitle/timestamp metadata.
  *
  * Timestamps are estimated based on the output duration when models do not
- * provide native timing information.
+ * provide native timing information. Accepts the same options as generateSpeech
+ * (including reference audio for voice cloning).
  */
 export async function generateSpeechWithTimestamps(
   text: string,
-  options?: SynthesisOptions
+  options?: TtsGenerationOptions
 ): Promise<GeneratedAudioWithTimestamps> {
   return SherpaOnnx.generateTtsWithTimestamps(
     text,
-    options?.sid ?? 0,
-    options?.speed ?? 1.0
+    toNativeTtsOptions(options)
   );
 }
 
@@ -186,10 +212,12 @@ export type TtsStreamHandlers = {
  * Generate speech in streaming mode (emits chunk events).
  *
  * Returns an unsubscribe function to remove event listeners.
+ * Supports the same options as generateSpeech; note: streaming with reference
+ * audio is not supported for Zipvoice (use generateSpeech for that case).
  */
 export async function generateSpeechStream(
   text: string,
-  options: SynthesisOptions | undefined,
+  options: TtsGenerationOptions | undefined,
   handlers: TtsStreamHandlers
 ): Promise<() => void> {
   const subscriptions = [
@@ -205,11 +233,7 @@ export async function generateSpeechStream(
   ];
 
   try {
-    await SherpaOnnx.generateTtsStream(
-      text,
-      options?.sid ?? 0,
-      options?.speed ?? 1.0
-    );
+    await SherpaOnnx.generateTtsStream(text, toNativeTtsOptions(options));
   } catch (error) {
     // Clean up listeners if native call fails
     subscriptions.forEach((sub) => sub.remove());
@@ -451,6 +475,7 @@ export function shareAudioFile(
 export type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsGenerationOptions,
   SynthesisOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
