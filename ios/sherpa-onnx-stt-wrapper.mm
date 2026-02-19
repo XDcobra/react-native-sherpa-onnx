@@ -35,6 +35,7 @@ public:
     bool initialized = false;
     std::string modelDir;
     std::optional<sherpa_onnx::cxx::OfflineRecognizer> recognizer;
+    std::optional<sherpa_onnx::cxx::OfflineRecognizerConfig> lastConfig;
 };
 
 SttWrapper::SttWrapper() : pImpl(std::make_unique<Impl>()) {
@@ -50,7 +51,9 @@ SttInitializeResult SttWrapper::initialize(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
     const std::optional<std::string>& modelType,
-    bool debug /* = false */
+    bool debug,
+    const std::optional<std::string>& hotwordsFile,
+    const std::optional<float>& hotwordsScore
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -119,6 +122,12 @@ SttInitializeResult SttWrapper::initialize(
         config.decoding_method = "greedy_search";
         config.model_config.num_threads = 4;
         config.model_config.provider = "cpu";
+        if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
+            config.hotwords_file = *hotwordsFile;
+        }
+        if (hotwordsScore.has_value()) {
+            config.hotwords_score = *hotwordsScore;
+        }
 
         bool isWhisperModel = !config.model_config.whisper.encoder.empty() && !config.model_config.whisper.decoder.empty();
         if (isWhisperModel) {
@@ -133,6 +142,7 @@ SttInitializeResult SttWrapper::initialize(
             return result;
         }
 
+        pImpl->lastConfig = config;
         pImpl->modelDir = modelDir;
         pImpl->initialized = true;
 
@@ -148,7 +158,21 @@ SttInitializeResult SttWrapper::initialize(
     }
 }
 
-std::string SttWrapper::transcribeFile(const std::string& filePath) {
+namespace {
+SttRecognitionResult offlineResultToSttResult(const sherpa_onnx::cxx::OfflineRecognizerResult& r) {
+    SttRecognitionResult out;
+    out.text = r.text;
+    out.tokens = r.tokens;
+    out.timestamps = r.timestamps;
+    out.lang = r.lang;
+    out.emotion = r.emotion;
+    out.event = r.event;
+    out.durations = r.durations;
+    return out;
+}
+}  // namespace
+
+SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
         LOGE("Not initialized. Call initialize() first.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
@@ -202,7 +226,7 @@ std::string SttWrapper::transcribeFile(const std::string& filePath) {
         stream.AcceptWaveform(sample_rate, wave.samples.data(), n_samples);
         pImpl->recognizer.value().Decode(&stream);
         auto result = pImpl->recognizer.value().GetResult(&stream);
-        return result.text;
+        return offlineResultToSttResult(result);
     } catch (const std::exception& e) {
         LOGE("Transcribe: recognition failed: %s", e.what());
         throw;
@@ -214,6 +238,49 @@ std::string SttWrapper::transcribeFile(const std::string& filePath) {
     }
 }
 
+SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& samples, int32_t sampleRate) {
+    if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
+        LOGE("Not initialized. Call initialize() first.");
+        throw std::runtime_error("STT not initialized. Call initialize() first.");
+    }
+    if (samples.empty()) {
+        SttRecognitionResult empty;
+        return empty;
+    }
+    if (samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        LOGE("Samples too large: %zu", samples.size());
+        throw std::runtime_error("Samples array too large to process");
+    }
+    try {
+        auto stream = pImpl->recognizer.value().CreateStream();
+        int32_t n = static_cast<int32_t>(samples.size());
+        stream.AcceptWaveform(sampleRate, samples.data(), n);
+        pImpl->recognizer.value().Decode(&stream);
+        auto result = pImpl->recognizer.value().GetResult(&stream);
+        return offlineResultToSttResult(result);
+    } catch (const std::exception& e) {
+        LOGE("TranscribeSamples: recognition failed: %s", e.what());
+        throw;
+    } catch (...) {
+        LOGE("TranscribeSamples: recognition failed (unknown exception)");
+        throw std::runtime_error("Recognition failed.");
+    }
+}
+
+void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
+    if (!pImpl->initialized || !pImpl->recognizer.has_value() || !pImpl->lastConfig.has_value()) {
+        LOGE("Not initialized or no stored config.");
+        throw std::runtime_error("STT not initialized. Call initialize() first.");
+    }
+    auto& config = pImpl->lastConfig.value();
+    if (options.decoding_method.has_value()) config.decoding_method = *options.decoding_method;
+    if (options.max_active_paths.has_value()) config.max_active_paths = *options.max_active_paths;
+    if (options.hotwords_file.has_value()) config.hotwords_file = *options.hotwords_file;
+    if (options.hotwords_score.has_value()) config.hotwords_score = *options.hotwords_score;
+    if (options.blank_penalty.has_value()) config.blank_penalty = *options.blank_penalty;
+    pImpl->recognizer.value().SetConfig(config);
+}
+
 bool SttWrapper::isInitialized() const {
     return pImpl->initialized;
 }
@@ -221,6 +288,7 @@ bool SttWrapper::isInitialized() const {
 void SttWrapper::release() {
     if (pImpl->initialized) {
         pImpl->recognizer.reset();
+        pImpl->lastConfig.reset();
         pImpl->initialized = false;
         pImpl->modelDir.clear();
     }
