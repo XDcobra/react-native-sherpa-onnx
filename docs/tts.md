@@ -2,26 +2,31 @@
 
 This guide covers the offline TTS APIs shipped with this package and practical examples for streaming playback, saving, and low-latency playback.
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Model initialization | Supported | `initializeTTS()` |
-| Full-buffer generation | Supported | `generateSpeech()` |
-| Streaming generation | Supported | `generateSpeechStream()` |
-| Native PCM playback | Supported | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
-| Save/share WAV | Supported | `saveAudioToFile()` / `saveAudioToContentUri()` |
-| Timestamps (estimated) | Supported | `generateSpeechWithTimestamps()` |
-| Noise/Noise W/Length scale tuning | Supported | VITS/Matcha/Kokoro/Kitten (model-dependent) |
-| Runtime param updates | Supported | `updateTtsParams()` |
-| Model downloads | Supported | Download Manager API |
-| Batch generation | Planned | C API supports multi-text generation |
-| SSML | Planned | Model-dependent |
-| Real-time factor (RTF) | Planned | Performance metrics |
-| Speaker embedding customization | Planned | Model-dependent |
-| Additional audio formats | Planned | MP3/OGG/FLAC export |
+| Feature | Status | Source | Notes |
+| --- | --- | --- | --- |
+| Model initialization | ✅ | Kotlin API | `initializeTTS()` |
+| Full-buffer generation | ✅ | Kotlin API | `generateSpeech()` |
+| Streaming generation | ✅ | Kotlin API | `generateSpeechStream()` |
+| Native PCM playback | ✅ | Kotlin API | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
+| Save/share WAV | ✅ | Kotlin API | `saveAudioToFile()` / `saveAudioToContentUri()` |
+| Timestamps (estimated) | ✅ | Kotlin API | `generateSpeechWithTimestamps()` |
+| Noise/Noise W/Length scale tuning | ✅ | Kotlin API | VITS/Matcha/Kokoro/Kitten (model-dependent) |
+| Runtime param updates | ✅ | Kotlin API | `updateTtsParams()` |
+| Model downloads | ✅ | Kotlin API | Download Manager API |
+| Voice cloning / reference audio | ✅ | Kotlin API | Integrated in `generateSpeech()` / `generateSpeechStream()` (Zipvoice + GenerationConfig) |
+| Generate with GenerationConfig | ✅ | Kotlin API | Reference audio, silenceScale, numSteps, extra via options |
+| Additional audio formats (MP3/OGG/FLAC) | ✅ | This package | Use the provided conversion API (e.g. `convertAudioToFormat()` from `react-native-sherpa-onnx/audio`); sherpa-onnx natively outputs WAV/PCM only. |
+| Progress in streaming callback (0..1) | Planned | C-API | Not exposed in Kotlin API |
+| Batch generation | Planned | C-API | C API supports multi-text generation |
+| SSML | Planned | C-API | Model-dependent |
+| Real-time factor (RTF) | Planned | C-API | Performance metrics |
+| Speaker embedding customization | Planned | C-API | Model-dependent |
 
 ## Overview
 
 The TTS module supports both full-buffer generation (return the entire sample buffer) and streaming generation (emit incremental PCM chunks). Streaming is useful for low-latency playback and interactive UIs.
+
+All generation functions (`generateSpeech`, `generateSpeechStream`, `generateSpeechWithTimestamps`) accept a single **options** object (`TtsGenerationOptions`). For simple use you pass `sid` and `speed`; for voice cloning you additionally pass `referenceAudio`, `referenceText`, and optionally `numSteps`, `silenceScale`, or `extra` (model-dependent). The native layer uses Kotlin's GenerationConfig or Zipvoice's reference-audio API depending on the loaded model. Supported model types include VITS, Matcha, Kokoro, Kitten, **Pocket**, and Zipvoice (see feature table).
 
 ## Quick Start
 
@@ -99,7 +104,7 @@ await stopTtsPcmPlayer();
 
 ### `initializeTTS(options)`
 
-Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files.
+Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files, or set it explicitly to `'vits'`, `'matcha'`, `'kokoro'`, `'kitten'`, `'pocket'`, or `'zipvoice'`.
 Auto-detection is file-based, so folder names do not need to match model types.
 
 Noise/Noise W/Length scale tuning (model-dependent):
@@ -130,13 +135,33 @@ await updateTtsParams({
 
 Generate speech audio from text. Returns `{ samples: number[]; sampleRate: number }`.
 
+**Options (`TtsGenerationOptions`):**
+
+- `sid` (number, default 0) — Speaker ID for multi-speaker models.
+- `speed` (number, default 1.0) — Speech speed multiplier.
+- `silenceScale` (number, optional) — Model-dependent (Kotlin GenerationConfig).
+- `referenceAudio` (optional) — `{ samples: number[]; sampleRate: number }` for voice cloning (Zipvoice or Kotlin generateWithConfig). Mono float samples in [-1, 1].
+- `referenceText` (string, optional) — Transcript of the reference audio; required for voice cloning when `referenceAudio` is set.
+- `numSteps` (number, optional) — e.g. flow-matching steps; model-dependent.
+- `extra` (Record<string, string>, optional) — Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`).
+
+When `referenceAudio` (and typically `referenceText`) are provided, the native layer uses voice cloning: with a Zipvoice model it calls the Zipvoice reference-audio API; with a Kotlin engine (e.g. Pocket, or other models supporting GenerationConfig) it uses `generateWithConfig`.
+
 Tips:
 - Check `getTtsSampleRate()` after initialization to know the model's native sample rate.
 - If a model outputs 22050 Hz and your playback path expects 48000 Hz, resample to avoid pitch/tempo mismatch.
 
+### `generateSpeechWithTimestamps(text, options?)`
+
+Same as `generateSpeech` but returns additional `subtitles` and `estimated` (timestamps are estimated from duration when the model does not provide them). Accepts the same `TtsGenerationOptions`, including voice-cloning options.
+
 ### `generateSpeechStream(text, options?, handlers)`
 
-Generate speech audio in streaming mode with `onChunk` callbacks. Handlers should be lightweight; forward audio to native playback quickly.
+Generate speech audio in streaming mode with `onChunk` callbacks. Accepts the same **options** object as `generateSpeech` (sid, speed, and optionally reference audio for Kotlin-engine models).
+
+**Note:** Streaming with reference audio is **not supported for Zipvoice**; use `generateSpeech` for Zipvoice voice cloning. For Kotlin-engine models (e.g. Pocket with GenerationConfig), streaming with reference audio is supported.
+
+Handlers should be lightweight; forward audio to native playback quickly.
 
 Best practices and caveats:
 - Chunk sizes vary by model and internal buffer. Avoid heavy CPU work in `onChunk`.
@@ -151,13 +176,30 @@ Important:
 
 ### Persistence (save/share)
 
-Use `saveTtsAudioToFile` to write a WAV file to an absolute path. On Android, prefer `saveTtsAudioToContentUri` when writing to user-selected directories (SAF). After saving to SAF, you can call `copyTtsContentUriToCache` to obtain a local copy for playback or sharing.
+Use `saveAudioToFile(audio, filePath)` to write a WAV file to an absolute path (`audio` is `{ samples, sampleRate }`). On Android, prefer `saveAudioToContentUri(audio, directoryContentUri, filename)` when writing to user-selected directories (SAF). After saving to SAF, you can call `copyTtsContentUriToCache` to obtain a local copy for playback or sharing.
 
 Android SAF notes:
 - `saveTtsAudioToContentUri` accepts a directory content URI and filename and returns a content URI for the saved file. Use the returned URI to share or present to the user.
 
 iOS notes:
 - On iOS the native implementation writes into the app container. Use share APIs to export if needed.
+
+### Voice cloning (reference audio)
+
+When the loaded model supports it (Zipvoice or Kotlin engines with GenerationConfig, e.g. Pocket), you can pass reference audio and its transcript so the synthesized speech matches the reference voice:
+
+```typescript
+// After loading a Zipvoice or compatible Kotlin model (e.g. Pocket)
+const audio = await generateSpeech('Target text to speak in the reference voice', {
+  referenceAudio: { samples: refSamples, sampleRate: 22050 },
+  referenceText: 'Transcript of the reference recording',
+  numSteps: 20,  // optional; model-dependent
+  speed: 1.0,
+});
+// For Pocket you can also pass extra: { temperature: '0.7', chunk_size: '15' }
+```
+
+Use `generateSpeech` for Zipvoice with reference audio. Use `generateSpeech` or `generateSpeechStream` for Kotlin-engine models (e.g. Pocket) with reference audio; streaming with reference audio is not available for Zipvoice.
 
 ## Detailed Example: streaming -> native playback -> optional save
 
@@ -170,7 +212,7 @@ import {
   writeTtsPcmChunk,
   stopTtsPcmPlayer,
   getTtsSampleRate,
-  saveTtsAudioToFile,
+  saveAudioToFile,
 } from 'react-native-sherpa-onnx/tts';
 
 await initializeTTS({
@@ -196,7 +238,7 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
   onEnd: async () => {
     await stopTtsPcmPlayer();
     // optionally save accumulated audio (beware memory for long sessions)
-    await saveTtsAudioToFile(accumulated, sampleRate, '/data/user/0/.../tts_out.wav');
+    await saveAudioToFile({ samples: accumulated, sampleRate }, '/data/user/0/.../tts_out.wav');
   },
   onError: ({ message }) => console.warn('TTS stream error', message),
 });
@@ -218,15 +260,16 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
 
 For advanced users the TurboModule exposes native primitives used by the JS wrappers. Key methods:
 
-- `initializeTts(modelDir, modelType, numThreads, debug, noiseScale, noiseScaleW, lengthScale)`
-- `generateTts(text, sid, speed)` — full-buffer generation
-- `generateTtsStream(text, sid, speed)` — streaming generation (emits chunk events)
+- `initializeTts(modelDir, modelType, numThreads, debug, noiseScale, noiseScaleW, lengthScale)` — `modelType`: `'vits'` | `'matcha'` | `'kokoro'` | `'kitten'` | `'pocket'` | `'zipvoice'` | `'auto'`
+- `generateTts(text, options)` — full-buffer generation; `options` is an object (sid, speed, and optionally referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra)
+- `generateTtsWithTimestamps(text, options)` — same as above with subtitles/estimated in the result
+- `generateTtsStream(text, options)` — streaming generation (emits chunk events); same options shape
 - `cancelTtsStream()`
 - `startTtsPcmPlayer(sampleRate, channels)` / `writeTtsPcmChunk(samples)` / `stopTtsPcmPlayer()`
 - `getTtsSampleRate()` / `getTtsNumSpeakers()`
 - `saveTtsAudioToFile(...)` / `saveTtsAudioToContentUri(...)` / `copyTtsContentUriToCache(...)`
 
-Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
+The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, sampleRate }`) into a flat options object for the native bridge. Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
 
 ## Model Setup
 

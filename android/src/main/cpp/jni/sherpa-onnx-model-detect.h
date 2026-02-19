@@ -27,6 +27,7 @@ enum class TtsModelKind {
     kMatcha,
     kKokoro,
     kKitten,
+    kPocket,
     kZipvoice
 };
 
@@ -55,6 +56,12 @@ struct TtsModelPaths {
     std::string vocoder;
     std::string encoder;
     std::string decoder;
+    // Pocket TTS
+    std::string lmFlow;
+    std::string lmMain;
+    std::string textConditioner;
+    std::string vocabJson;
+    std::string tokenScoresJson;
 };
 
 struct SttDetectResult {

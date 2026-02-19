@@ -233,37 +233,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Generate speech from text.
    */
-  override fun generateTts(
-    text: String,
-    sid: Double,
-    speed: Double,
-    promise: Promise
-  ) {
-    ttsHelper.generateTts(text, sid, speed, promise)
+  override fun generateTts(text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTts(text, options, promise)
   }
 
   /**
    * Generate speech with subtitle/timestamp metadata.
    */
-  override fun generateTtsWithTimestamps(
-    text: String,
-    sid: Double,
-    speed: Double,
-    promise: Promise
-  ) {
-    ttsHelper.generateTtsWithTimestamps(text, sid, speed, promise)
+  override fun generateTtsWithTimestamps(text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTtsWithTimestamps(text, options, promise)
   }
 
   /**
    * Generate speech in streaming mode (emits chunk events).
    */
-  override fun generateTtsStream(
-    text: String,
-    sid: Double,
-    speed: Double,
-    promise: Promise
-  ) {
-    ttsHelper.generateTtsStream(text, sid, speed, promise)
+  override fun generateTtsStream(text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTtsStream(text, options, promise)
   }
 
   /**

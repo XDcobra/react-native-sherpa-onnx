@@ -7,6 +7,7 @@ import type { ModelPathConfig } from '../types';
  * - 'matcha': Matcha models (acoustic model + vocoder)
  * - 'kokoro': Kokoro models (multi-speaker, multi-language)
  * - 'kitten': KittenTTS models (lightweight, multi-speaker)
+ * - 'pocket': Pocket TTS models
  * - 'zipvoice': Zipvoice models (voice cloning capable)
  * - 'auto': Auto-detect model type based on files present (default)
  */
@@ -15,6 +16,7 @@ export type TTSModelType =
   | 'matcha'
   | 'kokoro'
   | 'kitten'
+  | 'pocket'
   | 'zipvoice'
   | 'auto';
 
@@ -95,9 +97,10 @@ export interface TtsUpdateOptions {
 }
 
 /**
- * Options for speech synthesis.
+ * Options for TTS generation. Maps to Kotlin GenerationConfig when reference
+ * audio or advanced options are used; otherwise simple sid/speed are used.
  */
-export interface SynthesisOptions {
+export interface TtsGenerationOptions {
   /**
    * Speaker ID for multi-speaker models.
    * For single-speaker models, this is ignored.
@@ -118,7 +121,40 @@ export interface SynthesisOptions {
    * @default 1.0
    */
   speed?: number;
+
+  /**
+   * Silence scale (Kotlin GenerationConfig). Model-dependent.
+   */
+  silenceScale?: number;
+
+  /**
+   * Reference audio for voice cloning (Zipvoice or Kotlin generateWithConfig).
+   * Mono float samples in [-1, 1] and sample rate in Hz.
+   */
+  referenceAudio?: { samples: number[]; sampleRate: number };
+
+  /**
+   * Transcript text of the reference audio. Required for voice cloning when
+   * referenceAudio is provided.
+   */
+  referenceText?: string;
+
+  /**
+   * Number of steps (e.g. flow-matching steps). Model-dependent.
+   */
+  numSteps?: number;
+
+  /**
+   * Extra options as key-value pairs (Kotlin GenerationConfig.extra).
+   * Model-specific (e.g. temperature, chunk_size for Pocket).
+   */
+  extra?: Record<string, string>;
 }
+
+/**
+ * @deprecated Use TtsGenerationOptions. Kept as alias for compatibility.
+ */
+export type SynthesisOptions = TtsGenerationOptions;
 
 /**
  * Generated audio data from TTS synthesis.

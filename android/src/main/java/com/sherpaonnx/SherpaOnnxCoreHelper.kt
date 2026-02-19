@@ -321,6 +321,7 @@ internal class SherpaOnnxCoreHelper(
       "matcha",
       "kokoro",
       "kitten",
+      "pocket",
       "zipvoice",
       "melo",
       "coqui",

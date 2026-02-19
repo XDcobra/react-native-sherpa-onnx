@@ -76,7 +76,7 @@ export interface Spec extends TurboModule {
   /**
    * Initialize Text-to-Speech (TTS) with model directory.
    * @param modelDir - Absolute path to model directory
-   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'zipvoice', 'auto')
+   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'auto')
    * @param numThreads - Number of threads for inference (default: 2)
    * @param debug - Enable debug logging (default: false)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
@@ -117,27 +117,26 @@ export interface Spec extends TurboModule {
   /**
    * Generate speech from text.
    * @param text - Text to convert to speech
-   * @param sid - Speaker ID for multi-speaker models (default: 0)
-   * @param speed - Speech speed multiplier (default: 1.0)
+   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    * @returns Object with { samples: number[], sampleRate: number }
    */
   generateTts(
     text: string,
-    sid: number,
-    speed: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
+    options: Object
+  ): Promise<{
+    samples: number[];
+    sampleRate: number;
+  }>;
 
   /**
    * Generate speech with subtitle/timestamp metadata.
    * @param text - Text to convert to speech
-   * @param sid - Speaker ID for multi-speaker models (default: 0)
-   * @param speed - Speech speed multiplier (default: 1.0)
+   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    * @returns Object with samples, sampleRate, subtitles, and estimated flag
    */
   generateTtsWithTimestamps(
     text: string,
-    sid: number,
-    speed: number
+    options: Object
   ): Promise<{
     samples: number[];
     sampleRate: number;
@@ -148,10 +147,9 @@ export interface Spec extends TurboModule {
   /**
    * Generate speech in streaming mode (emits chunk events).
    * @param text - Text to convert to speech
-   * @param sid - Speaker ID for multi-speaker models (default: 0)
-   * @param speed - Speech speed multiplier (default: 1.0)
+   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    */
-  generateTtsStream(text: string, sid: number, speed: number): Promise<void>;
+  generateTtsStream(text: string, options: Object): Promise<void>;
 
   /**
    * Cancel an ongoing streaming TTS generation.
