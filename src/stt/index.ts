@@ -76,6 +76,11 @@ export async function initializeSTT(
   let modelType: STTModelType | undefined;
   let hotwordsFile: string | undefined;
   let hotwordsScore: number | undefined;
+  let numThreads: number | undefined;
+  let provider: string | undefined;
+  let ruleFsts: string | undefined;
+  let ruleFars: string | undefined;
+  let dither: number | undefined;
 
   if ('modelPath' in options) {
     modelPath = options.modelPath;
@@ -83,12 +88,22 @@ export async function initializeSTT(
     modelType = options.modelType;
     hotwordsFile = options.hotwordsFile;
     hotwordsScore = options.hotwordsScore;
+    numThreads = options.numThreads;
+    provider = options.provider;
+    ruleFsts = options.ruleFsts;
+    ruleFars = options.ruleFars;
+    dither = options.dither;
   } else {
     modelPath = options;
     preferInt8 = undefined;
     modelType = undefined;
     hotwordsFile = undefined;
     hotwordsScore = undefined;
+    numThreads = undefined;
+    provider = undefined;
+    ruleFsts = undefined;
+    ruleFars = undefined;
+    dither = undefined;
   }
 
   const debug = 'modelPath' in options ? options.debug : undefined;
@@ -99,7 +114,12 @@ export async function initializeSTT(
     modelType,
     debug,
     hotwordsFile,
-    hotwordsScore
+    hotwordsScore,
+    numThreads,
+    provider,
+    ruleFsts,
+    ruleFars,
+    dither
   );
 }
 
@@ -138,7 +158,7 @@ export async function transcribeSamples(
 }
 
 /**
- * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty).
+ * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
  * Merged with the config from initialization.
  */
 export function setSttConfig(options: SttRuntimeConfig): Promise<void> {
@@ -150,6 +170,8 @@ export function setSttConfig(options: SttRuntimeConfig): Promise<void> {
   if (options.hotwordsFile != null) map.hotwordsFile = options.hotwordsFile;
   if (options.hotwordsScore != null) map.hotwordsScore = options.hotwordsScore;
   if (options.blankPenalty != null) map.blankPenalty = options.blankPenalty;
+  if (options.ruleFsts != null) map.ruleFsts = options.ruleFsts;
+  if (options.ruleFars != null) map.ruleFars = options.ruleFars;
   return SherpaOnnx.setSttConfig(map);
 }
 
