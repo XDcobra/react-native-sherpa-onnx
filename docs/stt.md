@@ -69,7 +69,7 @@ Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to le
 | --- | --- | --- |
 | `modelPath` | `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto', path: string }` — no raw string path; resolved to absolute path before init. |
 | `preferInt8` | `boolean \| undefined` | Prefer int8 quantized models when available (faster, smaller); `undefined` = try int8 first (default). |
-| `modelType` | `STTModelType` | `'transducer'` \| `'paraformer'` \| `'nemo_ctc'` \| `'whisper'` \| `'wenet_ctc'` \| `'sense_voice'` \| `'funasr_nano'` \| `'auto'` (default). |
+| `modelType` | `STTModelType` | `'transducer'` \| `'nemo_transducer'` \| `'paraformer'` \| `'nemo_ctc'` \| `'whisper'` \| `'wenet_ctc'` \| `'sense_voice'` \| `'funasr_nano'` \| `'fire_red_asr'` \| `'moonshine'` \| `'dolphin'` \| `'canary'` \| `'omnilingual'` \| `'medasr'` \| `'telespeech_ctc'` \| `'auto'` (default). |
 | `debug` | `boolean` | Enable debug logging in native/sherpa-onnx (default: false). |
 | `hotwordsFile` | `string` | Path to hotwords file for keyword boosting. |
 | `hotwordsScore` | `number` | Hotwords score (default in native: 1.5). |
@@ -154,6 +154,23 @@ Release STT resources and unload the model. Call before re-initializing with a d
 ## Model Setup
 
 See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup steps.
+
+### Supported STT model types (Phase 2)
+
+The following model types are supported for detection and config build. Auto-detection uses folder names and file patterns; you can force a type with `modelType`.
+
+| Type | Typical files / structure |
+| --- | --- |
+| `transducer`, `nemo_transducer` | encoder.onnx, decoder.onnx, joiner.onnx, tokens.txt |
+| `paraformer` | model.onnx, tokens.txt |
+| `nemo_ctc`, `wenet_ctc`, `sense_voice`, `zipformer_ctc` | model.onnx (or model.int8.onnx), tokens.txt |
+| `whisper` | encoder.onnx, decoder.onnx, tokens.txt (no joiner) |
+| `funasr_nano` | encoder_adaptor, llm, embedding, tokenizer dir (e.g. vocab.json) |
+| `fire_red_asr` | encoder, decoder (folder name hints: fire_red, fire-red) |
+| `moonshine` | preprocess.onnx, encode.onnx, uncached_decode.onnx, cached_decode.onnx, tokens.txt |
+| `dolphin` | model.onnx, tokens.txt (folder name: dolphin) |
+| `canary` | encoder, decoder (folder name: canary) |
+| `omnilingual`, `medasr`, `telespeech_ctc` | model.onnx, tokens.txt (folder name hints) |
 
 ### Model-specific options not yet supported
 
