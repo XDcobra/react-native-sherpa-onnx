@@ -290,6 +290,11 @@ jobs:
           done
 
           echo ""
+          echo "--- Kotlin / Codegen errors (if any) ---"
+          if [ -f /tmp/build.full.log ]; then
+            grep -E "Unresolved reference|NativeSherpaOnnxSpec|compileDebugKotlin|compileReleaseKotlin|generateCodegenSpec|codegen" /tmp/build.full.log | head -30 || echo "  (none)"
+          fi
+          echo ""
           echo "--- Filtered errors from build log ---"
           if [ -f /tmp/build.full.log ]; then
             grep -E "CMake Error|FAILED|error:" /tmp/build.full.log | head -40 || echo "No error lines"

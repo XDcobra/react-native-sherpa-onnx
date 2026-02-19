@@ -264,81 +264,8 @@ def extractNativeLibs = tasks.register("extractNativeLibs") {
   }
 }
 
-// Standalone AAR build: run React Native codegen manually (RNGP is not applied).
-// When building inside a RN app, RNGP handles codegen via codegenConfig
-// (includesGeneratedCode=false), so these tasks are not needed.
-if (isStandaloneAarBuild) {
-  apply plugin: 'com.github.node-gradle.node'
-
-  def projectNodeVersion = null
-  def libraryRootForNode = project.projectDir.parentFile
-  def nvmrcFile = file("${libraryRootForNode}/.nvmrc")
-  if (nvmrcFile.exists()) {
-    projectNodeVersion = nvmrcFile.text.readLines().find { it?.trim() }?.trim()
-    if (projectNodeVersion?.startsWith('v')) {
-      projectNodeVersion = projectNodeVersion.substring(1)
-    }
-  }
-
-  node {
-    version = projectNodeVersion
-    download = false
-  }
-
-  def libraryRoot = project.projectDir.parentFile
-  def outDir = file("${project.buildDir}/generated/source/codegen")
-  def codegenJavaDir = file("${project.buildDir}/generated/source/codegen/java")
-
-  // Gradle 9 eagerly validates inputs.dir; create during configuration so it exists.
-  codegenJavaDir.mkdirs()
-
-  tasks.register("generateCodegenSpecNode", com.github.gradle.node.task.NodeTask) {
-    onlyIf { !project.hasProperty('useNpx') || project.property('useNpx') != 'true' }
-    workingDir = libraryRoot
-    inputs.dir(file("${libraryRoot}/src"))
-    inputs.file(file("${libraryRoot}/package.json"))
-    outputs.dir(codegenJavaDir)
-
-    doFirst {
-      if (!file("${libraryRoot}/node_modules/react-native").exists()) {
-        throw new RuntimeException(
-          "Codegen requires node_modules at library root. Run 'yarn install' (or npm install) in ${libraryRoot}, then rebuild."
-        )
-      }
-      outDir.mkdirs()
-    }
-
-    script = file("${libraryRoot}/node_modules/react-native/scripts/generate-codegen-artifacts.js")
-    args = [
-      '-p', libraryRoot.absolutePath.replace("\\", "/"),
-      '-t', 'android',
-      '-o', outDir.absolutePath.replace("\\", "/"),
-      '-s', 'library'
-    ]
-
-    environment = ['CI': 'true']
-
-    doLast {
-      // With includesGeneratedCode=false the script nests output under
-      // <outDir>/android/app/build/generated/source/codegen/.
-      // Copy to the flat codegen/java path so sourceSets and Kotlin compile find it.
-      def nestedJava = file("${outDir}/android/app/build/generated/source/codegen/java")
-      if (nestedJava.exists()) {
-        project.copy {
-          from nestedJava
-          into codegenJavaDir
-        }
-        println "[codegen] Normalised spec output -> ${codegenJavaDir}"
-      } else {
-        println "[codegen] WARNING: expected nested output at ${nestedJava} not found"
-      }
-    }
-  }
-
-  tasks.register('generateCodegenSpec') {
-    dependsOn tasks.named('generateCodegenSpecNode')
-  }
-}
+// Codegen for TurboModule spec; in separate script to avoid Gradle 9 Groovy "source is null" with NodeTask in main script.
+apply from: file("${project.projectDir}/codegen.gradle")
 
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
@@ -351,12 +278,11 @@ afterEvaluate {
 
   preBuild.dependsOn extractNativeLibs
 
-  // Standalone AAR: Kotlin compile depends on custom codegen task.
-  if (isStandaloneAarBuild) {
-    def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
-    tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
-      dependsOn tasks.named('generateCodegenSpec')
-      inputs.dir(codegenJavaDir)
-    }
+  // With includesGeneratedCode=false, codegen is always run by our custom task (not RNGP).
+  // Kotlin compile must depend on it for both standalone AAR and app-dependency builds.
+  def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
+  tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
+    dependsOn tasks.named('generateCodegenSpec')
+    inputs.dir(codegenJavaDir)
   }
 }
