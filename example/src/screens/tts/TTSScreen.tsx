@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Text,
   View,
@@ -54,6 +54,7 @@ import {
   getQualityHint,
   RECOMMENDED_MODEL_IDS,
 } from '../../utils/recommendedModels';
+import { getCpuCoreCount } from '../../cpuInfo';
 import RNFS from 'react-native-fs';
 import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -161,6 +162,12 @@ export default function TTSScreen() {
   const [cachedPlaybackSource, setCachedPlaybackSource] = useState<
     string | null
   >(null);
+  const [cpuCoreCount, setCpuCoreCount] = useState<number>(2);
+  const [ttsThreadOption, setTtsThreadOption] = useState<
+    'saver' | 'standard' | 'balanced' | 'maximum'
+  >('standard');
+  const [showThreadPicker, setShowThreadPicker] = useState(false);
+  const [optionsExpanded, setOptionsExpanded] = useState(false);
 
   const getDisplayPath = (path: string) => {
     try {
@@ -195,6 +202,42 @@ export default function TTSScreen() {
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
   }, [soundInstance]);
+
+  useEffect(() => {
+    getCpuCoreCount().then(setCpuCoreCount);
+  }, []);
+
+  const ttsThreadOptions = useMemo(() => {
+    const max = Math.max(1, cpuCoreCount);
+    const options: Array<{
+      id: 'saver' | 'standard' | 'balanced' | 'maximum';
+      label: string;
+      threads: number;
+    }> = [{ id: 'saver', label: 'Saver (1 thread)', threads: 1 }];
+    if (max >= 2) {
+      options.push({
+        id: 'standard',
+        label: 'Standard (2 threads)',
+        threads: 2,
+      });
+    }
+    options.push({
+      id: 'balanced',
+      label: `Balanced (${Math.max(1, Math.floor(max / 2))} threads)`,
+      threads: Math.max(1, Math.floor(max / 2)),
+    });
+    options.push({
+      id: 'maximum',
+      label: `Maximum (${Math.max(1, max - 1)} threads)`,
+      threads: Math.max(1, max - 1),
+    });
+    return options;
+  }, [cpuCoreCount]);
+
+  const ttsNumThreads = useMemo(() => {
+    const option = ttsThreadOptions.find((o) => o.id === ttsThreadOption);
+    return option?.threads ?? (cpuCoreCount >= 2 ? 2 : 1);
+  }, [ttsThreadOptions, ttsThreadOption, cpuCoreCount]);
 
   // Load available models on mount
   useEffect(() => {
@@ -727,7 +770,7 @@ export default function TTSScreen() {
             try {
               const r = await initializeTTS({
                 modelPath,
-                numThreads: 2,
+                numThreads: ttsNumThreads,
                 debug: false,
                 noiseScale: noiseScaleNumber,
                 noiseScaleW: noiseScaleWNumber,
@@ -1609,6 +1652,65 @@ export default function TTSScreen() {
             <Text style={styles.sectionDescription}>
               Select a TTS model to load:
             </Text>
+            <Text style={styles.inputLabel}>Threads</Text>
+            <TouchableOpacity
+              style={styles.dropdownTrigger}
+              onPress={() => setShowThreadPicker(true)}
+            >
+              <View style={styles.dropdownTriggerLeft}>
+                <Ionicons
+                  name="hardware-chip-outline"
+                  size={22}
+                  color="#8E8E93"
+                  style={styles.iconInline}
+                />
+                <Text style={styles.dropdownTriggerText}>
+                  {ttsThreadOptions.find((o) => o.id === ttsThreadOption)
+                    ?.label ?? 'Standard (2 threads)'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={20} color="#8E8E93" />
+            </TouchableOpacity>
+            <Modal
+              visible={showThreadPicker}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowThreadPicker(false)}
+            >
+              <Pressable
+                style={styles.dropdownBackdrop}
+                onPress={() => setShowThreadPicker(false)}
+              >
+                <View style={styles.dropdownMenu}>
+                  {ttsThreadOptions.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[
+                        styles.dropdownItem,
+                        ttsThreadOption === opt.id && styles.dropdownItemActive,
+                      ]}
+                      onPress={() => {
+                        setTtsThreadOption(opt.id);
+                        setShowThreadPicker(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          ttsThreadOption === opt.id &&
+                            styles.dropdownItemTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                      {ttsThreadOption === opt.id && (
+                        <Ionicons name="checkmark" size={20} color="#007AFF" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Pressable>
+            </Modal>
             <View style={styles.separator} />
             {loadingModels ? (
               <View style={styles.loadingContainer}>
@@ -1787,292 +1889,327 @@ export default function TTSScreen() {
                 numberOfLines={3}
               />
 
-              <View style={styles.optionsBlock}>
-                <Text style={styles.subsectionTitle}>Options</Text>
-
-                <Text style={styles.inputLabel}>Output format (for save)</Text>
-                <TouchableOpacity
-                  style={styles.dropdownTrigger}
-                  onPress={() => setShowOutputFormatPicker(true)}
-                >
-                  <Text style={styles.dropdownTriggerText}>
-                    {outputFormat.toUpperCase()}
-                  </Text>
-                  <Ionicons name="chevron-down" size={20} color="#8E8E93" />
-                </TouchableOpacity>
-                <Modal
-                  visible={showOutputFormatPicker}
-                  transparent
-                  animationType="fade"
-                  onRequestClose={() => setShowOutputFormatPicker(false)}
-                >
-                  <Pressable
-                    style={styles.dropdownBackdrop}
-                    onPress={() => setShowOutputFormatPicker(false)}
-                  >
-                    <View style={styles.dropdownMenu}>
-                      {(['wav', 'mp3', 'flac'] as const).map((fmt) => (
-                        <TouchableOpacity
-                          key={fmt}
-                          style={[
-                            styles.dropdownItem,
-                            outputFormat === fmt && styles.dropdownItemActive,
-                          ]}
-                          onPress={() => {
-                            setOutputFormat(fmt);
-                            setShowOutputFormatPicker(false);
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.dropdownItemText,
-                              outputFormat === fmt &&
-                                styles.dropdownItemTextActive,
-                            ]}
-                          >
-                            {fmt.toUpperCase()}
-                          </Text>
-                          {outputFormat === fmt && (
-                            <Ionicons
-                              name="checkmark"
-                              size={20}
-                              color="#007AFF"
-                            />
-                          )}
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </Pressable>
-                </Modal>
-
-                <View style={styles.parameterRow}>
-                  <View style={styles.parameterColumn}>
-                    <Text style={styles.inputLabel}>
-                      Noise scale (optional):
-                    </Text>
-                    <TextInput
-                      style={styles.parameterInput}
-                      value={noiseScale}
-                      onChangeText={setNoiseScale}
-                      keyboardType="decimal-pad"
-                      placeholder="0.667"
-                      placeholderTextColor="#8E8E93"
-                    />
-                  </View>
-                  <View style={styles.parameterColumn}>
-                    <Text style={styles.inputLabel}>
-                      Noise scale W (optional):
-                    </Text>
-                    <TextInput
-                      style={styles.parameterInput}
-                      value={noiseScaleW}
-                      onChangeText={setNoiseScaleW}
-                      keyboardType="decimal-pad"
-                      placeholder="0.8"
-                      placeholderTextColor="#8E8E93"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.parameterRow}>
-                  <View style={styles.parameterColumn}>
-                    <Text style={styles.inputLabel}>
-                      Length scale (optional):
-                    </Text>
-                    <TextInput
-                      style={styles.parameterInput}
-                      value={lengthScale}
-                      onChangeText={setLengthScale}
-                      keyboardType="decimal-pad"
-                      placeholder="1.0"
-                      placeholderTextColor="#8E8E93"
-                    />
-                  </View>
-                  <View style={styles.parameterColumn} />
-                </View>
-              </View>
-
-              {modelInfo != null && (
-                <Text style={styles.speakerCountHint}>
-                  Model has {modelInfo.numSpeakers} speaker
-                  {modelInfo.numSpeakers === 1 ? '' : 's'} (use ID 0
-                  {modelInfo.numSpeakers > 1
-                    ? `–${modelInfo.numSpeakers - 1}`
-                    : ''}
-                  )
-                </Text>
-              )}
-              <View style={styles.parameterRow}>
-                <View style={styles.parameterColumn}>
-                  <Text style={styles.inputLabel}>
-                    Speaker ID
-                    {modelInfo?.numSpeakers != null && modelInfo.numSpeakers > 0
-                      ? ` (0–${modelInfo.numSpeakers - 1})`
-                      : ' (0 … ?)'}
-                    :
-                  </Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    value={speakerId}
-                    onChangeText={setSpeakerId}
-                    keyboardType="numeric"
-                    placeholder="0"
-                    placeholderTextColor="#8E8E93"
-                  />
-                </View>
-
-                <View style={styles.parameterColumn}>
-                  <Text style={styles.inputLabel}>Speed:</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    value={speed}
-                    onChangeText={setSpeed}
-                    keyboardType="decimal-pad"
-                    placeholder="1.0"
-                    placeholderTextColor="#8E8E93"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.parameterRow}>
-                <View style={styles.parameterColumn}>
-                  <Text style={styles.inputLabel}>
-                    Silence scale (optional):
-                  </Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    value={silenceScale}
-                    onChangeText={setSilenceScale}
-                    keyboardType="decimal-pad"
-                    placeholder="—"
-                    placeholderTextColor="#8E8E93"
-                  />
-                </View>
-                <View style={styles.parameterColumn}>
-                  <Text style={styles.inputLabel}>Num steps (optional):</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    value={numSteps}
-                    onChangeText={setNumSteps}
-                    keyboardType="numeric"
-                    placeholder="—"
-                    placeholderTextColor="#8E8E93"
-                  />
-                </View>
-              </View>
-
               <View style={styles.voiceCloningSection}>
                 <TouchableOpacity
                   style={styles.voiceCloningHeader}
-                  onPress={() => setVoiceCloningExpanded((prev) => !prev)}
+                  onPress={() => setOptionsExpanded((prev) => !prev)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.voiceCloningHeaderLeft}>
                     <Ionicons
-                      name="person-circle-outline"
+                      name="options-outline"
                       size={22}
                       color="#8E8E93"
                       style={styles.iconInline}
                     />
-                    <Text style={styles.voiceCloningHeaderTitle}>
-                      Voice cloning (optional)
-                    </Text>
-                    {(referenceAudio != null ||
-                      referenceText.trim() !== '') && (
-                      <View style={styles.voiceCloningBadge}>
-                        <Text style={styles.voiceCloningBadgeText}>
-                          {referenceAudio != null ? '1 file' : 'text'}
-                        </Text>
-                      </View>
-                    )}
+                    <Text style={styles.voiceCloningHeaderTitle}>Options</Text>
                   </View>
                   <Ionicons
-                    name={voiceCloningExpanded ? 'chevron-up' : 'chevron-down'}
+                    name={optionsExpanded ? 'chevron-up' : 'chevron-down'}
                     size={24}
                     color="#8E8E93"
                   />
                 </TouchableOpacity>
-                {voiceCloningExpanded && (
+                {optionsExpanded && (
                   <View style={styles.voiceCloningContent}>
                     <Text style={styles.inputLabel}>
-                      Reference text (transcript of reference audio):
+                      Output format (for save)
                     </Text>
-                    <TextInput
-                      style={[styles.parameterInput, styles.referenceTextInput]}
-                      value={referenceText}
-                      onChangeText={setReferenceText}
-                      placeholder="Transcript of reference audio…"
-                      placeholderTextColor="#8E8E93"
-                    />
-                    <Text style={styles.inputLabel}>
-                      Reference audio (WAV):
-                    </Text>
-                    {referenceAudio == null ? (
-                      <TouchableOpacity
-                        style={styles.pickRefButtonPrimary}
-                        onPress={handlePickReferenceAudio}
+                    <TouchableOpacity
+                      style={styles.dropdownTrigger}
+                      onPress={() => setShowOutputFormatPicker(true)}
+                    >
+                      <Text style={styles.dropdownTriggerText}>
+                        {outputFormat.toUpperCase()}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="#8E8E93" />
+                    </TouchableOpacity>
+                    <Modal
+                      visible={showOutputFormatPicker}
+                      transparent
+                      animationType="fade"
+                      onRequestClose={() => setShowOutputFormatPicker(false)}
+                    >
+                      <Pressable
+                        style={styles.dropdownBackdrop}
+                        onPress={() => setShowOutputFormatPicker(false)}
                       >
-                        <Ionicons
-                          name="add-circle-outline"
-                          size={20}
-                          color="#FFFFFF"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.pickRefButtonPrimaryText}>
-                          Tap to select WAV file
+                        <View style={styles.dropdownMenu}>
+                          {(['wav', 'mp3', 'flac'] as const).map((fmt) => (
+                            <TouchableOpacity
+                              key={fmt}
+                              style={[
+                                styles.dropdownItem,
+                                outputFormat === fmt &&
+                                  styles.dropdownItemActive,
+                              ]}
+                              onPress={() => {
+                                setOutputFormat(fmt);
+                                setShowOutputFormatPicker(false);
+                              }}
+                            >
+                              <Text
+                                style={[
+                                  styles.dropdownItemText,
+                                  outputFormat === fmt &&
+                                    styles.dropdownItemTextActive,
+                                ]}
+                              >
+                                {fmt.toUpperCase()}
+                              </Text>
+                              {outputFormat === fmt && (
+                                <Ionicons
+                                  name="checkmark"
+                                  size={20}
+                                  color="#007AFF"
+                                />
+                              )}
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </Pressable>
+                    </Modal>
+
+                    <View style={styles.parameterRow}>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Noise scale (optional):
                         </Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <View style={styles.referenceAudioSelectedRow}>
-                        <View style={styles.referenceAudioSelectedInfo}>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={noiseScale}
+                          onChangeText={setNoiseScale}
+                          keyboardType="decimal-pad"
+                          placeholder="0.667"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Noise scale W (optional):
+                        </Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={noiseScaleW}
+                          onChangeText={setNoiseScaleW}
+                          keyboardType="decimal-pad"
+                          placeholder="0.8"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.parameterRow}>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Length scale (optional):
+                        </Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={lengthScale}
+                          onChangeText={setLengthScale}
+                          keyboardType="decimal-pad"
+                          placeholder="1.0"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                      <View style={styles.parameterColumn} />
+                    </View>
+
+                    {modelInfo != null && (
+                      <Text style={styles.speakerCountHint}>
+                        Model has {modelInfo.numSpeakers} speaker
+                        {modelInfo.numSpeakers === 1 ? '' : 's'} (use ID 0
+                        {modelInfo.numSpeakers > 1
+                          ? `–${modelInfo.numSpeakers - 1}`
+                          : ''}
+                        )
+                      </Text>
+                    )}
+                    <View style={styles.parameterRow}>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Speaker ID
+                          {modelInfo?.numSpeakers != null &&
+                          modelInfo.numSpeakers > 0
+                            ? ` (0–${modelInfo.numSpeakers - 1})`
+                            : ' (0 … ?)'}
+                          :
+                        </Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={speakerId}
+                          onChangeText={setSpeakerId}
+                          keyboardType="numeric"
+                          placeholder="0"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>Speed:</Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={speed}
+                          onChangeText={setSpeed}
+                          keyboardType="decimal-pad"
+                          placeholder="1.0"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.parameterRow}>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Silence scale (optional):
+                        </Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={silenceScale}
+                          onChangeText={setSilenceScale}
+                          keyboardType="decimal-pad"
+                          placeholder="—"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                      <View style={styles.parameterColumn}>
+                        <Text style={styles.inputLabel}>
+                          Num steps (optional):
+                        </Text>
+                        <TextInput
+                          style={styles.parameterInput}
+                          value={numSteps}
+                          onChangeText={setNumSteps}
+                          keyboardType="numeric"
+                          placeholder="—"
+                          placeholderTextColor="#8E8E93"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.voiceCloningSection}>
+                      <TouchableOpacity
+                        style={styles.voiceCloningHeader}
+                        onPress={() => setVoiceCloningExpanded((prev) => !prev)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.voiceCloningHeaderLeft}>
                           <Ionicons
-                            name="musical-notes"
-                            size={18}
-                            color="#34C759"
+                            name="person-circle-outline"
+                            size={22}
+                            color="#8E8E93"
                             style={styles.iconInline}
                           />
-                          <Text
-                            style={styles.referenceAudioFileName}
-                            numberOfLines={1}
-                          >
-                            {referenceAudioFileName}
+                          <Text style={styles.voiceCloningHeaderTitle}>
+                            Voice cloning (optional)
                           </Text>
+                          {(referenceAudio != null ||
+                            referenceText.trim() !== '') && (
+                            <View style={styles.voiceCloningBadge}>
+                              <Text style={styles.voiceCloningBadgeText}>
+                                {referenceAudio != null ? '1 file' : 'text'}
+                              </Text>
+                            </View>
+                          )}
                         </View>
-                        <View style={styles.referenceAudioActions}>
-                          <TouchableOpacity
-                            style={styles.changeRefButton}
-                            onPress={handlePickReferenceAudio}
-                          >
-                            <Text style={styles.changeRefButtonText}>
-                              Change
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.clearRefButton}
-                            onPress={() => {
-                              setReferenceAudio(null);
-                              setReferenceAudioFileName(null);
-                            }}
-                          >
-                            <Text style={styles.clearRefButtonText}>Clear</Text>
-                          </TouchableOpacity>
+                        <Ionicons
+                          name={
+                            voiceCloningExpanded ? 'chevron-up' : 'chevron-down'
+                          }
+                          size={24}
+                          color="#8E8E93"
+                        />
+                      </TouchableOpacity>
+                      {voiceCloningExpanded && (
+                        <View style={styles.voiceCloningContent}>
+                          <Text style={styles.inputLabel}>
+                            Reference text (transcript of reference audio):
+                          </Text>
+                          <TextInput
+                            style={[
+                              styles.parameterInput,
+                              styles.referenceTextInput,
+                            ]}
+                            value={referenceText}
+                            onChangeText={setReferenceText}
+                            placeholder="Transcript of reference audio…"
+                            placeholderTextColor="#8E8E93"
+                          />
+                          <Text style={styles.inputLabel}>
+                            Reference audio (WAV):
+                          </Text>
+                          {referenceAudio == null ? (
+                            <TouchableOpacity
+                              style={styles.pickRefButtonPrimary}
+                              onPress={handlePickReferenceAudio}
+                            >
+                              <Ionicons
+                                name="add-circle-outline"
+                                size={20}
+                                color="#FFFFFF"
+                                style={styles.iconInline}
+                              />
+                              <Text style={styles.pickRefButtonPrimaryText}>
+                                Tap to select WAV file
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <View style={styles.referenceAudioSelectedRow}>
+                              <View style={styles.referenceAudioSelectedInfo}>
+                                <Ionicons
+                                  name="musical-notes"
+                                  size={18}
+                                  color="#34C759"
+                                  style={styles.iconInline}
+                                />
+                                <Text
+                                  style={styles.referenceAudioFileName}
+                                  numberOfLines={1}
+                                >
+                                  {referenceAudioFileName}
+                                </Text>
+                              </View>
+                              <View style={styles.referenceAudioActions}>
+                                <TouchableOpacity
+                                  style={styles.changeRefButton}
+                                  onPress={handlePickReferenceAudio}
+                                >
+                                  <Text style={styles.changeRefButtonText}>
+                                    Change
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.clearRefButton}
+                                  onPress={() => {
+                                    setReferenceAudio(null);
+                                    setReferenceAudioFileName(null);
+                                  }}
+                                >
+                                  <Text style={styles.clearRefButtonText}>
+                                    Clear
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
                         </View>
-                      </View>
-                    )}
+                      )}
+                    </View>
+
+                    <Text style={styles.inputLabel}>
+                      Extra options (optional, key:value, …):
+                    </Text>
+                    <TextInput
+                      style={styles.parameterInput}
+                      value={extraOptions}
+                      onChangeText={setExtraOptions}
+                      placeholder="e.g. temperature:0.7, chunk_size:15"
+                      placeholderTextColor="#8E8E93"
+                    />
                   </View>
                 )}
               </View>
 
-              <Text style={styles.inputLabel}>
-                Extra options (optional, key:value, …):
-              </Text>
-              <TextInput
-                style={styles.parameterInput}
-                value={extraOptions}
-                onChangeText={setExtraOptions}
-                placeholder="e.g. temperature:0.7, chunk_size:15"
-                placeholderTextColor="#8E8E93"
-              />
               <View style={styles.generateActionsSpacer} />
               <TouchableOpacity
                 style={[
@@ -2407,6 +2544,11 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 12,
   },
+  labelText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginRight: 8,
+  },
   buttonGroup: {
     gap: 12,
   },
@@ -2554,6 +2696,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     marginBottom: 16,
+  },
+  dropdownTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   dropdownTriggerText: {
     fontSize: 16,
