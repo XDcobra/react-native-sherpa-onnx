@@ -653,13 +653,12 @@ internal class SherpaOnnxTtsHelper(
   private fun getSpeed(options: ReadableMap?): Float =
     if (options != null && options.hasKey("speed")) options.getDouble("speed").toFloat() else 1.0f
 
-  /** Build Kotlin GenerationConfig from ReadableMap; returns null if no reference/extra options. */
+  /** Build Kotlin GenerationConfig from ReadableMap. Returns null only when options is null; otherwise returns a config with sid, speed, silenceScale, numSteps, and any reference/extra fields from options. */
   private fun parseGenerationConfig(options: ReadableMap?): GenerationConfig? {
     if (options == null) return null
     val refAudio = options.getArray("referenceAudio")
     val refSampleRate = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
     val refText = options.getString("referenceText")
-    val hasRef = (refAudio != null && refAudio.size() > 0) || !refText.isNullOrEmpty()
     val silenceScale = if (options.hasKey("silenceScale")) options.getDouble("silenceScale").toFloat() else 0.2f
     val speed = getSpeed(options)
     val sid = getSid(options)
