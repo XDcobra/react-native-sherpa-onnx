@@ -6,12 +6,20 @@ import type { ModelPathConfig } from '../types';
 export type STTModelType =
   | 'transducer'
   | 'zipformer'
+  | 'nemo_transducer'
   | 'paraformer'
   | 'nemo_ctc'
   | 'whisper'
   | 'wenet_ctc'
   | 'sense_voice'
   | 'funasr_nano'
+  | 'fire_red_asr'
+  | 'moonshine'
+  | 'dolphin'
+  | 'canary'
+  | 'omnilingual'
+  | 'medasr'
+  | 'telespeech_ctc'
   | 'auto';
 
 /**
@@ -41,6 +49,13 @@ export interface STTInitializeOptions {
    * - 'wenet_ctc': Force detection as WeNet CTC model
    * - 'sense_voice': Force detection as SenseVoice model
    * - 'funasr_nano': Force detection as FunASR Nano model
+   * - 'fire_red_asr': FireRed ASR (encoder/decoder)
+   * - 'moonshine': Moonshine (preprocess, encode, uncached_decode, cached_decode)
+   * - 'dolphin': Dolphin (single model)
+   * - 'canary': Canary (encoder/decoder)
+   * - 'omnilingual': Omnilingual CTC (single model)
+   * - 'medasr': MedASR CTC (single model)
+   * - 'telespeech_ctc': TeleSpeech CTC (single model)
    * - 'auto': Automatic detection based on files (default)
    */
   modelType?: STTModelType;
