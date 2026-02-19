@@ -51,14 +51,57 @@ export interface STTInitializeOptions {
    * Default: false.
    */
   debug?: boolean;
+
+  /**
+   * Path to hotwords file for keyword boosting (Kotlin OfflineRecognizerConfig.hotwordsFile).
+   */
+  hotwordsFile?: string;
+
+  /**
+   * Hotwords score/weight (Kotlin OfflineRecognizerConfig.hotwordsScore).
+   * Default in Kotlin: 1.5.
+   */
+  hotwordsScore?: number;
 }
 
 /**
- * Transcription result
+ * Full recognition result from offline STT (maps to Kotlin OfflineRecognizerResult).
  */
-export interface TranscriptionResult {
-  /**
-   * Transcribed text
-   */
+export interface SttRecognitionResult {
+  /** Transcribed text. */
   text: string;
+  /** Token strings. */
+  tokens: string[];
+  /** Timestamps per token (model-dependent). */
+  timestamps: number[];
+  /** Detected or specified language (model-dependent). */
+  lang: string;
+  /** Emotion label (model-dependent, e.g. SenseVoice). */
+  emotion: string;
+  /** Event label (model-dependent). */
+  event: string;
+  /** Durations (valid for TDT models). */
+  durations: number[];
+}
+
+/**
+ * @deprecated Use SttRecognitionResult. Kept as alias for compatibility.
+ */
+export type TranscriptionResult = SttRecognitionResult;
+
+/**
+ * Runtime config for the offline recognizer (Kotlin OfflineRecognizerConfig).
+ * Only fields that can be updated via setConfig are included.
+ */
+export interface SttRuntimeConfig {
+  /** Decoding method (e.g. greedy_search). */
+  decodingMethod?: string;
+  /** Max active paths (beam search). */
+  maxActivePaths?: number;
+  /** Path to hotwords file. */
+  hotwordsFile?: string;
+  /** Hotwords score. */
+  hotwordsScore?: number;
+  /** Blank penalty. */
+  blankPenalty?: number;
 }
