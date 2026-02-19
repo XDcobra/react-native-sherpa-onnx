@@ -3,7 +3,10 @@ package com.sherpaonnx
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizerResult
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
@@ -33,11 +36,16 @@ internal class SherpaOnnxSttHelper(
   @Volatile
   private var recognizer: OfflineRecognizer? = null
 
+  @Volatile
+  private var lastRecognizerConfig: OfflineRecognizerConfig? = null
+
   fun initializeStt(
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
     debug: Boolean?,
+    hotwordsFile: String?,
+    hotwordsScore: Double?,
     promise: Promise
   ) {
     try {
@@ -99,7 +107,13 @@ internal class SherpaOnnxSttHelper(
 
       recognizer?.release()
       recognizer = null
-      val config = buildRecognizerConfig(pathStrings, modelTypeStr)
+      val config = buildRecognizerConfig(
+        pathStrings,
+        modelTypeStr,
+        hotwordsFile = hotwordsFile.orEmpty(),
+        hotwordsScore = hotwordsScore?.toFloat() ?: 1.5f
+      )
+      lastRecognizerConfig = config
       recognizer = OfflineRecognizer(config = config)
 
       val resultMap = Arguments.createMap()
@@ -135,7 +149,7 @@ internal class SherpaOnnxSttHelper(
       stream.acceptWaveform(wave.samples, wave.sampleRate)
       rec.decode(stream)
       val result = rec.getResult(stream)
-      promise.resolve(result.text)
+      promise.resolve(resultToWritableMap(result))
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
@@ -143,10 +157,78 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
+  fun transcribeSamples(samples: com.facebook.react.bridge.ReadableArray, sampleRate: Int, promise: Promise) {
+    try {
+      val rec = recognizer
+      if (rec == null) {
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
+        return
+      }
+      val floatSamples = FloatArray(samples.size()) { i -> samples.getDouble(i).toFloat() }
+      val stream: OfflineStream = rec.createStream()
+      try {
+        stream.acceptWaveform(floatSamples, sampleRate)
+        rec.decode(stream)
+        val result = rec.getResult(stream)
+        promise.resolve(resultToWritableMap(result))
+      } finally {
+        stream.release()
+      }
+    } catch (e: Exception) {
+      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe samples"
+      Log.e(logTag, "transcribeSamples error: $message", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", message, e, "stt")
+    }
+  }
+
+  fun setSttConfig(options: ReadableMap, promise: Promise) {
+    try {
+      val rec = recognizer
+      val current = lastRecognizerConfig
+      if (rec == null || current == null) {
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
+        return
+      }
+      val merged = current.copy(
+        decodingMethod = if (options.hasKey("decodingMethod")) options.getString("decodingMethod") ?: current.decodingMethod else current.decodingMethod,
+        maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else current.maxActivePaths,
+        hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") ?: current.hotwordsFile else current.hotwordsFile,
+        hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore").toFloat() else current.hotwordsScore,
+        blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty").toFloat() else current.blankPenalty
+      )
+      lastRecognizerConfig = merged
+      rec.setConfig(merged)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to set STT config"
+      Log.e(logTag, "setSttConfig error: $message", e)
+      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", message, e, "stt")
+    }
+  }
+
+  private fun resultToWritableMap(result: OfflineRecognizerResult): WritableMap {
+    val map = Arguments.createMap()
+    map.putString("text", result.text)
+    val tokensArray = Arguments.createArray()
+    for (t in result.tokens) tokensArray.pushString(t)
+    map.putArray("tokens", tokensArray)
+    val timestampsArray = Arguments.createArray()
+    for (t in result.timestamps) timestampsArray.pushDouble(t.toDouble())
+    map.putArray("timestamps", timestampsArray)
+    map.putString("lang", result.lang)
+    map.putString("emotion", result.emotion)
+    map.putString("event", result.event)
+    val durationsArray = Arguments.createArray()
+    for (d in result.durations) durationsArray.pushDouble(d.toDouble())
+    map.putArray("durations", durationsArray)
+    return map
+  }
+
   fun unloadStt(promise: Promise) {
     try {
       recognizer?.release()
       recognizer = null
+      lastRecognizerConfig = null
       promise.resolve(null)
     } catch (e: Exception) {
       CrashlyticsHelper.rejectWithCrashlytics(promise, "RELEASE_ERROR", "Failed to release resources", e, "stt")
@@ -156,7 +238,12 @@ internal class SherpaOnnxSttHelper(
   private fun path(paths: Map<String, String>, key: String): String =
     paths[key].orEmpty()
 
-  private fun buildRecognizerConfig(paths: Map<String, String>, modelType: String): OfflineRecognizerConfig {
+  private fun buildRecognizerConfig(
+    paths: Map<String, String>,
+    modelType: String,
+    hotwordsFile: String = "",
+    hotwordsScore: Float = 1.5f
+  ): OfflineRecognizerConfig {
     val featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80)
     val modelConfig = when (modelType) {
       "transducer", "nemo_transducer" -> OfflineModelConfig(
@@ -236,6 +323,11 @@ internal class SherpaOnnxSttHelper(
         }
       }
     }
-    return OfflineRecognizerConfig(featConfig = featConfig, modelConfig = modelConfig)
+    return OfflineRecognizerConfig(
+      featConfig = featConfig,
+      modelConfig = modelConfig,
+      hotwordsFile = hotwordsFile,
+      hotwordsScore = hotwordsScore
+    )
   }
 }

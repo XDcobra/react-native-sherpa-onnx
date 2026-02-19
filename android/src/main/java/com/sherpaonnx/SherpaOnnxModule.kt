@@ -113,9 +113,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     preferInt8: Boolean?,
     modelType: String?,
     debug: Boolean?,
+    hotwordsFile: String?,
+    hotwordsScore: Double?,
     promise: Promise
   ) {
-    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, promise)
+    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, promise)
   }
 
   /**
@@ -128,10 +130,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   // ==================== STT Methods ====================
 
   /**
-   * Transcribe an audio file.
+   * Transcribe an audio file. Returns full result (text, tokens, timestamps, lang, emotion, event, durations).
    */
   override fun transcribeFile(filePath: String, promise: Promise) {
     sttHelper.transcribeFile(filePath, promise)
+  }
+
+  /**
+   * Transcribe from float PCM samples.
+   */
+  override fun transcribeSamples(samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    sttHelper.transcribeSamples(samples, sampleRate.toInt(), promise)
+  }
+
+  /**
+   * Update recognizer config at runtime.
+   */
+  override fun setSttConfig(options: ReadableMap, promise: Promise) {
+    sttHelper.setSttConfig(options, promise)
   }
 
   /**
