@@ -13,11 +13,14 @@ import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.k2fsa.sherpa.onnx.GeneratedAudio
+import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
@@ -239,13 +242,37 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTts(text: String, sid: Double, speed: Double, promise: Promise) {
+  fun generateTts(text: String, options: ReadableMap?, promise: Promise) {
     try {
-      val audio = dispatchGenerate(text, sid.toInt(), speed.toFloat())
-        ?: run {
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
-          return
+      if (!hasEngine()) {
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+        return
+      }
+      val sid = getSid(options)
+      val speed = getSpeed(options)
+      val audio = when {
+        hasReferenceOptions(options) && isZipvoice -> {
+          val refAudio = options?.getArray("referenceAudio")
+            ?: run {
+              CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning", feature = "tts")
+              return
+            }
+          val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
+          val promptText = options.getString("referenceText").orEmpty()
+          val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
+          val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
+          zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
+        hasReferenceOptions(options) && tts != null -> {
+          val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+          tts!!.generateWithConfig(text, config)
+        }
+        else -> dispatchGenerate(text, sid, speed)
+          ?: run {
+            CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+            return
+          }
+      }
       val map = Arguments.createMap()
       val samplesArray = Arguments.createArray()
       for (sample in audio.samples) {
@@ -260,13 +287,37 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTtsWithTimestamps(text: String, sid: Double, speed: Double, promise: Promise) {
+  fun generateTtsWithTimestamps(text: String, options: ReadableMap?, promise: Promise) {
     try {
-      val audio = dispatchGenerate(text, sid.toInt(), speed.toFloat())
-        ?: run {
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
-          return
+      if (!hasEngine()) {
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+        return
+      }
+      val sid = getSid(options)
+      val speed = getSpeed(options)
+      val audio = when {
+        hasReferenceOptions(options) && isZipvoice -> {
+          val refAudio = options?.getArray("referenceAudio")
+            ?: run {
+              CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning", feature = "tts")
+              return
+            }
+          val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
+          val promptText = options.getString("referenceText").orEmpty()
+          val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
+          val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
+          zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
+        hasReferenceOptions(options) && tts != null -> {
+          val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+          tts!!.generateWithConfig(text, config)
+        }
+        else -> dispatchGenerate(text, sid, speed)
+          ?: run {
+            CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+            return
+          }
+      }
       val map = Arguments.createMap()
       val samplesArray = Arguments.createArray()
       for (sample in audio.samples) {
@@ -291,7 +342,7 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTtsStream(text: String, sid: Double, speed: Double, promise: Promise) {
+  fun generateTtsStream(text: String, options: ReadableMap?, promise: Promise) {
     if (ttsStreamRunning.get()) {
       CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "TTS streaming already in progress", feature = "tts")
       return
@@ -300,23 +351,39 @@ internal class SherpaOnnxTtsHelper(
       CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "TTS not initialized", feature = "tts")
       return
     }
+    if (hasReferenceOptions(options) && isZipvoice) {
+      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "Streaming with reference audio not supported for Zipvoice", feature = "tts")
+      return
+    }
+    val sid = getSid(options)
+    val speed = getSpeed(options)
     ttsStreamCancelled.set(false)
     ttsStreamRunning.set(true)
     ttsStreamThread = Thread {
       try {
         val sampleRate = dispatchSampleRate()
-        val zipvoice = zipvoiceTts
-        if (zipvoice != null) {
-          zipvoice.generateWithCallback(text, sid.toInt(), speed.toFloat()) { chunk ->
-            if (ttsStreamCancelled.get()) return@generateWithCallback 0
-            emitChunk(chunk, sampleRate, 0f, false)
-            chunk.size
+        when {
+          hasReferenceOptions(options) && tts != null -> {
+            val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+            tts!!.generateWithConfigAndCallback(text, config) { chunk ->
+              if (ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
+              emitChunk(chunk, sampleRate, 0f, false)
+              chunk.size
+            }
           }
-        } else {
-          tts!!.generateWithCallback(text, sid.toInt(), speed.toFloat()) { chunk ->
-            if (ttsStreamCancelled.get()) return@generateWithCallback 0
-            emitChunk(chunk, sampleRate, 0f, false)
-            chunk.size
+          zipvoiceTts != null -> {
+            zipvoiceTts!!.generateWithCallback(text, sid, speed) { chunk ->
+              if (ttsStreamCancelled.get()) return@generateWithCallback 0
+              emitChunk(chunk, sampleRate, 0f, false)
+              chunk.size
+            }
+          }
+          else -> {
+            tts!!.generateWithCallback(text, sid, speed) { chunk ->
+              if (ttsStreamCancelled.get()) return@generateWithCallback 0
+              emitChunk(chunk, sampleRate, 0f, false)
+              chunk.size
+            }
           }
         }
         if (!ttsStreamCancelled.get()) {
@@ -571,6 +638,56 @@ internal class SherpaOnnxTtsHelper(
   /** True if any TTS engine (Kotlin API or Zipvoice C-API) is loaded */
   private fun hasEngine(): Boolean = tts != null || zipvoiceTts != null
 
+  /** True if options contain reference-audio fields for voice cloning. */
+  private fun hasReferenceOptions(options: ReadableMap?): Boolean {
+    if (options == null) return false
+    val refAudio = options.getArray("referenceAudio")
+    val refText = options.getString("referenceText")
+    return (refAudio != null && refAudio.size() > 0) || !refText.isNullOrEmpty()
+  }
+
+  /** Parse sid and speed from options with defaults. */
+  private fun getSid(options: ReadableMap?): Int =
+    if (options != null && options.hasKey("sid")) options.getDouble("sid").toInt() else 0
+
+  private fun getSpeed(options: ReadableMap?): Float =
+    if (options != null && options.hasKey("speed")) options.getDouble("speed").toFloat() else 1.0f
+
+  /** Build Kotlin GenerationConfig from ReadableMap; returns null if no reference/extra options. */
+  private fun parseGenerationConfig(options: ReadableMap?): GenerationConfig? {
+    if (options == null) return null
+    val refAudio = options.getArray("referenceAudio")
+    val refSampleRate = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
+    val refText = options.getString("referenceText")
+    val hasRef = (refAudio != null && refAudio.size() > 0) || !refText.isNullOrEmpty()
+    val silenceScale = if (options.hasKey("silenceScale")) options.getDouble("silenceScale").toFloat() else 0.2f
+    val speed = getSpeed(options)
+    val sid = getSid(options)
+    val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 5
+    val extraMap = options.getMap("extra")?.let { map ->
+      val it = map.keySetIterator()
+      buildMap<String, String> {
+        while (it.hasNextKey()) {
+          val k = it.nextKey()
+          put(k, map.getString(k).orEmpty())
+        }
+      }
+    }
+    val refAudioFloat = refAudio?.let { arr ->
+      FloatArray(arr.size()) { i -> arr.getDouble(i).toFloat() }
+    }
+    return GenerationConfig(
+      silenceScale = silenceScale,
+      speed = speed,
+      sid = sid,
+      referenceAudio = refAudioFloat,
+      referenceSampleRate = refSampleRate,
+      referenceText = refText,
+      numSteps = numSteps,
+      extra = extraMap
+    )
+  }
+
   /** Dispatch generate to whichever engine is active. Returns null if none loaded. */
   private fun dispatchGenerate(text: String, sid: Int, speed: Float): GeneratedAudio? {
     zipvoiceTts?.let { return it.generate(text, sid, speed) }
@@ -665,6 +782,19 @@ internal class SherpaOnnxTtsHelper(
           tokens = path(paths, "tokens"),
           dataDir = path(paths, "dataDir"),
           lengthScale = ls
+        ),
+        numThreads = numThreads,
+        debug = debug
+      )
+      "pocket" -> OfflineTtsModelConfig(
+        pocket = OfflineTtsPocketModelConfig(
+          lmFlow = path(paths, "lmFlow"),
+          lmMain = path(paths, "lmMain"),
+          encoder = path(paths, "encoder"),
+          decoder = path(paths, "decoder"),
+          textConditioner = path(paths, "textConditioner"),
+          vocabJson = path(paths, "vocabJson"),
+          tokenScoresJson = path(paths, "tokenScoresJson")
         ),
         numThreads = numThreads,
         debug = debug
