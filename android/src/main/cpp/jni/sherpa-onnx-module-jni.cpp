@@ -95,6 +95,13 @@ const char* sttModelKindToString(sherpaonnx::SttModelKind k) {
     case sherpaonnx::SttModelKind::kZipformerCtc: return "zipformer_ctc";
     case sherpaonnx::SttModelKind::kWhisper: return "whisper";
     case sherpaonnx::SttModelKind::kFunAsrNano: return "funasr_nano";
+    case sherpaonnx::SttModelKind::kFireRedAsr: return "fire_red_asr";
+    case sherpaonnx::SttModelKind::kMoonshine: return "moonshine";
+    case sherpaonnx::SttModelKind::kDolphin: return "dolphin";
+    case sherpaonnx::SttModelKind::kCanary: return "canary";
+    case sherpaonnx::SttModelKind::kOmnilingual: return "omnilingual";
+    case sherpaonnx::SttModelKind::kMedAsr: return "medasr";
+    case sherpaonnx::SttModelKind::kTeleSpeechCtc: return "telespeech_ctc";
     default: return "unknown";
   }
 }
@@ -182,6 +189,18 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
       putString(env, pathsMap, mapPut, "funasrLLM", result.paths.funasrLLM);
       putString(env, pathsMap, mapPut, "funasrEmbedding", result.paths.funasrEmbedding);
       putString(env, pathsMap, mapPut, "funasrTokenizer", result.paths.funasrTokenizer);
+      putString(env, pathsMap, mapPut, "moonshinePreprocessor", result.paths.moonshinePreprocessor);
+      putString(env, pathsMap, mapPut, "moonshineEncoder", result.paths.moonshineEncoder);
+      putString(env, pathsMap, mapPut, "moonshineUncachedDecoder", result.paths.moonshineUncachedDecoder);
+      putString(env, pathsMap, mapPut, "moonshineCachedDecoder", result.paths.moonshineCachedDecoder);
+      putString(env, pathsMap, mapPut, "dolphinModel", result.paths.dolphinModel);
+      putString(env, pathsMap, mapPut, "omnilingualModel", result.paths.omnilingualModel);
+      putString(env, pathsMap, mapPut, "medasrModel", result.paths.medasrModel);
+      putString(env, pathsMap, mapPut, "telespeechCtcModel", result.paths.telespeechCtcModel);
+      putString(env, pathsMap, mapPut, "fireRedEncoder", result.paths.fireRedEncoder);
+      putString(env, pathsMap, mapPut, "fireRedDecoder", result.paths.fireRedDecoder);
+      putString(env, pathsMap, mapPut, "canaryEncoder", result.paths.canaryEncoder);
+      putString(env, pathsMap, mapPut, "canaryDecoder", result.paths.canaryDecoder);
       env->CallObjectMethod(map, mapPut, env->NewStringUTF("paths"), pathsMap);
       env->DeleteLocalRef(pathsMap);
     }

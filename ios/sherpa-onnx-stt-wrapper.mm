@@ -85,6 +85,7 @@ SttInitializeResult SttWrapper::initialize(
 
         switch (detect.selectedKind) {
             case SttModelKind::kTransducer:
+            case SttModelKind::kNemoTransducer:
                 config.model_config.transducer.encoder = detect.paths.encoder;
                 config.model_config.transducer.decoder = detect.paths.decoder;
                 config.model_config.transducer.joiner = detect.paths.joiner;
@@ -113,6 +114,32 @@ SttInitializeResult SttWrapper::initialize(
                 config.model_config.funasr_nano.llm = detect.paths.funasrLLM;
                 config.model_config.funasr_nano.embedding = detect.paths.funasrEmbedding;
                 config.model_config.funasr_nano.tokenizer = detect.paths.funasrTokenizer;
+                break;
+            case SttModelKind::kFireRedAsr:
+                config.model_config.fire_red_asr.encoder = detect.paths.fireRedEncoder;
+                config.model_config.fire_red_asr.decoder = detect.paths.fireRedDecoder;
+                break;
+            case SttModelKind::kMoonshine:
+                config.model_config.moonshine.preprocessor = detect.paths.moonshinePreprocessor;
+                config.model_config.moonshine.encoder = detect.paths.moonshineEncoder;
+                config.model_config.moonshine.uncached_decoder = detect.paths.moonshineUncachedDecoder;
+                config.model_config.moonshine.cached_decoder = detect.paths.moonshineCachedDecoder;
+                break;
+            case SttModelKind::kDolphin:
+                config.model_config.dolphin.model = detect.paths.dolphinModel;
+                break;
+            case SttModelKind::kCanary:
+                config.model_config.canary.encoder = detect.paths.canaryEncoder;
+                config.model_config.canary.decoder = detect.paths.canaryDecoder;
+                break;
+            case SttModelKind::kOmnilingual:
+                config.model_config.omnilingual.model = detect.paths.omnilingualModel;
+                break;
+            case SttModelKind::kMedAsr:
+                config.model_config.medasr.model = detect.paths.medasrModel;
+                break;
+            case SttModelKind::kTeleSpeechCtc:
+                config.model_config.telespeech_ctc = detect.paths.telespeechCtcModel;
                 break;
             case SttModelKind::kUnknown:
             default:

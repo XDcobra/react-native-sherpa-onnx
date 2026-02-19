@@ -58,6 +58,7 @@ std::string ResolveTokenizerDir(const std::string& modelDir) {
 
 SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "transducer" || modelType == "zipformer") return SttModelKind::kTransducer;
+    if (modelType == "nemo_transducer") return SttModelKind::kNemoTransducer;
     if (modelType == "paraformer") return SttModelKind::kParaformer;
     if (modelType == "nemo_ctc") return SttModelKind::kNemoCtc;
     if (modelType == "wenet_ctc") return SttModelKind::kWenetCtc;
@@ -65,6 +66,13 @@ SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "zipformer_ctc" || modelType == "ctc") return SttModelKind::kZipformerCtc;
     if (modelType == "whisper") return SttModelKind::kWhisper;
     if (modelType == "funasr_nano") return SttModelKind::kFunAsrNano;
+    if (modelType == "fire_red_asr") return SttModelKind::kFireRedAsr;
+    if (modelType == "moonshine") return SttModelKind::kMoonshine;
+    if (modelType == "dolphin") return SttModelKind::kDolphin;
+    if (modelType == "canary") return SttModelKind::kCanary;
+    if (modelType == "omnilingual") return SttModelKind::kOmnilingual;
+    if (modelType == "medasr") return SttModelKind::kMedAsr;
+    if (modelType == "telespeech_ctc") return SttModelKind::kTeleSpeechCtc;
     return SttModelKind::kUnknown;
 }
 
@@ -116,6 +124,11 @@ SttDetectResult DetectSttModel(
     std::string funasrEmbeddingInt8 = modelDir + "/embedding.int8.onnx";
 
     std::string funasrTokenizerDir = ResolveTokenizerDir(modelDir);
+
+    std::string moonshinePreprocess = modelDir + "/preprocess.onnx";
+    std::string moonshineEncode = modelDir + "/encode.onnx";
+    std::string moonshineUncachedDecode = modelDir + "/uncached_decode.onnx";
+    std::string moonshineCachedDecode = modelDir + "/cached_decode.onnx";
 
     std::string paraformerModelPath;
     if (preferInt8.has_value()) {
@@ -185,9 +198,30 @@ SttDetectResult DetectSttModel(
     bool isLikelyFunAsrNano = modelDir.find("funasr") != std::string::npos ||
                               modelDir.find("funasr-nano") != std::string::npos;
     bool isLikelyZipformer = modelDir.find("zipformer") != std::string::npos;
+    bool isLikelyNemoTransducer = modelDir.find("nemo") != std::string::npos && hasTransducer;
+    bool isLikelyMoonshine = modelDir.find("moonshine") != std::string::npos;
+    bool isLikelyDolphin = modelDir.find("dolphin") != std::string::npos;
+    bool isLikelyFireRedAsr = modelDir.find("fire_red") != std::string::npos || modelDir.find("fire-red") != std::string::npos;
+    bool isLikelyCanary = modelDir.find("canary") != std::string::npos;
+    bool isLikelyOmnilingual = modelDir.find("omnilingual") != std::string::npos;
+    bool isLikelyMedAsr = modelDir.find("medasr") != std::string::npos;
+    bool isLikelyTeleSpeech = modelDir.find("telespeech") != std::string::npos;
+
+    bool hasMoonshine = FileExists(moonshinePreprocess) && FileExists(moonshineEncode) &&
+                        FileExists(moonshineUncachedDecode) && FileExists(moonshineCachedDecode);
+    bool hasDolphin = isLikelyDolphin && !ctcModelPath.empty();
+    bool hasFireRedAsr = hasTransducer && isLikelyFireRedAsr;
+    bool hasCanary = hasTransducer && isLikelyCanary;
+    bool hasOmnilingual = !ctcModelPath.empty() && isLikelyOmnilingual;
+    bool hasMedAsr = !ctcModelPath.empty() && isLikelyMedAsr;
+    bool hasTeleSpeechCtc = !ctcModelPath.empty() && isLikelyTeleSpeech;
 
     if (hasTransducer) {
-        result.detectedModels.push_back({isLikelyZipformer ? "zipformer" : "transducer", modelDir});
+        if (isLikelyNemoTransducer) {
+            result.detectedModels.push_back({"nemo_transducer", modelDir});
+        } else {
+            result.detectedModels.push_back({isLikelyZipformer ? "zipformer" : "transducer", modelDir});
+        }
     }
 
     if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {
@@ -211,6 +245,27 @@ SttDetectResult DetectSttModel(
     if (hasFunAsrNano) {
         result.detectedModels.push_back({"funasr_nano", modelDir});
     }
+    if (hasMoonshine) {
+        result.detectedModels.push_back({"moonshine", modelDir});
+    }
+    if (hasDolphin) {
+        result.detectedModels.push_back({"dolphin", modelDir});
+    }
+    if (hasFireRedAsr) {
+        result.detectedModels.push_back({"fire_red_asr", modelDir});
+    }
+    if (hasCanary) {
+        result.detectedModels.push_back({"canary", modelDir});
+    }
+    if (hasOmnilingual) {
+        result.detectedModels.push_back({"omnilingual", modelDir});
+    }
+    if (hasMedAsr) {
+        result.detectedModels.push_back({"medasr", modelDir});
+    }
+    if (hasTeleSpeechCtc) {
+        result.detectedModels.push_back({"telespeech_ctc", modelDir});
+    }
 
     SttModelKind selected = SttModelKind::kUnknown;
 
@@ -223,6 +278,10 @@ SttDetectResult DetectSttModel(
 
         if (selected == SttModelKind::kTransducer && !hasTransducer) {
             result.error = "Transducer model requested but files not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kNemoTransducer && !hasTransducer) {
+            result.error = "NeMo Transducer model requested but encoder/decoder/joiner not found in " + modelDir;
             return result;
         }
         if (selected == SttModelKind::kParaformer && paraformerModelPath.empty()) {
@@ -243,9 +302,37 @@ SttDetectResult DetectSttModel(
             result.error = "FunASR Nano model requested but required files not found in " + modelDir;
             return result;
         }
+        if (selected == SttModelKind::kMoonshine && !hasMoonshine) {
+            result.error = "Moonshine model requested but preprocess/encode/uncached_decode/cached_decode not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kDolphin && !hasDolphin) {
+            result.error = "Dolphin model requested but model not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kFireRedAsr && !hasFireRedAsr) {
+            result.error = "FireRed ASR model requested but encoder/decoder not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kCanary && !hasCanary) {
+            result.error = "Canary model requested but encoder/decoder not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kOmnilingual && !hasOmnilingual) {
+            result.error = "Omnilingual model requested but model not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kMedAsr && !hasMedAsr) {
+            result.error = "MedASR model requested but model not found in " + modelDir;
+            return result;
+        }
+        if (selected == SttModelKind::kTeleSpeechCtc && !hasTeleSpeechCtc) {
+            result.error = "TeleSpeech CTC model requested but model not found in " + modelDir;
+            return result;
+        }
     } else {
         if (hasTransducer) {
-            selected = SttModelKind::kTransducer;
+            selected = isLikelyNemoTransducer ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
         } else if (!ctcModelPath.empty() && (isLikelyNemoCtc || isLikelyWenetCtc || isLikelySenseVoice)) {
             if (isLikelyNemoCtc) {
                 selected = SttModelKind::kNemoCtc;
@@ -262,6 +349,20 @@ SttDetectResult DetectSttModel(
             selected = SttModelKind::kWhisper;
         } else if (hasFunAsrNano) {
             selected = SttModelKind::kFunAsrNano;
+        } else if (hasMoonshine && isLikelyMoonshine) {
+            selected = SttModelKind::kMoonshine;
+        } else if (hasDolphin) {
+            selected = SttModelKind::kDolphin;
+        } else if (hasFireRedAsr) {
+            selected = SttModelKind::kFireRedAsr;
+        } else if (hasCanary) {
+            selected = SttModelKind::kCanary;
+        } else if (hasOmnilingual) {
+            selected = SttModelKind::kOmnilingual;
+        } else if (hasMedAsr) {
+            selected = SttModelKind::kMedAsr;
+        } else if (hasTeleSpeechCtc) {
+            selected = SttModelKind::kTeleSpeechCtc;
         } else if (!ctcModelPath.empty()) {
             selected = SttModelKind::kZipformerCtc;
         }
@@ -275,9 +376,9 @@ SttDetectResult DetectSttModel(
     result.selectedKind = selected;
     result.tokensRequired = !(selected == SttModelKind::kWhisper || selected == SttModelKind::kFunAsrNano);
 
-    if (selected == SttModelKind::kTransducer) {
-        result.paths.encoder = encoderPath;
-        result.paths.decoder = decoderPath;
+    if (selected == SttModelKind::kTransducer || selected == SttModelKind::kNemoTransducer) {
+        result.paths.encoder = FileExists(encoderPathInt8) ? encoderPathInt8 : encoderPath;
+        result.paths.decoder = FileExists(decoderPathInt8) ? decoderPathInt8 : decoderPath;
         result.paths.joiner = joinerPath;
     } else if (selected == SttModelKind::kParaformer) {
         result.paths.paraformerModel = paraformerModelPath;
@@ -292,6 +393,25 @@ SttDetectResult DetectSttModel(
         result.paths.funasrLLM = FileExists(funasrLLMInt8) ? funasrLLMInt8 : funasrLLM;
         result.paths.funasrEmbedding = FileExists(funasrEmbeddingInt8) ? funasrEmbeddingInt8 : funasrEmbedding;
         result.paths.funasrTokenizer = funasrTokenizerDir + "/vocab.json";
+    } else if (selected == SttModelKind::kMoonshine) {
+        result.paths.moonshinePreprocessor = moonshinePreprocess;
+        result.paths.moonshineEncoder = moonshineEncode;
+        result.paths.moonshineUncachedDecoder = moonshineUncachedDecode;
+        result.paths.moonshineCachedDecoder = moonshineCachedDecode;
+    } else if (selected == SttModelKind::kDolphin) {
+        result.paths.dolphinModel = ctcModelPath.empty() ? paraformerModelPath : ctcModelPath;
+    } else if (selected == SttModelKind::kFireRedAsr) {
+        result.paths.fireRedEncoder = FileExists(encoderPathInt8) ? encoderPathInt8 : encoderPath;
+        result.paths.fireRedDecoder = FileExists(decoderPathInt8) ? decoderPathInt8 : decoderPath;
+    } else if (selected == SttModelKind::kCanary) {
+        result.paths.canaryEncoder = FileExists(encoderPathInt8) ? encoderPathInt8 : encoderPath;
+        result.paths.canaryDecoder = FileExists(decoderPathInt8) ? decoderPathInt8 : decoderPath;
+    } else if (selected == SttModelKind::kOmnilingual) {
+        result.paths.omnilingualModel = ctcModelPath;
+    } else if (selected == SttModelKind::kMedAsr) {
+        result.paths.medasrModel = ctcModelPath;
+    } else if (selected == SttModelKind::kTeleSpeechCtc) {
+        result.paths.telespeechCtcModel = ctcModelPath.empty() ? paraformerModelPath : ctcModelPath;
     }
 
     if (FileExists(tokensPath)) {
