@@ -34,6 +34,46 @@ static bool SupportsHotwords(sherpaonnx::SttModelKind kind) {
     return kind == sherpaonnx::SttModelKind::kTransducer || kind == sherpaonnx::SttModelKind::kNemoTransducer;
 }
 
+// Returns error message if hotwords file is invalid, else empty optional.
+static std::optional<std::string> ValidateHotwordsFile(const std::string& filePath) {
+    if (filePath.empty()) return std::nullopt;
+    try {
+        if (!fs::exists(filePath)) return "Hotwords file does not exist: " + filePath;
+        if (!fs::is_regular_file(filePath)) return "Hotwords path is not a file: " + filePath;
+        std::ifstream f(filePath, std::ios::binary);
+        if (!f) return "Hotwords file is not readable: " + filePath;
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        f.close();
+        if (content.find('\0') != std::string::npos) return "Hotwords file contains null bytes (not a valid text file).";
+        int validLines = 0;
+        std::istringstream stream(content);
+        std::string line;
+        while (std::getline(stream, line, '\n')) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            size_t start = 0;
+            while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) start++;
+            size_t end = line.size();
+            while (end > start && (line[end - 1] == ' ' || line[end - 1] == '\t')) end--;
+            if (start >= end) continue;
+            line = line.substr(start, end - start);
+            size_t spaceColon = line.rfind(" :");
+            if (spaceColon != std::string::npos) {
+                std::string scoreStr = line.substr(spaceColon + 2);
+                try {
+                    (void)std::stof(scoreStr);
+                } catch (...) {
+                    return "Invalid hotword line (score must be a number after ' :'): " + line.substr(0, 60) + "…";
+                }
+            }
+            validLines++;
+        }
+        if (validLines == 0) return "Hotwords file has no valid lines (one hotword or phrase per line, UTF-8 text).";
+        return std::nullopt;
+    } catch (const std::exception& e) {
+        return std::string("Failed to read hotwords file: ") + e.what();
+    }
+}
+
 // PIMPL pattern implementation
 class SttWrapper::Impl {
 public:
@@ -224,6 +264,13 @@ SttInitializeResult SttWrapper::initialize(
                 LOGE("%s", result.error.c_str());
                 return result;
             }
+            auto validateErr = ValidateHotwordsFile(*hotwordsFile);
+            if (validateErr.has_value()) {
+                result.success = false;
+                result.error = "INVALID_HOTWORDS_FILE: " + *validateErr;
+                LOGE("%s", result.error.c_str());
+                return result;
+            }
         }
 
         config.decoding_method = "greedy_search";
@@ -393,6 +440,11 @@ void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
         if (!SupportsHotwords(pImpl->currentModelKind)) {
             LOGE("Hotwords are only supported for transducer models.");
             throw std::runtime_error("HOTWORDS_NOT_SUPPORTED: Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type is not transducer.");
+        }
+        auto validateErr = ValidateHotwordsFile(*options.hotwords_file);
+        if (validateErr.has_value()) {
+            LOGE("%s", validateErr->c_str());
+            throw std::runtime_error("INVALID_HOTWORDS_FILE: " + *validateErr);
         }
     }
     if (options.decoding_method.has_value()) config.decoding_method = *options.decoding_method;

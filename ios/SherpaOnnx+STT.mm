@@ -204,7 +204,9 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             NSString *errorMsg = result.error.empty()
                 ? [NSString stringWithFormat:@"Failed to initialize sherpa-onnx with model directory: %@", modelDir]
                 : [NSString stringWithUTF8String:result.error.c_str()];
-            NSString *code = [errorMsg hasPrefix:@"HOTWORDS_NOT_SUPPORTED"] ? @"HOTWORDS_NOT_SUPPORTED" : @"INIT_ERROR";
+            NSString *code = @"INIT_ERROR";
+            if ([errorMsg hasPrefix:@"HOTWORDS_NOT_SUPPORTED"]) code = @"HOTWORDS_NOT_SUPPORTED";
+            else if ([errorMsg hasPrefix:@"INVALID_HOTWORDS_FILE"]) code = @"INVALID_HOTWORDS_FILE";
             RCTLogError(@"%@", errorMsg);
             reject(code, errorMsg, nil);
         }
@@ -354,11 +356,22 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         if (options[@"ruleFars"] != nil && [options[@"ruleFars"] isKindOfClass:[NSString class]]) {
             opts.rule_fars = [(NSString *)options[@"ruleFars"] UTF8String];
         }
-        g_stt_wrapper->setConfig(opts);
-        resolve(nil);
+        try {
+            g_stt_wrapper->setConfig(opts);
+            resolve(nil);
+        } catch (const std::exception& e) {
+            NSString *reason = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Unknown error";
+            NSString *code = @"CONFIG_ERROR";
+            if ([reason hasPrefix:@"HOTWORDS_NOT_SUPPORTED"]) code = @"HOTWORDS_NOT_SUPPORTED";
+            else if ([reason hasPrefix:@"INVALID_HOTWORDS_FILE"]) code = @"INVALID_HOTWORDS_FILE";
+            RCTLogError(@"setSttConfig: %@", reason);
+            reject(code, reason, nil);
+        }
     } @catch (NSException *exception) {
         NSString *reason = exception.reason ?: @"";
-        NSString *code = [reason hasPrefix:@"HOTWORDS_NOT_SUPPORTED"] ? @"HOTWORDS_NOT_SUPPORTED" : @"CONFIG_ERROR";
+        NSString *code = @"CONFIG_ERROR";
+        if ([reason hasPrefix:@"HOTWORDS_NOT_SUPPORTED"]) code = @"HOTWORDS_NOT_SUPPORTED";
+        else if ([reason hasPrefix:@"INVALID_HOTWORDS_FILE"]) code = @"INVALID_HOTWORDS_FILE";
         NSString *errorMsg = [NSString stringWithFormat:@"Exception in setSttConfig: %@", reason];
         RCTLogError(@"%@", errorMsg);
         reject(code, errorMsg, nil);

@@ -34,6 +34,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
+    reactApplicationContext,
     { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
       Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
     },
