@@ -16,6 +16,31 @@ import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
 /**
+ * Detect TTS model type and structure without initializing the engine.
+ * Uses the same native file-based detection as initializeTTS.
+ *
+ * @param modelPath - Model path configuration (asset, file, or auto)
+ * @param options - Optional modelType (default: 'auto')
+ * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+ * @example
+ * ```typescript
+ * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
+ * if (result.success) console.log('Detected type:', result.modelType, result.detectedModels);
+ * ```
+ */
+export async function detectTtsModel(
+  modelPath: ModelPathConfig,
+  options?: { modelType?: TTSModelType }
+): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  modelType?: string;
+}> {
+  const resolvedPath = await resolveModelPath(modelPath);
+  return SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
+}
+
+/**
  * Initialize Text-to-Speech (TTS) with model directory.
  *
  * Supports multiple model source types:

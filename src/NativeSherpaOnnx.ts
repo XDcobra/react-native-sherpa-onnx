@@ -127,6 +127,22 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Detect TTS model type and structure without initializing the engine.
+   * Uses the same native file-based detection as initializeTts.
+   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * @param modelType - Optional: explicit type or 'auto' (default)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+   */
+  detectTtsModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
    * Update TTS model parameters by re-initializing with stored config.
    * @param noiseScale - Optional noise scale override
    * @param noiseScaleW - Optional noise scale W override
