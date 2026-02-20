@@ -1,17 +1,22 @@
 import { AppRegistry, Platform } from 'react-native';
-import crashlytics from '@react-native-firebase/crashlytics';
+import {
+  getCrashlytics,
+  setAttributes,
+  log,
+} from '@react-native-firebase/crashlytics';
 import App from './src/App';
 import { name as appName } from './app.json';
 
-// Crashlytics: set attributes and breadcrumb before any app code runs.
+// Crashlytics: set attributes and breadcrumb before any app code runs (modular API, v22).
 // The @react-native-firebase/crashlytics module already installs a global JS exception handler.
-(function initCrashlytics() {
+(async function initCrashlytics() {
   try {
-    crashlytics().setAttributes({
+    const crashlytics = getCrashlytics();
+    await setAttributes(crashlytics, {
       platform: Platform.OS,
       buildType: __DEV__ ? 'debug' : 'release',
     });
-    crashlytics().log('App started');
+    log(crashlytics, 'App started');
   } catch (e) {
     // Firebase not configured or native module not ready (e.g. missing google-services.json).
     if (__DEV__) {
