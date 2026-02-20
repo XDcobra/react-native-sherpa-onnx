@@ -61,7 +61,9 @@ SttDetectResult DetectSttModel(
         return result;
     }
 
-    const auto files = ListFilesRecursive(modelDir, 2);
+    // Depth 4 supports layouts like root/data/lang_bpe_500/tokens.txt (icefall, k2)
+    const int kMaxSearchDepth = 4;
+    const auto files = ListFilesRecursive(modelDir, kMaxSearchDepth);
     bool verbose = debug;
     LOGI("DetectSttModel: Found %zu files in %s (verbose=%d)", files.size(), modelDir.c_str(), (int)verbose);
     if (verbose) {
@@ -114,8 +116,9 @@ SttDetectResult DetectSttModel(
     }
 
     // Search for tokens file: first try exact "tokens.txt", then suffix match
-    // (e.g. "tiny-tokens.txt" for Whisper models)
-    std::string tokensPath = FindFileEndingWith(modelDir, "tokens.txt", 2);
+    // (e.g. "tiny-tokens.txt" for Whisper models). Use same depth as file list
+    // so layouts like root/data/lang_bpe_500/tokens.txt (icefall) are found.
+    std::string tokensPath = FindFileEndingWith(modelDir, "tokens.txt", kMaxSearchDepth);
     LOGI("DetectSttModel: tokens=%s", tokensPath.c_str());
 
     bool hasTransducer = !encoderPath.empty() && !decoderPath.empty() && !joinerPath.empty();
