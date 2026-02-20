@@ -182,7 +182,7 @@ export function unloadSTT(): Promise<void> {
   return SherpaOnnx.unloadStt();
 }
 
-// Export types
+// Export types and runtime type list
 export type {
   STTInitializeOptions,
   STTModelType,
@@ -190,3 +190,4 @@ export type {
   SttRuntimeConfig,
   TranscriptionResult,
 } from './types';
+export { STT_MODEL_TYPES } from './types';

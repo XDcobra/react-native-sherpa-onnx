@@ -2,16 +2,18 @@ import type { ModelPathConfig } from '../types';
 
 /**
  * Supported STT model types.
+ * Must match ParseSttModelType() in android/.../sherpa-onnx-model-detect-stt.cpp.
  */
 export type STTModelType =
   | 'transducer'
-  | 'zipformer'
   | 'nemo_transducer'
   | 'paraformer'
   | 'nemo_ctc'
-  | 'whisper'
   | 'wenet_ctc'
   | 'sense_voice'
+  | 'zipformer_ctc'
+  | 'ctc'
+  | 'whisper'
   | 'funasr_nano'
   | 'fire_red_asr'
   | 'moonshine'
@@ -21,6 +23,28 @@ export type STTModelType =
   | 'medasr'
   | 'telespeech_ctc'
   | 'auto';
+
+/** Runtime list of supported STT model types (must match ParseSttModelType in native). */
+export const STT_MODEL_TYPES: readonly STTModelType[] = [
+  'transducer',
+  'nemo_transducer',
+  'paraformer',
+  'nemo_ctc',
+  'wenet_ctc',
+  'sense_voice',
+  'zipformer_ctc',
+  'ctc',
+  'whisper',
+  'funasr_nano',
+  'fire_red_asr',
+  'moonshine',
+  'dolphin',
+  'canary',
+  'omnilingual',
+  'medasr',
+  'telespeech_ctc',
+  'auto',
+] as const;
 
 /**
  * STT-specific initialization options
@@ -42,7 +66,7 @@ export interface STTInitializeOptions {
   /**
    * Explicit model type specification for STT models
    * - 'transducer': Force detection as Transducer model
-   * - 'zipformer': Force detection as Zipformer (streaming) model
+   * - 'zipformer_ctc' | 'ctc': Force detection as Zipformer CTC model
    * - 'paraformer': Force detection as Paraformer model
    * - 'nemo_ctc': Force detection as NeMo CTC model
    * - 'whisper': Force detection as Whisper model

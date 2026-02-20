@@ -471,7 +471,7 @@ export function shareAudioFile(
   return SherpaOnnx.shareTtsAudio(fileUri, mimeType);
 }
 
-// Export types
+// Export types and runtime type list
 export type {
   TTSInitializeOptions,
   TTSModelType,
@@ -482,3 +482,4 @@ export type {
   TtsSubtitleItem,
   TTSModelInfo,
 } from './types';
+export { TTS_MODEL_TYPES } from './types';

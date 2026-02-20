@@ -1,5 +1,6 @@
 import { Alert, Platform } from 'react-native';
 import RNFS from 'react-native-fs';
+import type { TTSModelType } from '../tts/types';
 import { extractTarBz2 } from './extractTarBz2';
 import {
   parseChecksumFile,
@@ -23,13 +24,8 @@ export enum ModelCategory {
   Separation = 'separation',
 }
 
-export type TtsModelType =
-  | 'vits'
-  | 'kokoro'
-  | 'matcha'
-  | 'kitten'
-  | 'zipvoice'
-  | 'unknown';
+/** TTS model type for meta; 'unknown' when id could not be classified. */
+export type TtsModelType = TTSModelType | 'unknown';
 
 export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
 
@@ -406,6 +402,7 @@ function deriveType(id: string): TtsModelType {
   if (lower.includes('kokoro')) return 'kokoro';
   if (lower.includes('matcha')) return 'matcha';
   if (lower.includes('kitten')) return 'kitten';
+  if (lower.includes('pocket')) return 'pocket';
   if (lower.includes('zipvoice')) return 'zipvoice';
   return 'unknown';
 }
