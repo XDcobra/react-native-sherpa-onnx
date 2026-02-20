@@ -60,6 +60,14 @@ export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'auto',
 ] as const;
 
+/** Result of initializeSTT(). decodingMethod is set when init succeeds (e.g. "greedy_search" or "modified_beam_search"; auto-set when hotwords are used). */
+export interface SttInitResult {
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  modelType?: string;
+  decodingMethod?: string;
+}
+
 // ========== Model-specific options (only applied when that model type is loaded) ==========
 
 /** Options for Whisper models. Applied only when modelType is 'whisper'. */

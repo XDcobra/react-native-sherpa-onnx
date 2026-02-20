@@ -2,6 +2,7 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   STTInitializeOptions,
   STTModelType,
+  SttInitResult,
   SttModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
@@ -100,12 +101,7 @@ export async function detectSttModel(
  */
 export async function initializeSTT(
   options: STTInitializeOptions | ModelPathConfig
-): Promise<{
-  success: boolean;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  /** Model type that was loaded (e.g. "whisper", "transducer"). Use with sttSupportsHotwords() to show hotword options. */
-  modelType?: string;
-}> {
+): Promise<SttInitResult> {
   // Handle both object syntax and direct config syntax
   let modelPath: ModelPathConfig;
   let preferInt8: boolean | undefined;

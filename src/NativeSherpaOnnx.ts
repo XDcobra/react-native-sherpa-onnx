@@ -41,6 +41,8 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    decodingMethod?: string;
   }>;
 
   /**
