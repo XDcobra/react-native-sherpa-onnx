@@ -2,10 +2,34 @@
 #import <React/RCTLog.h>
 
 #include "sherpa-onnx-stt-wrapper.h"
+#include "sherpa-onnx-model-detect.h"
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+
+static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
+    using K = sherpaonnx::SttModelKind;
+    switch (kind) {
+        case K::kTransducer: return @"transducer";
+        case K::kNemoTransducer: return @"nemo_transducer";
+        case K::kParaformer: return @"paraformer";
+        case K::kNemoCtc: return @"nemo_ctc";
+        case K::kWenetCtc: return @"wenet_ctc";
+        case K::kSenseVoice: return @"sense_voice";
+        case K::kZipformerCtc: return @"zipformer_ctc";
+        case K::kWhisper: return @"whisper";
+        case K::kFunAsrNano: return @"funasr_nano";
+        case K::kFireRedAsr: return @"fire_red_asr";
+        case K::kMoonshine: return @"moonshine";
+        case K::kDolphin: return @"dolphin";
+        case K::kCanary: return @"canary";
+        case K::kOmnilingual: return @"omnilingual";
+        case K::kMedAsr: return @"medasr";
+        case K::kTeleSpeechCtc: return @"telespeech_ctc";
+        default: return @"unknown";
+    }
+}
 
 // Global STT wrapper instance
 static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
@@ -183,6 +207,47 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during initialization: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"INIT_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)detectSttModel:(NSString *)modelDir
+           preferInt8:(NSNumber *)preferInt8
+            modelType:(NSString *)modelType
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
+{
+    RCTLogInfo(@"Detecting STT model in: %@", modelDir);
+    @try {
+        std::string modelDirStr = [modelDir UTF8String];
+        std::optional<bool> preferInt8Opt = std::nullopt;
+        if (preferInt8 != nil) {
+            preferInt8Opt = [preferInt8 boolValue];
+        }
+        std::optional<std::string> modelTypeOpt = std::nullopt;
+        if (modelType != nil && [modelType length] > 0 && ![modelType isEqualToString:@"auto"]) {
+            modelTypeOpt = [modelType UTF8String];
+        }
+        sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(modelDirStr, preferInt8Opt, modelTypeOpt, false);
+
+        NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+        resultDict[@"success"] = @(result.ok);
+        if (!result.error.empty()) {
+            resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
+        }
+        NSMutableArray *detectedModelsArray = [NSMutableArray array];
+        for (const auto& model : result.detectedModels) {
+            NSMutableDictionary *modelDict = [NSMutableDictionary dictionary];
+            modelDict[@"type"] = [NSString stringWithUTF8String:model.type.c_str()];
+            modelDict[@"modelDir"] = [NSString stringWithUTF8String:model.modelDir.c_str()];
+            [detectedModelsArray addObject:modelDict];
+        }
+        resultDict[@"detectedModels"] = detectedModelsArray;
+        resultDict[@"modelType"] = sttModelKindToNSString(result.selectedKind);
+        resolve(resultDict);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"STT model detection failed: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"DETECT_ERROR", errorMsg, nil);
     }
 }
 

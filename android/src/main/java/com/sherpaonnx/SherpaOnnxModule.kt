@@ -106,6 +106,64 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
 
   /**
+   * Detect STT model type and structure without initializing the recognizer.
+   */
+  override fun detectSttModel(
+    modelDir: String,
+    preferInt8: Boolean?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectSttModel(
+        modelDir,
+        preferInt8 ?: false,
+        preferInt8 != null,
+        modelType ?: "auto",
+        false
+      )
+      if (result == null) {
+        CrashlyticsHelper.rejectWithCrashlytics(
+          promise, "DETECT_ERROR", "STT model detection returned null", feature = "stt"
+        )
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      CrashlyticsHelper.rejectWithCrashlytics(
+        promise, "DETECT_ERROR", "STT model detection failed: ${e.message}", e, "stt"
+      )
+    }
+  }
+
+  /**
    * Initialize Speech-to-Text (STT) with model directory.
    */
   override fun initializeStt(
