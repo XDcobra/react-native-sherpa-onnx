@@ -1654,7 +1654,7 @@ export default function TTSScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.body}>
         <ScrollView
           style={styles.scrollView}
@@ -2530,7 +2530,7 @@ export default function TTSScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#FFFFFF',
   },
   body: {
     flex: 1,
