@@ -29,7 +29,7 @@ namespace fs = std::filesystem;
 
 namespace sherpaonnx {
 
-// Hotwords are only supported for transducer models (sherpa-onnx limitation).
+// Hotwords are supported for transducer and NeMo transducer (sherpa-onnx; NeMo: #3077).
 static bool SupportsHotwords(sherpaonnx::SttModelKind kind) {
     return kind == sherpaonnx::SttModelKind::kTransducer || kind == sherpaonnx::SttModelKind::kNemoTransducer;
 }

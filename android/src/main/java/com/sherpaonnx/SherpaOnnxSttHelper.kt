@@ -52,7 +52,7 @@ internal class SherpaOnnxSttHelper(
   @Volatile
   private var currentSttModelType: String? = null
 
-  /** Hotwords are only supported for transducer models (sherpa-onnx limitation). */
+  /** Hotwords are supported for transducer and NeMo transducer models (sherpa-onnx; NeMo: https://github.com/k2-fsa/sherpa-onnx/pull/3077). */
   private fun supportsHotwords(modelType: String): Boolean =
     modelType == "transducer" || modelType == "nemo_transducer"
 
