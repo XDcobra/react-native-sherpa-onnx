@@ -895,7 +895,7 @@ export default function TTSScreen() {
 
       setError(errorMessage);
       setInitResult(
-        `Initialization failed: ${errorMessage}\n\nNote: TTS models must be provided separately. See TTS_MODEL_SETUP.md for details.`
+        `Initialization failed: ${errorMessage}\n\nThe error has been reported. We will address it as soon as possible in the next app update.`
       );
     } finally {
       setLoading(false);

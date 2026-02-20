@@ -465,7 +465,7 @@ export default function STTScreen() {
 
       setError(errorMessage);
       setInitResult(
-        `Initialization failed: ${errorMessage}\n\nNote: Models must be provided separately. See MODEL_SETUP.md for details.\n\nCheck Logcat (Android) or Console (iOS) for detailed logs.`
+        `Initialization failed: ${errorMessage}\n\nThe error has been reported. We will address it as soon as possible in the next app update.`
       );
     } finally {
       setLoading(false);
