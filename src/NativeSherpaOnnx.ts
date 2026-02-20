@@ -44,6 +44,25 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Detect STT model type and structure without initializing the recognizer.
+   * Uses the same native file-based detection as initializeStt. Useful to show model-specific
+   * options before init or to query the type for a given path.
+   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param modelType - Optional: explicit type or 'auto' (default)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+   */
+  detectSttModel(
+    modelDir: string,
+    preferInt8?: boolean,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
    * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
    */
   transcribeFile(filePath: string): Promise<{

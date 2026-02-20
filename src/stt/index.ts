@@ -32,6 +32,39 @@ function normalizeSttResult(raw: {
 }
 
 /**
+ * Detect STT model type and structure without initializing the recognizer.
+ * Uses the same native file-based detection as initializeSTT. Call this to show
+ * model-specific options before init or to query the type for a given path.
+ *
+ * @param modelPath - Model path configuration (asset, file, or auto)
+ * @param options - Optional preferInt8 and modelType (default: auto)
+ * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+ * @example
+ * ```typescript
+ * const path = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
+ * const result = await detectSttModel(path);
+ * if (result.success && result.detectedModels.length > 0) {
+ *   console.log('Detected type:', result.modelType, result.detectedModels);
+ * }
+ * ```
+ */
+export async function detectSttModel(
+  modelPath: ModelPathConfig,
+  options?: { preferInt8?: boolean; modelType?: STTModelType }
+): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  modelType?: string;
+}> {
+  const resolvedPath = await resolveModelPath(modelPath);
+  return SherpaOnnx.detectSttModel(
+    resolvedPath,
+    options?.preferInt8,
+    options?.modelType
+  );
+}
+
+/**
  * Initialize Speech-to-Text (STT) with model directory.
  *
  * Supports multiple model source types:
@@ -191,6 +224,7 @@ export function unloadSTT(): Promise<void> {
 export type {
   STTInitializeOptions,
   STTModelType,
+  SttModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
   TranscriptionResult,
