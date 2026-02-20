@@ -207,7 +207,10 @@ const getSttModelType = (modelId: string): STTModelType | null => {
   if (lower.includes('paraformer')) return 'paraformer';
   if (lower.includes('zipformer')) return 'zipformer_ctc';
   if (lower.includes('nemo') || lower.includes('parakeet')) {
-    return lower.includes('transducer') ? 'nemo_transducer' : 'nemo_ctc';
+    // TDT = transducer; "Nemo parakeet Tdt CTC 110m" is a transducer model (supports hotwords).
+    if (lower.includes('transducer') || lower.includes('tdt'))
+      return 'nemo_transducer';
+    return 'nemo_ctc';
   }
   if (lower.includes('conformer')) return 'transducer';
   if (lower.includes('transducer')) return 'transducer';
