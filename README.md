@@ -72,6 +72,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 - ✅ **Offline Speech-to-Text** - No internet connection required for speech recognition
 - ✅ **Multiple Model Types** - Supports Zipformer/Transducer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, and FunASR Nano models
+- ✅ **Model type detection** - `detectSttModel()` lets you query the model type for a path **automatically** without initializing
 - ✅ **Model Quantization** - Automatic detection and preference for quantized (int8) models
 - ✅ **Flexible Model Loading** - Asset models, file system models, or auto-detection
 - ✅ **Android Support** - Fully supported on Android

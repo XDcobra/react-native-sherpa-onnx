@@ -4,6 +4,7 @@ This guide covers the STT APIs for offline transcription.
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
+| Model type detection (no init) | Supported | Native | `detectSttModel(modelPath, options?)` — returns `success`, `detectedModels`, `modelType` without loading the model; useful to show model-specific options before init |
 | Model initialization | Supported | Kotlin API | `initializeSTT()`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
 | Offline file transcription | Supported | Kotlin API | `transcribeFile()` → full result object |
 | Transcribe from samples | Supported | Kotlin API | `transcribeSamples(samples, sampleRate)` |
@@ -52,6 +53,35 @@ await unloadSTT();
 ```
 
 ## API Reference
+
+### `detectSttModel(modelPath, options?)`
+
+```ts
+function detectSttModel(
+  modelPath: ModelPathConfig,
+  options?: { preferInt8?: boolean; modelType?: STTModelType }
+): Promise<{
+  success: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  modelType?: string;
+}>;
+```
+
+Detect the STT model type and structure **without** initializing the recognizer. Uses the same file-based detection as `initializeSTT`. Call this to show model-specific options in the UI before the user taps "Initialize", or to query the type for a given path.
+
+- **`modelPath`** — Same as for `initializeSTT` (asset, file, or auto); resolved via `resolveModelPath` before calling native.
+- **`options.preferInt8`** — Optional; same meaning as in `initializeSTT`.
+- **`options.modelType`** — Optional; explicit type or `'auto'` (default).
+- **Returns** — `success`, `detectedModels` (array of `{ type, modelDir }`), and `modelType` (primary detected type string). On failure, `success` is false and `error` may be set.
+
+Example: show Whisper options only when the selected folder is detected as Whisper:
+
+```ts
+const result = await detectSttModel({ type: 'asset', path: 'models/sherpa-onnx-whisper-tiny-en' });
+if (result.success && result.modelType === 'whisper') {
+  // Show Whisper-specific options (language, task, etc.)
+}
+```
 
 ### `initializeSTT(options)`
 
