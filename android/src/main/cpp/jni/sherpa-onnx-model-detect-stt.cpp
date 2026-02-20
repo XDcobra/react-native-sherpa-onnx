@@ -349,7 +349,8 @@ SttDetectResult DetectSttModel(
         result.paths.funasrEncoderAdaptor = funasrEncoderAdaptor;
         result.paths.funasrLLM = funasrLLM;
         result.paths.funasrEmbedding = funasrEmbedding;
-        result.paths.funasrTokenizer = funasrTokenizerDir + "/vocab.json";
+        // FunASR Nano C++ expects tokenizer directory (e.g. .../Qwen3-0.6B), not path to vocab.json
+        result.paths.funasrTokenizer = funasrTokenizerDir;
     } else if (selected == SttModelKind::kMoonshine) {
         result.paths.moonshinePreprocessor = moonshinePreprocessor;
         result.paths.moonshineEncoder = moonshineEncoder;
