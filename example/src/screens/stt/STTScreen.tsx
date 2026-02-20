@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Text,
   View,
@@ -7,6 +7,9 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  TextInput,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -27,6 +30,7 @@ import {
   getQualityHint,
   RECOMMENDED_MODEL_IDS,
 } from '../../utils/recommendedModels';
+import { getCpuCoreCount } from '../../cpuInfo';
 import {
   initializeSTT,
   unloadSTT,
@@ -53,6 +57,9 @@ export default function STTScreen() {
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
   );
+  const [selectedModelForInit, setSelectedModelForInit] = useState<
+    string | null
+  >(null);
   const [detectedModels, setDetectedModels] = useState<
     Array<{ type: STTModelType; modelDir: string }>
   >([]);
@@ -74,9 +81,70 @@ export default function STTScreen() {
   const [transcribing, setTranscribing] = useState(false);
   const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
+  const [cpuCoreCount, setCpuCoreCount] = useState(2);
+  const [sttThreadOption, setSttThreadOption] = useState<
+    'saver' | 'standard' | 'balanced' | 'maximum'
+  >('standard');
+  const [showThreadPicker, setShowThreadPicker] = useState(false);
+  const [showModelTypePicker, setShowModelTypePicker] = useState(false);
+  const [optionsExpanded, setOptionsExpanded] = useState(false);
+  const [preferInt8, setPreferInt8] = useState<'default' | 'true' | 'false'>(
+    'default'
+  );
+  const [modelTypeOption, setModelTypeOption] = useState<string>('auto');
+  const [debug, setDebug] = useState(false);
+  const [hotwordsFiles, setHotwordsFiles] = useState<
+    Array<{ path: string; name: string }>
+  >([]);
+  const [hotwordsScore, setHotwordsScore] = useState('');
+  const [provider, setProvider] = useState('');
+  const [ruleFstPaths, setRuleFstPaths] = useState<
+    Array<{ path: string; name: string }>
+  >([]);
+  const [ruleFarPaths, setRuleFarPaths] = useState<
+    Array<{ path: string; name: string }>
+  >([]);
+  const [dither, setDither] = useState('');
+
+  const sttThreadOptions = useMemo(() => {
+    const max = Math.max(1, cpuCoreCount);
+    const options: Array<{
+      id: 'saver' | 'standard' | 'balanced' | 'maximum';
+      label: string;
+      threads: number;
+    }> = [{ id: 'saver', label: 'Saver (1 thread)', threads: 1 }];
+    if (max >= 2) {
+      options.push({
+        id: 'standard',
+        label: 'Standard (2 threads)',
+        threads: 2,
+      });
+    }
+    options.push({
+      id: 'balanced',
+      label: `Balanced (${Math.max(1, Math.floor(max / 2))} threads)`,
+      threads: Math.max(1, Math.floor(max / 2)),
+    });
+    options.push({
+      id: 'maximum',
+      label: `Maximum (${Math.max(1, max - 1)} threads)`,
+      threads: Math.max(1, max - 1),
+    });
+    return options;
+  }, [cpuCoreCount]);
+
+  const sttNumThreads = useMemo(() => {
+    const option = sttThreadOptions.find((o) => o.id === sttThreadOption);
+    return option?.threads ?? (cpuCoreCount >= 2 ? 2 : 1);
+  }, [sttThreadOptions, sttThreadOption, cpuCoreCount]);
+
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
+  }, []);
+
+  useEffect(() => {
+    getCpuCoreCount().then(setCpuCoreCount);
   }, []);
 
   // Cleanup: Release STT resources when leaving the screen
@@ -197,12 +265,44 @@ export default function STTScreen() {
         downloadedModelIds.includes(modelFolder) ||
         padModelIds.includes(modelFolder);
 
+      const modelPath = useFilePath
+        ? padModelIds.includes(modelFolder) && padModelsPath
+          ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
+          : getFileModelPath(modelFolder, ModelCategory.Stt)
+        : getAssetModelPath(modelFolder);
+
+      const preferInt8Value =
+        preferInt8 === 'true'
+          ? true
+          : preferInt8 === 'false'
+          ? false
+          : undefined;
+      const modelTypeValue =
+        modelTypeOption === 'auto'
+          ? undefined
+          : (modelTypeOption as STTModelType);
+      const hotwordsScoreTrim = hotwordsScore.trim();
+      const ditherTrim = dither.trim();
+
       const result = await initializeSTT({
-        modelPath: useFilePath
-          ? padModelIds.includes(modelFolder) && padModelsPath
-            ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
-            : getFileModelPath(modelFolder, ModelCategory.Stt)
-          : getAssetModelPath(modelFolder),
+        modelPath,
+        numThreads: sttNumThreads,
+        preferInt8: preferInt8Value,
+        modelType: modelTypeValue,
+        debug,
+        hotwordsFile: hotwordsFiles[0]?.path ?? undefined,
+        hotwordsScore:
+          hotwordsScoreTrim !== '' ? parseFloat(hotwordsScoreTrim) : undefined,
+        provider: provider.trim() || undefined,
+        ruleFsts:
+          ruleFstPaths.length > 0
+            ? ruleFstPaths.map((f) => f.path).join(',')
+            : undefined,
+        ruleFars:
+          ruleFarPaths.length > 0
+            ? ruleFarPaths.map((f) => f.path).join(',')
+            : undefined,
+        dither: ditherTrim !== '' ? parseFloat(ditherTrim) : undefined,
       });
 
       if (result.success && result.detectedModels.length > 0) {
@@ -368,6 +468,82 @@ export default function STTScreen() {
     }
   };
 
+  const normalizePickedFiles = (
+    res: unknown
+  ): Array<{ path: string; name: string }> => {
+    const arr = Array.isArray(res) ? res : res ? [res] : [];
+    return arr
+      .map((f: any) => {
+        const path = f?.uri ?? f?.fileUri ?? f?.path ?? '';
+        const name = f?.name ?? (path ? path.split('/').pop() ?? '' : '');
+        return path ? { path, name } : null;
+      })
+      .filter((x): x is { path: string; name: string } => x != null);
+  };
+
+  const handlePickHotwordsFiles = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: ['*/*'],
+      });
+      const files = normalizePickedFiles(res);
+      if (files.length > 0) {
+        setHotwordsFiles((prev) => [...prev, ...files]);
+      }
+    } catch (err: any) {
+      if (
+        (DocumentPicker as any).isCancel?.(err) ||
+        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        err?.name === 'DocumentPickerCanceled'
+      )
+        return;
+      console.warn('Hotwords pick error:', err);
+    }
+  };
+
+  const handlePickRuleFsts = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: ['*/*'],
+      });
+      const files = normalizePickedFiles(res);
+      if (files.length > 0) {
+        setRuleFstPaths((prev) => [...prev, ...files]);
+      }
+    } catch (err: any) {
+      if (
+        (DocumentPicker as any).isCancel?.(err) ||
+        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        err?.name === 'DocumentPickerCanceled'
+      )
+        return;
+      console.warn('Rule FSTs pick error:', err);
+    }
+  };
+
+  const handlePickRuleFars = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: ['*/*'],
+      });
+      const files = normalizePickedFiles(res);
+      if (files.length > 0) {
+        setRuleFarPaths((prev) => [...prev, ...files]);
+      }
+    } catch (err: any) {
+      if (
+        (DocumentPicker as any).isCancel?.(err) ||
+        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        err?.name === 'DocumentPickerCanceled'
+      )
+        return;
+      console.warn('Rule FARs pick error:', err);
+    }
+  };
+
   const handlePlayAudio = () => {
     if (!customAudioPath) return;
 
@@ -422,14 +598,82 @@ export default function STTScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize Model</Text>
             <Text style={styles.hint}>
-              Select a model to initialize. Available models are discovered
-              automatically from your assets folder.
+              Select a model and options, then tap "Apply options & use model".
+              Changing options requires re-initializing.
             </Text>
 
-            {currentModelFolder && (
+            <Text style={styles.inputLabel}>Threads</Text>
+            <TouchableOpacity
+              style={styles.dropdownTrigger}
+              onPress={() => setShowThreadPicker(true)}
+            >
+              <View style={styles.dropdownTriggerLeft}>
+                <Ionicons
+                  name="hardware-chip-outline"
+                  size={22}
+                  color="#8E8E93"
+                  style={styles.iconInline}
+                />
+                <Text style={styles.dropdownTriggerText}>
+                  {sttThreadOptions.find((o) => o.id === sttThreadOption)
+                    ?.label ?? 'Standard (2 threads)'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={20} color="#8E8E93" />
+            </TouchableOpacity>
+            <Modal
+              visible={showThreadPicker}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowThreadPicker(false)}
+            >
+              <Pressable
+                style={styles.dropdownBackdrop}
+                onPress={() => setShowThreadPicker(false)}
+              >
+                <View style={styles.dropdownMenu}>
+                  {sttThreadOptions.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[
+                        styles.dropdownItem,
+                        sttThreadOption === opt.id && styles.dropdownItemActive,
+                      ]}
+                      onPress={() => {
+                        setSttThreadOption(opt.id);
+                        setShowThreadPicker(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          sttThreadOption === opt.id &&
+                            styles.dropdownItemTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                      {sttThreadOption === opt.id && (
+                        <Ionicons name="checkmark" size={20} color="#007AFF" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Pressable>
+            </Modal>
+
+            <View style={styles.separator} />
+
+            {(currentModelFolder || selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  Current: {getModelDisplayName(currentModelFolder)}
+                  {currentModelFolder
+                    ? `Initialized: ${getModelDisplayName(currentModelFolder)}`
+                    : `Selected: ${
+                        selectedModelForInit
+                          ? getModelDisplayName(selectedModelForInit)
+                          : ''
+                      }`}
                 </Text>
               </View>
             )}
@@ -451,26 +695,27 @@ export default function STTScreen() {
             ) : (
               <View style={styles.modelButtons}>
                 {availableModels.map((modelFolder) => {
+                  const isSelected = selectedModelForInit === modelFolder;
+                  const isInitialized = currentModelFolder === modelFolder;
                   return (
                     <TouchableOpacity
                       key={modelFolder}
                       style={[
                         styles.modelButton,
-                        currentModelFolder === modelFolder &&
-                          styles.modelButtonActive,
+                        isSelected && styles.modelButtonActive,
                         loading && styles.buttonDisabled,
                       ]}
-                      onPress={() => handleInitialize(modelFolder)}
+                      onPress={() => setSelectedModelForInit(modelFolder)}
                       disabled={loading}
                     >
                       <Text
                         style={[
                           styles.modelButtonText,
-                          currentModelFolder === modelFolder &&
-                            styles.modelButtonTextActive,
+                          isSelected && styles.modelButtonTextActive,
                         ]}
                       >
                         {getModelDisplayName(modelFolder)}
+                        {isInitialized ? ' ✓' : ''}
                       </Text>
                       {(() => {
                         const sizeHintInfo = getSizeHint(modelFolder);
@@ -507,6 +752,396 @@ export default function STTScreen() {
                   );
                 })}
               </View>
+            )}
+
+            {(selectedModelForInit || currentModelFolder) && (
+              <>
+                <View style={styles.optionsSection}>
+                  <TouchableOpacity
+                    style={styles.optionsHeader}
+                    onPress={() => setOptionsExpanded((prev) => !prev)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.optionsHeaderLeft}>
+                      <Ionicons
+                        name="options-outline"
+                        size={22}
+                        color="#8E8E93"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.optionsHeaderTitle}>
+                        Options for this model
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={optionsExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={24}
+                      color="#8E8E93"
+                    />
+                  </TouchableOpacity>
+                  {optionsExpanded && (
+                    <View style={styles.optionsContent}>
+                      <Text style={styles.inputLabel}>Prefer int8</Text>
+                      <View style={styles.optionsRow}>
+                        {(['default', 'true', 'false'] as const).map((val) => (
+                          <TouchableOpacity
+                            key={val}
+                            style={[
+                              styles.optionsChip,
+                              preferInt8 === val && styles.optionsChipActive,
+                            ]}
+                            onPress={() => setPreferInt8(val)}
+                          >
+                            <Text
+                              style={[
+                                styles.optionsChipText,
+                                preferInt8 === val &&
+                                  styles.optionsChipTextActive,
+                              ]}
+                            >
+                              {val === 'default'
+                                ? 'Default'
+                                : val === 'true'
+                                ? 'Yes'
+                                : 'No'}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={styles.inputLabel}>Model type</Text>
+                      <TouchableOpacity
+                        style={styles.dropdownTrigger}
+                        onPress={() => setShowModelTypePicker(true)}
+                      >
+                        <Text style={styles.dropdownTriggerText}>
+                          {modelTypeOption}
+                        </Text>
+                        <Ionicons
+                          name="chevron-down"
+                          size={20}
+                          color="#8E8E93"
+                        />
+                      </TouchableOpacity>
+                      <Modal
+                        visible={showModelTypePicker}
+                        transparent
+                        animationType="fade"
+                        onRequestClose={() => setShowModelTypePicker(false)}
+                      >
+                        <Pressable
+                          style={styles.dropdownBackdrop}
+                          onPress={() => setShowModelTypePicker(false)}
+                        >
+                          <View
+                            style={[
+                              styles.dropdownMenu,
+                              styles.dropdownMenuTall,
+                            ]}
+                          >
+                            <ScrollView style={styles.dropdownScroll}>
+                              {[
+                                'auto',
+                                'transducer',
+                                'nemo_transducer',
+                                'paraformer',
+                                'nemo_ctc',
+                                'zipformer_ctc',
+                                'ctc',
+                                'whisper',
+                                'wenet_ctc',
+                                'sense_voice',
+                                'funasr_nano',
+                                'fire_red_asr',
+                                'moonshine',
+                                'dolphin',
+                                'canary',
+                                'omnilingual',
+                                'medasr',
+                                'telespeech_ctc',
+                              ].map((opt) => (
+                                <TouchableOpacity
+                                  key={opt}
+                                  style={[
+                                    styles.dropdownItem,
+                                    modelTypeOption === opt &&
+                                      styles.dropdownItemActive,
+                                  ]}
+                                  onPress={() => {
+                                    setModelTypeOption(opt);
+                                    setShowModelTypePicker(false);
+                                  }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.dropdownItemText,
+                                      modelTypeOption === opt &&
+                                        styles.dropdownItemTextActive,
+                                    ]}
+                                  >
+                                    {opt}
+                                  </Text>
+                                  {modelTypeOption === opt && (
+                                    <Ionicons
+                                      name="checkmark"
+                                      size={20}
+                                      color="#007AFF"
+                                    />
+                                  )}
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        </Pressable>
+                      </Modal>
+                      {__DEV__ && (
+                        <>
+                          <Text style={styles.inputLabel}>Debug</Text>
+                          <View style={styles.optionsRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.optionsChip,
+                                !debug && styles.optionsChipActive,
+                              ]}
+                              onPress={() => setDebug(false)}
+                            >
+                              <Text
+                                style={[
+                                  styles.optionsChipText,
+                                  !debug && styles.optionsChipTextActive,
+                                ]}
+                              >
+                                Off
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.optionsChip,
+                                debug && styles.optionsChipActive,
+                              ]}
+                              onPress={() => setDebug(true)}
+                            >
+                              <Text
+                                style={[
+                                  styles.optionsChipText,
+                                  debug && styles.optionsChipTextActive,
+                                ]}
+                              >
+                                On
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      )}
+                      <Text style={styles.inputLabel}>
+                        Hotword files (optional)
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.addFilesButton}
+                        onPress={handlePickHotwordsFiles}
+                      >
+                        <Ionicons
+                          name="add-circle-outline"
+                          size={20}
+                          color="#007AFF"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.addFilesButtonText}>Add files</Text>
+                      </TouchableOpacity>
+                      {hotwordsFiles.length > 0 && (
+                        <View style={styles.pickedFilesList}>
+                          {hotwordsFiles.map((f, idx) => (
+                            <View
+                              key={`${f.path}-${idx}`}
+                              style={styles.pickedFileRow}
+                            >
+                              <Text
+                                style={styles.pickedFileName}
+                                numberOfLines={1}
+                                ellipsizeMode="middle"
+                              >
+                                {f.name}
+                              </Text>
+                              <TouchableOpacity
+                                hitSlop={{
+                                  top: 10,
+                                  bottom: 10,
+                                  left: 10,
+                                  right: 10,
+                                }}
+                                onPress={() =>
+                                  setHotwordsFiles((prev) =>
+                                    prev.filter((_, i) => i !== idx)
+                                  )
+                                }
+                                style={styles.pickedFileRemove}
+                              >
+                                <Ionicons
+                                  name="close-circle"
+                                  size={22}
+                                  color="#8E8E93"
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      <Text style={styles.inputLabel}>
+                        Hotwords score (optional)
+                      </Text>
+                      <TextInput
+                        style={styles.parameterInput}
+                        value={hotwordsScore}
+                        onChangeText={setHotwordsScore}
+                        keyboardType="decimal-pad"
+                        placeholder="e.g. 1.5"
+                        placeholderTextColor="#8E8E93"
+                      />
+                      <Text style={styles.inputLabel}>Provider (optional)</Text>
+                      <TextInput
+                        style={styles.parameterInput}
+                        value={provider}
+                        onChangeText={setProvider}
+                        placeholder="e.g. cpu"
+                        placeholderTextColor="#8E8E93"
+                      />
+                      <Text style={styles.inputLabel}>
+                        Rule FSTs (optional)
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.addFilesButton}
+                        onPress={handlePickRuleFsts}
+                      >
+                        <Ionicons
+                          name="add-circle-outline"
+                          size={20}
+                          color="#007AFF"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.addFilesButtonText}>Add files</Text>
+                      </TouchableOpacity>
+                      {ruleFstPaths.length > 0 && (
+                        <View style={styles.pickedFilesList}>
+                          {ruleFstPaths.map((f, idx) => (
+                            <View
+                              key={`${f.path}-${idx}`}
+                              style={styles.pickedFileRow}
+                            >
+                              <Text
+                                style={styles.pickedFileName}
+                                numberOfLines={1}
+                                ellipsizeMode="middle"
+                              >
+                                {f.name}
+                              </Text>
+                              <TouchableOpacity
+                                hitSlop={{
+                                  top: 10,
+                                  bottom: 10,
+                                  left: 10,
+                                  right: 10,
+                                }}
+                                onPress={() =>
+                                  setRuleFstPaths((prev) =>
+                                    prev.filter((_, i) => i !== idx)
+                                  )
+                                }
+                                style={styles.pickedFileRemove}
+                              >
+                                <Ionicons
+                                  name="close-circle"
+                                  size={22}
+                                  color="#8E8E93"
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      <Text style={styles.inputLabel}>
+                        Rule FARs (optional)
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.addFilesButton}
+                        onPress={handlePickRuleFars}
+                      >
+                        <Ionicons
+                          name="add-circle-outline"
+                          size={20}
+                          color="#007AFF"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.addFilesButtonText}>Add files</Text>
+                      </TouchableOpacity>
+                      {ruleFarPaths.length > 0 && (
+                        <View style={styles.pickedFilesList}>
+                          {ruleFarPaths.map((f, idx) => (
+                            <View
+                              key={`${f.path}-${idx}`}
+                              style={styles.pickedFileRow}
+                            >
+                              <Text
+                                style={styles.pickedFileName}
+                                numberOfLines={1}
+                                ellipsizeMode="middle"
+                              >
+                                {f.name}
+                              </Text>
+                              <TouchableOpacity
+                                hitSlop={{
+                                  top: 10,
+                                  bottom: 10,
+                                  left: 10,
+                                  right: 10,
+                                }}
+                                onPress={() =>
+                                  setRuleFarPaths((prev) =>
+                                    prev.filter((_, i) => i !== idx)
+                                  )
+                                }
+                                style={styles.pickedFileRemove}
+                              >
+                                <Ionicons
+                                  name="close-circle"
+                                  size={22}
+                                  color="#8E8E93"
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      <Text style={styles.inputLabel}>Dither (optional)</Text>
+                      <TextInput
+                        style={styles.parameterInput}
+                        value={dither}
+                        onChangeText={setDither}
+                        keyboardType="decimal-pad"
+                        placeholder="e.g. 0"
+                        placeholderTextColor="#8E8E93"
+                      />
+                    </View>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.applyButton,
+                    loading && styles.buttonDisabled,
+                  ]}
+                  onPress={() =>
+                    handleInitialize(
+                      selectedModelForInit ?? currentModelFolder ?? ''
+                    )
+                  }
+                  disabled={
+                    loading || (!selectedModelForInit && !currentModelFolder)
+                  }
+                >
+                  <Text style={styles.buttonText}>
+                    Apply options & use model
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
 
             {initResult && (
@@ -830,29 +1465,31 @@ export default function STTScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F2F2F7',
   },
   body: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    padding: 16,
     paddingBottom: 40,
   },
   section: {
-    marginBottom: 30,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
+    color: '#000000',
+    marginBottom: 8,
   },
   hint: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 15,
-    fontStyle: 'italic',
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 12,
   },
   button: {
     backgroundColor: '#007AFF',
@@ -861,6 +1498,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  applyButton: {
+    marginTop: 16,
   },
   buttonDisabled: {
     backgroundColor: '#999',
@@ -925,42 +1565,33 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   modelButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
     marginTop: 10,
-    justifyContent: 'flex-start',
   },
   modelButton: {
-    width: '29%',
-    flexGrow: 0,
-    flexShrink: 1,
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 6,
+    backgroundColor: '#F2F2F7',
     borderRadius: 8,
+    padding: 16,
     borderWidth: 2,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    minWidth: 100,
+    borderColor: 'transparent',
   },
   modelButtonActive: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#4caf50',
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
   },
   modelButtonText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#666',
+    color: '#000000',
+    marginBottom: 4,
   },
   modelButtonTextActive: {
-    color: '#2e7d32',
+    color: '#007AFF',
   },
   modelFolderText: {
-    fontSize: 10,
-    color: '#999',
+    fontSize: 12,
+    color: '#8E8E93',
     marginTop: 4,
-    textAlign: 'center',
   },
   subsectionTitle: {
     fontSize: 14,
@@ -1139,7 +1770,7 @@ const styles = StyleSheet.create({
   modelHintRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     marginTop: 4,
     gap: 8,
   },
@@ -1154,6 +1785,184 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 0,
     fontStyle: 'italic',
-    textAlign: 'center',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 8,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  dropdownTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+  },
+  dropdownTriggerText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  dropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  dropdownMenu: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    minWidth: 220,
+    paddingVertical: 8,
+  },
+  dropdownMenuTall: {
+    maxHeight: 360,
+  },
+  dropdownScroll: {
+    maxHeight: 320,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  dropdownItemActive: {
+    backgroundColor: '#e3f2fd',
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  dropdownItemTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  optionsSection: {
+    marginTop: 8,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    overflow: 'hidden',
+  },
+  optionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#f5f5f5',
+  },
+  optionsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+  },
+  optionsHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 4,
+  },
+  optionsContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  optionsChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  optionsChipActive: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#007AFF',
+  },
+  optionsChipText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  optionsChipTextActive: {
+    color: '#007AFF',
+  },
+  parameterInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 12,
+  },
+  addFilesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 8,
+    backgroundColor: '#F2F2F7',
+    alignSelf: 'flex-start',
+  },
+  addFilesButtonText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  pickedFilesList: {
+    marginBottom: 12,
+    gap: 4,
+  },
+  pickedFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 6,
+  },
+  pickedFileName: {
+    fontSize: 13,
+    color: '#333',
+    flex: 1,
+  },
+  pickedFileRemove: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginTop: 8,
+    marginBottom: 12,
+    borderRadius: 1,
   },
 });
