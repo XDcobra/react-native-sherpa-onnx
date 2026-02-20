@@ -59,7 +59,8 @@ await unloadSTT();
 ```ts
 function initializeSTT(
   options: STTInitializeOptions | ModelPathConfig
-): Promise<{ success: boolean; detectedModels: Array<{ type: string; modelDir: string }> }>;
+): Promise<SttInitResult>;
+// SttInitResult: { success; detectedModels; modelType?; decodingMethod? }
 ```
 
 Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to let the SDK detect the model based on files. The JS layer resolves `modelPath` (asset/file/auto) via `resolveModelPath` before calling the native module.
@@ -81,7 +82,7 @@ Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to le
 | `dither` | `number` | Dither for feature extraction (default: 0). |
 | `modelOptions` | `SttModelOptions` | Optional model-specific options. Only the block for the **loaded** model type is applied (e.g. when a Whisper model is loaded, only `modelOptions.whisper` is used). See [Model-specific options (modelOptions)](#model-specific-options-modeloptions) below. |
 
-**Return value:** `Promise<{ success: boolean; detectedModels: Array<{ type: string; modelDir: string }>; modelType?: string }>`. The optional `modelType` is the loaded model type (e.g. `"whisper"`, `"transducer"`). Use it with `sttSupportsHotwords(modelType)` to decide whether to show hotword options after init.
+**Return value:** `Promise<SttInitResult>` with `success`, `detectedModels`, optional `modelType` (loaded model type, e.g. `"whisper"`, `"transducer"`), and optional `decodingMethod` (e.g. `"greedy_search"`, `"modified_beam_search"`). When you pass a non-empty `hotwordsFile`, the SDK auto-switches decoding to `modified_beam_search` and returns that in `decodingMethod`. Use `sttSupportsHotwords(modelType)` to decide whether to show hotword options after init.
 
 Notes and common pitfalls:
 - `modelPath` must point to the model directory containing the expected files for the chosen `modelType` (e.g. `encoder.onnx`/`decoder.onnx`/`joiner.onnx` for transducer, `model.onnx` + `tokens.txt` for paraformer).
@@ -157,16 +158,24 @@ Release STT resources and unload the model. Call before re-initializing with a d
 
 ### Hotwords (contextual biasing)
 
-**Only transducer models** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx. All other model types (e.g. Whisper, Paraformer, Sense Voice) do not; passing a hotword file for them causes a **native crash** if not validated. The SDK therefore validates and rejects with:
+**Only transducer models** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx. All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
 
 | Code | When |
 | --- | --- |
 | `HOTWORDS_NOT_SUPPORTED` | `initializeSTT` or `setSttConfig` is called with a non-empty `hotwordsFile` (or merged config has a hotword file) and the current model type is not `transducer` or `nemo_transducer`. |
-| `INVALID_HOTWORDS_FILE` | A hotwords file path is set but the file is missing, not readable, not valid UTF-8 text, contains null bytes, has no valid lines, or a line with optional ` :score` has an invalid score. The message describes the specific issue. |
+| `INVALID_HOTWORDS_FILE` | A hotwords file path is set but the file is missing, not readable, not valid UTF-8 text, contains null bytes, has no valid lines, a line with optional ` :score` has an invalid score, or a line has no letter characters (e.g. numbers-only or SRT timestamps). The message describes the specific issue. |
 
 Use **`sttSupportsHotwords(modelType)`** (exported from `react-native-sherpa-onnx/stt`) to show hotword options only when the selected or detected model type supports them. The function returns `true` only for `'transducer'` and `'nemo_transducer'`.
 
-**Hotword file format (for transducer models):** One hotword or phrase per line. For BPE models use uppercase tokens (e.g. `SPEECH RECOGNITION`). Optional per-line score: `word_or_phrase :1.5` (space, colon, number). Decoding method must be `modified_beam_search` for hotwords to take effect (default may be `greedy_search`). The SDK validates the file when you pass a path: it must exist, be readable, be UTF-8 text without null bytes, and contain at least one non-empty line; lines with ` :` must have a numeric score after it. Invalid files cause rejection with `INVALID_HOTWORDS_FILE`.
+**Auto-switch to modified_beam_search:** When you provide a non-empty hotwords file, the SDK **automatically** sets the decoding method to `modified_beam_search` (and ensures `maxActivePaths` is at least 4), because sherpa-onnx only applies hotwords with that method. You do not need to set `decodingMethod` manually. The init result includes `decodingMethod` so you can confirm which method was applied.
+
+**Hotword file format (for transducer / nemo_transducer models):**
+
+- **One word or phrase per line.** UTF-8 text; no null bytes.
+- **Optional score per line:** `word_or_phrase :1.5` (space, colon, then a single number). If present, the part after ` :` must parse as a number.
+- **Each non-empty line must contain at least one letter character.** Lines that are only digits, punctuation, or symbols (e.g. SRT-style timestamps) are rejected.
+
+The SDK validates the file when you pass a path: it must exist, be readable, and satisfy the rules above. Invalid files cause rejection with `INVALID_HOTWORDS_FILE`.
 
 
 ## Model Setup
