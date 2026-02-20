@@ -239,6 +239,29 @@ export default function TTSScreen() {
     return option?.threads ?? (cpuCoreCount >= 2 ? 2 : 1);
   }, [ttsThreadOptions, ttsThreadOption, cpuCoreCount]);
 
+  // Model-specific options: only show when the loaded model type supports them.
+  // After init we use selectedModelType; options are hidden until a model is initialized.
+  const effectiveModelTypeForOptions = selectedModelType;
+
+  const showNoiseScale = useMemo(
+    () =>
+      effectiveModelTypeForOptions === 'vits' ||
+      effectiveModelTypeForOptions === 'matcha',
+    [effectiveModelTypeForOptions]
+  );
+  const showNoiseScaleW = useMemo(
+    () => effectiveModelTypeForOptions === 'vits',
+    [effectiveModelTypeForOptions]
+  );
+  const showLengthScale = useMemo(
+    () =>
+      effectiveModelTypeForOptions === 'vits' ||
+      effectiveModelTypeForOptions === 'matcha' ||
+      effectiveModelTypeForOptions === 'kokoro' ||
+      effectiveModelTypeForOptions === 'kitten',
+    [effectiveModelTypeForOptions]
+  );
+
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
@@ -1970,51 +1993,60 @@ export default function TTSScreen() {
                       </Pressable>
                     </Modal>
 
-                    <View style={styles.parameterRow}>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Noise scale (optional):
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={noiseScale}
-                          onChangeText={setNoiseScale}
-                          keyboardType="decimal-pad"
-                          placeholder="0.667"
-                          placeholderTextColor="#8E8E93"
-                        />
+                    {/* Model-specific init params: only shown for types that support them */}
+                    {(showNoiseScale || showNoiseScaleW) && (
+                      <View style={styles.parameterRow}>
+                        {showNoiseScale && (
+                          <View style={styles.parameterColumn}>
+                            <Text style={styles.inputLabel}>
+                              Noise scale (optional):
+                            </Text>
+                            <TextInput
+                              style={styles.parameterInput}
+                              value={noiseScale}
+                              onChangeText={setNoiseScale}
+                              keyboardType="decimal-pad"
+                              placeholder="0.667"
+                              placeholderTextColor="#8E8E93"
+                            />
+                          </View>
+                        )}
+                        {showNoiseScaleW && (
+                          <View style={styles.parameterColumn}>
+                            <Text style={styles.inputLabel}>
+                              Noise scale W (optional):
+                            </Text>
+                            <TextInput
+                              style={styles.parameterInput}
+                              value={noiseScaleW}
+                              onChangeText={setNoiseScaleW}
+                              keyboardType="decimal-pad"
+                              placeholder="0.8"
+                              placeholderTextColor="#8E8E93"
+                            />
+                          </View>
+                        )}
                       </View>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Noise scale W (optional):
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={noiseScaleW}
-                          onChangeText={setNoiseScaleW}
-                          keyboardType="decimal-pad"
-                          placeholder="0.8"
-                          placeholderTextColor="#8E8E93"
-                        />
-                      </View>
-                    </View>
+                    )}
 
-                    <View style={styles.parameterRow}>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Length scale (optional):
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={lengthScale}
-                          onChangeText={setLengthScale}
-                          keyboardType="decimal-pad"
-                          placeholder="1.0"
-                          placeholderTextColor="#8E8E93"
-                        />
+                    {showLengthScale && (
+                      <View style={styles.parameterRow}>
+                        <View style={styles.parameterColumn}>
+                          <Text style={styles.inputLabel}>
+                            Length scale (optional):
+                          </Text>
+                          <TextInput
+                            style={styles.parameterInput}
+                            value={lengthScale}
+                            onChangeText={setLengthScale}
+                            keyboardType="decimal-pad"
+                            placeholder="1.0"
+                            placeholderTextColor="#8E8E93"
+                          />
+                        </View>
+                        <View style={styles.parameterColumn} />
                       </View>
-                      <View style={styles.parameterColumn} />
-                    </View>
+                    )}
 
                     {modelInfo != null && (
                       <Text style={styles.speakerCountHint}>
