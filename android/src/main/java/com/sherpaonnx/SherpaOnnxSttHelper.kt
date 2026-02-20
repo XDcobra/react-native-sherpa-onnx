@@ -123,13 +123,16 @@ internal class SherpaOnnxSttHelper(
     for (raw in lines) {
       val line = raw.trim()
       if (line.isEmpty()) continue
-      if (line.contains(" :")) {
+      val hotwordPart = if (line.contains(" :")) {
         val lastColon = line.lastIndexOf(" :")
         val afterScore = line.substring(lastColon + 2).trim()
         if (afterScore.isEmpty()) return "Invalid hotword line (missing score after ' :'): ${line.take(60)}…"
         val score = afterScore.toFloatOrNull()
         if (score == null) return "Invalid hotword line (score must be a number after ' :'): ${line.take(60)}…"
-      }
+        line.substring(0, lastColon).trim()
+      } else line
+      if (hotwordPart.isEmpty()) return "Invalid hotword line (empty hotword): ${line.take(60)}…"
+      if (!hotwordPart.any { it.isLetter() }) return "Invalid hotword line (must contain at least one letter): ${line.take(60)}…"
       validLines++
     }
     if (validLines == 0) return "Hotwords file has no valid lines (one hotword or phrase per line, UTF-8 text)."
@@ -296,6 +299,7 @@ internal class SherpaOnnxSttHelper(
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
       resultMap.putString("modelType", modelTypeStr)
+      resultMap.putString("decodingMethod", config.decodingMethod)
       val detectedModelsArray = Arguments.createArray()
       for (model in detectedModels) {
         val modelMap = model as? HashMap<*, *>
@@ -417,11 +421,17 @@ internal class SherpaOnnxSttHelper(
           }
         }
       } else ""
-      val configToApply = merged.copy(
+      val configWithPaths = merged.copy(
         hotwordsFile = resolvedHotwordsPath,
         ruleFsts = resolvedRuleFsts,
         ruleFars = resolvedRuleFars
       )
+      val configToApply = if (configWithPaths.hotwordsFile.isNotEmpty()) {
+        configWithPaths.copy(
+          decodingMethod = "modified_beam_search",
+          maxActivePaths = maxOf(4, configWithPaths.maxActivePaths)
+        )
+      } else configWithPaths
       lastRecognizerConfig = configToApply
       rec.setConfig(configToApply)
       CrashlyticsHelper.setContextAttributes(
@@ -676,7 +686,7 @@ internal class SherpaOnnxSttHelper(
       numThreads = numThreads ?: 1,
       provider = provider ?: "cpu"
     )
-    return OfflineRecognizerConfig(
+    val baseConfig = OfflineRecognizerConfig(
       featConfig = featConfig,
       modelConfig = finalModelConfig,
       hotwordsFile = hotwordsFile,
@@ -684,5 +694,11 @@ internal class SherpaOnnxSttHelper(
       ruleFsts = ruleFsts,
       ruleFars = ruleFars
     )
+    return if (hotwordsFile.isNotEmpty() && (modelType == "transducer" || modelType == "nemo_transducer")) {
+      baseConfig.copy(
+        decodingMethod = "modified_beam_search",
+        maxActivePaths = maxOf(4, baseConfig.maxActivePaths)
+      )
+    } else baseConfig
   }
 }

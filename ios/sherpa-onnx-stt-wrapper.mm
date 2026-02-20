@@ -45,6 +45,7 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
         std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         f.close();
         if (content.find('\0') != std::string::npos) return "Hotwords file contains null bytes (not a valid text file).";
+        NSCharacterSet *letterSet = [NSCharacterSet letterCharacterSet];
         int validLines = 0;
         std::istringstream stream(content);
         std::string line;
@@ -56,14 +57,28 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
             while (end > start && (line[end - 1] == ' ' || line[end - 1] == '\t')) end--;
             if (start >= end) continue;
             line = line.substr(start, end - start);
+            std::string hotwordPart;
             size_t spaceColon = line.rfind(" :");
             if (spaceColon != std::string::npos) {
                 std::string scoreStr = line.substr(spaceColon + 2);
                 try {
                     (void)std::stof(scoreStr);
                 } catch (...) {
-                    return "Invalid hotword line (score must be a number after ' :'): " + line.substr(0, 60) + "…";
+                    return "Invalid hotword line (score must be a number after ' :'): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
                 }
+                size_t hStart = 0, hEnd = spaceColon;
+                while (hStart < hEnd && (line[hStart] == ' ' || line[hStart] == '\t')) hStart++;
+                while (hEnd > hStart && (line[hEnd - 1] == ' ' || line[hEnd - 1] == '\t')) hEnd--;
+                hotwordPart = line.substr(hStart, hEnd - hStart);
+            } else {
+                hotwordPart = line;
+            }
+            if (hotwordPart.empty()) return "Invalid hotword line (empty hotword): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
+            @autoreleasepool {
+                NSString *hotwordNS = [NSString stringWithUTF8String:hotwordPart.c_str()];
+                if (!hotwordNS) return "Invalid hotword line (invalid UTF-8): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
+                if ([hotwordNS rangeOfCharacterFromSet:letterSet].location == NSNotFound)
+                    return "Invalid hotword line (must contain at least one letter): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
             }
             validLines++;
         }
@@ -278,6 +293,8 @@ SttInitializeResult SttWrapper::initialize(
         config.model_config.provider = provider.value_or("cpu");
         if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
             config.hotwords_file = *hotwordsFile;
+            config.decoding_method = "modified_beam_search";
+            config.max_active_paths = std::max(4, config.max_active_paths);
         }
         if (hotwordsScore.has_value()) {
             config.hotwords_score = *hotwordsScore;
@@ -300,6 +317,13 @@ SttInitializeResult SttWrapper::initialize(
             pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
         } catch (const std::exception& e) {
             LOGE("Failed to create recognizer: %s", e.what());
+            result.success = false;
+            result.error = std::string("INIT_ERROR: ") + e.what();
+            return result;
+        } catch (...) {
+            LOGE("Unknown exception during recognizer creation");
+            result.success = false;
+            result.error = "INIT_ERROR: Unknown exception during recognizer creation";
             return result;
         }
 
@@ -311,6 +335,7 @@ SttInitializeResult SttWrapper::initialize(
         result.success = true;
         result.detectedModels = detect.detectedModels;
         result.modelType = detect.detectedModels.empty() ? "" : detect.detectedModels[0].type;
+        result.decodingMethod = config.decoding_method;
         return result;
     } catch (const std::exception& e) {
         LOGE("Exception during initialization: %s", e.what());
@@ -454,6 +479,10 @@ void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
     if (options.blank_penalty.has_value()) config.blank_penalty = *options.blank_penalty;
     if (options.rule_fsts.has_value()) config.rule_fsts = *options.rule_fsts;
     if (options.rule_fars.has_value()) config.rule_fars = *options.rule_fars;
+    if (!config.hotwords_file.empty()) {
+        config.decoding_method = "modified_beam_search";
+        config.max_active_paths = std::max(4, config.max_active_paths);
+    }
     pImpl->recognizer.value().SetConfig(config);
 }
 

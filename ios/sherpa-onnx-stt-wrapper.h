@@ -20,6 +20,8 @@ struct SttInitializeResult {
     std::string error;
     /** Loaded model type (e.g. "whisper", "transducer") for JS modelType in init result. */
     std::string modelType;
+    /** Decoding method actually applied (e.g. "greedy_search", "modified_beam_search"). Set when success is true. */
+    std::string decodingMethod;
 };
 
 /**

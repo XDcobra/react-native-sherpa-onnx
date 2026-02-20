@@ -198,6 +198,9 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             if (!result.modelType.empty()) {
                 resultDict[@"modelType"] = [NSString stringWithUTF8String:result.modelType.c_str()];
             }
+            if (!result.decodingMethod.empty()) {
+                resultDict[@"decodingMethod"] = [NSString stringWithUTF8String:result.decodingMethod.c_str()];
+            }
 
             resolve(resultDict);
         } else {
