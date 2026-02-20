@@ -177,6 +177,23 @@ Use **`sttSupportsHotwords(modelType)`** (exported from `react-native-sherpa-onn
 
 The SDK validates the file when you pass a path: it must exist, be readable, and satisfy the rules above. Invalid files cause rejection with `INVALID_HOTWORDS_FILE`.
 
+**Modeling unit and BPE vocab (optional):** Only relevant if you use **hotwords**. Then you can pass **`modelingUnit`** (and if needed **`bpeVocab`**) so hotwords are tokenized correctly. See [sherpa-onnx hotwords](https://k2-fsa.github.io/sherpa/onnx/hotwords/index.html).
+
+- **`modelingUnit`**: Set when using hotwords. `'cjkchar'` \| `'bpe'` \| `'cjkchar+bpe'`. Must match the model’s training unit.
+- **`bpeVocab`**: Only needed when `modelingUnit` is **`'bpe'`** or **`'cjkchar+bpe'`**. Path to the BPE vocabulary file (sentencepiece **bpe.vocab**). For **`'cjkchar'`** you do *not* need `bpeVocab`.
+
+If the model directory contains **`bpe.vocab`**, it is detected automatically and used when `bpeVocab` is not provided (for `bpe` / `cjkchar+bpe`).
+
+**When to use which `modelingUnit`:** The value depends on how the **model was trained**, not on the app. You find it in the model’s documentation (e.g. k2-fsa releases, Hugging Face card).
+
+| Use this | Typical models / hints |
+| --- | --- |
+| **`bpe`** | English (or similar) transducer: e.g. “zipformer-en”, “icefall … en”, LibriSpeech. Model often has **bpe.model** or **bpe.vocab** in the folder. Hotwords file: one word/phrase per line (e.g. `SPEECH RECOGNITION`). |
+| **`cjkchar`** | Chinese character-based transducer: e.g. “conformer-zh”, “wenetspeech”, “multi-dataset zh”. No BPE; tokens are characters. Hotwords file: Chinese words per line (e.g. `语音识别`). |
+| **`cjkchar+bpe`** | Bilingual Chinese + English transducer: e.g. “bilingual-zh-en”, “streaming zipformer bilingual”. Model often has **bpe.vocab**. Hotwords can mix Chinese and English (e.g. `礼拜二`, `FOREVER`). |
+
+If you’re unsure: check the model’s repo or README for “modeling unit”, “tokenizer”, or “BPE”. If the folder contains **bpe.vocab** (or bpe.model), the model is usually **bpe** or **cjkchar+bpe**; then set **`modelingUnit`** and, if needed, **`bpeVocab`** (or rely on auto-detected **bpe.vocab**).
+
 
 ## Model Setup
 
