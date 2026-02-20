@@ -24,8 +24,14 @@ import {
   type SizeTier,
   type TtsModelMeta,
 } from 'react-native-sherpa-onnx/download';
-import type { STTModelType } from 'react-native-sherpa-onnx/stt';
-import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
+import {
+  type STTModelType,
+  STT_MODEL_TYPES,
+} from 'react-native-sherpa-onnx/stt';
+import {
+  type TTSModelType,
+  TTS_MODEL_TYPES,
+} from 'react-native-sherpa-onnx/tts';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 type FilterState = {
@@ -189,6 +195,7 @@ const getTtsModelType = (modelId: string): TTSModelType | null => {
   if (lower.includes('matcha')) return 'matcha';
   if (lower.includes('kokoro')) return 'kokoro';
   if (lower.includes('kitten')) return 'kitten';
+  if (lower.includes('pocket')) return 'pocket';
   if (lower.includes('zipvoice')) return 'zipvoice';
   return null;
 };
@@ -197,16 +204,24 @@ const getSttModelType = (modelId: string): STTModelType | null => {
   const lower = modelId.toLowerCase();
   if (lower.includes('whisper')) return 'whisper';
   if (lower.includes('paraformer')) return 'paraformer';
-  if (lower.includes('zipformer')) return 'zipformer';
+  if (lower.includes('zipformer')) return 'zipformer_ctc';
+  if (lower.includes('nemo') || lower.includes('parakeet')) {
+    return lower.includes('transducer') ? 'nemo_transducer' : 'nemo_ctc';
+  }
+  if (lower.includes('conformer')) return 'transducer';
   if (lower.includes('transducer')) return 'transducer';
   if (lower.includes('wenet')) return 'wenet_ctc';
   if (lower.includes('sense-voice') || lower.includes('sensevoice')) {
     return 'sense_voice';
   }
   if (lower.includes('funasr')) return 'funasr_nano';
-  if (lower.includes('nemo') || lower.includes('parakeet')) {
-    return 'nemo_ctc';
-  }
+  if (lower.includes('fire') && lower.includes('red')) return 'fire_red_asr';
+  if (lower.includes('moonshine')) return 'moonshine';
+  if (lower.includes('dolphin')) return 'dolphin';
+  if (lower.includes('canary')) return 'canary';
+  if (lower.includes('omnilingual')) return 'omnilingual';
+  if (lower.includes('medasr')) return 'medasr';
+  if (lower.includes('telespeech')) return 'telespeech_ctc';
   return null;
 };
 
@@ -220,10 +235,12 @@ const getLanguageCodeFromModelId = (modelId: string) => {
 
 const isUnsupportedModel = (model: ModelMetaBase, category: ModelCategory) => {
   if (category === ModelCategory.Tts) {
-    return getTtsModelType(model.id) === null;
+    const t = getTtsModelType(model.id);
+    return t === null || !TTS_MODEL_TYPES.includes(t);
   }
   if (category === ModelCategory.Stt) {
-    return getSttModelType(model.id) === null;
+    const t = getSttModelType(model.id);
+    return t === null || !STT_MODEL_TYPES.includes(t);
   }
   // For other categories, assume supported for now
   return false;
