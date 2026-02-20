@@ -4,6 +4,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
+| Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
 | Model initialization | ✅ | Kotlin API | `initializeTTS()` |
 | Full-buffer generation | ✅ | Kotlin API | `generateSpeech()` |
 | Streaming generation | ✅ | Kotlin API | `generateSpeechStream()` |
