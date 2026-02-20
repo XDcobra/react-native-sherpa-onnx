@@ -1896,30 +1896,14 @@ export default function STTScreen() {
             </View>
           )}
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Select Model Type</Text>
-            <Text style={styles.hint}>
-              If multiple model types were detected, select which one to use for
-              transcription.
-            </Text>
+          {detectedModels.length > 1 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>2. Select Model Type</Text>
+              <Text style={styles.hint}>
+                Multiple model types were detected. Select which one to use for
+                transcription.
+              </Text>
 
-            {!currentModelFolder && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  Please initialize a model directory first
-                </Text>
-              </View>
-            )}
-
-            {currentModelFolder && detectedModels.length === 0 && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No models detected. Please try another directory.
-                </Text>
-              </View>
-            )}
-
-            {detectedModels.length > 0 && (
               <View style={styles.detectedModelsContainer}>
                 {detectedModels.map((model, index) => (
                   <TouchableOpacity
@@ -1948,21 +1932,23 @@ export default function STTScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-            )}
 
-            {currentModelFolder &&
-              detectedModels.length > 0 &&
-              !selectedModelType && (
+              {!selectedModelType && (
                 <View style={styles.warningContainer}>
                   <Text style={styles.warningText}>
                     Please select a model type above
                   </Text>
                 </View>
               )}
-          </View>
+            </View>
+          )}
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
+            <Text style={styles.sectionTitle}>
+              {detectedModels.length > 1
+                ? '3. Transcribe Audio'
+                : '2. Transcribe Audio'}
+            </Text>
             <Text style={styles.hint}>
               Select an audio source and transcribe it using the selected model.
             </Text>
@@ -1970,7 +1956,9 @@ export default function STTScreen() {
             {!selectedModelType && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Please select a model type first
+                  {!currentModelFolder
+                    ? 'Please initialize a model directory first'
+                    : 'Please select a model type first'}
                 </Text>
               </View>
             )}
