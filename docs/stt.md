@@ -18,6 +18,7 @@ This guide covers the STT APIs for offline transcription.
 | Batch decode (multiple streams) | Planned | C-API | DecodeMultipleOfflineStreams not in Kotlin |
 | Recognizer sample rate / num tokens | Planned | C-API | Not exposed in Kotlin OfflineRecognizer |
 | Streaming/online recognition | Planned | C-API | OnlineRecognizer separate API |
+| Segment timestamps (Whisper) | Planned | C-API | segment_timestamps / segment_durations / segment_texts; C-API has them, Kotlin/RN bridge to follow |
 
 ## Overview
 
@@ -158,7 +159,7 @@ Release STT resources and unload the model. Call before re-initializing with a d
 
 ### Hotwords (contextual biasing)
 
-**Only transducer models** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx. All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
+**Transducer and NeMo transducer** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx (NeMo support added in [sherpa-onnx#3077](https://github.com/k2-fsa/sherpa-onnx/pull/3077)). All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
 
 | Code | When |
 | --- | --- |
