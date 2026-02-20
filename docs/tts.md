@@ -282,6 +282,27 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 
 The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, sampleRate }`) into a flat options object for the native bridge. Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
 
+### Kotlin Offline API coverage
+
+All **OfflineTts** functions and the options we pass are available in this SDK:
+
+| Kotlin / Config | In this SDK |
+| --- | --- |
+| `sampleRate()`, `numSpeakers()` | ✅ `getTtsSampleRate()`, `getTtsNumSpeakers()`. |
+| Init: model paths, `numThreads`, `debug`, `noiseScale`, `noiseScaleW`, `lengthScale` | ✅ `initializeTTS` options. |
+| `updateParams(noiseScale, noiseScaleW, lengthScale)` | ✅ `updateTtsParams`. |
+| `generate` / `generateWithConfig` (sid, speed, silenceScale, referenceAudio, referenceText, numSteps, extra) | ✅ `generateSpeech` / `generateSpeechWithTimestamps` via `TtsGenerationOptions`. |
+| `generateWithCallback` (streaming) | ✅ `generateSpeechStream`; `cancelSpeechStream` → `cancelTtsStream`. |
+| Native PCM player (start, write, stop) | ✅ `startTtsPcmPlayer`, `writeTtsPcmChunk`, `stopTtsPcmPlayer`. |
+| Save to file / content URI | ✅ `saveAudioToFile`, `saveAudioToContentUri`. |
+
+**Not exposed (Kotlin OfflineTtsConfig):**
+
+- **ruleFsts**, **ruleFars** — ITN rule files for TTS are not passed in init in this package (config builds with model only).
+- **maxNumSentences** — not set (Kotlin default is 1). If you need batch or multi-sentence limits, use the native API.
+
+Generation options (e.g. `silenceScale`, reference audio, `numSteps`, `extra`) are passed per call via `TtsGenerationOptions` / Kotlin `GenerationConfig`, not as global config.
+
 ## Model Setup
 
 See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup steps.

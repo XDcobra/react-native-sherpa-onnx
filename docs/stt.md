@@ -78,6 +78,7 @@ Initialize the speech-to-text engine with a model. Use `modelType: 'auto'` to le
 | `ruleFsts` | `string` | Comma-separated paths to rule FSTs for inverse text normalization (ITN). |
 | `ruleFars` | `string` | Comma-separated paths to rule FARs for ITN. |
 | `dither` | `number` | Dither for feature extraction (default: 0). |
+| `modelOptions` | `SttModelOptions` | Optional model-specific options. Only the block for the **loaded** model type is applied (e.g. when a Whisper model is loaded, only `modelOptions.whisper` is used). See [Model-specific options (modelOptions)](#model-specific-options-modeloptions) below. |
 
 Notes and common pitfalls:
 - `modelPath` must point to the model directory containing the expected files for the chosen `modelType` (e.g. `encoder.onnx`/`decoder.onnx`/`joiner.onnx` for transducer, `model.onnx` + `tokens.txt` for paraformer).
@@ -172,18 +173,28 @@ The following model types are supported for detection and config build. Auto-det
 | `canary` | encoder, decoder (folder name: canary) |
 | `omnilingual`, `medasr`, `telespeech_ctc` | model.onnx, tokens.txt (folder name hints) |
 
-### Model-specific options not yet supported
+### Model-specific options (modelOptions)
 
-The Kotlin/C API exposes additional per-model options that are **not yet supported** in this package. They may be added in a later release.
+Pass `modelOptions` in `initializeSTT(options)` to set per-model options. Only the block for the **actually loaded** model type is applied; other keys are ignored (e.g. `modelOptions.whisper` has no effect when a Paraformer model is loaded).
 
-| Model | Options in native API | Description |
-| --- | --- | --- |
-| **Whisper** | language, task, tailPaddings, enableTokenTimestamps, enableSegmentTimestamps | Language, transcribe/translate, padding, timestamp flags |
-| **SenseVoice** | language, useInverseTextNormalization | Language and ITN |
-| **FunASR Nano** | systemPrompt, userPrompt, maxNewTokens, temperature, topP, seed, language, itn, hotwords | LLM/prompt and decoding options |
-| **Canary** | srcLang, tgtLang, usePnc | Source/target language, punctuation |
+| Model | Key | Options | Description |
+| --- | --- | --- | --- |
+| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` | Language code (e.g. `"en"`). With `task: 'translate'`, result `text` is **English** (speech translated to English). **iOS:** only `language`, `task`, `tailPaddings` are applied; `enableTokenTimestamps` and `enableSegmentTimestamps` are **Android only**. |
+| **SenseVoice** | `senseVoice` | `language?`, `useItn?` | Language hint; inverse text normalization (default true on Kotlin). |
+| **Canary** | `canary` | `srcLang?`, `tgtLang?`, `usePnc?` | Source/target language (default `"en"`); use punctuation (default true). |
+| **FunASR Nano** | `funasrNano` | `systemPrompt?`, `userPrompt?`, `maxNewTokens?`, `temperature?`, `topP?`, `seed?`, `language?`, `itn?`, `hotwords?` | LLM/prompt and decoding options; see native defaults in `SttFunAsrNanoModelOptions`. |
 
-Use the native sherpa-onnx Kotlin/C API directly if you need these options today.
+Example:
+
+```ts
+await initializeSTT({
+  modelPath: { type: 'asset', path: 'models/sherpa-onnx-whisper-tiny' },
+  modelType: 'whisper',
+  modelOptions: {
+    whisper: { language: 'de', task: 'transcribe' },
+  },
+});
+```
 
 ## Mapping to Native API
 
@@ -193,7 +204,7 @@ The JS API in `react-native-sherpa-onnx/stt` resolves model paths and normalizes
 
 | JS (public) | TurboModule method | Notes |
 | --- | --- | --- |
-| `initializeSTT(options)` | `initializeStt(modelDir, preferInt8?, modelType?, debug?, hotwordsFile?, hotwordsScore?, numThreads?, provider?, ruleFsts?, ruleFars?, dither?)` | JS resolves `modelPath` to `modelDir` via `resolveModelPath`. |
+| `initializeSTT(options)` | `initializeStt(modelDir, preferInt8?, modelType?, debug?, hotwordsFile?, hotwordsScore?, numThreads?, provider?, ruleFsts?, ruleFars?, dither?, modelOptions?)` | JS resolves `modelPath` to `modelDir` via `resolveModelPath`. `modelOptions` is an object with optional `whisper`, `senseVoice`, `canary`, `funasrNano` sub-objects; only the block for the loaded model type is applied. |
 | `transcribeFile(filePath)` | `transcribeFile(filePath)` | Returns `Promise<SttRecognitionResult>` (object). |
 | `transcribeSamples(samples, sampleRate)` | `transcribeSamples(samples, sampleRate)` | Same return type as `transcribeFile`. |
 | `setSttConfig(options)` | `setSttConfig(options)` | `options` is a flat object (e.g. `decodingMethod`, `maxActivePaths`, `hotwordsFile`, `hotwordsScore`, `blankPenalty`, `ruleFsts`, `ruleFars`). |
@@ -222,6 +233,23 @@ Result normalization: the native layer returns an object with `text`, `tokens`, 
 ### Underlying engine
 
 On both platforms, sherpa-onnx’s **C API** is used (via Kotlin JNI on Android and C++ `sherpa-onnx/c-api/cxx-api.h` on iOS): `OfflineRecognizer`, `OfflineRecognizerConfig`, `OfflineRecognizerResult`, `CreateStream`, `AcceptWaveform`, `Decode`, `GetResult`, `SetConfig`. The JS API and native bridges hide these details; the table in the feature section at the top of this doc calls out which capabilities come from the Kotlin/ObjC layer vs. the C-API-only features (e.g. result as JSON, batch decode, online recognizer).
+
+### Kotlin Offline API coverage
+
+All **OfflineRecognizer** functions and the options we pass are available in this SDK:
+
+| Kotlin / Config | In this SDK |
+| --- | --- |
+| `OfflineRecognizer` create stream, decode, get result | Used internally by `transcribeFile` / `transcribeSamples`. |
+| Init: model paths, `numThreads`, `provider`, `hotwordsFile`, `hotwordsScore`, `ruleFsts`, `ruleFars`, `dither` | ✅ `initializeSTT` options. |
+| `FeatureConfig`: `dither` | ✅ Init option; `sampleRate`/`featureDim` are fixed (16000 / 80) in native. |
+| Runtime: `decodingMethod`, `maxActivePaths`, `hotwordsFile`, `hotwordsScore`, `blankPenalty`, `ruleFsts`, `ruleFars` | ✅ `setSttConfig`. |
+| `unload` / release | ✅ `unloadSTT`. |
+
+**Not exposed (Kotlin OfflineRecognizerConfig):**
+
+- **HomophoneReplacerConfig** (`hr`: `dictDir`, `lexicon`, `ruleFsts`) — not configurable in this package.
+- **Model-specific options** — see "Model-specific options not yet supported" above (Whisper, SenseVoice, FunASR Nano, Canary, etc.).
 
 ## Advanced Examples & Tips
 
