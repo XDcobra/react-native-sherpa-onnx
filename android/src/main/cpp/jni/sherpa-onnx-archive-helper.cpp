@@ -348,9 +348,9 @@ bool ArchiveHelper::ExtractTarBz2(
     *out_sha256 = ToHex(digest, sizeof(digest));
   }
 
-  // Final progress
-  if (on_progress && total_bytes > 0) {
-    on_progress(total_bytes, total_bytes, 100.0);
+  // Final progress: report uncompressed size so JS can store sizeOnDisk
+  if (on_progress) {
+    on_progress(extracted_bytes, extracted_bytes, 100.0);
   }
 
   return true;

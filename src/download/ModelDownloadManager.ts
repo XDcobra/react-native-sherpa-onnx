@@ -80,6 +80,8 @@ type ModelManifest<T extends ModelMetaBase = ModelMetaBase> = {
   downloadedAt: string;
   lastUsed?: string;
   model: T;
+  /** Total size in bytes of the extracted/model directory (set after download or computed once). */
+  sizeOnDisk?: number;
 };
 
 export type ModelWithMetadata<T extends ModelMetaBase = ModelMetaBase> = {
@@ -988,6 +990,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     let extractResult: { sha256?: string } | null = null;
+    /** Total uncompressed bytes from libarchive progress; used for manifest.sizeOnDisk. */
+    let extractedTotalBytes = 0;
 
     if (isArchive) {
       await RNFS.mkdir(modelDir);
@@ -1000,6 +1004,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           if (isAborted()) {
             return;
           }
+          if (evt.totalBytes > 0) extractedTotalBytes = evt.totalBytes;
           if (model.bytes > 0) {
             // Calculate extraction speed and ETA
             const now = Date.now();
@@ -1113,12 +1118,24 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
 
     await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
     const now = new Date().toISOString();
+    let sizeOnDisk: number | undefined;
+    if (isArchive && extractedTotalBytes > 0) {
+      sizeOnDisk = extractedTotalBytes;
+    } else if (!isArchive) {
+      try {
+        const stat = await RNFS.stat(downloadPath);
+        sizeOnDisk = stat.size;
+      } catch {
+        // ignore
+      }
+    }
     await RNFS.writeFile(
       getManifestPath(category, id),
       JSON.stringify({
         downloadedAt: now,
         lastUsed: now,
         model,
+        sizeOnDisk,
       } as ModelManifest),
       'utf8'
     );
@@ -1181,7 +1198,7 @@ export async function listDownloadedModelsWithMetadata<T extends ModelMetaBase>(
             model: manifest.model,
             downloadedAt: manifest.downloadedAt,
             lastUsed: manifest.lastUsed ?? null,
-            sizeOnDisk: entry.size,
+            sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
           });
         }
       } catch (error) {

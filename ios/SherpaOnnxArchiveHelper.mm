@@ -267,8 +267,8 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   archive_read_free(archive);
   archive_write_free(disk);
 
-  if (progress && totalBytes > 0) {
-    progress(totalBytes, totalBytes, 100.0);
+  if (progress) {
+    progress(extractedBytes, extractedBytes, 100.0);
   }
 
   close_reader();

@@ -1047,7 +1047,7 @@ export default function ModelManagementScreen() {
                             </Text>
                             <Text style={styles.modelMeta}>
                               {model.id}
-                              {model.sizeOnDisk != null
+                              {model.sizeOnDisk != null && model.sizeOnDisk > 0
                                 ? ` · ${formatBytes(model.sizeOnDisk)}`
                                 : ''}
                             </Text>
