@@ -151,11 +151,13 @@ export default function STTScreen() {
     return option?.threads ?? (cpuCoreCount >= 2 ? 2 : 1);
   }, [sttThreadOptions, sttThreadOption, cpuCoreCount]);
 
-  // Model-specific options: show as soon as a model is selected (before or after init).
-  // When the selected-for-init model is the same as the loaded one: use selectedModelType.
-  // When the user selected a different model (or none): use detected type for that selection so hotword/options match the model they are about to init.
+  // Model-specific options: only after we have a type (from init or from native detection). No heuristic fallback.
+  // While detectingModelType, we show a full-screen overlay and effectiveModelTypeForOptions is null.
   const effectiveModelTypeForOptions =
-    currentModelFolder != null && selectedModelForInit === currentModelFolder
+    selectedModelForInit != null && detectingModelType
+      ? null
+      : currentModelFolder != null &&
+        selectedModelForInit === currentModelFolder
       ? selectedModelType
       : selectedModelForInit != null
       ? detectedTypeForSelectedFolder ??
@@ -163,15 +165,6 @@ export default function STTScreen() {
       : modelTypeOption !== 'auto'
       ? (modelTypeOption as STTModelType)
       : null;
-
-  const hasModelSpecificOptions = useMemo(
-    () =>
-      effectiveModelTypeForOptions === 'whisper' ||
-      effectiveModelTypeForOptions === 'sense_voice' ||
-      effectiveModelTypeForOptions === 'canary' ||
-      effectiveModelTypeForOptions === 'funasr_nano',
-    [effectiveModelTypeForOptions]
-  );
 
   /** Hotwords are only supported for transducer models; hide options for Whisper, Paraformer, etc. */
   const showHotwordsOptions = useMemo(
@@ -1374,112 +1367,108 @@ export default function STTScreen() {
                         placeholderTextColor="#8E8E93"
                       />
 
-                      {/* Model-specific options: only for whisper, sense_voice, canary, funasr_nano */}
-                      {(hasModelSpecificOptions ||
-                        (selectedModelForInit != null &&
-                          detectingModelType)) && (
-                        <View style={styles.modelOptionsSection}>
-                          <Text style={styles.subsectionTitle}>
-                            {detectingModelType && !effectiveModelTypeForOptions
-                              ? 'Model-specific options (detecting…)'
-                              : `Model-specific options (${effectiveModelTypeForOptions})`}
-                          </Text>
-                          {detectingModelType &&
-                            !effectiveModelTypeForOptions && (
-                              <Text style={styles.hint}>
-                                Detecting model type from files…
-                              </Text>
-                            )}
+                      {/* Model-specific options: only for types that have options in this block (whisper, sense_voice, canary, funasr_nano). Transducer options are in "Hotword options" above. */}
+                      {effectiveModelTypeForOptions != null &&
+                        (effectiveModelTypeForOptions === 'whisper' ||
+                          effectiveModelTypeForOptions === 'sense_voice' ||
+                          effectiveModelTypeForOptions === 'canary' ||
+                          effectiveModelTypeForOptions === 'funasr_nano') && (
+                          <View style={styles.modelOptionsSection}>
+                            <Text style={styles.subsectionTitle}>
+                              {`Model-specific options (${effectiveModelTypeForOptions})`}
+                            </Text>
 
-                          {effectiveModelTypeForOptions === 'whisper' && (
-                            <>
-                              <Text style={styles.inputLabel}>
-                                Language (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={sttModelOptions.whisper?.language ?? ''}
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    whisper: {
-                                      ...prev.whisper,
-                                      language: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="e.g. en, de"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>Task</Text>
-                              <View style={styles.optionsRow}>
-                                {(['transcribe', 'translate'] as const).map(
-                                  (t) => (
-                                    <TouchableOpacity
-                                      key={t}
-                                      style={[
-                                        styles.optionsChip,
-                                        (sttModelOptions.whisper?.task ??
-                                          'transcribe') === t &&
-                                          styles.optionsChipActive,
-                                      ]}
-                                      onPress={() =>
-                                        setSttModelOptions((prev) => ({
-                                          ...prev,
-                                          whisper: {
-                                            ...prev.whisper,
-                                            task: t,
-                                          },
-                                        }))
-                                      }
-                                    >
-                                      <Text
+                            {effectiveModelTypeForOptions === 'whisper' && (
+                              <>
+                                <Text style={styles.inputLabel}>
+                                  Language (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.whisper?.language ?? ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      whisper: {
+                                        ...prev.whisper,
+                                        language: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="e.g. en, de"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>Task</Text>
+                                <View style={styles.optionsRow}>
+                                  {(['transcribe', 'translate'] as const).map(
+                                    (t) => (
+                                      <TouchableOpacity
+                                        key={t}
                                         style={[
-                                          styles.optionsChipText,
+                                          styles.optionsChip,
                                           (sttModelOptions.whisper?.task ??
                                             'transcribe') === t &&
-                                            styles.optionsChipTextActive,
+                                            styles.optionsChipActive,
                                         ]}
+                                        onPress={() =>
+                                          setSttModelOptions((prev) => ({
+                                            ...prev,
+                                            whisper: {
+                                              ...prev.whisper,
+                                              task: t,
+                                            },
+                                          }))
+                                        }
                                       >
-                                        {t}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )
-                                )}
-                              </View>
-                              <Text style={styles.inputLabel}>
-                                Tail paddings (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.whisper?.tailPaddings != null
-                                    ? String(
-                                        sttModelOptions.whisper.tailPaddings
-                                      )
-                                    : ''
-                                }
-                                onChangeText={(v) => {
-                                  const n =
-                                    v.trim() === ''
-                                      ? undefined
-                                      : parseInt(v, 10);
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    whisper: {
-                                      ...prev.whisper,
-                                      tailPaddings:
-                                        n !== undefined && !isNaN(n)
-                                          ? n
-                                          : undefined,
-                                    },
-                                  }));
-                                }}
-                                keyboardType="numeric"
-                                placeholder="e.g. 1000"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              {__DEV__ && (
+                                        <Text
+                                          style={[
+                                            styles.optionsChipText,
+                                            (sttModelOptions.whisper?.task ??
+                                              'transcribe') === t &&
+                                              styles.optionsChipTextActive,
+                                          ]}
+                                        >
+                                          {t}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )
+                                  )}
+                                </View>
+                                <Text style={styles.inputLabel}>
+                                  Tail paddings (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.whisper?.tailPaddings !=
+                                    null
+                                      ? String(
+                                          sttModelOptions.whisper.tailPaddings
+                                        )
+                                      : ''
+                                  }
+                                  onChangeText={(v) => {
+                                    const n =
+                                      v.trim() === ''
+                                        ? undefined
+                                        : parseInt(v, 10);
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      whisper: {
+                                        ...prev.whisper,
+                                        tailPaddings:
+                                          n !== undefined && !isNaN(n)
+                                            ? n
+                                            : undefined,
+                                      },
+                                    }));
+                                  }}
+                                  keyboardType="numeric"
+                                  placeholder="e.g. 1000"
+                                  placeholderTextColor="#8E8E93"
+                                />
                                 <>
                                   <Text style={styles.inputLabel}>
                                     Token timestamps (Android)
@@ -1558,299 +1547,300 @@ export default function STTScreen() {
                                     ))}
                                   </View>
                                 </>
-                              )}
-                            </>
-                          )}
+                              </>
+                            )}
 
-                          {effectiveModelTypeForOptions === 'sense_voice' && (
-                            <>
-                              <Text style={styles.inputLabel}>
-                                Language (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.senseVoice?.language ?? ''
-                                }
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    senseVoice: {
-                                      ...prev.senseVoice,
-                                      language: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="e.g. en"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>Use ITN</Text>
-                              <View style={styles.optionsRow}>
-                                {[false, true].map((val) => (
-                                  <TouchableOpacity
-                                    key={String(val)}
-                                    style={[
-                                      styles.optionsChip,
-                                      (sttModelOptions.senseVoice?.useItn ??
-                                        true) === val &&
-                                        styles.optionsChipActive,
-                                    ]}
-                                    onPress={() =>
-                                      setSttModelOptions((prev) => ({
-                                        ...prev,
-                                        senseVoice: {
-                                          ...prev.senseVoice,
-                                          useItn: val,
-                                        },
-                                      }))
-                                    }
-                                  >
-                                    <Text
+                            {effectiveModelTypeForOptions === 'sense_voice' && (
+                              <>
+                                <Text style={styles.inputLabel}>
+                                  Language (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.senseVoice?.language ?? ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      senseVoice: {
+                                        ...prev.senseVoice,
+                                        language: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="e.g. en"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>Use ITN</Text>
+                                <View style={styles.optionsRow}>
+                                  {[false, true].map((val) => (
+                                    <TouchableOpacity
+                                      key={String(val)}
                                       style={[
-                                        styles.optionsChipText,
+                                        styles.optionsChip,
                                         (sttModelOptions.senseVoice?.useItn ??
                                           true) === val &&
-                                          styles.optionsChipTextActive,
+                                          styles.optionsChipActive,
                                       ]}
+                                      onPress={() =>
+                                        setSttModelOptions((prev) => ({
+                                          ...prev,
+                                          senseVoice: {
+                                            ...prev.senseVoice,
+                                            useItn: val,
+                                          },
+                                        }))
+                                      }
                                     >
-                                      {val ? 'Yes' : 'No'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </View>
-                            </>
-                          )}
+                                      <Text
+                                        style={[
+                                          styles.optionsChipText,
+                                          (sttModelOptions.senseVoice?.useItn ??
+                                            true) === val &&
+                                            styles.optionsChipTextActive,
+                                        ]}
+                                      >
+                                        {val ? 'Yes' : 'No'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                              </>
+                            )}
 
-                          {effectiveModelTypeForOptions === 'canary' && (
-                            <>
-                              <Text style={styles.inputLabel}>
-                                Source language (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={sttModelOptions.canary?.srcLang ?? ''}
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    canary: {
-                                      ...prev.canary,
-                                      srcLang: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="e.g. en"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>
-                                Target language (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={sttModelOptions.canary?.tgtLang ?? ''}
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    canary: {
-                                      ...prev.canary,
-                                      tgtLang: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="e.g. en"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>
-                                Use punctuation
-                              </Text>
-                              <View style={styles.optionsRow}>
-                                {[false, true].map((val) => (
-                                  <TouchableOpacity
-                                    key={String(val)}
-                                    style={[
-                                      styles.optionsChip,
-                                      (sttModelOptions.canary?.usePnc ??
-                                        true) === val &&
-                                        styles.optionsChipActive,
-                                    ]}
-                                    onPress={() =>
-                                      setSttModelOptions((prev) => ({
-                                        ...prev,
-                                        canary: {
-                                          ...prev.canary,
-                                          usePnc: val,
-                                        },
-                                      }))
-                                    }
-                                  >
-                                    <Text
+                            {effectiveModelTypeForOptions === 'canary' && (
+                              <>
+                                <Text style={styles.inputLabel}>
+                                  Source language (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={sttModelOptions.canary?.srcLang ?? ''}
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      canary: {
+                                        ...prev.canary,
+                                        srcLang: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="e.g. en"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>
+                                  Target language (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={sttModelOptions.canary?.tgtLang ?? ''}
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      canary: {
+                                        ...prev.canary,
+                                        tgtLang: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="e.g. en"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>
+                                  Use punctuation
+                                </Text>
+                                <View style={styles.optionsRow}>
+                                  {[false, true].map((val) => (
+                                    <TouchableOpacity
+                                      key={String(val)}
                                       style={[
-                                        styles.optionsChipText,
+                                        styles.optionsChip,
                                         (sttModelOptions.canary?.usePnc ??
                                           true) === val &&
-                                          styles.optionsChipTextActive,
+                                          styles.optionsChipActive,
                                       ]}
+                                      onPress={() =>
+                                        setSttModelOptions((prev) => ({
+                                          ...prev,
+                                          canary: {
+                                            ...prev.canary,
+                                            usePnc: val,
+                                          },
+                                        }))
+                                      }
                                     >
-                                      {val ? 'Yes' : 'No'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </View>
-                            </>
-                          )}
+                                      <Text
+                                        style={[
+                                          styles.optionsChipText,
+                                          (sttModelOptions.canary?.usePnc ??
+                                            true) === val &&
+                                            styles.optionsChipTextActive,
+                                        ]}
+                                      >
+                                        {val ? 'Yes' : 'No'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                              </>
+                            )}
 
-                          {effectiveModelTypeForOptions === 'funasr_nano' && (
-                            <>
-                              <Text style={styles.inputLabel}>
-                                System prompt (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.funasrNano?.systemPrompt ?? ''
-                                }
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    funasrNano: {
-                                      ...prev.funasrNano,
-                                      systemPrompt: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="You are a helpful assistant."
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>
-                                User prompt (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.funasrNano?.userPrompt ?? ''
-                                }
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    funasrNano: {
-                                      ...prev.funasrNano,
-                                      userPrompt: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="语音转写："
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>
-                                Max new tokens (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.funasrNano?.maxNewTokens !=
-                                  null
-                                    ? String(
-                                        sttModelOptions.funasrNano.maxNewTokens
-                                      )
-                                    : ''
-                                }
-                                onChangeText={(v) => {
-                                  const n =
-                                    v.trim() === ''
-                                      ? undefined
-                                      : parseInt(v, 10);
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    funasrNano: {
-                                      ...prev.funasrNano,
-                                      maxNewTokens:
-                                        n !== undefined && !isNaN(n) && n > 0
-                                          ? n
-                                          : undefined,
-                                    },
-                                  }));
-                                }}
-                                keyboardType="numeric"
-                                placeholder="512"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>
-                                Language (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.funasrNano?.language ?? ''
-                                }
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    funasrNano: {
-                                      ...prev.funasrNano,
-                                      language: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="e.g. en"
-                                placeholderTextColor="#8E8E93"
-                              />
-                              <Text style={styles.inputLabel}>ITN</Text>
-                              <View style={styles.optionsRow}>
-                                {[false, true].map((val) => (
-                                  <TouchableOpacity
-                                    key={String(val)}
-                                    style={[
-                                      styles.optionsChip,
-                                      (sttModelOptions.funasrNano?.itn ??
-                                        true) === val &&
-                                        styles.optionsChipActive,
-                                    ]}
-                                    onPress={() =>
-                                      setSttModelOptions((prev) => ({
-                                        ...prev,
-                                        funasrNano: {
-                                          ...prev.funasrNano,
-                                          itn: val,
-                                        },
-                                      }))
-                                    }
-                                  >
-                                    <Text
+                            {effectiveModelTypeForOptions === 'funasr_nano' && (
+                              <>
+                                <Text style={styles.inputLabel}>
+                                  System prompt (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.funasrNano?.systemPrompt ??
+                                    ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      funasrNano: {
+                                        ...prev.funasrNano,
+                                        systemPrompt: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="You are a helpful assistant."
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>
+                                  User prompt (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.funasrNano?.userPrompt ?? ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      funasrNano: {
+                                        ...prev.funasrNano,
+                                        userPrompt: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="语音转写："
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>
+                                  Max new tokens (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.funasrNano?.maxNewTokens !=
+                                    null
+                                      ? String(
+                                          sttModelOptions.funasrNano
+                                            .maxNewTokens
+                                        )
+                                      : ''
+                                  }
+                                  onChangeText={(v) => {
+                                    const n =
+                                      v.trim() === ''
+                                        ? undefined
+                                        : parseInt(v, 10);
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      funasrNano: {
+                                        ...prev.funasrNano,
+                                        maxNewTokens:
+                                          n !== undefined && !isNaN(n) && n > 0
+                                            ? n
+                                            : undefined,
+                                      },
+                                    }));
+                                  }}
+                                  keyboardType="numeric"
+                                  placeholder="512"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>
+                                  Language (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.funasrNano?.language ?? ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      funasrNano: {
+                                        ...prev.funasrNano,
+                                        language: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="e.g. en"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                                <Text style={styles.inputLabel}>ITN</Text>
+                                <View style={styles.optionsRow}>
+                                  {[false, true].map((val) => (
+                                    <TouchableOpacity
+                                      key={String(val)}
                                       style={[
-                                        styles.optionsChipText,
+                                        styles.optionsChip,
                                         (sttModelOptions.funasrNano?.itn ??
                                           true) === val &&
-                                          styles.optionsChipTextActive,
+                                          styles.optionsChipActive,
                                       ]}
+                                      onPress={() =>
+                                        setSttModelOptions((prev) => ({
+                                          ...prev,
+                                          funasrNano: {
+                                            ...prev.funasrNano,
+                                            itn: val,
+                                          },
+                                        }))
+                                      }
                                     >
-                                      {val ? 'Yes' : 'No'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </View>
-                              <Text style={styles.inputLabel}>
-                                Hotwords (optional)
-                              </Text>
-                              <TextInput
-                                style={styles.parameterInput}
-                                value={
-                                  sttModelOptions.funasrNano?.hotwords ?? ''
-                                }
-                                onChangeText={(v) =>
-                                  setSttModelOptions((prev) => ({
-                                    ...prev,
-                                    funasrNano: {
-                                      ...prev.funasrNano,
-                                      hotwords: v || undefined,
-                                    },
-                                  }))
-                                }
-                                placeholder="word1 word2"
-                                placeholderTextColor="#8E8E93"
-                              />
-                            </>
-                          )}
-                        </View>
-                      )}
+                                      <Text
+                                        style={[
+                                          styles.optionsChipText,
+                                          (sttModelOptions.funasrNano?.itn ??
+                                            true) === val &&
+                                            styles.optionsChipTextActive,
+                                        ]}
+                                      >
+                                        {val ? 'Yes' : 'No'}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                                <Text style={styles.inputLabel}>
+                                  Hotwords (optional)
+                                </Text>
+                                <TextInput
+                                  style={styles.parameterInput}
+                                  value={
+                                    sttModelOptions.funasrNano?.hotwords ?? ''
+                                  }
+                                  onChangeText={(v) =>
+                                    setSttModelOptions((prev) => ({
+                                      ...prev,
+                                      funasrNano: {
+                                        ...prev.funasrNano,
+                                        hotwords: v || undefined,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="word1 word2"
+                                  placeholderTextColor="#8E8E93"
+                                />
+                              </>
+                            )}
+                          </View>
+                        )}
                     </View>
                   )}
                 </View>
@@ -1858,7 +1848,7 @@ export default function STTScreen() {
                   style={[
                     styles.button,
                     styles.applyButton,
-                    loading && styles.buttonDisabled,
+                    (loading || detectingModelType) && styles.buttonDisabled,
                   ]}
                   onPress={() =>
                     handleInitialize(
@@ -1866,12 +1856,27 @@ export default function STTScreen() {
                     )
                   }
                   disabled={
-                    loading || (!selectedModelForInit && !currentModelFolder)
+                    loading ||
+                    detectingModelType ||
+                    (!selectedModelForInit && !currentModelFolder)
                   }
                 >
-                  <Text style={styles.buttonText}>
-                    Apply options & use model
-                  </Text>
+                  {detectingModelType ? (
+                    <View style={styles.applyButtonContent}>
+                      <ActivityIndicator
+                        size="small"
+                        color="#FFFFFF"
+                        style={styles.applyButtonSpinner}
+                      />
+                      <Text style={styles.buttonText}>
+                        Detecting model type…
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.buttonText}>
+                      Apply options & use model
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </>
             )}
@@ -2226,6 +2231,14 @@ const styles = StyleSheet.create({
   },
   applyButton: {
     marginTop: 16,
+  },
+  applyButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  applyButtonSpinner: {
+    marginRight: 2,
   },
   buttonDisabled: {
     backgroundColor: '#999',
