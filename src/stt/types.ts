@@ -24,6 +24,20 @@ export type STTModelType =
   | 'telespeech_ctc'
   | 'auto';
 
+/** Model types that support hotwords (contextual biasing). Only transducer models support hotwords in sherpa-onnx. */
+export const STT_HOTWORDS_MODEL_TYPES: readonly STTModelType[] = [
+  'transducer',
+  'nemo_transducer',
+] as const;
+
+/**
+ * Returns true only for model types that support hotwords (transducer, nemo_transducer).
+ * Use this to show/hide hotword options in the UI or to validate before init/setSttConfig.
+ */
+export function sttSupportsHotwords(modelType: STTModelType | string): boolean {
+  return modelType === 'transducer' || modelType === 'nemo_transducer';
+}
+
 /** Runtime list of supported STT model types (must match ParseSttModelType in native). */
 export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'transducer',

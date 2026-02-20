@@ -103,6 +103,8 @@ export async function initializeSTT(
 ): Promise<{
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
+  /** Model type that was loaded (e.g. "whisper", "transducer"). Use with sttSupportsHotwords() to show hotword options. */
+  modelType?: string;
 }> {
   // Handle both object syntax and direct config syntax
   let modelPath: ModelPathConfig;
@@ -229,4 +231,8 @@ export type {
   SttRuntimeConfig,
   TranscriptionResult,
 } from './types';
-export { STT_MODEL_TYPES } from './types';
+export {
+  STT_MODEL_TYPES,
+  STT_HOTWORDS_MODEL_TYPES,
+  sttSupportsHotwords,
+} from './types';
