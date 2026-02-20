@@ -57,6 +57,7 @@ internal class SherpaOnnxSttHelper(
     ruleFsts: String?,
     ruleFars: String?,
     dither: Double?,
+    modelOptions: ReadableMap?,
     promise: Promise
   ) {
     try {
@@ -127,7 +128,8 @@ internal class SherpaOnnxSttHelper(
         provider = provider,
         ruleFsts = ruleFsts.orEmpty(),
         ruleFars = ruleFars.orEmpty(),
-        dither = dither?.toFloat() ?: 0f
+        dither = dither?.toFloat() ?: 0f,
+        modelOptions = modelOptions
       )
       lastRecognizerConfig = config
       recognizer = OfflineRecognizer(config = config)
@@ -265,7 +267,8 @@ internal class SherpaOnnxSttHelper(
     provider: String? = null,
     ruleFsts: String = "",
     ruleFars: String = "",
-    dither: Float = 0f
+    dither: Float = 0f,
+    modelOptions: ReadableMap? = null
   ): OfflineRecognizerConfig {
     val featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = dither)
     val modelConfig = when (modelType) {
@@ -293,24 +296,39 @@ internal class SherpaOnnxSttHelper(
         tokens = path(paths, "tokens"),
         modelType = "wenet_ctc"
       )
-      "sense_voice" -> OfflineModelConfig(
-        senseVoice = OfflineSenseVoiceModelConfig(model = path(paths, "ctcModel")),
-        tokens = path(paths, "tokens"),
-        modelType = "sense_voice"
-      )
+      "sense_voice" -> {
+        val sv = modelOptions?.getMap("senseVoice")
+        OfflineModelConfig(
+          senseVoice = OfflineSenseVoiceModelConfig(
+            model = path(paths, "ctcModel"),
+            language = sv?.getString("language") ?: "",
+            useInverseTextNormalization = if (sv?.hasKey("useItn") == true) sv.getBoolean("useItn") else true
+          ),
+          tokens = path(paths, "tokens"),
+          modelType = "sense_voice"
+        )
+      }
       "zipformer_ctc", "ctc" -> OfflineModelConfig(
         zipformerCtc = OfflineZipformerCtcModelConfig(model = path(paths, "ctcModel")),
         tokens = path(paths, "tokens"),
         modelType = if (modelType == "ctc") "zipformer_ctc" else modelType
       )
-      "whisper" -> OfflineModelConfig(
-        whisper = OfflineWhisperModelConfig(
-          encoder = path(paths, "whisperEncoder"),
-          decoder = path(paths, "whisperDecoder")
-        ),
-        tokens = path(paths, "tokens"),
-        modelType = "whisper"
-      )
+      "whisper" -> {
+        val w = modelOptions?.getMap("whisper")
+        OfflineModelConfig(
+          whisper = OfflineWhisperModelConfig(
+            encoder = path(paths, "whisperEncoder"),
+            decoder = path(paths, "whisperDecoder"),
+            language = w?.getString("language") ?: "en",
+            task = w?.getString("task") ?: "transcribe",
+            tailPaddings = if (w?.hasKey("tailPaddings") == true) w.getInt("tailPaddings") else 1000,
+            enableTokenTimestamps = w?.hasKey("enableTokenTimestamps") == true && w.getBoolean("enableTokenTimestamps"),
+            enableSegmentTimestamps = w?.hasKey("enableSegmentTimestamps") == true && w.getBoolean("enableSegmentTimestamps")
+          ),
+          tokens = path(paths, "tokens"),
+          modelType = "whisper"
+        )
+      }
       "fire_red_asr" -> OfflineModelConfig(
         fireRedAsr = OfflineFireRedAsrModelConfig(
           encoder = path(paths, "fireRedEncoder"),
@@ -334,14 +352,20 @@ internal class SherpaOnnxSttHelper(
         tokens = path(paths, "tokens"),
         modelType = "dolphin"
       )
-      "canary" -> OfflineModelConfig(
-        canary = OfflineCanaryModelConfig(
-          encoder = path(paths, "canaryEncoder"),
-          decoder = path(paths, "canaryDecoder")
-        ),
-        tokens = path(paths, "tokens"),
-        modelType = "canary"
-      )
+      "canary" -> {
+        val c = modelOptions?.getMap("canary")
+        OfflineModelConfig(
+          canary = OfflineCanaryModelConfig(
+            encoder = path(paths, "canaryEncoder"),
+            decoder = path(paths, "canaryDecoder"),
+            srcLang = c?.getString("srcLang") ?: "en",
+            tgtLang = c?.getString("tgtLang") ?: "en",
+            usePnc = if (c?.hasKey("usePnc") == true) c.getBoolean("usePnc") else true
+          ),
+          tokens = path(paths, "tokens"),
+          modelType = "canary"
+        )
+      }
       "omnilingual" -> OfflineModelConfig(
         omnilingual = OfflineOmnilingualAsrCtcModelConfig(model = path(paths, "omnilingualModel")),
         tokens = path(paths, "tokens"),
@@ -357,15 +381,27 @@ internal class SherpaOnnxSttHelper(
         tokens = path(paths, "tokens"),
         modelType = "telespeech_ctc"
       )
-      "funasr_nano" -> OfflineModelConfig(
-        funasrNano = OfflineFunAsrNanoModelConfig(
-          encoderAdaptor = path(paths, "funasrEncoderAdaptor"),
-          llm = path(paths, "funasrLLM"),
-          embedding = path(paths, "funasrEmbedding"),
-          tokenizer = path(paths, "funasrTokenizer")
-        ),
-        tokens = ""
-      )
+      "funasr_nano" -> {
+        val fn = modelOptions?.getMap("funasrNano")
+        OfflineModelConfig(
+          funasrNano = OfflineFunAsrNanoModelConfig(
+            encoderAdaptor = path(paths, "funasrEncoderAdaptor"),
+            llm = path(paths, "funasrLLM"),
+            embedding = path(paths, "funasrEmbedding"),
+            tokenizer = path(paths, "funasrTokenizer"),
+            systemPrompt = fn?.getString("systemPrompt") ?: "You are a helpful assistant.",
+            userPrompt = fn?.getString("userPrompt") ?: "语音转写：",
+            maxNewTokens = if (fn?.hasKey("maxNewTokens") == true) fn.getInt("maxNewTokens") else 512,
+            temperature = if (fn?.hasKey("temperature") == true) fn.getDouble("temperature").toFloat() else 1e-6f,
+            topP = if (fn?.hasKey("topP") == true) fn.getDouble("topP").toFloat() else 0.8f,
+            seed = if (fn?.hasKey("seed") == true) fn.getInt("seed") else 42,
+            language = fn?.getString("language") ?: "",
+            itn = if (fn?.hasKey("itn") == true) fn.getBoolean("itn") else true,
+            hotwords = fn?.getString("hotwords") ?: ""
+          ),
+          tokens = ""
+        )
+      }
       else -> {
         val tokens = path(paths, "tokens")
         when {

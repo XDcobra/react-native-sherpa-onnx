@@ -47,6 +47,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             ruleFsts:(NSString *)ruleFsts
             ruleFars:(NSString *)ruleFars
               dither:(NSNumber *)dither
+         modelOptions:(NSDictionary *)modelOptions
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -106,9 +107,55 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             ditherOpt = [dither floatValue];
         }
 
+        // Parse model-specific options (only the block for the loaded model type is applied in C++).
+        sherpaonnx::SttWhisperOptions whisperOpts;
+        sherpaonnx::SttSenseVoiceOptions senseVoiceOpts;
+        sherpaonnx::SttCanaryOptions canaryOpts;
+        sherpaonnx::SttFunAsrNanoOptions funasrNanoOpts;
+        const sherpaonnx::SttWhisperOptions *whisperOptsPtr = nullptr;
+        const sherpaonnx::SttSenseVoiceOptions *senseVoiceOptsPtr = nullptr;
+        const sherpaonnx::SttCanaryOptions *canaryOptsPtr = nullptr;
+        const sherpaonnx::SttFunAsrNanoOptions *funasrNanoOptsPtr = nullptr;
+        if (modelOptions != nil && [modelOptions isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *w = modelOptions[@"whisper"];
+            if ([w isKindOfClass:[NSDictionary class]]) {
+                if (w[@"language"] != nil) whisperOpts.language = std::string([(NSString *)w[@"language"] UTF8String]);
+                if (w[@"task"] != nil) whisperOpts.task = std::string([(NSString *)w[@"task"] UTF8String]);
+                if (w[@"tailPaddings"] != nil) whisperOpts.tail_paddings = [(NSNumber *)w[@"tailPaddings"] intValue];
+                whisperOptsPtr = &whisperOpts;
+            }
+            NSDictionary *sv = modelOptions[@"senseVoice"];
+            if ([sv isKindOfClass:[NSDictionary class]]) {
+                if (sv[@"language"] != nil) senseVoiceOpts.language = std::string([(NSString *)sv[@"language"] UTF8String]);
+                if (sv[@"useItn"] != nil) senseVoiceOpts.use_itn = [(NSNumber *)sv[@"useItn"] boolValue];
+                senseVoiceOptsPtr = &senseVoiceOpts;
+            }
+            NSDictionary *c = modelOptions[@"canary"];
+            if ([c isKindOfClass:[NSDictionary class]]) {
+                if (c[@"srcLang"] != nil) canaryOpts.src_lang = std::string([(NSString *)c[@"srcLang"] UTF8String]);
+                if (c[@"tgtLang"] != nil) canaryOpts.tgt_lang = std::string([(NSString *)c[@"tgtLang"] UTF8String]);
+                if (c[@"usePnc"] != nil) canaryOpts.use_pnc = [(NSNumber *)c[@"usePnc"] boolValue];
+                canaryOptsPtr = &canaryOpts;
+            }
+            NSDictionary *fn = modelOptions[@"funasrNano"];
+            if ([fn isKindOfClass:[NSDictionary class]]) {
+                if (fn[@"systemPrompt"] != nil) funasrNanoOpts.system_prompt = std::string([(NSString *)fn[@"systemPrompt"] UTF8String]);
+                if (fn[@"userPrompt"] != nil) funasrNanoOpts.user_prompt = std::string([(NSString *)fn[@"userPrompt"] UTF8String]);
+                if (fn[@"maxNewTokens"] != nil) funasrNanoOpts.max_new_tokens = [(NSNumber *)fn[@"maxNewTokens"] intValue];
+                if (fn[@"temperature"] != nil) funasrNanoOpts.temperature = [(NSNumber *)fn[@"temperature"] floatValue];
+                if (fn[@"topP"] != nil) funasrNanoOpts.top_p = [(NSNumber *)fn[@"topP"] floatValue];
+                if (fn[@"seed"] != nil) funasrNanoOpts.seed = [(NSNumber *)fn[@"seed"] intValue];
+                if (fn[@"language"] != nil) funasrNanoOpts.language = std::string([(NSString *)fn[@"language"] UTF8String]);
+                if (fn[@"itn"] != nil) funasrNanoOpts.itn = [(NSNumber *)fn[@"itn"] boolValue];
+                if (fn[@"hotwords"] != nil) funasrNanoOpts.hotwords = std::string([(NSString *)fn[@"hotwords"] UTF8String]);
+                funasrNanoOptsPtr = &funasrNanoOpts;
+            }
+        }
+
         sherpaonnx::SttInitializeResult result = g_stt_wrapper->initialize(
             modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
-            numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt);
+            numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
+            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr);
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");

@@ -44,6 +44,39 @@ struct SttRuntimeConfigOptions {
     std::optional<std::string> rule_fars;
 };
 
+/** Model-specific options: Whisper (iOS: language, task, tail_paddings only). */
+struct SttWhisperOptions {
+    std::optional<std::string> language;
+    std::optional<std::string> task;
+    std::optional<int32_t> tail_paddings;
+};
+
+/** Model-specific options: SenseVoice. */
+struct SttSenseVoiceOptions {
+    std::optional<std::string> language;
+    std::optional<bool> use_itn;
+};
+
+/** Model-specific options: Canary. */
+struct SttCanaryOptions {
+    std::optional<std::string> src_lang;
+    std::optional<std::string> tgt_lang;
+    std::optional<bool> use_pnc;
+};
+
+/** Model-specific options: FunASR Nano. */
+struct SttFunAsrNanoOptions {
+    std::optional<std::string> system_prompt;
+    std::optional<std::string> user_prompt;
+    std::optional<int32_t> max_new_tokens;
+    std::optional<float> temperature;
+    std::optional<float> top_p;
+    std::optional<int32_t> seed;
+    std::optional<std::string> language;
+    std::optional<bool> itn;
+    std::optional<std::string> hotwords;
+};
+
 /**
  * Wrapper class for sherpa-onnx OfflineRecognizer (STT).
  */
@@ -63,7 +96,11 @@ public:
         const std::optional<std::string>& provider = std::nullopt,
         const std::optional<std::string>& ruleFsts = std::nullopt,
         const std::optional<std::string>& ruleFars = std::nullopt,
-        const std::optional<float>& dither = std::nullopt
+        const std::optional<float>& dither = std::nullopt,
+        const SttWhisperOptions* whisperOpts = nullptr,
+        const SttSenseVoiceOptions* senseVoiceOpts = nullptr,
+        const SttCanaryOptions* canaryOpts = nullptr,
+        const SttFunAsrNanoOptions* funasrNanoOpts = nullptr
     );
 
     SttRecognitionResult transcribeFile(const std::string& filePath);

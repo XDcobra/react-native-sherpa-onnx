@@ -58,7 +58,11 @@ SttInitializeResult SttWrapper::initialize(
     const std::optional<std::string>& provider,
     const std::optional<std::string>& ruleFsts,
     const std::optional<std::string>& ruleFars,
-    const std::optional<float>& dither
+    const std::optional<float>& dither,
+    const SttWhisperOptions* whisperOpts,
+    const SttSenseVoiceOptions* senseVoiceOpts,
+    const SttCanaryOptions* canaryOpts,
+    const SttFunAsrNanoOptions* funasrNanoOpts
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -149,6 +153,62 @@ SttInitializeResult SttWrapper::initialize(
 
         if (!detect.paths.tokens.empty()) {
             config.model_config.tokens = detect.paths.tokens;
+        }
+
+        // Apply model-specific options (only for the loaded model type).
+        switch (detect.selectedKind) {
+            case SttModelKind::kWhisper:
+                if (whisperOpts) {
+                    if (whisperOpts->language.has_value())
+                        config.model_config.whisper.language = *whisperOpts->language;
+                    if (whisperOpts->task.has_value())
+                        config.model_config.whisper.task = *whisperOpts->task;
+                    if (whisperOpts->tail_paddings.has_value())
+                        config.model_config.whisper.tail_paddings = *whisperOpts->tail_paddings;
+                }
+                break;
+            case SttModelKind::kSenseVoice:
+                if (senseVoiceOpts) {
+                    if (senseVoiceOpts->language.has_value())
+                        config.model_config.sense_voice.language = *senseVoiceOpts->language;
+                    if (senseVoiceOpts->use_itn.has_value())
+                        config.model_config.sense_voice.use_itn = *senseVoiceOpts->use_itn;
+                }
+                break;
+            case SttModelKind::kCanary:
+                if (canaryOpts) {
+                    if (canaryOpts->src_lang.has_value())
+                        config.model_config.canary.src_lang = *canaryOpts->src_lang;
+                    if (canaryOpts->tgt_lang.has_value())
+                        config.model_config.canary.tgt_lang = *canaryOpts->tgt_lang;
+                    if (canaryOpts->use_pnc.has_value())
+                        config.model_config.canary.use_pnc = *canaryOpts->use_pnc;
+                }
+                break;
+            case SttModelKind::kFunAsrNano:
+                if (funasrNanoOpts) {
+                    if (funasrNanoOpts->system_prompt.has_value())
+                        config.model_config.funasr_nano.system_prompt = *funasrNanoOpts->system_prompt;
+                    if (funasrNanoOpts->user_prompt.has_value())
+                        config.model_config.funasr_nano.user_prompt = *funasrNanoOpts->user_prompt;
+                    if (funasrNanoOpts->max_new_tokens.has_value())
+                        config.model_config.funasr_nano.max_new_tokens = *funasrNanoOpts->max_new_tokens;
+                    if (funasrNanoOpts->temperature.has_value())
+                        config.model_config.funasr_nano.temperature = *funasrNanoOpts->temperature;
+                    if (funasrNanoOpts->top_p.has_value())
+                        config.model_config.funasr_nano.top_p = *funasrNanoOpts->top_p;
+                    if (funasrNanoOpts->seed.has_value())
+                        config.model_config.funasr_nano.seed = *funasrNanoOpts->seed;
+                    if (funasrNanoOpts->language.has_value())
+                        config.model_config.funasr_nano.language = *funasrNanoOpts->language;
+                    if (funasrNanoOpts->itn.has_value())
+                        config.model_config.funasr_nano.itn = *funasrNanoOpts->itn;
+                    if (funasrNanoOpts->hotwords.has_value())
+                        config.model_config.funasr_nano.hotwords = *funasrNanoOpts->hotwords;
+                }
+                break;
+            default:
+                break;
         }
 
         config.decoding_method = "greedy_search";
