@@ -14,12 +14,13 @@ import { FlashList } from '@shopify/flash-list';
 import {
   deleteModelByCategory,
   downloadModelByCategory,
-  listDownloadedModelsByCategory,
+  listDownloadedModelsWithMetadata,
   refreshModelsByCategory,
   subscribeDownloadProgress,
   ModelCategory,
   type DownloadProgress,
   type ModelMetaBase,
+  type ModelWithMetadata,
   type Quantization,
   type SizeTier,
   type TtsModelMeta,
@@ -255,6 +256,7 @@ type DownloadedListItem = {
   isActive: boolean;
   isAborted?: boolean;
   progress?: DownloadProgress;
+  sizeOnDisk?: number;
 };
 const downloadAbortControllers = new Map<string, AbortController>();
 
@@ -280,7 +282,9 @@ export default function ModelManagementScreen() {
   const [category, setCategory] = useState<ModelCategory>(ModelCategory.Tts);
   const [models, setModels] = useState<ModelMetaBase[]>([]);
   const [filteredModels, setFilteredModels] = useState<ModelMetaBase[]>([]);
-  const [downloadedModels, setDownloadedModels] = useState<ModelMetaBase[]>([]);
+  const [downloadedModels, setDownloadedModels] = useState<
+    ModelWithMetadata<ModelMetaBase>[]
+  >([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -329,7 +333,7 @@ export default function ModelManagementScreen() {
   );
 
   const downloadedIds = useMemo(() => {
-    return new Set(downloadedModels.map((model) => model.id));
+    return new Set(downloadedModels.map((m) => m.model.id));
   }, [downloadedModels]);
 
   const modelsById = useMemo(() => {
@@ -358,10 +362,11 @@ export default function ModelManagementScreen() {
       (item) => !downloadedIds.has(item.id) && !progressById[item.id]
     );
 
-    const downloadedItems = downloadedModels.map((model) => ({
-      id: model.id,
-      displayName: model.displayName,
+    const downloadedItems = downloadedModels.map((item) => ({
+      id: item.model.id,
+      displayName: item.model.displayName,
       isActive: false,
+      sizeOnDisk: item.sizeOnDisk,
     }));
 
     return [
@@ -437,7 +442,7 @@ export default function ModelManagementScreen() {
   }, [sttModels]);
 
   const loadDownloaded = useCallback(async () => {
-    const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
+    const downloaded = await listDownloadedModelsWithMetadata<ModelMetaBase>(
       category
     );
     setDownloadedModels(downloaded);
@@ -1040,7 +1045,12 @@ export default function ModelManagementScreen() {
                             <Text style={styles.modelName}>
                               {model.displayName}
                             </Text>
-                            <Text style={styles.modelMeta}>{model.id}</Text>
+                            <Text style={styles.modelMeta}>
+                              {model.id}
+                              {model.sizeOnDisk != null
+                                ? ` · ${formatBytes(model.sizeOnDisk)}`
+                                : ''}
+                            </Text>
                             {model.isActive && activeProgress && (
                               <Text style={styles.modelMeta}>
                                 {formatProgressText(activeProgress)}
