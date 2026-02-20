@@ -36,6 +36,7 @@ import {
   unloadSTT,
   transcribeFile,
   detectSttModel,
+  sttSupportsHotwords,
   type STTModelType,
   type SttModelOptions,
 } from 'react-native-sherpa-onnx/stt';
@@ -163,6 +164,14 @@ export default function STTScreen() {
       effectiveModelTypeForOptions === 'sense_voice' ||
       effectiveModelTypeForOptions === 'canary' ||
       effectiveModelTypeForOptions === 'funasr_nano',
+    [effectiveModelTypeForOptions]
+  );
+
+  /** Hotwords are only supported for transducer models; hide options for Whisper, Paraformer, etc. */
+  const showHotwordsOptions = useMemo(
+    () =>
+      effectiveModelTypeForOptions != null &&
+      sttSupportsHotwords(effectiveModelTypeForOptions),
     [effectiveModelTypeForOptions]
   );
 
@@ -407,8 +416,13 @@ export default function STTScreen() {
           )}\nDetected models: ${detectedTypes}`
         );
 
-        // Auto-select first detected model
-        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+        // Auto-select first detected model (use result.modelType when available for consistency)
+        const loadedType =
+          (result as { modelType?: string }).modelType ??
+          normalizedDetected[0]?.type;
+        if (loadedType) {
+          setSelectedModelType(loadedType as STTModelType);
+        } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
           setSelectedModelType(normalizedDetected[0].type);
         }
       } else {
@@ -1019,70 +1033,76 @@ export default function STTScreen() {
                           </View>
                         </>
                       )}
-                      <Text style={styles.inputLabel}>
-                        Hotword files (optional)
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.addFilesButton}
-                        onPress={handlePickHotwordsFiles}
-                      >
-                        <Ionicons
-                          name="add-circle-outline"
-                          size={20}
-                          color="#007AFF"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.addFilesButtonText}>Add files</Text>
-                      </TouchableOpacity>
-                      {hotwordsFiles.length > 0 && (
-                        <View style={styles.pickedFilesList}>
-                          {hotwordsFiles.map((f, idx) => (
-                            <View
-                              key={`${f.path}-${idx}`}
-                              style={styles.pickedFileRow}
-                            >
-                              <Text
-                                style={styles.pickedFileName}
-                                numberOfLines={1}
-                                ellipsizeMode="middle"
-                              >
-                                {f.name}
-                              </Text>
-                              <TouchableOpacity
-                                hitSlop={{
-                                  top: 10,
-                                  bottom: 10,
-                                  left: 10,
-                                  right: 10,
-                                }}
-                                onPress={() =>
-                                  setHotwordsFiles((prev) =>
-                                    prev.filter((_, i) => i !== idx)
-                                  )
-                                }
-                                style={styles.pickedFileRemove}
-                              >
-                                <Ionicons
-                                  name="close-circle"
-                                  size={22}
-                                  color="#8E8E93"
-                                />
-                              </TouchableOpacity>
+                      {showHotwordsOptions && (
+                        <>
+                          <Text style={styles.inputLabel}>
+                            Hotword files (optional)
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.addFilesButton}
+                            onPress={handlePickHotwordsFiles}
+                          >
+                            <Ionicons
+                              name="add-circle-outline"
+                              size={20}
+                              color="#007AFF"
+                              style={styles.iconInline}
+                            />
+                            <Text style={styles.addFilesButtonText}>
+                              Add files
+                            </Text>
+                          </TouchableOpacity>
+                          {hotwordsFiles.length > 0 && (
+                            <View style={styles.pickedFilesList}>
+                              {hotwordsFiles.map((f, idx) => (
+                                <View
+                                  key={`${f.path}-${idx}`}
+                                  style={styles.pickedFileRow}
+                                >
+                                  <Text
+                                    style={styles.pickedFileName}
+                                    numberOfLines={1}
+                                    ellipsizeMode="middle"
+                                  >
+                                    {f.name}
+                                  </Text>
+                                  <TouchableOpacity
+                                    hitSlop={{
+                                      top: 10,
+                                      bottom: 10,
+                                      left: 10,
+                                      right: 10,
+                                    }}
+                                    onPress={() =>
+                                      setHotwordsFiles((prev) =>
+                                        prev.filter((_, i) => i !== idx)
+                                      )
+                                    }
+                                    style={styles.pickedFileRemove}
+                                  >
+                                    <Ionicons
+                                      name="close-circle"
+                                      size={22}
+                                      color="#8E8E93"
+                                    />
+                                  </TouchableOpacity>
+                                </View>
+                              ))}
                             </View>
-                          ))}
-                        </View>
+                          )}
+                          <Text style={styles.inputLabel}>
+                            Hotwords score (optional)
+                          </Text>
+                          <TextInput
+                            style={styles.parameterInput}
+                            value={hotwordsScore}
+                            onChangeText={setHotwordsScore}
+                            keyboardType="decimal-pad"
+                            placeholder="e.g. 1.5"
+                            placeholderTextColor="#8E8E93"
+                          />
+                        </>
                       )}
-                      <Text style={styles.inputLabel}>
-                        Hotwords score (optional)
-                      </Text>
-                      <TextInput
-                        style={styles.parameterInput}
-                        value={hotwordsScore}
-                        onChangeText={setHotwordsScore}
-                        keyboardType="decimal-pad"
-                        placeholder="e.g. 1.5"
-                        placeholderTextColor="#8E8E93"
-                      />
                       <Text style={styles.inputLabel}>Provider (optional)</Text>
                       <TextInput
                         style={styles.parameterInput}
