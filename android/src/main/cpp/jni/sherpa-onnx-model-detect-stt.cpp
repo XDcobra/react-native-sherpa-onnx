@@ -139,33 +139,37 @@ SttDetectResult DetectSttModel(
     bool hasFunAsrTokenizer = !funasrTokenizerDir.empty() && FileExists(funasrTokenizerDir + "/vocab.json");
     bool hasFunAsrNano = hasFunAsrEncoderAdaptor && hasFunAsrLLM && hasFunAsrEmbedding && hasFunAsrTokenizer;
 
-    bool isLikelyNemo = modelDir.find("nemo") != std::string::npos ||
-                        modelDir.find("parakeet") != std::string::npos;
-    bool isLikelyWenetCtc = modelDir.find("wenet") != std::string::npos;
-    bool isLikelySenseVoice = modelDir.find("sense") != std::string::npos ||
-                              modelDir.find("sensevoice") != std::string::npos;
-    bool isLikelyFunAsrNano = modelDir.find("funasr") != std::string::npos ||
-                              modelDir.find("funasr-nano") != std::string::npos;
-    bool isLikelyMoonshine = modelDir.find("moonshine") != std::string::npos;
-    bool isLikelyDolphin = modelDir.find("dolphin") != std::string::npos;
-    bool isLikelyFireRedAsr = modelDir.find("fire_red") != std::string::npos ||
-                              modelDir.find("fire-red") != std::string::npos;
-    bool isLikelyCanary = modelDir.find("canary") != std::string::npos;
-    bool isLikelyOmnilingual = modelDir.find("omnilingual") != std::string::npos;
-    bool isLikelyMedAsr = modelDir.find("medasr") != std::string::npos;
-    bool isLikelyTeleSpeech = modelDir.find("telespeech") != std::string::npos;
+    // Case-insensitive path hints so "Nemo parakeet Tdt CTC 110m EN" etc. are recognized
+    std::string modelDirLower = model_detect::ToLower(modelDir);
+    bool isLikelyNemo = modelDirLower.find("nemo") != std::string::npos ||
+                        modelDirLower.find("parakeet") != std::string::npos;
+    bool isLikelyTdt = modelDirLower.find("tdt") != std::string::npos;
+    bool isLikelyWenetCtc = modelDirLower.find("wenet") != std::string::npos;
+    bool isLikelySenseVoice = modelDirLower.find("sense") != std::string::npos ||
+                              modelDirLower.find("sensevoice") != std::string::npos;
+    bool isLikelyFunAsrNano = modelDirLower.find("funasr") != std::string::npos ||
+                              modelDirLower.find("funasr-nano") != std::string::npos;
+    bool isLikelyMoonshine = modelDirLower.find("moonshine") != std::string::npos;
+    bool isLikelyDolphin = modelDirLower.find("dolphin") != std::string::npos;
+    bool isLikelyFireRedAsr = modelDirLower.find("fire_red") != std::string::npos ||
+                              modelDirLower.find("fire-red") != std::string::npos;
+    bool isLikelyCanary = modelDirLower.find("canary") != std::string::npos;
+    bool isLikelyOmnilingual = modelDirLower.find("omnilingual") != std::string::npos;
+    bool isLikelyMedAsr = modelDirLower.find("medasr") != std::string::npos;
+    bool isLikelyTeleSpeech = modelDirLower.find("telespeech") != std::string::npos;
 
     bool hasMoonshine = !moonshinePreprocessor.empty() && !moonshineUncachedDecoder.empty() &&
                         !moonshineCachedDecoder.empty() && !moonshineEncoder.empty();
     bool hasDolphin = isLikelyDolphin && !ctcModelPath.empty();
     bool hasFireRedAsr = hasTransducer && isLikelyFireRedAsr;
-    bool hasCanary = hasTransducer && isLikelyCanary;
+    // Canary (NeMo Canary) uses encoder + decoder without joiner; same file pattern as Whisper but path contains "canary"
+    bool hasCanary = hasWhisperEncoder && hasWhisperDecoder && joinerPath.empty() && isLikelyCanary;
     bool hasOmnilingual = !ctcModelPath.empty() && isLikelyOmnilingual;
     bool hasMedAsr = !ctcModelPath.empty() && isLikelyMedAsr;
     bool hasTeleSpeechCtc = (!ctcModelPath.empty() || !paraformerModelPath.empty()) && isLikelyTeleSpeech;
 
     if (hasTransducer) {
-        if (isLikelyNemo) {
+        if (isLikelyNemo || isLikelyTdt) {
             result.detectedModels.push_back({"nemo_transducer", modelDir});
         } else {
             result.detectedModels.push_back({"transducer", modelDir});
@@ -280,7 +284,7 @@ SttDetectResult DetectSttModel(
         }
     } else {
         if (hasTransducer) {
-            selected = isLikelyNemo ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
+            selected = (isLikelyNemo || isLikelyTdt) ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
         } else if (!ctcModelPath.empty() && (isLikelyNemo || isLikelyWenetCtc || isLikelySenseVoice)) {
             if (isLikelyNemo) {
                 selected = SttModelKind::kNemoCtc;
@@ -293,6 +297,10 @@ SttDetectResult DetectSttModel(
             selected = SttModelKind::kFunAsrNano;
         } else if (!paraformerModelPath.empty()) {
             selected = SttModelKind::kParaformer;
+        } else if (hasCanary) {
+            selected = SttModelKind::kCanary;
+        } else if (hasFireRedAsr) {
+            selected = SttModelKind::kFireRedAsr;
         } else if (hasWhisper) {
             selected = SttModelKind::kWhisper;
         } else if (hasFunAsrNano) {
@@ -301,10 +309,6 @@ SttDetectResult DetectSttModel(
             selected = SttModelKind::kMoonshine;
         } else if (hasDolphin) {
             selected = SttModelKind::kDolphin;
-        } else if (hasFireRedAsr) {
-            selected = SttModelKind::kFireRedAsr;
-        } else if (hasCanary) {
-            selected = SttModelKind::kCanary;
         } else if (hasOmnilingual) {
             selected = SttModelKind::kOmnilingual;
         } else if (hasMedAsr) {
