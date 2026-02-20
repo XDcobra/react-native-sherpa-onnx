@@ -180,9 +180,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ruleFars: String?,
     dither: Double?,
     modelOptions: ReadableMap?,
+    modelingUnit: String?,
+    bpeVocab: String?,
     promise: Promise
   ) {
-    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, promise)
+    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
   }
 
   /**

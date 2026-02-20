@@ -192,6 +192,20 @@ export interface STTInitializeOptions {
   hotwordsScore?: number;
 
   /**
+   * Modeling unit for hotwords tokenization (Kotlin OfflineModelConfig.modelingUnit).
+   * Only used when hotwords are set and model is transducer/nemo_transducer.
+   * Must match how the model was trained: 'bpe' (e.g. English zipformer), 'cjkchar' (e.g. Chinese conformer), 'cjkchar+bpe' (bilingual zh-en).
+   * See docs/stt.md "When to use which modelingUnit" and sherpa-onnx hotwords docs.
+   */
+  modelingUnit?: 'cjkchar' | 'bpe' | 'cjkchar+bpe';
+
+  /**
+   * Path to BPE vocabulary file for hotwords (Kotlin OfflineModelConfig.bpeVocab).
+   * Required when modelingUnit is 'bpe' or 'cjkchar+bpe'. Sentencepiece .vocab export (bpe.vocab), not the hotwords file.
+   */
+  bpeVocab?: string;
+
+  /**
    * Number of threads for inference (Kotlin OfflineModelConfig.numThreads).
    * Default in Kotlin: 1.
    */

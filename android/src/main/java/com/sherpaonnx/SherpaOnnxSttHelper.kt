@@ -130,6 +130,13 @@ internal class SherpaOnnxSttHelper(
         val score = afterScore.toFloatOrNull()
         if (score == null) return "Invalid hotword line (score must be a number after ' :'): ${line.take(60)}…"
         line.substring(0, lastColon).trim()
+      } else if (line.contains('\t')) {
+        // Likely sentencepiece .vocab format (token<TAB>score); hotwords use " :score" and one word/phrase per line.
+        val afterTab = line.substringAfter('\t').trim()
+        if (afterTab.toFloatOrNull() != null) {
+          return "This file looks like a sentencepiece .vocab file (token<TAB>score). Use a hotwords file instead: one word or phrase per line, optional ' :score' at end."
+        }
+        line
       } else line
       if (hotwordPart.isEmpty()) return "Invalid hotword line (empty hotword): ${line.take(60)}…"
       if (!hotwordPart.any { it.isLetter() }) return "Invalid hotword line (must contain at least one letter): ${line.take(60)}…"
@@ -152,6 +159,8 @@ internal class SherpaOnnxSttHelper(
     ruleFars: String?,
     dither: Double?,
     modelOptions: ReadableMap?,
+    modelingUnit: String?,
+    bpeVocab: String?,
     promise: Promise
   ) {
     try {
@@ -273,7 +282,9 @@ internal class SherpaOnnxSttHelper(
         ruleFsts = resolvedRuleFsts,
         ruleFars = resolvedRuleFars,
         dither = dither?.toFloat() ?: 0f,
-        modelOptions = modelOptions
+        modelOptions = modelOptions,
+        modelingUnit = modelingUnit?.trim().orEmpty(),
+        bpeVocab = bpeVocab?.trim().orEmpty()
       )
       lastRecognizerConfig = config
       currentSttModelType = modelTypeStr
@@ -522,7 +533,9 @@ internal class SherpaOnnxSttHelper(
     ruleFsts: String = "",
     ruleFars: String = "",
     dither: Float = 0f,
-    modelOptions: ReadableMap? = null
+    modelOptions: ReadableMap? = null,
+    modelingUnit: String = "",
+    bpeVocab: String = ""
   ): OfflineRecognizerConfig {
     val featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = dither)
     val modelConfig = when (modelType) {
@@ -682,9 +695,12 @@ internal class SherpaOnnxSttHelper(
         }
       }
     }
+    val effectiveBpeVocab = bpeVocab.ifEmpty { path(paths, "bpeVocab") }
     val finalModelConfig = modelConfig.copy(
       numThreads = numThreads ?: 1,
-      provider = provider ?: "cpu"
+      provider = provider ?: "cpu",
+      modelingUnit = modelingUnit,
+      bpeVocab = effectiveBpeVocab
     )
     val baseConfig = OfflineRecognizerConfig(
       featConfig = featConfig,

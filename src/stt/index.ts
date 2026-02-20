@@ -114,6 +114,8 @@ export async function initializeSTT(
   let ruleFars: string | undefined;
   let dither: number | undefined;
   let modelOptions: SttModelOptions | undefined;
+  let modelingUnit: string | undefined;
+  let bpeVocab: string | undefined;
 
   if ('modelPath' in options) {
     modelPath = options.modelPath;
@@ -127,6 +129,8 @@ export async function initializeSTT(
     ruleFars = options.ruleFars;
     dither = options.dither;
     modelOptions = options.modelOptions;
+    modelingUnit = options.modelingUnit;
+    bpeVocab = options.bpeVocab;
   } else {
     modelPath = options;
     preferInt8 = undefined;
@@ -139,6 +143,8 @@ export async function initializeSTT(
     ruleFars = undefined;
     dither = undefined;
     modelOptions = undefined;
+    modelingUnit = undefined;
+    bpeVocab = undefined;
   }
 
   const debug = 'modelPath' in options ? options.debug : undefined;
@@ -155,7 +161,9 @@ export async function initializeSTT(
     ruleFsts,
     ruleFars,
     dither,
-    modelOptions
+    modelOptions,
+    modelingUnit,
+    bpeVocab
   );
 }
 

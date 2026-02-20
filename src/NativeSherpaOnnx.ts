@@ -23,6 +23,8 @@ export interface Spec extends TurboModule {
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
    * @param dither - Optional: dither for feature extraction (default 0)
    * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
+   * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
+   * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeStt(
@@ -37,7 +39,9 @@ export interface Spec extends TurboModule {
     ruleFsts?: string,
     ruleFars?: string,
     dither?: number,
-    modelOptions?: Object
+    modelOptions?: Object,
+    modelingUnit?: string,
+    bpeVocab?: string
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
