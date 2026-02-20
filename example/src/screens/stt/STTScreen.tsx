@@ -91,15 +91,20 @@ export default function STTScreen() {
   const [showThreadPicker, setShowThreadPicker] = useState(false);
   const [showModelTypePicker, setShowModelTypePicker] = useState(false);
   const [optionsExpanded, setOptionsExpanded] = useState(false);
-  const [preferInt8, setPreferInt8] = useState<'default' | 'true' | 'false'>(
-    'default'
-  );
   const [modelTypeOption, setModelTypeOption] = useState<string>('auto');
   const [debug, setDebug] = useState(false);
   const [hotwordsFiles, setHotwordsFiles] = useState<
     Array<{ path: string; name: string }>
   >([]);
   const [hotwordsScore, setHotwordsScore] = useState('');
+  const [hotwordsSectionExpanded, setHotwordsSectionExpanded] = useState(true);
+  const [modelingUnit, setModelingUnit] = useState<
+    '' | 'cjkchar' | 'bpe' | 'cjkchar+bpe'
+  >('');
+  const [bpeVocabFile, setBpeVocabFile] = useState<{
+    path: string;
+    name: string;
+  } | null>(null);
   const [provider, setProvider] = useState('');
   const [ruleFstPaths, setRuleFstPaths] = useState<
     Array<{ path: string; name: string }>
@@ -147,9 +152,10 @@ export default function STTScreen() {
   }, [sttThreadOptions, sttThreadOption, cpuCoreCount]);
 
   // Model-specific options: show as soon as a model is selected (before or after init).
-  // After init: use selectedModelType. Before init: use native detectSttModel result (detectedTypeForSelectedFolder), else modelTypeOption if not 'auto'.
+  // When the selected-for-init model is the same as the loaded one: use selectedModelType.
+  // When the user selected a different model (or none): use detected type for that selection so hotword/options match the model they are about to init.
   const effectiveModelTypeForOptions =
-    currentModelFolder != null
+    currentModelFolder != null && selectedModelForInit === currentModelFolder
       ? selectedModelType
       : selectedModelForInit != null
       ? detectedTypeForSelectedFolder ??
@@ -175,6 +181,18 @@ export default function STTScreen() {
     [effectiveModelTypeForOptions]
   );
 
+  // Clear hotwords (and related options) when user selects a model that doesn't support them.
+  useEffect(() => {
+    if (
+      effectiveModelTypeForOptions != null &&
+      !sttSupportsHotwords(effectiveModelTypeForOptions) &&
+      (hotwordsFiles.length > 0 || bpeVocabFile != null)
+    ) {
+      setHotwordsFiles([]);
+      setBpeVocabFile(null);
+    }
+  }, [effectiveModelTypeForOptions, hotwordsFiles.length, bpeVocabFile]);
+
   // When user selects a model folder (before init), run native detection to get model type for model-specific options.
   useEffect(() => {
     if (!selectedModelForInit) {
@@ -190,8 +208,6 @@ export default function STTScreen() {
         ? getFileModelPath(folder, ModelCategory.Stt, padModelsPath)
         : getFileModelPath(folder, ModelCategory.Stt)
       : getAssetModelPath(folder);
-    const preferInt8Value =
-      preferInt8 === 'true' ? true : preferInt8 === 'false' ? false : undefined;
     const modelTypeValue =
       modelTypeOption === 'auto'
         ? undefined
@@ -200,7 +216,6 @@ export default function STTScreen() {
     setDetectingModelType(true);
     setDetectedTypeForSelectedFolder(null);
     detectSttModel(modelPath, {
-      preferInt8: preferInt8Value,
       modelType: modelTypeValue,
     })
       .then((result) => {
@@ -228,7 +243,6 @@ export default function STTScreen() {
     downloadedModelIds,
     padModelIds,
     padModelsPath,
-    preferInt8,
     modelTypeOption,
   ]);
 
@@ -365,12 +379,6 @@ export default function STTScreen() {
           : getFileModelPath(modelFolder, ModelCategory.Stt)
         : getAssetModelPath(modelFolder);
 
-      const preferInt8Value =
-        preferInt8 === 'true'
-          ? true
-          : preferInt8 === 'false'
-          ? false
-          : undefined;
       const modelTypeValue =
         modelTypeOption === 'auto'
           ? undefined
@@ -378,15 +386,34 @@ export default function STTScreen() {
       const hotwordsScoreTrim = hotwordsScore.trim();
       const ditherTrim = dither.trim();
 
+      // Only pass hotwords when the model we're initializing supports them (transducer / nemo_transducer).
+      const modelTypeForInit: STTModelType | null =
+        currentModelFolder != null && modelFolder === currentModelFolder
+          ? selectedModelType
+          : detectedTypeForSelectedFolder ??
+            (modelTypeOption !== 'auto'
+              ? (modelTypeOption as STTModelType)
+              : null);
+      const passHotwords =
+        modelTypeForInit != null && sttSupportsHotwords(modelTypeForInit);
+
       const result = await initializeSTT({
         modelPath,
         numThreads: sttNumThreads,
-        preferInt8: preferInt8Value,
         modelType: modelTypeValue,
         debug,
-        hotwordsFile: hotwordsFiles[0]?.path ?? undefined,
+        hotwordsFile: passHotwords
+          ? hotwordsFiles[0]?.path ?? undefined
+          : undefined,
         hotwordsScore:
-          hotwordsScoreTrim !== '' ? parseFloat(hotwordsScoreTrim) : undefined,
+          passHotwords && hotwordsScoreTrim !== ''
+            ? parseFloat(hotwordsScoreTrim)
+            : undefined,
+        modelingUnit:
+          passHotwords && modelingUnit.trim() !== ''
+            ? (modelingUnit as 'cjkchar' | 'bpe' | 'cjkchar+bpe')
+            : undefined,
+        bpeVocab: passHotwords ? bpeVocabFile?.path ?? undefined : undefined,
         provider: provider.trim() || undefined,
         ruleFsts:
           ruleFstPaths.length > 0
@@ -600,6 +627,27 @@ export default function STTScreen() {
       )
         return;
       console.warn('Hotwords pick error:', err);
+    }
+  };
+
+  const handlePickBpeVocabFile = async () => {
+    try {
+      const res = await DocumentPicker.pick({
+        allowMultiSelection: false,
+        type: ['*/*'],
+      });
+      const files = normalizePickedFiles(res);
+      if (files.length > 0) {
+        setBpeVocabFile(files[0] ?? null);
+      }
+    } catch (err: any) {
+      if (
+        (DocumentPicker as any).isCancel?.(err) ||
+        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        err?.name === 'DocumentPickerCanceled'
+      )
+        return;
+      console.warn('BPE vocab pick error:', err);
     }
   };
 
@@ -889,33 +937,6 @@ export default function STTScreen() {
                   </TouchableOpacity>
                   {optionsExpanded && (
                     <View style={styles.optionsContent}>
-                      <Text style={styles.inputLabel}>Prefer int8</Text>
-                      <View style={styles.optionsRow}>
-                        {(['default', 'true', 'false'] as const).map((val) => (
-                          <TouchableOpacity
-                            key={val}
-                            style={[
-                              styles.optionsChip,
-                              preferInt8 === val && styles.optionsChipActive,
-                            ]}
-                            onPress={() => setPreferInt8(val)}
-                          >
-                            <Text
-                              style={[
-                                styles.optionsChipText,
-                                preferInt8 === val &&
-                                  styles.optionsChipTextActive,
-                              ]}
-                            >
-                              {val === 'default'
-                                ? 'Default'
-                                : val === 'true'
-                                ? 'Yes'
-                                : 'No'}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
                       <Text style={styles.inputLabel}>Model type</Text>
                       <TouchableOpacity
                         style={styles.dropdownTrigger}
@@ -1041,74 +1062,180 @@ export default function STTScreen() {
                         </>
                       )}
                       {showHotwordsOptions && (
-                        <>
-                          <Text style={styles.inputLabel}>
-                            Hotword files (optional)
-                          </Text>
+                        <View style={styles.hotwordsSection}>
                           <TouchableOpacity
-                            style={styles.addFilesButton}
-                            onPress={handlePickHotwordsFiles}
+                            style={styles.hotwordsSectionHeader}
+                            onPress={() =>
+                              setHotwordsSectionExpanded((e) => !e)
+                            }
+                            activeOpacity={0.7}
                           >
-                            <Ionicons
-                              name="add-circle-outline"
-                              size={20}
-                              color="#007AFF"
-                              style={styles.iconInline}
-                            />
-                            <Text style={styles.addFilesButtonText}>
-                              Add files
+                            <Text style={styles.hotwordsSectionTitle}>
+                              Hotword options
                             </Text>
+                            <Ionicons
+                              name={
+                                hotwordsSectionExpanded
+                                  ? 'chevron-up'
+                                  : 'chevron-down'
+                              }
+                              size={22}
+                              color="#8E8E93"
+                            />
                           </TouchableOpacity>
-                          {hotwordsFiles.length > 0 && (
-                            <View style={styles.pickedFilesList}>
-                              {hotwordsFiles.map((f, idx) => (
-                                <View
-                                  key={`${f.path}-${idx}`}
-                                  style={styles.pickedFileRow}
-                                >
-                                  <Text
-                                    style={styles.pickedFileName}
-                                    numberOfLines={1}
-                                    ellipsizeMode="middle"
-                                  >
-                                    {f.name}
-                                  </Text>
+                          {hotwordsSectionExpanded && (
+                            <View style={styles.hotwordsSectionContent}>
+                              <Text style={styles.inputLabel}>
+                                Hotword files (optional)
+                              </Text>
+                              <TouchableOpacity
+                                style={styles.addFilesButton}
+                                onPress={handlePickHotwordsFiles}
+                              >
+                                <Ionicons
+                                  name="add-circle-outline"
+                                  size={20}
+                                  color="#007AFF"
+                                  style={styles.iconInline}
+                                />
+                                <Text style={styles.addFilesButtonText}>
+                                  Add files
+                                </Text>
+                              </TouchableOpacity>
+                              {hotwordsFiles.length > 0 && (
+                                <View style={styles.pickedFilesList}>
+                                  {hotwordsFiles.map((f, idx) => (
+                                    <View
+                                      key={`${f.path}-${idx}`}
+                                      style={styles.pickedFileRow}
+                                    >
+                                      <Text
+                                        style={styles.pickedFileName}
+                                        numberOfLines={1}
+                                        ellipsizeMode="middle"
+                                      >
+                                        {f.name}
+                                      </Text>
+                                      <TouchableOpacity
+                                        hitSlop={{
+                                          top: 10,
+                                          bottom: 10,
+                                          left: 10,
+                                          right: 10,
+                                        }}
+                                        onPress={() =>
+                                          setHotwordsFiles((prev) =>
+                                            prev.filter((_, i) => i !== idx)
+                                          )
+                                        }
+                                        style={styles.pickedFileRemove}
+                                      >
+                                        <Ionicons
+                                          name="close-circle"
+                                          size={22}
+                                          color="#8E8E93"
+                                        />
+                                      </TouchableOpacity>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                              <Text style={styles.inputLabel}>
+                                Hotwords score (optional)
+                              </Text>
+                              <TextInput
+                                style={styles.parameterInput}
+                                value={hotwordsScore}
+                                onChangeText={setHotwordsScore}
+                                keyboardType="decimal-pad"
+                                placeholder="e.g. 1.5"
+                                placeholderTextColor="#8E8E93"
+                              />
+                              <Text style={styles.inputLabel}>
+                                Modeling unit (optional)
+                              </Text>
+                              <View style={styles.optionsRow}>
+                                {(
+                                  [
+                                    ['', 'Default'],
+                                    ['cjkchar', 'cjkchar'],
+                                    ['bpe', 'bpe'],
+                                    ['cjkchar+bpe', 'cjkchar+bpe'],
+                                  ] as const
+                                ).map(([value, label]) => (
                                   <TouchableOpacity
-                                    hitSlop={{
-                                      top: 10,
-                                      bottom: 10,
-                                      left: 10,
-                                      right: 10,
-                                    }}
+                                    key={value || 'default'}
+                                    style={[
+                                      styles.optionsChip,
+                                      modelingUnit === value &&
+                                        styles.optionsChipActive,
+                                    ]}
                                     onPress={() =>
-                                      setHotwordsFiles((prev) =>
-                                        prev.filter((_, i) => i !== idx)
+                                      setModelingUnit(
+                                        value as
+                                          | ''
+                                          | 'cjkchar'
+                                          | 'bpe'
+                                          | 'cjkchar+bpe'
                                       )
                                     }
-                                    style={styles.pickedFileRemove}
                                   >
-                                    <Ionicons
-                                      name="close-circle"
-                                      size={22}
-                                      color="#8E8E93"
-                                    />
+                                    <Text
+                                      style={[
+                                        styles.optionsChipText,
+                                        modelingUnit === value &&
+                                          styles.optionsChipTextActive,
+                                      ]}
+                                    >
+                                      {label}
+                                    </Text>
                                   </TouchableOpacity>
-                                </View>
-                              ))}
+                                ))}
+                              </View>
+                              <Text style={styles.inputLabel}>
+                                BPE vocab file (optional)
+                              </Text>
+                              <Text style={styles.inputHint}>
+                                For bpe / cjkchar+bpe. Use sentencepiece
+                                bpe.vocab, not the hotwords file.
+                              </Text>
+                              <TouchableOpacity
+                                style={styles.addFilesButton}
+                                onPress={handlePickBpeVocabFile}
+                              >
+                                <Ionicons
+                                  name="add-circle-outline"
+                                  size={20}
+                                  color="#007AFF"
+                                  style={styles.iconInline}
+                                />
+                                <Text style={styles.addFilesButtonText}>
+                                  {bpeVocabFile
+                                    ? bpeVocabFile.name
+                                    : 'Select bpe.vocab'}
+                                </Text>
+                              </TouchableOpacity>
+                              {bpeVocabFile && (
+                                <TouchableOpacity
+                                  hitSlop={{
+                                    top: 10,
+                                    bottom: 10,
+                                    left: 10,
+                                    right: 10,
+                                  }}
+                                  onPress={() => setBpeVocabFile(null)}
+                                  style={styles.pickedFileRemove}
+                                >
+                                  <Ionicons
+                                    name="close-circle"
+                                    size={22}
+                                    color="#8E8E93"
+                                  />
+                                </TouchableOpacity>
+                              )}
                             </View>
                           )}
-                          <Text style={styles.inputLabel}>
-                            Hotwords score (optional)
-                          </Text>
-                          <TextInput
-                            style={styles.parameterInput}
-                            value={hotwordsScore}
-                            onChangeText={setHotwordsScore}
-                            keyboardType="decimal-pad"
-                            placeholder="e.g. 1.5"
-                            placeholderTextColor="#8E8E93"
-                          />
-                        </>
+                        </View>
                       )}
                       <Text style={styles.inputLabel}>Provider (optional)</Text>
                       <TextInput
@@ -2389,6 +2516,37 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginBottom: 8,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#6d6d72',
+    marginBottom: 8,
+  },
+  hotwordsSection: {
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#FAFAFA',
+  },
+  hotwordsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  hotwordsSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  hotwordsSectionContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#e8e8e8',
   },
   dropdownTrigger: {
     flexDirection: 'row',
