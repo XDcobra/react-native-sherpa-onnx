@@ -16,6 +16,10 @@ namespace sherpaonnx {
 struct SttInitializeResult {
     bool success;
     std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+    /** When success is false, optional error message (e.g. HOTWORDS_NOT_SUPPORTED). */
+    std::string error;
+    /** Loaded model type (e.g. "whisper", "transducer") for JS modelType in init result. */
+    std::string modelType;
 };
 
 /**

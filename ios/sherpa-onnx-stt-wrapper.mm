@@ -29,11 +29,17 @@ namespace fs = std::filesystem;
 
 namespace sherpaonnx {
 
+// Hotwords are only supported for transducer models (sherpa-onnx limitation).
+static bool SupportsHotwords(sherpaonnx::SttModelKind kind) {
+    return kind == sherpaonnx::SttModelKind::kTransducer || kind == sherpaonnx::SttModelKind::kNemoTransducer;
+}
+
 // PIMPL pattern implementation
 class SttWrapper::Impl {
 public:
     bool initialized = false;
     std::string modelDir;
+    sherpaonnx::SttModelKind currentModelKind = sherpaonnx::SttModelKind::kUnknown;
     std::optional<sherpa_onnx::cxx::OfflineRecognizer> recognizer;
     std::optional<sherpa_onnx::cxx::OfflineRecognizerConfig> lastConfig;
 };
@@ -211,6 +217,15 @@ SttInitializeResult SttWrapper::initialize(
                 break;
         }
 
+        if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
+            if (!SupportsHotwords(detect.selectedKind)) {
+                result.success = false;
+                result.error = "HOTWORDS_NOT_SUPPORTED: Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type is not transducer.";
+                LOGE("%s", result.error.c_str());
+                return result;
+            }
+        }
+
         config.decoding_method = "greedy_search";
         config.model_config.num_threads = numThreads.value_or(1);
         config.model_config.provider = provider.value_or("cpu");
@@ -243,10 +258,12 @@ SttInitializeResult SttWrapper::initialize(
 
         pImpl->lastConfig = config;
         pImpl->modelDir = modelDir;
+        pImpl->currentModelKind = detect.selectedKind;
         pImpl->initialized = true;
 
         result.success = true;
         result.detectedModels = detect.detectedModels;
+        result.modelType = detect.detectedModels.empty() ? "" : detect.detectedModels[0].type;
         return result;
     } catch (const std::exception& e) {
         LOGE("Exception during initialization: %s", e.what());
@@ -372,6 +389,12 @@ void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
     auto& config = pImpl->lastConfig.value();
+    if (options.hotwords_file.has_value() && !options.hotwords_file->empty()) {
+        if (!SupportsHotwords(pImpl->currentModelKind)) {
+            LOGE("Hotwords are only supported for transducer models.");
+            throw std::runtime_error("HOTWORDS_NOT_SUPPORTED: Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type is not transducer.");
+        }
+    }
     if (options.decoding_method.has_value()) config.decoding_method = *options.decoding_method;
     if (options.max_active_paths.has_value()) config.max_active_paths = *options.max_active_paths;
     if (options.hotwords_file.has_value()) config.hotwords_file = *options.hotwords_file;
@@ -392,6 +415,7 @@ void SttWrapper::release() {
         pImpl->lastConfig.reset();
         pImpl->initialized = false;
         pImpl->modelDir.clear();
+        pImpl->currentModelKind = sherpaonnx::SttModelKind::kUnknown;
     }
 }
 

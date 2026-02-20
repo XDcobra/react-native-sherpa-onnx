@@ -45,6 +45,14 @@ internal class SherpaOnnxSttHelper(
   @Volatile
   private var lastRecognizerConfig: OfflineRecognizerConfig? = null
 
+  /** Model type from last successful init; used to validate hotwords in setSttConfig. */
+  @Volatile
+  private var currentSttModelType: String? = null
+
+  /** Hotwords are only supported for transducer models (sherpa-onnx limitation). */
+  private fun supportsHotwords(modelType: String): Boolean =
+    modelType == "transducer" || modelType == "nemo_transducer"
+
   fun initializeStt(
     modelDir: String,
     preferInt8: Boolean?,
@@ -117,12 +125,20 @@ internal class SherpaOnnxSttHelper(
       val pathStrings = paths.mapValues { (_, v) -> (v as? String).orEmpty() }.mapKeys { it.key.toString() }
       val modelTypeStr = result["modelType"] as? String ?: "unknown"
 
+      val hotwordsFileTrimmed = hotwordsFile?.trim().orEmpty()
+      if (hotwordsFileTrimmed.isNotEmpty() && !supportsHotwords(modelTypeStr)) {
+        val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: $modelTypeStr"
+        Log.e(logTag, errorMsg)
+        CrashlyticsHelper.rejectWithCrashlytics(promise, "HOTWORDS_NOT_SUPPORTED", errorMsg, feature = "stt")
+        return
+      }
+
       recognizer?.release()
       recognizer = null
       val config = buildRecognizerConfig(
         pathStrings,
         modelTypeStr,
-        hotwordsFile = hotwordsFile.orEmpty(),
+        hotwordsFile = hotwordsFileTrimmed,
         hotwordsScore = hotwordsScore?.toFloat() ?: 1.5f,
         numThreads = numThreads?.toInt(),
         provider = provider,
@@ -132,10 +148,12 @@ internal class SherpaOnnxSttHelper(
         modelOptions = modelOptions
       )
       lastRecognizerConfig = config
+      currentSttModelType = modelTypeStr
       recognizer = OfflineRecognizer(config = config)
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
+      resultMap.putString("modelType", modelTypeStr)
       val detectedModelsArray = Arguments.createArray()
       for (model in detectedModels) {
         val modelMap = model as? HashMap<*, *>
@@ -216,6 +234,16 @@ internal class SherpaOnnxSttHelper(
         ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") ?: current.ruleFsts else current.ruleFsts,
         ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") ?: current.ruleFars else current.ruleFars
       )
+      val newHotwordsFile = merged.hotwordsFile.trim()
+      if (newHotwordsFile.isNotEmpty()) {
+        val modelType = currentSttModelType
+        if (modelType == null || !supportsHotwords(modelType)) {
+          val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}"
+          Log.e(logTag, errorMsg)
+          CrashlyticsHelper.rejectWithCrashlytics(promise, "HOTWORDS_NOT_SUPPORTED", errorMsg, feature = "stt")
+          return
+        }
+      }
       lastRecognizerConfig = merged
       rec.setConfig(merged)
       promise.resolve(null)
@@ -249,6 +277,7 @@ internal class SherpaOnnxSttHelper(
       recognizer?.release()
       recognizer = null
       lastRecognizerConfig = null
+      currentSttModelType = null
       promise.resolve(null)
     } catch (e: Exception) {
       CrashlyticsHelper.rejectWithCrashlytics(promise, "RELEASE_ERROR", "Failed to release resources", e, "stt")

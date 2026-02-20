@@ -184,7 +184,6 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");
 
-            // Create result dictionary with detected models
             NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
             resultDict[@"success"] = @YES;
 
@@ -196,12 +195,18 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
                 [detectedModelsArray addObject:modelDict];
             }
             resultDict[@"detectedModels"] = detectedModelsArray;
+            if (!result.modelType.empty()) {
+                resultDict[@"modelType"] = [NSString stringWithUTF8String:result.modelType.c_str()];
+            }
 
             resolve(resultDict);
         } else {
-            NSString *errorMsg = [NSString stringWithFormat:@"Failed to initialize sherpa-onnx with model directory: %@", modelDir];
+            NSString *errorMsg = result.error.empty()
+                ? [NSString stringWithFormat:@"Failed to initialize sherpa-onnx with model directory: %@", modelDir]
+                : [NSString stringWithUTF8String:result.error.c_str()];
+            NSString *code = [errorMsg hasPrefix:@"HOTWORDS_NOT_SUPPORTED"] ? @"HOTWORDS_NOT_SUPPORTED" : @"INIT_ERROR";
             RCTLogError(@"%@", errorMsg);
-            reject(@"INIT_ERROR", errorMsg, nil);
+            reject(code, errorMsg, nil);
         }
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during initialization: %@", exception.reason];
@@ -352,9 +357,11 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         g_stt_wrapper->setConfig(opts);
         resolve(nil);
     } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception in setSttConfig: %@", exception.reason];
+        NSString *reason = exception.reason ?: @"";
+        NSString *code = [reason hasPrefix:@"HOTWORDS_NOT_SUPPORTED"] ? @"HOTWORDS_NOT_SUPPORTED" : @"CONFIG_ERROR";
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception in setSttConfig: %@", reason];
         RCTLogError(@"%@", errorMsg);
-        reject(@"CONFIG_ERROR", errorMsg, nil);
+        reject(code, errorMsg, nil);
     }
 }
 
