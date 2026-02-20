@@ -5,6 +5,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 #include "sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-model-detect.h"
 #include <atomic>
 #include <memory>
 #include <sstream>
@@ -25,6 +26,18 @@ static BOOL g_tts_debug = NO;
 static NSNumber *g_tts_noise_scale = nil;
 static NSNumber *g_tts_noise_scale_w = nil;
 static NSNumber *g_tts_length_scale = nil;
+
+static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
+    using K = sherpaonnx::TtsModelKind;
+    switch (kind) {
+        case K::kVits: return @"vits";
+        case K::kMatcha: return @"matcha";
+        case K::kKokoro: return @"kokoro";
+        case K::kKitten: return @"kitten";
+        case K::kZipvoice: return @"zipvoice";
+        default: return @"unknown";
+    }
+}
 
 namespace {
 std::vector<std::string> SplitTtsTokens(const std::string &text) {
@@ -121,6 +134,40 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS init: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_INIT_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)detectTtsModel:(NSString *)modelDir
+            modelType:(NSString *)modelType
+         withResolver:(RCTPromiseResolveBlock)resolve
+         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    RCTLogInfo(@"Detecting TTS model in: %@", modelDir);
+    @try {
+        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelTypeStr = (modelType != nil && [modelType length] > 0 && ![modelType isEqualToString:@"auto"])
+            ? [modelType UTF8String] : "auto";
+        sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(modelDirStr, modelTypeStr);
+
+        NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+        resultDict[@"success"] = @(result.ok);
+        if (!result.error.empty()) {
+            resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
+        }
+        NSMutableArray *detectedModelsArray = [NSMutableArray array];
+        for (const auto& model : result.detectedModels) {
+            [detectedModelsArray addObject:@{
+                @"type": [NSString stringWithUTF8String:model.type.c_str()],
+                @"modelDir": [NSString stringWithUTF8String:model.modelDir.c_str()]
+            }];
+        }
+        resultDict[@"detectedModels"] = detectedModelsArray;
+        resultDict[@"modelType"] = ttsModelKindToNSString(result.selectedKind);
+        resolve(resultDict);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"TTS model detection failed: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"DETECT_ERROR", errorMsg, nil);
     }
 }
 

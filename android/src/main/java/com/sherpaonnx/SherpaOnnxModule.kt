@@ -299,6 +299,53 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Detect TTS model type and structure without initializing the engine.
+   */
+  override fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) {
+    try {
+      val result = Companion.nativeDetectTtsModel(modelDir, modelType ?: "auto")
+      if (result == null) {
+        CrashlyticsHelper.rejectWithCrashlytics(
+          promise, "DETECT_ERROR", "TTS model detection returned null", feature = "tts"
+        )
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      CrashlyticsHelper.rejectWithCrashlytics(
+        promise, "DETECT_ERROR", "TTS model detection failed: ${e.message}", e, "tts"
+      )
+    }
+  }
+
+  /**
    * Update TTS params by re-initializing with stored config.
    */
   override fun updateTtsParams(
