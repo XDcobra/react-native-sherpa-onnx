@@ -22,6 +22,7 @@ export interface Spec extends TurboModule {
    * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
    * @param dither - Optional: dither for feature extraction (default 0)
+   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeStt(
@@ -35,7 +36,8 @@ export interface Spec extends TurboModule {
     provider?: string,
     ruleFsts?: string,
     ruleFars?: string,
-    dither?: number
+    dither?: number,
+    modelOptions?: Object
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;

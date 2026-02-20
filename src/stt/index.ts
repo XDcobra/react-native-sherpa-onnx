@@ -2,6 +2,7 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   STTInitializeOptions,
   STTModelType,
+  SttModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
 } from './types';
@@ -81,6 +82,7 @@ export async function initializeSTT(
   let ruleFsts: string | undefined;
   let ruleFars: string | undefined;
   let dither: number | undefined;
+  let modelOptions: SttModelOptions | undefined;
 
   if ('modelPath' in options) {
     modelPath = options.modelPath;
@@ -93,6 +95,7 @@ export async function initializeSTT(
     ruleFsts = options.ruleFsts;
     ruleFars = options.ruleFars;
     dither = options.dither;
+    modelOptions = options.modelOptions;
   } else {
     modelPath = options;
     preferInt8 = undefined;
@@ -104,6 +107,7 @@ export async function initializeSTT(
     ruleFsts = undefined;
     ruleFars = undefined;
     dither = undefined;
+    modelOptions = undefined;
   }
 
   const debug = 'modelPath' in options ? options.debug : undefined;
@@ -119,7 +123,8 @@ export async function initializeSTT(
     provider,
     ruleFsts,
     ruleFars,
-    dither
+    dither,
+    modelOptions
   );
 }
 

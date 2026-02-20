@@ -46,6 +46,73 @@ export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'auto',
 ] as const;
 
+// ========== Model-specific options (only applied when that model type is loaded) ==========
+
+/** Options for Whisper models. Applied only when modelType is 'whisper'. */
+export interface SttWhisperModelOptions {
+  /** Language code (e.g. "en", "de"). Used with multilingual models. Default: "en". */
+  language?: string;
+  /** "transcribe" or "translate". Default: "transcribe". With "translate", result text is English. */
+  task?: 'transcribe' | 'translate';
+  /** Padding at end of samples. Kotlin default 1000; C++ default -1. */
+  tailPaddings?: number;
+  /** Token-level timestamps. Android only; ignored on iOS. */
+  enableTokenTimestamps?: boolean;
+  /** Segment-level timestamps. Android only; ignored on iOS. */
+  enableSegmentTimestamps?: boolean;
+}
+
+/** Options for SenseVoice models. Applied only when modelType is 'sense_voice'. */
+export interface SttSenseVoiceModelOptions {
+  /** Language hint. */
+  language?: string;
+  /** Inverse text normalization. Default: true (Kotlin), false (C++). */
+  useItn?: boolean;
+}
+
+/** Options for Canary models. Applied only when modelType is 'canary'. */
+export interface SttCanaryModelOptions {
+  /** Source language code. Default: "en". */
+  srcLang?: string;
+  /** Target language code. Default: "en". */
+  tgtLang?: string;
+  /** Use punctuation. Default: true. */
+  usePnc?: boolean;
+}
+
+/** Options for FunASR Nano models. Applied only when modelType is 'funasr_nano'. */
+export interface SttFunAsrNanoModelOptions {
+  /** System prompt. Default: "You are a helpful assistant." */
+  systemPrompt?: string;
+  /** User prompt prefix. Default: "语音转写：" */
+  userPrompt?: string;
+  /** Max new tokens. Default: 512. */
+  maxNewTokens?: number;
+  /** Temperature. Default: 1e-6. */
+  temperature?: number;
+  /** Top-p. Default: 0.8. */
+  topP?: number;
+  /** Random seed. Default: 42. */
+  seed?: number;
+  /** Language hint. */
+  language?: string;
+  /** Inverse text normalization. Default: true. */
+  itn?: boolean;
+  /** Hotwords string. */
+  hotwords?: string;
+}
+
+/**
+ * Model-specific STT options. Only the block for the actually loaded model type is applied;
+ * others are ignored (e.g. whisper options have no effect when a paraformer model is loaded).
+ */
+export interface SttModelOptions {
+  whisper?: SttWhisperModelOptions;
+  senseVoice?: SttSenseVoiceModelOptions;
+  canary?: SttCanaryModelOptions;
+  funasrNano?: SttFunAsrNanoModelOptions;
+}
+
 /**
  * STT-specific initialization options
  */
@@ -128,6 +195,12 @@ export interface STTInitializeOptions {
    * Dither for feature extraction (Kotlin FeatureConfig.dither). Default 0.
    */
   dither?: number;
+
+  /**
+   * Model-specific options. Only options for the loaded model type are applied.
+   * E.g. when modelType is 'whisper', only modelOptions.whisper is used.
+   */
+  modelOptions?: SttModelOptions;
 }
 
 /**
