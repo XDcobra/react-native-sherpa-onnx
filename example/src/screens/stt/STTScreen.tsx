@@ -857,6 +857,13 @@ export default function STTScreen() {
 
             {(selectedModelForInit || currentModelFolder) && (
               <>
+                <Text style={styles.optionsStepLabel}>
+                  2. Configure options
+                </Text>
+                <Text style={styles.optionsStepHint}>
+                  Set preferences below before tapping "Apply options & use
+                  model".
+                </Text>
                 <View style={styles.optionsSection}>
                   <TouchableOpacity
                     style={styles.optionsHeader}
@@ -865,19 +872,19 @@ export default function STTScreen() {
                   >
                     <View style={styles.optionsHeaderLeft}>
                       <Ionicons
-                        name="options-outline"
-                        size={22}
-                        color="#8E8E93"
+                        name="settings-outline"
+                        size={24}
+                        color="#007AFF"
                         style={styles.iconInline}
                       />
                       <Text style={styles.optionsHeaderTitle}>
-                        Options for this model
+                        {optionsExpanded ? 'Hide options' : 'Open options'}
                       </Text>
                     </View>
                     <Ionicons
                       name={optionsExpanded ? 'chevron-up' : 'chevron-down'}
                       size={24}
-                      color="#8E8E93"
+                      color="#007AFF"
                     />
                   </TouchableOpacity>
                   {optionsExpanded && (
@@ -2441,21 +2448,39 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontWeight: '600',
   },
+  optionsStepLabel: {
+    marginTop: 20,
+    marginBottom: 4,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  optionsStepHint: {
+    marginBottom: 10,
+    fontSize: 13,
+    color: '#6d6d72',
+    lineHeight: 18,
+  },
   optionsSection: {
-    marginTop: 8,
     marginBottom: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#007AFF',
+    backgroundColor: '#F0F7FF',
     overflow: 'hidden',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   optionsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#E3F2FD',
   },
   optionsHeaderLeft: {
     flexDirection: 'row',
@@ -2465,9 +2490,9 @@ const styles = StyleSheet.create({
   },
   optionsHeaderTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 4,
+    fontWeight: '700',
+    color: '#007AFF',
+    marginLeft: 8,
   },
   optionsContent: {
     paddingHorizontal: 16,
