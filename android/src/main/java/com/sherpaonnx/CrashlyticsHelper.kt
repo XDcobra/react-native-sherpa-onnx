@@ -15,6 +15,7 @@ object CrashlyticsHelper {
    * Sets context attributes for the next crash/error report (e.g. model type, path, feature).
    * Call before model-dependent operations (STT/TTS init, archive extract) so reports include config.
    * Long strings are truncated to [MAX_ATTR_LENGTH].
+   * STT-specific keys (stt_*) are set when the corresponding params are non-null.
    */
   @JvmStatic
   fun setContextAttributes(
@@ -23,7 +24,18 @@ object CrashlyticsHelper {
     feature: String? = null,
     archiveSource: String? = null,
     preferInt8: Boolean? = null,
-    numThreads: Int? = null
+    numThreads: Int? = null,
+    // STT init options (for feature = "stt")
+    sttNumThreads: Int? = null,
+    sttHotwordsFile: String? = null,
+    sttHotwordsScore: Float? = null,
+    sttProvider: String? = null,
+    sttRuleFsts: String? = null,
+    sttRuleFars: String? = null,
+    sttDither: Float? = null,
+    sttDecodingMethod: String? = null,
+    sttMaxActivePaths: Int? = null,
+    sttModelOptionsSummary: String? = null
   ) {
     try {
       val crashlytics = com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
@@ -33,6 +45,16 @@ object CrashlyticsHelper {
       archiveSource?.let { crashlytics.setCustomKey("archive_source", truncate(it)) }
       preferInt8?.let { crashlytics.setCustomKey("stt_prefer_int8", it.toString()) }
       numThreads?.let { crashlytics.setCustomKey("tts_num_threads", it.toString()) }
+      sttNumThreads?.let { crashlytics.setCustomKey("stt_num_threads", it.toString()) }
+      sttHotwordsFile?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_hotwords_file", truncate(it)) }
+      sttHotwordsScore?.let { crashlytics.setCustomKey("stt_hotwords_score", it.toString()) }
+      sttProvider?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_provider", truncate(it)) }
+      sttRuleFsts?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_rule_fsts", truncate(it)) }
+      sttRuleFars?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_rule_fars", truncate(it)) }
+      sttDither?.let { crashlytics.setCustomKey("stt_dither", it.toString()) }
+      sttDecodingMethod?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_decoding_method", it) }
+      sttMaxActivePaths?.let { crashlytics.setCustomKey("stt_max_active_paths", it.toString()) }
+      sttModelOptionsSummary?.takeIf { it.isNotBlank() }?.let { crashlytics.setCustomKey("stt_model_options", truncate(it)) }
     } catch (_: Throwable) { }
   }
 
