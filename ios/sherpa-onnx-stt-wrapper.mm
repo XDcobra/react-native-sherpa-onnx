@@ -71,6 +71,14 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
                 while (hEnd > hStart && (line[hEnd - 1] == ' ' || line[hEnd - 1] == '\t')) hEnd--;
                 hotwordPart = line.substr(hStart, hEnd - hStart);
             } else {
+                size_t tabPos = line.find('\t');
+                if (tabPos != std::string::npos) {
+                    std::string afterTab = line.substr(tabPos + 1);
+                    try {
+                        (void)std::stof(afterTab);
+                        return "This file looks like a sentencepiece .vocab file (token<TAB>score). Use a hotwords file instead: one word or phrase per line, optional ' :score' at end.";
+                    } catch (...) {}
+                }
                 hotwordPart = line;
             }
             if (hotwordPart.empty()) return "Invalid hotword line (empty hotword): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";

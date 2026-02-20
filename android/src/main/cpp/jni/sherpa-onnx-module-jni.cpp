@@ -201,6 +201,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
       putString(env, pathsMap, mapPut, "fireRedDecoder", result.paths.fireRedDecoder);
       putString(env, pathsMap, mapPut, "canaryEncoder", result.paths.canaryEncoder);
       putString(env, pathsMap, mapPut, "canaryDecoder", result.paths.canaryDecoder);
+      putString(env, pathsMap, mapPut, "bpeVocab", result.paths.bpeVocab);
       env->CallObjectMethod(map, mapPut, env->NewStringUTF("paths"), pathsMap);
       env->DeleteLocalRef(pathsMap);
     }

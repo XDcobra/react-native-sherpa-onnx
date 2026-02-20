@@ -47,6 +47,8 @@ struct SttModelPaths {
     std::string whisperEncoder;
     std::string whisperDecoder;
     std::string tokens;
+    /** BPE vocabulary for hotwords tokenization (sentencepiece export bpe.vocab). Optional. */
+    std::string bpeVocab;
     std::string funasrEncoderAdaptor;
     std::string funasrLLM;
     std::string funasrEmbedding;

@@ -121,6 +121,12 @@ SttDetectResult DetectSttModel(
     std::string tokensPath = FindFileEndingWith(modelDir, "tokens.txt", kMaxSearchDepth);
     LOGI("DetectSttModel: tokens=%s", tokensPath.c_str());
 
+    // Optional: BPE vocabulary for hotwords (sentencepiece bpe.vocab). Used when modeling_unit is bpe or cjkchar+bpe.
+    std::string bpeVocabPath = FindFileByName(modelDir, "bpe.vocab", kMaxSearchDepth);
+    if (!bpeVocabPath.empty()) {
+        LOGI("DetectSttModel: bpeVocab=%s", bpeVocabPath.c_str());
+    }
+
     bool hasTransducer = !encoderPath.empty() && !decoderPath.empty() && !joinerPath.empty();
 
     bool hasWhisperEncoder = !encoderPath.empty();
@@ -367,6 +373,10 @@ SttDetectResult DetectSttModel(
         result.error = "Tokens file not found in " + modelDir;
         LOGE("%s", result.error.c_str());
         return result;
+    }
+
+    if (!bpeVocabPath.empty() && FileExists(bpeVocabPath)) {
+        result.paths.bpeVocab = bpeVocabPath;
     }
 
     LOGI("DetectSttModel: detection OK for %s — tokens=%s",
