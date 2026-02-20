@@ -97,7 +97,7 @@ export default function STTScreen() {
     Array<{ path: string; name: string }>
   >([]);
   const [hotwordsScore, setHotwordsScore] = useState('');
-  const [hotwordsSectionExpanded, setHotwordsSectionExpanded] = useState(true);
+  const [hotwordsSectionExpanded, setHotwordsSectionExpanded] = useState(false);
   const [modelingUnit, setModelingUnit] = useState<
     '' | 'cjkchar' | 'bpe' | 'cjkchar+bpe'
   >('');
@@ -255,17 +255,18 @@ export default function STTScreen() {
     getCpuCoreCount().then(setCpuCoreCount);
   }, []);
 
-  // Cleanup: Release STT resources when leaving the screen
+  // Cleanup: Release STT resources only when leaving the screen (unmount).
+  // Do not depend on currentModelFolder: when switching models, handleInitialize
+  // already calls unloadSTT() before re-init. If cleanup ran on currentModelFolder
+  // change, it would call unloadSTT() after the new init and break transcription.
   useEffect(() => {
     return () => {
-      if (currentModelFolder !== null) {
-        console.log('STTScreen: Cleaning up STT resources');
-        unloadSTT().catch((err) => {
-          console.error('STTScreen: Failed to unload STT:', err);
-        });
-      }
+      console.log('STTScreen: Cleaning up STT resources');
+      unloadSTT().catch((err) => {
+        console.error('STTScreen: Failed to unload STT:', err);
+      });
     };
-  }, [currentModelFolder]);
+  }, []);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -852,6 +853,7 @@ export default function STTScreen() {
                       style={[
                         styles.modelButton,
                         isSelected && styles.modelButtonActive,
+                        isInitialized && styles.modelButtonInitialized,
                         loading && styles.buttonDisabled,
                       ]}
                       onPress={() => setSelectedModelForInit(modelFolder)}
@@ -864,7 +866,6 @@ export default function STTScreen() {
                         ]}
                       >
                         {getModelDisplayName(modelFolder)}
-                        {isInitialized ? ' ✓' : ''}
                       </Text>
                       {(() => {
                         const sizeHintInfo = getSizeHint(modelFolder);
@@ -1071,7 +1072,7 @@ export default function STTScreen() {
                             activeOpacity={0.7}
                           >
                             <Text style={styles.hotwordsSectionTitle}>
-                              Hotword options
+                              Hotword options (optional)
                             </Text>
                             <Ionicons
                               name={
@@ -1199,39 +1200,50 @@ export default function STTScreen() {
                                 For bpe / cjkchar+bpe. Use sentencepiece
                                 bpe.vocab, not the hotwords file.
                               </Text>
-                              <TouchableOpacity
-                                style={styles.addFilesButton}
-                                onPress={handlePickBpeVocabFile}
-                              >
-                                <Ionicons
-                                  name="add-circle-outline"
-                                  size={20}
-                                  color="#007AFF"
-                                  style={styles.iconInline}
-                                />
-                                <Text style={styles.addFilesButtonText}>
-                                  {bpeVocabFile
-                                    ? bpeVocabFile.name
-                                    : 'Select bpe.vocab'}
-                                </Text>
-                              </TouchableOpacity>
-                              {bpeVocabFile && (
+                              {!bpeVocabFile && (
                                 <TouchableOpacity
-                                  hitSlop={{
-                                    top: 10,
-                                    bottom: 10,
-                                    left: 10,
-                                    right: 10,
-                                  }}
-                                  onPress={() => setBpeVocabFile(null)}
-                                  style={styles.pickedFileRemove}
+                                  style={styles.addFilesButton}
+                                  onPress={handlePickBpeVocabFile}
                                 >
                                   <Ionicons
-                                    name="close-circle"
-                                    size={22}
-                                    color="#8E8E93"
+                                    name="add-circle-outline"
+                                    size={20}
+                                    color="#007AFF"
+                                    style={styles.iconInline}
                                   />
+                                  <Text style={styles.addFilesButtonText}>
+                                    Select bpe.vocab
+                                  </Text>
                                 </TouchableOpacity>
+                              )}
+                              {bpeVocabFile && (
+                                <View style={styles.pickedFilesList}>
+                                  <View style={styles.pickedFileRow}>
+                                    <Text
+                                      style={styles.pickedFileName}
+                                      numberOfLines={1}
+                                      ellipsizeMode="middle"
+                                    >
+                                      {bpeVocabFile.name}
+                                    </Text>
+                                    <TouchableOpacity
+                                      hitSlop={{
+                                        top: 10,
+                                        bottom: 10,
+                                        left: 10,
+                                        right: 10,
+                                      }}
+                                      onPress={() => setBpeVocabFile(null)}
+                                      style={styles.pickedFileRemove}
+                                    >
+                                      <Ionicons
+                                        name="close-circle"
+                                        size={22}
+                                        color="#8E8E93"
+                                      />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
                               )}
                             </View>
                           )}
@@ -1929,7 +1941,9 @@ export default function STTScreen() {
                       {model.type.toUpperCase()}
                     </Text>
                     <Text style={styles.detectedModelPath}>
-                      {model.modelDir}
+                      {getModelDisplayName(
+                        model.modelDir.replace(/^.*[/\\]/, '') || model.modelDir
+                      )}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -2298,6 +2312,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#E3F2FD',
     borderColor: '#007AFF',
   },
+  modelButtonInitialized: {
+    borderColor: '#34C759',
+  },
   modelButtonText: {
     fontSize: 16,
     fontWeight: '600',
@@ -2544,6 +2561,7 @@ const styles = StyleSheet.create({
   },
   hotwordsSectionContent: {
     paddingHorizontal: 14,
+    paddingTop: 16,
     paddingBottom: 14,
     borderTopWidth: 1,
     borderTopColor: '#e8e8e8',
