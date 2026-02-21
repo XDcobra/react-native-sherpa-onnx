@@ -2,7 +2,6 @@ import { NavigationContainer } from '@react-navigation/native';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './navigation/RootNavigator';
-import AdsBanner from './ads/AdsBanner';
 
 export default function App() {
   return (
@@ -13,7 +12,6 @@ export default function App() {
             <RootNavigator />
           </NavigationContainer>
         </View>
-        <AdsBanner />
       </View>
     </SafeAreaProvider>
   );

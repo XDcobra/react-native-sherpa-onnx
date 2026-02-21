@@ -75,21 +75,18 @@ internal class SherpaOnnxTtsHelper(
     promise: Promise
   ) {
     try {
-      CrashlyticsHelper.setContextAttributes(
-        modelDir = modelDir,
-        modelType = modelType,
-        feature = "tts",
-        numThreads = numThreads.toInt()
-      )
+      
       val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
+        promise.reject("TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
         return
       }
       val success = result["success"] as? Boolean ?: false
       if (!success) {
         val reason = result["error"] as? String
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_INIT_ERROR", reason ?: "Failed to detect TTS model", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: ${reason ?: "Failed to detect TTS model"}")
+        promise.reject("TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
         return
       }
       val paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
@@ -113,7 +110,8 @@ internal class SherpaOnnxTtsHelper(
           debug = debug
         )
         if (wrapper == null) {
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.", feature = "tts")
+          Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
+          promise.reject("TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
           return
         }
         zipvoiceTts = wrapper
@@ -155,7 +153,8 @@ internal class SherpaOnnxTtsHelper(
       resultMap.putInt("numSpeakers", numSpeakers)
       promise.resolve(resultMap)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to initialize TTS: ${e.message}", e)
+      promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
     }
   }
 
@@ -166,11 +165,13 @@ internal class SherpaOnnxTtsHelper(
     promise: Promise
   ) {
     if (ttsStreamRunning.get()) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_UPDATE_ERROR", "Cannot update params while streaming", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Cannot update params while streaming")
+      promise.reject("TTS_UPDATE_ERROR", "Cannot update params while streaming")
       return
     }
     val state = ttsInitState ?: run {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_UPDATE_ERROR", "TTS not initialized", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: TTS not initialized")
+      promise.reject("TTS_UPDATE_ERROR", "TTS not initialized")
       return
     }
 
@@ -202,7 +203,8 @@ internal class SherpaOnnxTtsHelper(
     try {
       val result = detectTtsModel(state.modelDir, state.modelType)
       if (result == null || result["success"] as? Boolean != true) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_UPDATE_ERROR", "Failed to re-detect TTS model", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Failed to re-detect TTS model")
+        promise.reject("TTS_UPDATE_ERROR", "Failed to re-detect TTS model")
         return
       }
       val paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
@@ -238,14 +240,16 @@ internal class SherpaOnnxTtsHelper(
       resultMap.putInt("numSpeakers", ttsInstance.numSpeakers())
       promise.resolve(resultMap)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_UPDATE_ERROR", "Failed to update TTS params", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Failed to update TTS params", e)
+      promise.reject("TTS_UPDATE_ERROR", "Failed to update TTS params", e)
     }
   }
 
   fun generateTts(text: String, options: ReadableMap?, promise: Promise) {
     try {
       if (!hasEngine()) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+        promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
       }
       val sid = getSid(options)
@@ -254,7 +258,8 @@ internal class SherpaOnnxTtsHelper(
         hasReferenceOptions(options) && isZipvoice -> {
           val refAudio = options?.getArray("referenceAudio")
             ?: run {
-              CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning", feature = "tts")
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
+              promise.reject("TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning")
               return
             }
           val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
@@ -269,7 +274,8 @@ internal class SherpaOnnxTtsHelper(
         }
         else -> dispatchGenerate(text, sid, speed)
           ?: run {
-            CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
             return
           }
       }
@@ -283,14 +289,16 @@ internal class SherpaOnnxTtsHelper(
       promise.resolve(map)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: ${e.message ?: "Failed to generate speech"}", e)
+      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
     }
   }
 
   fun generateTtsWithTimestamps(text: String, options: ReadableMap?, promise: Promise) {
     try {
       if (!hasEngine()) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+        promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
       }
       val sid = getSid(options)
@@ -299,7 +307,8 @@ internal class SherpaOnnxTtsHelper(
         hasReferenceOptions(options) && isZipvoice -> {
           val refAudio = options?.getArray("referenceAudio")
             ?: run {
-              CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning", feature = "tts")
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
+              promise.reject("TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning")
               return
             }
           val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
@@ -314,7 +323,8 @@ internal class SherpaOnnxTtsHelper(
         }
         else -> dispatchGenerate(text, sid, speed)
           ?: run {
-            CrashlyticsHelper.rejectWithCrashlytics(promise, "TTS_GENERATE_ERROR", "TTS not initialized", feature = "tts")
+            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
             return
           }
       }
@@ -338,21 +348,25 @@ internal class SherpaOnnxTtsHelper(
       map.putBoolean("estimated", true)
       promise.resolve(map)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: ${e.message ?: "Failed to generate speech"}", e)
+      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
     }
   }
 
   fun generateTtsStream(text: String, options: ReadableMap?, promise: Promise) {
     if (ttsStreamRunning.get()) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "TTS streaming already in progress", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS streaming already in progress")
+      promise.reject("TTS_STREAM_ERROR", "TTS streaming already in progress")
       return
     }
     if (!hasEngine()) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "TTS not initialized", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS not initialized")
+      promise.reject("TTS_STREAM_ERROR", "TTS not initialized")
       return
     }
     if (hasReferenceOptions(options) && isZipvoice) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_STREAM_ERROR", "Streaming with reference audio not supported for Zipvoice", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Streaming with reference audio not supported for Zipvoice")
+      promise.reject("TTS_STREAM_ERROR", "Streaming with reference audio not supported for Zipvoice")
       return
     }
     val sid = getSid(options)
@@ -411,11 +425,13 @@ internal class SherpaOnnxTtsHelper(
   fun startTtsPcmPlayer(sampleRate: Double, channels: Double, promise: Promise) {
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "PCM playback requires API 21+", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM playback requires API 21+")
+        promise.reject("TTS_PCM_ERROR", "PCM playback requires API 21+")
         return
       }
       if (channels.toInt() != 1) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "PCM playback supports mono only", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM playback supports mono only")
+        promise.reject("TTS_PCM_ERROR", "PCM playback supports mono only")
         return
       }
       stopPcmPlayerInternal()
@@ -427,7 +443,8 @@ internal class SherpaOnnxTtsHelper(
         .build()
       val minBufferSize = AudioTrack.getMinBufferSize(sampleRate.toInt(), channelConfig, AudioFormat.ENCODING_PCM_FLOAT)
       if (minBufferSize == AudioTrack.ERROR || minBufferSize == AudioTrack.ERROR_BAD_VALUE) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "Invalid buffer size for PCM player", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Invalid buffer size for PCM player")
+        promise.reject("TTS_PCM_ERROR", "Invalid buffer size for PCM player")
         return
       }
       val attributes = AudioAttributes.Builder()
@@ -438,13 +455,15 @@ internal class SherpaOnnxTtsHelper(
       ttsPcmTrack?.play()
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "Failed to start PCM player", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Failed to start PCM player", e)
+      promise.reject("TTS_PCM_ERROR", "Failed to start PCM player", e)
     }
   }
 
   fun writeTtsPcmChunk(samples: ReadableArray, promise: Promise) {
     val track = ttsPcmTrack ?: run {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "PCM player not initialized", feature = "tts")
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM player not initialized")
+      promise.reject("TTS_PCM_ERROR", "PCM player not initialized")
       return
     }
     try {
@@ -454,12 +473,14 @@ internal class SherpaOnnxTtsHelper(
       }
       val written = track.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
       if (written < 0) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "PCM write failed: $written", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM write failed: $written")
+        promise.reject("TTS_PCM_ERROR", "PCM write failed: $written")
         return
       }
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "Failed to write PCM chunk", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Failed to write PCM chunk", e)
+      promise.reject("TTS_PCM_ERROR", "Failed to write PCM chunk", e)
     }
   }
 
@@ -468,31 +489,36 @@ internal class SherpaOnnxTtsHelper(
       stopPcmPlayerInternal()
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_PCM_ERROR", "Failed to stop PCM player", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Failed to stop PCM player", e)
+      promise.reject("TTS_PCM_ERROR", "Failed to stop PCM player", e)
     }
   }
 
   fun getTtsSampleRate(promise: Promise) {
     try {
       if (!hasEngine()) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_ERROR", "TTS not initialized", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_ERROR: TTS not initialized")
+        promise.reject("TTS_ERROR", "TTS not initialized")
         return
       }
       promise.resolve(dispatchSampleRate().toDouble())
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_ERROR", "Failed to get sample rate", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_ERROR: Failed to get sample rate", e)
+      promise.reject("TTS_ERROR", "Failed to get sample rate", e)
     }
   }
 
   fun getTtsNumSpeakers(promise: Promise) {
     try {
       if (!hasEngine()) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_ERROR", "TTS not initialized", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_ERROR: TTS not initialized")
+        promise.reject("TTS_ERROR", "TTS not initialized")
         return
       }
       promise.resolve(dispatchNumSpeakers().toDouble())
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_ERROR", "Failed to get number of speakers", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_ERROR: Failed to get number of speakers", e)
+      promise.reject("TTS_ERROR", "Failed to get number of speakers", e)
     }
   }
 
@@ -503,7 +529,8 @@ internal class SherpaOnnxTtsHelper(
       ttsInitState = null
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_RELEASE_ERROR", "Failed to release TTS resources", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_RELEASE_ERROR: Failed to release TTS resources", e)
+      promise.reject("TTS_RELEASE_ERROR", "Failed to release TTS resources", e)
     }
   }
 
@@ -522,10 +549,12 @@ internal class SherpaOnnxTtsHelper(
       if (success) {
         promise.resolve(filePath)
       } else {
-        CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SAVE_ERROR", "Failed to save audio to file", feature = "tts")
+        Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save audio to file")
+        promise.reject("TTS_SAVE_ERROR", "Failed to save audio to file")
       }
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SAVE_ERROR", "Failed to save audio to file", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save audio to file", e)
+      promise.reject("TTS_SAVE_ERROR", "Failed to save audio to file", e)
     }
   }
 
@@ -549,7 +578,8 @@ internal class SherpaOnnxTtsHelper(
       } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SAVE_ERROR", "Failed to save audio to content URI", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save audio to content URI", e)
+      promise.reject("TTS_SAVE_ERROR", "Failed to save audio to content URI", e)
     }
   }
 
@@ -569,7 +599,8 @@ internal class SherpaOnnxTtsHelper(
       } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SAVE_ERROR", "Failed to save text to content URI", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save text to content URI", e)
+      promise.reject("TTS_SAVE_ERROR", "Failed to save text to content URI", e)
     }
   }
 
@@ -585,7 +616,8 @@ internal class SherpaOnnxTtsHelper(
       } ?: throw IllegalStateException("Failed to open input stream for URI: $fileUri")
       promise.resolve(cacheFile.absolutePath)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SAVE_ERROR", "Failed to copy audio to cache", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to copy audio to cache", e)
+      promise.reject("TTS_SAVE_ERROR", "Failed to copy audio to cache", e)
     }
   }
 
@@ -617,7 +649,8 @@ internal class SherpaOnnxTtsHelper(
       context.startActivity(chooser)
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise,"TTS_SHARE_ERROR", "Failed to share audio", e, "tts")
+      Log.e("SherpaOnnxTts", "TTS_SHARE_ERROR: Failed to share audio", e)
+      promise.reject("TTS_SHARE_ERROR", "Failed to share audio", e)
     }
   }
 

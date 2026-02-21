@@ -2,7 +2,6 @@
   xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
     <application
       android:name=".MainApplication"
@@ -13,10 +12,6 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
-      <meta-data
-        android:name="com.google.android.gms.ads.APPLICATION_ID"
-        android:value="${admobAppId}"
-        tools:replace="android:value" />
       <provider
         android:name="androidx.core.content.FileProvider"
         android:authorities="${applicationId}.fileprovider"

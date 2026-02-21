@@ -290,7 +290,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.xdcobra.voicelab";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.xdcobra.voiceexample";
 				PRODUCT_NAME = VoiceLabOfflineTools;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -317,7 +317,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.xdcobra.voicelab";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.xdcobra.voiceexample";
 				PRODUCT_NAME = VoiceLabOfflineTools;
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";

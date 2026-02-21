@@ -164,32 +164,19 @@ internal class SherpaOnnxSttHelper(
     promise: Promise
   ) {
     try {
-      CrashlyticsHelper.setContextAttributes(
-        modelDir = modelDir,
-        modelType = modelType,
-        feature = "stt",
-        preferInt8 = preferInt8,
-        sttNumThreads = numThreads?.toInt(),
-        sttHotwordsFile = hotwordsFile?.trim()?.takeIf { it.isNotEmpty() },
-        sttHotwordsScore = hotwordsScore?.toFloat(),
-        sttProvider = provider?.takeIf { it.isNotBlank() },
-        sttRuleFsts = ruleFsts?.takeIf { it.isNotBlank() },
-        sttRuleFars = ruleFars?.takeIf { it.isNotBlank() },
-        sttDither = dither?.toFloat(),
-        sttModelOptionsSummary = modelOptionsSummary(modelOptions)
-      )
+      
       val modelDirFile = File(modelDir)
       if (!modelDirFile.exists()) {
         val errorMsg = "Model directory does not exist: $modelDir"
         Log.e(logTag, errorMsg)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg)
         return
       }
 
       if (!modelDirFile.isDirectory) {
         val errorMsg = "Model path is not a directory: $modelDir"
         Log.e(logTag, errorMsg)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg)
         return
       }
 
@@ -204,7 +191,7 @@ internal class SherpaOnnxSttHelper(
       if (result == null) {
         val errorMsg = "Failed to detect STT model. Check native logs for details."
         Log.e(logTag, "Detection returned null for modelDir: $modelDir")
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg)
         return
       }
 
@@ -220,7 +207,7 @@ internal class SherpaOnnxSttHelper(
           "Failed to initialize sherpa-onnx. Check native logs for details."
         }
         Log.e(logTag, "Detection failed for modelDir: $modelDir")
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg)
         return
       }
 
@@ -232,7 +219,7 @@ internal class SherpaOnnxSttHelper(
       if (hotwordsFileTrimmed.isNotEmpty() && !supportsHotwords(modelTypeStr)) {
         val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: $modelTypeStr"
         Log.e(logTag, errorMsg)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "HOTWORDS_NOT_SUPPORTED", errorMsg, feature = "stt")
+        promise.reject("HOTWORDS_NOT_SUPPORTED", errorMsg)
         return
       }
       val resolvedHotwordsPath = if (hotwordsFileTrimmed.isNotEmpty()) {
@@ -241,14 +228,14 @@ internal class SherpaOnnxSttHelper(
         } catch (e: Exception) {
           val errorMsg = e.message ?: "Hotwords file could not be resolved"
           Log.e(logTag, errorMsg, e)
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "INVALID_HOTWORDS_FILE", errorMsg, e, feature = "stt")
+          promise.reject("INVALID_HOTWORDS_FILE", errorMsg, e)
           return
         }
       } else ""
       if (resolvedHotwordsPath.isNotEmpty()) {
         validateHotwordsFile(resolvedHotwordsPath)?.let { errorMsg ->
           Log.e(logTag, errorMsg)
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "INVALID_HOTWORDS_FILE", errorMsg, feature = "stt")
+          promise.reject("INVALID_HOTWORDS_FILE", errorMsg)
           return
         }
       }
@@ -258,7 +245,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, e, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg, e)
         return
       }
       val resolvedRuleFars = try {
@@ -266,7 +253,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, e, feature = "stt")
+        promise.reject("INIT_ERROR", errorMsg, e)
         return
       }
 
@@ -290,22 +277,7 @@ internal class SherpaOnnxSttHelper(
       currentSttModelType = modelTypeStr
       recognizer = OfflineRecognizer(config = config)
 
-      CrashlyticsHelper.setContextAttributes(
-        modelDir = modelDir,
-        modelType = modelTypeStr,
-        feature = "stt",
-        preferInt8 = preferInt8,
-        sttNumThreads = config.modelConfig.numThreads,
-        sttHotwordsFile = config.hotwordsFile.takeIf { it.isNotBlank() },
-        sttHotwordsScore = config.hotwordsScore,
-        sttProvider = config.modelConfig.provider.takeIf { it.isNotBlank() },
-        sttRuleFsts = config.ruleFsts.takeIf { it.isNotBlank() },
-        sttRuleFars = config.ruleFars.takeIf { it.isNotBlank() },
-        sttDither = config.featConfig.dither,
-        sttDecodingMethod = config.decodingMethod,
-        sttMaxActivePaths = config.maxActivePaths,
-        sttModelOptionsSummary = modelOptionsSummary(modelOptions)
-      )
+      
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
@@ -326,7 +298,7 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMsg, e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", errorMsg, e, "stt")
+      promise.reject("INIT_ERROR", errorMsg, e)
     }
   }
 
@@ -334,7 +306,7 @@ internal class SherpaOnnxSttHelper(
     try {
       val rec = recognizer
       if (rec == null) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
+        promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
       val wave = WaveReader.readWave(filePath)
@@ -346,7 +318,7 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", message, e, "stt")
+      promise.reject("TRANSCRIBE_ERROR", message, e)
     }
   }
 
@@ -354,7 +326,7 @@ internal class SherpaOnnxSttHelper(
     try {
       val rec = recognizer
       if (rec == null) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
+        promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
       val floatSamples = FloatArray(samples.size()) { i -> samples.getDouble(i).toFloat() }
@@ -370,7 +342,7 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe samples"
       Log.e(logTag, "transcribeSamples error: $message", e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "TRANSCRIBE_ERROR", message, e, "stt")
+      promise.reject("TRANSCRIBE_ERROR", message, e)
     }
   }
 
@@ -379,7 +351,7 @@ internal class SherpaOnnxSttHelper(
       val rec = recognizer
       val current = lastRecognizerConfig
       if (rec == null || current == null) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", "STT not initialized. Call initializeStt first.", feature = "stt")
+        promise.reject("CONFIG_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
       val merged = current.copy(
@@ -396,7 +368,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", errorMsg, e, feature = "stt")
+        promise.reject("CONFIG_ERROR", errorMsg, e)
         return
       }
       val resolvedRuleFars = try {
@@ -404,7 +376,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", errorMsg, e, feature = "stt")
+        promise.reject("CONFIG_ERROR", errorMsg, e)
         return
       }
 
@@ -414,7 +386,7 @@ internal class SherpaOnnxSttHelper(
         if (modelType == null || !supportsHotwords(modelType)) {
           val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}"
           Log.e(logTag, errorMsg)
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "HOTWORDS_NOT_SUPPORTED", errorMsg, feature = "stt")
+          promise.reject("HOTWORDS_NOT_SUPPORTED", errorMsg)
           return
         }
         try {
@@ -422,12 +394,12 @@ internal class SherpaOnnxSttHelper(
         } catch (e: Exception) {
           val errorMsg = e.message ?: "Hotwords file could not be resolved"
           Log.e(logTag, errorMsg, e)
-          CrashlyticsHelper.rejectWithCrashlytics(promise, "INVALID_HOTWORDS_FILE", errorMsg, e, feature = "stt")
+          promise.reject("INVALID_HOTWORDS_FILE", errorMsg, e)
           return
         }.also { path ->
           validateHotwordsFile(path)?.let { errorMsg ->
             Log.e(logTag, errorMsg)
-            CrashlyticsHelper.rejectWithCrashlytics(promise, "INVALID_HOTWORDS_FILE", errorMsg, feature = "stt")
+            promise.reject("INVALID_HOTWORDS_FILE", errorMsg)
             return
           }
         }
@@ -445,21 +417,11 @@ internal class SherpaOnnxSttHelper(
       } else configWithPaths
       lastRecognizerConfig = configToApply
       rec.setConfig(configToApply)
-      CrashlyticsHelper.setContextAttributes(
-        feature = "stt",
-        modelType = currentSttModelType,
-        modelDir = null,
-        preferInt8 = null,
-        sttDecodingMethod = configToApply.decodingMethod,
-        sttMaxActivePaths = configToApply.maxActivePaths,
-        sttHotwordsFile = configToApply.hotwordsFile.takeIf { it.isNotBlank() },
-        sttHotwordsScore = configToApply.hotwordsScore
-      )
       promise.resolve(null)
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to set STT config"
       Log.e(logTag, "setSttConfig error: $message", e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONFIG_ERROR", message, e, "stt")
+      promise.reject("CONFIG_ERROR", message, e)
     }
   }
 
@@ -489,7 +451,7 @@ internal class SherpaOnnxSttHelper(
       currentSttModelType = null
       promise.resolve(null)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "RELEASE_ERROR", "Failed to release resources", e, "stt")
+      promise.reject("RELEASE_ERROR", "Failed to release resources", e)
     }
   }
 

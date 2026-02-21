@@ -400,14 +400,14 @@ export function unloadTTS(): Promise<void> {
  * @example
  * ```typescript
  * import { Platform } from 'react-native';
- * import RNFS from 'react-native-fs';
+ * import {DocumentDirectoryPath, ExternalDirectoryPath} from '@dr.pogodin/react-native-fs';
  *
  * const audio = await generateSpeech('Hello, world!');
  *
  * // Save to documents directory
  * const documentsPath = Platform.OS === 'ios'
- *   ? RNFS.DocumentDirectoryPath
- *   : RNFS.ExternalDirectoryPath;
+ *   ? DocumentDirectoryPath
+ *   : ExternalDirectoryPath;
  * const filePath = `${documentsPath}/speech_${Date.now()}.wav`;
  *
  * const savedPath = await saveAudioToFile(audio, filePath);

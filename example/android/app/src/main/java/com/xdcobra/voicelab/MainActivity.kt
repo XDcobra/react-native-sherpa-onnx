@@ -1,4 +1,4 @@
-package com.xdcobra.voicelab
+package com.xdcobra.voiceexample
 
 import android.os.Bundle
 import com.facebook.react.ReactActivity

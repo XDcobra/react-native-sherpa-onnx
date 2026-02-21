@@ -1,4 +1,10 @@
-import RNFS from 'react-native-fs';
+import {
+  DocumentDirectoryPath,
+  stat,
+  exists,
+  readDir,
+  type ReadDirResItemT,
+} from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 
 export type ValidationError =
@@ -55,8 +61,8 @@ export async function calculateFileChecksum(
   try {
     const digest = await SherpaOnnx.computeFileSha256(filePath);
     if (onProgress) {
-      const stat = await RNFS.stat(filePath);
-      const total = stat.size;
+      const statResult = await stat(filePath);
+      const total = statResult.size;
       onProgress(total, total, 100);
     }
     return digest.toLowerCase();
@@ -111,7 +117,7 @@ export async function validateExtractedFiles(
   _category: string
 ): Promise<ValidationResult> {
   try {
-    const dirExists = await RNFS.exists(modelDir);
+    const dirExists = await exists(modelDir);
     if (!dirExists) {
       return new ValidationResult(
         false,
@@ -134,11 +140,11 @@ export async function validateExtractedFiles(
       dir: string,
       depth = 0,
       maxDepth = 4
-    ): Promise<RNFS.ReadDirItem[]> => {
+    ): Promise<ReadDirResItemT[]> => {
       if (depth > maxDepth) return [];
 
-      const entries = await RNFS.readDir(dir);
-      const files: RNFS.ReadDirItem[] = [];
+      const entries = await readDir(dir);
+      const files: ReadDirResItemT[] = [];
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
@@ -156,7 +162,7 @@ export async function validateExtractedFiles(
       return files;
     };
 
-    const entries = await RNFS.readDir(modelDir);
+    const entries = await readDir(modelDir);
     const actualFiles = entries.filter((entry) => !entry.isDirectory());
     const subdirs = entries.filter((entry) => entry.isDirectory());
 
@@ -204,7 +210,7 @@ export async function validateExtractedFiles(
 export async function getAvailableDiskSpace(): Promise<number> {
   try {
     // Try to get the document directory (simple check for availability)
-    const dirExists = await RNFS.exists(RNFS.DocumentDirectoryPath);
+    const dirExists = await exists(DocumentDirectoryPath);
     if (dirExists) {
       // Default to 10GB for modern devices
       // In production, integrate native disk space calculation

@@ -17,10 +17,6 @@ if linkage != nil
 end
 
 target 'VoiceLabOfflineTools' do
-  # Required for Swift Firebase pods when using static libraries (new arch)
-  pod 'GoogleUtilities', :modular_headers => true
-  pod 'GoogleDataTransport', :modular_headers => true
-  pod 'nanopb', :modular_headers => true
 
   config = use_native_modules!
 

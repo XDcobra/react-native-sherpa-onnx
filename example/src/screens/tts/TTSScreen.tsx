@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Text,
   View,
-  StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
@@ -10,8 +9,6 @@ import {
   Alert,
   Platform,
   Share,
-  Modal,
-  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -23,7 +20,6 @@ import {
   startTtsPcmPlayer,
   writeTtsPcmChunk,
   stopTtsPcmPlayer,
-  updateTtsParams,
   unloadTTS,
   getModelInfo,
   saveAudioToFile,
@@ -35,11 +31,7 @@ import {
   type TtsGenerationOptions,
 } from 'react-native-sherpa-onnx/tts';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
-import {
-  listDownloadedModelsByCategory,
-  ModelCategory,
-  subscribeModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
+import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -50,48 +42,24 @@ import {
   getFileModelPath,
   getModelDisplayName,
 } from '../../modelConfig';
+import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
-  getSizeHint,
-  getQualityHint,
-  RECOMMENDED_MODEL_IDS,
-} from '../../utils/recommendedModels';
-import { getCpuCoreCount } from '../../cpuInfo';
-import RNFS from 'react-native-fs';
+  DocumentDirectoryPath,
+  DownloadDirectoryPath,
+  mkdir,
+  unlink,
+  writeFile,
+  exists,
+} from '@dr.pogodin/react-native-fs';
 import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { styles } from './TTSScreen.styles';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
-/** Minimal WAV parser: 44-byte header, 16-bit PCM LE → float samples in [-1, 1]. Mono or stereo (takes first channel). Path must be readable by RNFS (file path or cache path). */
-async function readWavToFloatSamples(
-  path: string
-): Promise<{ samples: number[]; sampleRate: number }> {
-  const base64 = await RNFS.readFile(path, 'base64');
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-  const view = new DataView(bytes.buffer);
-  if (bytes.length < 44) throw new Error('File too short for WAV');
-  const sampleRate = view.getUint32(24, true);
-  const numChannels = view.getUint16(22, true);
-  const bitsPerSample = view.getUint16(34, true);
-  if (bitsPerSample !== 16) throw new Error('Only 16-bit WAV supported');
-
-  const dataOffset = 44;
-  const numSamples = Math.floor((bytes.length - dataOffset) / 2);
-  const samples: number[] = [];
-  for (let i = 0; i < numSamples; i += numChannels) {
-    const v = view.getInt16(dataOffset + i * 2, true);
-    samples.push(v / 32768);
-  }
-  return { samples, sampleRate };
-}
-
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -110,27 +78,6 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [speakerId, setSpeakerId] = useState<string>('0');
-  const [speed, setSpeed] = useState<string>('1.0');
-  const [silenceScale, setSilenceScale] = useState<string>('');
-  const [numSteps, setNumSteps] = useState<string>('');
-  const [referenceText, setReferenceText] = useState<string>('');
-  const [referenceAudio, setReferenceAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
-  const [referenceAudioFileName, setReferenceAudioFileName] = useState<
-    string | null
-  >(null);
-  const [extraOptions, setExtraOptions] = useState<string>('');
-  const [noiseScale, setNoiseScale] = useState<string>('');
-  const [noiseScaleW, setNoiseScaleW] = useState<string>('');
-  const [lengthScale, setLengthScale] = useState<string>('');
-  const [outputFormat, setOutputFormat] = useState<'wav' | 'mp3' | 'flac'>(
-    'wav'
-  );
-  const [showOutputFormatPicker, setShowOutputFormatPicker] = useState(false);
-  const [voiceCloningExpanded, setVoiceCloningExpanded] = useState(false);
   const [generatedAudio, setGeneratedAudio] = useState<{
     samples: number[];
     sampleRate: number;
@@ -163,12 +110,8 @@ export default function TTSScreen() {
   const [cachedPlaybackSource, setCachedPlaybackSource] = useState<
     string | null
   >(null);
-  const [cpuCoreCount, setCpuCoreCount] = useState<number>(2);
-  const [ttsThreadOption, setTtsThreadOption] = useState<
-    'saver' | 'standard' | 'balanced' | 'maximum'
-  >('standard');
-  const [showThreadPicker, setShowThreadPicker] = useState(false);
-  const [optionsExpanded, setOptionsExpanded] = useState(false);
+
+  const TTS_NUM_THREADS = 2;
 
   const getDisplayPath = (path: string) => {
     try {
@@ -198,153 +141,18 @@ export default function TTSScreen() {
   const streamInFlightRef = useRef(false);
   const streamLastTextRef = useRef('');
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
   }, [soundInstance]);
-
-  useEffect(() => {
-    getCpuCoreCount().then(setCpuCoreCount);
-  }, []);
-
-  const ttsThreadOptions = useMemo(() => {
-    const max = Math.max(1, cpuCoreCount);
-    const options: Array<{
-      id: 'saver' | 'standard' | 'balanced' | 'maximum';
-      label: string;
-      threads: number;
-    }> = [{ id: 'saver', label: 'Saver (1 thread)', threads: 1 }];
-    if (max >= 2) {
-      options.push({
-        id: 'standard',
-        label: 'Standard (2 threads)',
-        threads: 2,
-      });
-    }
-    options.push({
-      id: 'balanced',
-      label: `Balanced (${Math.max(1, Math.floor(max / 2))} threads)`,
-      threads: Math.max(1, Math.floor(max / 2)),
-    });
-    options.push({
-      id: 'maximum',
-      label: `Maximum (${Math.max(1, max - 1)} threads)`,
-      threads: Math.max(1, max - 1),
-    });
-    return options;
-  }, [cpuCoreCount]);
-
-  const ttsNumThreads = useMemo(() => {
-    const option = ttsThreadOptions.find((o) => o.id === ttsThreadOption);
-    return option?.threads ?? (cpuCoreCount >= 2 ? 2 : 1);
-  }, [ttsThreadOptions, ttsThreadOption, cpuCoreCount]);
-
-  // Model-specific options: only show when the loaded model type supports them.
-  // After init we use selectedModelType; options are hidden until a model is initialized.
-  const effectiveModelTypeForOptions = selectedModelType;
-
-  const showNoiseScale = useMemo(
-    () =>
-      effectiveModelTypeForOptions === 'vits' ||
-      effectiveModelTypeForOptions === 'matcha',
-    [effectiveModelTypeForOptions]
-  );
-  const showNoiseScaleW = useMemo(
-    () => effectiveModelTypeForOptions === 'vits',
-    [effectiveModelTypeForOptions]
-  );
-  const showLengthScale = useMemo(
-    () =>
-      effectiveModelTypeForOptions === 'vits' ||
-      effectiveModelTypeForOptions === 'matcha' ||
-      effectiveModelTypeForOptions === 'kokoro' ||
-      effectiveModelTypeForOptions === 'kitten',
-    [effectiveModelTypeForOptions]
-  );
 
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
   }, []);
 
-  // When a download+extraction completes (e.g. from Model Management), refresh the list so the new model appears without leaving the screen.
-  useEffect(() => {
-    const unsubscribe = subscribeModelsListUpdated((category) => {
-      if (category === ModelCategory.Tts) void loadAvailableModels();
-    });
-    return unsubscribe;
-  }, []);
-
   useEffect(() => {
     currentModelFolderRef.current = currentModelFolder;
   }, [currentModelFolder]);
-
-  useEffect(() => {
-    if (!currentModelFolder || streaming) {
-      return;
-    }
-
-    if (paramsDebounceRef.current) {
-      clearTimeout(paramsDebounceRef.current);
-    }
-
-    paramsDebounceRef.current = setTimeout(() => {
-      const noiseValue = noiseScale.trim();
-      const noiseWValue = noiseScaleW.trim();
-      const lengthValue = lengthScale.trim();
-
-      const nextNoise = noiseValue.length > 0 ? parseFloat(noiseValue) : null;
-      if (
-        noiseValue.length > 0 &&
-        (isNaN(nextNoise as number) || (nextNoise as number) <= 0)
-      ) {
-        setError('Invalid noise scale value');
-        return;
-      }
-
-      const nextNoiseW =
-        noiseWValue.length > 0 ? parseFloat(noiseWValue) : null;
-      if (
-        noiseWValue.length > 0 &&
-        (isNaN(nextNoiseW as number) || (nextNoiseW as number) <= 0)
-      ) {
-        setError('Invalid noise scale W value');
-        return;
-      }
-
-      const nextLength =
-        lengthValue.length > 0 ? parseFloat(lengthValue) : null;
-      if (
-        lengthValue.length > 0 &&
-        (isNaN(nextLength as number) || (nextLength as number) <= 0)
-      ) {
-        setError('Invalid length scale value');
-        return;
-      }
-
-      if (nextNoise === null && nextNoiseW === null && nextLength === null) {
-        return;
-      }
-
-      updateTtsParams({
-        noiseScale: nextNoise,
-        noiseScaleW: nextNoiseW,
-        lengthScale: nextLength,
-      }).catch((err) => {
-        const message =
-          err instanceof Error ? err.message : 'Failed to update TTS params';
-        setError(message);
-      });
-    }, 500);
-
-    return () => {
-      if (paramsDebounceRef.current) {
-        clearTimeout(paramsDebounceRef.current);
-        paramsDebounceRef.current = null;
-      }
-    };
-  }, [currentModelFolder, lengthScale, noiseScale, noiseScaleW, streaming]);
 
   // Cleanup: Release TTS resources when leaving the screen
   useEffect(() => {
@@ -409,72 +217,8 @@ export default function TTSScreen() {
   };
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
-    const sid = parseInt(speakerId, 10);
-    const speedValue = parseFloat(speed);
-
-    if (isNaN(sid) || sid < 0) {
-      throw new Error('Invalid speaker ID (must be ≥ 0)');
-    }
-
-    const numSpeakers = modelInfo?.numSpeakers ?? 0;
-    if (numSpeakers > 0 && sid >= numSpeakers) {
-      throw new Error(
-        `Speaker ID must be between 0 and ${
-          numSpeakers - 1
-        } (model has ${numSpeakers} speaker${numSpeakers === 1 ? '' : 's'})`
-      );
-    }
-
-    if (isNaN(speedValue) || speedValue <= 0) {
-      throw new Error('Invalid speed value');
-    }
-
-    const options: TtsGenerationOptions = { sid, speed: speedValue };
-
-    const silenceScaleVal = silenceScale.trim();
-    if (silenceScaleVal.length > 0) {
-      const v = parseFloat(silenceScaleVal);
-      if (!isNaN(v) && v > 0) options.silenceScale = v;
-    }
-
-    const numStepsVal = numSteps.trim();
-    if (numStepsVal.length > 0) {
-      const v = parseInt(numStepsVal, 10);
-      if (!isNaN(v) && v > 0) options.numSteps = v;
-    }
-
-    if (referenceText.trim().length > 0)
-      options.referenceText = referenceText.trim();
-    if (referenceAudio != null) options.referenceAudio = referenceAudio;
-
-    if (extraOptions.trim().length > 0) {
-      const extra: Record<string, string> = {};
-      extraOptions
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .forEach((pair) => {
-          const idx = pair.indexOf(':');
-          if (idx > 0) {
-            const k = pair.slice(0, idx).trim();
-            const v = pair.slice(idx + 1).trim();
-            if (k && v) extra[k] = v;
-          }
-        });
-      if (Object.keys(extra).length > 0) options.extra = extra;
-    }
-
-    return options;
-  }, [
-    speakerId,
-    speed,
-    silenceScale,
-    numSteps,
-    referenceText,
-    referenceAudio,
-    extraOptions,
-    modelInfo?.numSpeakers,
-  ]);
+    return { sid: 0, speed: 1.0 };
+  }, []);
 
   const processStreamQueue = useCallback(async () => {
     if (!streaming || streamInFlightRef.current) {
@@ -604,62 +348,22 @@ export default function TTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const downloadedModels = await listDownloadedModelsByCategory(
-        ModelCategory.Tts
-      );
-      const downloadedIds = downloadedModels
-        .map((model) => model.id)
-        .filter(Boolean);
-
       const assetModels = await listAssetModels();
       const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
-      console.log(
-        '[TTSScreen PAD debug] listAssetModels: total=',
-        assetModels.length,
-        'tts=',
-        ttsFolders.length,
-        'folders=',
-        ttsFolders
-      );
 
       // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
       let padFolders: string[] = [];
       let resolvedPadPath: string | null = null;
       try {
         const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        console.log(
-          '[TTSScreen PAD debug] getAssetPackPath("' +
-            PAD_PACK_NAME +
-            '") returned:',
-          padPathFromNative ?? 'null'
-        );
-        const fallbackPath = `${RNFS.DocumentDirectoryPath}/models`;
+        const fallbackPath = `${DocumentDirectoryPath}/models`;
         const padPath = padPathFromNative ?? fallbackPath;
-        console.log(
-          '[TTSScreen PAD debug] using path for listModelsAtPath:',
-          padPath,
-          padPathFromNative
-            ? '(PAD)'
-            : '(fallback DocumentDirectoryPath/models)'
-        );
         const padResults = await listModelsAtPath(padPath);
-        console.log(
-          '[TTSScreen PAD debug] listModelsAtPath raw result count:',
-          padResults?.length ?? 0,
-          'entries:',
-          JSON.stringify(padResults ?? [])
-        );
         padFolders = (padResults || [])
           .filter((m) => m.hint === 'tts')
           .map((m) => m.folder);
-        console.log(
-          '[TTSScreen PAD debug] after filter hint===tts:',
-          padFolders.length,
-          'folders:',
-          padFolders
-        );
         if (padFolders.length > 0) {
           resolvedPadPath = padPath;
           console.log(
@@ -676,47 +380,25 @@ export default function TTSScreen() {
       setPadModelsPath(resolvedPadPath);
       setPadModelIds(padFolders);
 
-      // Merge: downloaded, then PAD/filesystem, then bundled assets (no duplicates)
+      // Merge: PAD folders, then bundled asset folders (no duplicates)
       const combined = [
-        ...downloadedIds,
-        ...padFolders.filter((f) => !downloadedIds.includes(f)),
-        ...ttsFolders.filter(
-          (f) => !downloadedIds.includes(f) && !padFolders.includes(f)
-        ),
+        ...padFolders,
+        ...ttsFolders.filter((f) => !padFolders.includes(f)),
       ];
 
-      if (downloadedIds.length > 0) {
-        console.log('TTSScreen: Found downloaded models:', downloadedIds);
-      }
-      if (padFolders.length > 0) {
-        console.log('TTSScreen: Found PAD/filesystem models:', padFolders);
-      }
       if (ttsFolders.length > 0) {
         console.log('TTSScreen: Found asset models:', ttsFolders);
       }
-
-      setDownloadedModelIds(downloadedIds);
       setAvailableModels(combined);
 
       if (combined.length === 0) {
-        const hasRecommendedModels =
-          (RECOMMENDED_MODEL_IDS[ModelCategory.Tts] || []).length > 0;
-
-        if (hasRecommendedModels) {
-          setError(
-            'No TTS models found. Consider downloading one of the recommended models in the Model Management screen.'
-          );
-          console.log(
-            'TTSScreen: No models available. Recommended models available for download.'
-          );
-        } else {
-          setError('No TTS models found. See TTS_MODEL_SETUP.md');
-        }
+        setError(
+          'No TTS models found. Use bundled assets or PAD models. See TTS_MODEL_SETUP.md'
+        );
       }
     } catch (err) {
       console.error('TTSScreen: Failed to load models:', err);
       setError('Failed to load available models');
-      setDownloadedModelIds([]);
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
@@ -754,47 +436,13 @@ export default function TTSScreen() {
         await unloadTTS();
       }
 
-      const useFilePath =
-        downloadedModelIds.includes(modelFolder) ||
-        padModelIds.includes(modelFolder);
+      const useFilePath = padModelIds.includes(modelFolder);
       const modelPath = useFilePath
         ? padModelIds.includes(modelFolder) && padModelsPath
           ? getFileModelPath(modelFolder, undefined, padModelsPath)
           : getFileModelPath(modelFolder, ModelCategory.Tts)
         : getAssetModelPath(modelFolder);
 
-      const noiseScaleValue = noiseScale.trim();
-      const noiseScaleWValue = noiseScaleW.trim();
-      const lengthScaleValue = lengthScale.trim();
-      let noiseScaleNumber: number | undefined;
-      let noiseScaleWNumber: number | undefined;
-      let lengthScaleNumber: number | undefined;
-
-      if (noiseScaleValue.length > 0) {
-        const parsed = parseFloat(noiseScaleValue);
-        if (isNaN(parsed) || parsed <= 0) {
-          throw new Error('Invalid noise scale value');
-        }
-        noiseScaleNumber = parsed;
-      }
-
-      if (noiseScaleWValue.length > 0) {
-        const parsed = parseFloat(noiseScaleWValue);
-        if (isNaN(parsed) || parsed <= 0) {
-          throw new Error('Invalid noise scale W value');
-        }
-        noiseScaleWNumber = parsed;
-      }
-
-      if (lengthScaleValue.length > 0) {
-        const parsed = parseFloat(lengthScaleValue);
-        if (isNaN(parsed) || parsed <= 0) {
-          throw new Error('Invalid length scale value');
-        }
-        lengthScaleNumber = parsed;
-      }
-
-      // Initialize new model (defer to event loop to avoid blocking UI)
       let result: any;
       try {
         result = await new Promise((resolve, reject) => {
@@ -802,11 +450,8 @@ export default function TTSScreen() {
             try {
               const r = await initializeTTS({
                 modelPath,
-                numThreads: ttsNumThreads,
+                numThreads: TTS_NUM_THREADS,
                 debug: false,
-                noiseScale: noiseScaleNumber,
-                noiseScaleW: noiseScaleWNumber,
-                lengthScale: lengthScaleNumber,
               });
               resolve(r);
             } catch (e) {
@@ -819,14 +464,10 @@ export default function TTSScreen() {
           'Initial initializeTTS failed, retrying with fewer threads',
           initErr
         );
-        // Retry with reduced resource usage
         result = await initializeTTS({
           modelPath,
           numThreads: 1,
           debug: false,
-          noiseScale: noiseScaleNumber,
-          noiseScaleW: noiseScaleWNumber,
-          lengthScale: lengthScaleNumber,
         });
       }
 
@@ -1116,33 +757,6 @@ export default function TTSScreen() {
     }
   };
 
-  const handlePickReferenceAudio = async () => {
-    setError(null);
-    try {
-      const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
-      });
-      const file = Array.isArray(picked) ? picked[0] : picked;
-      const uri = file?.uri ?? (file as any)?.fileUri ?? file?.name ?? '';
-      const name = file?.name ?? uri?.split('/')?.pop() ?? 'reference.wav';
-      if (!uri) {
-        setError('Could not get file URI from picker');
-        return;
-      }
-      let path = uri.replace(/^file:\/\//, '');
-      if (uri.startsWith('content://')) {
-        path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
-      }
-      const { samples, sampleRate } = await readWavToFloatSamples(path);
-      setReferenceAudio({ samples, sampleRate });
-      setReferenceAudioFileName(name);
-    } catch (err: any) {
-      if ((DocumentPicker as any).isCancel?.(err)) return;
-      console.warn('Pick reference audio failed', err);
-      setError(err?.message ?? 'Failed to load reference WAV (use 16-bit PCM)');
-    }
-  };
-
   const pickSaveDirectory = async () => {
     let directoryPath: string | null = null;
     let directoryUri: string | null = null;
@@ -1167,10 +781,10 @@ export default function TTSScreen() {
   };
 
   const getFallbackDirectory = () => {
-    if (Platform.OS === 'android' && RNFS.DownloadDirectoryPath) {
-      return RNFS.DownloadDirectoryPath;
+    if (Platform.OS === 'android' && DownloadDirectoryPath) {
+      return DownloadDirectoryPath;
     }
-    return RNFS.DocumentDirectoryPath;
+    return DocumentDirectoryPath;
   };
 
   const showFallbackNotice = () => {
@@ -1194,7 +808,7 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = outputFormat;
+      const ext = 'wav';
       const filename = `tts_${timestamp}.${ext}`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
@@ -1229,7 +843,7 @@ export default function TTSScreen() {
         showFallbackNotice();
       }
 
-      await RNFS.mkdir(targetDirectory);
+      await mkdir(targetDirectory);
       if (ext === 'wav') {
         const filePath = `${targetDirectory}/${filename}`;
         // Save audio to file (WAV)
@@ -1260,7 +874,7 @@ export default function TTSScreen() {
           setCachedPlaybackSource(null);
           // Remove temporary WAV
           try {
-            await RNFS.unlink(tempWav);
+            await unlink(tempWav);
           } catch {}
           Alert.alert(
             'Success',
@@ -1314,9 +928,9 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = outputFormat;
-      const directoryPath = RNFS.DocumentDirectoryPath;
-      await RNFS.mkdir(directoryPath);
+      const ext = 'wav';
+      const directoryPath = DocumentDirectoryPath;
+      await mkdir(directoryPath);
 
       if (ext === 'wav') {
         const filename = `tts_${timestamp}.wav`;
@@ -1347,7 +961,7 @@ export default function TTSScreen() {
           setCachedPlaybackPath(null);
           setCachedPlaybackSource(null);
           try {
-            await RNFS.unlink(tempWav);
+            await unlink(tempWav);
           } catch {}
           Alert.alert(
             'Success',
@@ -1422,13 +1036,13 @@ export default function TTSScreen() {
     try {
       const timestamp = Date.now();
       const filename = `tts_${timestamp}.srt`;
-      const directoryPath = RNFS.DocumentDirectoryPath;
+      const directoryPath = DocumentDirectoryPath;
 
-      await RNFS.mkdir(directoryPath);
+      await mkdir(directoryPath);
       const filePath = `${directoryPath}/${filename}`;
 
       const srtContent = buildSrtContent(generatedSubtitles);
-      await RNFS.writeFile(filePath, srtContent, 'utf8');
+      await writeFile(filePath, srtContent, 'utf8');
       setSavedSubtitlePath(filePath);
 
       const shareUrl = getShareUrl(filePath);
@@ -1491,10 +1105,10 @@ export default function TTSScreen() {
         showFallbackNotice();
       }
 
-      await RNFS.mkdir(targetDirectory);
+      await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
 
-      await RNFS.writeFile(filePath, srtContent, 'utf8');
+      await writeFile(filePath, srtContent, 'utf8');
       setSavedSubtitlePath(filePath);
 
       Alert.alert(
@@ -1543,7 +1157,7 @@ export default function TTSScreen() {
         if (
           cachedPlaybackPath &&
           cachedPlaybackSource === savedAudioPath &&
-          (await RNFS.exists(cachedPlaybackPath))
+          (await exists(cachedPlaybackPath))
         ) {
           playbackPath = cachedPlaybackPath;
         } else {
@@ -1602,18 +1216,16 @@ export default function TTSScreen() {
     }
 
     try {
-      const exists = await RNFS.exists(savedAudioPath);
-      if (!exists && !savedAudioPath.startsWith('content://')) {
+      const existsResult = await exists(savedAudioPath);
+      if (!existsResult && !savedAudioPath.startsWith('content://')) {
         Alert.alert('Error', 'Saved audio file not found.');
         return;
       }
 
       const shareUrl = getShareUrl(savedAudioPath);
 
-      // Map selected output format to MIME type. Note: currently we save WAV files only.
-      let mimeType = 'audio/wav';
-      if (outputFormat === 'mp3') mimeType = 'audio/mpeg';
-      if (outputFormat === 'flac') mimeType = 'audio/flac';
+      // We use WAV for saved files.
+      const mimeType = 'audio/wav';
 
       if (Platform.OS === 'android') {
         await shareAudioFile(shareUrl, mimeType);
@@ -1684,66 +1296,6 @@ export default function TTSScreen() {
             <Text style={styles.sectionDescription}>
               Select a TTS model to load:
             </Text>
-            <Text style={styles.inputLabel}>Threads</Text>
-            <TouchableOpacity
-              style={styles.dropdownTrigger}
-              onPress={() => setShowThreadPicker(true)}
-            >
-              <View style={styles.dropdownTriggerLeft}>
-                <Ionicons
-                  name="hardware-chip-outline"
-                  size={22}
-                  color="#8E8E93"
-                  style={styles.iconInline}
-                />
-                <Text style={styles.dropdownTriggerText}>
-                  {ttsThreadOptions.find((o) => o.id === ttsThreadOption)
-                    ?.label ?? 'Standard (2 threads)'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-down" size={20} color="#8E8E93" />
-            </TouchableOpacity>
-            <Modal
-              visible={showThreadPicker}
-              transparent
-              animationType="fade"
-              onRequestClose={() => setShowThreadPicker(false)}
-            >
-              <Pressable
-                style={styles.dropdownBackdrop}
-                onPress={() => setShowThreadPicker(false)}
-              >
-                <View style={styles.dropdownMenu}>
-                  {ttsThreadOptions.map((opt) => (
-                    <TouchableOpacity
-                      key={opt.id}
-                      style={[
-                        styles.dropdownItem,
-                        ttsThreadOption === opt.id && styles.dropdownItemActive,
-                      ]}
-                      onPress={() => {
-                        setTtsThreadOption(opt.id);
-                        setShowThreadPicker(false);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          ttsThreadOption === opt.id &&
-                            styles.dropdownItemTextActive,
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                      {ttsThreadOption === opt.id && (
-                        <Ionicons name="checkmark" size={20} color="#007AFF" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </Pressable>
-            </Modal>
-            <View style={styles.separator} />
             {loadingModels ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="small" color="#007AFF" />
@@ -1906,8 +1458,8 @@ export default function TTSScreen() {
             </View>
           )}
 
-          {/* Section 4: Generate Speech */}
-          {selectedModelType && (
+          {/* Section 4: Generate Speech - always visible */}
+          <>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>3. Generate Speech</Text>
 
@@ -1920,336 +1472,6 @@ export default function TTSScreen() {
                 multiline
                 numberOfLines={3}
               />
-
-              <View style={styles.voiceCloningSection}>
-                <TouchableOpacity
-                  style={styles.voiceCloningHeader}
-                  onPress={() => setOptionsExpanded((prev) => !prev)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.voiceCloningHeaderLeft}>
-                    <Ionicons
-                      name="options-outline"
-                      size={22}
-                      color="#8E8E93"
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.voiceCloningHeaderTitle}>Options</Text>
-                  </View>
-                  <Ionicons
-                    name={optionsExpanded ? 'chevron-up' : 'chevron-down'}
-                    size={24}
-                    color="#8E8E93"
-                  />
-                </TouchableOpacity>
-                {optionsExpanded && (
-                  <View style={styles.voiceCloningContent}>
-                    <Text style={styles.inputLabel}>
-                      Output format (for save)
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.dropdownTrigger}
-                      onPress={() => setShowOutputFormatPicker(true)}
-                    >
-                      <Text style={styles.dropdownTriggerText}>
-                        {outputFormat.toUpperCase()}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color="#8E8E93" />
-                    </TouchableOpacity>
-                    <Modal
-                      visible={showOutputFormatPicker}
-                      transparent
-                      animationType="fade"
-                      onRequestClose={() => setShowOutputFormatPicker(false)}
-                    >
-                      <Pressable
-                        style={styles.dropdownBackdrop}
-                        onPress={() => setShowOutputFormatPicker(false)}
-                      >
-                        <View style={styles.dropdownMenu}>
-                          {(['wav', 'mp3', 'flac'] as const).map((fmt) => (
-                            <TouchableOpacity
-                              key={fmt}
-                              style={[
-                                styles.dropdownItem,
-                                outputFormat === fmt &&
-                                  styles.dropdownItemActive,
-                              ]}
-                              onPress={() => {
-                                setOutputFormat(fmt);
-                                setShowOutputFormatPicker(false);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.dropdownItemText,
-                                  outputFormat === fmt &&
-                                    styles.dropdownItemTextActive,
-                                ]}
-                              >
-                                {fmt.toUpperCase()}
-                              </Text>
-                              {outputFormat === fmt && (
-                                <Ionicons
-                                  name="checkmark"
-                                  size={20}
-                                  color="#007AFF"
-                                />
-                              )}
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </Pressable>
-                    </Modal>
-
-                    {/* Model-specific init params: only shown for types that support them */}
-                    {(showNoiseScale || showNoiseScaleW) && (
-                      <View style={styles.parameterRow}>
-                        {showNoiseScale && (
-                          <View style={styles.parameterColumn}>
-                            <Text style={styles.inputLabel}>
-                              Noise scale (optional):
-                            </Text>
-                            <TextInput
-                              style={styles.parameterInput}
-                              value={noiseScale}
-                              onChangeText={setNoiseScale}
-                              keyboardType="decimal-pad"
-                              placeholder="0.667"
-                              placeholderTextColor="#8E8E93"
-                            />
-                          </View>
-                        )}
-                        {showNoiseScaleW && (
-                          <View style={styles.parameterColumn}>
-                            <Text style={styles.inputLabel}>
-                              Noise scale W (optional):
-                            </Text>
-                            <TextInput
-                              style={styles.parameterInput}
-                              value={noiseScaleW}
-                              onChangeText={setNoiseScaleW}
-                              keyboardType="decimal-pad"
-                              placeholder="0.8"
-                              placeholderTextColor="#8E8E93"
-                            />
-                          </View>
-                        )}
-                      </View>
-                    )}
-
-                    {showLengthScale && (
-                      <View style={styles.parameterRow}>
-                        <View style={styles.parameterColumn}>
-                          <Text style={styles.inputLabel}>
-                            Length scale (optional):
-                          </Text>
-                          <TextInput
-                            style={styles.parameterInput}
-                            value={lengthScale}
-                            onChangeText={setLengthScale}
-                            keyboardType="decimal-pad"
-                            placeholder="1.0"
-                            placeholderTextColor="#8E8E93"
-                          />
-                        </View>
-                        <View style={styles.parameterColumn} />
-                      </View>
-                    )}
-
-                    {modelInfo != null && (
-                      <Text style={styles.speakerCountHint}>
-                        Model has {modelInfo.numSpeakers} speaker
-                        {modelInfo.numSpeakers === 1 ? '' : 's'} (use ID 0
-                        {modelInfo.numSpeakers > 1
-                          ? `–${modelInfo.numSpeakers - 1}`
-                          : ''}
-                        )
-                      </Text>
-                    )}
-                    <View style={styles.parameterRow}>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Speaker ID
-                          {modelInfo?.numSpeakers != null &&
-                          modelInfo.numSpeakers > 0
-                            ? ` (0–${modelInfo.numSpeakers - 1})`
-                            : ' (0 … ?)'}
-                          :
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={speakerId}
-                          onChangeText={setSpeakerId}
-                          keyboardType="numeric"
-                          placeholder="0"
-                          placeholderTextColor="#8E8E93"
-                        />
-                      </View>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>Speed:</Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={speed}
-                          onChangeText={setSpeed}
-                          keyboardType="decimal-pad"
-                          placeholder="1.0"
-                          placeholderTextColor="#8E8E93"
-                        />
-                      </View>
-                    </View>
-
-                    <View style={styles.parameterRow}>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Silence scale (optional):
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={silenceScale}
-                          onChangeText={setSilenceScale}
-                          keyboardType="decimal-pad"
-                          placeholder="—"
-                          placeholderTextColor="#8E8E93"
-                        />
-                      </View>
-                      <View style={styles.parameterColumn}>
-                        <Text style={styles.inputLabel}>
-                          Num steps (optional):
-                        </Text>
-                        <TextInput
-                          style={styles.parameterInput}
-                          value={numSteps}
-                          onChangeText={setNumSteps}
-                          keyboardType="numeric"
-                          placeholder="—"
-                          placeholderTextColor="#8E8E93"
-                        />
-                      </View>
-                    </View>
-
-                    <View style={styles.voiceCloningSection}>
-                      <TouchableOpacity
-                        style={styles.voiceCloningHeader}
-                        onPress={() => setVoiceCloningExpanded((prev) => !prev)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.voiceCloningHeaderLeft}>
-                          <Ionicons
-                            name="person-circle-outline"
-                            size={22}
-                            color="#8E8E93"
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.voiceCloningHeaderTitle}>
-                            Voice cloning (optional)
-                          </Text>
-                          {(referenceAudio != null ||
-                            referenceText.trim() !== '') && (
-                            <View style={styles.voiceCloningBadge}>
-                              <Text style={styles.voiceCloningBadgeText}>
-                                {referenceAudio != null ? '1 file' : 'text'}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                        <Ionicons
-                          name={
-                            voiceCloningExpanded ? 'chevron-up' : 'chevron-down'
-                          }
-                          size={24}
-                          color="#8E8E93"
-                        />
-                      </TouchableOpacity>
-                      {voiceCloningExpanded && (
-                        <View style={styles.voiceCloningContent}>
-                          <Text style={styles.inputLabel}>
-                            Reference text (transcript of reference audio):
-                          </Text>
-                          <TextInput
-                            style={[
-                              styles.parameterInput,
-                              styles.referenceTextInput,
-                            ]}
-                            value={referenceText}
-                            onChangeText={setReferenceText}
-                            placeholder="Transcript of reference audio…"
-                            placeholderTextColor="#8E8E93"
-                          />
-                          <Text style={styles.inputLabel}>
-                            Reference audio (WAV):
-                          </Text>
-                          {referenceAudio == null ? (
-                            <TouchableOpacity
-                              style={styles.pickRefButtonPrimary}
-                              onPress={handlePickReferenceAudio}
-                            >
-                              <Ionicons
-                                name="add-circle-outline"
-                                size={20}
-                                color="#FFFFFF"
-                                style={styles.iconInline}
-                              />
-                              <Text style={styles.pickRefButtonPrimaryText}>
-                                Tap to select WAV file
-                              </Text>
-                            </TouchableOpacity>
-                          ) : (
-                            <View style={styles.referenceAudioSelectedRow}>
-                              <View style={styles.referenceAudioSelectedInfo}>
-                                <Ionicons
-                                  name="musical-notes"
-                                  size={18}
-                                  color="#34C759"
-                                  style={styles.iconInline}
-                                />
-                                <Text
-                                  style={styles.referenceAudioFileName}
-                                  numberOfLines={1}
-                                >
-                                  {referenceAudioFileName}
-                                </Text>
-                              </View>
-                              <View style={styles.referenceAudioActions}>
-                                <TouchableOpacity
-                                  style={styles.changeRefButton}
-                                  onPress={handlePickReferenceAudio}
-                                >
-                                  <Text style={styles.changeRefButtonText}>
-                                    Change
-                                  </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={styles.clearRefButton}
-                                  onPress={() => {
-                                    setReferenceAudio(null);
-                                    setReferenceAudioFileName(null);
-                                  }}
-                                >
-                                  <Text style={styles.clearRefButtonText}>
-                                    Clear
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                    </View>
-
-                    <Text style={styles.inputLabel}>
-                      Extra options (optional, key:value, …):
-                    </Text>
-                    <TextInput
-                      style={styles.parameterInput}
-                      value={extraOptions}
-                      onChangeText={setExtraOptions}
-                      placeholder="e.g. temperature:0.7, chunk_size:15"
-                      placeholderTextColor="#8E8E93"
-                    />
-                  </View>
-                )}
-              </View>
 
               <View style={styles.generateActionsSpacer} />
               <TouchableOpacity
@@ -2314,7 +1536,7 @@ export default function TTSScreen() {
                 </Text>
               )}
             </View>
-          )}
+          </>
 
           {/* Section 5: Results */}
           {generatedAudio && (
@@ -2535,586 +1757,3 @@ export default function TTSScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  body: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  icon: {
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#8E8E93',
-    textAlign: 'center',
-  },
-  section: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 8,
-  },
-  sectionDescription: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 12,
-  },
-  labelText: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginRight: 8,
-  },
-  buttonGroup: {
-    gap: 12,
-  },
-  modelButton: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  modelButtonActive: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#007AFF',
-  },
-  modelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 4,
-  },
-  modelButtonTextActive: {
-    color: '#007AFF',
-  },
-  modelButtonDisabled: {
-    opacity: 0.5,
-  },
-  modelButtonTextDisabled: {
-    color: '#C7C7CC',
-  },
-  modelButtonSubtext: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  resultContainer: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
-  },
-  resultText: {
-    fontSize: 14,
-    color: '#000000',
-    marginBottom: 4,
-  },
-  detectedModelsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  detectedModelButton: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  detectedModelButtonActive: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#007AFF',
-  },
-  detectedModelButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#000000',
-  },
-  detectedModelButtonTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  autoSelectedText: {
-    fontSize: 14,
-    color: '#34C759',
-    fontWeight: '500',
-  },
-  infoContainer: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    padding: 12,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#000000',
-    marginBottom: 4,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#000000',
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: '#000000',
-    marginBottom: 16,
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  parameterRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  parameterColumn: {
-    flex: 1,
-  },
-  parameterInput: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: '#000000',
-  },
-  referenceTextInput: {
-    minHeight: 48,
-    marginBottom: 12,
-  },
-  optionsBlock: {
-    marginBottom: 8,
-  },
-  subsectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 12,
-  },
-  dropdownTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F2F2F7',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 16,
-  },
-  dropdownTriggerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    minWidth: 0,
-  },
-  dropdownTriggerText: {
-    fontSize: 16,
-    color: '#000000',
-    fontWeight: '500',
-  },
-  dropdownBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  dropdownMenu: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    minWidth: 200,
-    paddingVertical: 8,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-  },
-  dropdownItemActive: {
-    backgroundColor: '#E3F2FD',
-  },
-  dropdownItemText: {
-    fontSize: 16,
-    color: '#000000',
-  },
-  dropdownItemTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  voiceCloningSection: {
-    marginTop: 8,
-    marginBottom: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E5EA',
-    overflow: 'hidden',
-  },
-  voiceCloningHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: '#F2F2F7',
-  },
-  voiceCloningHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    minWidth: 0,
-  },
-  voiceCloningHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-    marginLeft: 4,
-  },
-  voiceCloningBadge: {
-    marginLeft: 10,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    backgroundColor: '#E3F2FD',
-  },
-  voiceCloningBadgeText: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  voiceCloningContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
-  },
-  referenceAudioRow: {
-    marginBottom: 16,
-  },
-  referenceAudioButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  pickRefButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#E3F2FD',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  pickRefButtonText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  pickRefButtonPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    marginBottom: 16,
-  },
-  pickRefButtonPrimaryText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  referenceAudioSelectedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#E8F5E9',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 16,
-    gap: 12,
-  },
-  referenceAudioSelectedInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 0,
-  },
-  referenceAudioFileName: {
-    fontSize: 14,
-    color: '#1B5E20',
-    fontWeight: '500',
-    flex: 1,
-  },
-  referenceAudioActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  changeRefButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    backgroundColor: '#E3F2FD',
-  },
-  changeRefButtonText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  clearRefButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    backgroundColor: '#FFEBEE',
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-  },
-  clearRefButtonText: {
-    fontSize: 14,
-    color: '#FF3B30',
-    fontWeight: '500',
-  },
-  generateActionsSpacer: {
-    height: 24,
-  },
-  generateButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  generateButtonSecondary: {
-    backgroundColor: '#5856D6',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  generateButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  streamControls: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  streamButton: {
-    flex: 1,
-    backgroundColor: '#34C759',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  cancelStreamButton: {
-    flex: 1,
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  streamInfoText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  audioControls: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  subtitleActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  audioButton: {
-    flexBasis: '30%',
-    maxWidth: '32%',
-    flexGrow: 1,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButton: {
-    backgroundColor: '#34C759',
-  },
-  playButton: {
-    backgroundColor: '#007AFF',
-  },
-  stopButton: {
-    backgroundColor: '#FF9500',
-  },
-  shareButton: {
-    backgroundColor: '#5856D6',
-  },
-  exportButton: {
-    backgroundColor: '#6E56CF',
-  },
-  saveSubtitleButton: {
-    backgroundColor: '#34C759',
-  },
-  audioButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  savedPathText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  noteText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    fontStyle: 'italic',
-    marginTop: 8,
-  },
-  hint: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 4,
-    marginBottom: 8,
-    fontStyle: 'italic',
-  },
-  speakerCountHint: {
-    fontSize: 13,
-    color: '#8E8E93',
-    marginBottom: 12,
-  },
-  iconInline: {
-    marginRight: 12,
-  },
-  rowCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowAlignCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modelHintRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-    gap: 8,
-  },
-  modelHintGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginRight: 12,
-  },
-  modelHintText: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 0,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  outputFormatContainer: {
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  outputFormatRow: {
-    flexDirection: 'row',
-  },
-  outputFormatButtonSpacing: {
-    marginLeft: 8,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: '#E5E5EA',
-    marginTop: 8,
-    marginBottom: 12,
-    borderRadius: 1,
-  },
-  errorContainer: {
-    backgroundColor: '#FFE5E5',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorText: {
-    fontSize: 14,
-    color: '#D32F2F',
-  },
-  cleanupButton: {
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  cleanupButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  footer: {
-    alignItems: 'center',
-    padding: 16,
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    textAlign: 'center',
-  },
-});

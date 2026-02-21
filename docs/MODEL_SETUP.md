@@ -110,7 +110,7 @@ The app references the pack via `assetPacks = [":sherpa_models"]` and gets the u
 4. **Initialize** STT/TTS with that path.
 
 ```typescript
-import RNFS from 'react-native-fs';
+import {DocumentDirectoryPath} from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
   listModelsAtPath,
@@ -121,7 +121,7 @@ const PAD_PACK = 'sherpa_models';
 
 // 1) PAD path (null if app wasn't installed with the asset pack)
 const padPath = await getAssetPackPath(PAD_PACK);
-const basePath = padPath ?? `${RNFS.DocumentDirectoryPath}/models`;
+const basePath = padPath ?? `${DocumentDirectoryPath}/models`;
 
 // 2) List model folders under that path (hint: 'stt' | 'tts' | 'unknown')
 const models = await listModelsAtPath(basePath);
