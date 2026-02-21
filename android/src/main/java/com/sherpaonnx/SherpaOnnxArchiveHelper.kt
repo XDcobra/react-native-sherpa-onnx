@@ -38,6 +38,15 @@ class SherpaOnnxArchiveHelper {
     promise: Promise,
     onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
   ) {
+    val promiseSettled = AtomicBoolean(false)
+    fun resolveOnce(success: Boolean, reason: String? = null) {
+      if (!promiseSettled.compareAndSet(false, true)) return
+      val result = Arguments.createMap()
+      result.putBoolean("success", success)
+      if (reason != null) result.putString("reason", reason)
+      promise.resolve(result)
+    }
+
     try {
       cancelRequested.set(false)
 
@@ -54,17 +63,11 @@ class SherpaOnnxArchiveHelper {
         try {
           nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
         } catch (e: Exception) {
-          val result = Arguments.createMap()
-          result.putBoolean("success", false)
-          result.putString("reason", "Archive extraction error: ${e.message}")
-          promise.resolve(result)
+          resolveOnce(false, "Archive extraction error: ${e.message}")
         }
       }
     } catch (e: Exception) {
-      val result = Arguments.createMap()
-      result.putBoolean("success", false)
-      result.putString("reason", "Archive extraction error: ${e.message}")
-      promise.resolve(result)
+      resolveOnce(false, "Archive extraction error: ${e.message}")
     }
   }
 
