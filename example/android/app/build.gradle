@@ -2,15 +2,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-// Only apply Firebase plugins if google-services.json exists
-// This allows the example app to build without Firebase configured (e.g., for forks or local dev)
-def googleServicesJson = file('google-services.json')
-if (googleServicesJson.exists()) {
-    apply plugin: "com.google.gms.google-services"
-    apply plugin: "com.google.firebase.crashlytics"
-} else {
-    logger.warn("google-services.json not found. Firebase plugins will not be applied. Crashlytics will not be available.")
-}
 
 
 /**
@@ -90,7 +81,7 @@ android {
 
     assetPacks = [":sherpa_models"]
 
-    namespace "com.xdcobra.voicelab"
+    namespace "com.xdcobra.voiceexample"
     defaultConfig {
         applicationId "com.xdcobra.voicelab"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -99,9 +90,6 @@ android {
         def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "0.0.1"
         versionCode resolvedVersionCode.toInteger()
         versionName resolvedVersionName.toString()
-        manifestPlaceholders = [
-            admobAppId: "ca-app-pub-3940256099942544~3347511713"
-        ]
     }
     signingConfigs {
         debug {
@@ -127,49 +115,17 @@ android {
     }
     buildTypes {
         debug {
-            if (googleServicesJson.exists()) {
-                firebaseCrashlytics {
-                    nativeSymbolUploadEnabled true
-                    unstrippedNativeLibsDir "build/intermediates/merged_native_libs/debug/out/lib"
-                }
-            }
             signingConfig signingConfigs.debug
-            buildConfigField "boolean", "ADS_ENABLED", "false"
-            buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"ca-app-pub-3940256099942544/6300978111\""
         }
         release {
-            if (googleServicesJson.exists()) {
-                firebaseCrashlytics {
-                    nativeSymbolUploadEnabled true
-                    unstrippedNativeLibsDir "build/intermediates/merged_native_libs/release/out/lib"
-                }
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
+            if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
+                println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
+            } else {
+                signingConfig signingConfigs.release
             }
-            def releaseAdmobAppId = project.findProperty('ADMOB_APP_ID_ANDROID')
-            def releaseAdmobBannerId = project.findProperty('ADMOB_BANNER_ID_ANDROID')
-            def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
-            if (isReleaseTask && (releaseAdmobAppId == null || releaseAdmobAppId.toString().trim().isEmpty())) {
-                throw new RuntimeException("ADMOB_APP_ID_ANDROID is required for release builds")
-            }
-            if (isReleaseTask && (releaseAdmobBannerId == null || releaseAdmobBannerId.toString().trim().isEmpty())) {
-                throw new RuntimeException("ADMOB_BANNER_ID_ANDROID is required for release builds")
-            }
-            if (releaseAdmobAppId != null && !releaseAdmobAppId.toString().trim().isEmpty()) {
-                manifestPlaceholders = [
-                    admobAppId: releaseAdmobAppId
-                ]
-            }
-            if (releaseAdmobBannerId != null && !releaseAdmobBannerId.toString().trim().isEmpty()) {
-                buildConfigField "String", "ADMOB_BANNER_ID_ANDROID", "\"${releaseAdmobBannerId}\""
-            }
-            buildConfigField "boolean", "ADS_ENABLED", "true"
-                // Caution! In production, you need to generate your own keystore file.
-                // see https://reactnative.dev/docs/signed-apk-android.
-                // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
-                if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
-                    println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
-                } else {
-                    signingConfig signingConfigs.release
-                }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -195,13 +151,6 @@ dependencies {
         implementation jscFlavor
     }
 
-    // Firebase (BoM ensures compatible versions; required for Crashlytics / google-services)
-    // Only add Firebase dependencies if google-services.json exists
-    if (googleServicesJson.exists()) {
-        implementation platform('com.google.firebase:firebase-bom:34.9.0')
-        implementation 'com.google.firebase:firebase-analytics'
-        implementation 'com.google.firebase:firebase-crashlytics'
-    }
 }
 
 // Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).

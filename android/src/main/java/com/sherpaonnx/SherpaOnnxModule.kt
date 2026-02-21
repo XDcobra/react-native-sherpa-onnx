@@ -34,6 +34,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
+    reactApplicationContext,
     { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
       Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
     },
@@ -61,7 +62,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val result = nativeTestSherpaInit()
       promise.resolve(result)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "INIT_ERROR", "Failed to test sherpa-onnx initialization", e, "init")
+      android.util.Log.e(NAME, "INIT_ERROR: Failed to test sherpa-onnx initialization", e)
+      promise.reject("INIT_ERROR", "Failed to test sherpa-onnx initialization", e)
     }
   }
 
@@ -74,7 +76,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
-    CrashlyticsHelper.setContextAttributes(archiveSource = sourcePath.substringAfterLast('/'), feature = "archive")
     archiveHelper.extractTarBz2(sourcePath, targetPath, force, promise) { bytes, total, percent ->
       emitExtractProgress(bytes, total, percent)
     }
@@ -86,7 +87,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun computeFileSha256(filePath: String, promise: Promise) {
-    CrashlyticsHelper.setContextAttributes(archiveSource = filePath.substringAfterLast('/'), feature = "archive")
     archiveHelper.computeFileSha256(filePath, promise)
   }
 
@@ -106,32 +106,112 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
 
   /**
-   * Initialize sherpa-onnx with model directory.
+   * Detect STT model type and structure without initializing the recognizer.
    */
-  override fun initializeSherpaOnnx(
+  override fun detectSttModel(
+    modelDir: String,
+    preferInt8: Boolean?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectSttModel(
+        modelDir,
+        preferInt8 ?: false,
+        preferInt8 != null,
+        modelType ?: "auto",
+        false
+      )
+      if (result == null) {
+        android.util.Log.e(NAME, "DETECT_ERROR: STT model detection returned null")
+        promise.reject("DETECT_ERROR", "STT model detection returned null")
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "DETECT_ERROR: STT model detection failed: ${e.message}", e)
+      promise.reject("DETECT_ERROR", "STT model detection failed: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Initialize Speech-to-Text (STT) with model directory.
+   */
+  override fun initializeStt(
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
     debug: Boolean?,
+    hotwordsFile: String?,
+    hotwordsScore: Double?,
+    numThreads: Double?,
+    provider: String?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    dither: Double?,
+    modelOptions: ReadableMap?,
+    modelingUnit: String?,
+    bpeVocab: String?,
     promise: Promise
   ) {
-    sttHelper.initializeSherpaOnnx(modelDir, preferInt8, modelType, debug, promise)
+    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
   }
 
   /**
-   * Release sherpa-onnx resources.
+   * Release STT resources.
    */
-  override fun unloadSherpaOnnx(promise: Promise) {
-    sttHelper.unloadSherpaOnnx(promise)
+  override fun unloadStt(promise: Promise) {
+    sttHelper.unloadStt(promise)
   }
 
   // ==================== STT Methods ====================
 
   /**
-   * Transcribe an audio file.
+   * Transcribe an audio file. Returns full result (text, tokens, timestamps, lang, emotion, event, durations).
    */
   override fun transcribeFile(filePath: String, promise: Promise) {
     sttHelper.transcribeFile(filePath, promise)
+  }
+
+  /**
+   * Transcribe from float PCM samples.
+   */
+  override fun transcribeSamples(samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    sttHelper.transcribeSamples(samples, sampleRate.toInt(), promise)
+  }
+
+  /**
+   * Update recognizer config at runtime.
+   */
+  override fun setSttConfig(options: ReadableMap, promise: Promise) {
+    sttHelper.setSttConfig(options, promise)
   }
 
   /**
@@ -144,19 +224,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       var rate = outputSampleRateHz?.toInt() ?: 0
 
       if (rate < 0) {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0", feature = "convert")
+        android.util.Log.e(NAME, "CONVERT_ERROR: Invalid outputSampleRateHz: must be >= 0")
+        promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
         return
       }
 
       if (format.equals("mp3", ignoreCase = true)) {
         val allowed = setOf(0, 32000, 44100, 48000)
         if (!allowed.contains(rate)) {
-          CrashlyticsHelper.rejectWithCrashlytics(
-            promise,
-            "CONVERT_ERROR",
-            "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate",
-            feature = "convert"
-          )
+            android.util.Log.e(NAME, "CONVERT_ERROR: MP3 output sample rate invalid: $rate")
+            promise.reject("CONVERT_ERROR", "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate")
           return
         }
       } else {
@@ -167,10 +244,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", err, feature = "convert")
+        android.util.Log.e(NAME, "CONVERT_ERROR: $err")
+        promise.reject("CONVERT_ERROR", err)
       }
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e, "convert")
+      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio: ${e.message}", e)
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
     }
   }
 
@@ -184,10 +263,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
-        CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_ERROR", err, feature = "convert")
+            android.util.Log.e(NAME, "CONVERT_ERROR: $err")
+            promise.reject("CONVERT_ERROR", err)
       }
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e, "convert")
+      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio to WAV16k: ${e.message}", e)
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
     }
   }
 
@@ -216,6 +297,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       lengthScale,
       promise
     )
+  }
+
+  /**
+   * Detect TTS model type and structure without initializing the engine.
+   */
+  override fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) {
+    try {
+      val result = Companion.nativeDetectTtsModel(modelDir, modelType ?: "auto")
+      if (result == null) {
+        android.util.Log.e(NAME, "DETECT_ERROR: TTS model detection returned null")
+        promise.reject("DETECT_ERROR", "TTS model detection returned null")
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "DETECT_ERROR: TTS model detection failed: ${e.message}", e)
+      promise.reject("DETECT_ERROR", "TTS model detection failed: ${e.message}", e)
+    }
   }
 
   /**

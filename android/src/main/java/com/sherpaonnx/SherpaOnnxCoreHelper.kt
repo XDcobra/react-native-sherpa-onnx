@@ -35,7 +35,7 @@ internal class SherpaOnnxCoreHelper(
     } catch (e: Exception) {
       val errorMessage = "Failed to resolve model path: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMessage, e)
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "PATH_RESOLVE_ERROR", errorMessage, e, "core")
+      promise.reject("PATH_RESOLVE_ERROR", errorMessage, e)
     }
   }
 
@@ -66,7 +66,8 @@ internal class SherpaOnnxCoreHelper(
 
       promise.resolve(result)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "LIST_ASSETS_ERROR", "Failed to list asset models: ${e.message}", e, "core")
+      Log.e(logTag, "LIST_ASSETS_ERROR: Failed to list asset models: ${e.message}", e)
+      promise.reject("LIST_ASSETS_ERROR", "Failed to list asset models: ${e.message}", e)
     }
   }
 
@@ -113,7 +114,8 @@ internal class SherpaOnnxCoreHelper(
 
       promise.resolve(result)
     } catch (e: Exception) {
-      CrashlyticsHelper.rejectWithCrashlytics(promise, "LIST_MODELS_ERROR", "Failed to list models at path: ${e.message}", e, "core")
+      Log.e(logTag, "LIST_MODELS_ERROR: Failed to list models at path: ${e.message}", e)
+      promise.reject("LIST_MODELS_ERROR", "Failed to list models at path: ${e.message}", e)
     }
   }
 

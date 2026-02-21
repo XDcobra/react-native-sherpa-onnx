@@ -13,6 +13,7 @@ For supported model types and file requirements per type, see the [Supported Mod
 - [Quick usage: Bundled assets](#quick-usage-bundled-assets)
 - [Quick usage: Play Asset Delivery (PAD)](#quick-usage-play-asset-delivery-pad)
 - [Public API for model discovery and paths](#public-api-for-model-discovery-and-paths)
+- [Model type detection without initialization](#model-type-detection-without-initialization)
 - [Advanced](#advanced)
 - [Troubleshooting](#troubleshooting)
 
@@ -109,7 +110,7 @@ The app references the pack via `assetPacks = [":sherpa_models"]` and gets the u
 4. **Initialize** STT/TTS with that path.
 
 ```typescript
-import RNFS from 'react-native-fs';
+import {DocumentDirectoryPath} from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
   listModelsAtPath,
@@ -120,7 +121,7 @@ const PAD_PACK = 'sherpa_models';
 
 // 1) PAD path (null if app wasn't installed with the asset pack)
 const padPath = await getAssetPackPath(PAD_PACK);
-const basePath = padPath ?? `${RNFS.DocumentDirectoryPath}/models`;
+const basePath = padPath ?? `${DocumentDirectoryPath}/models`;
 
 // 2) List model folders under that path (hint: 'stt' | 'tts' | 'unknown')
 const models = await listModelsAtPath(basePath);
@@ -154,6 +155,63 @@ Use **`listModelsAtPath(path)`** whenever models are **not** in the main app ass
 | **`getDefaultModelPath()`** | ❌ | ✅ | Optional helper for a default root. | Returns a platform-specific default model directory name (e.g. for building paths in app code, PAD fallback). |
 
 **Summary:** Use **`listAssetModels()`** for bundled assets; use **`listModelsAtPath(path)`** for PAD or any filesystem model directory. Then pass the chosen folder to `resolveModelPath` (for assets) or build a file path (for PAD/filesystem) and initialize with that config.
+
+---
+
+## Model type detection without initialization
+
+You can query the **model type** for a given path **without** loading the model. This uses the same file-based detection as `initializeSTT` / `initializeTTS` and is useful to show model-specific options in the UI before the user taps "Initialize".
+
+### `detectSttModel(modelPath, options?)`
+
+```ts
+import { detectSttModel } from 'react-native-sherpa-onnx/stt';
+
+const result = await detectSttModel(
+  { type: 'asset', path: 'models/sherpa-onnx-whisper-tiny-en' },
+  { preferInt8: true, modelType: 'auto' }
+);
+// result: { success, detectedModels: [{ type, modelDir }], modelType? }
+```
+
+- **`modelPath`** — Same as for `initializeSTT` (asset, file, or auto); resolved via `resolveModelPath` before calling native.
+- **`options.preferInt8`** — Optional; same meaning as in `initializeSTT`.
+- **`options.modelType`** — Optional; explicit type or `'auto'` (default).
+- **Returns** — `success`, `detectedModels` (array of `{ type, modelDir }`), and `modelType` (primary detected type). On failure, `success` is false and `error` may be set.
+
+Example: show Whisper options only when the selected folder is detected as Whisper:
+
+```ts
+const result = await detectSttModel({ type: 'asset', path: `models/${selectedFolder}` });
+if (result.success && result.modelType === 'whisper') {
+  // Show Whisper-specific options (language, task, etc.)
+}
+```
+
+### `detectTtsModel(modelPath, options?)`
+
+```ts
+import { detectTtsModel } from 'react-native-sherpa-onnx/tts';
+
+const result = await detectTtsModel(
+  { type: 'asset', path: 'models/vits-piper-en_US-lessac-low' },
+  { modelType: 'auto' }
+);
+// result: { success, detectedModels: [{ type, modelDir }], modelType? }
+```
+
+- **`modelPath`** — Same as for `initializeTTS` (asset, file, or auto); resolved via `resolveModelPath` before calling native.
+- **`options.modelType`** — Optional; explicit type or `'auto'` (default).
+- **Returns** — `success`, `detectedModels` (array of `{ type, modelDir }`), and `modelType` (primary detected type). On failure, `success` is false and `error` may be set.
+
+Example: show VITS/Matcha-specific options only when the type is detected:
+
+```ts
+const result = await detectTtsModel({ type: 'file', path: fullPathToModel });
+if (result.success && (result.modelType === 'vits' || result.modelType === 'matcha')) {
+  // Show noise scale / length scale options
+}
+```
 
 ---
 

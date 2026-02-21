@@ -17,6 +17,7 @@ if linkage != nil
 end
 
 target 'VoiceLabOfflineTools' do
+
   config = use_native_modules!
 
   use_react_native!(
@@ -46,7 +47,7 @@ pre_install do |installer|
     script = File.join(Dir.pwd, '..', 'node_modules', 'react-native', 'scripts', 'generate-codegen-artifacts.js')
     if File.exist?(script)
       Dir.chdir(File.join(Dir.pwd, '..')) do
-        system(sh, '-p', '.', '-t', 'ios', '-o', 'ios', '-s', 'library')
+        system(sh, script, '-p', '.', '-t', 'ios', '-o', 'ios', '-s', 'library')
       end
     else
       UI.warn("React Native codegen script not found at #{script}; install node_modules first.")

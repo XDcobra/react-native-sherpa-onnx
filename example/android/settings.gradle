@@ -1,7 +1,8 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+// The gradle plugin lives in the workspace root node_modules. Adjust path from example/android to repo root.
+pluginManagement { includeBuild("../../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'voicelab'
 include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')
+includeBuild('../../node_modules/@react-native/gradle-plugin')
 include ':sherpa_models'

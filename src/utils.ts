@@ -99,7 +99,7 @@ export async function resolveModelPath(
  * // Initialize each model to detect types
  * for (const model of models) {
  *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
- *   const result = await initializeSherpaOnnx(path);
+ *   const result = await initializeStt(path);
  *   if (result.success) {
  *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
  *   }

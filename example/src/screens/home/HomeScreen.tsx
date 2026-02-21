@@ -112,15 +112,8 @@ export default function HomeScreen({ navigation }: Props) {
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Voice Lab - Offline Tools</Text>
+          <Text style={styles.headerTitle}>Sherpa ONNX Example</Text>
           <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('ModelManagement')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="download-outline" size={22} color="#007AFF" />
-            </TouchableOpacity>
             <TouchableOpacity
               style={styles.settingsButton}
               onPress={() => navigation.navigate('Settings')}

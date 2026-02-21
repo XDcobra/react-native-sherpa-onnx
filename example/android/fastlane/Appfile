@@ -1,2 +1,0 @@
-package_name("com.xdcobra.voicelab")
-json_key_file("fastlane/fastlane.json")

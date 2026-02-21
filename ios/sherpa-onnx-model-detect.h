@@ -11,13 +11,21 @@ namespace sherpaonnx {
 enum class SttModelKind {
     kUnknown,
     kTransducer,
+    kNemoTransducer,
     kParaformer,
     kNemoCtc,
     kWenetCtc,
     kSenseVoice,
     kZipformerCtc,
     kWhisper,
-    kFunAsrNano
+    kFunAsrNano,
+    kFireRedAsr,
+    kMoonshine,
+    kDolphin,
+    kCanary,
+    kOmnilingual,
+    kMedAsr,
+    kTeleSpeechCtc
 };
 
 enum class TtsModelKind {
@@ -42,6 +50,18 @@ struct SttModelPaths {
     std::string funasrLLM;
     std::string funasrEmbedding;
     std::string funasrTokenizer;
+    std::string moonshinePreprocessor;
+    std::string moonshineEncoder;
+    std::string moonshineUncachedDecoder;
+    std::string moonshineCachedDecoder;
+    std::string dolphinModel;
+    std::string omnilingualModel;
+    std::string medasrModel;
+    std::string telespeechCtcModel;
+    std::string fireRedEncoder;
+    std::string fireRedDecoder;
+    std::string canaryEncoder;
+    std::string canaryDecoder;
 };
 
 struct TtsModelPaths {

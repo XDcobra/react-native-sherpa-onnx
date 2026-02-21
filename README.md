@@ -72,6 +72,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 - ✅ **Offline Speech-to-Text** - No internet connection required for speech recognition
 - ✅ **Multiple Model Types** - Supports Zipformer/Transducer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, and FunASR Nano models
+- ✅ **Model type detection** - `detectSttModel()` and `detectTtsModel()` let you query the model type for a path **automatically**. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization).
 - ✅ **Model Quantization** - Automatic detection and preference for quantized (int8) models
 - ✅ **Flexible Model Loading** - Asset models, file system models, or auto-detection
 - ✅ **Android Support** - Fully supported on Android
@@ -153,6 +154,19 @@ Then run `pod install` as usual.
 
 Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 
+## Breaking changes (upgrading to 0.3.0)
+
+If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
+
+### Speech-to-Text (STT)
+
+- **`transcribeFile`** now returns `Promise<SttRecognitionResult>` (an object with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, `durations`) instead of `Promise<string>`. For text only, use `(await transcribeFile(path)).text`.
+- **`initializeSTT`** supports two additional optional options: `hotwordsFile` and `hotwordsScore`. The native TurboModule methods were renamed from `initializeSherpaOnnx` / `unloadSherpaOnnx` to `initializeStt` / `unloadStt`.
+
+### Text-to-Speech (TTS)
+
+- The **TTS public JS API** (`initializeTTS`, `unloadTTS`, `generateSpeech`, `generateSpeechStream`, etc.) is unchanged. If you call the **TurboModule directly**, use the new method names: `initializeTts`, `unloadTts`, and the other `Tts`-suffixed names (see [docs/tts.md – Mapping to Native API](./docs/tts.md#mapping-to-native-api)).
+
 ## Requirements
 
 - React Native >= 0.70
@@ -188,8 +202,7 @@ yarn android  # or yarn ios
 <td><img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" width="240" /></td>
 </tr>
 <tr>
-<td><img src="./docs/images/example_tts_1.png" alt="Text to speech settings" width="240" /></td>
-<td><img src="./docs/images/example_tts_2.png" alt="Text to speech generation" width="240" /></td>
+<td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
 <td></td>
 </tr>
 </table>

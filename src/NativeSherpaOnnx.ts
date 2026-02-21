@@ -6,70 +6,106 @@ export interface Spec extends TurboModule {
    */
   testSherpaInit(): Promise<string>;
 
-  /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
-   * Returns an absolute path that can be used by native code.
-   *
-   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
-   */
-  resolveModelPath(config: { type: string; path: string }): Promise<string>;
-
-  /**
-   * Extract a .tar.bz2 archive to a target folder.
-   * Returns { success, path } or { success, reason }.
-   */
-  extractTarBz2(
-    sourcePath: string,
-    targetPath: string,
-    force: boolean
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
-
-  /**
-   * Cancel any in-progress tar.bz2 extraction.
-   */
-  cancelExtractTarBz2(): Promise<void>;
-
-  /**
-   * Compute SHA-256 of a file and return the hex digest.
-   */
-  computeFileSha256(filePath: string): Promise<string>;
-
-  /**
-   * Initialize sherpa-onnx with model directory.
-   * Expects an absolute path (use resolveModelPath first for asset/file paths).
-   * @param modelDir - Absolute path to model directory
-   * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'auto'), undefined = auto (default)
-   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
-   * @returns Object with success boolean and array of detected models (each with type and modelDir)
-   */
-  initializeSherpaOnnx(
-    modelDir: string,
-    preferInt8?: boolean,
-    modelType?: string,
-    debug?: boolean
-  ): Promise<{
-    success: boolean;
-    detectedModels: Array<{ type: string; modelDir: string }>;
-  }>;
-
   // ==================== STT Methods ====================
 
   /**
-   * Transcribe an audio file.
+   * Initialize Speech-to-Text (STT) with model directory.
+   * Expects an absolute path (use resolveModelPath first for asset/file paths).
+   * @param modelDir - Absolute path to model directory
+   * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
+   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'fire_red_asr', 'moonshine', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
+   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
+   * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
+   * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
+   * @param numThreads - Optional: number of threads for inference (default in Kotlin: 1)
+   * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
+   * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
+   * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
+   * @param dither - Optional: dither for feature extraction (default 0)
+   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
+   * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
+   * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
+   * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
-  transcribeFile(filePath: string): Promise<string>;
+  initializeStt(
+    modelDir: string,
+    preferInt8?: boolean,
+    modelType?: string,
+    debug?: boolean,
+    hotwordsFile?: string,
+    hotwordsScore?: number,
+    numThreads?: number,
+    provider?: string,
+    ruleFsts?: string,
+    ruleFars?: string,
+    dither?: number,
+    modelOptions?: Object,
+    modelingUnit?: string,
+    bpeVocab?: string
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    decodingMethod?: string;
+  }>;
 
   /**
-   * Release sherpa-onnx resources.
+   * Detect STT model type and structure without initializing the recognizer.
+   * Uses the same native file-based detection as initializeStt. Useful to show model-specific
+   * options before init or to query the type for a given path.
+   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param modelType - Optional: explicit type or 'auto' (default)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
    */
-  unloadSherpaOnnx(): Promise<void>;
+  detectSttModel(
+    modelDir: string,
+    preferInt8?: boolean,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
+   * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
+   */
+  transcribeFile(filePath: string): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  }>;
+
+  /**
+   * Transcribe from float PCM samples (e.g. from microphone). Same return type as transcribeFile.
+   */
+  transcribeSamples(
+    samples: number[],
+    sampleRate: number
+  ): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  }>;
+
+  /**
+   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
+   */
+  setSttConfig(options: Object): Promise<void>;
+
+  /**
+   * Release STT resources.
+   */
+  unloadStt(): Promise<void>;
 
   // ==================== TTS Methods ====================
 
@@ -94,6 +130,22 @@ export interface Spec extends TurboModule {
     detectedModels: Array<{ type: string; modelDir: string }>;
     sampleRate: number;
     numSpeakers: number;
+  }>;
+
+  /**
+   * Detect TTS model type and structure without initializing the engine.
+   * Uses the same native file-based detection as initializeTts.
+   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * @param modelType - Optional: explicit type or 'auto' (default)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+   */
+  detectTtsModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
   }>;
 
   /**
@@ -249,7 +301,16 @@ export interface Spec extends TurboModule {
    */
   shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
 
-  // ==================== Helper Methods ====================
+  // ==================== Helper - Assets ====================
+
+  /**
+   * Resolve model path based on configuration.
+   * Handles asset paths, file system paths, and auto-detection.
+   * Returns an absolute path that can be used by native code.
+   *
+   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
+   */
+  resolveModelPath(config: { type: string; path: string }): Promise<string>;
 
   /**
    * List all model folders in the assets/models directory.
@@ -265,7 +326,7 @@ export interface Spec extends TurboModule {
    * // Then use with resolveModelPath and initialize:
    * for (const model of folders) {
    *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
-   *   const result = await initializeSherpaOnnx(path);
+   *   const result = await initializeStt(path);
    *   if (result.success) {
    *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
    *   }
@@ -291,6 +352,35 @@ export interface Spec extends TurboModule {
    * Use this to list and load models that are delivered via PAD instead of bundled app assets.
    */
   getAssetPackPath(packName: string): Promise<string | null>;
+
+  // ==================== Helper - Extraction ====================
+
+  /**
+   * Extract a .tar.bz2 archive to a target folder.
+   * Returns { success, path } or { success, reason }.
+   */
+  extractTarBz2(
+    sourcePath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Cancel any in-progress tar.bz2 extraction.
+   */
+  cancelExtractTarBz2(): Promise<void>;
+
+  /**
+   * Compute SHA-256 of a file and return the hex digest.
+   */
+  computeFileSha256(filePath: string): Promise<string>;
+
+  // ==================== Helper - Audio conversion ====================
 
   /**
    * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").

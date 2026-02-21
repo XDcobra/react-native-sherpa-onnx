@@ -20,6 +20,17 @@ export type TTSModelType =
   | 'zipvoice'
   | 'auto';
 
+/** Runtime list of supported TTS model types. */
+export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
+  'vits',
+  'matcha',
+  'kokoro',
+  'kitten',
+  'pocket',
+  'zipvoice',
+  'auto',
+] as const;
+
 /**
  * Configuration for TTS initialization.
  */

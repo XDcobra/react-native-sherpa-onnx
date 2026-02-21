@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import {
   Text,
   View,
-  StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
   Alert,
+  Share,
 } from 'react-native';
+import { styles } from './STTScreen.styles';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
@@ -17,21 +19,15 @@ import {
   resolveModelPath,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
-import RNFS from 'react-native-fs';
-import {
-  listDownloadedModelsByCategory,
-  ModelCategory,
-} from 'react-native-sherpa-onnx/download';
-import {
-  getSizeHint,
-  getQualityHint,
-  RECOMMENDED_MODEL_IDS,
-} from '../../utils/recommendedModels';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   initializeSTT,
   unloadSTT,
   transcribeFile,
   type STTModelType,
+  type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
 import {
   getAssetModelPath,
@@ -45,7 +41,6 @@ const PAD_PACK_NAME = 'sherpa_models';
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -53,6 +48,9 @@ export default function STTScreen() {
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
   );
+  const [selectedModelForInit, setSelectedModelForInit] = useState<
+    string | null
+  >(null);
   const [detectedModels, setDetectedModels] = useState<
     Array<{ type: STTModelType; modelDir: string }>
   >([]);
@@ -60,6 +58,9 @@ export default function STTScreen() {
     useState<STTModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorSource, setErrorSource] = useState<'init' | 'transcribe' | null>(
+    null
+  );
   const [audioSourceType, setAudioSourceType] = useState<
     'example' | 'own' | null
   >(null);
@@ -68,40 +69,39 @@ export default function STTScreen() {
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [transcriptionResult, setTranscriptionResult] = useState<string | null>(
-    null
-  );
+  const [transcriptionResult, setTranscriptionResult] =
+    useState<SttRecognitionResult | null>(null);
+  const [tokensExpanded, setTokensExpanded] = useState(false);
+  const [timestampsExpanded, setTimestampsExpanded] = useState(false);
+  const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [soundPlayer, setSoundPlayer] = useState<any>(null);
+
+  const STT_NUM_THREADS = 2;
 
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
   }, []);
 
-  // Cleanup: Release STT resources when leaving the screen
+  // Cleanup: Release STT resources only when leaving the screen (unmount).
+  // Do not depend on currentModelFolder: when switching models, handleInitialize
+  // already calls unloadSTT() before re-init. If cleanup ran on currentModelFolder
+  // change, it would call unloadSTT() after the new init and break transcription.
   useEffect(() => {
     return () => {
-      if (currentModelFolder !== null) {
-        console.log('STTScreen: Cleaning up STT resources');
-        unloadSTT().catch((err) => {
-          console.error('STTScreen: Failed to unload STT:', err);
-        });
-      }
+      console.log('STTScreen: Cleaning up STT resources');
+      unloadSTT().catch((err) => {
+        console.error('STTScreen: Failed to unload STT:', err);
+      });
     };
-  }, [currentModelFolder]);
+  }, []);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
+    setErrorSource(null);
     try {
-      const downloadedModels = await listDownloadedModelsByCategory(
-        ModelCategory.Stt
-      );
-      const downloadedIds = downloadedModels
-        .map((model) => model.id)
-        .filter(Boolean);
-
       const assetModels = await listAssetModels();
       const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
@@ -112,7 +112,7 @@ export default function STTScreen() {
       let resolvedPadPath: string | null = null;
       try {
         const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${RNFS.DocumentDirectoryPath}/models`;
+        const fallbackPath = `${DocumentDirectoryPath}/models`;
         const padPath = padPathFromNative ?? fallbackPath;
         const padResults = await listModelsAtPath(padPath);
         padFolders = (padResults || [])
@@ -133,46 +133,28 @@ export default function STTScreen() {
       }
       setPadModelsPath(resolvedPadPath);
 
-      // Merge: prefer downloaded, then PAD folders, then bundled asset folders (avoid duplicates)
+      // Merge: PAD folders, then bundled asset folders (no duplicates)
       const combined = [
-        ...downloadedIds,
-        ...padFolders.filter((f) => !downloadedIds.includes(f)),
-        ...sttFolders.filter(
-          (f) => !downloadedIds.includes(f) && !padFolders.includes(f)
-        ),
+        ...padFolders,
+        ...sttFolders.filter((f) => !padFolders.includes(f)),
       ];
 
       setPadModelIds(padFolders);
-
-      if (downloadedIds.length > 0) {
-        console.log('STTScreen: Found downloaded models:', downloadedIds);
-      }
       if (sttFolders.length > 0) {
         console.log('STTScreen: Found asset models:', sttFolders);
       }
-
-      setDownloadedModelIds(downloadedIds);
       setAvailableModels(combined);
 
       if (combined.length === 0) {
-        const hasRecommendedModels =
-          (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
-
-        if (hasRecommendedModels) {
-          setError(
-            'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
-          );
-          console.log(
-            'STTScreen: No models available. Recommended models available for download.'
-          );
-        } else {
-          setError('No STT models found. See STT_MODEL_SETUP.md');
-        }
+        setErrorSource('init');
+        setError(
+          'No STT models found. Use bundled assets or PAD models. See STT_MODEL_SETUP.md'
+        );
       }
     } catch (err) {
       console.error('STTScreen: Failed to load models:', err);
+      setErrorSource('init');
       setError('Failed to load available models');
-      setDownloadedModelIds([]);
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
@@ -182,6 +164,7 @@ export default function STTScreen() {
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
     setError(null);
+    setErrorSource(null);
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
@@ -192,17 +175,18 @@ export default function STTScreen() {
         await unloadSTT();
       }
 
-      // Initialize new model: PAD models use padModelsPath as base; downloaded use default STT path; assets use getAssetModelPath
-      const useFilePath =
-        downloadedModelIds.includes(modelFolder) ||
-        padModelIds.includes(modelFolder);
+      // Initialize new model: PAD models use padModelsPath as base; assets use getAssetModelPath
+      const useFilePath = padModelIds.includes(modelFolder);
+
+      const modelPath = useFilePath
+        ? padModelIds.includes(modelFolder) && padModelsPath
+          ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
+          : getFileModelPath(modelFolder, ModelCategory.Stt)
+        : getAssetModelPath(modelFolder);
 
       const result = await initializeSTT({
-        modelPath: useFilePath
-          ? padModelIds.includes(modelFolder) && padModelsPath
-            ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
-            : getFileModelPath(modelFolder, ModelCategory.Stt)
-          : getAssetModelPath(modelFolder),
+        modelPath,
+        numThreads: STT_NUM_THREADS,
       });
 
       if (result.success && result.detectedModels.length > 0) {
@@ -220,11 +204,17 @@ export default function STTScreen() {
           )}\nDetected models: ${detectedTypes}`
         );
 
-        // Auto-select first detected model
-        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+        // Auto-select first detected model (use result.modelType when available for consistency)
+        const loadedType =
+          (result as { modelType?: string }).modelType ??
+          normalizedDetected[0]?.type;
+        if (loadedType) {
+          setSelectedModelType(loadedType as STTModelType);
+        } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
           setSelectedModelType(normalizedDetected[0].type);
         }
       } else {
+        setErrorSource('init');
         setError('No models detected in the directory');
         setInitResult('Initialization failed: No compatible models found');
       }
@@ -262,9 +252,10 @@ export default function STTScreen() {
         }
       }
 
+      setErrorSource('init');
       setError(errorMessage);
       setInitResult(
-        `Initialization failed: ${errorMessage}\n\nNote: Models must be provided separately. See MODEL_SETUP.md for details.\n\nCheck Logcat (Android) or Console (iOS) for detailed logs.`
+        `Initialization failed: ${errorMessage}\n\nThe error has been reported. We will address it as soon as possible in the next app update.`
       );
     } finally {
       setLoading(false);
@@ -273,18 +264,21 @@ export default function STTScreen() {
 
   const handleTranscribe = async () => {
     if (!currentModelFolder) {
+      setErrorSource('transcribe');
       setError('Please select a model first');
       return;
     }
 
     // If a custom audio file was chosen, prefer it
     if (!selectedAudio && !customAudioPath) {
+      setErrorSource('transcribe');
       setError('Please select an audio file (example or local WAV)');
       return;
     }
 
     setTranscribing(true);
     setError(null);
+    setErrorSource(null);
     setTranscriptionResult(null);
 
     try {
@@ -302,7 +296,16 @@ export default function STTScreen() {
       const result = await transcribeFile(pathToTranscribe);
       setTranscriptionResult(result);
     } catch (err) {
-      console.error('Transcription error:', err);
+      const msg =
+        (err instanceof Error ? err.message : (err as any)?.message) ?? '';
+      if (msg.includes('cache_last_time')) {
+        const friendly =
+          'This model appears to be a NeMo streaming transducer (e.g. "streaming fast conformer"). File transcription currently requires a non-streaming NeMo transducer model. Please use a model exported for offline/non-streaming use, or choose another STT model.';
+        Alert.alert('Transcription not supported', friendly);
+        setErrorSource('transcribe');
+        setError(friendly);
+        return;
+      }
 
       let errorMessage = 'Unknown error';
       if (err instanceof Error) {
@@ -321,6 +324,7 @@ export default function STTScreen() {
         }
       }
 
+      setErrorSource('transcribe');
       setError(errorMessage);
     } finally {
       setTranscribing(false);
@@ -329,6 +333,7 @@ export default function STTScreen() {
 
   const handlePickLocalFile = async () => {
     setError(null);
+    setErrorSource(null);
     setTranscriptionResult(null);
 
     try {
@@ -342,6 +347,7 @@ export default function STTScreen() {
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
 
       if (!uri) {
+        setErrorSource('transcribe');
         setError('Could not get file URI from picker result');
         return;
       }
@@ -364,6 +370,7 @@ export default function STTScreen() {
         return;
       }
       console.error('File pick error:', err);
+      setErrorSource('transcribe');
       setError(err instanceof Error ? err.message : String(err));
     }
   };
@@ -413,23 +420,29 @@ export default function STTScreen() {
     : [];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.body}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          style={styles.scrollView}
         >
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize Model</Text>
             <Text style={styles.hint}>
-              Select a model to initialize. Available models are discovered
-              automatically from your assets folder.
+              Select a model, then tap "Use model".
             </Text>
 
-            {currentModelFolder && (
+            {(currentModelFolder || selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  Current: {getModelDisplayName(currentModelFolder)}
+                  {currentModelFolder
+                    ? `Initialized: ${getModelDisplayName(currentModelFolder)}`
+                    : `Selected: ${
+                        selectedModelForInit
+                          ? getModelDisplayName(selectedModelForInit)
+                          : ''
+                      }`}
                 </Text>
               </View>
             )}
@@ -451,23 +464,24 @@ export default function STTScreen() {
             ) : (
               <View style={styles.modelButtons}>
                 {availableModels.map((modelFolder) => {
+                  const isSelected = selectedModelForInit === modelFolder;
+                  const isInitialized = currentModelFolder === modelFolder;
                   return (
                     <TouchableOpacity
                       key={modelFolder}
                       style={[
                         styles.modelButton,
-                        currentModelFolder === modelFolder &&
-                          styles.modelButtonActive,
+                        isSelected && styles.modelButtonActive,
+                        isInitialized && styles.modelButtonInitialized,
                         loading && styles.buttonDisabled,
                       ]}
-                      onPress={() => handleInitialize(modelFolder)}
+                      onPress={() => setSelectedModelForInit(modelFolder)}
                       disabled={loading}
                     >
                       <Text
                         style={[
                           styles.modelButtonText,
-                          currentModelFolder === modelFolder &&
-                            styles.modelButtonTextActive,
+                          isSelected && styles.modelButtonTextActive,
                         ]}
                       >
                         {getModelDisplayName(modelFolder)}
@@ -509,51 +523,60 @@ export default function STTScreen() {
               </View>
             )}
 
-            {initResult && (
-              <View
-                style={[styles.resultContainer, error && styles.errorContainer]}
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  styles.applyButton,
+                  loading && styles.buttonDisabled,
+                ]}
+                onPress={() =>
+                  handleInitialize(
+                    selectedModelForInit ?? currentModelFolder ?? ''
+                  )
+                }
+                disabled={
+                  loading || (!selectedModelForInit && !currentModelFolder)
+                }
               >
-                <Text style={[styles.resultLabel, error && styles.errorLabel]}>
-                  {error ? 'Error' : 'Result'}:
-                </Text>
-                <Text style={[styles.resultText, error && styles.errorText]}>
-                  {initResult}
-                </Text>
+                {loading ? (
+                  <View style={styles.applyButtonContent}>
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                      style={styles.applyButtonSpinner}
+                    />
+                    <Text style={styles.buttonText}>Initializing…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.buttonText}>Use model</Text>
+                )}
+              </TouchableOpacity>
+            </>
+
+            {initResult && !(error && errorSource === 'init') && (
+              <View style={styles.resultContainer}>
+                <Text style={styles.resultLabel}>Result:</Text>
+                <Text style={styles.resultText}>{initResult}</Text>
+              </View>
+            )}
+
+            {error && errorSource === 'init' && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorLabel}>Error:</Text>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
           </View>
 
-          {error && !initResult && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorLabel}>Error:</Text>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
+          {detectedModels.length > 1 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>2. Select Model Type</Text>
+              <Text style={styles.hint}>
+                Multiple model types were detected. Select which one to use for
+                transcription.
+              </Text>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Select Model Type</Text>
-            <Text style={styles.hint}>
-              If multiple model types were detected, select which one to use for
-              transcription.
-            </Text>
-
-            {!currentModelFolder && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  Please initialize a model directory first
-                </Text>
-              </View>
-            )}
-
-            {currentModelFolder && detectedModels.length === 0 && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No models detected. Please try another directory.
-                </Text>
-              </View>
-            )}
-
-            {detectedModels.length > 0 && (
               <View style={styles.detectedModelsContainer}>
                 {detectedModels.map((model, index) => (
                   <TouchableOpacity
@@ -575,26 +598,30 @@ export default function STTScreen() {
                       {model.type.toUpperCase()}
                     </Text>
                     <Text style={styles.detectedModelPath}>
-                      {model.modelDir}
+                      {getModelDisplayName(
+                        model.modelDir.replace(/^.*[/\\]/, '') || model.modelDir
+                      )}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            )}
 
-            {currentModelFolder &&
-              detectedModels.length > 0 &&
-              !selectedModelType && (
+              {!selectedModelType && (
                 <View style={styles.warningContainer}>
                   <Text style={styles.warningText}>
                     Please select a model type above
                   </Text>
                 </View>
               )}
-          </View>
+            </View>
+          )}
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Transcribe Audio</Text>
+            <Text style={styles.sectionTitle}>
+              {detectedModels.length > 1
+                ? '3. Transcribe Audio'
+                : '2. Transcribe Audio'}
+            </Text>
             <Text style={styles.hint}>
               Select an audio source and transcribe it using the selected model.
             </Text>
@@ -602,7 +629,9 @@ export default function STTScreen() {
             {!selectedModelType && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Please select a model type first
+                  {!currentModelFolder
+                    ? 'Please initialize a model directory first'
+                    : 'Please select a model type first'}
                 </Text>
               </View>
             )}
@@ -710,15 +739,6 @@ export default function STTScreen() {
                       ← Change Audio Source
                     </Text>
                   </TouchableOpacity>
-
-                  {transcriptionResult && (
-                    <View style={styles.resultContainer}>
-                      <Text style={styles.resultLabel}>Transcription:</Text>
-                      <Text style={styles.resultText}>
-                        {transcriptionResult}
-                      </Text>
-                    </View>
-                  )}
                 </>
               )}
 
@@ -801,15 +821,345 @@ export default function STTScreen() {
                     ← Change Audio Source
                   </Text>
                 </TouchableOpacity>
-
-                {transcriptionResult && (
-                  <View style={styles.resultContainer}>
-                    <Text style={styles.resultLabel}>Transcription:</Text>
-                    <Text style={styles.resultText}>{transcriptionResult}</Text>
-                  </View>
-                )}
               </>
             )}
+
+            {selectedModelType &&
+              transcriptionResult &&
+              (audioSourceType === 'example' || audioSourceType === 'own') && (
+                <View style={styles.resultSection}>
+                  <View style={styles.resultLabelRow}>
+                    <Text style={styles.resultLabel}>Transcription:</Text>
+                    <View style={styles.resultLabelActions}>
+                      <TouchableOpacity
+                        style={styles.copyIconButton}
+                        onPress={() => {
+                          const t = transcriptionResult.text ?? '';
+                          if (t) Clipboard.setString(t);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons
+                          name="copy-outline"
+                          size={20}
+                          color="#2e7d32"
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.copyIconButton}
+                        onPress={() => {
+                          const t = transcriptionResult.text ?? '';
+                          if (t) {
+                            Share.share({
+                              message: t,
+                              title: 'Transcription',
+                            });
+                          }
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons
+                          name="share-outline"
+                          size={20}
+                          color="#2e7d32"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <Text style={styles.resultText} selectable>
+                    {transcriptionResult.text ?? ''}
+                  </Text>
+                  {(transcriptionResult.lang ||
+                    transcriptionResult.emotion ||
+                    transcriptionResult.event) && (
+                    <View style={styles.metaRow}>
+                      {transcriptionResult.lang ? (
+                        <Text style={styles.metaText}>
+                          Lang: {transcriptionResult.lang}
+                        </Text>
+                      ) : null}
+                      {transcriptionResult.emotion ? (
+                        <Text style={styles.metaText}>
+                          Emotion: {transcriptionResult.emotion}
+                        </Text>
+                      ) : null}
+                      {transcriptionResult.event ? (
+                        <Text style={styles.metaText}>
+                          Event: {transcriptionResult.event}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setTokensExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={tokensExpanded ? 'chevron-down' : 'chevron-forward'}
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Tokens ({(transcriptionResult.tokens ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {tokensExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.tokens ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.tokens ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Tokens',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.expandListItem}>
+                        {(transcriptionResult.tokens ?? []).join(', ')}
+                      </Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setTimestampsExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={
+                        timestampsExpanded ? 'chevron-down' : 'chevron-forward'
+                      }
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Timestamps (
+                      {(transcriptionResult.timestamps ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {timestampsExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.timestamps ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.timestamps ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Timestamps',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {(transcriptionResult.timestamps ?? []).length > 0 && (
+                        <ScrollView
+                          style={styles.expandListWrap}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
+                        >
+                          {(transcriptionResult.timestamps ?? []).map(
+                            (item, i) => (
+                              <Text
+                                key={`ts-${i}`}
+                                style={styles.expandListItem}
+                              >
+                                [{String(item)}]
+                              </Text>
+                            )
+                          )}
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setDurationsExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={
+                        durationsExpanded ? 'chevron-down' : 'chevron-forward'
+                      }
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Durations ({(transcriptionResult.durations ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {durationsExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.durations ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.durations ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Durations',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {(transcriptionResult.durations ?? []).length > 0 && (
+                        <ScrollView
+                          style={styles.expandListWrap}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
+                        >
+                          {(transcriptionResult.durations ?? []).map(
+                            (item, i) => (
+                              <Text
+                                key={`d-${i}`}
+                                style={styles.expandListItem}
+                              >
+                                [{String(item)}]
+                              </Text>
+                            )
+                          )}
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+                  <View style={styles.resultButtonRow}>
+                    <TouchableOpacity
+                      style={styles.resultActionButton}
+                      onPress={() => {
+                        const json = JSON.stringify(
+                          transcriptionResult,
+                          null,
+                          2
+                        );
+                        Clipboard.setString(json);
+                      }}
+                    >
+                      <Ionicons
+                        name="copy-outline"
+                        size={18}
+                        color="#2e7d32"
+                        style={styles.resultActionIcon}
+                      />
+                      <Text style={styles.resultActionText}>
+                        Copy all as JSON
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.resultActionButton}
+                      onPress={() => {
+                        const json = JSON.stringify(
+                          transcriptionResult,
+                          null,
+                          2
+                        );
+                        Share.share({
+                          message: json,
+                          title: 'Export all as JSON',
+                        });
+                      }}
+                    >
+                      <Ionicons
+                        name="document-text-outline"
+                        size={18}
+                        color="#2e7d32"
+                        style={styles.resultActionIcon}
+                      />
+                      <Text style={styles.resultActionText}>
+                        Export all as JSON
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
             {selectedModelType &&
               audioSourceType === 'example' &&
@@ -820,340 +1170,16 @@ export default function STTScreen() {
                   </Text>
                 </View>
               )}
+
+            {error && errorSource === 'transcribe' && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorLabel}>Error:</Text>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       </View>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  body: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  section: {
-    marginBottom: 30,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
-  },
-  hint: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 15,
-    fontStyle: 'italic',
-  },
-  button: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: '#999',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  resultContainer: {
-    marginTop: 30,
-    padding: 20,
-    backgroundColor: '#e8f5e9',
-    borderRadius: 8,
-  },
-  resultLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2e7d32',
-    marginBottom: 8,
-  },
-  resultText: {
-    fontSize: 16,
-    color: '#1b5e20',
-  },
-  errorContainer: {
-    marginTop: 30,
-    padding: 20,
-    backgroundColor: '#ffebee',
-    borderRadius: 8,
-  },
-  errorLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#c62828',
-    marginBottom: 8,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#b71c1c',
-  },
-  currentModelContainer: {
-    marginBottom: 15,
-    padding: 10,
-    backgroundColor: '#e3f2fd',
-    borderRadius: 6,
-  },
-  currentModelText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976d2',
-    textAlign: 'center',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  loadingText: {
-    marginTop: 15,
-    fontSize: 14,
-    color: '#666',
-  },
-  modelButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-    justifyContent: 'flex-start',
-  },
-  modelButton: {
-    width: '29%',
-    flexGrow: 0,
-    flexShrink: 1,
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 6,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    minWidth: 100,
-  },
-  modelButtonActive: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#4caf50',
-  },
-  modelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  modelButtonTextActive: {
-    color: '#2e7d32',
-  },
-  modelFolderText: {
-    fontSize: 10,
-    color: '#999',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  subsectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#555',
-    marginTop: 15,
-    marginBottom: 10,
-  },
-  audioFilesContainer: {
-    marginTop: 10,
-    marginBottom: 15,
-  },
-  audioFileButton: {
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    marginBottom: 10,
-  },
-  audioFileButtonActive: {
-    backgroundColor: '#e3f2fd',
-    borderColor: '#2196f3',
-  },
-  audioFileButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  audioFileButtonTextActive: {
-    color: '#1976d2',
-  },
-  audioFileDescription: {
-    fontSize: 12,
-    color: '#999',
-  },
-  warningContainer: {
-    marginTop: 15,
-    padding: 12,
-    backgroundColor: '#fff3cd',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#ffc107',
-  },
-  warningText: {
-    fontSize: 14,
-    color: '#856404',
-    textAlign: 'center',
-  },
-  sourceChoiceButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sourceChoiceButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  sourceChoiceRow: {
-    flexDirection: 'row',
-    marginBottom: 20,
-  },
-  flex1: {
-    flex: 1,
-  },
-  mr12: {
-    marginRight: 12,
-  },
-  mt15: {
-    marginTop: 15,
-  },
-  mt12: {
-    marginTop: 12,
-  },
-  secondaryButton: {
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  selectedFileContainer: {
-    marginTop: 20,
-    padding: 16,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  selectedFileLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-  },
-  selectedFileName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
-  },
-  playButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  playButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  iconInline: {
-    marginRight: 8,
-  },
-  rowCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowAlignCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detectedModelsSection: {
-    marginTop: 20,
-  },
-  detectedModelsContainer: {
-    marginTop: 10,
-  },
-  detectedModelButton: {
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    marginBottom: 10,
-  },
-  detectedModelButtonActive: {
-    backgroundColor: '#e3f2fd',
-    borderColor: '#2196f3',
-  },
-  detectedModelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  detectedModelButtonTextActive: {
-    color: '#1976d2',
-  },
-  detectedModelPath: {
-    fontSize: 12,
-    color: '#999',
-  },
-  modelHintRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-    gap: 8,
-  },
-  modelHintGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginRight: 12,
-  },
-  modelHintText: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 0,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-});

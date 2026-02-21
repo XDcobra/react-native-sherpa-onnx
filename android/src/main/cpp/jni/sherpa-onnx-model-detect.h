@@ -18,7 +18,14 @@ enum class SttModelKind {
     kSenseVoice,
     kZipformerCtc,
     kWhisper,
-    kFunAsrNano
+    kFunAsrNano,
+    kFireRedAsr,
+    kMoonshine,
+    kDolphin,
+    kCanary,
+    kOmnilingual,
+    kMedAsr,
+    kTeleSpeechCtc
 };
 
 enum class TtsModelKind {
@@ -40,10 +47,27 @@ struct SttModelPaths {
     std::string whisperEncoder;
     std::string whisperDecoder;
     std::string tokens;
+    /** BPE vocabulary for hotwords tokenization (sentencepiece export bpe.vocab). Optional. */
+    std::string bpeVocab;
     std::string funasrEncoderAdaptor;
     std::string funasrLLM;
     std::string funasrEmbedding;
     std::string funasrTokenizer;
+    // Moonshine
+    std::string moonshinePreprocessor;
+    std::string moonshineEncoder;
+    std::string moonshineUncachedDecoder;
+    std::string moonshineCachedDecoder;
+    // Dolphin, Omnilingual, MedAsr, TeleSpeech (single model each)
+    std::string dolphinModel;
+    std::string omnilingualModel;
+    std::string medasrModel;
+    std::string telespeechCtcModel;
+    // FireRed ASR, Canary (encoder/decoder)
+    std::string fireRedEncoder;
+    std::string fireRedDecoder;
+    std::string canaryEncoder;
+    std::string canaryDecoder;
 };
 
 struct TtsModelPaths {

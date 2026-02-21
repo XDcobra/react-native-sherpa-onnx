@@ -1,5 +1,17 @@
 import { Alert, Platform } from 'react-native';
-import RNFS from 'react-native-fs';
+import {
+  DocumentDirectoryPath,
+  exists,
+  readFile,
+  mkdir,
+  writeFile,
+  readDir,
+  stat,
+  unlink,
+  downloadFile,
+  stopDownload,
+} from '@dr.pogodin/react-native-fs';
+import type { TTSModelType } from '../tts/types';
 import { extractTarBz2 } from './extractTarBz2';
 import {
   parseChecksumFile,
@@ -23,13 +35,8 @@ export enum ModelCategory {
   Separation = 'separation',
 }
 
-export type TtsModelType =
-  | 'vits'
-  | 'kokoro'
-  | 'matcha'
-  | 'kitten'
-  | 'zipvoice'
-  | 'unknown';
+/** TTS model type for meta; 'unknown' when id could not be classified. */
+export type TtsModelType = TTSModelType | 'unknown';
 
 export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
 
@@ -84,6 +91,8 @@ type ModelManifest<T extends ModelMetaBase = ModelMetaBase> = {
   downloadedAt: string;
   lastUsed?: string;
   model: T;
+  /** Total size in bytes of the extracted/model directory (set after download or computed once). */
+  sizeOnDisk?: number;
 };
 
 export type ModelWithMetadata<T extends ModelMetaBase = ModelMetaBase> = {
@@ -197,37 +206,37 @@ const CATEGORY_CONFIG: Record<
   [ModelCategory.Tts]: {
     tag: 'tts-models',
     cacheFile: 'tts-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/tts`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/tts`,
   },
   [ModelCategory.Stt]: {
     tag: 'asr-models',
     cacheFile: 'asr-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/stt`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/stt`,
   },
   [ModelCategory.Vad]: {
     tag: 'asr-models',
     cacheFile: 'vad-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/vad`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/vad`,
   },
   [ModelCategory.Diarization]: {
     tag: 'speaker-segmentation-models',
     cacheFile: 'diarization-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/diarization`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/diarization`,
   },
   [ModelCategory.Enhancement]: {
     tag: 'speech-enhancement-models',
     cacheFile: 'enhancement-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/enhancement`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/enhancement`,
   },
   [ModelCategory.Separation]: {
     tag: 'source-separation-models',
     cacheFile: 'separation-models.json',
-    baseDir: `${RNFS.DocumentDirectoryPath}/sherpa-onnx/models/separation`,
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/separation`,
   },
 };
 
 function getCacheDir(): string {
-  return `${RNFS.DocumentDirectoryPath}/sherpa-onnx/cache`;
+  return `${DocumentDirectoryPath}/sherpa-onnx/cache`;
 }
 
 function getCachePath(category: ModelCategory): string {
@@ -406,6 +415,7 @@ function deriveType(id: string): TtsModelType {
   if (lower.includes('kokoro')) return 'kokoro';
   if (lower.includes('matcha')) return 'matcha';
   if (lower.includes('kitten')) return 'kitten';
+  if (lower.includes('pocket')) return 'pocket';
   if (lower.includes('zipvoice')) return 'zipvoice';
   return 'unknown';
 }
@@ -576,10 +586,10 @@ async function loadCacheFromDisk<T extends ModelMetaBase>(
     | undefined;
   if (memoryCache) return memoryCache;
   const cachePath = getCachePath(category);
-  const exists = await RNFS.exists(cachePath);
-  if (!exists) return null;
+  const existsResult = await exists(cachePath);
+  if (!existsResult) return null;
 
-  const raw = await RNFS.readFile(cachePath, 'utf8');
+  const raw = await readFile(cachePath, 'utf8');
   const parsed = JSON.parse(raw) as CachePayload<T>;
   memoryCacheByCategory[category] = parsed as CachePayload<ModelMetaBase>;
   return parsed;
@@ -590,8 +600,8 @@ async function saveCache<T extends ModelMetaBase>(
   payload: CachePayload<T>
 ): Promise<void> {
   const cacheDir = getCacheDir();
-  await RNFS.mkdir(cacheDir);
-  await RNFS.writeFile(getCachePath(category), JSON.stringify(payload), 'utf8');
+  await mkdir(cacheDir);
+  await writeFile(getCachePath(category), JSON.stringify(payload), 'utf8');
   memoryCacheByCategory[category] = payload as CachePayload<ModelMetaBase>;
 }
 
@@ -710,32 +720,27 @@ export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
   category: ModelCategory
 ): Promise<T[]> {
   const baseDir = getModelsBaseDir(category);
-  const exists = await RNFS.exists(baseDir);
-  if (!exists) return [];
+  const existsResult = await exists(baseDir);
+  if (!existsResult) return [];
 
-  const entries = await RNFS.readDir(baseDir);
+  const entries = await readDir(baseDir);
   const models: T[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const manifestPath = getManifestPath(category, entry.name);
-    const manifestExists = await RNFS.exists(manifestPath);
-    if (manifestExists) {
-      try {
-        const raw = await RNFS.readFile(manifestPath, 'utf8');
-        const manifest = JSON.parse(raw) as ModelManifest<T>;
-        if (manifest.model) {
-          models.push(manifest.model);
-          continue;
-        }
-      } catch {
-        // ignore and fall back
+    const manifestExists = await exists(manifestPath);
+    // Only list models that have a manifest (download + extraction fully complete).
+    // Directories without manifest are still being extracted and must not appear in the list.
+    if (!manifestExists) continue;
+    try {
+      const raw = await readFile(manifestPath, 'utf8');
+      const manifest = JSON.parse(raw) as ModelManifest<T>;
+      if (manifest.model) {
+        models.push(manifest.model);
       }
-    }
-
-    const model = await getModelByIdByCategory<T>(category, entry.name);
-    if (model) {
-      models.push(model);
+    } catch {
+      // ignore invalid manifest
     }
   }
 
@@ -747,7 +752,7 @@ export async function isModelDownloadedByCategory(
   id: string
 ): Promise<boolean> {
   const readyPath = getReadyMarkerPath(category, id);
-  return RNFS.exists(readyPath);
+  return exists(readyPath);
 }
 
 export async function getLocalModelPathByCategory(
@@ -788,7 +793,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   }
 
   const baseDir = getModelsBaseDir(category);
-  await RNFS.mkdir(baseDir);
+  await mkdir(baseDir);
 
   const downloadPath = getArchivePath(category, id, model.archiveExt);
   const isArchive = model.archiveExt === 'tar.bz2';
@@ -805,21 +810,21 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     // Only clean up extracted model dir, preserve archive for download resume
-    if (await RNFS.exists(modelDir)) {
-      await RNFS.unlink(modelDir);
+    if (await exists(modelDir)) {
+      await unlink(modelDir);
     }
   };
 
   const cleanupPartialWithRetry = async () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await cleanupPartial();
-      if (!(await RNFS.exists(modelDir))) {
+      if (!(await exists(modelDir))) {
         return;
       }
       await sleep(400);
     }
 
-    if (await RNFS.exists(modelDir)) {
+    if (await exists(modelDir)) {
       console.warn(
         `Model cleanup after abort did not fully complete for ${category}:${id}`
       );
@@ -833,24 +838,22 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   }
 
   if (opts?.overwrite) {
-    if (await RNFS.exists(modelDir)) {
-      await RNFS.unlink(modelDir);
+    if (await exists(modelDir)) {
+      await unlink(modelDir);
     }
-    if (await RNFS.exists(downloadPath)) {
-      await RNFS.unlink(downloadPath);
+    if (await exists(downloadPath)) {
+      await unlink(downloadPath);
     }
   } else {
     // Clean up incomplete extractions but preserve partial downloads for resume
-    const readyMarkerExists = await RNFS.exists(
-      getReadyMarkerPath(category, id)
-    );
+    const readyMarkerExists = await exists(getReadyMarkerPath(category, id));
     if (!readyMarkerExists) {
       if (isArchive) {
         // No ready marker found; only clean up extracted model dir
         // Keep archive file to support download resume
-        if (await RNFS.exists(modelDir)) {
+        if (await exists(modelDir)) {
           // Removing partial model dir
-          await RNFS.unlink(modelDir);
+          await unlink(modelDir);
         }
       }
     }
@@ -859,16 +862,16 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   try {
     // Step 2: Download archive or onnx file (with resume support)
     if (!isArchive) {
-      await RNFS.mkdir(modelDir);
+      await mkdir(modelDir);
     }
 
-    const archiveExists = await RNFS.exists(downloadPath);
+    const archiveExists = await exists(downloadPath);
     let partialDownload = false;
 
     if (archiveExists) {
       // Check if this is a complete download or partial
-      const stat = await RNFS.stat(downloadPath);
-      const currentSize = stat.size;
+      const statResult = await stat(downloadPath);
+      const currentSize = statResult.size;
       if (currentSize < model.bytes) {
         partialDownload = true;
         console.log(
@@ -884,7 +887,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
         async () => {
           const downloadStartTime = Date.now();
 
-          const download = RNFS.downloadFile({
+          const download = downloadFile({
             fromUrl: model.downloadUrl,
             toFile: downloadPath,
             progressDivider: 1,
@@ -936,7 +939,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
             aborted = true;
             if (downloadFinished) return;
             try {
-              RNFS.stopDownload(download.jobId);
+              stopDownload(download.jobId);
             } catch {
               // Swallow stop errors to avoid crashing the app on cancel.
             }
@@ -967,11 +970,11 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
               result.statusCode === 410 || // Gone
               result.statusCode === 451 || // Unavailable for legal reasons
               result.statusCode === 416; // Range not satisfiable
-            if (isNonResumableError && (await RNFS.exists(downloadPath))) {
+            if (isNonResumableError && (await exists(downloadPath))) {
               console.warn(
                 `[Download] Non-resumable error ${result.statusCode}, removing partial download`
               );
-              await RNFS.unlink(downloadPath);
+              await unlink(downloadPath);
             }
             throw new Error(`Download failed: ${result.statusCode}`);
           }
@@ -991,9 +994,11 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     let extractResult: { sha256?: string } | null = null;
+    /** Total uncompressed bytes from libarchive progress; used for manifest.sizeOnDisk. */
+    let extractedTotalBytes = 0;
 
     if (isArchive) {
-      await RNFS.mkdir(modelDir);
+      await mkdir(modelDir);
       const extractStartTime = Date.now();
       extractResult = await extractTarBz2(
         downloadPath,
@@ -1003,6 +1008,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           if (isAborted()) {
             return;
           }
+          if (evt.totalBytes > 0) extractedTotalBytes = evt.totalBytes;
           if (model.bytes > 0) {
             // Calculate extraction speed and ETA
             const now = Date.now();
@@ -1087,11 +1093,11 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           : await promptChecksumFallback(issue);
 
         if (!keepFile) {
-          if (await RNFS.exists(modelDir)) {
-            await RNFS.unlink(modelDir);
+          if (await exists(modelDir)) {
+            await unlink(modelDir);
           }
-          if (await RNFS.exists(downloadPath)) {
-            await RNFS.unlink(downloadPath);
+          if (await exists(downloadPath)) {
+            await unlink(downloadPath);
           }
           throw new Error(`Checksum validation failed: ${issue.message}`);
         }
@@ -1108,23 +1114,39 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     const filesValidation = await validateExtractedFiles(modelDir, category);
     if (!filesValidation.success) {
       // Clean up failed extraction
-      await RNFS.unlink(modelDir);
+      await unlink(modelDir);
       throw new Error(
         `Extracted files validation failed: ${filesValidation.message}`
       );
     }
 
-    await RNFS.writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
+    await writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
     const now = new Date().toISOString();
-    await RNFS.writeFile(
+    let sizeOnDisk: number | undefined;
+    if (isArchive && extractedTotalBytes > 0) {
+      sizeOnDisk = extractedTotalBytes;
+    } else if (!isArchive) {
+      try {
+        const statResult = await stat(downloadPath);
+        sizeOnDisk = statResult.size;
+      } catch {
+        // ignore
+      }
+    }
+    await writeFile(
       getManifestPath(category, id),
       JSON.stringify({
         downloadedAt: now,
         lastUsed: now,
         model,
+        sizeOnDisk,
       } as ModelManifest),
       'utf8'
     );
+
+    // Notify subscribers (e.g. STT/TTS screens) so the model list updates without leaving the screen.
+    const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
+    emitModelsListUpdated(category, list);
 
     return { modelId: id, localPath: modelDir };
   } catch (err) {
@@ -1143,14 +1165,14 @@ export async function updateModelLastUsed(
   id: string
 ): Promise<void> {
   const manifestPath = getManifestPath(category, id);
-  const exists = await RNFS.exists(manifestPath);
-  if (!exists) return;
+  const existsResult = await exists(manifestPath);
+  if (!existsResult) return;
 
   try {
-    const raw = await RNFS.readFile(manifestPath, 'utf8');
+    const raw = await readFile(manifestPath, 'utf8');
     const manifest = JSON.parse(raw) as ModelManifest;
     manifest.lastUsed = new Date().toISOString();
-    await RNFS.writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+    await writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
   } catch (error) {
     console.warn(`Failed to update lastUsed for ${category}:${id}:`, error);
   }
@@ -1163,28 +1185,28 @@ export async function listDownloadedModelsWithMetadata<T extends ModelMetaBase>(
   category: ModelCategory
 ): Promise<ModelWithMetadata<T>[]> {
   const baseDir = getModelsBaseDir(category);
-  const exists = await RNFS.exists(baseDir);
-  if (!exists) return [];
+  const existsResult = await exists(baseDir);
+  if (!existsResult) return [];
 
-  const entries = await RNFS.readDir(baseDir);
+  const entries = await readDir(baseDir);
   const modelsWithMetadata: ModelWithMetadata<T>[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
     const manifestPath = getManifestPath(category, entry.name);
-    const manifestExists = await RNFS.exists(manifestPath);
+    const manifestExists = await exists(manifestPath);
 
     if (manifestExists) {
       try {
-        const raw = await RNFS.readFile(manifestPath, 'utf8');
+        const raw = await readFile(manifestPath, 'utf8');
         const manifest = JSON.parse(raw) as ModelManifest<T>;
         if (manifest.model) {
           modelsWithMetadata.push({
             model: manifest.model,
             downloadedAt: manifest.downloadedAt,
             lastUsed: manifest.lastUsed ?? null,
-            sizeOnDisk: entry.size,
+            sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
           });
         }
       } catch (error) {
@@ -1274,14 +1296,14 @@ export async function deleteModelByCategory(
   const modelDir = getModelDir(category, id);
   const tarPath = getTarArchivePath(category, id);
   const onnxPath = getOnnxPath(category, id);
-  if (await RNFS.exists(modelDir)) {
-    await RNFS.unlink(modelDir);
+  if (await exists(modelDir)) {
+    await unlink(modelDir);
   }
-  if (await RNFS.exists(tarPath)) {
-    await RNFS.unlink(tarPath);
+  if (await exists(tarPath)) {
+    await unlink(tarPath);
   }
-  if (await RNFS.exists(onnxPath)) {
-    await RNFS.unlink(onnxPath);
+  if (await exists(onnxPath)) {
+    await unlink(onnxPath);
   }
 }
 
@@ -1289,15 +1311,15 @@ export async function clearModelCacheByCategory(
   category: ModelCategory
 ): Promise<void> {
   const cachePath = getCachePath(category);
-  if (await RNFS.exists(cachePath)) {
-    await RNFS.unlink(cachePath);
+  if (await exists(cachePath)) {
+    await unlink(cachePath);
   }
   delete memoryCacheByCategory[category];
 }
 
 export async function getDownloadStorageBase(): Promise<string> {
   if (Platform.OS === 'ios') {
-    return RNFS.DocumentDirectoryPath;
+    return DocumentDirectoryPath;
   }
-  return RNFS.DocumentDirectoryPath;
+  return DocumentDirectoryPath;
 }

@@ -1,78 +1,53 @@
-import { useState } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  Linking,
-} from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AdsConsent, AdsConsentStatus } from 'react-native-google-mobile-ads';
-import { adsEnabled } from '../../ads/adsConfig';
-import { useAdsConsent } from '../../ads/useAdsConsent';
+
+const appPkg = (() => {
+  try {
+    // example/package.json
+    // relative path from this file: ../../../package.json
+    // use require to avoid TS JSON import settings
+    return require('../../../package.json');
+  } catch {
+    return null;
+  }
+})();
+
+const appVersion = appPkg?.version ?? 'unknown';
+
+const sdkVersion = (() => {
+  try {
+    // try to read workspace root package.json and infer a sherpa/sherpa-onnx related dep
+    // relative path from this file to repo root: ../../../../package.json
+    const rootPkg = require('../../../../package.json');
+    const fields = ['dependencies', 'devDependencies', 'peerDependencies'];
+    for (const f of fields) {
+      const deps = rootPkg[f] || {};
+      for (const k of Object.keys(deps)) {
+        const key = k.toLowerCase();
+        if (
+          key.includes('sherpa') ||
+          key.includes('sherpa-onnx') ||
+          key.includes('sherpaonnx')
+        ) {
+          return deps[k];
+        }
+      }
+    }
+    return rootPkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 export default function SettingsScreen() {
-  const { status, error, refreshConsent } = useAdsConsent(adsEnabled);
-  const [loading, setLoading] = useState(false);
-
-  const handlePrivacyOptions = async () => {
-    if (!adsEnabled || loading) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await AdsConsent.showPrivacyOptionsForm();
-      await refreshConsent();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const openPrivacyWeb = async () => {
-    const url =
-      'https://xdcobra.github.io/voice-lab-offline-tools/privacy-policy.html';
-    try {
-      const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        console.warn('Cannot open URL:', url);
-      }
-    } catch (e) {
-      console.warn('Failed to open URL', e);
-    }
-  };
-
-  const statusLabel = status ?? AdsConsentStatus.UNKNOWN;
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.body}>
         <View style={styles.section}>
-          <Text style={styles.title}>Advertising</Text>
-          <Text style={styles.bodyText}>Consent status: {statusLabel}</Text>
-          {error ? (
-            <Text style={styles.errorText}>Consent error: {error.message}</Text>
-          ) : null}
+          <Text style={styles.title}>App</Text>
+          <Text style={styles.bodyText}>Version: {appVersion}</Text>
+          <Text style={styles.bodyText}>SDK Version: {sdkVersion}</Text>
         </View>
-
-        <TouchableOpacity
-          style={[styles.button, !adsEnabled && styles.buttonDisabled]}
-          onPress={handlePrivacyOptions}
-          disabled={!adsEnabled || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.buttonText}>Privacy Options</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.linkButton} onPress={openPrivacyWeb}>
-          <Text style={styles.linkText}>Open Privacy Policy (web)</Text>
-        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );

@@ -1,4 +1,4 @@
-package com.xdcobra.voicelab
+package com.xdcobra.voiceexample
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext

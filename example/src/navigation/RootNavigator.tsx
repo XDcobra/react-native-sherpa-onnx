@@ -9,8 +9,6 @@ import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
-import ModelManagementScreen from '../screens/download/ModelManagementScreen';
-
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -82,13 +80,6 @@ export default function RootNavigator() {
         component={SettingsScreen}
         options={{
           title: 'Settings',
-        }}
-      />
-      <Stack.Screen
-        name="ModelManagement"
-        component={ModelManagementScreen}
-        options={{
-          title: 'Model Management',
         }}
       />
     </Stack.Navigator>
