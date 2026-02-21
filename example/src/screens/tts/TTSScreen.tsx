@@ -38,6 +38,7 @@ import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import {
   listDownloadedModelsByCategory,
   ModelCategory,
+  subscribeModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
 import {
   getAssetPackPath,
@@ -265,6 +266,14 @@ export default function TTSScreen() {
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
+  }, []);
+
+  // When a download+extraction completes (e.g. from Model Management), refresh the list so the new model appears without leaving the screen.
+  useEffect(() => {
+    const unsubscribe = subscribeModelsListUpdated((category) => {
+      if (category === ModelCategory.Tts) void loadAvailableModels();
+    });
+    return unsubscribe;
   }, []);
 
   useEffect(() => {

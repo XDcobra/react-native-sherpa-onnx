@@ -719,22 +719,17 @@ export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
     if (!entry.isDirectory()) continue;
     const manifestPath = getManifestPath(category, entry.name);
     const manifestExists = await RNFS.exists(manifestPath);
-    if (manifestExists) {
-      try {
-        const raw = await RNFS.readFile(manifestPath, 'utf8');
-        const manifest = JSON.parse(raw) as ModelManifest<T>;
-        if (manifest.model) {
-          models.push(manifest.model);
-          continue;
-        }
-      } catch {
-        // ignore and fall back
+    // Only list models that have a manifest (download + extraction fully complete).
+    // Directories without manifest are still being extracted and must not appear in the list.
+    if (!manifestExists) continue;
+    try {
+      const raw = await RNFS.readFile(manifestPath, 'utf8');
+      const manifest = JSON.parse(raw) as ModelManifest<T>;
+      if (manifest.model) {
+        models.push(manifest.model);
       }
-    }
-
-    const model = await getModelByIdByCategory<T>(category, entry.name);
-    if (model) {
-      models.push(model);
+    } catch {
+      // ignore invalid manifest
     }
   }
 
@@ -1139,6 +1134,10 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       } as ModelManifest),
       'utf8'
     );
+
+    // Notify subscribers (e.g. STT/TTS screens) so the model list updates without leaving the screen.
+    const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
+    emitModelsListUpdated(category, list);
 
     return { modelId: id, localPath: modelDir };
   } catch (err) {

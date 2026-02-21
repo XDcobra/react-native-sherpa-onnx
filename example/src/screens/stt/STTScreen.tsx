@@ -26,6 +26,7 @@ import RNFS from 'react-native-fs';
 import {
   listDownloadedModelsByCategory,
   ModelCategory,
+  subscribeModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
 import {
   getSizeHint,
@@ -250,6 +251,14 @@ export default function STTScreen() {
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
+  }, []);
+
+  // When a download+extraction completes (e.g. from Model Management), refresh the list so the new model appears without leaving the screen.
+  useEffect(() => {
+    const unsubscribe = subscribeModelsListUpdated((category) => {
+      if (category === ModelCategory.Stt) void loadAvailableModels();
+    });
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
