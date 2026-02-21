@@ -202,8 +202,7 @@ yarn android  # or yarn ios
 <td><img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" width="240" /></td>
 </tr>
 <tr>
-<td><img src="./docs/images/example_tts_1.png" alt="Text to speech settings" width="240" /></td>
-<td><img src="./docs/images/example_tts_2.png" alt="Text to speech generation" width="240" /></td>
+<td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
 <td></td>
 </tr>
 </table>
