@@ -1,10 +1,6 @@
 # Hotwords (contextual biasing)
 
-<div style="border: 2px solid #c00; padding: 0.75em 1em; border-radius: 6px; background: #fff5f5;">
-
-**Transducer and NeMo transducer** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx (NeMo support added in [sherpa-onnx#3077](https://github.com/k2-fsa/sherpa-onnx/pull/3077)). All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
-
-</div>
+> **Transducer and NeMo transducer** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx (NeMo support added in [sherpa-onnx#3077](https://github.com/k2-fsa/sherpa-onnx/pull/3077)). All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
 
 | Code | When |
 | --- | --- |
