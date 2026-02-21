@@ -2,6 +2,8 @@ package com.sherpaonnx
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -12,6 +14,9 @@ class SherpaOnnxArchiveHelper {
   private val cancelRequested = AtomicBoolean(false)
 
   companion object {
+    /** Single-thread executor so extractions run off the React Native bridge thread and do not block listDownloadedModelsByCategory / RNFS. */
+    private val extractExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
     init {
       try {
         System.loadLibrary("sherpaonnx")
@@ -43,8 +48,18 @@ class SherpaOnnxArchiveHelper {
         }
       }
 
-      // Call native JNI method using libarchive
-      nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
+      // Run extraction on a background thread so the React Native bridge thread is not blocked.
+      // Otherwise listDownloadedModelsByCategory (RNFS) and other native calls would wait until extraction finishes.
+      extractExecutor.execute {
+        try {
+          nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
+        } catch (e: Exception) {
+          val result = Arguments.createMap()
+          result.putBoolean("success", false)
+          result.putString("reason", "Archive extraction error: ${e.message}")
+          promise.resolve(result)
+        }
+      }
     } catch (e: Exception) {
       val result = Arguments.createMap()
       result.putBoolean("success", false)
