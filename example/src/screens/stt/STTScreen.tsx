@@ -10,7 +10,9 @@ import {
   TextInput,
   Modal,
   Pressable,
+  Share,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
@@ -39,6 +41,7 @@ import {
   sttSupportsHotwords,
   type STTModelType,
   type SttModelOptions,
+  type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
 import {
   getAssetModelPath,
@@ -78,9 +81,11 @@ export default function STTScreen() {
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [transcriptionResult, setTranscriptionResult] = useState<string | null>(
-    null
-  );
+  const [transcriptionResult, setTranscriptionResult] =
+    useState<SttRecognitionResult | null>(null);
+  const [tokensExpanded, setTokensExpanded] = useState(false);
+  const [timestampsExpanded, setTimestampsExpanded] = useState(false);
+  const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
@@ -522,7 +527,7 @@ export default function STTScreen() {
 
       // Transcribe the audio file (pathToTranscribe may be an asset path or file URI)
       const result = await transcribeFile(pathToTranscribe);
-      setTranscriptionResult(result.text ?? '');
+      setTranscriptionResult(result);
     } catch (err) {
       console.error('Transcription error:', err);
 
@@ -541,6 +546,17 @@ export default function STTScreen() {
         if (errorObj.code) {
           errorMessage = `[${errorObj.code}] ${errorMessage}`;
         }
+      }
+
+      // NeMo streaming transducer: decoder expects cache_last_time etc.; offline decode doesn't provide them.
+      if (
+        typeof errorMessage === 'string' &&
+        (errorMessage.includes('cache_last_time') ||
+          (errorMessage.includes('Missing Input') &&
+            errorMessage.toLowerCase().includes('cache')))
+      ) {
+        errorMessage =
+          'This model appears to be a NeMo streaming transducer (e.g. "streaming fast conformer"). File transcription currently requires a non-streaming NeMo transducer model. Please use a model exported for offline/non-streaming use, or choose another STT model.';
       }
 
       setError(errorMessage);
@@ -2072,15 +2088,6 @@ export default function STTScreen() {
                       ← Change Audio Source
                     </Text>
                   </TouchableOpacity>
-
-                  {transcriptionResult && (
-                    <View style={styles.resultContainer}>
-                      <Text style={styles.resultLabel}>Transcription:</Text>
-                      <Text style={styles.resultText}>
-                        {transcriptionResult}
-                      </Text>
-                    </View>
-                  )}
                 </>
               )}
 
@@ -2163,15 +2170,345 @@ export default function STTScreen() {
                     ← Change Audio Source
                   </Text>
                 </TouchableOpacity>
-
-                {transcriptionResult && (
-                  <View style={styles.resultContainer}>
-                    <Text style={styles.resultLabel}>Transcription:</Text>
-                    <Text style={styles.resultText}>{transcriptionResult}</Text>
-                  </View>
-                )}
               </>
             )}
+
+            {selectedModelType &&
+              transcriptionResult &&
+              (audioSourceType === 'example' || audioSourceType === 'own') && (
+                <View style={styles.resultSection}>
+                  <View style={styles.resultLabelRow}>
+                    <Text style={styles.resultLabel}>Transcription:</Text>
+                    <View style={styles.resultLabelActions}>
+                      <TouchableOpacity
+                        style={styles.copyIconButton}
+                        onPress={() => {
+                          const t = transcriptionResult.text ?? '';
+                          if (t) Clipboard.setString(t);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons
+                          name="copy-outline"
+                          size={20}
+                          color="#2e7d32"
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.copyIconButton}
+                        onPress={() => {
+                          const t = transcriptionResult.text ?? '';
+                          if (t) {
+                            Share.share({
+                              message: t,
+                              title: 'Transcription',
+                            });
+                          }
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons
+                          name="share-outline"
+                          size={20}
+                          color="#2e7d32"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <Text style={styles.resultText} selectable>
+                    {transcriptionResult.text ?? ''}
+                  </Text>
+                  {(transcriptionResult.lang ||
+                    transcriptionResult.emotion ||
+                    transcriptionResult.event) && (
+                    <View style={styles.metaRow}>
+                      {transcriptionResult.lang ? (
+                        <Text style={styles.metaText}>
+                          Lang: {transcriptionResult.lang}
+                        </Text>
+                      ) : null}
+                      {transcriptionResult.emotion ? (
+                        <Text style={styles.metaText}>
+                          Emotion: {transcriptionResult.emotion}
+                        </Text>
+                      ) : null}
+                      {transcriptionResult.event ? (
+                        <Text style={styles.metaText}>
+                          Event: {transcriptionResult.event}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setTokensExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={tokensExpanded ? 'chevron-down' : 'chevron-forward'}
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Tokens ({(transcriptionResult.tokens ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {tokensExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.tokens ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.tokens ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Tokens',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.expandListItem}>
+                        {(transcriptionResult.tokens ?? []).join(', ')}
+                      </Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setTimestampsExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={
+                        timestampsExpanded ? 'chevron-down' : 'chevron-forward'
+                      }
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Timestamps (
+                      {(transcriptionResult.timestamps ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {timestampsExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.timestamps ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.timestamps ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Timestamps',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {(transcriptionResult.timestamps ?? []).length > 0 && (
+                        <ScrollView
+                          style={styles.expandListWrap}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
+                        >
+                          {(transcriptionResult.timestamps ?? []).map(
+                            (item, i) => (
+                              <Text
+                                key={`ts-${i}`}
+                                style={styles.expandListItem}
+                              >
+                                [{String(item)}]
+                              </Text>
+                            )
+                          )}
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.expandHeader}
+                    onPress={() => setDurationsExpanded((e) => !e)}
+                  >
+                    <Ionicons
+                      name={
+                        durationsExpanded ? 'chevron-down' : 'chevron-forward'
+                      }
+                      size={18}
+                      color="#2e7d32"
+                    />
+                    <Text style={styles.expandHeaderText}>
+                      Durations ({(transcriptionResult.durations ?? []).length})
+                    </Text>
+                  </TouchableOpacity>
+                  {durationsExpanded && (
+                    <View style={styles.expandContent}>
+                      <View style={styles.expandActionRow}>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.durations ?? [];
+                            Clipboard.setString(
+                              Array.isArray(arr)
+                                ? JSON.stringify(arr)
+                                : String(arr)
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.expandActionBtn}
+                          onPress={() => {
+                            const arr = transcriptionResult.durations ?? [];
+                            const str = Array.isArray(arr)
+                              ? JSON.stringify(arr)
+                              : String(arr);
+                            Share.share({
+                              message: str,
+                              title: 'Durations',
+                            });
+                          }}
+                        >
+                          <Ionicons
+                            name="share-outline"
+                            size={18}
+                            color="#2e7d32"
+                            style={styles.expandActionIcon}
+                          />
+                          <Text style={styles.expandActionLabel}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {(transcriptionResult.durations ?? []).length > 0 && (
+                        <ScrollView
+                          style={styles.expandListWrap}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
+                        >
+                          {(transcriptionResult.durations ?? []).map(
+                            (item, i) => (
+                              <Text
+                                key={`d-${i}`}
+                                style={styles.expandListItem}
+                              >
+                                [{String(item)}]
+                              </Text>
+                            )
+                          )}
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+                  <View style={styles.resultButtonRow}>
+                    <TouchableOpacity
+                      style={styles.resultActionButton}
+                      onPress={() => {
+                        const json = JSON.stringify(
+                          transcriptionResult,
+                          null,
+                          2
+                        );
+                        Clipboard.setString(json);
+                      }}
+                    >
+                      <Ionicons
+                        name="copy-outline"
+                        size={18}
+                        color="#2e7d32"
+                        style={styles.resultActionIcon}
+                      />
+                      <Text style={styles.resultActionText}>
+                        Copy all as JSON
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.resultActionButton}
+                      onPress={() => {
+                        const json = JSON.stringify(
+                          transcriptionResult,
+                          null,
+                          2
+                        );
+                        Share.share({
+                          message: json,
+                          title: 'Export all as JSON',
+                        });
+                      }}
+                    >
+                      <Ionicons
+                        name="document-text-outline"
+                        size={18}
+                        color="#2e7d32"
+                        style={styles.resultActionIcon}
+                      />
+                      <Text style={styles.resultActionText}>
+                        Export all as JSON
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
             {selectedModelType &&
               audioSourceType === 'example' &&
@@ -2254,15 +2591,117 @@ const styles = StyleSheet.create({
     backgroundColor: '#e8f5e9',
     borderRadius: 8,
   },
+  resultSection: {
+    marginTop: 30,
+    padding: 20,
+    backgroundColor: '#e8f5e9',
+    borderRadius: 8,
+  },
+  resultLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   resultLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#2e7d32',
-    marginBottom: 8,
+  },
+  resultLabelActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   resultText: {
     fontSize: 16,
     color: '#1b5e20',
+  },
+  copyIconButton: {
+    padding: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  metaText: {
+    fontSize: 13,
+    color: '#2e7d32',
+  },
+  expandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 6,
+  },
+  expandHeaderText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2e7d32',
+  },
+  expandContent: {
+    marginLeft: 8,
+    marginTop: 4,
+  },
+  expandActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  expandActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  expandActionIcon: {
+    marginRight: 4,
+  },
+  expandActionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2e7d32',
+  },
+  expandListWrap: {
+    height: 200,
+    marginLeft: 0,
+  },
+  expandList: {
+    flexGrow: 0,
+  },
+  expandListItem: {
+    fontSize: 13,
+    color: '#1b5e20',
+    paddingVertical: 2,
+  },
+  resultButtonRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 12,
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(46, 125, 50, 0.3)',
+  },
+  resultActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexShrink: 1,
+  },
+  resultActionIcon: {
+    marginRight: 4,
+  },
+  resultActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2e7d32',
   },
   errorContainer: {
     marginTop: 30,
