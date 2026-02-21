@@ -392,7 +392,7 @@ SttDetectResult DetectSttModel(
         result.paths.funasrEncoderAdaptor = FileExists(funasrEncoderAdaptorInt8) ? funasrEncoderAdaptorInt8 : funasrEncoderAdaptor;
         result.paths.funasrLLM = FileExists(funasrLLMInt8) ? funasrLLMInt8 : funasrLLM;
         result.paths.funasrEmbedding = FileExists(funasrEmbeddingInt8) ? funasrEmbeddingInt8 : funasrEmbedding;
-        result.paths.funasrTokenizer = funasrTokenizerDir + "/vocab.json";
+        result.paths.funasrTokenizer = funasrTokenizerDir;
     } else if (selected == SttModelKind::kMoonshine) {
         result.paths.moonshinePreprocessor = moonshinePreprocess;
         result.paths.moonshineEncoder = moonshineEncode;
