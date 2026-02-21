@@ -73,6 +73,9 @@ export default function STTScreen() {
     useState<STTModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorSource, setErrorSource] = useState<'init' | 'transcribe' | null>(
+    null
+  );
   const [audioSourceType, setAudioSourceType] = useState<
     'example' | 'own' | null
   >(null);
@@ -269,6 +272,7 @@ export default function STTScreen() {
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
+    setErrorSource(null);
     try {
       const downloadedModels = await listDownloadedModelsByCategory(
         ModelCategory.Stt
@@ -334,6 +338,7 @@ export default function STTScreen() {
           (RECOMMENDED_MODEL_IDS[ModelCategory.Stt] || []).length > 0;
 
         if (hasRecommendedModels) {
+          setErrorSource('init');
           setError(
             'No STT models found. Consider downloading one of the recommended models in the Model Management screen.'
           );
@@ -341,11 +346,13 @@ export default function STTScreen() {
             'STTScreen: No models available. Recommended models available for download.'
           );
         } else {
+          setErrorSource('init');
           setError('No STT models found. See STT_MODEL_SETUP.md');
         }
       }
     } catch (err) {
       console.error('STTScreen: Failed to load models:', err);
+      setErrorSource('init');
       setError('Failed to load available models');
       setDownloadedModelIds([]);
       setAvailableModels([]);
@@ -357,6 +364,7 @@ export default function STTScreen() {
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
     setError(null);
+    setErrorSource(null);
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
@@ -452,6 +460,7 @@ export default function STTScreen() {
           setSelectedModelType(normalizedDetected[0].type);
         }
       } else {
+        setErrorSource('init');
         setError('No models detected in the directory');
         setInitResult('Initialization failed: No compatible models found');
       }
@@ -489,6 +498,7 @@ export default function STTScreen() {
         }
       }
 
+      setErrorSource('init');
       setError(errorMessage);
       setInitResult(
         `Initialization failed: ${errorMessage}\n\nThe error has been reported. We will address it as soon as possible in the next app update.`
@@ -500,18 +510,21 @@ export default function STTScreen() {
 
   const handleTranscribe = async () => {
     if (!currentModelFolder) {
+      setErrorSource('transcribe');
       setError('Please select a model first');
       return;
     }
 
     // If a custom audio file was chosen, prefer it
     if (!selectedAudio && !customAudioPath) {
+      setErrorSource('transcribe');
       setError('Please select an audio file (example or local WAV)');
       return;
     }
 
     setTranscribing(true);
     setError(null);
+    setErrorSource(null);
     setTranscriptionResult(null);
 
     try {
@@ -529,7 +542,16 @@ export default function STTScreen() {
       const result = await transcribeFile(pathToTranscribe);
       setTranscriptionResult(result);
     } catch (err) {
-      console.error('Transcription error:', err);
+      const msg =
+        (err instanceof Error ? err.message : (err as any)?.message) ?? '';
+      if (msg.includes('cache_last_time')) {
+        const friendly =
+          'This model appears to be a NeMo streaming transducer (e.g. "streaming fast conformer"). File transcription currently requires a non-streaming NeMo transducer model. Please use a model exported for offline/non-streaming use, or choose another STT model.';
+        Alert.alert('Transcription not supported', friendly);
+        setErrorSource('transcribe');
+        setError(friendly);
+        return;
+      }
 
       let errorMessage = 'Unknown error';
       if (err instanceof Error) {
@@ -548,17 +570,7 @@ export default function STTScreen() {
         }
       }
 
-      // NeMo streaming transducer: decoder expects cache_last_time etc.; offline decode doesn't provide them.
-      if (
-        typeof errorMessage === 'string' &&
-        (errorMessage.includes('cache_last_time') ||
-          (errorMessage.includes('Missing Input') &&
-            errorMessage.toLowerCase().includes('cache')))
-      ) {
-        errorMessage =
-          'This model appears to be a NeMo streaming transducer (e.g. "streaming fast conformer"). File transcription currently requires a non-streaming NeMo transducer model. Please use a model exported for offline/non-streaming use, or choose another STT model.';
-      }
-
+      setErrorSource('transcribe');
       setError(errorMessage);
     } finally {
       setTranscribing(false);
@@ -567,6 +579,7 @@ export default function STTScreen() {
 
   const handlePickLocalFile = async () => {
     setError(null);
+    setErrorSource(null);
     setTranscriptionResult(null);
 
     try {
@@ -580,6 +593,7 @@ export default function STTScreen() {
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
 
       if (!uri) {
+        setErrorSource('transcribe');
         setError('Could not get file URI from picker result');
         return;
       }
@@ -602,6 +616,7 @@ export default function STTScreen() {
         return;
       }
       console.error('File pick error:', err);
+      setErrorSource('transcribe');
       setError(err instanceof Error ? err.message : String(err));
     }
   };
@@ -1897,26 +1912,20 @@ export default function STTScreen() {
               </>
             )}
 
-            {initResult && (
-              <View
-                style={[styles.resultContainer, error && styles.errorContainer]}
-              >
-                <Text style={[styles.resultLabel, error && styles.errorLabel]}>
-                  {error ? 'Error' : 'Result'}:
-                </Text>
-                <Text style={[styles.resultText, error && styles.errorText]}>
-                  {initResult}
-                </Text>
+            {initResult && !(error && errorSource === 'init') && (
+              <View style={styles.resultContainer}>
+                <Text style={styles.resultLabel}>Result:</Text>
+                <Text style={styles.resultText}>{initResult}</Text>
+              </View>
+            )}
+
+            {error && errorSource === 'init' && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorLabel}>Error:</Text>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
           </View>
-
-          {error && !initResult && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorLabel}>Error:</Text>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
 
           {detectedModels.length > 1 && (
             <View style={styles.section}>
@@ -2519,6 +2528,13 @@ export default function STTScreen() {
                   </Text>
                 </View>
               )}
+
+            {error && errorSource === 'transcribe' && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorLabel}>Error:</Text>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       </View>
