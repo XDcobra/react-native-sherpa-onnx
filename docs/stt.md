@@ -2,18 +2,39 @@
 
 This guide covers the STT APIs for offline transcription.
 
+## Table of contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+  - [initializeSTT(options)](#initializesttoptions)
+  - [transcribeFile(filePath)](#transcribefilefilepath)
+  - [transcribeSamples(samples, sampleRate)](#transcribesamplessamples-samplerate)
+  - [setSttConfig(options)](#setsttconfigoptions)
+  - [unloadSTT()](#unloadstt)
+  - [Hotwords (contextual biasing)](./hotwords.md)
+- [Model Setup](#model-setup)
+  - [Supported STT model types](#supported-stt-model-types)
+  - [Model-specific options (modelOptions)](#model-specific-options-modeloptions)
+- [Mapping to Native API](#mapping-to-native-api)
+  - [TurboModule](#turbomodule-spec-srcnativesherpaonnxts)
+  - [Android (Kotlin)](#android-kotlin)
+  - [iOS (ObjC + C++)](#ios-objc--c)
+  - [Underlying engine](#underlying-engine)
+- [Advanced Examples & Tips](#advanced-examples--tips)
+
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
-| Model type detection (no init) | Supported | Native | `detectSttModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
-| Model initialization | Supported | Kotlin API | `initializeSTT()`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
-| Offline file transcription | Supported | Kotlin API | `transcribeFile()` → full result object |
-| Transcribe from samples | Supported | Kotlin API | `transcribeSamples(samples, sampleRate)` |
-| Full result (tokens, timestamps, lang, emotion, …) | Supported | Kotlin API | Via `transcribeFile` / `transcribeSamples` return type |
-| Hotwords (init) | Supported | Kotlin API | OfflineRecognizerConfig hotwordsFile, hotwordsScore |
-| Runtime config | Supported | Kotlin API | `setSttConfig()` (decodingMethod, maxActivePaths, hotwords, blankPenalty, ruleFsts, ruleFars) |
-| Unload resources | Supported | Kotlin API | `unloadSTT()` |
-| Model discovery helpers | Supported | This package | `listAssetModels()` / `resolveModelPath()` |
-| Model downloads | Supported | Kotlin API | Download Manager API |
+| Model type detection (no init) | ✅ | Native | `detectSttModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
+| Model initialization | ✅ | Kotlin API | `initializeSTT()`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
+| Offline file transcription | ✅ | Kotlin API | `transcribeFile()` → full result object |
+| Transcribe from samples | ✅ | Kotlin API | `transcribeSamples(samples, sampleRate)` |
+| Full result (tokens, timestamps, lang, emotion, …) | ✅ | Kotlin API | Via `transcribeFile` / `transcribeSamples` return type |
+| Hotwords (init) | ✅ | Kotlin API | OfflineRecognizerConfig hotwordsFile, hotwordsScore |
+| Runtime config | ✅ | Kotlin API | `setSttConfig()` (decodingMethod, maxActivePaths, hotwords, blankPenalty, ruleFsts, ruleFars) |
+| Unload resources | ✅ | Kotlin API | `unloadSTT()` |
+| Model discovery helpers | ✅ | This package | `listAssetModels()` / `resolveModelPath()` |
+| Model downloads | ✅ | Kotlin API | Download Manager API |
 | Result as JSON string | Planned | C-API | GetOfflineStreamResultAsJson not in Kotlin |
 | Batch decode (multiple streams) | Planned | C-API | DecodeMultipleOfflineStreams not in Kotlin |
 | Recognizer sample rate / num tokens | Planned | C-API | Not exposed in Kotlin OfflineRecognizer |
@@ -159,48 +180,14 @@ Release STT resources and unload the model. Call before re-initializing with a d
 
 ### Hotwords (contextual biasing)
 
-**Transducer and NeMo transducer** (`transducer`, `nemo_transducer`) support hotwords in sherpa-onnx (NeMo support added in [sherpa-onnx#3077](https://github.com/k2-fsa/sherpa-onnx/pull/3077)). All other model types (e.g. Whisper, Paraformer, Sense Voice) do not. The SDK validates and rejects with:
-
-| Code | When |
-| --- | --- |
-| `HOTWORDS_NOT_SUPPORTED` | `initializeSTT` or `setSttConfig` is called with a non-empty `hotwordsFile` (or merged config has a hotword file) and the current model type is not `transducer` or `nemo_transducer`. |
-| `INVALID_HOTWORDS_FILE` | A hotwords file path is set but the file is missing, not readable, not valid UTF-8 text, contains null bytes, has no valid lines, a line with optional ` :score` has an invalid score, or a line has no letter characters (e.g. numbers-only or SRT timestamps). The message describes the specific issue. |
-
-Use **`sttSupportsHotwords(modelType)`** (exported from `react-native-sherpa-onnx/stt`) to show hotword options only when the selected or detected model type supports them. The function returns `true` only for `'transducer'` and `'nemo_transducer'`.
-
-**Auto-switch to modified_beam_search:** When you provide a non-empty hotwords file, the SDK **automatically** sets the decoding method to `modified_beam_search` (and ensures `maxActivePaths` is at least 4), because sherpa-onnx only applies hotwords with that method. You do not need to set `decodingMethod` manually. The init result includes `decodingMethod` so you can confirm which method was applied.
-
-**Hotword file format (for transducer / nemo_transducer models):**
-
-- **One word or phrase per line.** UTF-8 text; no null bytes.
-- **Optional score per line:** `word_or_phrase :1.5` (space, colon, then a single number). If present, the part after ` :` must parse as a number.
-- **Each non-empty line must contain at least one letter character.** Lines that are only digits, punctuation, or symbols (e.g. SRT-style timestamps) are rejected.
-
-The SDK validates the file when you pass a path: it must exist, be readable, and satisfy the rules above. Invalid files cause rejection with `INVALID_HOTWORDS_FILE`.
-
-**Modeling unit and BPE vocab (optional):** Only relevant if you use **hotwords**. Then you can pass **`modelingUnit`** (and if needed **`bpeVocab`**) so hotwords are tokenized correctly. See [sherpa-onnx hotwords](https://k2-fsa.github.io/sherpa/onnx/hotwords/index.html).
-
-- **`modelingUnit`**: Set when using hotwords. `'cjkchar'` \| `'bpe'` \| `'cjkchar+bpe'`. Must match the model’s training unit.
-- **`bpeVocab`**: Only needed when `modelingUnit` is **`'bpe'`** or **`'cjkchar+bpe'`**. Path to the BPE vocabulary file (sentencepiece **bpe.vocab**). For **`'cjkchar'`** you do *not* need `bpeVocab`.
-
-If the model directory contains **`bpe.vocab`**, it is detected automatically and used when `bpeVocab` is not provided (for `bpe` / `cjkchar+bpe`).
-
-**When to use which `modelingUnit`:** The value depends on how the **model was trained**, not on the app. You find it in the model’s documentation (e.g. k2-fsa releases, Hugging Face card).
-
-| Use this | Typical models / hints |
-| --- | --- |
-| **`bpe`** | English (or similar) transducer: e.g. “zipformer-en”, “icefall … en”, LibriSpeech. Model often has **bpe.model** or **bpe.vocab** in the folder. Hotwords file: one word/phrase per line (e.g. `SPEECH RECOGNITION`). |
-| **`cjkchar`** | Chinese character-based transducer: e.g. “conformer-zh”, “wenetspeech”, “multi-dataset zh”. No BPE; tokens are characters. Hotwords file: Chinese words per line (e.g. `语音识别`). |
-| **`cjkchar+bpe`** | Bilingual Chinese + English transducer: e.g. “bilingual-zh-en”, “streaming zipformer bilingual”. Model often has **bpe.vocab**. Hotwords can mix Chinese and English (e.g. `礼拜二`, `FOREVER`). |
-
-If you’re unsure: check the model’s repo or README for “modeling unit”, “tokenizer”, or “BPE”. If the folder contains **bpe.vocab** (or bpe.model), the model is usually **bpe** or **cjkchar+bpe**; then set **`modelingUnit`** and, if needed, **`bpeVocab`** (or rely on auto-detected **bpe.vocab**).
+See [Hotwords (contextual biasing)](./hotwords.md) for supported model types, file format, validation, and modeling units.
 
 
 ## Model Setup
 
 See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup steps.
 
-### Supported STT model types (Phase 2)
+### Supported STT model types
 
 The following model types are supported for detection and config build. Auto-detection uses folder names and file patterns; you can force a type with `modelType`.
 
@@ -278,23 +265,6 @@ Result normalization: the native layer returns an object with `text`, `tokens`, 
 
 On both platforms, sherpa-onnx’s **C API** is used (via Kotlin JNI on Android and C++ `sherpa-onnx/c-api/cxx-api.h` on iOS): `OfflineRecognizer`, `OfflineRecognizerConfig`, `OfflineRecognizerResult`, `CreateStream`, `AcceptWaveform`, `Decode`, `GetResult`, `SetConfig`. The JS API and native bridges hide these details; the table in the feature section at the top of this doc calls out which capabilities come from the Kotlin/ObjC layer vs. the C-API-only features (e.g. result as JSON, batch decode, online recognizer).
 
-### Kotlin Offline API coverage
-
-All **OfflineRecognizer** functions and the options we pass are available in this SDK:
-
-| Kotlin / Config | In this SDK |
-| --- | --- |
-| `OfflineRecognizer` create stream, decode, get result | Used internally by `transcribeFile` / `transcribeSamples`. |
-| Init: model paths, `numThreads`, `provider`, `hotwordsFile`, `hotwordsScore`, `ruleFsts`, `ruleFars`, `dither` | ✅ `initializeSTT` options. |
-| `FeatureConfig`: `dither` | ✅ Init option; `sampleRate`/`featureDim` are fixed (16000 / 80) in native. |
-| Runtime: `decodingMethod`, `maxActivePaths`, `hotwordsFile`, `hotwordsScore`, `blankPenalty`, `ruleFsts`, `ruleFars` | ✅ `setSttConfig`. |
-| `unload` / release | ✅ `unloadSTT`. |
-
-**Not exposed (Kotlin OfflineRecognizerConfig):**
-
-- **HomophoneReplacerConfig** (`hr`: `dictDir`, `lexicon`, `ruleFsts`) — not configurable in this package.
-- **Model-specific options** — see "Model-specific options not yet supported" above (Whisper, SenseVoice, FunASR Nano, Canary, etc.).
-
 ## Advanced Examples & Tips
 
 1) Iterate bundled models and initialize the first STT model found:
@@ -318,16 +288,9 @@ for (const m of models) {
 2) Performance tuning:
 - Quantized (int8) models are faster and use less memory — use `preferInt8: true` when acceptable.
 
-3) Errors & debugging:
-- Check native logs (adb logcat on Android, device logs on iOS) for model load errors (missing files, permission issues, or wrong folder structure).
-- If you see OOM errors on mobile, try a smaller model or enable int8 quantized versions.
-
-4) Real-time / streaming scenarios:
-- For live audio, use `transcribeSamples` with chunks of float samples (e.g. from a recorder). Streaming/online recognition with the OnlineRecognizer is a separate C-API feature not yet exposed in this bridge.
-
-5) Post-processing:
+3) Post-processing:
 - Model outputs may be raw tokens or lowercased. Apply punctuation/capitalization if your use case needs it.
 
-6) Model-specific notes:
+4) Model-specific notes:
 - `whisper` models may require special token handling and can produce timestamps; see full result object.
 - `transducer` / `zipformer` models are optimized for low-latency use cases.

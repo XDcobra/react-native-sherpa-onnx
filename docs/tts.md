@@ -2,6 +2,27 @@
 
 This guide covers the offline TTS APIs shipped with this package and practical examples for streaming playback, saving, and low-latency playback.
 
+## Table of contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Streaming TTS (low-latency)](#streaming-tts-low-latency)
+- [Live PCM Playback (native player)](#live-pcm-playback-native-player)
+- [API Reference & Practical Notes](#api-reference--practical-notes)
+  - [initializeTTS(options)](#initializettsoptions)
+  - [updateTtsParams(options)](#updatettsparamsoptions)
+  - [generateSpeech(text, options?)](#generatespeechtext-options)
+  - [generateSpeechWithTimestamps(text, options?)](#generatespeechwithtimestampstext-options)
+  - [generateSpeechStream(text, options?, handlers)](#generatespeechstreamtext-options-handlers)
+  - [startTtsPcmPlayer / writeTtsPcmChunk / stopTtsPcmPlayer](#startttspcmplayersamplerate-channels--writettspcmchunksamples--stopttspcmplayer)
+  - [Persistence (save/share)](#persistence-saveshare)
+  - [Voice cloning (reference audio)](#voice-cloning-reference-audio)
+- [Detailed Example: streaming -> native playback -> optional save](#detailed-example-streaming--native-playback--optional-save)
+- [Mapping to Native API](#mapping-to-native-api)
+  - [TurboModule (spec: src/NativeSherpaOnnx.ts)](#turbomodule-spec-srcnativesherpaonnxts)
+- [Model Setup](#model-setup)
+- [Troubleshooting & tuning](#troubleshooting--tuning)
+
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
 | Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
@@ -249,14 +270,6 @@ const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, 
 // unsub();
 ```
 
-## Troubleshooting & tuning
-
-- Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
-- Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
-- Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
-- Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
-- Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` and `noiseScaleW` can trade naturalness vs. clarity (model-dependent).
-
 ## Mapping to Native API
 
 The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps options; prefer it over calling the TurboModule directly.
@@ -283,27 +296,14 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 
 The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, sampleRate }`) into a flat options object for the native bridge. Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
 
-### Kotlin Offline API coverage
-
-All **OfflineTts** functions and the options we pass are available in this SDK:
-
-| Kotlin / Config | In this SDK |
-| --- | --- |
-| `sampleRate()`, `numSpeakers()` | ✅ `getTtsSampleRate()`, `getTtsNumSpeakers()`. |
-| Init: model paths, `numThreads`, `debug`, `noiseScale`, `noiseScaleW`, `lengthScale` | ✅ `initializeTTS` options. |
-| `updateParams(noiseScale, noiseScaleW, lengthScale)` | ✅ `updateTtsParams`. |
-| `generate` / `generateWithConfig` (sid, speed, silenceScale, referenceAudio, referenceText, numSteps, extra) | ✅ `generateSpeech` / `generateSpeechWithTimestamps` via `TtsGenerationOptions`. |
-| `generateWithCallback` (streaming) | ✅ `generateSpeechStream`; `cancelSpeechStream` → `cancelTtsStream`. |
-| Native PCM player (start, write, stop) | ✅ `startTtsPcmPlayer`, `writeTtsPcmChunk`, `stopTtsPcmPlayer`. |
-| Save to file / content URI | ✅ `saveAudioToFile`, `saveAudioToContentUri`. |
-
-**Not exposed (Kotlin OfflineTtsConfig):**
-
-- **ruleFsts**, **ruleFars** — ITN rule files for TTS are not passed in init in this package (config builds with model only).
-- **maxNumSentences** — not set (Kotlin default is 1). If you need batch or multi-sentence limits, use the native API.
-
-Generation options (e.g. `silenceScale`, reference audio, `numSteps`, `extra`) are passed per call via `TtsGenerationOptions` / Kotlin `GenerationConfig`, not as global config.
-
 ## Model Setup
 
 See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup steps.
+
+## Troubleshooting & tuning
+
+- Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
+- Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
+- Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
+- Quantization: `preferInt8` usually improves speed and memory but can slightly affect voice quality.
+- Noise/length scale: smaller `lengthScale` speeds up speech; `noiseScale` and `noiseScaleW` can trade naturalness vs. clarity (model-dependent).
