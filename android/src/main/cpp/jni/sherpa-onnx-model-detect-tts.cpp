@@ -55,7 +55,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
          tokensFile.c_str(), lexiconFile.c_str(), dataDirPath.c_str(), voicesFile.c_str());
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
-    std::string vocoder = FindOnnxByAnyToken(files, {"vocoder"}, std::nullopt);
+    std::string vocoder = FindOnnxByAnyToken(files, {"vocoder", "vocos"}, std::nullopt);
     std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, std::nullopt);
     std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, std::nullopt);
     std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
@@ -86,7 +86,12 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
     bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
-    bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    // Full zipvoice: encoder + decoder + vocoder. Distill: encoder + decoder + lexicon + tokens (no vocoder).
+    bool hasZipvoiceFull = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    bool hasZipvoiceDistill = !encoder.empty() && !decoder.empty() &&
+                             !lexiconFile.empty() && FileExists(lexiconFile) &&
+                             !tokensFile.empty() && FileExists(tokensFile);
+    bool hasZipvoice = hasZipvoiceFull || hasZipvoiceDistill;
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
                      !textConditioner.empty() && !vocabJsonFile.empty() && FileExists(vocabJsonFile) &&
                      !tokenScoresJsonFile.empty() && FileExists(tokenScoresJsonFile);
