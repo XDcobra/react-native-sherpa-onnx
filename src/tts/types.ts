@@ -85,6 +85,30 @@ export interface TTSInitializeOptions {
    * If omitted, the model default (or model.json) is used.
    */
   lengthScale?: number;
+
+  /**
+   * Path(s) to rule FSTs for TTS (OfflineTtsConfig.ruleFsts).
+   * Used for text normalization / ITN.
+   */
+  ruleFsts?: string;
+
+  /**
+   * Path(s) to rule FARs for TTS (OfflineTtsConfig.ruleFars).
+   * Used for text normalization / ITN.
+   */
+  ruleFars?: string;
+
+  /**
+   * Max number of sentences per streaming callback (OfflineTtsConfig.maxNumSentences).
+   * Default: 1.
+   */
+  maxNumSentences?: number;
+
+  /**
+   * Silence scale on config level (OfflineTtsConfig.silenceScale).
+   * Default: 0.2.
+   */
+  silenceScale?: number;
 }
 
 /**

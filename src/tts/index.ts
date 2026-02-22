@@ -96,6 +96,10 @@ export async function initializeTTS(
   let noiseScale: number | undefined;
   let noiseScaleW: number | undefined;
   let lengthScale: number | undefined;
+  let ruleFsts: string | undefined;
+  let ruleFars: string | undefined;
+  let maxNumSentences: number | undefined;
+  let silenceScale: number | undefined;
 
   if ('modelPath' in options) {
     modelPath = options.modelPath;
@@ -105,6 +109,10 @@ export async function initializeTTS(
     noiseScale = options.noiseScale;
     noiseScaleW = options.noiseScaleW;
     lengthScale = options.lengthScale;
+    ruleFsts = options.ruleFsts;
+    ruleFars = options.ruleFars;
+    maxNumSentences = options.maxNumSentences;
+    silenceScale = options.silenceScale;
   } else {
     modelPath = options;
     modelType = undefined;
@@ -113,6 +121,10 @@ export async function initializeTTS(
     noiseScale = undefined;
     noiseScaleW = undefined;
     lengthScale = undefined;
+    ruleFsts = undefined;
+    ruleFars = undefined;
+    maxNumSentences = undefined;
+    silenceScale = undefined;
   }
 
   const resolvedPath = await resolveModelPath(modelPath);
@@ -123,7 +135,11 @@ export async function initializeTTS(
     debug ?? false,
     noiseScale,
     noiseScaleW,
-    lengthScale
+    lengthScale,
+    ruleFsts,
+    ruleFars,
+    maxNumSentences,
+    silenceScale
   );
 }
 

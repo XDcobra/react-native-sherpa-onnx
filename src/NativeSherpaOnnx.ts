@@ -115,6 +115,13 @@ export interface Spec extends TurboModule {
    * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'auto')
    * @param numThreads - Number of threads for inference (default: 2)
    * @param debug - Enable debug logging (default: false)
+   * @param noiseScale - Optional noise scale (VITS/Matcha)
+   * @param noiseScaleW - Optional noise scale W (VITS)
+   * @param lengthScale - Optional length scale (VITS/Matcha/Kokoro/Kitten)
+   * @param ruleFsts - Optional path(s) to rule FSTs for TTS (OfflineTtsConfig)
+   * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
+   * @param maxNumSentences - Optional max sentences per callback (default: 1)
+   * @param silenceScale - Optional silence scale on config (default: 0.2)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeTts(
@@ -124,7 +131,11 @@ export interface Spec extends TurboModule {
     debug: boolean,
     noiseScale?: number,
     noiseScaleW?: number,
-    lengthScale?: number
+    lengthScale?: number,
+    ruleFsts?: string,
+    ruleFars?: string,
+    maxNumSentences?: number,
+    silenceScale?: number
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
