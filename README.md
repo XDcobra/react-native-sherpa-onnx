@@ -166,6 +166,15 @@ If you are upgrading from an earlier version to **0.3.0**, plan for the followin
 ### Text-to-Speech (TTS)
 
 - The **TTS public JS API** (`initializeTTS`, `unloadTTS`, `generateSpeech`, `generateSpeechStream`, etc.) is unchanged. If you call the **TurboModule directly**, use the new method names: `initializeTts`, `unloadTts`, and the other `Tts`-suffixed names (see [docs/tts.md – Mapping to Native API](./docs/tts.md#mapping-to-native-api)).
+- **TTS model-specific options (breaking for versions &lt; 0.3.0):**  
+  Init and update no longer use flat `noiseScale`, `noiseScaleW`, and `lengthScale` on the options object. Use **`modelOptions`** instead, with one block per model type (aligned with the STT `modelOptions` design):
+  - **`initializeTTS`:** Replace `noiseScale`, `noiseScaleW`, `lengthScale` with `modelOptions`. Only the block for the loaded model type is applied.  
+    **Before:** `initializeTTS({ modelPath, modelType: 'vits', noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 })`  
+    **After:** `initializeTTS({ modelPath, modelType: 'vits', modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } } })`
+  - **`updateTtsParams`:** Replace flat `noiseScale` / `noiseScaleW` / `lengthScale` with `modelType` + `modelOptions`.  
+    **Before:** `updateTtsParams({ noiseScale: 0.7, lengthScale: 1.2 })`  
+    **After:** `updateTtsParams({ modelType: 'vits', modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } } })`
+  - Types: `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, `TtsKokoroModelOptions`, `TtsKittenModelOptions`, `TtsPocketModelOptions` are exported from the TTS module. See [docs/tts.md](./docs/tts.md) for details.
 
 ## Requirements
 

@@ -129,15 +129,22 @@ await stopTtsPcmPlayer();
 Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files, or set it explicitly to `'vits'`, `'matcha'`, `'kokoro'`, `'kitten'`, `'pocket'`, or `'zipvoice'`.
 Auto-detection is file-based, so folder names do not need to match model types.
 
-Noise/Noise W/Length scale tuning (model-dependent):
+Model-specific options (noise/length scale) go in `modelOptions`; only the block for the loaded model type is applied. See `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, etc. in `src/tts/types.ts`.
 
 ```typescript
+// VITS: noiseScale, noiseScaleW, lengthScale
 await initializeTTS({
   modelPath,
+  modelType: 'vits',
   numThreads: 2,
-  noiseScale: 0.667,
-  noiseScaleW: 0.8,
-  lengthScale: 1.0,
+  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
+});
+
+// Kokoro: lengthScale only
+await initializeTTS({
+  modelPath,
+  modelType: 'kokoro',
+  modelOptions: { kokoro: { lengthScale: 1.2 } },
 });
 ```
 
@@ -150,13 +157,12 @@ Optional config-level options (OfflineTtsConfig, for text normalization / stream
 
 ### `updateTtsParams(options)`
 
-Update TTS parameters at runtime without reloading the model manually. Pass `null` to reset a parameter to the model default; omit a field to keep the current value.
+Update TTS parameters at runtime without reloading the model manually. Pass `modelType` and `modelOptions`; only the block for that model type is applied (same design as init). The JS layer flattens to native `noiseScale` / `noiseScaleW` / `lengthScale`.
 
 ```typescript
 await updateTtsParams({
-  noiseScale: 0.7,
-  noiseScaleW: 0.8,
-  lengthScale: null,
+  modelType: 'vits',
+  modelOptions: { vits: { noiseScale: 0.7, noiseScaleW: 0.8, lengthScale: 1.0 } },
 });
 ```
 
@@ -285,8 +291,8 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 
 | JS (public) | TurboModule method | Notes |
 | --- | --- | --- |
-| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?, ruleFsts?, ruleFars?, maxNumSentences?, silenceScale?)` | JS resolves `modelPath` to `modelDir`; optional ruleFsts, ruleFars, maxNumSentences, silenceScale (OfflineTtsConfig). |
-| `updateTtsParams(options)` | `updateTtsParams(noiseScale?, noiseScaleW?, lengthScale?)` | Runtime param updates; pass `null` to reset to default. |
+| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?, ruleFsts?, ruleFars?, maxNumSentences?, silenceScale?)` | JS resolves `modelPath` to `modelDir`; builds noiseScale/noiseScaleW/lengthScale from `options.modelOptions` for the given `modelType`. Optional ruleFsts, ruleFars, maxNumSentences, silenceScale (OfflineTtsConfig). |
+| `updateTtsParams(options)` | `updateTtsParams(noiseScale?, noiseScaleW?, lengthScale?)` | JS flattens `options.modelType` + `options.modelOptions` to the three native params; only the block for `modelType` is used. |
 | `generateSpeech(text, options?)` | `generateTts(text, options)` | Full-buffer generation; `options`: sid, speed, referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra. |
 | `generateSpeechWithTimestamps(text, options?)` | `generateTtsWithTimestamps(text, options)` | Same as above; result includes `subtitles` and `estimated`. |
 | `generateSpeechStream(text, options?, handlers)` | `generateTtsStream(text, options)` | Streaming generation (emits chunk events); same options shape. |
