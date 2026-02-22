@@ -1,5 +1,7 @@
 package com.sherpaonnx
 
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -33,6 +35,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class SherpaOnnxTtsHelper(
@@ -89,7 +92,7 @@ internal class SherpaOnnxTtsHelper(
 
   private fun getInstance(instanceId: String): TtsEngineInstance? = instances[instanceId]
 
-  /** Run promise resolve/reject on the UI thread to avoid Surface/lifecycle crashes when init completes after long native work (e.g. Zipvoice). */
+  /** Run promise resolve/reject on the UI thread so React state updates run on the main thread. */
   private val mainHandler = Handler(Looper.getMainLooper())
   private fun resolveOnUiThread(promise: Promise, result: WritableMap) {
     mainHandler.post { promise.resolve(result) }
@@ -99,6 +102,9 @@ internal class SherpaOnnxTtsHelper(
       if (throwable != null) promise.reject(code, message, throwable) else promise.reject(code, message)
     }
   }
+
+  /** Single-thread executor for TTS init so the RN bridge thread is not blocked (avoids Inspector/dev WebSocket races in debug builds). */
+  private val ttsInitExecutor = Executors.newSingleThreadExecutor()
 
   fun initializeTts(
     instanceId: String,
@@ -115,19 +121,20 @@ internal class SherpaOnnxTtsHelper(
     silenceScale: Double?,
     promise: Promise
   ) {
-    try {
+    ttsInitExecutor.execute init@{
+      try {
       val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
         rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
-        return
+        return@init
       }
       val success = result["success"] as? Boolean ?: false
       if (!success) {
         val reason = result["error"] as? String
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: ${reason ?: "Failed to detect TTS model"}")
         rejectOnUiThread(promise, "TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
-        return
+        return@init
       }
       val paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
       val modelTypeStr = result["modelType"] as? String ?: "vits"
@@ -146,8 +153,29 @@ internal class SherpaOnnxTtsHelper(
           val msg = "Zipvoice distill models (encoder+decoder only, no vocoder) are not supported. Use the full Zipvoice model that includes vocos_24khz.onnx (or similar vocoder file)."
           Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
           rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
-          return
+          return@init
         }
+        val am = context.applicationContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        if (am != null) {
+          val memInfo = ActivityManager.MemoryInfo()
+          am.getMemoryInfo(memInfo)
+          val availMb = memInfo.availMem / (1024 * 1024)
+          if (memInfo.availMem < 800L * 1024 * 1024) {
+            val msg = "Not enough free memory to load the full Zipvoice model (available: ${availMb} MB). Use the int8 distill variant (sherpa-onnx-zipvoice-distill-int8-zh-en-emilia) or close other apps."
+            Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
+            rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
+            return@init
+          }
+        }
+        // Reduce memory pressure: GC before heavy allocation and cap threads to limit peak RAM.
+        System.gc()
+        Runtime.getRuntime().gc()
+        if (am != null) {
+          val memInfoBefore = ActivityManager.MemoryInfo()
+          am.getMemoryInfo(memInfoBefore)
+          Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfoBefore.availMem / (1024 * 1024)} MB (before load)")
+        }
+        val zipvoiceNumThreads = 1
         val wrapper = ZipvoiceTtsWrapper.create(
           tokens = path(paths, "tokens"),
           encoder = path(paths, "encoder"),
@@ -155,13 +183,18 @@ internal class SherpaOnnxTtsHelper(
           vocoder = vocoderPath,
           dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon"),
-          numThreads = numThreads.toInt(),
+          numThreads = zipvoiceNumThreads,
           debug = debug
         )
+        if (am != null) {
+          val memInfo = ActivityManager.MemoryInfo()
+          am.getMemoryInfo(memInfo)
+          Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfo.availMem / (1024 * 1024)} MB (after load)")
+        }
         if (wrapper == null) {
           Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
           rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
-          return
+          return@init
         }
         inst.zipvoiceTts = wrapper
         sampleRate = wrapper.sampleRate()
@@ -212,6 +245,7 @@ internal class SherpaOnnxTtsHelper(
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to initialize TTS: ${e.message}", e)
       rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
+    }
     }
   }
 

@@ -332,6 +332,8 @@ See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup ste
 - **Full Zipvoice** (supported): encoder + decoder + **vocoder** (e.g. `vocos_24khz.onnx`), plus `tokens.txt`, `lexicon.txt`, and `espeak-ng-data`. The pipeline is: encoder/decoder → mel-spectrogram → vocoder → waveform.
 - **Zipvoice distill** (encoder + decoder only, no vocoder): These models are **detected** as zipvoice so they appear in the model list, but **initialization will fail** with a clear error. The sherpa-onnx C-API and C++ implementation require a vocoder; there is no optional-vocoder or waveform-from-decoder path in the current upstream. Use a full Zipvoice model that includes a vocoder file (e.g. `vocos_24khz.onnx`) for successful initialization.
 
+**Memory and model variants:** The full fp32 Zipvoice model (e.g. `sherpa-onnx-zipvoice-zh-en-emilia`, ~605 MB compressed) uses significant RAM when loading. On devices with **less than 8 GB RAM**, prefer the **int8 distill** variant: `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` (~104 MB compressed). The SDK checks free memory before loading Zipvoice and rejects with an actionable error if below ~800 MB; the error message suggests using the int8 variant or closing other apps.
+
 **References (Zipvoice via sherpa-onnx):**
 
 - [sherpa-onnx PR #2487 – Add Zipvoice](https://github.com/k2-fsa/sherpa-onnx/pull/2487): Integration of Zipvoice (zero-shot TTS, encoder + flow-matching decoder + vocoder), C-API, vocoder selection, and [discussion on running Zipvoice / distill](https://github.com/k2-fsa/sherpa-onnx/pull/2487#issuecomment-3227884498).
@@ -339,6 +341,7 @@ See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup ste
 
 ## Troubleshooting & tuning
 
+- **Zipvoice init fails or app crashes on low-RAM devices (Android):** The full Zipvoice model needs substantial free memory. If you see "Not enough free memory" or a crash in system graphics threads (e.g. `FenceMonitor` / `libgui.so`), use the **int8 distill** model `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` or close other apps to free RAM.
 - Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
 - Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.
 - Threading: increase `numThreads` for better throughput on multi-core devices, but test memory usage.
