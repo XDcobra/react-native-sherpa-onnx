@@ -12,16 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  initializeTTS,
-  generateSpeech,
-  generateSpeechWithTimestamps,
-  generateSpeechStream,
-  cancelSpeechStream,
-  startTtsPcmPlayer,
-  writeTtsPcmChunk,
-  stopTtsPcmPlayer,
-  unloadTTS,
-  getModelInfo,
+  createTTS,
+  detectTtsModel,
   saveAudioToFile,
   saveAudioToContentUri,
   saveTextToContentUri,
@@ -30,6 +22,8 @@ import {
   type TTSModelType,
   type TtsGenerationOptions,
 } from 'react-native-sherpa-onnx/tts';
+import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
+import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
@@ -131,6 +125,7 @@ export default function TTSScreen() {
     }
     return Platform.OS === 'android' ? `file://${path}` : path;
   };
+  const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const soundInstanceRef = useRef<Sound | null>(null);
   const streamChunksRef = useRef<number[][]>([]);
@@ -154,15 +149,28 @@ export default function TTSScreen() {
     currentModelFolderRef.current = currentModelFolder;
   }, [currentModelFolder]);
 
-  // Cleanup: Release TTS resources when leaving the screen
+  // Restore persisted TTS instance when entering the screen (do not release on unmount)
+  useEffect(() => {
+    const cached = getTtsCache();
+    if (cached.engine != null && cached.modelFolder != null) {
+      ttsEngineRef.current = cached.engine;
+      setCurrentModelFolder(cached.modelFolder);
+      setDetectedModels(cached.detectedModels);
+      setSelectedModelType(cached.selectedModelType);
+      setModelInfo(cached.modelInfo);
+      setInitResult(
+        `Initialized: ${getModelDisplayName(
+          cached.modelFolder
+        )}\nDetected models: ${cached.detectedModels
+          .map((m) => m.type)
+          .join(', ')}`
+      );
+    }
+  }, []);
+
+  // On unmount: release sound and stream only; do NOT destroy the TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
-      if (currentModelFolderRef.current !== null) {
-        console.log('TTSScreen: Cleaning up TTS resources');
-        unloadTTS().catch((err) => {
-          console.error('TTSScreen: Failed to unload TTS:', err);
-        });
-      }
       if (soundInstanceRef.current) {
         soundInstanceRef.current.release();
       }
@@ -170,9 +178,12 @@ export default function TTSScreen() {
         streamUnsubscribeRef.current();
         streamUnsubscribeRef.current = null;
       }
-      stopTtsPcmPlayer().catch((err) => {
-        console.warn('Failed to stop PCM player:', err);
-      });
+      const engine = ttsEngineRef.current;
+      if (engine) {
+        engine.stopPcmPlayer().catch((err) => {
+          console.warn('Failed to stop PCM player:', err);
+        });
+      }
     };
   }, []);
 
@@ -190,9 +201,12 @@ export default function TTSScreen() {
     streamInFlightRef.current = false;
     streamLastTextRef.current = '';
     streamPlaybackStartedRef.current = false;
-    stopTtsPcmPlayer().catch((err) => {
-      console.warn('Failed to stop PCM player:', err);
-    });
+    const engine = ttsEngineRef.current;
+    if (engine) {
+      engine.stopPcmPlayer().catch((err) => {
+        console.warn('Failed to stop PCM player:', err);
+      });
+    }
     setStreamProgress(null);
     setStreaming(false);
   }, []);
@@ -240,21 +254,27 @@ export default function TTSScreen() {
       return;
     }
 
+    const engine = ttsEngineRef.current;
+    if (!engine) {
+      streamInFlightRef.current = false;
+      return;
+    }
+
     streamInFlightRef.current = true;
 
     try {
-      const unsubscribe = await generateSpeechStream(nextText, options, {
+      const unsubscribe = await engine.generateSpeechStream(nextText, options, {
         onChunk: (chunk) => {
           if (streamSampleRateRef.current === null) {
             streamSampleRateRef.current = chunk.sampleRate;
           }
           if (!streamPlaybackStartedRef.current) {
             streamPlaybackStartedRef.current = true;
-            startTtsPcmPlayer(chunk.sampleRate, 1).catch((err) => {
+            engine.startPcmPlayer(chunk.sampleRate, 1).catch((err) => {
               console.warn('Failed to start PCM player:', err);
             });
           }
-          writeTtsPcmChunk(chunk.samples).catch((err) => {
+          engine.writePcmChunk(chunk.samples).catch((err) => {
             console.warn('Failed to write PCM chunk:', err);
           });
           streamChunksRef.current.push(chunk.samples);
@@ -421,7 +441,8 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      await cancelSpeechStream();
+      const eng = ttsEngineRef.current;
+      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -431,9 +452,11 @@ export default function TTSScreen() {
     }
 
     try {
-      // Unload previous model if any
-      if (currentModelFolder) {
-        await unloadTTS();
+      const previous = ttsEngineRef.current;
+      if (previous) {
+        await previous.destroy();
+        ttsEngineRef.current = null;
+        clearTtsCache();
       }
 
       const useFilePath = padModelIds.includes(modelFolder);
@@ -443,79 +466,85 @@ export default function TTSScreen() {
           : getFileModelPath(modelFolder, ModelCategory.Tts)
         : getAssetModelPath(modelFolder);
 
-      let result: any;
+      let engine: TtsEngine;
       try {
-        result = await new Promise((resolve, reject) => {
-          setTimeout(async () => {
-            try {
-              const r = await initializeTTS({
-                modelPath,
-                numThreads: TTS_NUM_THREADS,
-                debug: false,
-              });
-              resolve(r);
-            } catch (e) {
-              reject(e);
-            }
+        engine = await new Promise((resolve, reject) => {
+          setTimeout(() => {
+            createTTS({
+              modelPath,
+              numThreads: TTS_NUM_THREADS,
+              debug: false,
+            })
+              .then(resolve)
+              .catch(reject);
           }, 50);
         });
       } catch (initErr) {
         console.warn(
-          'Initial initializeTTS failed, retrying with fewer threads',
+          'Initial createTTS failed, retrying with fewer threads',
           initErr
         );
-        result = await initializeTTS({
+        engine = await createTTS({
           modelPath,
           numThreads: 1,
           debug: false,
         });
       }
 
-      if (result.success && result.detectedModels.length > 0) {
-        const normalizedDetected = result.detectedModels.map(
-          (model: { type: string; modelDir: string }) => ({
-            ...model,
-            type: model.type as TTSModelType,
-          })
-        );
-        setDetectedModels(normalizedDetected);
-        setCurrentModelFolder(modelFolder);
+      const detectResult = await detectTtsModel(modelPath);
+      const normalizedDetected =
+        detectResult.success && detectResult.detectedModels?.length
+          ? detectResult.detectedModels.map((m) => ({
+              ...m,
+              type: m.type as TTSModelType,
+            }))
+          : ([
+              { type: 'vits' as TTSModelType, modelDir: modelFolder },
+            ] as Array<{
+              type: TTSModelType;
+              modelDir: string;
+            }>);
+      const firstType =
+        (detectResult.modelType as TTSModelType) ??
+        normalizedDetected[0]?.type ??
+        null;
 
-        const detectedTypes = normalizedDetected
-          .map((m: { type: TTSModelType }) => m.type)
-          .join(', ');
-        setInitResult(
-          `Initialized: ${getModelDisplayName(
-            modelFolder
-          )}\nDetected models: ${detectedTypes}`
-        );
-
-        // Auto-select first detected model
-        if (normalizedDetected.length === 1 && normalizedDetected[0]) {
-          setSelectedModelType(normalizedDetected[0].type);
+      let modelInfoValue: { sampleRate: number; numSpeakers: number } | null =
+        null;
+      try {
+        const info = await engine.getModelInfo();
+        if (
+          info &&
+          typeof info.sampleRate === 'number' &&
+          typeof info.numSpeakers === 'number'
+        ) {
+          modelInfoValue = {
+            sampleRate: info.sampleRate,
+            numSpeakers: info.numSpeakers,
+          };
         }
-
-        // Try to get model info (sample rate, num speakers) for all models.
-        // For some file-path models this may fail; we catch and leave modelInfo null.
-        try {
-          const info = await getModelInfo();
-          if (
-            info &&
-            typeof info.sampleRate === 'number' &&
-            typeof info.numSpeakers === 'number'
-          ) {
-            setModelInfo(info);
-          } else {
-            setModelInfo(null);
-          }
-        } catch (infoErr) {
-          console.warn('getModelInfo not available for this model:', infoErr);
-          setModelInfo(null);
-        }
-      } else {
-        setError('No models detected in the directory');
-        setInitResult('Initialization failed: No compatible models found');
+      } catch {
+        // leave modelInfoValue null
       }
+      ttsEngineRef.current = engine;
+      setDetectedModels(normalizedDetected);
+      setCurrentModelFolder(modelFolder);
+      setSelectedModelType(firstType);
+      setModelInfo(modelInfoValue);
+      setInitResult(
+        `Initialized: ${getModelDisplayName(
+          modelFolder
+        )}\nDetected models: ${normalizedDetected
+          .map((m) => m.type)
+          .join(', ')}`
+      );
+      setTtsCache(
+        engine,
+        modelFolder,
+        normalizedDetected,
+        firstType,
+        modelInfoValue
+      );
 
       setGeneratedAudio(null);
       setGeneratedSubtitles(null);
@@ -579,7 +608,8 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      await cancelSpeechStream();
+      const eng = ttsEngineRef.current;
+      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -588,9 +618,14 @@ export default function TTSScreen() {
       setIsPlaying(false);
     }
 
+    const engine = ttsEngineRef.current;
+    if (!engine) {
+      setError('TTS engine not initialized');
+      return;
+    }
     try {
       const options = getSynthesisOptions();
-      const result = await generateSpeech(inputText, options);
+      const result = await engine.generateSpeech(inputText, options);
 
       setGeneratedAudio(result);
       Alert.alert(
@@ -649,7 +684,8 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      await cancelSpeechStream();
+      const eng = ttsEngineRef.current;
+      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -658,9 +694,18 @@ export default function TTSScreen() {
       setIsPlaying(false);
     }
 
+    const engine = ttsEngineRef.current;
+    if (!engine) {
+      setError('TTS engine not initialized');
+      setGenerating(false);
+      return;
+    }
     try {
       const options = getSynthesisOptions();
-      const result = await generateSpeechWithTimestamps(inputText, options);
+      const result = await engine.generateSpeechWithTimestamps(
+        inputText,
+        options
+      );
 
       setGeneratedAudio({
         samples: result.samples,
@@ -745,7 +790,8 @@ export default function TTSScreen() {
       return;
     }
     try {
-      await cancelSpeechStream();
+      const eng = ttsEngineRef.current;
+      if (eng) await eng.cancelSpeechStream();
     } catch (err) {
       console.warn('Failed to cancel streaming:', err);
     } finally {
@@ -1244,10 +1290,11 @@ export default function TTSScreen() {
     }
   };
 
-  const handleCleanup = async () => {
+  const handleFree = async () => {
     try {
       if (streaming) {
-        await cancelSpeechStream();
+        const eng = ttsEngineRef.current;
+        if (eng) await eng.cancelSpeechStream();
         resetStreamingState(true);
       }
       if (soundInstance) {
@@ -1255,7 +1302,12 @@ export default function TTSScreen() {
         setSoundInstance(null);
         setIsPlaying(false);
       }
-      await unloadTTS();
+      const engine = ttsEngineRef.current;
+      if (engine) {
+        await engine.destroy();
+        ttsEngineRef.current = null;
+      }
+      clearTtsCache();
       setCurrentModelFolder(null);
       setInitResult(null);
       setDetectedModels([]);
@@ -1267,9 +1319,9 @@ export default function TTSScreen() {
       setSavedAudioPath(null);
       setSavedSubtitlePath(null);
       setError(null);
-      Alert.alert('Success', 'TTS resources released');
+      Alert.alert('Success', 'TTS model released');
     } catch (err) {
-      console.error('Cleanup error:', err);
+      console.error('Release error:', err);
       Alert.alert('Error', 'Failed to release TTS resources');
     }
   };
@@ -1281,6 +1333,15 @@ export default function TTSScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
         >
+          {currentModelFolder != null && (
+            <TouchableOpacity
+              style={styles.cleanupButton}
+              onPress={handleFree}
+              disabled={loading}
+            >
+              <Text style={styles.cleanupButtonText}>Release model</Text>
+            </TouchableOpacity>
+          )}
           {/* Header */}
           <View style={styles.header}>
             <Ionicons name="volume-high" size={48} style={styles.icon} />
@@ -1731,16 +1792,6 @@ export default function TTSScreen() {
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>{error}</Text>
             </View>
-          )}
-
-          {/* Cleanup Button */}
-          {currentModelFolder && (
-            <TouchableOpacity
-              style={styles.cleanupButton}
-              onPress={handleCleanup}
-            >
-              <Text style={styles.cleanupButtonText}>Release Resources</Text>
-            </TouchableOpacity>
           )}
 
           {/* Footer */}

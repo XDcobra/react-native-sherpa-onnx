@@ -352,6 +352,18 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
   },
+  freeButton: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  freeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   selectedFileContainer: {
     marginTop: 20,
     padding: 16,
