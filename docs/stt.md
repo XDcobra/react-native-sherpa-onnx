@@ -16,6 +16,7 @@ This guide covers the STT APIs for offline transcription.
 - [Model Setup](#model-setup)
   - [Supported STT model types](#supported-stt-model-types)
   - [Model-specific options (modelOptions)](#model-specific-options-modeloptions)
+  - [Whisper language codes (getWhisperLanguages)](#whisper-language-codes-getwhisperlanguages)
 - [Mapping to Native API](#mapping-to-native-api)
   - [TurboModule](#turbomodule-spec-srcnativesherpaonnxts)
   - [Android (Kotlin)](#android-kotlin)
@@ -207,7 +208,7 @@ Pass `modelOptions` in `createSTT(options)` to set per-model options. Only the b
 
 | Model | Key | Options | Description |
 | --- | --- | --- | --- |
-| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` | Language code (e.g. `"en"`). With `task: 'translate'`, result `text` is **English** (speech translated to English). **iOS:** only `language`, `task`, `tailPaddings` are applied; `enableTokenTimestamps` and `enableSegmentTimestamps` are **Android only**. |
+| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` | Language code (e.g. `"en"`, `"de"`). **Only use valid codes** — invalid values can crash the app. Use [getWhisperLanguages()](#whisper-language-codes-getwhisperlanguages) to get the full list of `{ id, name }`. With `task: 'translate'`, result `text` is **English**. **iOS:** only `language`, `task`, `tailPaddings` are applied; `enableTokenTimestamps` and `enableSegmentTimestamps` are **Android only**. |
 | **SenseVoice** | `senseVoice` | `language?`, `useItn?` | Language hint; inverse text normalization (default true on Kotlin). |
 | **Canary** | `canary` | `srcLang?`, `tgtLang?`, `usePnc?` | Source/target language (default `"en"`); use punctuation (default true). |
 | **FunASR Nano** | `funasrNano` | `systemPrompt?`, `userPrompt?`, `maxNewTokens?`, `temperature?`, `topP?`, `seed?`, `language?`, `itn?`, `hotwords?` | LLM/prompt and decoding options; see native defaults in `SttFunAsrNanoModelOptions`. |
@@ -224,6 +225,27 @@ const stt = await createSTT({
 });
 // ... use stt ... then await stt.destroy();
 ```
+
+### Whisper language codes (getWhisperLanguages)
+
+Whisper’s `modelOptions.whisper.language` accepts only specific ISO-style codes (e.g. `"en"`, `"de"`, `"yue"`). Passing an invalid code can cause a native crash. The SDK exposes the full list of supported codes and display names so you can build a dropdown or picker instead of free text.
+
+- **`getWhisperLanguages(): readonly WhisperLanguage[]`** — Returns the list of all Whisper-supported languages. Each entry has `id` (the code to pass as `language`) and `name` (e.g. `"english"`, `"german"`).
+- **`WHISPER_LANGUAGES`** — The same list as a constant (readonly array).
+
+**Type:** `WhisperLanguage` is `{ id: string; name: string }`.
+
+Example (e.g. for a language dropdown):
+
+```ts
+import { getWhisperLanguages } from 'react-native-sherpa-onnx/stt';
+
+const languages = getWhisperLanguages();
+// languages[0] => { id: 'en', name: 'english' }
+// Use id as modelOptions.whisper.language; show name (or "name (id)") in the UI.
+```
+
+Use an empty string or omit `language` for auto-detection.
 
 ## Mapping to Native API
 
