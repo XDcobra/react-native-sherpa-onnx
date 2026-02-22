@@ -29,14 +29,15 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class SherpaOnnxTtsHelper(
   private val context: ReactApplicationContext,
   private val detectTtsModel: (modelDir: String, modelType: String) -> HashMap<String, Any>?,
-  private val emitChunk: (FloatArray, Int, Float, Boolean) -> Unit,
-  private val emitError: (String) -> Unit,
-  private val emitEnd: (Boolean) -> Unit
+  private val emitChunk: (String, FloatArray, Int, Float, Boolean) -> Unit,
+  private val emitError: (String, String) -> Unit,
+  private val emitEnd: (String, Boolean) -> Unit
 ) {
 
   private data class TtsInitState(
@@ -53,22 +54,40 @@ internal class SherpaOnnxTtsHelper(
     val silenceScale: Double?
   )
 
-  // Dual-engine: either OfflineTts (Kotlin API) or ZipvoiceTtsWrapper (C-API)
-  @Volatile
-  private var tts: OfflineTts? = null
-  @Volatile
-  private var zipvoiceTts: ZipvoiceTtsWrapper? = null
+  private data class TtsEngineInstance(
+    @Volatile var tts: OfflineTts? = null,
+    @Volatile var zipvoiceTts: ZipvoiceTtsWrapper? = null,
+    var ttsInitState: TtsInitState? = null,
+    val ttsStreamRunning: AtomicBoolean = AtomicBoolean(false),
+    val ttsStreamCancelled: AtomicBoolean = AtomicBoolean(false),
+    var ttsStreamThread: Thread? = null,
+    var ttsPcmTrack: AudioTrack? = null
+  ) {
+    fun hasEngine(): Boolean = tts != null || zipvoiceTts != null
+    val isZipvoice: Boolean get() = zipvoiceTts != null
+    fun releaseEngines() {
+      tts?.release()
+      tts = null
+      zipvoiceTts?.release()
+      zipvoiceTts = null
+      ttsInitState = null
+    }
+    fun stopPcmPlayer() {
+      ttsPcmTrack?.apply {
+        try { stop() } catch (_: IllegalStateException) {}
+        flush()
+        release()
+      }
+      ttsPcmTrack = null
+    }
+  }
 
-  private val ttsStreamRunning = AtomicBoolean(false)
-  private val ttsStreamCancelled = AtomicBoolean(false)
-  private var ttsStreamThread: Thread? = null
-  private var ttsPcmTrack: AudioTrack? = null
-  private var ttsInitState: TtsInitState? = null
+  private val instances = ConcurrentHashMap<String, TtsEngineInstance>()
 
-  /** True when the active engine is ZipvoiceTtsWrapper */
-  private val isZipvoice: Boolean get() = zipvoiceTts != null
+  private fun getInstance(instanceId: String): TtsEngineInstance? = instances[instanceId]
 
   fun initializeTts(
+    instanceId: String,
     modelDir: String,
     modelType: String,
     numThreads: Double,
@@ -83,7 +102,6 @@ internal class SherpaOnnxTtsHelper(
     promise: Promise
   ) {
     try {
-      
       val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
@@ -101,7 +119,9 @@ internal class SherpaOnnxTtsHelper(
       val modelTypeStr = result["modelType"] as? String ?: "vits"
       val detectedModels = result["detectedModels"] as? ArrayList<*>
 
-      releaseEngines()
+      val inst = instances.getOrPut(instanceId) { TtsEngineInstance() }
+      inst.stopPcmPlayer()
+      inst.releaseEngines()
 
       val sampleRate: Int
       val numSpeakers: Int
@@ -122,7 +142,7 @@ internal class SherpaOnnxTtsHelper(
           promise.reject("TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
           return
         }
-        zipvoiceTts = wrapper
+        inst.zipvoiceTts = wrapper
         sampleRate = wrapper.sampleRate()
         numSpeakers = wrapper.numSpeakers()
       } else {
@@ -131,12 +151,12 @@ internal class SherpaOnnxTtsHelper(
           noiseScale, noiseScaleW, lengthScale,
           ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale
         )
-        tts = OfflineTts(config = config)
-        sampleRate = tts!!.sampleRate()
-        numSpeakers = tts!!.numSpeakers()
+        inst.tts = OfflineTts(config = config)
+        sampleRate = inst.tts!!.sampleRate()
+        numSpeakers = inst.tts!!.numSpeakers()
       }
 
-      Log.i("SherpaOnnxTts", "initializeTts: engine=${if (isZipvoice) "zipvoice-c-api" else "kotlin-api"}, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
+      Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=${if (inst.isZipvoice) "zipvoice-c-api" else "kotlin-api"}, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
 
       val modelsArray = Arguments.createArray()
       detectedModels?.forEach { modelObj ->
@@ -148,7 +168,7 @@ internal class SherpaOnnxTtsHelper(
         }
       }
 
-      ttsInitState = TtsInitState(
+      inst.ttsInitState = TtsInitState(
         modelDir,
         modelType,
         numThreads.toInt(),
@@ -175,26 +195,31 @@ internal class SherpaOnnxTtsHelper(
   }
 
   fun updateTtsParams(
+    instanceId: String,
     noiseScale: Double?,
     noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
-    if (ttsStreamRunning.get()) {
+    val inst = getInstance(instanceId) ?: run {
+      Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: TTS instance not found: $instanceId")
+      promise.reject("TTS_UPDATE_ERROR", "TTS instance not found: $instanceId")
+      return
+    }
+    if (inst.ttsStreamRunning.get()) {
       Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Cannot update params while streaming")
       promise.reject("TTS_UPDATE_ERROR", "Cannot update params while streaming")
       return
     }
-    val state = ttsInitState ?: run {
+    val state = inst.ttsInitState ?: run {
       Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: TTS not initialized")
       promise.reject("TTS_UPDATE_ERROR", "TTS not initialized")
       return
     }
 
-    // Zipvoice has no tunable noise/length params; re-init is the only way to "update"
-    if (isZipvoice) {
-      // Re-initialize with same params (Zipvoice ignores noise/length scales)
+    if (inst.isZipvoice) {
       initializeTts(
+        instanceId,
         state.modelDir, state.modelType, state.numThreads.toDouble(), state.debug,
         noiseScale, noiseScaleW, lengthScale,
         state.ruleFsts, state.ruleFars, state.maxNumSentences?.toDouble(), state.silenceScale,
@@ -229,15 +254,15 @@ internal class SherpaOnnxTtsHelper(
       val modelTypeStr = result["modelType"] as? String ?: state.modelType
       val detectedModels = result["detectedModels"] as? ArrayList<*>
 
-      tts?.release()
-      tts = null
+      inst.tts?.release()
+      inst.tts = null
       val config = buildTtsConfig(
         paths, modelTypeStr, state.numThreads, state.debug,
         nextNoiseScale, nextNoiseScaleW, nextLengthScale,
         state.ruleFsts, state.ruleFars, state.maxNumSentences, state.silenceScale
       )
-      tts = OfflineTts(config = config)
-      val ttsInstance = tts!!
+      inst.tts = OfflineTts(config = config)
+      val ttsInstance = inst.tts!!
 
       val modelsArray = Arguments.createArray()
       detectedModels?.forEach { modelObj ->
@@ -249,7 +274,7 @@ internal class SherpaOnnxTtsHelper(
         }
       }
 
-      ttsInitState = state.copy(
+      inst.ttsInitState = state.copy(
         noiseScale = nextNoiseScale,
         noiseScaleW = nextNoiseScaleW,
         lengthScale = nextLengthScale
@@ -267,9 +292,14 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTts(text: String, options: ReadableMap?, promise: Promise) {
+  fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
     try {
-      if (!hasEngine()) {
+      val inst = getInstance(instanceId) ?: run {
+        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS instance not found: $instanceId")
+        promise.reject("TTS_GENERATE_ERROR", "TTS instance not found: $instanceId")
+        return
+      }
+      if (!inst.hasEngine()) {
         Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
         promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
@@ -277,7 +307,7 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceOptions(options) && isZipvoice -> {
+        hasReferenceOptions(options) && inst.isZipvoice -> {
           val refAudio = options?.getArray("referenceAudio")
             ?: run {
               Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
@@ -288,13 +318,13 @@ internal class SherpaOnnxTtsHelper(
           val promptText = options.getString("referenceText").orEmpty()
           val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
           val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
-          zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
+          inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
-        hasReferenceOptions(options) && tts != null -> {
+        hasReferenceOptions(options) && inst.tts != null -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          tts!!.generateWithConfig(text, config)
+          inst.tts!!.generateWithConfig(text, config)
         }
-        else -> dispatchGenerate(text, sid, speed)
+        else -> dispatchGenerate(inst, text, sid, speed)
           ?: run {
             Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
             promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
@@ -311,14 +341,18 @@ internal class SherpaOnnxTtsHelper(
       promise.resolve(map)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e)
-      Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: ${e.message ?: "Failed to generate speech"}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
     }
   }
 
-  fun generateTtsWithTimestamps(text: String, options: ReadableMap?, promise: Promise) {
+  fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
     try {
-      if (!hasEngine()) {
+      val inst = getInstance(instanceId) ?: run {
+        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS instance not found: $instanceId")
+        promise.reject("TTS_GENERATE_ERROR", "TTS instance not found: $instanceId")
+        return
+      }
+      if (!inst.hasEngine()) {
         Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
         promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
@@ -326,7 +360,7 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceOptions(options) && isZipvoice -> {
+        hasReferenceOptions(options) && inst.isZipvoice -> {
           val refAudio = options?.getArray("referenceAudio")
             ?: run {
               Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
@@ -337,13 +371,13 @@ internal class SherpaOnnxTtsHelper(
           val promptText = options.getString("referenceText").orEmpty()
           val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
           val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
-          zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
+          inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
-        hasReferenceOptions(options) && tts != null -> {
+        hasReferenceOptions(options) && inst.tts != null -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          tts!!.generateWithConfig(text, config)
+          inst.tts!!.generateWithConfig(text, config)
         }
-        else -> dispatchGenerate(text, sid, speed)
+        else -> dispatchGenerate(inst, text, sid, speed)
           ?: run {
             Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
             promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
@@ -375,76 +409,89 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTtsStream(text: String, options: ReadableMap?, promise: Promise) {
-    if (ttsStreamRunning.get()) {
+  fun generateTtsStream(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS instance not found: $instanceId")
+      promise.reject("TTS_STREAM_ERROR", "TTS instance not found: $instanceId")
+      return
+    }
+    if (inst.ttsStreamRunning.get()) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS streaming already in progress")
       promise.reject("TTS_STREAM_ERROR", "TTS streaming already in progress")
       return
     }
-    if (!hasEngine()) {
+    if (!inst.hasEngine()) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS not initialized")
       promise.reject("TTS_STREAM_ERROR", "TTS not initialized")
       return
     }
-    if (hasReferenceOptions(options) && isZipvoice) {
+    if (hasReferenceOptions(options) && inst.isZipvoice) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Streaming with reference audio not supported for Zipvoice")
       promise.reject("TTS_STREAM_ERROR", "Streaming with reference audio not supported for Zipvoice")
       return
     }
     val sid = getSid(options)
     val speed = getSpeed(options)
-    ttsStreamCancelled.set(false)
-    ttsStreamRunning.set(true)
-    ttsStreamThread = Thread {
+    inst.ttsStreamCancelled.set(false)
+    inst.ttsStreamRunning.set(true)
+    inst.ttsStreamThread = Thread {
       try {
-        val sampleRate = dispatchSampleRate()
+        val sampleRate = dispatchSampleRate(inst)
         when {
-          hasReferenceOptions(options) && tts != null -> {
+          hasReferenceOptions(options) && inst.tts != null -> {
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-            tts!!.generateWithConfigAndCallback(text, config) { chunk ->
-              if (ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
-              emitChunk(chunk, sampleRate, 0f, false)
+            inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
+              if (inst.ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
+              emitChunk(instanceId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
-          zipvoiceTts != null -> {
-            zipvoiceTts!!.generateWithCallback(text, sid, speed) { chunk ->
-              if (ttsStreamCancelled.get()) return@generateWithCallback 0
-              emitChunk(chunk, sampleRate, 0f, false)
+          inst.zipvoiceTts != null -> {
+            inst.zipvoiceTts!!.generateWithCallback(text, sid, speed) { chunk ->
+              if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
+              emitChunk(instanceId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
           else -> {
-            tts!!.generateWithCallback(text, sid, speed) { chunk ->
-              if (ttsStreamCancelled.get()) return@generateWithCallback 0
-              emitChunk(chunk, sampleRate, 0f, false)
+            inst.tts!!.generateWithCallback(text, sid, speed) { chunk ->
+              if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
+              emitChunk(instanceId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
         }
-        if (!ttsStreamCancelled.get()) {
-          emitChunk(FloatArray(0), sampleRate, 1f, true)
+        if (!inst.ttsStreamCancelled.get()) {
+          emitChunk(instanceId, FloatArray(0), sampleRate, 1f, true)
         }
       } catch (e: Exception) {
-        if (!ttsStreamCancelled.get()) {
-          emitError("TTS streaming failed: ${e.message}")
+        if (!inst.ttsStreamCancelled.get()) {
+          emitError(instanceId, "TTS streaming failed: ${e.message}")
         }
       } finally {
-        emitEnd(ttsStreamCancelled.get())
-        ttsStreamRunning.set(false)
+        emitEnd(instanceId, inst.ttsStreamCancelled.get())
+        inst.ttsStreamRunning.set(false)
       }
     }
-    ttsStreamThread?.start()
+    inst.ttsStreamThread?.start()
     promise.resolve(null)
   }
 
-  fun cancelTtsStream(promise: Promise) {
-    ttsStreamCancelled.set(true)
-    ttsStreamThread?.interrupt()
+  fun cancelTtsStream(instanceId: String, promise: Promise) {
+    val inst = getInstance(instanceId)
+    if (inst != null) {
+      inst.ttsStreamCancelled.set(true)
+      inst.ttsStreamThread?.interrupt()
+    }
     promise.resolve(null)
   }
 
-  fun startTtsPcmPlayer(sampleRate: Double, channels: Double, promise: Promise) {
+  fun startTtsPcmPlayer(instanceId: String, sampleRate: Double, channels: Double, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: TTS instance not found: $instanceId")
+      promise.reject("TTS_PCM_ERROR", "TTS instance not found: $instanceId")
+      return
+    }
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
         Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM playback requires API 21+")
@@ -456,7 +503,7 @@ internal class SherpaOnnxTtsHelper(
         promise.reject("TTS_PCM_ERROR", "PCM playback supports mono only")
         return
       }
-      stopPcmPlayerInternal()
+      inst.stopPcmPlayer()
       val channelConfig = AudioFormat.CHANNEL_OUT_MONO
       val audioFormat = AudioFormat.Builder()
         .setSampleRate(sampleRate.toInt())
@@ -473,8 +520,8 @@ internal class SherpaOnnxTtsHelper(
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
-      ttsPcmTrack = AudioTrack(attributes, audioFormat, minBufferSize, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE)
-      ttsPcmTrack?.play()
+      inst.ttsPcmTrack = AudioTrack(attributes, audioFormat, minBufferSize, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE)
+      inst.ttsPcmTrack?.play()
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Failed to start PCM player", e)
@@ -482,8 +529,13 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun writeTtsPcmChunk(samples: ReadableArray, promise: Promise) {
-    val track = ttsPcmTrack ?: run {
+  fun writeTtsPcmChunk(instanceId: String, samples: ReadableArray, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: TTS instance not found: $instanceId")
+      promise.reject("TTS_PCM_ERROR", "TTS instance not found: $instanceId")
+      return
+    }
+    val track = inst.ttsPcmTrack ?: run {
       Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: PCM player not initialized")
       promise.reject("TTS_PCM_ERROR", "PCM player not initialized")
       return
@@ -506,9 +558,9 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun stopTtsPcmPlayer(promise: Promise) {
+  fun stopTtsPcmPlayer(instanceId: String, promise: Promise) {
     try {
-      stopPcmPlayerInternal()
+      getInstance(instanceId)?.stopPcmPlayer()
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_PCM_ERROR: Failed to stop PCM player", e)
@@ -516,39 +568,51 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun getTtsSampleRate(promise: Promise) {
+  fun getTtsSampleRate(instanceId: String, promise: Promise) {
     try {
-      if (!hasEngine()) {
+      val inst = getInstance(instanceId) ?: run {
+        Log.e("SherpaOnnxTts", "TTS_ERROR: TTS instance not found: $instanceId")
+        promise.reject("TTS_ERROR", "TTS instance not found: $instanceId")
+        return
+      }
+      if (!inst.hasEngine()) {
         Log.e("SherpaOnnxTts", "TTS_ERROR: TTS not initialized")
         promise.reject("TTS_ERROR", "TTS not initialized")
         return
       }
-      promise.resolve(dispatchSampleRate().toDouble())
+      promise.resolve(dispatchSampleRate(inst).toDouble())
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_ERROR: Failed to get sample rate", e)
       promise.reject("TTS_ERROR", "Failed to get sample rate", e)
     }
   }
 
-  fun getTtsNumSpeakers(promise: Promise) {
+  fun getTtsNumSpeakers(instanceId: String, promise: Promise) {
     try {
-      if (!hasEngine()) {
+      val inst = getInstance(instanceId) ?: run {
+        Log.e("SherpaOnnxTts", "TTS_ERROR: TTS instance not found: $instanceId")
+        promise.reject("TTS_ERROR", "TTS instance not found: $instanceId")
+        return
+      }
+      if (!inst.hasEngine()) {
         Log.e("SherpaOnnxTts", "TTS_ERROR: TTS not initialized")
         promise.reject("TTS_ERROR", "TTS not initialized")
         return
       }
-      promise.resolve(dispatchNumSpeakers().toDouble())
+      promise.resolve(dispatchNumSpeakers(inst).toDouble())
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_ERROR: Failed to get number of speakers", e)
       promise.reject("TTS_ERROR", "Failed to get number of speakers", e)
     }
   }
 
-  fun unloadTts(promise: Promise) {
+  fun unloadTts(instanceId: String, promise: Promise) {
     try {
-      stopPcmPlayerInternal()
-      releaseEngines()
-      ttsInitState = null
+      val inst = instances.remove(instanceId)
+      if (inst != null) {
+        inst.stopPcmPlayer()
+        inst.releaseEngines()
+      }
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_RELEASE_ERROR: Failed to release TTS resources", e)
@@ -676,22 +740,7 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun emitTtsStreamChunk(samples: FloatArray, sampleRate: Int, progress: Float, isFinal: Boolean) {
-    emitChunk(samples, sampleRate, progress, isFinal)
-  }
-
-  fun emitTtsStreamError(message: String) {
-    emitError(message)
-  }
-
-  fun emitTtsStreamEnd(cancelled: Boolean) {
-    emitEnd(cancelled)
-  }
-
   // -- Dual-engine dispatch helpers --
-
-  /** True if any TTS engine (Kotlin API or Zipvoice C-API) is loaded */
-  private fun hasEngine(): Boolean = tts != null || zipvoiceTts != null
 
   /** True if options contain reference-audio fields for voice cloning. */
   private fun hasReferenceOptions(options: ReadableMap?): Boolean {
@@ -742,38 +791,21 @@ internal class SherpaOnnxTtsHelper(
     )
   }
 
-  /** Dispatch generate to whichever engine is active. Returns null if none loaded. */
-  private fun dispatchGenerate(text: String, sid: Int, speed: Float): GeneratedAudio? {
-    zipvoiceTts?.let { return it.generate(text, sid, speed) }
-    tts?.let { return it.generate(text, sid, speed) }
+  /** Dispatch generate to whichever engine is active on the instance. Returns null if none loaded. */
+  private fun dispatchGenerate(inst: TtsEngineInstance, text: String, sid: Int, speed: Float): GeneratedAudio? {
+    inst.zipvoiceTts?.let { return it.generate(text, sid, speed) }
+    inst.tts?.let { return it.generate(text, sid, speed) }
     return null
   }
 
-  private fun dispatchSampleRate(): Int {
-    zipvoiceTts?.let { return it.sampleRate() }
-    return tts?.sampleRate() ?: 0
+  private fun dispatchSampleRate(inst: TtsEngineInstance): Int {
+    inst.zipvoiceTts?.let { return it.sampleRate() }
+    return inst.tts?.sampleRate() ?: 0
   }
 
-  private fun dispatchNumSpeakers(): Int {
-    zipvoiceTts?.let { return it.numSpeakers() }
-    return tts?.numSpeakers() ?: 0
-  }
-
-  /** Release both engines. */
-  private fun releaseEngines() {
-    tts?.release()
-    tts = null
-    zipvoiceTts?.release()
-    zipvoiceTts = null
-  }
-
-  private fun stopPcmPlayerInternal() {
-    ttsPcmTrack?.apply {
-      try { stop() } catch (_: IllegalStateException) {}
-      flush()
-      release()
-    }
-    ttsPcmTrack = null
+  private fun dispatchNumSpeakers(inst: TtsEngineInstance): Int {
+    inst.zipvoiceTts?.let { return it.numSpeakers() }
+    return inst.tts?.numSpeakers() ?: 0
   }
 
   private fun path(paths: Map<String, String>, key: String): String = paths[key].orEmpty()

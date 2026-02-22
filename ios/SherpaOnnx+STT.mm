@@ -4,9 +4,18 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+struct SttInstanceState {
+    std::unique_ptr<sherpaonnx::SttWrapper> wrapper;
+};
+
+static std::unordered_map<std::string, std::unique_ptr<SttInstanceState>> g_stt_instances;
+static std::mutex g_stt_mutex;
 
 static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
     using K = sherpaonnx::SttModelKind;
@@ -30,9 +39,6 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         default: return @"unknown";
     }
 }
-
-// Global STT wrapper instance
-static std::unique_ptr<sherpaonnx::SttWrapper> g_stt_wrapper = nullptr;
 
 static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) {
     NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:r.tokens.size()];
@@ -60,26 +66,40 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
 
 @implementation SherpaOnnx (STT)
 
-- (void)initializeStt:(NSString *)modelDir
-          preferInt8:(NSNumber *)preferInt8
-           modelType:(NSString *)modelType
-               debug:(NSNumber *)debug
-        hotwordsFile:(NSString *)hotwordsFile
-       hotwordsScore:(NSNumber *)hotwordsScore
-          numThreads:(NSNumber *)numThreads
-            provider:(NSString *)provider
-            ruleFsts:(NSString *)ruleFsts
-            ruleFars:(NSString *)ruleFars
-              dither:(NSNumber *)dither
-         modelOptions:(NSDictionary *)modelOptions
+- (void)initializeStt:(NSString *)instanceId
+            modelDir:(NSString *)modelDir
+         preferInt8:(NSNumber *)preferInt8
+          modelType:(NSString *)modelType
+              debug:(NSNumber *)debug
+       hotwordsFile:(NSString *)hotwordsFile
+      hotwordsScore:(NSNumber *)hotwordsScore
+         numThreads:(NSNumber *)numThreads
+           provider:(NSString *)provider
+           ruleFsts:(NSString *)ruleFsts
+           ruleFars:(NSString *)ruleFars
+             dither:(NSNumber *)dither
+        modelOptions:(NSDictionary *)modelOptions
+        modelingUnit:(NSString *)modelingUnit
+             bpeVocab:(NSString *)bpeVocab
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
-    RCTLogInfo(@"Initializing sherpa-onnx with modelDir: %@", modelDir);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"INIT_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    RCTLogInfo(@"Initializing STT instance %@ with modelDir: %@", instanceId, modelDir);
 
     @try {
-        if (g_stt_wrapper == nullptr) {
-            g_stt_wrapper = std::make_unique<sherpaonnx::SttWrapper>();
+        std::lock_guard<std::mutex> lock(g_stt_mutex);
+        auto it = g_stt_instances.find(instanceIdStr);
+        if (it == g_stt_instances.end()) {
+            g_stt_instances[instanceIdStr] = std::make_unique<SttInstanceState>();
+        }
+        SttInstanceState *inst = g_stt_instances[instanceIdStr].get();
+        if (inst->wrapper == nullptr) {
+            inst->wrapper = std::make_unique<sherpaonnx::SttWrapper>();
         }
 
         std::string modelDirStr = [modelDir UTF8String];
@@ -176,7 +196,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             }
         }
 
-        sherpaonnx::SttInitializeResult result = g_stt_wrapper->initialize(
+        sherpaonnx::SttInitializeResult result = inst->wrapper->initialize(
             modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
             numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
             whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr);
@@ -261,20 +281,26 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
     }
 }
 
-- (void)transcribeFile:(NSString *)filePath
+- (void)transcribeFile:(NSString *)instanceId
+             filePath:(NSString *)filePath
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
-    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-        NSString *errorMsg = @"STT not initialized. Call initializeStt first.";
-        RCTLogError(@"Transcribe error: %@", errorMsg);
-        reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TRANSCRIBE_ERROR", @"instanceId is required", nil);
         return;
     }
-
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_stt_mutex);
+    auto it = g_stt_instances.find(instanceIdStr);
+    if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TRANSCRIBE_ERROR", @"STT not initialized. Call initializeStt first.", nil);
+        return;
+    }
+    sherpaonnx::SttWrapper *wrapper = it->second->wrapper.get();
     try {
         std::string filePathStr = [filePath UTF8String];
-        sherpaonnx::SttRecognitionResult result = g_stt_wrapper->transcribeFile(filePathStr);
+        sherpaonnx::SttRecognitionResult result = wrapper->transcribeFile(filePathStr);
         resolve(sttResultToDict(result));
     } catch (const std::exception& e) {
         NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
@@ -288,25 +314,31 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
     }
 }
 
-- (void)transcribeSamples:(NSArray<NSNumber *> *)samples
-              sampleRate:(double)sampleRate
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
+- (void)transcribeSamples:(NSString *)instanceId
+                  samples:(NSArray<NSNumber *> *)samples
+                sampleRate:(double)sampleRate
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
 {
-    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-        NSString *errorMsg = @"STT not initialized. Call initializeStt first.";
-        RCTLogError(@"TranscribeSamples error: %@", errorMsg);
-        reject(@"TRANSCRIBE_ERROR", errorMsg, nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TRANSCRIBE_ERROR", @"instanceId is required", nil);
         return;
     }
-
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_stt_mutex);
+    auto it = g_stt_instances.find(instanceIdStr);
+    if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TRANSCRIBE_ERROR", @"STT not initialized. Call initializeStt first.", nil);
+        return;
+    }
+    sherpaonnx::SttWrapper *wrapper = it->second->wrapper.get();
     try {
         std::vector<float> floatSamples;
         floatSamples.reserve([samples count]);
         for (NSNumber *n in samples) {
             floatSamples.push_back([n floatValue]);
         }
-        sherpaonnx::SttRecognitionResult result = g_stt_wrapper->transcribeSamples(floatSamples, static_cast<int32_t>(sampleRate));
+        sherpaonnx::SttRecognitionResult result = wrapper->transcribeSamples(floatSamples, static_cast<int32_t>(sampleRate));
         resolve(sttResultToDict(result));
     } catch (const std::exception& e) {
         NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
@@ -320,17 +352,23 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
     }
 }
 
-- (void)setSttConfig:(NSDictionary *)options
-             resolve:(RCTPromiseResolveBlock)resolve
-              reject:(RCTPromiseRejectBlock)reject
+- (void)setSttConfig:(NSString *)instanceId
+             options:(NSDictionary *)options
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
 {
-    if (g_stt_wrapper == nullptr || !g_stt_wrapper->isInitialized()) {
-        NSString *errorMsg = @"STT not initialized. Call initializeStt first.";
-        RCTLogError(@"setSttConfig error: %@", errorMsg);
-        reject(@"CONFIG_ERROR", errorMsg, nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"CONFIG_ERROR", @"instanceId is required", nil);
         return;
     }
-
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_stt_mutex);
+    auto it = g_stt_instances.find(instanceIdStr);
+    if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"CONFIG_ERROR", @"STT not initialized. Call initializeStt first.", nil);
+        return;
+    }
+    sherpaonnx::SttWrapper *wrapper = it->second->wrapper.get();
     @try {
         sherpaonnx::SttRuntimeConfigOptions opts;
         if (options[@"decodingMethod"] != nil) {
@@ -360,7 +398,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
             opts.rule_fars = [(NSString *)options[@"ruleFars"] UTF8String];
         }
         try {
-            g_stt_wrapper->setConfig(opts);
+            wrapper->setConfig(opts);
             resolve(nil);
         } catch (const std::exception& e) {
             NSString *reason = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Unknown error";
@@ -381,16 +419,24 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
     }
 }
 
-- (void)unloadStt:(RCTPromiseResolveBlock)resolve
+- (void)unloadStt:(NSString *)instanceId
+          resolve:(RCTPromiseResolveBlock)resolve
            reject:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        resolve(nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
     @try {
-        if (g_stt_wrapper != nullptr) {
-            g_stt_wrapper->release();
-            g_stt_wrapper.reset();
-            g_stt_wrapper = nullptr;
+        std::lock_guard<std::mutex> lock(g_stt_mutex);
+        auto it = g_stt_instances.find(instanceIdStr);
+        if (it != g_stt_instances.end()) {
+            it->second->wrapper->release();
+            it->second->wrapper.reset();
+            g_stt_instances.erase(it);
         }
-        RCTLogInfo(@"Sherpa-onnx resources released");
+        RCTLogInfo(@"STT instance %@ released", instanceId);
         resolve(nil);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during cleanup: %@", exception.reason];

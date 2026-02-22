@@ -43,9 +43,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
-    ::emitTtsStreamChunk,
-    ::emitTtsStreamError,
-    ::emitTtsStreamEnd
+    { instanceId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, samples, sampleRate, progress, isFinal) },
+    { instanceId, message -> emitTtsStreamError(instanceId, message) },
+    { instanceId, cancelled -> emitTtsStreamEnd(instanceId, cancelled) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
 
@@ -165,6 +165,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Initialize Speech-to-Text (STT) with model directory.
    */
   override fun initializeStt(
+    instanceId: String,
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
@@ -181,14 +182,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bpeVocab: String?,
     promise: Promise
   ) {
-    sttHelper.initializeStt(modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
+    sttHelper.initializeStt(instanceId, modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
   }
 
   /**
    * Release STT resources.
    */
-  override fun unloadStt(promise: Promise) {
-    sttHelper.unloadStt(promise)
+  override fun unloadStt(instanceId: String, promise: Promise) {
+    sttHelper.unloadStt(instanceId, promise)
   }
 
   // ==================== STT Methods ====================
@@ -196,22 +197,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Transcribe an audio file. Returns full result (text, tokens, timestamps, lang, emotion, event, durations).
    */
-  override fun transcribeFile(filePath: String, promise: Promise) {
-    sttHelper.transcribeFile(filePath, promise)
+  override fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
+    sttHelper.transcribeFile(instanceId, filePath, promise)
   }
 
   /**
    * Transcribe from float PCM samples.
    */
-  override fun transcribeSamples(samples: ReadableArray, sampleRate: Double, promise: Promise) {
-    sttHelper.transcribeSamples(samples, sampleRate.toInt(), promise)
+  override fun transcribeSamples(instanceId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    sttHelper.transcribeSamples(instanceId, samples, sampleRate.toInt(), promise)
   }
 
   /**
    * Update recognizer config at runtime.
    */
-  override fun setSttConfig(options: ReadableMap, promise: Promise) {
-    sttHelper.setSttConfig(options, promise)
+  override fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
+    sttHelper.setSttConfig(instanceId, options, promise)
   }
 
   /**
@@ -278,6 +279,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Initialize TTS with model directory.
    */
   override fun initializeTts(
+    instanceId: String,
     modelDir: String,
     modelType: String,
     numThreads: Double,
@@ -292,6 +294,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     ttsHelper.initializeTts(
+      instanceId,
       modelDir,
       modelType,
       numThreads,
@@ -356,64 +359,66 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Update TTS params by re-initializing with stored config.
    */
   override fun updateTtsParams(
+    instanceId: String,
     noiseScale: Double?,
     noiseScaleW: Double?,
     lengthScale: Double?,
     promise: Promise
   ) {
-    ttsHelper.updateTtsParams(noiseScale, noiseScaleW, lengthScale, promise)
+    ttsHelper.updateTtsParams(instanceId, noiseScale, noiseScaleW, lengthScale, promise)
   }
 
   /**
    * Generate speech from text.
    */
-  override fun generateTts(text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTts(text, options, promise)
+  override fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTts(instanceId, text, options, promise)
   }
 
   /**
    * Generate speech with subtitle/timestamp metadata.
    */
-  override fun generateTtsWithTimestamps(text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTtsWithTimestamps(text, options, promise)
+  override fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
   }
 
   /**
    * Generate speech in streaming mode (emits chunk events).
    */
-  override fun generateTtsStream(text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTtsStream(text, options, promise)
+  override fun generateTtsStream(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTtsStream(instanceId, text, options, promise)
   }
 
   /**
    * Cancel ongoing streaming TTS.
    */
-  override fun cancelTtsStream(promise: Promise) {
-    ttsHelper.cancelTtsStream(promise)
+  override fun cancelTtsStream(instanceId: String, promise: Promise) {
+    ttsHelper.cancelTtsStream(instanceId, promise)
   }
 
   /**
    * Start PCM playback for streaming TTS.
    */
-  override fun startTtsPcmPlayer(sampleRate: Double, channels: Double, promise: Promise) {
-    ttsHelper.startTtsPcmPlayer(sampleRate, channels, promise)
+  override fun startTtsPcmPlayer(instanceId: String, sampleRate: Double, channels: Double, promise: Promise) {
+    ttsHelper.startTtsPcmPlayer(instanceId, sampleRate, channels, promise)
   }
 
   /**
    * Write PCM samples to the streaming TTS player.
    */
-  override fun writeTtsPcmChunk(samples: ReadableArray, promise: Promise) {
-    ttsHelper.writeTtsPcmChunk(samples, promise)
+  override fun writeTtsPcmChunk(instanceId: String, samples: ReadableArray, promise: Promise) {
+    ttsHelper.writeTtsPcmChunk(instanceId, samples, promise)
   }
 
   /**
    * Stop PCM playback for streaming TTS.
    */
-  override fun stopTtsPcmPlayer(promise: Promise) {
-    ttsHelper.stopTtsPcmPlayer(promise)
+  override fun stopTtsPcmPlayer(instanceId: String, promise: Promise) {
+    ttsHelper.stopTtsPcmPlayer(instanceId, promise)
   }
 
   private fun emitTtsStreamChunk(
+    instanceId: String,
     samples: FloatArray,
     sampleRate: Int,
     progress: Float,
@@ -426,6 +431,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       samplesArray.pushDouble(sample.toDouble())
     }
     val payload = Arguments.createMap()
+    payload.putString("instanceId", instanceId)
     payload.putArray("samples", samplesArray)
     payload.putInt("sampleRate", sampleRate)
     payload.putDouble("progress", progress.toDouble())
@@ -433,18 +439,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     eventEmitter.emit("ttsStreamChunk", payload)
   }
 
-  private fun emitTtsStreamError(message: String) {
+  private fun emitTtsStreamError(instanceId: String, message: String) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
+    payload.putString("instanceId", instanceId)
     payload.putString("message", message)
     eventEmitter.emit("ttsStreamError", payload)
   }
 
-  private fun emitTtsStreamEnd(cancelled: Boolean) {
+  private fun emitTtsStreamEnd(instanceId: String, cancelled: Boolean) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
+    payload.putString("instanceId", instanceId)
     payload.putBoolean("cancelled", cancelled)
     eventEmitter.emit("ttsStreamEnd", payload)
   }
@@ -452,22 +460,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Get TTS sample rate.
    */
-  override fun getTtsSampleRate(promise: Promise) {
-    ttsHelper.getTtsSampleRate(promise)
+  override fun getTtsSampleRate(instanceId: String, promise: Promise) {
+    ttsHelper.getTtsSampleRate(instanceId, promise)
   }
 
   /**
    * Get number of speakers.
    */
-  override fun getTtsNumSpeakers(promise: Promise) {
-    ttsHelper.getTtsNumSpeakers(promise)
+  override fun getTtsNumSpeakers(instanceId: String, promise: Promise) {
+    ttsHelper.getTtsNumSpeakers(instanceId, promise)
   }
 
   /**
    * Release TTS resources.
    */
-  override fun unloadTts(promise: Promise) {
-    ttsHelper.unloadTts(promise)
+  override fun unloadTts(instanceId: String, promise: Promise) {
+    ttsHelper.unloadTts(instanceId, promise)
   }
 
   /**

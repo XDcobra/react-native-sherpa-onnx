@@ -29,6 +29,7 @@ import com.k2fsa.sherpa.onnx.OfflineOmnilingualAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMedAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxSttHelper(
   private val context: Context,
@@ -42,15 +43,15 @@ internal class SherpaOnnxSttHelper(
   private val logTag: String
 ) {
 
-  @Volatile
-  private var recognizer: OfflineRecognizer? = null
+  private data class SttEngineInstance(
+    @Volatile var recognizer: OfflineRecognizer? = null,
+    @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
+    @Volatile var currentSttModelType: String? = null
+  )
 
-  @Volatile
-  private var lastRecognizerConfig: OfflineRecognizerConfig? = null
+  private val instances = ConcurrentHashMap<String, SttEngineInstance>()
 
-  /** Model type from last successful init; used to validate hotwords in setSttConfig. */
-  @Volatile
-  private var currentSttModelType: String? = null
+  private fun getInstance(instanceId: String): SttEngineInstance? = instances[instanceId]
 
   /** Hotwords are supported for transducer and NeMo transducer models (sherpa-onnx; NeMo: https://github.com/k2-fsa/sherpa-onnx/pull/3077). */
   private fun supportsHotwords(modelType: String): Boolean =
@@ -147,6 +148,7 @@ internal class SherpaOnnxSttHelper(
   }
 
   fun initializeStt(
+    instanceId: String,
     modelDir: String,
     preferInt8: Boolean?,
     modelType: String?,
@@ -164,7 +166,6 @@ internal class SherpaOnnxSttHelper(
     promise: Promise
   ) {
     try {
-      
       val modelDirFile = File(modelDir)
       if (!modelDirFile.exists()) {
         val errorMsg = "Model directory does not exist: $modelDir"
@@ -257,8 +258,9 @@ internal class SherpaOnnxSttHelper(
         return
       }
 
-      recognizer?.release()
-      recognizer = null
+      val inst = instances.getOrPut(instanceId) { SttEngineInstance() }
+      inst.recognizer?.release()
+      inst.recognizer = null
       val config = buildRecognizerConfig(
         pathStrings,
         modelTypeStr,
@@ -273,9 +275,9 @@ internal class SherpaOnnxSttHelper(
         modelingUnit = modelingUnit?.trim().orEmpty(),
         bpeVocab = bpeVocab?.trim().orEmpty()
       )
-      lastRecognizerConfig = config
-      currentSttModelType = modelTypeStr
-      recognizer = OfflineRecognizer(config = config)
+      inst.lastRecognizerConfig = config
+      inst.currentSttModelType = modelTypeStr
+      inst.recognizer = OfflineRecognizer(config = config)
 
       
 
@@ -302,9 +304,13 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun transcribeFile(filePath: String, promise: Promise) {
+  fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
     try {
-      val rec = recognizer
+      val inst = getInstance(instanceId) ?: run {
+        promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
+        return
+      }
+      val rec = inst.recognizer
       if (rec == null) {
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
@@ -322,9 +328,13 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun transcribeSamples(samples: com.facebook.react.bridge.ReadableArray, sampleRate: Int, promise: Promise) {
+  fun transcribeSamples(instanceId: String, samples: com.facebook.react.bridge.ReadableArray, sampleRate: Int, promise: Promise) {
     try {
-      val rec = recognizer
+      val inst = getInstance(instanceId) ?: run {
+        promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
+        return
+      }
+      val rec = inst.recognizer
       if (rec == null) {
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
@@ -346,10 +356,14 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun setSttConfig(options: ReadableMap, promise: Promise) {
+  fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
     try {
-      val rec = recognizer
-      val current = lastRecognizerConfig
+      val inst = getInstance(instanceId) ?: run {
+        promise.reject("CONFIG_ERROR", "STT instance not found: $instanceId")
+        return
+      }
+      val rec = inst.recognizer
+      val current = inst.lastRecognizerConfig
       if (rec == null || current == null) {
         promise.reject("CONFIG_ERROR", "STT not initialized. Call initializeStt first.")
         return
@@ -382,7 +396,7 @@ internal class SherpaOnnxSttHelper(
 
       val newHotwordsFile = merged.hotwordsFile.trim()
       val resolvedHotwordsPath = if (newHotwordsFile.isNotEmpty()) {
-        val modelType = currentSttModelType
+        val modelType = inst.currentSttModelType
         if (modelType == null || !supportsHotwords(modelType)) {
           val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}"
           Log.e(logTag, errorMsg)
@@ -415,7 +429,7 @@ internal class SherpaOnnxSttHelper(
           maxActivePaths = maxOf(4, configWithPaths.maxActivePaths)
         )
       } else configWithPaths
-      lastRecognizerConfig = configToApply
+      inst.lastRecognizerConfig = configToApply
       rec.setConfig(configToApply)
       promise.resolve(null)
     } catch (e: Exception) {
@@ -443,12 +457,15 @@ internal class SherpaOnnxSttHelper(
     return map
   }
 
-  fun unloadStt(promise: Promise) {
+  fun unloadStt(instanceId: String, promise: Promise) {
     try {
-      recognizer?.release()
-      recognizer = null
-      lastRecognizerConfig = null
-      currentSttModelType = null
+      val inst = instances.remove(instanceId)
+      if (inst != null) {
+        inst.recognizer?.release()
+        inst.recognizer = null
+        inst.lastRecognizerConfig = null
+        inst.currentSttModelType = null
+      }
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("RELEASE_ERROR", "Failed to release resources", e)

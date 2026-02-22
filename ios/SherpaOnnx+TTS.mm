@@ -8,28 +8,34 @@
 #include "sherpa-onnx-model-detect.h"
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-// Global TTS wrapper instance
-static std::unique_ptr<sherpaonnx::TtsWrapper> g_tts_wrapper = nullptr;
-static std::atomic<bool> g_tts_stream_running{false};
-static std::atomic<bool> g_tts_stream_cancelled{false};
-static AVAudioEngine *g_tts_engine = nil;
-static AVAudioPlayerNode *g_tts_player = nil;
-static AVAudioFormat *g_tts_format = nil;
-static NSString *g_tts_model_dir = nil;
-static NSString *g_tts_model_type = nil;
-static int32_t g_tts_num_threads = 2;
-static BOOL g_tts_debug = NO;
-static NSNumber *g_tts_noise_scale = nil;
-static NSNumber *g_tts_noise_scale_w = nil;
-static NSNumber *g_tts_length_scale = nil;
-static NSString *g_tts_rule_fsts = nil;
-static NSString *g_tts_rule_fars = nil;
-static NSNumber *g_tts_max_num_sentences = nil;
-static NSNumber *g_tts_silence_scale = nil;
+struct TtsInstanceState {
+    std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
+    std::atomic<bool> streamRunning{false};
+    std::atomic<bool> streamCancelled{false};
+    AVAudioEngine *engine = nil;
+    AVAudioPlayerNode *player = nil;
+    AVAudioFormat *format = nil;
+    NSString *modelDir = nil;
+    NSString *modelType = nil;
+    int32_t numThreads = 2;
+    BOOL debug = NO;
+    NSNumber *noiseScale = nil;
+    NSNumber *noiseScaleW = nil;
+    NSNumber *lengthScale = nil;
+    NSString *ruleFsts = nil;
+    NSString *ruleFars = nil;
+    NSNumber *maxNumSentences = nil;
+    NSNumber *silenceScale = nil;
+};
+
+static std::unordered_map<std::string, std::unique_ptr<TtsInstanceState>> g_tts_instances;
+static std::mutex g_tts_mutex;
 
 static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
     using K = sherpaonnx::TtsModelKind;
@@ -60,25 +66,37 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
 @implementation SherpaOnnx (TTS)
 
-- (void)initializeTts:(NSString *)modelDir
+- (void)initializeTts:(NSString *)instanceId
+            modelDir:(NSString *)modelDir
             modelType:(NSString *)modelType
            numThreads:(double)numThreads
                 debug:(BOOL)debug
-         noiseScale:(NSNumber *)noiseScale
-    noiseScaleW:(NSNumber *)noiseScaleW
-        lengthScale:(NSNumber *)lengthScale
-           ruleFsts:(NSString *)ruleFsts
-           ruleFars:(NSString *)ruleFars
-    maxNumSentences:(NSNumber *)maxNumSentences
-      silenceScale:(NSNumber *)silenceScale
+           noiseScale:(NSNumber *)noiseScale
+          noiseScaleW:(NSNumber *)noiseScaleW
+           lengthScale:(NSNumber *)lengthScale
+              ruleFsts:(NSString *)ruleFsts
+              ruleFars:(NSString *)ruleFars
+       maxNumSentences:(NSNumber *)maxNumSentences
+         silenceScale:(NSNumber *)silenceScale
          withResolver:(RCTPromiseResolveBlock)resolve
          withRejecter:(RCTPromiseRejectBlock)reject
 {
-    RCTLogInfo(@"Initializing TTS with modelDir: %@, modelType: %@", modelDir, modelType);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INIT_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    RCTLogInfo(@"Initializing TTS instance %@ with modelDir: %@, modelType: %@", instanceId, modelDir, modelType);
 
     @try {
-        if (g_tts_wrapper == nullptr) {
-            g_tts_wrapper = std::make_unique<sherpaonnx::TtsWrapper>();
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end()) {
+            g_tts_instances[instanceIdStr] = std::make_unique<TtsInstanceState>();
+        }
+        TtsInstanceState *inst = g_tts_instances[instanceIdStr].get();
+        if (inst->wrapper == nullptr) {
+            inst->wrapper = std::make_unique<sherpaonnx::TtsWrapper>();
         }
 
         std::string modelDirStr = [modelDir UTF8String];
@@ -114,7 +132,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             silenceScaleOpt = [silenceScale floatValue];
         }
 
-        sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
+        sherpaonnx::TtsInitializeResult result = inst->wrapper->initialize(
             modelDirStr,
             modelTypeStr,
             static_cast<int32_t>(numThreads),
@@ -129,19 +147,19 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         );
 
         if (result.success) {
-            RCTLogInfo(@"TTS initialization successful");
+            RCTLogInfo(@"TTS initialization successful for instance %@", instanceId);
 
-            g_tts_model_dir = [modelDir copy];
-            g_tts_model_type = [modelType copy];
-            g_tts_num_threads = static_cast<int32_t>(numThreads);
-            g_tts_debug = debug;
-            g_tts_noise_scale = noiseScale ? [noiseScale copy] : nil;
-            g_tts_noise_scale_w = noiseScaleW ? [noiseScaleW copy] : nil;
-            g_tts_length_scale = lengthScale ? [lengthScale copy] : nil;
-            g_tts_rule_fsts = (ruleFsts != nil && [ruleFsts length] > 0) ? [ruleFsts copy] : nil;
-            g_tts_rule_fars = (ruleFars != nil && [ruleFars length] > 0) ? [ruleFars copy] : nil;
-            g_tts_max_num_sentences = (maxNumSentences != nil && [maxNumSentences intValue] >= 1) ? [maxNumSentences copy] : nil;
-            g_tts_silence_scale = silenceScale ? [silenceScale copy] : nil;
+            inst->modelDir = [modelDir copy];
+            inst->modelType = [modelType copy];
+            inst->numThreads = static_cast<int32_t>(numThreads);
+            inst->debug = debug;
+            inst->noiseScale = noiseScale ? [noiseScale copy] : nil;
+            inst->noiseScaleW = noiseScaleW ? [noiseScaleW copy] : nil;
+            inst->lengthScale = lengthScale ? [lengthScale copy] : nil;
+            inst->ruleFsts = (ruleFsts != nil && [ruleFsts length] > 0) ? [ruleFsts copy] : nil;
+            inst->ruleFars = (ruleFars != nil && [ruleFars length] > 0) ? [ruleFars copy] : nil;
+            inst->maxNumSentences = (maxNumSentences != nil && [maxNumSentences intValue] >= 1) ? [maxNumSentences copy] : nil;
+            inst->silenceScale = silenceScale ? [silenceScale copy] : nil;
 
             NSMutableArray *detectedModelsArray = [NSMutableArray array];
             for (const auto& model : result.detectedModels) {
@@ -204,19 +222,27 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
-- (void)updateTtsParams:(NSNumber *)noiseScale
-            noiseScaleW:(NSNumber *)noiseScaleW
-            lengthScale:(NSNumber *)lengthScale
+- (void)updateTtsParams:(NSString *)instanceId
+            noiseScale:(NSNumber *)noiseScale
+           noiseScaleW:(NSNumber *)noiseScaleW
+           lengthScale:(NSNumber *)lengthScale
            withResolver:(RCTPromiseResolveBlock)resolve
            withRejecter:(RCTPromiseRejectBlock)reject
 {
-    if (g_tts_stream_running.load()) {
-        reject(@"TTS_UPDATE_ERROR", @"Cannot update params while streaming", nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_UPDATE_ERROR", @"instanceId is required", nil);
         return;
     }
-
-    if (g_tts_wrapper == nullptr || g_tts_model_dir == nil || g_tts_model_type == nil) {
-        reject(@"TTS_UPDATE_ERROR", @"TTS not initialized", nil);
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->wrapper == nullptr || it->second->modelDir == nil || it->second->modelType == nil) {
+        reject(@"TTS_UPDATE_ERROR", @"TTS instance not found or not initialized", nil);
+        return;
+    }
+    TtsInstanceState *inst = it->second.get();
+    if (inst->streamRunning.load()) {
+        reject(@"TTS_UPDATE_ERROR", @"Cannot update params while streaming", nil);
         return;
     }
 
@@ -224,7 +250,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     if (noiseScale == nil) {
         nextNoiseScale = nil;
     } else if (isnan([noiseScale doubleValue])) {
-        nextNoiseScale = g_tts_noise_scale;
+        nextNoiseScale = inst->noiseScale;
     } else {
         nextNoiseScale = noiseScale;
     }
@@ -233,7 +259,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     if (noiseScaleW == nil) {
         nextNoiseScaleW = nil;
     } else if (isnan([noiseScaleW doubleValue])) {
-        nextNoiseScaleW = g_tts_noise_scale_w;
+        nextNoiseScaleW = inst->noiseScaleW;
     } else {
         nextNoiseScaleW = noiseScaleW;
     }
@@ -242,7 +268,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     if (lengthScale == nil) {
         nextLengthScale = nil;
     } else if (isnan([lengthScale doubleValue])) {
-        nextLengthScale = g_tts_length_scale;
+        nextLengthScale = inst->lengthScale;
     } else {
         nextLengthScale = lengthScale;
     }
@@ -265,24 +291,24 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         std::optional<std::string> ruleFarsOpt = std::nullopt;
         std::optional<int32_t> maxNumSentencesOpt = std::nullopt;
         std::optional<float> silenceScaleOpt = std::nullopt;
-        if (g_tts_rule_fsts != nil && [g_tts_rule_fsts length] > 0) {
-            ruleFstsOpt = std::string([g_tts_rule_fsts UTF8String]);
+        if (inst->ruleFsts != nil && [inst->ruleFsts length] > 0) {
+            ruleFstsOpt = std::string([inst->ruleFsts UTF8String]);
         }
-        if (g_tts_rule_fars != nil && [g_tts_rule_fars length] > 0) {
-            ruleFarsOpt = std::string([g_tts_rule_fars UTF8String]);
+        if (inst->ruleFars != nil && [inst->ruleFars length] > 0) {
+            ruleFarsOpt = std::string([inst->ruleFars UTF8String]);
         }
-        if (g_tts_max_num_sentences != nil && [g_tts_max_num_sentences intValue] >= 1) {
-            maxNumSentencesOpt = static_cast<int32_t>([g_tts_max_num_sentences intValue]);
+        if (inst->maxNumSentences != nil && [inst->maxNumSentences intValue] >= 1) {
+            maxNumSentencesOpt = static_cast<int32_t>([inst->maxNumSentences intValue]);
         }
-        if (g_tts_silence_scale != nil) {
-            silenceScaleOpt = [g_tts_silence_scale floatValue];
+        if (inst->silenceScale != nil) {
+            silenceScaleOpt = [inst->silenceScale floatValue];
         }
 
-        sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
-            std::string([g_tts_model_dir UTF8String]),
-            std::string([g_tts_model_type UTF8String]),
-            g_tts_num_threads,
-            g_tts_debug,
+        sherpaonnx::TtsInitializeResult result = inst->wrapper->initialize(
+            std::string([inst->modelDir UTF8String]),
+            std::string([inst->modelType UTF8String]),
+            inst->numThreads,
+            inst->debug,
             noiseScaleOpt,
             noiseScaleWOpt,
             lengthScaleOpt,
@@ -299,9 +325,9 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             return;
         }
 
-        g_tts_noise_scale = nextNoiseScale ? [nextNoiseScale copy] : nil;
-        g_tts_noise_scale_w = nextNoiseScaleW ? [nextNoiseScaleW copy] : nil;
-        g_tts_length_scale = nextLengthScale ? [nextLengthScale copy] : nil;
+        inst->noiseScale = nextNoiseScale ? [nextNoiseScale copy] : nil;
+        inst->noiseScaleW = nextNoiseScaleW ? [nextNoiseScaleW copy] : nil;
+        inst->lengthScale = nextLengthScale ? [nextLengthScale copy] : nil;
 
         NSMutableArray *detectedModelsArray = [NSMutableArray array];
         for (const auto& model : result.detectedModels) {
@@ -325,23 +351,34 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
-- (void)generateTts:(NSString *)text
-                sid:(double)sid
-              speed:(double)speed
+- (void)generateTts:(NSString *)instanceId
+              text:(NSString *)text
+            options:(NSDictionary *)options
        withResolver:(RCTPromiseResolveBlock)resolve
        withRejecter:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    double sid = 0;
+    double speed = 1.0;
+    if (options != nil) {
+        if (options[@"sid"] != nil) sid = [options[@"sid"] doubleValue];
+        if (options[@"speed"] != nil) speed = [options[@"speed"] doubleValue];
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    sherpaonnx::TtsWrapper *wrapper = it->second->wrapper.get();
     @try {
-        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
-            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
-            RCTLogError(@"%@", errorMsg);
-            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
-            return;
-        }
-
         std::string textStr = [text UTF8String];
 
-        auto result = g_tts_wrapper->generate(
+        auto result = wrapper->generate(
             textStr,
             static_cast<int32_t>(sid),
             static_cast<float>(speed)
@@ -375,23 +412,34 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
-- (void)generateTtsWithTimestamps:(NSString *)text
-                              sid:(double)sid
-                            speed:(double)speed
+- (void)generateTtsWithTimestamps:(NSString *)instanceId
+                            text:(NSString *)text
+                          options:(NSDictionary *)options
                      withResolver:(RCTPromiseResolveBlock)resolve
                      withRejecter:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    double sid = 0;
+    double speed = 1.0;
+    if (options != nil) {
+        if (options[@"sid"] != nil) sid = [options[@"sid"] doubleValue];
+        if (options[@"speed"] != nil) speed = [options[@"speed"] doubleValue];
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    sherpaonnx::TtsWrapper *wrapper = it->second->wrapper.get();
     @try {
-        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
-            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
-            RCTLogError(@"%@", errorMsg);
-            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
-            return;
-        }
-
         std::string textStr = [text UTF8String];
 
-        auto result = g_tts_wrapper->generate(
+        auto result = wrapper->generate(
             textStr,
             static_cast<int32_t>(sid),
             static_cast<float>(speed)
@@ -443,38 +491,54 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
-- (void)generateTtsStream:(NSString *)text
-                      sid:(double)sid
-                    speed:(double)speed
+- (void)generateTtsStream:(NSString *)instanceId
+                    text:(NSString *)text
+                  options:(NSDictionary *)options
              withResolver:(RCTPromiseResolveBlock)resolve
              withRejecter:(RCTPromiseRejectBlock)reject
 {
-    if (g_tts_stream_running.load()) {
-        reject(@"TTS_STREAM_ERROR", @"TTS streaming already in progress", nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_STREAM_ERROR", @"instanceId is required", nil);
         return;
     }
-
-    if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
-        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
-        return;
+    double sid = 0;
+    double speed = 1.0;
+    if (options != nil) {
+        if (options[@"sid"] != nil) sid = [options[@"sid"] doubleValue];
+        if (options[@"speed"] != nil) speed = [options[@"speed"] doubleValue];
     }
-
-    g_tts_stream_cancelled.store(false);
-    g_tts_stream_running.store(true);
+    std::string instanceIdStr = [instanceId UTF8String];
+    TtsInstanceState *inst = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+            reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+            return;
+        }
+        inst = it->second.get();
+        if (inst->streamRunning.load()) {
+            reject(@"TTS_STREAM_ERROR", @"TTS streaming already in progress", nil);
+            return;
+        }
+        inst->streamCancelled.store(false);
+        inst->streamRunning.store(true);
+    }
 
     std::string textStr = [text UTF8String];
-    int32_t sampleRate = g_tts_wrapper->getSampleRate();
+    int32_t sampleRate = inst->wrapper->getSampleRate();
+    NSString *instanceIdCopy = [instanceId copy];
 
     __weak SherpaOnnx *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool success = false;
         @try {
-            success = g_tts_wrapper->generateStream(
+            success = inst->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate](const float *samples, int32_t numSamples, float progress) -> int32_t {
-                    if (g_tts_stream_cancelled.load()) {
+                [weakSelf, sampleRate, instanceIdCopy, inst](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                    if (inst->streamCancelled.load()) {
                         return 0;
                     }
 
@@ -484,6 +548,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                     }
 
                     NSDictionary *payload = @{
+                        @"instanceId": instanceIdCopy,
                         @"samples": samplesArray,
                         @"sampleRate": @(sampleRate),
                         @"progress": @(progress),
@@ -496,85 +561,108 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                         }
                     });
 
-                    return g_tts_stream_cancelled.load() ? 0 : 1;
+                    return inst->streamCancelled.load() ? 0 : 1;
                 }
             );
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
-                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"message": errorMsg }];
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"instanceId": instanceIdCopy, @"message": errorMsg }];
                 }
             });
         }
 
-        bool cancelled = g_tts_stream_cancelled.load();
+        bool cancelled = inst->streamCancelled.load();
         if (!success && !cancelled) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
-                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"message": @"TTS streaming generation failed" }];
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"instanceId": instanceIdCopy, @"message": @"TTS streaming generation failed" }];
                 }
             });
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (weakSelf) {
-                [weakSelf sendEventWithName:@"ttsStreamEnd" body:@{ @"cancelled": @(cancelled) }];
+                [weakSelf sendEventWithName:@"ttsStreamEnd" body:@{ @"instanceId": instanceIdCopy, @"cancelled": @(cancelled) }];
             }
         });
 
-        g_tts_stream_running.store(false);
+        inst->streamRunning.store(false);
     });
 
     resolve(nil);
 }
 
-- (void)cancelTtsStream:(RCTPromiseResolveBlock)resolve
+- (void)cancelTtsStream:(NSString *)instanceId
+           withResolver:(RCTPromiseResolveBlock)resolve
            withRejecter:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        g_tts_stream_cancelled.store(true);
+    if (instanceId == nil || [instanceId length] == 0) {
         resolve(nil);
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Failed to cancel TTS stream: %@", exception.reason];
-        reject(@"TTS_STREAM_ERROR", errorMsg, nil);
+        return;
     }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it != g_tts_instances.end()) {
+        it->second->streamCancelled.store(true);
+    }
+    resolve(nil);
 }
 
-- (void)startTtsPcmPlayer:(double)sampleRate
+- (void)startTtsPcmPlayer:(NSString *)instanceId
+               sampleRate:(double)sampleRate
                  channels:(double)channels
              withResolver:(RCTPromiseResolveBlock)resolve
              withRejecter:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_PCM_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
+            std::lock_guard<std::mutex> lock(g_tts_mutex);
+            auto it = g_tts_instances.find(instanceIdStr);
+            if (it == g_tts_instances.end()) {
+                reject(@"TTS_PCM_ERROR", @"TTS instance not found", nil);
+                return;
+            }
+            TtsInstanceState *inst = it->second.get();
             if (channels != 1.0) {
                 reject(@"TTS_PCM_ERROR", @"PCM playback supports mono only", nil);
                 return;
             }
-            [self stopTtsPcmPlayer:^(__unused id result) {}
-                       withRejecter:^(__unused NSString *code, __unused NSString *message, __unused NSError *error) {}];
+            if (inst->player != nil) [inst->player stop];
+            if (inst->engine != nil) {
+                [inst->engine stop];
+                [inst->engine reset];
+            }
+            inst->player = nil;
+            inst->engine = nil;
+            inst->format = nil;
 
             AVAudioSession *session = [AVAudioSession sharedInstance];
             [session setCategory:AVAudioSessionCategoryPlayback error:nil];
             [session setActive:YES error:nil];
 
-            g_tts_engine = [[AVAudioEngine alloc] init];
-            g_tts_player = [[AVAudioPlayerNode alloc] init];
+            inst->engine = [[AVAudioEngine alloc] init];
+            inst->player = [[AVAudioPlayerNode alloc] init];
+            inst->format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
 
-            g_tts_format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
-
-            [g_tts_engine attachNode:g_tts_player];
-            [g_tts_engine connect:g_tts_player to:g_tts_engine.mainMixerNode format:g_tts_format];
+            [inst->engine attachNode:inst->player];
+            [inst->engine connect:inst->player to:inst->engine.mainMixerNode format:inst->format];
 
             NSError *startError = nil;
-            if (![g_tts_engine startAndReturnError:&startError]) {
+            if (![inst->engine startAndReturnError:&startError]) {
                 NSString *errorMsg = [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription];
                 reject(@"TTS_PCM_ERROR", errorMsg, startError);
                 return;
             }
 
-            [g_tts_player play];
+            [inst->player play];
             resolve(nil);
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"Failed to start PCM player: %@", exception.reason];
@@ -583,18 +671,26 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     });
 }
 
-- (void)writeTtsPcmChunk:(NSArray<NSNumber *> *)samples
+- (void)writeTtsPcmChunk:(NSString *)instanceId
+                 samples:(NSArray<NSNumber *> *)samples
             withResolver:(RCTPromiseResolveBlock)resolve
             withRejecter:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_PCM_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->engine == nil || it->second->player == nil || it->second->format == nil) {
+        reject(@"TTS_PCM_ERROR", @"PCM player not initialized", nil);
+        return;
+    }
+    TtsInstanceState *inst = it->second.get();
     @try {
-        if (g_tts_engine == nil || g_tts_player == nil || g_tts_format == nil) {
-            reject(@"TTS_PCM_ERROR", @"PCM player not initialized", nil);
-            return;
-        }
-
         AVAudioFrameCount frameCount = (AVAudioFrameCount)[samples count];
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:g_tts_format frameCapacity:frameCount];
+        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:inst->format frameCapacity:frameCount];
         buffer.frameLength = frameCount;
 
         float *channelData = buffer.floatChannelData[0];
@@ -602,7 +698,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             channelData[i] = [samples[i] floatValue];
         }
 
-        [g_tts_player scheduleBuffer:buffer completionHandler:nil];
+        [inst->player scheduleBuffer:buffer completionHandler:nil];
         resolve(nil);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Failed to write PCM chunk: %@", exception.reason];
@@ -610,21 +706,32 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
-- (void)stopTtsPcmPlayer:(RCTPromiseResolveBlock)resolve
+- (void)stopTtsPcmPlayer:(NSString *)instanceId
+            withResolver:(RCTPromiseResolveBlock)resolve
             withRejecter:(RCTPromiseRejectBlock)reject
 {
+    if (instanceId == nil || [instanceId length] == 0) {
+        resolve(nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
-            if (g_tts_player != nil) {
-                [g_tts_player stop];
+            std::lock_guard<std::mutex> lock(g_tts_mutex);
+            auto it = g_tts_instances.find(instanceIdStr);
+            if (it != g_tts_instances.end()) {
+                TtsInstanceState *inst = it->second.get();
+                if (inst->player != nil) {
+                    [inst->player stop];
+                }
+                if (inst->engine != nil) {
+                    [inst->engine stop];
+                    [inst->engine reset];
+                }
+                inst->player = nil;
+                inst->engine = nil;
+                inst->format = nil;
             }
-            if (g_tts_engine != nil) {
-                [g_tts_engine stop];
-                [g_tts_engine reset];
-            }
-            g_tts_player = nil;
-            g_tts_engine = nil;
-            g_tts_format = nil;
             resolve(nil);
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"Failed to stop PCM player: %@", exception.reason];
@@ -633,65 +740,85 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     });
 }
 
-- (void)getTtsSampleRate:(RCTPromiseResolveBlock)resolve
+- (void)getTtsSampleRate:(NSString *)instanceId
+            withResolver:(RCTPromiseResolveBlock)resolve
             withRejecter:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
-            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
-            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
-            return;
-        }
-
-        int32_t sampleRate = g_tts_wrapper->getSampleRate();
-        resolve(@(sampleRate));
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception getting sample rate: %@", exception.reason];
-        reject(@"TTS_ERROR", errorMsg, nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_ERROR", @"instanceId is required", nil);
+        return;
     }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    int32_t sampleRate = it->second->wrapper->getSampleRate();
+    resolve(@(sampleRate));
 }
 
-- (void)getTtsNumSpeakers:(RCTPromiseResolveBlock)resolve
+- (void)getTtsNumSpeakers:(NSString *)instanceId
+             withResolver:(RCTPromiseResolveBlock)resolve
              withRejecter:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        if (g_tts_wrapper == nullptr || !g_tts_wrapper->isInitialized()) {
-            NSString *errorMsg = @"TTS not initialized. Call initializeTts() first.";
-            reject(@"TTS_NOT_INITIALIZED", errorMsg, nil);
-            return;
-        }
-
-        int32_t numSpeakers = g_tts_wrapper->getNumSpeakers();
-        resolve(@(numSpeakers));
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception getting num speakers: %@", exception.reason];
-        reject(@"TTS_ERROR", errorMsg, nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_ERROR", @"instanceId is required", nil);
+        return;
     }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+        reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    int32_t numSpeakers = it->second->wrapper->getNumSpeakers();
+    resolve(@(numSpeakers));
 }
 
-- (void)unloadTts:(RCTPromiseResolveBlock)resolve
+- (void)unloadTts:(NSString *)instanceId
+     withResolver:(RCTPromiseResolveBlock)resolve
      withRejecter:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        [self stopTtsPcmPlayer:^(__unused id result) {}
-               withRejecter:^(__unused NSString *code, __unused NSString *message, __unused NSError *error) {}];
-        if (g_tts_wrapper != nullptr) {
-            g_tts_wrapper->release();
-            g_tts_wrapper.reset();
-            g_tts_wrapper = nullptr;
-        }
-        g_tts_model_dir = nil;
-        g_tts_model_type = nil;
-        g_tts_num_threads = 2;
-        g_tts_debug = NO;
-        g_tts_noise_scale = nil;
-        g_tts_length_scale = nil;
-        g_tts_rule_fsts = nil;
-        g_tts_rule_fars = nil;
-        g_tts_max_num_sentences = nil;
-        g_tts_silence_scale = nil;
-        RCTLogInfo(@"TTS resources released");
+    if (instanceId == nil || [instanceId length] == 0) {
         resolve(nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    @try {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            std::lock_guard<std::mutex> lock(g_tts_mutex);
+            auto it = g_tts_instances.find(instanceIdStr);
+            if (it != g_tts_instances.end()) {
+                TtsInstanceState *inst = it->second.get();
+                if (inst->player != nil) [inst->player stop];
+                if (inst->engine != nil) {
+                    [inst->engine stop];
+                    [inst->engine reset];
+                }
+                inst->player = nil;
+                inst->engine = nil;
+                inst->format = nil;
+                if (inst->wrapper != nullptr) {
+                    inst->wrapper->release();
+                    inst->wrapper.reset();
+                }
+                inst->modelDir = nil;
+                inst->modelType = nil;
+                inst->noiseScale = nil;
+                inst->noiseScaleW = nil;
+                inst->lengthScale = nil;
+                inst->ruleFsts = nil;
+                inst->ruleFars = nil;
+                inst->maxNumSentences = nil;
+                inst->silenceScale = nil;
+                g_tts_instances.erase(it);
+            }
+            RCTLogInfo(@"TTS instance %@ released", instanceId);
+            resolve(nil);
+        });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
