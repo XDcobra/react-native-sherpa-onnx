@@ -46,7 +46,11 @@ internal class SherpaOnnxTtsHelper(
     val debug: Boolean,
     val noiseScale: Double?,
     val noiseScaleW: Double?,
-    val lengthScale: Double?
+    val lengthScale: Double?,
+    val ruleFsts: String?,
+    val ruleFars: String?,
+    val maxNumSentences: Int?,
+    val silenceScale: Double?
   )
 
   // Dual-engine: either OfflineTts (Kotlin API) or ZipvoiceTtsWrapper (C-API)
@@ -72,6 +76,10 @@ internal class SherpaOnnxTtsHelper(
     noiseScale: Double?,
     noiseScaleW: Double?,
     lengthScale: Double?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    maxNumSentences: Double?,
+    silenceScale: Double?,
     promise: Promise
   ) {
     try {
@@ -118,7 +126,11 @@ internal class SherpaOnnxTtsHelper(
         sampleRate = wrapper.sampleRate()
         numSpeakers = wrapper.numSpeakers()
       } else {
-        val config = buildTtsConfig(paths, modelTypeStr, numThreads.toInt(), debug, noiseScale, noiseScaleW, lengthScale)
+        val config = buildTtsConfig(
+          paths, modelTypeStr, numThreads.toInt(), debug,
+          noiseScale, noiseScaleW, lengthScale,
+          ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale
+        )
         tts = OfflineTts(config = config)
         sampleRate = tts!!.sampleRate()
         numSpeakers = tts!!.numSpeakers()
@@ -143,7 +155,11 @@ internal class SherpaOnnxTtsHelper(
         debug,
         noiseScale?.takeUnless { it.isNaN() },
         noiseScaleW?.takeUnless { it.isNaN() },
-        lengthScale?.takeUnless { it.isNaN() }
+        lengthScale?.takeUnless { it.isNaN() },
+        ruleFsts?.takeIf { it.isNotBlank() },
+        ruleFars?.takeIf { it.isNotBlank() },
+        maxNumSentences?.toInt()?.takeIf { it > 0 },
+        silenceScale?.takeUnless { it.isNaN() }
       )
 
       val resultMap = Arguments.createMap()
@@ -180,7 +196,9 @@ internal class SherpaOnnxTtsHelper(
       // Re-initialize with same params (Zipvoice ignores noise/length scales)
       initializeTts(
         state.modelDir, state.modelType, state.numThreads.toDouble(), state.debug,
-        noiseScale, noiseScaleW, lengthScale, promise
+        noiseScale, noiseScaleW, lengthScale,
+        state.ruleFsts, state.ruleFars, state.maxNumSentences?.toDouble(), state.silenceScale,
+        promise
       )
       return
     }
@@ -213,7 +231,11 @@ internal class SherpaOnnxTtsHelper(
 
       tts?.release()
       tts = null
-      val config = buildTtsConfig(paths, modelTypeStr, state.numThreads, state.debug, nextNoiseScale, nextNoiseScaleW, nextLengthScale)
+      val config = buildTtsConfig(
+        paths, modelTypeStr, state.numThreads, state.debug,
+        nextNoiseScale, nextNoiseScaleW, nextLengthScale,
+        state.ruleFsts, state.ruleFars, state.maxNumSentences, state.silenceScale
+      )
       tts = OfflineTts(config = config)
       val ttsInstance = tts!!
 
@@ -763,7 +785,11 @@ internal class SherpaOnnxTtsHelper(
     debug: Boolean,
     noiseScale: Double?,
     noiseScaleW: Double?,
-    lengthScale: Double?
+    lengthScale: Double?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    maxNumSentences: Int?,
+    silenceScale: Double?
   ): OfflineTtsConfig {
     val ns = noiseScale?.toFloat() ?: 0.667f
     val nsw = noiseScaleW?.toFloat() ?: 0.8f
@@ -884,7 +910,13 @@ internal class SherpaOnnxTtsHelper(
         }
       }
     }
-    return OfflineTtsConfig(model = modelConfig)
+    return OfflineTtsConfig(
+      model = modelConfig,
+      ruleFsts = ruleFsts?.takeIf { it.isNotBlank() } ?: "",
+      ruleFars = ruleFars?.takeIf { it.isNotBlank() } ?: "",
+      maxNumSentences = maxNumSentences?.coerceAtLeast(1) ?: 1,
+      silenceScale = silenceScale?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f
+    )
   }
 
   private fun createDocumentInDirectory(

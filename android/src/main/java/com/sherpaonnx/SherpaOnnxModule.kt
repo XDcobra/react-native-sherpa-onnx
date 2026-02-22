@@ -285,6 +285,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     noiseScale: Double?,
     noiseScaleW: Double?,
     lengthScale: Double?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    maxNumSentences: Double?,
+    silenceScale: Double?,
     promise: Promise
   ) {
     ttsHelper.initializeTts(
@@ -295,6 +299,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       noiseScale,
       noiseScaleW,
       lengthScale,
+      ruleFsts,
+      ruleFars,
+      maxNumSentences,
+      silenceScale,
       promise
     )
   }

@@ -34,7 +34,11 @@ public:
         bool debug = false,
         const std::optional<float>& noiseScale = std::nullopt,
         const std::optional<float>& noiseScaleW = std::nullopt,
-        const std::optional<float>& lengthScale = std::nullopt
+        const std::optional<float>& lengthScale = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<int32_t>& maxNumSentences = std::nullopt,
+        const std::optional<float>& silenceScale = std::nullopt
     );
 
     struct AudioResult {

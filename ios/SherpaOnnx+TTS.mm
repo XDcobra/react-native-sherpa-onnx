@@ -26,6 +26,10 @@ static BOOL g_tts_debug = NO;
 static NSNumber *g_tts_noise_scale = nil;
 static NSNumber *g_tts_noise_scale_w = nil;
 static NSNumber *g_tts_length_scale = nil;
+static NSString *g_tts_rule_fsts = nil;
+static NSString *g_tts_rule_fars = nil;
+static NSNumber *g_tts_max_num_sentences = nil;
+static NSNumber *g_tts_silence_scale = nil;
 
 static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
     using K = sherpaonnx::TtsModelKind;
@@ -63,6 +67,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
          noiseScale:(NSNumber *)noiseScale
     noiseScaleW:(NSNumber *)noiseScaleW
         lengthScale:(NSNumber *)lengthScale
+           ruleFsts:(NSString *)ruleFsts
+           ruleFars:(NSString *)ruleFars
+    maxNumSentences:(NSNumber *)maxNumSentences
+      silenceScale:(NSNumber *)silenceScale
          withResolver:(RCTPromiseResolveBlock)resolve
          withRejecter:(RCTPromiseRejectBlock)reject
 {
@@ -89,6 +97,23 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             lengthScaleOpt = [lengthScale floatValue];
         }
 
+        std::optional<std::string> ruleFstsOpt = std::nullopt;
+        std::optional<std::string> ruleFarsOpt = std::nullopt;
+        std::optional<int32_t> maxNumSentencesOpt = std::nullopt;
+        std::optional<float> silenceScaleOpt = std::nullopt;
+        if (ruleFsts != nil && [ruleFsts length] > 0) {
+            ruleFstsOpt = std::string([ruleFsts UTF8String]);
+        }
+        if (ruleFars != nil && [ruleFars length] > 0) {
+            ruleFarsOpt = std::string([ruleFars UTF8String]);
+        }
+        if (maxNumSentences != nil && [maxNumSentences intValue] >= 1) {
+            maxNumSentencesOpt = static_cast<int32_t>([maxNumSentences intValue]);
+        }
+        if (silenceScale != nil) {
+            silenceScaleOpt = [silenceScale floatValue];
+        }
+
         sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
             modelDirStr,
             modelTypeStr,
@@ -96,7 +121,11 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             debug,
             noiseScaleOpt,
             noiseScaleWOpt,
-            lengthScaleOpt
+            lengthScaleOpt,
+            ruleFstsOpt,
+            ruleFarsOpt,
+            maxNumSentencesOpt,
+            silenceScaleOpt
         );
 
         if (result.success) {
@@ -109,6 +138,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             g_tts_noise_scale = noiseScale ? [noiseScale copy] : nil;
             g_tts_noise_scale_w = noiseScaleW ? [noiseScaleW copy] : nil;
             g_tts_length_scale = lengthScale ? [lengthScale copy] : nil;
+            g_tts_rule_fsts = (ruleFsts != nil && [ruleFsts length] > 0) ? [ruleFsts copy] : nil;
+            g_tts_rule_fars = (ruleFars != nil && [ruleFars length] > 0) ? [ruleFars copy] : nil;
+            g_tts_max_num_sentences = (maxNumSentences != nil && [maxNumSentences intValue] >= 1) ? [maxNumSentences copy] : nil;
+            g_tts_silence_scale = silenceScale ? [silenceScale copy] : nil;
 
             NSMutableArray *detectedModelsArray = [NSMutableArray array];
             for (const auto& model : result.detectedModels) {
@@ -228,6 +261,23 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             lengthScaleOpt = [nextLengthScale floatValue];
         }
 
+        std::optional<std::string> ruleFstsOpt = std::nullopt;
+        std::optional<std::string> ruleFarsOpt = std::nullopt;
+        std::optional<int32_t> maxNumSentencesOpt = std::nullopt;
+        std::optional<float> silenceScaleOpt = std::nullopt;
+        if (g_tts_rule_fsts != nil && [g_tts_rule_fsts length] > 0) {
+            ruleFstsOpt = std::string([g_tts_rule_fsts UTF8String]);
+        }
+        if (g_tts_rule_fars != nil && [g_tts_rule_fars length] > 0) {
+            ruleFarsOpt = std::string([g_tts_rule_fars UTF8String]);
+        }
+        if (g_tts_max_num_sentences != nil && [g_tts_max_num_sentences intValue] >= 1) {
+            maxNumSentencesOpt = static_cast<int32_t>([g_tts_max_num_sentences intValue]);
+        }
+        if (g_tts_silence_scale != nil) {
+            silenceScaleOpt = [g_tts_silence_scale floatValue];
+        }
+
         sherpaonnx::TtsInitializeResult result = g_tts_wrapper->initialize(
             std::string([g_tts_model_dir UTF8String]),
             std::string([g_tts_model_type UTF8String]),
@@ -235,7 +285,11 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             g_tts_debug,
             noiseScaleOpt,
             noiseScaleWOpt,
-            lengthScaleOpt
+            lengthScaleOpt,
+            ruleFstsOpt,
+            ruleFarsOpt,
+            maxNumSentencesOpt,
+            silenceScaleOpt
         );
 
         if (!result.success) {
@@ -632,6 +686,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         g_tts_debug = NO;
         g_tts_noise_scale = nil;
         g_tts_length_scale = nil;
+        g_tts_rule_fsts = nil;
+        g_tts_rule_fars = nil;
+        g_tts_max_num_sentences = nil;
+        g_tts_silence_scale = nil;
         RCTLogInfo(@"TTS resources released");
         resolve(nil);
     } @catch (NSException *exception) {

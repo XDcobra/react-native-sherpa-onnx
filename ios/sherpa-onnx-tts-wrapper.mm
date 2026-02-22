@@ -50,7 +50,11 @@ TtsInitializeResult TtsWrapper::initialize(
     bool debug,
     const std::optional<float>& noiseScale,
     const std::optional<float>& noiseScaleW,
-    const std::optional<float>& lengthScale
+    const std::optional<float>& lengthScale,
+    const std::optional<std::string>& ruleFsts,
+    const std::optional<std::string>& ruleFars,
+    const std::optional<int32_t>& maxNumSentences,
+    const std::optional<float>& silenceScale
 ) {
     TtsInitializeResult result;
     result.success = false;
@@ -134,6 +138,19 @@ TtsInitializeResult TtsWrapper::initialize(
             default:
                 LOGE("TTS: Unknown model type: %s", modelType.c_str());
                 return result;
+        }
+
+        if (ruleFsts.has_value() && !ruleFsts->empty()) {
+            config.rule_fsts = *ruleFsts;
+        }
+        if (ruleFars.has_value() && !ruleFars->empty()) {
+            config.rule_fars = *ruleFars;
+        }
+        if (maxNumSentences.has_value() && *maxNumSentences >= 1) {
+            config.max_num_sentences = *maxNumSentences;
+        }
+        if (silenceScale.has_value()) {
+            config.silence_scale = *silenceScale;
         }
 
         LOGI("TTS: Creating OfflineTts instance...");
