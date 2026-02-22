@@ -154,6 +154,12 @@ Then run `pod install` as usual.
 
 Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 
+## Requirements
+
+- React Native >= 0.70
+- Android API 24+ (Android 7.0+)
+- iOS 13.0+
+
 ## Breaking changes (upgrading to 0.3.0)
 
 If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
@@ -198,6 +204,7 @@ await stt.destroy();
 
 - **`transcribeFile`** now returns `Promise<SttRecognitionResult>` (an object with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, `durations`) instead of `Promise<string>`. For text only, use `(await transcribeFile(path)).text`.
 - **`initializeSTT`** supports two additional optional options: `hotwordsFile` and `hotwordsScore`. The native TurboModule methods were renamed from `initializeSherpaOnnx` / `unloadSherpaOnnx` to `initializeStt` / `unloadStt`.
+- **Removed deprecated type:** `TranscriptionResult` has been removed. Use `SttRecognitionResult` instead (same shape).
 
 ### Text-to-Speech (TTS)
 
@@ -211,12 +218,7 @@ await stt.destroy();
     **Before (old API):** `updateTtsParams({ noiseScale: 0.7, lengthScale: 1.2 })`  
     **After:** `tts.updateParams({ modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } } })` or `tts.updateParams({ modelType: 'vits', modelOptions: { vits: { ... } } })`
   - Types: `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, `TtsKokoroModelOptions`, `TtsKittenModelOptions`, `TtsPocketModelOptions` are exported from the TTS module. See [docs/tts.md](./docs/tts.md) for details.
-
-## Requirements
-
-- React Native >= 0.70
-- Android API 24+ (Android 7.0+)
-- iOS 13.0+ (requires sherpa-onnx XCFramework - see iOS Setup below)
+- **Removed deprecated type:** `SynthesisOptions` has been removed. Use `TtsGenerationOptions` instead (same shape).
 
 ## Example Apps
 
