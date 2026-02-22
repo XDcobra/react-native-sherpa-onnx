@@ -3,6 +3,7 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsModelOptions,
   TtsUpdateOptions,
   TtsGenerationOptions,
   GeneratedAudio,
@@ -14,6 +15,70 @@ import type {
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+
+/**
+ * Flatten model-specific options for the given model type to native init/update params.
+ * When modelType is 'auto' or missing, returns undefined for all (native uses defaults).
+ */
+function flattenTtsModelOptionsForNative(
+  modelType: TTSModelType | undefined,
+  modelOptions: TtsModelOptions | undefined
+): {
+  noiseScale: number | undefined;
+  noiseScaleW: number | undefined;
+  lengthScale: number | undefined;
+} {
+  if (
+    !modelOptions ||
+    !modelType ||
+    modelType === 'auto' ||
+    modelType === 'zipvoice'
+  )
+    return {
+      noiseScale: undefined,
+      noiseScaleW: undefined,
+      lengthScale: undefined,
+    };
+  const block =
+    modelType === 'vits'
+      ? modelOptions.vits
+      : modelType === 'matcha'
+      ? modelOptions.matcha
+      : modelType === 'kokoro'
+      ? modelOptions.kokoro
+      : modelType === 'kitten'
+      ? modelOptions.kitten
+      : modelType === 'pocket'
+      ? modelOptions.pocket
+      : undefined;
+  if (!block)
+    return {
+      noiseScale: undefined,
+      noiseScaleW: undefined,
+      lengthScale: undefined,
+    };
+  const out: {
+    noiseScale: number | undefined;
+    noiseScaleW: number | undefined;
+    lengthScale: number | undefined;
+  } = {
+    noiseScale: undefined,
+    noiseScaleW: undefined,
+    lengthScale: undefined,
+  };
+  const n = block as {
+    noiseScale?: number;
+    noiseScaleW?: number;
+    lengthScale?: number;
+  };
+  if (n.noiseScale !== undefined && typeof n.noiseScale === 'number')
+    out.noiseScale = n.noiseScale;
+  if (n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number')
+    out.noiseScaleW = n.noiseScaleW;
+  if (n.lengthScale !== undefined && typeof n.lengthScale === 'number')
+    out.lengthScale = n.lengthScale;
+  return out;
+}
 
 /**
  * Detect TTS model type and structure without initializing the engine.
@@ -75,10 +140,18 @@ export async function detectTtsModel(
  *   debug: true
  * });
  *
- * // With explicit model type
+ * // With explicit model type and model-specific options
  * const result = await initializeTTS({
  *   modelPath: { type: 'asset', path: 'models/kokoro-en' },
- *   modelType: 'kokoro'
+ *   modelType: 'kokoro',
+ *   modelOptions: { kokoro: { lengthScale: 1.2 } }
+ * });
+ *
+ * // VITS with noise/length scales
+ * const result = await initializeTTS({
+ *   modelPath: { type: 'asset', path: 'models/vits-piper-en' },
+ *   modelType: 'vits',
+ *   modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } }
  * });
  * ```
  */
@@ -93,9 +166,7 @@ export async function initializeTTS(
   let modelType: TTSModelType | undefined;
   let numThreads: number | undefined;
   let debug: boolean | undefined;
-  let noiseScale: number | undefined;
-  let noiseScaleW: number | undefined;
-  let lengthScale: number | undefined;
+  let modelOptions: TtsModelOptions | undefined;
   let ruleFsts: string | undefined;
   let ruleFars: string | undefined;
   let maxNumSentences: number | undefined;
@@ -106,9 +177,7 @@ export async function initializeTTS(
     modelType = options.modelType;
     numThreads = options.numThreads;
     debug = options.debug;
-    noiseScale = options.noiseScale;
-    noiseScaleW = options.noiseScaleW;
-    lengthScale = options.lengthScale;
+    modelOptions = options.modelOptions;
     ruleFsts = options.ruleFsts;
     ruleFars = options.ruleFars;
     maxNumSentences = options.maxNumSentences;
@@ -118,14 +187,14 @@ export async function initializeTTS(
     modelType = undefined;
     numThreads = undefined;
     debug = undefined;
-    noiseScale = undefined;
-    noiseScaleW = undefined;
-    lengthScale = undefined;
+    modelOptions = undefined;
     ruleFsts = undefined;
     ruleFars = undefined;
     maxNumSentences = undefined;
     silenceScale = undefined;
   }
+
+  const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
 
   const resolvedPath = await resolveModelPath(modelPath);
   return SherpaOnnx.initializeTts(
@@ -133,9 +202,9 @@ export async function initializeTTS(
     modelType ?? 'auto',
     numThreads ?? 2,
     debug ?? false,
-    noiseScale,
-    noiseScaleW,
-    lengthScale,
+    flat.noiseScale,
+    flat.noiseScaleW,
+    flat.lengthScale,
     ruleFsts,
     ruleFars,
     maxNumSentences,
@@ -145,17 +214,21 @@ export async function initializeTTS(
 
 /**
  * Update TTS parameters by re-initializing with stored config.
+ * Pass modelType and modelOptions; only the block for modelType is applied and flattened to native.
  */
 export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
 }> {
-  const noiseArg =
-    options.noiseScale === undefined ? Number.NaN : options.noiseScale;
+  const flat = flattenTtsModelOptionsForNative(
+    options.modelType,
+    options.modelOptions
+  );
+  const noiseArg = flat.noiseScale === undefined ? Number.NaN : flat.noiseScale;
   const noiseWArg =
-    options.noiseScaleW === undefined ? Number.NaN : options.noiseScaleW;
+    flat.noiseScaleW === undefined ? Number.NaN : flat.noiseScaleW;
   const lengthArg =
-    options.lengthScale === undefined ? Number.NaN : options.lengthScale;
+    flat.lengthScale === undefined ? Number.NaN : flat.lengthScale;
 
   return SherpaOnnx.updateTtsParams(noiseArg, noiseWArg, lengthArg);
 }
@@ -516,6 +589,13 @@ export function shareAudioFile(
 export type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsModelOptions,
+  TtsVitsModelOptions,
+  TtsMatchaModelOptions,
+  TtsKokoroModelOptions,
+  TtsKittenModelOptions,
+  TtsPocketModelOptions,
+  TtsUpdateOptions,
   TtsGenerationOptions,
   SynthesisOptions,
   GeneratedAudio,

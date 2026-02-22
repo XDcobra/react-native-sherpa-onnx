@@ -31,6 +31,55 @@ export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'auto',
 ] as const;
 
+// ========== Model-specific options (only applied when that model type is loaded) ==========
+
+/** Options for VITS models. Applied only when modelType is 'vits'. Kotlin OfflineTtsVitsModelConfig. */
+export interface TtsVitsModelOptions {
+  /** Noise scale. If omitted, model default (or model.json) is used. */
+  noiseScale?: number;
+  /** Noise scale W. If omitted, model default is used. */
+  noiseScaleW?: number;
+  /** Length scale. If omitted, model default is used. */
+  lengthScale?: number;
+}
+
+/** Options for Matcha models. Applied only when modelType is 'matcha'. Kotlin OfflineTtsMatchaModelConfig. */
+export interface TtsMatchaModelOptions {
+  /** Noise scale. If omitted, model default is used. */
+  noiseScale?: number;
+  /** Length scale. If omitted, model default is used. */
+  lengthScale?: number;
+}
+
+/** Options for Kokoro models. Applied only when modelType is 'kokoro'. Kotlin OfflineTtsKokoroModelConfig. */
+export interface TtsKokoroModelOptions {
+  /** Length scale. If omitted, model default is used. */
+  lengthScale?: number;
+}
+
+/** Options for KittenTTS models. Applied only when modelType is 'kitten'. Kotlin OfflineTtsKittenModelConfig. */
+export interface TtsKittenModelOptions {
+  /** Length scale. If omitted, model default is used. */
+  lengthScale?: number;
+}
+
+/** Options for Pocket TTS models. Applied only when modelType is 'pocket'. Kotlin has no init-time model config for pocket; reserved for future use. */
+export interface TtsPocketModelOptions {
+  // No init-time options in Kotlin OfflineTtsPocketModelConfig; voice cloning is via GenerationConfig at generate time.
+}
+
+/**
+ * Model-specific TTS options. Only the block for the actually loaded model type is applied;
+ * others are ignored (e.g. vits options have no effect when a kokoro model is loaded).
+ */
+export interface TtsModelOptions {
+  vits?: TtsVitsModelOptions;
+  matcha?: TtsMatchaModelOptions;
+  kokoro?: TtsKokoroModelOptions;
+  kitten?: TtsKittenModelOptions;
+  pocket?: TtsPocketModelOptions;
+}
+
 /**
  * Configuration for TTS initialization.
  */
@@ -66,25 +115,10 @@ export interface TTSInitializeOptions {
   debug?: boolean;
 
   /**
-   * Noise scale for VITS/Matcha models.
-   *
-   * If omitted, the model default (or model.json) is used.
+   * Model-specific options. Only options for the loaded model type are applied.
+   * E.g. when modelType is 'vits', only modelOptions.vits is used.
    */
-  noiseScale?: number;
-
-  /**
-   * Noise scale W for VITS models.
-   *
-   * If omitted, the model default (or model.json) is used.
-   */
-  noiseScaleW?: number;
-
-  /**
-   * Length scale for VITS/Matcha/Kokoro/Kitten models.
-   *
-   * If omitted, the model default (or model.json) is used.
-   */
-  lengthScale?: number;
+  modelOptions?: TtsModelOptions;
 
   /**
    * Path(s) to rule FSTs for TTS (OfflineTtsConfig.ruleFsts).
@@ -112,23 +146,19 @@ export interface TTSInitializeOptions {
 }
 
 /**
- * Options for updating TTS model parameters.
+ * Options for updating TTS model parameters at runtime.
+ * Only the block for the given modelType is applied; flattened to native noiseScale / noiseScaleW / lengthScale.
  */
 export interface TtsUpdateOptions {
   /**
-   * Noise scale for VITS/Matcha models.
+   * Model type currently loaded. Required when modelOptions is provided, so the correct block is applied.
    */
-  noiseScale?: number | null;
+  modelType?: TTSModelType;
 
   /**
-   * Noise scale W for VITS models.
+   * Model-specific options. Only the block for modelType is used (e.g. modelOptions.vits when modelType is 'vits').
    */
-  noiseScaleW?: number | null;
-
-  /**
-   * Length scale for VITS/Matcha/Kokoro/Kitten models.
-   */
-  lengthScale?: number | null;
+  modelOptions?: TtsModelOptions;
 }
 
 /**
@@ -158,24 +188,26 @@ export interface TtsGenerationOptions {
   speed?: number;
 
   /**
-   * Silence scale (Kotlin GenerationConfig). Model-dependent.
+   * Silence scale (Kotlin GenerationConfig.silenceScale). Used at generate time.
    */
   silenceScale?: number;
 
   /**
-   * Reference audio for voice cloning (Zipvoice or Kotlin generateWithConfig).
+   * Reference audio for voice cloning (Kotlin GenerationConfig).
+   * In the Kotlin/RN stack, only Pocket TTS uses this; other model types (vits, matcha, kokoro, kitten) ignore it.
    * Mono float samples in [-1, 1] and sample rate in Hz.
    */
   referenceAudio?: { samples: number[]; sampleRate: number };
 
   /**
-   * Transcript text of the reference audio. Required for voice cloning when
-   * referenceAudio is provided.
+   * Transcript text of the reference audio (Kotlin GenerationConfig.referenceText).
+   * Required for Pocket TTS when referenceAudio is provided; ignored by other model types.
    */
   referenceText?: string;
 
   /**
-   * Number of steps (e.g. flow-matching steps). Model-dependent.
+   * Number of steps, e.g. flow-matching steps (Kotlin GenerationConfig.numSteps).
+   * Used by models such as Pocket.
    */
   numSteps?: number;
 
