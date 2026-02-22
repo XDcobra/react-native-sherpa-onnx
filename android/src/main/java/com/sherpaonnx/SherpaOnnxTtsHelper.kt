@@ -127,11 +127,18 @@ internal class SherpaOnnxTtsHelper(
       val numSpeakers: Int
 
       if (modelTypeStr == "zipvoice") {
+        val vocoderPath = path(paths, "vocoder")
+        if (vocoderPath.isBlank()) {
+          val msg = "Zipvoice distill models (encoder+decoder only, no vocoder) are not supported. Use the full Zipvoice model that includes vocos_24khz.onnx (or similar vocoder file)."
+          Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
+          promise.reject("TTS_INIT_ERROR", msg)
+          return
+        }
         val wrapper = ZipvoiceTtsWrapper.create(
           tokens = path(paths, "tokens"),
           encoder = path(paths, "encoder"),
           decoder = path(paths, "decoder"),
-          vocoder = path(paths, "vocoder"),
+          vocoder = vocoderPath,
           dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon"),
           numThreads = numThreads.toInt(),

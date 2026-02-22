@@ -327,6 +327,16 @@ The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, s
 
 See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup steps.
 
+### Zipvoice: full vs distill
+
+- **Full Zipvoice** (supported): encoder + decoder + **vocoder** (e.g. `vocos_24khz.onnx`), plus `tokens.txt`, `lexicon.txt`, and `espeak-ng-data`. The pipeline is: encoder/decoder → mel-spectrogram → vocoder → waveform.
+- **Zipvoice distill** (encoder + decoder only, no vocoder): These models are **detected** as zipvoice so they appear in the model list, but **initialization will fail** with a clear error. The sherpa-onnx C-API and C++ implementation require a vocoder; there is no optional-vocoder or waveform-from-decoder path in the current upstream. Use a full Zipvoice model that includes a vocoder file (e.g. `vocos_24khz.onnx`) for successful initialization.
+
+**References (Zipvoice via sherpa-onnx):**
+
+- [sherpa-onnx PR #2487 – Add Zipvoice](https://github.com/k2-fsa/sherpa-onnx/pull/2487): Integration of Zipvoice (zero-shot TTS, encoder + flow-matching decoder + vocoder), C-API, vocoder selection, and [discussion on running Zipvoice / distill](https://github.com/k2-fsa/sherpa-onnx/pull/2487#issuecomment-3227884498).
+- [k2-fsa/ZipVoice](https://github.com/k2-fsa/ZipVoice): Upstream ZipVoice and ZipVoice-Distill (faster, minimal quality loss). For CPU deployment with ONNX, sherpa-onnx is the recommended C++ runtime; the ONNX export for sherpa-onnx still uses encoder + decoder + vocoder (e.g. `vocos_24khz.onnx`).
+
 ## Troubleshooting & tuning
 
 - Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
