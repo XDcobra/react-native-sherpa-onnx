@@ -16,6 +16,9 @@ import type {
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
+/** Model type last used in a successful initializeTTS; used by updateTtsParams when modelType is omitted. Cleared on unloadTTS(). */
+let lastInitializedTtsModelType: TTSModelType | null = null;
+
 /**
  * Flatten model-specific options for the given model type to native init/update params.
  * When modelType is 'auto' or missing, returns undefined for all (native uses defaults).
@@ -197,7 +200,7 @@ export async function initializeTTS(
   const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
 
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeTts(
+  const result = await SherpaOnnx.initializeTts(
     resolvedPath,
     modelType ?? 'auto',
     numThreads ?? 2,
@@ -210,18 +213,40 @@ export async function initializeTTS(
     maxNumSentences,
     silenceScale
   );
+
+  if (result.success && result.detectedModels?.length > 0) {
+    const firstDetected = result.detectedModels[0];
+    const effectiveType =
+      modelType && modelType !== 'auto'
+        ? modelType
+        : (firstDetected?.type as TTSModelType);
+    lastInitializedTtsModelType = effectiveType ?? null;
+  } else {
+    lastInitializedTtsModelType = null;
+  }
+
+  return result;
 }
 
 /**
  * Update TTS parameters by re-initializing with stored config.
- * Pass modelType and modelOptions; only the block for modelType is applied and flattened to native.
+ * Only the block for the effective model type is applied and flattened to native.
+ *
+ * When modelType is omitted or 'auto', the model type from the last successful
+ * initializeTTS() is used. After unloadTTS(), you must pass modelType explicitly
+ * until initializeTTS() is called again.
  */
 export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
 }> {
+  const effectiveModelType =
+    options.modelType && options.modelType !== 'auto'
+      ? options.modelType
+      : lastInitializedTtsModelType ?? undefined;
+
   const flat = flattenTtsModelOptionsForNative(
-    options.modelType,
+    effectiveModelType,
     options.modelOptions
   );
   const noiseArg = flat.noiseScale === undefined ? Number.NaN : flat.noiseScale;
@@ -477,6 +502,7 @@ export function getNumSpeakers(): Promise<number> {
  * ```
  */
 export function unloadTTS(): Promise<void> {
+  lastInitializedTtsModelType = null;
   return SherpaOnnx.unloadTts();
 }
 

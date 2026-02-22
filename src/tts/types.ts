@@ -151,12 +151,13 @@ export interface TTSInitializeOptions {
  */
 export interface TtsUpdateOptions {
   /**
-   * Model type currently loaded. Required when modelOptions is provided, so the correct block is applied.
+   * Model type currently loaded. When omitted or 'auto', the SDK uses the model type from the last
+   * successful initializeTTS(). After unloadTTS(), pass modelType explicitly until init is called again.
    */
   modelType?: TTSModelType;
 
   /**
-   * Model-specific options. Only the block for modelType is used (e.g. modelOptions.vits when modelType is 'vits').
+   * Model-specific options. Only the block for the effective model type is used (e.g. modelOptions.vits when type is 'vits').
    */
   modelOptions?: TtsModelOptions;
 }
