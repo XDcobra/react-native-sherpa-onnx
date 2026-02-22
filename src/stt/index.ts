@@ -234,3 +234,5 @@ export {
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
 } from './types';
+export { getWhisperLanguages, WHISPER_LANGUAGES } from './whisperLanguages';
+export type { WhisperLanguage } from './whisperLanguages';
