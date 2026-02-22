@@ -171,9 +171,9 @@ If you are upgrading from an earlier version to **0.3.0**, plan for the followin
   - **`initializeTTS`:** Replace `noiseScale`, `noiseScaleW`, `lengthScale` with `modelOptions`. Only the block for the loaded model type is applied.  
     **Before:** `initializeTTS({ modelPath, modelType: 'vits', noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 })`  
     **After:** `initializeTTS({ modelPath, modelType: 'vits', modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } } })`
-  - **`updateTtsParams`:** Replace flat `noiseScale` / `noiseScaleW` / `lengthScale` with `modelType` + `modelOptions`.  
+  - **`updateTtsParams`:** Replace flat `noiseScale` / `noiseScaleW` / `lengthScale` with `modelOptions` (and optionally `modelType`). When `modelType` is omitted, the SDK uses the model type from the last successful `initializeTTS()`.  
     **Before:** `updateTtsParams({ noiseScale: 0.7, lengthScale: 1.2 })`  
-    **After:** `updateTtsParams({ modelType: 'vits', modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } } })`
+    **After:** `updateTtsParams({ modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } } })` or `updateTtsParams({ modelType: 'vits', modelOptions: { vits: { ... } } })`
   - Types: `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, `TtsKokoroModelOptions`, `TtsKittenModelOptions`, `TtsPocketModelOptions` are exported from the TTS module. See [docs/tts.md](./docs/tts.md) for details.
 
 ## Requirements

@@ -157,12 +157,20 @@ Optional config-level options (OfflineTtsConfig, for text normalization / stream
 
 ### `updateTtsParams(options)`
 
-Update TTS parameters at runtime without reloading the model manually. Pass `modelType` and `modelOptions`; only the block for that model type is applied (same design as init). The JS layer flattens to native `noiseScale` / `noiseScaleW` / `lengthScale`.
+Update TTS parameters at runtime without reloading the model manually. Pass `modelOptions`; only the block for the effective model type is applied (same design as init). The JS layer flattens to native `noiseScale` / `noiseScaleW` / `lengthScale`.
+
+When **modelType** is omitted or `'auto'`, the SDK uses the model type from the last successful `initializeTTS()`, so you can call `updateTtsParams({ modelOptions: { vits: { noiseScale: 0.7 } } })` without repeating the type. After `unloadTTS()`, you must pass `modelType` explicitly until `initializeTTS()` is called again.
 
 ```typescript
+// With explicit type
 await updateTtsParams({
   modelType: 'vits',
   modelOptions: { vits: { noiseScale: 0.7, noiseScaleW: 0.8, lengthScale: 1.0 } },
+});
+
+// Omitting modelType: uses the type from the last initializeTTS()
+await updateTtsParams({
+  modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } },
 });
 ```
 
