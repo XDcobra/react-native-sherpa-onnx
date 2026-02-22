@@ -184,7 +184,11 @@ internal class SherpaOnnxTtsHelper(
           dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon"),
           numThreads = zipvoiceNumThreads,
-          debug = debug
+          debug = debug,
+          ruleFsts = ruleFsts?.takeIf { it.isNotBlank() } ?: "",
+          ruleFars = ruleFars?.takeIf { it.isNotBlank() } ?: "",
+          maxNumSentences = maxNumSentences?.toInt()?.coerceAtLeast(1) ?: 1,
+          silenceScale = silenceScale?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f
         )
         if (am != null) {
           val memInfo = ActivityManager.MemoryInfo()
