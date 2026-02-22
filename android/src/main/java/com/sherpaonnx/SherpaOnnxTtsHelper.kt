@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.DocumentsContract
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -15,6 +17,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
@@ -86,6 +89,17 @@ internal class SherpaOnnxTtsHelper(
 
   private fun getInstance(instanceId: String): TtsEngineInstance? = instances[instanceId]
 
+  /** Run promise resolve/reject on the UI thread to avoid Surface/lifecycle crashes when init completes after long native work (e.g. Zipvoice). */
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private fun resolveOnUiThread(promise: Promise, result: WritableMap) {
+    mainHandler.post { promise.resolve(result) }
+  }
+  private fun rejectOnUiThread(promise: Promise, code: String, message: String, throwable: Throwable? = null) {
+    mainHandler.post {
+      if (throwable != null) promise.reject(code, message, throwable) else promise.reject(code, message)
+    }
+  }
+
   fun initializeTts(
     instanceId: String,
     modelDir: String,
@@ -105,14 +119,14 @@ internal class SherpaOnnxTtsHelper(
       val result = detectTtsModel(modelDir, modelType)
       if (result == null) {
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
-        promise.reject("TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
+        rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
         return
       }
       val success = result["success"] as? Boolean ?: false
       if (!success) {
         val reason = result["error"] as? String
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: ${reason ?: "Failed to detect TTS model"}")
-        promise.reject("TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
+        rejectOnUiThread(promise, "TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
         return
       }
       val paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
@@ -131,7 +145,7 @@ internal class SherpaOnnxTtsHelper(
         if (vocoderPath.isBlank()) {
           val msg = "Zipvoice distill models (encoder+decoder only, no vocoder) are not supported. Use the full Zipvoice model that includes vocos_24khz.onnx (or similar vocoder file)."
           Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
-          promise.reject("TTS_INIT_ERROR", msg)
+          rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
           return
         }
         val wrapper = ZipvoiceTtsWrapper.create(
@@ -146,7 +160,7 @@ internal class SherpaOnnxTtsHelper(
         )
         if (wrapper == null) {
           Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
-          promise.reject("TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
+          rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
           return
         }
         inst.zipvoiceTts = wrapper
@@ -194,10 +208,10 @@ internal class SherpaOnnxTtsHelper(
       resultMap.putArray("detectedModels", modelsArray)
       resultMap.putInt("sampleRate", sampleRate)
       resultMap.putInt("numSpeakers", numSpeakers)
-      promise.resolve(resultMap)
+      resolveOnUiThread(promise, resultMap)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to initialize TTS: ${e.message}", e)
-      promise.reject("TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
+      rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
     }
   }
 
