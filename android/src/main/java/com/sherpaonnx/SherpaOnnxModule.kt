@@ -77,7 +77,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
     archiveHelper.extractTarBz2(sourcePath, targetPath, force, promise) { bytes, total, percent ->
-      emitExtractProgress(bytes, total, percent)
+      emitExtractProgress(sourcePath, bytes, total, percent)
     }
   }
 
@@ -90,10 +90,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     archiveHelper.computeFileSha256(filePath, promise)
   }
 
-  private fun emitExtractProgress(bytes: Long, totalBytes: Long, percent: Double) {
+  private fun emitExtractProgress(sourcePath: String, bytes: Long, totalBytes: Long, percent: Double) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
+    payload.putString("sourcePath", sourcePath)
     payload.putDouble("bytes", bytes.toDouble())
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
