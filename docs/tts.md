@@ -9,12 +9,12 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 - [Streaming TTS (low-latency)](#streaming-tts-low-latency)
 - [Live PCM Playback (native player)](#live-pcm-playback-native-player)
 - [API Reference & Practical Notes](#api-reference--practical-notes)
-  - [initializeTTS(options)](#initializettsoptions)
-  - [updateTtsParams(options)](#updatettsparamsoptions)
-  - [generateSpeech(text, options?)](#generatespeechtext-options)
-  - [generateSpeechWithTimestamps(text, options?)](#generatespeechwithtimestampstext-options)
-  - [generateSpeechStream(text, options?, handlers)](#generatespeechstreamtext-options-handlers)
-  - [startTtsPcmPlayer / writeTtsPcmChunk / stopTtsPcmPlayer](#startttspcmplayersamplerate-channels--writettspcmchunksamples--stopttspcmplayer)
+  - [createTTS(options)](#createttsoptions)
+  - [TtsEngine: updateParams(options)](#ttsengine-updateparamoptions)
+  - [TtsEngine: generateSpeech(text, options?)](#ttsengine-generatespeechtext-options)
+  - [TtsEngine: generateSpeechWithTimestamps(text, options?)](#ttsengine-generatespeechwithtimestampstext-options)
+  - [TtsEngine: generateSpeechStream(text, options?, handlers)](#ttsengine-generatespeechstreamtext-options-handlers)
+  - [TtsEngine: startPcmPlayer / writePcmChunk / stopPcmPlayer](#ttsengine-startpcmplayer--writepcmchunk--stoppcmplayer)
   - [Persistence (save/share)](#persistence-saveshare)
   - [Voice cloning (reference audio)](#voice-cloning-reference-audio)
 - [Detailed Example: streaming -> native playback -> optional save](#detailed-example-streaming--native-playback--optional-save)
@@ -26,16 +26,16 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
 | Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
-| Model initialization | ✅ | Kotlin API | `initializeTTS()` |
-| Full-buffer generation | ✅ | Kotlin API | `generateSpeech()` |
-| Streaming generation | ✅ | Kotlin API | `generateSpeechStream()` |
-| Native PCM playback | ✅ | Kotlin API | `startTtsPcmPlayer()` / `writeTtsPcmChunk()` |
+| Model initialization | ✅ | Kotlin API | `createTTS()` → `TtsEngine` |
+| Full-buffer generation | ✅ | Kotlin API | `tts.generateSpeech()` |
+| Streaming generation | ✅ | Kotlin API | `tts.generateSpeechStream()` |
+| Native PCM playback | ✅ | Kotlin API | `tts.startPcmPlayer()` / `tts.writePcmChunk()` |
 | Save/share WAV | ✅ | Kotlin API | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Timestamps (estimated) | ✅ | Kotlin API | `generateSpeechWithTimestamps()` |
 | Noise/Noise W/Length scale tuning | ✅ | Kotlin API | VITS/Matcha/Kokoro/Kitten (model-dependent) |
-| Runtime param updates | ✅ | Kotlin API | `updateTtsParams()` |
+| Runtime param updates | ✅ | Kotlin API | `tts.updateParams()` |
 | Model downloads | ✅ | Kotlin API | Download Manager API |
-| Voice cloning / reference audio | ✅ | Kotlin API | Integrated in `generateSpeech()` / `generateSpeechStream()` (Zipvoice + GenerationConfig) |
+| Voice cloning / reference audio | ✅ | Kotlin API | Integrated in `tts.generateSpeech()` / `tts.generateSpeechStream()` (Zipvoice + GenerationConfig) |
 | Generate with GenerationConfig | ✅ | Kotlin API | Reference audio, silenceScale, numSteps, extra via options |
 | Additional audio formats (MP3/OGG/FLAC) | ✅ | This package | Use the provided conversion API (e.g. `convertAudioToFormat()` from `react-native-sherpa-onnx/audio`); sherpa-onnx natively outputs WAV/PCM only. |
 | Progress in streaming callback (0..1) | Planned | C-API | Not exposed in Kotlin API |
@@ -54,12 +54,11 @@ All generation functions (`generateSpeech`, `generateSpeechStream`, `generateSpe
 
 ```typescript
 import {
-  initializeTTS,
-  generateSpeech,
-  unloadTTS,
+  createTTS,
+  saveAudioToFile,
 } from 'react-native-sherpa-onnx/tts';
 
-await initializeTTS({
+const tts = await createTTS({
   modelPath: {
     type: 'asset',
     path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
@@ -68,10 +67,10 @@ await initializeTTS({
   numThreads: 2,
 });
 
-const audio = await generateSpeech('Hello, world!');
+const audio = await tts.generateSpeech('Hello, world!');
 console.log('sampleRate:', audio.sampleRate, 'samples:', audio.samples.length);
 
-await unloadTTS();
+await tts.destroy();
 ```
 
 ## Streaming TTS (low-latency)
@@ -79,9 +78,11 @@ await unloadTTS();
 Use streaming mode to receive incremental float PCM chunks and play them immediately.
 
 ```typescript
-import { generateSpeechStream, cancelSpeechStream } from 'react-native-sherpa-onnx/tts';
+import { createTTS } from 'react-native-sherpa-onnx/tts';
 
-const unsubscribe = await generateSpeechStream(
+const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/vits-piper-en' }, modelType: 'vits' });
+
+const unsubscribe = await tts.generateSpeechStream(
   'Hello streaming world!',
   { sid: 0, speed: 1.0 },
   {
@@ -102,8 +103,9 @@ const unsubscribe = await generateSpeechStream(
 );
 
 // cancel generation if needed
-await cancelSpeechStream();
+await tts.cancelSpeechStream();
 unsubscribe();
+await tts.destroy();
 ```
 
 ## Live PCM Playback (native player)
@@ -111,29 +113,36 @@ unsubscribe();
 The library exposes a native PCM player so you can minimize JS roundtrips and play chunks immediately.
 
 ```typescript
-import { startTtsPcmPlayer, writeTtsPcmChunk, stopTtsPcmPlayer, getSampleRate } from 'react-native-sherpa-onnx/tts';
+import { createTTS } from 'react-native-sherpa-onnx/tts';
 
-const sampleRate = await getSampleRate();
-await startTtsPcmPlayer(sampleRate, 1); // mono
+const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/vits-piper-en' }, modelType: 'vits' });
 
-// inside onChunk handler from generateSpeechStream:
-// await writeTtsPcmChunk(chunk.samples);
+const sampleRate = await tts.getSampleRate();
+await tts.startPcmPlayer(sampleRate, 1); // mono
 
-await stopTtsPcmPlayer();
+// inside onChunk handler from tts.generateSpeechStream:
+// await tts.writePcmChunk(chunk.samples);
+
+await tts.stopPcmPlayer();
+await tts.destroy();
 ```
 
 ## API Reference & Practical Notes
 
-### `initializeTTS(options)`
+### `createTTS(options)`
 
-Initialize the text-to-speech engine with a model. `options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files, or set it explicitly to `'vits'`, `'matcha'`, `'kokoro'`, `'kitten'`, `'pocket'`, or `'zipvoice'`.
+Create a TTS engine instance. Returns `Promise<TtsEngine>`. You **must** call `tts.destroy()` when done to free native resources.
+
+`options.modelPath` should point to the model directory using a `ModelPathConfig` (no string path needed). Use `modelType: 'auto'` to let the SDK detect the model based on files, or set it explicitly to `'vits'`, `'matcha'`, `'kokoro'`, `'kitten'`, `'pocket'`, or `'zipvoice'`.
 Auto-detection is file-based, so folder names do not need to match model types.
 
 Model-specific options (noise/length scale) go in `modelOptions`; only the block for the loaded model type is applied. See `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, etc. in `src/tts/types.ts`.
 
 ```typescript
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+
 // VITS: noiseScale, noiseScaleW, lengthScale
-await initializeTTS({
+const tts = await createTTS({
   modelPath,
   modelType: 'vits',
   numThreads: 2,
@@ -141,11 +150,12 @@ await initializeTTS({
 });
 
 // Kokoro: lengthScale only
-await initializeTTS({
+const ttsKokoro = await createTTS({
   modelPath,
   modelType: 'kokoro',
   modelOptions: { kokoro: { lengthScale: 1.2 } },
 });
+// ... use ttsKokoro ... then await ttsKokoro.destroy();
 ```
 
 Optional config-level options (OfflineTtsConfig, for text normalization / streaming batch size):
@@ -155,26 +165,24 @@ Optional config-level options (OfflineTtsConfig, for text normalization / stream
 - **maxNumSentences** (number, default: 1) — Max number of sentences per streaming callback.
 - **silenceScale** (number, default: 0.2) — Silence scale on config level.
 
-### `updateTtsParams(options)`
+### `TtsEngine: updateParams(options)`
 
-Update TTS parameters at runtime without reloading the model manually. Pass `modelOptions`; only the block for the effective model type is applied (same design as init). The JS layer flattens to native `noiseScale` / `noiseScaleW` / `lengthScale`.
-
-When **modelType** is omitted or `'auto'`, the SDK uses the model type from the last successful `initializeTTS()`, so you can call `updateTtsParams({ modelOptions: { vits: { noiseScale: 0.7 } } })` without repeating the type. After `unloadTTS()`, you must pass `modelType` explicitly until `initializeTTS()` is called again.
+Update TTS parameters at runtime without reloading the model. Call on an existing engine: `await tts.updateParams({ modelOptions: { vits: { noiseScale: 0.7 } } })`. Only the block for the effective model type is applied. The engine remembers its model type from creation.
 
 ```typescript
 // With explicit type
-await updateTtsParams({
+await tts.updateParams({
   modelType: 'vits',
   modelOptions: { vits: { noiseScale: 0.7, noiseScaleW: 0.8, lengthScale: 1.0 } },
 });
 
-// Omitting modelType: uses the type from the last initializeTTS()
-await updateTtsParams({
+// Omitting modelType: uses the type from createTTS()
+await tts.updateParams({
   modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } },
 });
 ```
 
-### `generateSpeech(text, options?)`
+### `TtsEngine: generateSpeech(text, options?)`
 
 Generate speech audio from text. Returns `{ samples: number[]; sampleRate: number }`.
 
@@ -191,14 +199,14 @@ Generate speech audio from text. Returns `{ samples: number[]; sampleRate: numbe
 When `referenceAudio` (and typically `referenceText`) are provided, the native layer uses voice cloning: with a Zipvoice model it calls the Zipvoice reference-audio API; with a Kotlin engine (e.g. Pocket, or other models supporting GenerationConfig) it uses `generateWithConfig`.
 
 Tips:
-- Check `getTtsSampleRate()` after initialization to know the model's native sample rate.
+- Check `tts.getSampleRate()` after creation to know the model's native sample rate.
 - If a model outputs 22050 Hz and your playback path expects 48000 Hz, resample to avoid pitch/tempo mismatch.
 
-### `generateSpeechWithTimestamps(text, options?)`
+### `TtsEngine: generateSpeechWithTimestamps(text, options?)`
 
 Same as `generateSpeech` but returns additional `subtitles` and `estimated` (timestamps are estimated from duration when the model does not provide them). Accepts the same `TtsGenerationOptions`, including voice-cloning options.
 
-### `generateSpeechStream(text, options?, handlers)`
+### `TtsEngine: generateSpeechStream(text, options?, handlers)`
 
 Generate speech audio in streaming mode with `onChunk` callbacks. Accepts the same **options** object as `generateSpeech` (sid, speed, and optionally reference audio for Kotlin-engine models).
 
@@ -209,12 +217,12 @@ Handlers should be lightweight; forward audio to native playback quickly.
 Best practices and caveats:
 - Chunk sizes vary by model and internal buffer. Avoid heavy CPU work in `onChunk`.
 - Accumulating all chunks in JS for very long sessions can exhaust memory — prefer saving on native or writing to a file incrementally.
-- To stop generation early, call `cancelSpeechStream()`.
+- To stop generation early, call `tts.cancelSpeechStream()`.
 
-### `startTtsPcmPlayer(sampleRate, channels)` / `writeTtsPcmChunk(samples)` / `stopTtsPcmPlayer()`
+### `TtsEngine: startPcmPlayer` / `writePcmChunk` / `stopPcmPlayer`
 
 Important:
-- `writeTtsPcmChunk` expects float PCM samples in [-1.0, 1.0]. Values outside this range will clip.
+- `tts.writePcmChunk` expects float PCM samples in [-1.0, 1.0]. Values outside this range will clip.
 - Balance write frequency and chunk size: very small writes increase bridge overhead; very large writes increase latency.
 
 ### Persistence (save/share)
@@ -232,33 +240,29 @@ iOS notes:
 When the loaded model supports it (Zipvoice or Kotlin engines with GenerationConfig, e.g. Pocket), you can pass reference audio and its transcript so the synthesized speech matches the reference voice:
 
 ```typescript
-// After loading a Zipvoice or compatible Kotlin model (e.g. Pocket)
-const audio = await generateSpeech('Target text to speak in the reference voice', {
+// After creating a TTS engine with Zipvoice or compatible Kotlin model (e.g. Pocket)
+const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/zipvoice' }, modelType: 'zipvoice' });
+const audio = await tts.generateSpeech('Target text to speak in the reference voice', {
   referenceAudio: { samples: refSamples, sampleRate: 22050 },
   referenceText: 'Transcript of the reference recording',
   numSteps: 20,  // optional; model-dependent
   speed: 1.0,
 });
 // For Pocket you can also pass extra: { temperature: '0.7', chunk_size: '15' }
+await tts.destroy();
 ```
 
-Use `generateSpeech` for Zipvoice with reference audio. Use `generateSpeech` or `generateSpeechStream` for Kotlin-engine models (e.g. Pocket) with reference audio; streaming with reference audio is not available for Zipvoice.
+Use `tts.generateSpeech` for Zipvoice with reference audio. Use `tts.generateSpeech` or `tts.generateSpeechStream` for Kotlin-engine models (e.g. Pocket) with reference audio; streaming with reference audio is not available for Zipvoice.
 
 ## Detailed Example: streaming -> native playback -> optional save
 
 ```typescript
 import {
-  initializeTTS,
-  generateSpeechStream,
-  cancelSpeechStream,
-  startTtsPcmPlayer,
-  writeTtsPcmChunk,
-  stopTtsPcmPlayer,
-  getTtsSampleRate,
+  createTTS,
   saveAudioToFile,
 } from 'react-native-sherpa-onnx/tts';
 
-await initializeTTS({
+const tts = await createTTS({
   modelPath: {
     type: 'asset',
     path: 'models/sherpa-onnx-vits-piper-en_US-libritts_r-medium',
@@ -266,29 +270,31 @@ await initializeTTS({
   numThreads: 2,
 });
 
-const sampleRate = await getTtsSampleRate();
-await startTtsPcmPlayer(sampleRate, 1);
+const sampleRate = await tts.getSampleRate();
+await tts.startPcmPlayer(sampleRate, 1);
 
 const accumulated: number[] = [];
 
-const unsub = await generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, {
+const unsub = await tts.generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, {
   onChunk: async (chunk) => {
     // low-latency play
-    await writeTtsPcmChunk(chunk.samples);
+    await tts.writePcmChunk(chunk.samples);
     // optionally persist to JS buffer (watch memory)
     accumulated.push(...chunk.samples);
   },
   onEnd: async () => {
-    await stopTtsPcmPlayer();
+    await tts.stopPcmPlayer();
     // optionally save accumulated audio (beware memory for long sessions)
     await saveAudioToFile({ samples: accumulated, sampleRate }, '/data/user/0/.../tts_out.wav');
+    await tts.destroy();
   },
   onError: ({ message }) => console.warn('TTS stream error', message),
 });
 
 // cancel if needed
-// await cancelSpeechStream();
+// await tts.cancelSpeechStream();
 // unsub();
+// await tts.destroy();
 ```
 
 ## Mapping to Native API
@@ -299,19 +305,19 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 
 | JS (public) | TurboModule method | Notes |
 | --- | --- | --- |
-| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?, ruleFsts?, ruleFars?, maxNumSentences?, silenceScale?)` | JS resolves `modelPath` to `modelDir`; builds noiseScale/noiseScaleW/lengthScale from `options.modelOptions` for the given `modelType`. Optional ruleFsts, ruleFars, maxNumSentences, silenceScale (OfflineTtsConfig). |
-| `updateTtsParams(options)` | `updateTtsParams(noiseScale?, noiseScaleW?, lengthScale?)` | JS flattens `options.modelType` + `options.modelOptions` to the three native params; only the block for `modelType` is used. |
-| `generateSpeech(text, options?)` | `generateTts(text, options)` | Full-buffer generation; `options`: sid, speed, referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra. |
-| `generateSpeechWithTimestamps(text, options?)` | `generateTtsWithTimestamps(text, options)` | Same as above; result includes `subtitles` and `estimated`. |
-| `generateSpeechStream(text, options?, handlers)` | `generateTtsStream(text, options)` | Streaming generation (emits chunk events); same options shape. |
-| `cancelSpeechStream()` | `cancelTtsStream()` | No arguments. |
-| `startTtsPcmPlayer(sampleRate, channels)` | `startTtsPcmPlayer(sampleRate, channels)` | — |
-| `writeTtsPcmChunk(samples)` | `writeTtsPcmChunk(samples)` | Float PCM in [-1, 1]. |
-| `stopTtsPcmPlayer()` | `stopTtsPcmPlayer()` | — |
-| `getSampleRate()` | `getTtsSampleRate()` | — |
-| `getNumSpeakers()` | `getTtsNumSpeakers()` | — |
-| `unloadTTS()` | `unloadTts()` | No arguments. |
-| `saveAudioToFile(audio, filePath)` | `saveTtsAudioToFile(samples, sampleRate, filePath)` | — |
+| `createTTS(options)` | `initializeTts(instanceId, modelDir, ...)` | JS generates `instanceId`, resolves `modelPath` to `modelDir`; builds noiseScale/noiseScaleW/lengthScale from `options.modelOptions`. Returns `TtsEngine` with bound `instanceId`. |
+| `tts.updateParams(options)` | `updateTtsParams(instanceId, ...)` | JS flattens `options.modelOptions`; only the block for the engine's model type is used. |
+| `tts.generateSpeech(text, options?)` | `generateTts(instanceId, text, options)` | Full-buffer generation; `options`: sid, speed, referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra. |
+| `tts.generateSpeechWithTimestamps(text, options?)` | `generateTtsWithTimestamps(instanceId, text, options)` | Same as above; result includes `subtitles` and `estimated`. |
+| `tts.generateSpeechStream(text, options?, handlers)` | `generateTtsStream(instanceId, text, options)` | Streaming generation (emits chunk events with `instanceId`); same options shape. |
+| `tts.cancelSpeechStream()` | `cancelTtsStream(instanceId)` | — |
+| `tts.startPcmPlayer(sampleRate, channels)` | `startTtsPcmPlayer(instanceId, sampleRate, channels)` | — |
+| `tts.writePcmChunk(samples)` | `writeTtsPcmChunk(instanceId, samples)` | Float PCM in [-1, 1]. |
+| `tts.stopPcmPlayer()` | `stopTtsPcmPlayer(instanceId)` | — |
+| `tts.getSampleRate()` | `getTtsSampleRate(instanceId)` | — |
+| `tts.getNumSpeakers()` | `getTtsNumSpeakers(instanceId)` | — |
+| `tts.destroy()` | `unloadTts(instanceId)` | Mandatory cleanup. |
+| `saveAudioToFile(audio, filePath)` | `saveTtsAudioToFile(samples, sampleRate, filePath)` | Stateless; no instanceId. |
 | `saveAudioToContentUri(...)` | `saveTtsAudioToContentUri(...)` | Android SAF; returns content URI. |
 | `copyContentUriToCache(fileUri, filename)` | `copyTtsContentUriToCache(fileUri, filename)` | — |
 
