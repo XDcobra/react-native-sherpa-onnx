@@ -234,5 +234,16 @@ export {
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
 } from './types';
-export { getWhisperLanguages, WHISPER_LANGUAGES } from './whisperLanguages';
-export type { WhisperLanguage } from './whisperLanguages';
+export {
+  getWhisperLanguages,
+  WHISPER_LANGUAGES,
+  getSenseVoiceLanguages,
+  SENSEVOICE_LANGUAGES,
+  getCanaryLanguages,
+  CANARY_LANGUAGES,
+  getFunasrNanoLanguages,
+  FUNASR_NANO_LANGUAGES,
+  getFunasrMltNanoLanguages,
+  FUNASR_MLT_NANO_LANGUAGES,
+} from './sttModelLanguages';
+export type { SttModelLanguage, WhisperLanguage } from './sttModelLanguages';
