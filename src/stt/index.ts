@@ -228,7 +228,6 @@ export type {
   SttRuntimeConfig,
   SttEngine,
   SttInitResult,
-  TranscriptionResult,
 } from './types';
 export {
   STT_MODEL_TYPES,

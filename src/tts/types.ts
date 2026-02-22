@@ -220,11 +220,6 @@ export interface TtsGenerationOptions {
 }
 
 /**
- * @deprecated Use TtsGenerationOptions. Kept as alias for compatibility.
- */
-export type SynthesisOptions = TtsGenerationOptions;
-
-/**
  * Generated audio data from TTS synthesis.
  *
  * The samples are normalized float values in the range [-1.0, 1.0].

@@ -260,11 +260,6 @@ export interface SttRecognitionResult {
 }
 
 /**
- * @deprecated Use SttRecognitionResult. Kept as alias for compatibility.
- */
-export type TranscriptionResult = SttRecognitionResult;
-
-/**
  * Instance-based STT engine returned by createSTT().
  * Call destroy() when done to free native resources.
  */

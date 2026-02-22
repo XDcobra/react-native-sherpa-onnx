@@ -460,7 +460,6 @@ export type {
   TtsPocketModelOptions,
   TtsUpdateOptions,
   TtsGenerationOptions,
-  SynthesisOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,
