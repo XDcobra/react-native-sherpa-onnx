@@ -141,6 +141,13 @@ await initializeTTS({
 });
 ```
 
+Optional config-level options (OfflineTtsConfig, for text normalization / streaming batch size):
+
+- **ruleFsts** (string) — Path(s) to rule FSTs for TTS (e.g. ITN).
+- **ruleFars** (string) — Path(s) to rule FARs for TTS.
+- **maxNumSentences** (number, default: 1) — Max number of sentences per streaming callback.
+- **silenceScale** (number, default: 0.2) — Silence scale on config level.
+
 ### `updateTtsParams(options)`
 
 Update TTS parameters at runtime without reloading the model manually. Pass `null` to reset a parameter to the model default; omit a field to keep the current value.
@@ -278,7 +285,7 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 
 | JS (public) | TurboModule method | Notes |
 | --- | --- | --- |
-| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?)` | JS resolves `modelPath` to `modelDir`; `modelType`: `'vits'` \| `'matcha'` \| `'kokoro'` \| `'kitten'` \| `'pocket'` \| `'zipvoice'` \| `'auto'`. |
+| `initializeTTS(options)` | `initializeTts(modelDir, modelType, numThreads, debug, noiseScale?, noiseScaleW?, lengthScale?, ruleFsts?, ruleFars?, maxNumSentences?, silenceScale?)` | JS resolves `modelPath` to `modelDir`; optional ruleFsts, ruleFars, maxNumSentences, silenceScale (OfflineTtsConfig). |
 | `updateTtsParams(options)` | `updateTtsParams(noiseScale?, noiseScaleW?, lengthScale?)` | Runtime param updates; pass `null` to reset to default. |
 | `generateSpeech(text, options?)` | `generateTts(text, options)` | Full-buffer generation; `options`: sid, speed, referenceAudio, referenceSampleRate, referenceText, numSteps, silenceScale, extra. |
 | `generateSpeechWithTimestamps(text, options?)` | `generateTtsWithTimestamps(text, options)` | Same as above; result includes `subtitles` and `estimated`. |
