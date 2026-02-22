@@ -284,6 +284,8 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
  * Streaming chunk event payload for TTS generation.
  */
 export interface TtsStreamChunk {
+  /** Instance ID (set by native for multi-instance routing). */
+  instanceId?: string;
   samples: number[];
   sampleRate: number;
   progress: number;
@@ -294,6 +296,8 @@ export interface TtsStreamChunk {
  * Streaming end event payload.
  */
 export interface TtsStreamEnd {
+  /** Instance ID (set by native for multi-instance routing). */
+  instanceId?: string;
   cancelled: boolean;
 }
 
@@ -301,7 +305,51 @@ export interface TtsStreamEnd {
  * Streaming error event payload.
  */
 export interface TtsStreamError {
+  /** Instance ID (set by native for multi-instance routing). */
+  instanceId?: string;
   message: string;
+}
+
+/**
+ * Handlers for TTS streaming generation (chunk, end, error).
+ */
+export interface TtsStreamHandlers {
+  onChunk?: (chunk: TtsStreamChunk) => void;
+  onEnd?: (event: TtsStreamEnd) => void;
+  onError?: (event: TtsStreamError) => void;
+}
+
+/**
+ * Instance-based TTS engine returned by createTTS().
+ * Call destroy() when done to free native resources.
+ */
+export interface TtsEngine {
+  readonly instanceId: string;
+  generateSpeech(
+    text: string,
+    options?: TtsGenerationOptions
+  ): Promise<GeneratedAudio>;
+  generateSpeechWithTimestamps(
+    text: string,
+    options?: TtsGenerationOptions
+  ): Promise<GeneratedAudioWithTimestamps>;
+  generateSpeechStream(
+    text: string,
+    options: TtsGenerationOptions | undefined,
+    handlers: TtsStreamHandlers
+  ): Promise<() => void>;
+  cancelSpeechStream(): Promise<void>;
+  startPcmPlayer(sampleRate: number, channels: number): Promise<void>;
+  writePcmChunk(samples: number[]): Promise<void>;
+  stopPcmPlayer(): Promise<void>;
+  updateParams(options: TtsUpdateOptions): Promise<{
+    success: boolean;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+  }>;
+  getModelInfo(): Promise<TTSModelInfo>;
+  getSampleRate(): Promise<number>;
+  getNumSpeakers(): Promise<number>;
+  destroy(): Promise<void>;
 }
 
 /**

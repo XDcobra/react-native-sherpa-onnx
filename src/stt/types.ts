@@ -265,6 +265,21 @@ export interface SttRecognitionResult {
 export type TranscriptionResult = SttRecognitionResult;
 
 /**
+ * Instance-based STT engine returned by createSTT().
+ * Call destroy() when done to free native resources.
+ */
+export interface SttEngine {
+  readonly instanceId: string;
+  transcribeFile(filePath: string): Promise<SttRecognitionResult>;
+  transcribeSamples(
+    samples: number[],
+    sampleRate: number
+  ): Promise<SttRecognitionResult>;
+  setConfig(options: SttRuntimeConfig): Promise<void>;
+  destroy(): Promise<void>;
+}
+
+/**
  * Runtime config for the offline recognizer (Kotlin OfflineRecognizerConfig).
  * Only fields that can be updated via setConfig are included.
  */
