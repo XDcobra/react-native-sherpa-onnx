@@ -11,6 +11,7 @@ export interface WhisperLanguage {
   name: string;
 }
 
+// https://github.com/ggml-org/whisper.cpp/blob/d682e150908e10caa4c15883c633d7902d385237/src/whisper.cpp#L248
 /** Ordered list of all Whisper-supported language codes and names. */
 export const WHISPER_LANGUAGES: readonly WhisperLanguage[] = [
   { id: 'en', name: 'english' },
