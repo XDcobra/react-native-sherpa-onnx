@@ -16,7 +16,7 @@ This guide covers the STT APIs for offline transcription.
 - [Model Setup](#model-setup)
   - [Supported STT model types](#supported-stt-model-types)
   - [Model-specific options (modelOptions)](#model-specific-options-modeloptions)
-  - [Whisper language codes (getWhisperLanguages)](#whisper-language-codes-getwhisperlanguages)
+  - [Model language lists (sttModelLanguages)](#model-language-lists-sttmodellanguages)
 - [Mapping to Native API](#mapping-to-native-api)
   - [TurboModule](#turbomodule-spec-srcnativesherpaonnxts)
   - [Android (Kotlin)](#android-kotlin)
@@ -208,7 +208,7 @@ Pass `modelOptions` in `createSTT(options)` to set per-model options. Only the b
 
 | Model | Key | Options | Description |
 | --- | --- | --- | --- |
-| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` | Language code (e.g. `"en"`, `"de"`). **Only use valid codes** — invalid values can crash the app. Use [getWhisperLanguages()](#whisper-language-codes-getwhisperlanguages) to get the full list of `{ id, name }`. With `task: 'translate'`, result `text` is **English**. **iOS:** only `language`, `task`, `tailPaddings` are applied; `enableTokenTimestamps` and `enableSegmentTimestamps` are **Android only**. |
+| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` | Language code (e.g. `"en"`, `"de"`). **Only use valid codes** — invalid values can crash the app. Use [getWhisperLanguages()](#model-language-lists-sttmodellanguages) to get the full list of `{ id, name }`. With `task: 'translate'`, result `text` is **English**. **iOS:** only `language`, `task`, `tailPaddings` are applied; `enableTokenTimestamps` and `enableSegmentTimestamps` are **Android only**. |
 | **SenseVoice** | `senseVoice` | `language?`, `useItn?` | Language hint; inverse text normalization (default true on Kotlin). |
 | **Canary** | `canary` | `srcLang?`, `tgtLang?`, `usePnc?` | Source/target language (default `"en"`); use punctuation (default true). |
 | **FunASR Nano** | `funasrNano` | `systemPrompt?`, `userPrompt?`, `maxNewTokens?`, `temperature?`, `topP?`, `seed?`, `language?`, `itn?`, `hotwords?` | LLM/prompt and decoding options; see native defaults in `SttFunAsrNanoModelOptions`. |
@@ -226,16 +226,21 @@ const stt = await createSTT({
 // ... use stt ... then await stt.destroy();
 ```
 
-### Whisper language codes (getWhisperLanguages)
+### Model language lists (sttModelLanguages)
 
-Whisper’s `modelOptions.whisper.language` accepts only specific ISO-style codes (e.g. `"en"`, `"de"`, `"yue"`). Passing an invalid code can cause a native crash. The SDK exposes the full list of supported codes and display names so you can build a dropdown or picker instead of free text.
+Several STT models accept a language hint. Invalid values can cause crashes (e.g. Whisper) or wrong behaviour. The SDK exposes per-model lists of valid codes and English display names in `react-native-sherpa-onnx/stt` so you can build dropdowns instead of free text.
 
-- **`getWhisperLanguages(): readonly WhisperLanguage[]`** — Returns the list of all Whisper-supported languages. Each entry has `id` (the code to pass as `language`) and `name` (e.g. `"english"`, `"german"`).
-- **`WHISPER_LANGUAGES`** — The same list as a constant (readonly array).
+**Shared type:** `SttModelLanguage` is `{ id: string; name: string }`. Use `id` as the value for the model option (`language`, `srcLang`, or `tgtLang`); use `name` (or e.g. `"name (id)"`) in the UI. `WhisperLanguage` is an alias of `SttModelLanguage` (deprecated).
 
-**Type:** `WhisperLanguage` is `{ id: string; name: string }`.
+| Model | Constant | Getter | Use for |
+| --- | --- | --- | --- |
+| **Whisper** | `WHISPER_LANGUAGES` | `getWhisperLanguages()` | `modelOptions.whisper.language`. Ids are ISO-style (e.g. `"en"`, `"de"`). Omit or empty = auto. |
+| **SenseVoice** | `SENSEVOICE_LANGUAGES` | `getSenseVoiceLanguages()` | `modelOptions.senseVoice.language`. Ids: `auto`, `zh`, `en`, `yue`, `ja`, `ko`. |
+| **Canary** | `CANARY_LANGUAGES` | `getCanaryLanguages()` | `modelOptions.canary.srcLang`, `modelOptions.canary.tgtLang`. Ids: `en`, `es`, `de`, `fr`. |
+| **FunASR Nano (2512)** | `FUNASR_NANO_LANGUAGES` | `getFunasrNanoLanguages()` | `modelOptions.funasrNano.language`. Ids are Chinese labels: `中文`, `英文`, `日文`. |
+| **FunASR MLT-Nano (2512)** | `FUNASR_MLT_NANO_LANGUAGES` | `getFunasrMltNanoLanguages()` | `modelOptions.funasrNano.language`. Same id style; multilingual list (31 languages). |
 
-Example (e.g. for a language dropdown):
+Example (Whisper dropdown):
 
 ```ts
 import { getWhisperLanguages } from 'react-native-sherpa-onnx/stt';
@@ -245,7 +250,7 @@ const languages = getWhisperLanguages();
 // Use id as modelOptions.whisper.language; show name (or "name (id)") in the UI.
 ```
 
-Use an empty string or omit `language` for auto-detection.
+For SenseVoice, Canary, or FunASR Nano, use the corresponding getter and pass `id` into the matching option (`senseVoice.language`, `canary.srcLang`/`tgtLang`, or `funasrNano.language`). FunASR Nano ids are Chinese strings (e.g. `"中文"`) as required by the model API.
 
 ## Mapping to Native API
 
