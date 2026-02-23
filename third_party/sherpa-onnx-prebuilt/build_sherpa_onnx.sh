@@ -101,24 +101,36 @@ if [ -n "$RELEASE_TAG" ]; then
     if [ -z "$REPO_SLUG" ]; then
         REPO_SLUG=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]([^/]+/[^/]+)(\.git)?$|\1|' || true)
     fi
-    if [ -n "$REPO_SLUG" ]; then
-        ORT_URL="https://github.com/${REPO_SLUG}/releases/download/${RELEASE_TAG}/onnxruntime-android-qnn.zip"
-        ORT_EXTRACT="$SHERPA_SRC/ort-prebuilt-qnn-$$"
-        if curl -sSfL -o "$SHERPA_SRC/ort-prebuilt-qnn.zip" "$ORT_URL"; then
-            mkdir -p "$ORT_EXTRACT"
-            if unzip -o -q "$SHERPA_SRC/ort-prebuilt-qnn.zip" -d "$ORT_EXTRACT"; then
-                rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
-                ORT_PREBUILT_ROOT="$ORT_EXTRACT"
-                echo "Using ONNX Runtime from release $RELEASE_TAG"
-            else
-                rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
-                rm -rf "$ORT_EXTRACT"
-            fi
-        else
-            rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
-            echo "Release $RELEASE_TAG not found or download failed; sherpa-onnx will use default onnxruntime-libs."
-        fi
+    if [ -z "$REPO_SLUG" ]; then
+        echo "Error: Cannot determine GitHub repo (set GITHUB_REPOSITORY or run from a git clone with remote origin). Required to download ONNX Runtime Android+QNN release $RELEASE_TAG."
+        exit 1
     fi
+    ORT_URL="https://github.com/${REPO_SLUG}/releases/download/${RELEASE_TAG}/onnxruntime-android-qnn.zip"
+    ORT_EXTRACT="$SHERPA_SRC/ort-prebuilt-qnn-$$"
+    if ! curl -sSfL -o "$SHERPA_SRC/ort-prebuilt-qnn.zip" "$ORT_URL"; then
+        rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+        echo "Error: Failed to download ONNX Runtime Android+QNN release."
+        echo "  Tag: $RELEASE_TAG"
+        echo "  URL: $ORT_URL"
+        echo "  Ensure the release exists (run the Build ONNX Runtime (Android + QNN) workflow first) or check ANDROID_RELEASE_TAG / VERSIONS."
+        exit 1
+    fi
+    mkdir -p "$ORT_EXTRACT"
+    if ! unzip -o -q "$SHERPA_SRC/ort-prebuilt-qnn.zip" -d "$ORT_EXTRACT"; then
+        rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+        rm -rf "$ORT_EXTRACT"
+        echo "Error: Failed to extract onnxruntime-android-qnn.zip (corrupt or unexpected layout)."
+        exit 1
+    fi
+    rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+    ORT_PREBUILT_ROOT="$ORT_EXTRACT"
+    echo "Using ONNX Runtime from release $RELEASE_TAG"
+fi
+
+# With --qnn we must use our ORT+QNN prebuilt; no fallback to default onnxruntime-libs
+if [ "$ENABLE_QNN" = ON ] && [ -z "$ORT_PREBUILT_ROOT" ]; then
+    echo "Error: QNN build requires the ONNX Runtime Android+QNN release. Set third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG (or VERSIONS) and ensure the release exists at the repo's GitHub Releases."
+    exit 1
 fi
 
 # ABI -> build script name -> build dir (relative to sherpa-onnx)

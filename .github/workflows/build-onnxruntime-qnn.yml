@@ -3,7 +3,7 @@
 # VERSIONS is still used for ONNXRUNTIME_VERSION, QNN_SDK_VERSION and the build. Tag should match versions, e.g.:
 #   ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>
 
-name: Build ONNX Runtime (Android + QNN)
+name: Prebuilt - ONNX Runtime (Android + QNN)
 
 on:
   workflow_dispatch:

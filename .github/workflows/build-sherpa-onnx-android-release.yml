@@ -3,18 +3,18 @@
 # Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ with sherpa-onnx + onnxruntime .so,
 # so extraction into android/src/main/jniLibs/ merges correctly.
 
-name: Build Sherpa-onnx (Android) Release
+name: Prebuilt - Sherpa-onnx (Android) Release
 
 on:
   workflow_dispatch:
   push:
-    #branches:
-    #  - main
-    #paths:
-    #  - 'third_party/sherpa-onnx-prebuilt/**'
-    #  - 'third_party/sherpa-onnx/**'
-    #  - 'third_party/onnxruntime_prebuilt/VERSIONS'
-    #  - '.github/workflows/build-sherpa-onnx-android-release.yml'
+    branches:
+      - main
+    paths:
+      - 'third_party/sherpa-onnx-prebuilt/**'
+      - 'third_party/sherpa-onnx/**'
+      - 'third_party/onnxruntime_prebuilt/VERSIONS'
+      - '.github/workflows/build-sherpa-onnx-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

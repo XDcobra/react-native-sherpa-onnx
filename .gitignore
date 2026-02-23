@@ -129,15 +129,17 @@ third_party/onnxruntime_prebuilt/*
 !third_party/onnxruntime_prebuilt/README.md
 !third_party/onnxruntime_prebuilt/build_onnxruntime.sh
 !third_party/onnxruntime_prebuilt/VERSIONS
+!third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default
 third_party/ffmpeg_prebuilt/*
-# but allow the README, build scripts to be tracked
+# but allow the README, build scripts and release tag to be tracked
 !third_party/ffmpeg_prebuilt/README.md
 !third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
 !third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
 !third_party/ffmpeg_prebuilt/build_ffmpeg.sh
+!third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
