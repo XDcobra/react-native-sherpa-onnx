@@ -108,7 +108,7 @@ example/models/
 android/src/main/jniLibs/*
 
 # sherpa-onnx source submodule at repo root (not nested include/ dirs)
-/sherpa-onnx/
+/third_party/sherpa-onnx/
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")

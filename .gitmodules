@@ -1,5 +1,5 @@
-[submodule "sherpa-onnx"]
-	path = sherpa-onnx
+[submodule "third_party/sherpa-onnx"]
+	path = third_party/sherpa-onnx
 	url = https://github.com/k2-fsa/sherpa-onnx
 
 [submodule "third_party/ffmpeg"]

@@ -25,6 +25,8 @@ if (!sherpaOnnxVersion) {
   }
 }
 
+def sherpaOnnxClassesDir = file("${buildDir}/sherpa-onnx-classes")
+
 buildscript {
   ext.SherpaOnnx = [
     kotlinVersion: "2.0.21",
@@ -72,13 +74,8 @@ android {
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 
-  // Include extracted sherpa-onnx .so in jniLibs ONLY for standalone AAR builds.
-  // When building as part of an app (e.g. example app), the sherpa-onnx .so files
-  // are provided transitively via the `implementation` dependency — adding them
-  // here too would cause duplicate .so errors at :app:packageDebug.
-  if (isStandaloneAarBuild) {
-    sourceSets.main.jniLibs.srcDirs += file("${buildDir}/extracted_native_libs/jni")
-  }
+  // sherpa-onnx native .so files are provided from src/main/jniLibs/ (populated by
+  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js or shipped in npm package).
 
   // Codegen Java output: always use the flat path. For app builds RNGP writes here directly;
   // for standalone AAR builds the codegen task normalises the nested output to this path.
@@ -96,9 +93,7 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        arguments "-DANDROID_STL=c++_shared",
-                  // Path to sherpa-onnx native libs extracted from AAR (includes libsherpa-onnx-c-api.so for Zipvoice C-API)
-                  "-DSHERPA_ONNX_EXTRACTED_LIBS=${buildDir}/extracted_native_libs/jni".toString()
+        arguments "-DANDROID_STL=c++_shared"
       }
     }
 
@@ -139,36 +134,35 @@ android {
     jvmTarget = '17'
   }
 
-  // The build expects prebuilt .so files to exist under this module's
-  // `src/main/jniLibs/<abi>/` directory. Use the helper script
-  // `third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js` to install
-  // the required .so files before running Gradle.
+  // The build expects prebuilt .so files under src/main/jniLibs/<abi>/.
+  // Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and
+  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js (or use npm package with prebuilts).
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+  def requiredFfmpegSoFiles = [
+    'libavcodec.so', 'libavformat.so', 'libavutil.so', 'libswresample.so', 'libavfilter.so', 'libshine.so'
+  ]
+  def requiredSherpaOnnxSoFiles = [
+    'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
+  ]
 
   task checkJniLibs {
     doLast {
-      // Explicitly require FFmpeg shared libraries to be present for each ABI.
-      def requiredSoFiles = [
-        'libavcodec.so',
-        'libavformat.so',
-        'libavutil.so',
-        'libswresample.so',
-        'libavfilter.so',
-        // libshine is needed when FFmpeg was built with libshine (MP3 encoder)
-        'libshine.so'
-      ]
-
       requiredAbis.each { abi ->
         def dir = file("${projectDir}/src/main/jniLibs/${abi}")
         if (!dir.exists()) {
-          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure the sherpa-onnx AAR provides FFmpeg .so files.")
+          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js")
         }
-
-        requiredSoFiles.each { soName ->
+        requiredFfmpegSoFiles.each { soName ->
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
-            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure the sherpa-onnx AAR provides it.")
+            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js")
+          }
+        }
+        requiredSherpaOnnxSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required sherpa-onnx library '${soName}' for ABI ${abi}. Run third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js")
           }
         }
       }
@@ -196,66 +190,39 @@ dependencies {
   implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
-  // sherpa-onnx prebuilt AAR from JitPack
-  // This includes the native .so libraries for all ABIs
-  implementation "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
+  // sherpa-onnx Java/Kotlin classes only (extracted from AAR); native .so are from prebuilts in jniLibs.
+  implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar')
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
 }
 
-// Create resolvable configuration for extraction
+// Extract Java/Kotlin classes from sherpa-onnx AAR (native .so built separately with QNN support)
 configurations {
-  extractNativeLibs {
+  sherpaOnnxClasses {
     canBeResolved = true
     canBeConsumed = false
   }
 }
-
 dependencies {
-  extractNativeLibs "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
+  sherpaOnnxClasses "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
 }
-
-// Extract native libraries from AAR before CMake runs
-def extractNativeLibs = tasks.register("extractNativeLibs") {
+def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
+  outputs.dir sherpaOnnxClassesDir
   doLast {
-    def extractedLibsDir = file("${buildDir}/extracted_native_libs")
-    extractedLibsDir.mkdirs()
-    
-    def resolvedConfig = configurations.extractNativeLibs.resolvedConfiguration
+    sherpaOnnxClassesDir.mkdirs()
     def foundAar = false
-    
-    resolvedConfig.resolvedArtifacts.each { artifact ->
-      def aarFile = artifact.file
-      println "Checking artifact: ${aarFile.name} (exists: ${aarFile.exists()})"
-      
-      if (aarFile.exists() && (aarFile.name.endsWith(".aar") || aarFile.name.endsWith(".jar"))) {
+    configurations.sherpaOnnxClasses.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+      if (artifact.file.name.endsWith(".aar")) {
         foundAar = true
-        println "Extracting native libraries from: ${aarFile.name}"
-        
         copy {
-          from(zipTree(aarFile)) {
-            include "jni/**/*.so"
-          }
-          into extractedLibsDir
-        }
-        
-        // Verify extraction succeeded
-        def extractedFiles = fileTree(extractedLibsDir).matching { include "**/*.so" }
-        if (extractedFiles.isEmpty()) {
-          println "WARNING: No .so files extracted from ${aarFile.name}"
-          println "Contents of AAR:"
-          zipTree(aarFile).each { entry ->
-            if (entry.name.contains("jni") || entry.name.endsWith(".so")) {
-              println "  ${entry.name}"
-            }
-          }
+          from(zipTree(artifact.file)) { include "classes.jar" }
+          into sherpaOnnxClassesDir
         }
       }
     }
-    
     if (!foundAar) {
-      throw new RuntimeException("No AAR file found for sherpa-onnx. Check if the dependency is correctly resolved.")
+      throw new RuntimeException("No sherpa-onnx AAR found. Check sherpaOnnxVersion and JitPack resolution.")
     }
   }
 }
@@ -265,19 +232,14 @@ apply from: file("${project.projectDir}/codegen.gradle")
 
 afterEvaluate {
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
-    dependsOn extractNativeLibs
+    dependsOn extractSherpaOnnxClasses
   }
-
-  tasks.matching { it.name == "mergeReleaseNativeLibs" }.configureEach {
-    dependsOn extractNativeLibs
-  }
-
-  preBuild.dependsOn extractNativeLibs
 
   // With includesGeneratedCode=false, codegen is always run by our custom task (not RNGP).
   // Kotlin compile must depend on it for both standalone AAR and app-dependency builds.
   def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
   tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
+    dependsOn extractSherpaOnnxClasses
     dependsOn tasks.named('generateCodegenSpec')
     inputs.dir(codegenJavaDir)
   }

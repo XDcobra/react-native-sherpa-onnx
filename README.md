@@ -103,6 +103,21 @@ YARN_NODE_LINKER=node-modules yarn install
 
 No additional setup required. The library automatically handles native dependencies via Gradle.
 
+#### QNN (Qualcomm NPU) Acceleration
+
+The Android build includes optional **Qualcomm NPU (QNN)** support for `arm64-v8a`. On devices with a supported Snapdragon SoC, inference can use the NPU for acceleration when the QNN runtime libraries are present.
+
+- **Without QNN libraries:** The SDK runs normally using CPU (and NNAPI where available). No extra steps required.
+- **With QNN libraries:** To enable NPU acceleration:
+  1. Download the [Qualcomm AI Engine Direct SDK](https://qpm.qualcomm.com/) (QNN SDK) and accept its license terms.
+  2. Copy the required runtime libraries into your app’s `jniLibs/arm64-v8a/` (e.g. under `android/app/src/main/jniLibs/arm64-v8a/`), for example:
+     - `libQnnHtp.so`
+     - `libQnnHtpV75Stub.so` (or the stub matching your chipset)
+     - `libQnnSystem.so`
+  3. Rebuild your app. ONNX Runtime will use the QNN execution provider when these libraries are available; otherwise it falls back to CPU automatically.
+
+The QNN SDK license does not allow redistributing these libraries in public repositories or npm packages, so they must be obtained and added by the app developer.
+
 ### iOS
 
 The sherpa-onnx XCFramework is **not included in the repository or npm package** due to its size (~80MB), but **no manual action is required**! The framework is automatically downloaded during `pod install`.

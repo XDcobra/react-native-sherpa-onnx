@@ -362,6 +362,84 @@ function copyFfmpegPrebuilts() {
 }
 
 /**
+ * Step 4: Copy sherpa-onnx prebuilt .so files to android/src/main/jniLibs/
+ *
+ * Prebuilts must be built first (third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh).
+ * Non-fatal: if prebuilts are not built yet, warns and continues.
+ * npm consumers get prebuilts from the package; devs build and copy.
+ */
+function copySherpaOnnxPrebuilts() {
+  log('Step 4: Copying sherpa-onnx prebuilt .so files...', 'info');
+
+  const prebuiltRoot = path.join(
+    __dirname,
+    '..',
+    'third_party',
+    'sherpa-onnx-prebuilt',
+    'android'
+  );
+  const jniLibsRoot = path.join(
+    __dirname,
+    '..',
+    'android',
+    'src',
+    'main',
+    'jniLibs'
+  );
+
+  const abis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'];
+  const hasPrebuilts = abis.some((abi) => {
+    const libDir = path.join(prebuiltRoot, abi, 'lib');
+    return fs.existsSync(libDir);
+  });
+
+  if (!hasPrebuilts) {
+    log('sherpa-onnx prebuilts not found at ' + prebuiltRoot, 'warning');
+    log(
+      'Build them with: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh',
+      'warning'
+    );
+    log(
+      'Then run: node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js',
+      'warning'
+    );
+    return true; // non-fatal
+  }
+
+  const sampleSo = path.join(jniLibsRoot, 'arm64-v8a', 'libsherpa-onnx-jni.so');
+  if (fs.existsSync(sampleSo)) {
+    log('sherpa-onnx .so files already present in jniLibs/', 'success');
+    return true;
+  }
+
+  try {
+    const copyScript = path.join(
+      __dirname,
+      '..',
+      'third_party',
+      'sherpa-onnx-prebuilt',
+      'copy_prebuilts_to_sdk.js'
+    );
+    const copyResult = runCommand(`node "${copyScript}"`, {
+      allowFailure: true,
+    });
+
+    if (copyResult.ok) {
+      log('sherpa-onnx prebuilt .so files copied to jniLibs/', 'success');
+    } else {
+      log(
+        'Warning: sherpa-onnx prebuilt copy had issues; check output above',
+        'warning'
+      );
+    }
+    return true;
+  } catch {
+    log('Warning: sherpa-onnx prebuilt copy failed (non-fatal)', 'warning');
+    return true; // non-fatal
+  }
+}
+
+/**
  * Main setup function
  */
 function setup() {
@@ -389,6 +467,11 @@ function setup() {
 
   // Step 3: Copy FFmpeg prebuilt .so to jniLibs (non-fatal if prebuilts not built yet)
   copyFfmpegPrebuilts();
+
+  console.log('');
+
+  // Step 4: Copy sherpa-onnx prebuilt .so to jniLibs (non-fatal if prebuilts not built yet)
+  copySherpaOnnxPrebuilts();
 
   console.log('');
   if (success) {

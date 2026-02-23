@@ -63,23 +63,27 @@ add_library(sherpaonnx SHARED
     ${SOURCES}
 )
 
-# sherpa-onnx C-API shared library (from AAR, extracted by Gradle extractNativeLibs task).
-# Used by Zipvoice TTS JNI wrapper; the Kotlin API does not expose Zipvoice.
-if(SHERPA_ONNX_EXTRACTED_LIBS)
-    set(SHERPA_ONNX_C_API_SO "${SHERPA_ONNX_EXTRACTED_LIBS}/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
-    if(EXISTS "${SHERPA_ONNX_C_API_SO}")
+# sherpa-onnx C-API shared library (from prebuilts or jniLibs). Used by Zipvoice TTS JNI wrapper.
+set(SHERPA_ONNX_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/sherpa-onnx-prebuilt/android")
+set(SHERPA_ONNX_ABI_LIB "${SHERPA_ONNX_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+if(EXISTS "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
+    add_library(sherpa-onnx-c-api SHARED IMPORTED)
+    set_target_properties(sherpa-onnx-c-api PROPERTIES
+        IMPORTED_LOCATION "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so"
+    )
+    message(STATUS "sherpa-onnx C-API found: ${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
+else()
+    set(JNILIBS_C_API "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
+    if(EXISTS "${JNILIBS_C_API}")
         add_library(sherpa-onnx-c-api SHARED IMPORTED)
         set_target_properties(sherpa-onnx-c-api PROPERTIES
-            IMPORTED_LOCATION "${SHERPA_ONNX_C_API_SO}"
+            IMPORTED_LOCATION "${JNILIBS_C_API}"
         )
-        message(STATUS "sherpa-onnx C-API found: ${SHERPA_ONNX_C_API_SO}")
+        message(STATUS "sherpa-onnx C-API found (jniLibs): ${JNILIBS_C_API}")
     else()
-        message(WARNING "sherpa-onnx C-API not found at ${SHERPA_ONNX_C_API_SO}. "
-                        "Zipvoice TTS will not be available. "
-                        "Ensure extractNativeLibs ran before CMake configure.")
+        message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
+                        "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
     endif()
-else()
-    message(WARNING "SHERPA_ONNX_EXTRACTED_LIBS not set. Zipvoice TTS will not be available.")
 endif()
 
 # Include directories (must be after add_library)

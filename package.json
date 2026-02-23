@@ -61,6 +61,7 @@
     "scripts/**/*",
     "cpp",
     "third_party/ffmpeg_prebuilt",
+    "third_party/sherpa-onnx-prebuilt",
     "third_party/libarchive",
     "*.podspec",
     "react-native.config.js",
@@ -74,8 +75,8 @@
     "!**/__fixtures__",
     "!**/__mocks__",
     "!**/.*",
-    "!./sherpa-onnx",
-    "!./sherpa-onnx/**",
+    "!./third_party/sherpa-onnx",
+    "!./third_party/sherpa-onnx/**",
     "!./third_party/ffmpeg",
     "!./third_party/ffmpeg/**",
     "!ios/Frameworks/.gitkeep"

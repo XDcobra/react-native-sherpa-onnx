@@ -12,6 +12,7 @@ const path = require('path');
 const SOURCE_DIR = path.join(
   __dirname,
   '..',
+  'third_party',
   'sherpa-onnx',
   'sherpa-onnx',
   'c-api'
