@@ -69,22 +69,28 @@ internal class SherpaOnnxTtsHelper(
     var ttsStreamThread: Thread? = null,
     var ttsPcmTrack: AudioTrack? = null
   ) {
-    fun hasEngine(): Boolean = tts != null || zipvoiceTts != null
-    val isZipvoice: Boolean get() = zipvoiceTts != null
+    private val lock = Any()
+
+    fun hasEngine(): Boolean = synchronized(lock) { tts != null || zipvoiceTts != null }
+    val isZipvoice: Boolean get() = synchronized(lock) { zipvoiceTts != null }
     fun releaseEngines() {
-      tts?.release()
-      tts = null
-      zipvoiceTts?.release()
-      zipvoiceTts = null
-      ttsInitState = null
+      synchronized(lock) {
+        tts?.release()
+        tts = null
+        zipvoiceTts?.release()
+        zipvoiceTts = null
+        ttsInitState = null
+      }
     }
     fun stopPcmPlayer() {
-      ttsPcmTrack?.apply {
-        try { stop() } catch (_: IllegalStateException) {}
-        flush()
-        release()
+      synchronized(lock) {
+        ttsPcmTrack?.apply {
+          try { stop() } catch (_: IllegalStateException) {}
+          flush()
+          release()
+        }
+        ttsPcmTrack = null
       }
-      ttsPcmTrack = null
     }
   }
 
@@ -182,15 +188,14 @@ internal class SherpaOnnxTtsHelper(
           am.getMemoryInfo(memInfo)
           val availMb = memInfo.availMem / (1024 * 1024)
           if (memInfo.availMem < 800L * 1024 * 1024) {
-            val msg = "Not enough free memory to load the full Zipvoice model (available: ${availMb} MB). Use the int8 distill variant (sherpa-onnx-zipvoice-distill-int8-zh-en-emilia) or close other apps."
+            val msg = "Not enough free memory to load the Zipvoice model (available: ${availMb} MB). Close other apps to free memory or use a smaller Zipvoice model that includes all required components (encoder, decoder, and vocoder)."
             Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
             rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
             return@init
           }
         }
-        // Reduce memory pressure: GC before heavy allocation and cap threads to limit peak RAM.
+        // Hint GC before heavy allocation to reduce memory pressure; zipvoice always uses 1 thread to limit peak RAM.
         System.gc()
-        Runtime.getRuntime().gc()
         if (am != null) {
           val memInfoBefore = ActivityManager.MemoryInfo()
           am.getMemoryInfo(memInfoBefore)
