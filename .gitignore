@@ -124,7 +124,12 @@ third_party/shine_prebuilt/*
 !third_party/shine_prebuilt/build_shine_msys2.sh
 !third_party/shine_prebuilt/build_shine.sh
 
-# ffmpeg build artifacts (when building prebuilts locally)
+# ONNX Runtime prebuilt build artifacts (when building prebuilts locally)
+third_party/onnxruntime_prebuilt/*
+!third_party/onnxruntime_prebuilt/README.md
+!third_party/onnxruntime_prebuilt/build_onnxruntime.sh
+
+# FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default
 third_party/ffmpeg_prebuilt/*
 # but allow the README, build scripts to be tracked
