@@ -79,16 +79,15 @@ jobs:
           fi
           unzip -q -o qnn-archive
           rm -f qnn-archive
-          TOP=$(find . -maxdepth 1 -type d ! -name . | head -1)
-          if [ -n "$TOP" ] && [ -f "$TOP/include/QNN/QnnInterface.h" ] 2>/dev/null; then
-            QNN_ROOT="$(pwd)/$TOP"
-          elif [ -f "include/QNN/QnnInterface.h" ] 2>/dev/null; then
-            QNN_ROOT="$(pwd)"
-          else
+          # Qualcomm zip may be e.g. qairt/2.43.1.260218/include/QNN/QnnInterface.h – find SDK root from file path
+          QNN_IFACE=$(find . -path '*/include/QNN/QnnInterface.h' -type f 2>/dev/null | head -1)
+          if [ -z "$QNN_IFACE" ]; then
             echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h"
             find . -name "QnnInterface.h" 2>/dev/null || true
             exit 1
           fi
+          QNN_REL=$(dirname "$(dirname "$(dirname "$QNN_IFACE")")")
+          QNN_ROOT="$(cd "$QNN_REL" && pwd)"
           echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
           echo "QNN SDK root: $QNN_ROOT"
 
