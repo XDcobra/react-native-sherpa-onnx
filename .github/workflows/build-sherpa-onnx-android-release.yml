@@ -8,13 +8,13 @@ name: Prebuilt - Sherpa-onnx (Android) Release
 on:
   workflow_dispatch:
   push:
-    #branches:
-    #  - main
-    #paths:
-    #  - 'third_party/sherpa-onnx-prebuilt/**'
-    #  - 'third_party/sherpa-onnx/**'
-    #  - 'third_party/onnxruntime_prebuilt/VERSIONS'
-    #  - '.github/workflows/build-sherpa-onnx-android-release.yml'
+    branches:
+      - main
+    paths:
+      - 'third_party/sherpa-onnx-prebuilt/**'
+      - 'third_party/sherpa-onnx/**'
+      - 'third_party/onnxruntime_prebuilt/VERSIONS'
+      - '.github/workflows/build-sherpa-onnx-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
