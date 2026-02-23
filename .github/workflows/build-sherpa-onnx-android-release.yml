@@ -1,0 +1,162 @@
+# Build sherpa-onnx for Android (all ABIs, with QNN) and publish as GitHub Release.
+# Release tag is read from third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.
+# Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ with sherpa-onnx + onnxruntime .so,
+# so extraction into android/src/main/jniLibs/ merges correctly.
+
+name: Build Sherpa-onnx (Android) Release
+
+on:
+  workflow_dispatch:
+  push:
+    #branches:
+    #  - main
+    #paths:
+    #  - 'third_party/sherpa-onnx-prebuilt/**'
+    #  - 'third_party/sherpa-onnx/**'
+    #  - 'third_party/onnxruntime_prebuilt/VERSIONS'
+    #  - '.github/workflows/build-sherpa-onnx-android-release.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-sherpa-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. sherpa-onnx-android-v1)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG"
+
+      - name: Read VERSIONS (QNN SDK)
+        id: versions
+        run: |
+          set -a
+          source third_party/onnxruntime_prebuilt/VERSIONS
+          set +a
+          echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Get sherpa-onnx submodule version
+        id: submodules
+        run: |
+          echo "sherpa=$(git -C third_party/sherpa-onnx rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache sherpa-onnx prebuilts
+        uses: actions/cache@v4
+        id: sherpa-cache
+        with:
+          path: third_party/sherpa-onnx-prebuilt/android
+          key: sherpa-android-prebuilt-qnn-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
+
+      - name: Download and extract QNN SDK
+        if: steps.sherpa-cache.outputs.cache-hit != 'true'
+        id: qnn
+        run: |
+          QNN_VER="${{ steps.versions.outputs.QNN_SDK_VERSION }}"
+          QNN_URL="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${QNN_VER}/v${QNN_VER}.zip"
+          mkdir -p qnn-sdk
+          cd qnn-sdk
+          echo "Downloading QNN SDK ${QNN_VER} from Qualcomm..."
+          if ! curl -sSfL -o qnn-archive "$QNN_URL"; then
+            echo "::error::QNN SDK download failed."
+            exit 1
+          fi
+          unzip -q -o qnn-archive
+          rm -f qnn-archive
+          QNN_IFACE=$(find . -path '*/include/QNN/QnnInterface.h' -type f 2>/dev/null | head -1)
+          if [ -z "$QNN_IFACE" ]; then
+            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h"
+            exit 1
+          fi
+          QNN_REL=$(dirname "$(dirname "$(dirname "$QNN_IFACE")")")
+          QNN_ROOT="$(cd "$QNN_REL" && pwd)"
+          echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Build sherpa-onnx (Android, all ABIs, with QNN)
+        if: steps.sherpa-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/sherpa-onnx-prebuilt
+          chmod +x build_sherpa_onnx.sh
+          ./build_sherpa_onnx.sh --qnn
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
+
+      - name: Package jniLibs layout (sherpa-onnx + onnxruntime)
+        run: |
+          LAYOUT=sherpa-onnx-android-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libonnxruntime.so"
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          for abi in $ABIS; do
+            mkdir -p "$LAYOUT/$abi"
+            for so in $SHERPA_SO; do
+              SRC="$PREBUILT/$abi/lib/$so"
+              if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; fi
+            done
+          done
+          echo "Layout contents:"
+          find "$LAYOUT" -type f -name '*.so' | head -30
+
+      - name: Create release zip
+        run: |
+          cd sherpa-onnx-android-layout
+          zip -r ../sherpa-onnx-android.zip .
+          cd ..
+          ls -la sherpa-onnx-android.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
+          body: |
+            Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
+            Zip layout: extract into `android/src/main/jniLibs/` so that `arm64-v8a/`, `armeabi-v7a/`, etc. contain the .so files.
+            Used by Gradle when native libs are missing (download from this release).
+          files: sherpa-onnx-android.zip
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Sherpa-onnx Android release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Asset \`sherpa-onnx-android.zip\` contains \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` with sherpa-onnx and onnxruntime .so. Extract into \`android/src/main/jniLibs/\`." >> $GITHUB_STEP_SUMMARY

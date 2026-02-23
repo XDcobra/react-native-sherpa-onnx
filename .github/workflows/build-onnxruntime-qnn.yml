@@ -1,6 +1,6 @@
 # Build ONNX Runtime for Android with QNN support and publish as GitHub Release.
-# Versions are read from third_party/onnxruntime_prebuilt/VERSIONS.
-# QNN SDK is downloaded from Qualcomm (public URL). Release tag format:
+# Release tag is read from third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG (same pattern as FFmpeg/sherpa-onnx).
+# VERSIONS is still used for ONNXRUNTIME_VERSION, QNN_SDK_VERSION and the build. Tag should match versions, e.g.:
 #   ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>
 
 name: Build ONNX Runtime (Android + QNN)
@@ -32,10 +32,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Read VERSIONS
+      - name: Read ANDROID_RELEASE_TAG and VERSIONS
         id: versions
         run: |
+          TAG_FILE=third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
           VERSIONS_FILE=third_party/onnxruntime_prebuilt/VERSIONS
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.17.1-qnn2.43.1.260218)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
           if [ ! -f "$VERSIONS_FILE" ]; then
             echo "::error::Missing $VERSIONS_FILE"
             exit 1
@@ -45,8 +56,7 @@ jobs:
           set +a
           echo "ONNXRUNTIME_VERSION=$ONNXRUNTIME_VERSION" >> $GITHUB_OUTPUT
           echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> $GITHUB_OUTPUT
-          RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
-          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "ort_commit=$(git -C third_party/onnxruntime rev-parse HEAD 2>/dev/null || echo 'none')" >> $GITHUB_OUTPUT
           echo "Release tag: $RELEASE_TAG"
 
       - name: Set up JDK
@@ -65,8 +75,15 @@ jobs:
           ndk-version: r29
           add-to-path: true
 
+      - name: Cache QNN SDK
+        uses: actions/cache@v4
+        id: qnn-cache
+        with:
+          path: qnn-sdk
+          key: qnn-sdk-${{ steps.versions.outputs.QNN_SDK_VERSION }}
+
       - name: Download and extract QNN SDK
-        id: qnn
+        if: steps.qnn-cache.outputs.cache-hit != 'true'
         run: |
           QNN_VER="${{ steps.versions.outputs.QNN_SDK_VERSION }}"
           QNN_URL="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${QNN_VER}/v${QNN_VER}.zip"
@@ -79,10 +96,14 @@ jobs:
           fi
           unzip -q -o qnn-archive
           rm -f qnn-archive
-          # Qualcomm zip may be e.g. qairt/2.43.1.260218/include/QNN/QnnInterface.h – find SDK root from file path
+
+      - name: Get QNN SDK root
+        id: qnn
+        run: |
+          cd qnn-sdk
           QNN_IFACE=$(find . -path '*/include/QNN/QnnInterface.h' -type f 2>/dev/null | head -1)
           if [ -z "$QNN_IFACE" ]; then
-            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h"
+            echo "::error::QNN SDK must contain include/QNN/QnnInterface.h"
             find . -name "QnnInterface.h" 2>/dev/null || true
             exit 1
           fi
@@ -91,7 +112,15 @@ jobs:
           echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
           echo "QNN SDK root: $QNN_ROOT"
 
+      - name: Cache ONNX Runtime build output
+        uses: actions/cache@v4
+        id: ort-cache
+        with:
+          path: third_party/onnxruntime_prebuilt/android
+          key: ort-android-qnn-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
+
       - name: Build ONNX Runtime with QNN
+        if: steps.ort-cache.outputs.cache-hit != 'true'
         run: |
           cd third_party/onnxruntime_prebuilt
           chmod +x build_onnxruntime.sh
