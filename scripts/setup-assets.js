@@ -396,7 +396,7 @@ function copySherpaOnnxPrebuilts() {
   if (!hasPrebuilts) {
     log('sherpa-onnx prebuilts not found at ' + prebuiltRoot, 'warning');
     log(
-      'Build them with: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh',
+      'Build them with: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh (optional: --qnn for Qualcomm NPU; requires QNN_SDK_ROOT)',
       'warning'
     );
     log(

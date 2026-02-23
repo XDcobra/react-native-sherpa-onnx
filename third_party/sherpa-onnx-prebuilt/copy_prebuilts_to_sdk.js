@@ -67,7 +67,7 @@ function main() {
 
   if (!any) {
     console.error(
-      'No .so files copied. Build sherpa-onnx first: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh'
+      'No .so files copied. Build sherpa-onnx first: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh (see README.md for --qnn)'
     );
     process.exit(2);
   }
