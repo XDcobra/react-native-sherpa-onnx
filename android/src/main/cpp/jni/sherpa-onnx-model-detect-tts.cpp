@@ -86,12 +86,8 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
     bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
-    // Full zipvoice: encoder + decoder + vocoder. Distill: encoder + decoder + lexicon + tokens (no vocoder).
-    bool hasZipvoiceFull = !encoder.empty() && !decoder.empty() && !vocoder.empty();
-    bool hasZipvoiceDistill = !encoder.empty() && !decoder.empty() &&
-                             !lexiconFile.empty() && FileExists(lexiconFile) &&
-                             !tokensFile.empty() && FileExists(tokensFile);
-    bool hasZipvoice = hasZipvoiceFull || hasZipvoiceDistill;
+    // Zipvoice requires encoder + decoder + vocoder (full model). Distill variants (no vocoder) are not supported by the native layer.
+    bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
                      !textConditioner.empty() && !vocabJsonFile.empty() && FileExists(vocabJsonFile) &&
                      !tokenScoresJsonFile.empty() && FileExists(tokenScoresJsonFile);
