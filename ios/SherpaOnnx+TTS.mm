@@ -18,23 +18,23 @@ struct TtsInstanceState {
     std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
     std::atomic<bool> streamRunning{false};
     std::atomic<bool> streamCancelled{false};
-    AVAudioEngine *engine = nil;
-    AVAudioPlayerNode *player = nil;
-    AVAudioFormat *format = nil;
-    NSString *modelDir = nil;
-    NSString *modelType = nil;
+    __strong AVAudioEngine *engine = nil;
+    __strong AVAudioPlayerNode *player = nil;
+    __strong AVAudioFormat *format = nil;
+    __strong NSString *modelDir = nil;
+    __strong NSString *modelType = nil;
     int32_t numThreads = 2;
     BOOL debug = NO;
-    NSNumber *noiseScale = nil;
-    NSNumber *noiseScaleW = nil;
-    NSNumber *lengthScale = nil;
-    NSString *ruleFsts = nil;
-    NSString *ruleFars = nil;
-    NSNumber *maxNumSentences = nil;
-    NSNumber *silenceScale = nil;
+    __strong NSNumber *noiseScale = nil;
+    __strong NSNumber *noiseScaleW = nil;
+    __strong NSNumber *lengthScale = nil;
+    __strong NSString *ruleFsts = nil;
+    __strong NSString *ruleFars = nil;
+    __strong NSNumber *maxNumSentences = nil;
+    __strong NSNumber *silenceScale = nil;
 };
 
-static std::unordered_map<std::string, std::unique_ptr<TtsInstanceState>> g_tts_instances;
+static std::unordered_map<std::string, std::shared_ptr<TtsInstanceState>> g_tts_instances;
 static std::mutex g_tts_mutex;
 
 static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
@@ -92,7 +92,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         std::lock_guard<std::mutex> lock(g_tts_mutex);
         auto it = g_tts_instances.find(instanceIdStr);
         if (it == g_tts_instances.end()) {
-            g_tts_instances[instanceIdStr] = std::make_unique<TtsInstanceState>();
+            g_tts_instances[instanceIdStr] = std::make_shared<TtsInstanceState>();
         }
         TtsInstanceState *inst = g_tts_instances[instanceIdStr].get();
         if (inst->wrapper == nullptr) {
@@ -508,7 +508,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         if (options[@"speed"] != nil) speed = [options[@"speed"] doubleValue];
     }
     std::string instanceIdStr = [instanceId UTF8String];
-    TtsInstanceState *inst = nullptr;
+    std::shared_ptr<TtsInstanceState> instRef;
     {
         std::lock_guard<std::mutex> lock(g_tts_mutex);
         auto it = g_tts_instances.find(instanceIdStr);
@@ -516,29 +516,29 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
             return;
         }
-        inst = it->second.get();
-        if (inst->streamRunning.load()) {
+        instRef = it->second; // shared_ptr copy keeps TtsInstanceState alive during streaming
+        if (instRef->streamRunning.load()) {
             reject(@"TTS_STREAM_ERROR", @"TTS streaming already in progress", nil);
             return;
         }
-        inst->streamCancelled.store(false);
-        inst->streamRunning.store(true);
+        instRef->streamCancelled.store(false);
+        instRef->streamRunning.store(true);
     }
 
     std::string textStr = [text UTF8String];
-    int32_t sampleRate = inst->wrapper->getSampleRate();
+    int32_t sampleRate = instRef->wrapper->getSampleRate();
     NSString *instanceIdCopy = [instanceId copy];
 
     __weak SherpaOnnx *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool success = false;
         @try {
-            success = inst->wrapper->generateStream(
+            success = instRef->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, inst](const float *samples, int32_t numSamples, float progress) -> int32_t {
-                    if (inst->streamCancelled.load()) {
+                [weakSelf, sampleRate, instanceIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                    if (instRef->streamCancelled.load()) {
                         return 0;
                     }
 
@@ -561,7 +561,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                         }
                     });
 
-                    return inst->streamCancelled.load() ? 0 : 1;
+                    return instRef->streamCancelled.load() ? 0 : 1;
                 }
             );
         } @catch (NSException *exception) {
@@ -573,7 +573,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             });
         }
 
-        bool cancelled = inst->streamCancelled.load();
+        bool cancelled = instRef->streamCancelled.load();
         if (!success && !cancelled) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
@@ -588,7 +588,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             }
         });
 
-        inst->streamRunning.store(false);
+        instRef->streamRunning.store(false);
     });
 
     resolve(nil);
@@ -788,36 +788,61 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
     std::string instanceIdStr = [instanceId UTF8String];
     @try {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        // Move the instance out of the map and signal any in-progress stream to stop.
+        // Using shared_ptr ensures TtsInstanceState stays alive until both the
+        // AVAudio cleanup (main thread) and wrapper release (background thread) finish.
+        std::shared_ptr<TtsInstanceState> instToRelease;
+        {
             std::lock_guard<std::mutex> lock(g_tts_mutex);
             auto it = g_tts_instances.find(instanceIdStr);
             if (it != g_tts_instances.end()) {
-                TtsInstanceState *inst = it->second.get();
-                if (inst->player != nil) [inst->player stop];
-                if (inst->engine != nil) {
-                    [inst->engine stop];
-                    [inst->engine reset];
-                }
-                inst->player = nil;
-                inst->engine = nil;
-                inst->format = nil;
-                if (inst->wrapper != nullptr) {
-                    inst->wrapper->release();
-                    inst->wrapper.reset();
-                }
-                inst->modelDir = nil;
-                inst->modelType = nil;
-                inst->noiseScale = nil;
-                inst->noiseScaleW = nil;
-                inst->lengthScale = nil;
-                inst->ruleFsts = nil;
-                inst->ruleFars = nil;
-                inst->maxNumSentences = nil;
-                inst->silenceScale = nil;
+                instToRelease = std::move(it->second);
                 g_tts_instances.erase(it);
+                instToRelease->streamCancelled.store(true);
             }
+        }
+
+        if (!instToRelease) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                RCTLogInfo(@"TTS instance %@ not found (already released)", instanceId);
+                resolve(nil);
+            });
+            return;
+        }
+
+        // Release AVAudio resources on the main thread (AVAudio is not thread-safe).
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (instToRelease->player != nil) [instToRelease->player stop];
+            if (instToRelease->engine != nil) {
+                [instToRelease->engine stop];
+                [instToRelease->engine reset];
+            }
+            instToRelease->player = nil;
+            instToRelease->engine = nil;
+            instToRelease->format = nil;
+            instToRelease->modelDir = nil;
+            instToRelease->modelType = nil;
+            instToRelease->noiseScale = nil;
+            instToRelease->noiseScaleW = nil;
+            instToRelease->lengthScale = nil;
+            instToRelease->ruleFsts = nil;
+            instToRelease->ruleFars = nil;
+            instToRelease->maxNumSentences = nil;
+            instToRelease->silenceScale = nil;
             RCTLogInfo(@"TTS instance %@ released", instanceId);
             resolve(nil);
+        });
+
+        // Release the TTS wrapper on a background queue after any in-progress stream finishes,
+        // so the main thread is not blocked and the streaming thread is not using the wrapper.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            while (instToRelease->streamRunning.load()) {
+                [NSThread sleepForTimeInterval:0.05];
+            }
+            if (instToRelease->wrapper != nullptr) {
+                instToRelease->wrapper->release();
+                instToRelease->wrapper.reset();
+            }
         });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];

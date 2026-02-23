@@ -2,6 +2,12 @@
  * Persists STT/TTS engine instances and UI state across screen navigation.
  * When the user leaves a screen, the instance is not released; when they return,
  * the same state (selected model, Free button visible) is restored.
+ *
+ * **Lifecycle note:** These module-level caches persist for the lifetime of the JS context.
+ * If the JS context is reloaded (e.g. on hot reload or app restart), native instances will
+ * not be automatically destroyed and may leak. Call `clearTtsCache` / `clearSttCache` and
+ * `.destroy()` on the cached engine in app lifecycle hooks (e.g. AppState 'change' to
+ * 'background' or before reloading the bundle) to free native resources.
  */
 
 import type { SttEngine } from 'react-native-sherpa-onnx/stt';
