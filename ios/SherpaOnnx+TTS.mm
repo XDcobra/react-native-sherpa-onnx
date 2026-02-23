@@ -631,46 +631,66 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     std::string instanceIdStr = [instanceId UTF8String];
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
-            std::lock_guard<std::mutex> lock(g_tts_mutex);
-            auto it = g_tts_instances.find(instanceIdStr);
-            if (it == g_tts_instances.end()) {
-                reject(@"TTS_PCM_ERROR", @"TTS instance not found", nil);
-                return;
+            TtsInstanceState *inst = nullptr;
+            NSError *startError = nil;
+            NSString *errorMsg = nil;
+            {
+                std::lock_guard<std::mutex> lock(g_tts_mutex);
+                auto it = g_tts_instances.find(instanceIdStr);
+                if (it == g_tts_instances.end()) {
+                    errorMsg = @"TTS instance not found";
+                    goto out_start;
+                }
+                inst = it->second.get();
+                if (channels != 1.0) {
+                    errorMsg = @"PCM playback supports mono only";
+                    goto out_start;
+                }
+                if (inst->player != nil) [inst->player stop];
+                if (inst->engine != nil) {
+                    [inst->engine stop];
+                    [inst->engine reset];
+                }
+                inst->player = nil;
+                inst->engine = nil;
+                inst->format = nil;
             }
-            TtsInstanceState *inst = it->second.get();
-            if (channels != 1.0) {
-                reject(@"TTS_PCM_ERROR", @"PCM playback supports mono only", nil);
-                return;
-            }
-            if (inst->player != nil) [inst->player stop];
-            if (inst->engine != nil) {
-                [inst->engine stop];
-                [inst->engine reset];
-            }
-            inst->player = nil;
-            inst->engine = nil;
-            inst->format = nil;
 
             AVAudioSession *session = [AVAudioSession sharedInstance];
             [session setCategory:AVAudioSessionCategoryPlayback error:nil];
             [session setActive:YES error:nil];
 
-            inst->engine = [[AVAudioEngine alloc] init];
-            inst->player = [[AVAudioPlayerNode alloc] init];
-            inst->format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
+            {
+                std::lock_guard<std::mutex> lock(g_tts_mutex);
+                auto it = g_tts_instances.find(instanceIdStr);
+                if (it == g_tts_instances.end()) {
+                    errorMsg = @"TTS instance not found";
+                    goto out_start;
+                }
+                inst = it->second.get();
+                inst->engine = [[AVAudioEngine alloc] init];
+                inst->player = [[AVAudioPlayerNode alloc] init];
+                inst->format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
 
-            [inst->engine attachNode:inst->player];
-            [inst->engine connect:inst->player to:inst->engine.mainMixerNode format:inst->format];
+                [inst->engine attachNode:inst->player];
+                [inst->engine connect:inst->player to:inst->engine.mainMixerNode format:inst->format];
 
-            NSError *startError = nil;
-            if (![inst->engine startAndReturnError:&startError]) {
-                NSString *errorMsg = [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription];
-                reject(@"TTS_PCM_ERROR", errorMsg, startError);
-                return;
+                if (![inst->engine startAndReturnError:&startError]) {
+                    errorMsg = [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription];
+                    goto out_start;
+                }
+                [inst->player play];
             }
-
-            [inst->player play];
-            resolve(nil);
+        out_start:
+            if (errorMsg != nil) {
+                if (startError) {
+                    reject(@"TTS_PCM_ERROR", errorMsg, startError);
+                } else {
+                    reject(@"TTS_PCM_ERROR", errorMsg, nil);
+                }
+            } else {
+                resolve(nil);
+            }
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"Failed to start PCM player: %@", exception.reason];
             reject(@"TTS_PCM_ERROR", errorMsg, nil);
