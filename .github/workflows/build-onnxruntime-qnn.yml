@@ -8,12 +8,12 @@ name: Build ONNX Runtime (Android + QNN)
 on:
   workflow_dispatch:
   push:
-  #  branches:
-  #    - main
-  #  paths:
-  #    - 'third_party/onnxruntime_prebuilt/**'
-  #    - 'third_party/onnxruntime/**'
-  #    - '.github/workflows/build-onnxruntime-qnn.yml'
+    branches:
+      - main
+    paths:
+      - 'third_party/onnxruntime_prebuilt/**'
+      - 'third_party/onnxruntime/**'
+      - '.github/workflows/build-onnxruntime-qnn.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
