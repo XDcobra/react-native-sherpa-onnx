@@ -94,12 +94,16 @@ build_abi() {
     echo "===== Building ONNX Runtime for $ABI ====="
 
     local EXTRA_ARGS=()
+    # NNAPI: skip for arm64-v8a when QNN is on to avoid duplicate symbols (NodeAttrHelper in both static libs)
     if [ "$ENABLE_NNAPI" = ON ]; then
-        EXTRA_ARGS+=(--use_nnapi)
+        if [ "$ABI" != "arm64-v8a" ] || [ "$ENABLE_QNN" != ON ]; then
+            EXTRA_ARGS+=(--use_nnapi)
+        fi
     fi
     # QNN only for arm64-v8a (ORT Android + QNN requires static_lib)
     if [ "$ABI" = "arm64-v8a" ] && [ "$ENABLE_QNN" = ON ]; then
         EXTRA_ARGS+=(--use_qnn "static_lib" --qnn_home "$QNN_SDK_ROOT")
+        [ "$ENABLE_NNAPI" = ON ] && echo "Note: arm64-v8a with QNN built without NNAPI to avoid duplicate symbol errors."
     fi
 
     (cd "$ORT_SRC" && ./build.sh \
