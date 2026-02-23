@@ -11,6 +11,7 @@ export interface Spec extends TurboModule {
   /**
    * Initialize Speech-to-Text (STT) with model directory.
    * Expects an absolute path (use resolveModelPath first for asset/file paths).
+   * @param instanceId - Unique ID for this engine instance (from createSTT)
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
    * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'fire_red_asr', 'moonshine', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
@@ -28,6 +29,7 @@ export interface Spec extends TurboModule {
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeStt(
+    instanceId: string,
     modelDir: string,
     preferInt8?: boolean,
     modelType?: string,
@@ -71,7 +73,10 @@ export interface Spec extends TurboModule {
   /**
    * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
    */
-  transcribeFile(filePath: string): Promise<{
+  transcribeFile(
+    instanceId: string,
+    filePath: string
+  ): Promise<{
     text: string;
     tokens: string[];
     timestamps: number[];
@@ -85,6 +90,7 @@ export interface Spec extends TurboModule {
    * Transcribe from float PCM samples (e.g. from microphone). Same return type as transcribeFile.
    */
   transcribeSamples(
+    instanceId: string,
     samples: number[],
     sampleRate: number
   ): Promise<{
@@ -100,31 +106,44 @@ export interface Spec extends TurboModule {
   /**
    * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
    */
-  setSttConfig(options: Object): Promise<void>;
+  setSttConfig(instanceId: string, options: Object): Promise<void>;
 
   /**
    * Release STT resources.
    */
-  unloadStt(): Promise<void>;
+  unloadStt(instanceId: string): Promise<void>;
 
   // ==================== TTS Methods ====================
 
   /**
    * Initialize Text-to-Speech (TTS) with model directory.
+   * @param instanceId - Unique ID for this engine instance (from createTTS)
    * @param modelDir - Absolute path to model directory
    * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'auto')
    * @param numThreads - Number of threads for inference (default: 2)
    * @param debug - Enable debug logging (default: false)
+   * @param noiseScale - Optional noise scale (VITS/Matcha)
+   * @param noiseScaleW - Optional noise scale W (VITS)
+   * @param lengthScale - Optional length scale (VITS/Matcha/Kokoro/Kitten)
+   * @param ruleFsts - Optional path(s) to rule FSTs for TTS (OfflineTtsConfig)
+   * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
+   * @param maxNumSentences - Optional max sentences per callback (default: 1)
+   * @param silenceScale - Optional silence scale on config (default: 0.2)
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeTts(
+    instanceId: string,
     modelDir: string,
     modelType: string,
     numThreads: number,
     debug: boolean,
     noiseScale?: number,
     noiseScaleW?: number,
-    lengthScale?: number
+    lengthScale?: number,
+    ruleFsts?: string,
+    ruleFars?: string,
+    maxNumSentences?: number,
+    silenceScale?: number
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -150,12 +169,14 @@ export interface Spec extends TurboModule {
 
   /**
    * Update TTS model parameters by re-initializing with stored config.
+   * @param instanceId - Unique ID for this engine instance
    * @param noiseScale - Optional noise scale override
    * @param noiseScaleW - Optional noise scale W override
    * @param lengthScale - Optional length scale override
    * @returns Object with success boolean and array of detected models
    */
   updateTtsParams(
+    instanceId: string,
     noiseScale?: number | null,
     noiseScaleW?: number | null,
     lengthScale?: number | null
@@ -168,11 +189,13 @@ export interface Spec extends TurboModule {
 
   /**
    * Generate speech from text.
+   * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    * @returns Object with { samples: number[], sampleRate: number }
    */
   generateTts(
+    instanceId: string,
     text: string,
     options: Object
   ): Promise<{
@@ -182,11 +205,13 @@ export interface Spec extends TurboModule {
 
   /**
    * Generate speech with subtitle/timestamp metadata.
+   * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    * @returns Object with samples, sampleRate, subtitles, and estimated flag
    */
   generateTtsWithTimestamps(
+    instanceId: string,
     text: string,
     options: Object
   ): Promise<{
@@ -198,50 +223,66 @@ export interface Spec extends TurboModule {
 
   /**
    * Generate speech in streaming mode (emits chunk events).
+   * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    */
-  generateTtsStream(text: string, options: Object): Promise<void>;
+  generateTtsStream(
+    instanceId: string,
+    text: string,
+    options: Object
+  ): Promise<void>;
 
   /**
    * Cancel an ongoing streaming TTS generation.
+   * @param instanceId - Unique ID for this engine instance
    */
-  cancelTtsStream(): Promise<void>;
+  cancelTtsStream(instanceId: string): Promise<void>;
 
   /**
    * Start PCM playback for streaming TTS.
+   * @param instanceId - Unique ID for this engine instance
    * @param sampleRate - Sample rate in Hz
    * @param channels - Number of channels (1 = mono)
    */
-  startTtsPcmPlayer(sampleRate: number, channels: number): Promise<void>;
+  startTtsPcmPlayer(
+    instanceId: string,
+    sampleRate: number,
+    channels: number
+  ): Promise<void>;
 
   /**
    * Write PCM samples to the streaming TTS player.
+   * @param instanceId - Unique ID for this engine instance
    * @param samples - Float PCM samples in range [-1.0, 1.0]
    */
-  writeTtsPcmChunk(samples: number[]): Promise<void>;
+  writeTtsPcmChunk(instanceId: string, samples: number[]): Promise<void>;
 
   /**
    * Stop PCM playback for streaming TTS.
+   * @param instanceId - Unique ID for this engine instance
    */
-  stopTtsPcmPlayer(): Promise<void>;
+  stopTtsPcmPlayer(instanceId: string): Promise<void>;
 
   /**
    * Get the sample rate of the initialized TTS model.
+   * @param instanceId - Unique ID for this engine instance
    * @returns Sample rate in Hz
    */
-  getTtsSampleRate(): Promise<number>;
+  getTtsSampleRate(instanceId: string): Promise<number>;
 
   /**
    * Get the number of speakers/voices available in the model.
+   * @param instanceId - Unique ID for this engine instance
    * @returns Number of speakers (0 or 1 for single-speaker models)
    */
-  getTtsNumSpeakers(): Promise<number>;
+  getTtsNumSpeakers(instanceId: string): Promise<number>;
 
   /**
    * Release TTS resources.
+   * @param instanceId - Unique ID for this engine instance
    */
-  unloadTts(): Promise<void>;
+  unloadTts(instanceId: string): Promise<void>;
 
   /**
    * Save TTS audio samples to a WAV file.

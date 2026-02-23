@@ -33,7 +33,11 @@ export async function extractTarBz2(
   if (onProgress) {
     subscription = DeviceEventEmitter.addListener(
       'extractTarBz2Progress',
-      (event) => {
+      (event: ExtractProgressEvent & { sourcePath?: string }) => {
+        // Only handle events for this extraction (fixes parallel extractions showing same %)
+        if (event.sourcePath != null && event.sourcePath !== sourcePath) {
+          return;
+        }
         const safePercent = Math.max(0, Math.min(100, event.percent));
         onProgress({ ...event, percent: safePercent });
       }

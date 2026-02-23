@@ -204,7 +204,8 @@
                                           force:force
                                        progress:^(long long bytes, long long totalBytes, double percent) {
         [self sendEventWithName:@"extractTarBz2Progress"
-                           body:@{ @"bytes": @(bytes),
+                           body:@{ @"sourcePath": sourcePath,
+                                   @"bytes": @(bytes),
                                    @"totalBytes": @(totalBytes),
                                    @"percent": @(percent) }];
     }];

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Text,
   View,
@@ -23,12 +23,12 @@ import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
-  initializeSTT,
-  unloadSTT,
-  transcribeFile,
+  createSTT,
+  detectSttModel,
   type STTModelType,
   type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
+import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -36,6 +36,7 @@ import {
 } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import type { SttEngine } from 'react-native-sherpa-onnx/stt';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -77,6 +78,7 @@ export default function STTScreen() {
   const [transcribing, setTranscribing] = useState(false);
   const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
+  const sttEngineRef = useRef<SttEngine | null>(null);
   const STT_NUM_THREADS = 2;
 
   // Load available models on mount
@@ -84,17 +86,23 @@ export default function STTScreen() {
     loadAvailableModels();
   }, []);
 
-  // Cleanup: Release STT resources only when leaving the screen (unmount).
-  // Do not depend on currentModelFolder: when switching models, handleInitialize
-  // already calls unloadSTT() before re-init. If cleanup ran on currentModelFolder
-  // change, it would call unloadSTT() after the new init and break transcription.
+  // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
-    return () => {
-      console.log('STTScreen: Cleaning up STT resources');
-      unloadSTT().catch((err) => {
-        console.error('STTScreen: Failed to unload STT:', err);
-      });
-    };
+    const cached = getSttCache();
+    if (cached.engine != null && cached.modelFolder != null) {
+      sttEngineRef.current = cached.engine;
+      setCurrentModelFolder(cached.modelFolder);
+      setSelectedModelForInit(cached.modelFolder);
+      setDetectedModels(cached.detectedModels);
+      setSelectedModelType(cached.selectedModelType);
+      setInitResult(
+        `Initialized: ${getModelDisplayName(
+          cached.modelFolder
+        )}\nDetected models: ${cached.detectedModels
+          .map((m) => m.type)
+          .join(', ')}`
+      );
+    }
   }, []);
 
   const loadAvailableModels = async () => {
@@ -170,56 +178,66 @@ export default function STTScreen() {
     setSelectedModelType(null);
 
     try {
-      // Unload previous model if any
-      if (currentModelFolder) {
-        await unloadSTT();
+      // Release previous engine if switching to another model
+      const previous = sttEngineRef.current;
+      if (previous) {
+        await previous.destroy();
+        sttEngineRef.current = null;
+        clearSttCache();
       }
 
-      // Initialize new model: PAD models use padModelsPath as base; assets use getAssetModelPath
       const useFilePath = padModelIds.includes(modelFolder);
-
       const modelPath = useFilePath
         ? padModelIds.includes(modelFolder) && padModelsPath
           ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
           : getFileModelPath(modelFolder, ModelCategory.Stt)
         : getAssetModelPath(modelFolder);
 
-      const result = await initializeSTT({
+      const engine = await createSTT({
         modelPath,
         numThreads: STT_NUM_THREADS,
       });
 
-      if (result.success && result.detectedModels.length > 0) {
-        const normalizedDetected = result.detectedModels.map((model) => ({
-          ...model,
-          type: model.type as STTModelType,
-        }));
-        setDetectedModels(normalizedDetected);
-        setCurrentModelFolder(modelFolder);
-
-        const detectedTypes = normalizedDetected.map((m) => m.type).join(', ');
-        setInitResult(
-          `Initialized: ${getModelDisplayName(
-            modelFolder
-          )}\nDetected models: ${detectedTypes}`
-        );
-
-        // Auto-select first detected model (use result.modelType when available for consistency)
-        const loadedType =
-          (result as { modelType?: string }).modelType ??
-          normalizedDetected[0]?.type;
-        if (loadedType) {
-          setSelectedModelType(loadedType as STTModelType);
-        } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
-          setSelectedModelType(normalizedDetected[0].type);
-        }
-      } else {
+      const detectResult = await detectSttModel(modelPath);
+      if (!detectResult.success || !detectResult.detectedModels?.length) {
+        await engine.destroy();
         setErrorSource('init');
         setError('No models detected in the directory');
         setInitResult('Initialization failed: No compatible models found');
+        return;
       }
 
-      // Reset audio selection when changing models
+      const normalizedDetected = detectResult.detectedModels.map((model) => ({
+        ...model,
+        type: model.type as STTModelType,
+      }));
+      const loadedType =
+        (detectResult.modelType as STTModelType) ?? normalizedDetected[0]?.type;
+
+      sttEngineRef.current = engine;
+      setDetectedModels(normalizedDetected);
+      setCurrentModelFolder(modelFolder);
+      setSelectedModelForInit(modelFolder);
+      if (loadedType) {
+        setSelectedModelType(loadedType);
+      } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
+        setSelectedModelType(normalizedDetected[0].type);
+      }
+
+      const detectedTypes = normalizedDetected.map((m) => m.type).join(', ');
+      setInitResult(
+        `Initialized: ${getModelDisplayName(
+          modelFolder
+        )}\nDetected models: ${detectedTypes}`
+      );
+
+      setSttCache(
+        engine,
+        modelFolder,
+        normalizedDetected,
+        loadedType ?? normalizedDetected[0]?.type ?? null
+      );
+
       setAudioSourceType(null);
       setSelectedAudio(null);
       setCustomAudioPath(null);
@@ -292,8 +310,13 @@ export default function STTScreen() {
         pathToTranscribe = await resolveModelPath(audioPathConfig);
       }
 
-      // Transcribe the audio file (pathToTranscribe may be an asset path or file URI)
-      const result = await transcribeFile(pathToTranscribe);
+      const engine = sttEngineRef.current;
+      if (!engine) {
+        setErrorSource('transcribe');
+        setError('STT engine not initialized');
+        return;
+      }
+      const result = await engine.transcribeFile(pathToTranscribe);
       setTranscriptionResult(result);
     } catch (err) {
       const msg =
@@ -329,6 +352,30 @@ export default function STTScreen() {
     } finally {
       setTranscribing(false);
     }
+  };
+
+  const handleFree = async () => {
+    const engine = sttEngineRef.current;
+    if (!engine) return;
+    try {
+      await engine.destroy();
+    } catch (err) {
+      console.error('STTScreen: Failed to destroy STT:', err);
+    }
+    sttEngineRef.current = null;
+    clearSttCache();
+    setCurrentModelFolder(null);
+    setSelectedModelForInit(null);
+    setDetectedModels([]);
+    setSelectedModelType(null);
+    setInitResult(null);
+    setAudioSourceType(null);
+    setSelectedAudio(null);
+    setCustomAudioPath(null);
+    setCustomAudioName(null);
+    setTranscriptionResult(null);
+    setError(null);
+    setErrorSource(null);
   };
 
   const handlePickLocalFile = async () => {
@@ -427,6 +474,15 @@ export default function STTScreen() {
           showsVerticalScrollIndicator={false}
           style={styles.scrollView}
         >
+          {currentModelFolder != null && (
+            <TouchableOpacity
+              style={styles.freeButton}
+              onPress={handleFree}
+              disabled={loading}
+            >
+              <Text style={styles.freeButtonText}>Release model</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize Model</Text>
             <Text style={styles.hint}>

@@ -2,13 +2,15 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   STTInitializeOptions,
   STTModelType,
-  SttInitResult,
+  SttEngine,
   SttModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+
+let sttInstanceCounter = 0;
 
 function normalizeSttResult(raw: {
   text?: string;
@@ -34,8 +36,7 @@ function normalizeSttResult(raw: {
 
 /**
  * Detect STT model type and structure without initializing the recognizer.
- * Uses the same native file-based detection as initializeSTT. Call this to show
- * model-specific options before init or to query the type for a given path.
+ * Uses the same native file-based detection as createSTT. Stateless; no instance required.
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional preferInt8 and modelType (default: auto)
@@ -66,43 +67,25 @@ export async function detectSttModel(
 }
 
 /**
- * Initialize Speech-to-Text (STT) with model directory.
- *
- * Supports multiple model source types:
- * - Asset models (bundled in app)
- * - File system models (downloaded or user-provided)
- * - Auto-detection (tries asset first, then file system)
+ * Create an STT engine instance. Call destroy() on the returned engine when done to free native resources.
  *
  * @param options - STT initialization options or model path configuration
- * @returns Object with success status and array of detected models (each with type and modelDir)
+ * @returns Promise resolving to an SttEngine instance
  * @example
  * ```typescript
- * // Auto-detect model path
- * const result = await initializeSTT({ type: 'auto', path: 'models/sherpa-onnx-model' });
- * console.log('Detected models:', result.detectedModels);
- *
- * // Asset model
- * const result = await initializeSTT({
- *   modelPath: { type: 'asset', path: 'models/sherpa-onnx-model' }
+ * const stt = await createSTT({
+ *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
  * });
- *
- * // File system model with preferInt8 option
- * const result = await initializeSTT({
- *   modelPath: { type: 'file', path: '/path/to/model' },
- *   preferInt8: true  // Prefer quantized int8 models (smaller, faster)
- * });
- *
- * // With explicit model type
- * const result = await initializeSTT({
- *   modelPath: { type: 'asset', path: 'models/sherpa-onnx-nemo-parakeet-tdt-ctc-en' },
- *   modelType: 'nemo_ctc'
- * });
+ * const result = await stt.transcribeFile('/path/to/audio.wav');
+ * console.log(result.text);
+ * await stt.destroy();
  * ```
  */
-export async function initializeSTT(
+export async function createSTT(
   options: STTInitializeOptions | ModelPathConfig
-): Promise<SttInitResult> {
-  // Handle both object syntax and direct config syntax
+): Promise<SttEngine> {
+  const instanceId = `stt_${++sttInstanceCounter}`;
+
   let modelPath: ModelPathConfig;
   let preferInt8: boolean | undefined;
   let modelType: STTModelType | undefined;
@@ -149,7 +132,9 @@ export async function initializeSTT(
 
   const debug = 'modelPath' in options ? options.debug : undefined;
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeStt(
+
+  const result = await SherpaOnnx.initializeStt(
+    instanceId,
     resolvedPath,
     preferInt8,
     modelType,
@@ -165,65 +150,73 @@ export async function initializeSTT(
     modelingUnit,
     bpeVocab
   );
-}
 
-/**
- * Transcribe an audio file.
- *
- * @param filePath - Path to WAV file (16kHz, mono, 16-bit PCM)
- * @returns Promise resolving to full recognition result (text, tokens, timestamps, lang, emotion, event, durations)
- * @example
- * ```typescript
- * const result = await transcribeFile('path/to/audio.wav');
- * console.log('Transcription:', result.text);
- * console.log('Tokens:', result.tokens);
- * ```
- */
-export async function transcribeFile(
-  filePath: string
-): Promise<SttRecognitionResult> {
-  const raw = await SherpaOnnx.transcribeFile(filePath);
-  return normalizeSttResult(raw);
-}
+  if (!result.success) {
+    throw new Error(
+      `STT initialization failed: ${JSON.stringify(
+        result.detectedModels ?? []
+      )}`
+    );
+  }
 
-/**
- * Transcribe from float PCM samples (e.g. from microphone or another decoder).
- *
- * @param samples - Float samples in [-1, 1], mono
- * @param sampleRate - Sample rate in Hz (e.g. 16000)
- * @returns Promise resolving to full recognition result (same shape as transcribeFile)
- */
-export async function transcribeSamples(
-  samples: number[],
-  sampleRate: number
-): Promise<SttRecognitionResult> {
-  const raw = await SherpaOnnx.transcribeSamples(samples, sampleRate);
-  return normalizeSttResult(raw);
-}
+  let destroyed = false;
 
-/**
- * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
- * Merged with the config from initialization.
- */
-export function setSttConfig(options: SttRuntimeConfig): Promise<void> {
-  const map: Record<string, string | number> = {};
-  if (options.decodingMethod != null)
-    map.decodingMethod = options.decodingMethod;
-  if (options.maxActivePaths != null)
-    map.maxActivePaths = options.maxActivePaths;
-  if (options.hotwordsFile != null) map.hotwordsFile = options.hotwordsFile;
-  if (options.hotwordsScore != null) map.hotwordsScore = options.hotwordsScore;
-  if (options.blankPenalty != null) map.blankPenalty = options.blankPenalty;
-  if (options.ruleFsts != null) map.ruleFsts = options.ruleFsts;
-  if (options.ruleFars != null) map.ruleFars = options.ruleFars;
-  return SherpaOnnx.setSttConfig(map);
-}
+  const guard = () => {
+    if (destroyed) {
+      throw new Error(
+        `STT instance ${instanceId} has been destroyed; cannot call methods on it.`
+      );
+    }
+  };
 
-/**
- * Release STT resources.
- */
-export function unloadSTT(): Promise<void> {
-  return SherpaOnnx.unloadStt();
+  const engine: SttEngine = {
+    get instanceId() {
+      return instanceId;
+    },
+
+    async transcribeFile(filePath: string): Promise<SttRecognitionResult> {
+      guard();
+      const raw = await SherpaOnnx.transcribeFile(instanceId, filePath);
+      return normalizeSttResult(raw);
+    },
+
+    async transcribeSamples(
+      samples: number[],
+      sampleRate: number
+    ): Promise<SttRecognitionResult> {
+      guard();
+      const raw = await SherpaOnnx.transcribeSamples(
+        instanceId,
+        samples,
+        sampleRate
+      );
+      return normalizeSttResult(raw);
+    },
+
+    async setConfig(config: SttRuntimeConfig): Promise<void> {
+      guard();
+      const map: Record<string, string | number> = {};
+      if (config.decodingMethod != null)
+        map.decodingMethod = config.decodingMethod;
+      if (config.maxActivePaths != null)
+        map.maxActivePaths = config.maxActivePaths;
+      if (config.hotwordsFile != null) map.hotwordsFile = config.hotwordsFile;
+      if (config.hotwordsScore != null)
+        map.hotwordsScore = config.hotwordsScore;
+      if (config.blankPenalty != null) map.blankPenalty = config.blankPenalty;
+      if (config.ruleFsts != null) map.ruleFsts = config.ruleFsts;
+      if (config.ruleFars != null) map.ruleFars = config.ruleFars;
+      return SherpaOnnx.setSttConfig(instanceId, map);
+    },
+
+    async destroy(): Promise<void> {
+      if (destroyed) return;
+      destroyed = true;
+      await SherpaOnnx.unloadStt(instanceId);
+    },
+  };
+
+  return engine;
 }
 
 // Export types and runtime type list
@@ -233,10 +226,24 @@ export type {
   SttModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
-  TranscriptionResult,
+  SttEngine,
+  SttInitResult,
 } from './types';
 export {
   STT_MODEL_TYPES,
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
 } from './types';
+export {
+  getWhisperLanguages,
+  WHISPER_LANGUAGES,
+  getSenseVoiceLanguages,
+  SENSEVOICE_LANGUAGES,
+  getCanaryLanguages,
+  CANARY_LANGUAGES,
+  getFunasrNanoLanguages,
+  FUNASR_NANO_LANGUAGES,
+  getFunasrMltNanoLanguages,
+  FUNASR_MLT_NANO_LANGUAGES,
+} from './sttModelLanguages';
+export type { SttModelLanguage, WhisperLanguage } from './sttModelLanguages';

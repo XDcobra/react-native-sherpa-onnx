@@ -3,21 +3,90 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsModelOptions,
   TtsUpdateOptions,
   TtsGenerationOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TTSModelInfo,
+  TtsEngine,
   TtsStreamChunk,
   TtsStreamEnd,
   TtsStreamError,
+  TtsStreamHandlers,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
+let ttsInstanceCounter = 0;
+
+/**
+ * Flatten model-specific options for the given model type to native init/update params.
+ * When modelType is 'auto' or missing, returns undefined for all (native uses defaults).
+ */
+function flattenTtsModelOptionsForNative(
+  modelType: TTSModelType | undefined,
+  modelOptions: TtsModelOptions | undefined
+): {
+  noiseScale: number | undefined;
+  noiseScaleW: number | undefined;
+  lengthScale: number | undefined;
+} {
+  if (
+    !modelOptions ||
+    !modelType ||
+    modelType === 'auto' ||
+    modelType === 'zipvoice' // Zipvoice does not use noise/length scale; native uses its own defaults
+  )
+    return {
+      noiseScale: undefined,
+      noiseScaleW: undefined,
+      lengthScale: undefined,
+    };
+  const block =
+    modelType === 'vits'
+      ? modelOptions.vits
+      : modelType === 'matcha'
+      ? modelOptions.matcha
+      : modelType === 'kokoro'
+      ? modelOptions.kokoro
+      : modelType === 'kitten'
+      ? modelOptions.kitten
+      : modelType === 'pocket'
+      ? modelOptions.pocket
+      : undefined;
+  if (!block)
+    return {
+      noiseScale: undefined,
+      noiseScaleW: undefined,
+      lengthScale: undefined,
+    };
+  const out: {
+    noiseScale: number | undefined;
+    noiseScaleW: number | undefined;
+    lengthScale: number | undefined;
+  } = {
+    noiseScale: undefined,
+    noiseScaleW: undefined,
+    lengthScale: undefined,
+  };
+  const n = block as {
+    noiseScale?: number;
+    noiseScaleW?: number;
+    lengthScale?: number;
+  };
+  if (n.noiseScale !== undefined && typeof n.noiseScale === 'number')
+    out.noiseScale = n.noiseScale;
+  if (n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number')
+    out.noiseScaleW = n.noiseScaleW;
+  if (n.lengthScale !== undefined && typeof n.lengthScale === 'number')
+    out.lengthScale = n.lengthScale;
+  return out;
+}
+
 /**
  * Detect TTS model type and structure without initializing the engine.
- * Uses the same native file-based detection as initializeTTS.
+ * Uses the same native file-based detection as createTTS. Stateless; no instance required.
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional modelType (default: 'auto')
@@ -38,110 +107,6 @@ export async function detectTtsModel(
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
   return SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
-}
-
-/**
- * Initialize Text-to-Speech (TTS) with model directory.
- *
- * Supports multiple model source types:
- * - Asset models (bundled in app)
- * - File system models (downloaded or user-provided)
- * - Auto-detection (tries asset first, then file system)
- *
- * Supported model types (auto-detected or explicit):
- * - VITS (includes Piper, Coqui, MeloTTS, MMS)
- * - Matcha (acoustic model + vocoder)
- * - Kokoro (multi-speaker, multi-language)
- * - KittenTTS (lightweight, multi-speaker)
- * - Zipvoice (voice cloning capable)
- *
- * @param options - TTS initialization options or model path configuration
- * @returns Promise resolving to result with success and detected models
- * @example
- * ```typescript
- * // Auto-detect model path
- * const result = await initializeTTS({ type: 'auto', path: 'models/sherpa-onnx-vits-piper-en_US-lessac-medium' });
- * console.log('Detected models:', result.detectedModels);
- *
- * // Asset model
- * const result = await initializeTTS({
- *   modelPath: { type: 'asset', path: 'models/vits-piper-en' }
- * });
- *
- * // File system model with options
- * const result = await initializeTTS({
- *   modelPath: { type: 'file', path: '/path/to/model' },
- *   numThreads: 4,
- *   debug: true
- * });
- *
- * // With explicit model type
- * const result = await initializeTTS({
- *   modelPath: { type: 'asset', path: 'models/kokoro-en' },
- *   modelType: 'kokoro'
- * });
- * ```
- */
-export async function initializeTTS(
-  options: TTSInitializeOptions | ModelPathConfig
-): Promise<{
-  success: boolean;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-}> {
-  // Handle both object syntax and direct config syntax
-  let modelPath: ModelPathConfig;
-  let modelType: TTSModelType | undefined;
-  let numThreads: number | undefined;
-  let debug: boolean | undefined;
-  let noiseScale: number | undefined;
-  let noiseScaleW: number | undefined;
-  let lengthScale: number | undefined;
-
-  if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    modelType = options.modelType;
-    numThreads = options.numThreads;
-    debug = options.debug;
-    noiseScale = options.noiseScale;
-    noiseScaleW = options.noiseScaleW;
-    lengthScale = options.lengthScale;
-  } else {
-    modelPath = options;
-    modelType = undefined;
-    numThreads = undefined;
-    debug = undefined;
-    noiseScale = undefined;
-    noiseScaleW = undefined;
-    lengthScale = undefined;
-  }
-
-  const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.initializeTts(
-    resolvedPath,
-    modelType ?? 'auto',
-    numThreads ?? 2,
-    debug ?? false,
-    noiseScale,
-    noiseScaleW,
-    lengthScale
-  );
-}
-
-/**
- * Update TTS parameters by re-initializing with stored config.
- */
-export async function updateTtsParams(options: TtsUpdateOptions): Promise<{
-  success: boolean;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-}> {
-  const noiseArg =
-    options.noiseScale === undefined ? Number.NaN : options.noiseScale;
-  const noiseWArg =
-    options.noiseScaleW === undefined ? Number.NaN : options.noiseScaleW;
-  const lengthArg =
-    options.lengthScale === undefined ? Number.NaN : options.lengthScale;
-
-  return SherpaOnnx.updateTtsParams(noiseArg, noiseWArg, lengthArg);
 }
 
 /**
@@ -169,56 +134,6 @@ function toNativeTtsOptions(
   return out;
 }
 
-/**
- * Generate speech from text.
- *
- * Returns raw audio samples as float array in range [-1.0, 1.0].
- * Supports simple options (sid, speed) and voice cloning / GenerationConfig
- * (referenceAudio, referenceText, numSteps, silenceScale, extra) when the model supports it.
- *
- * @param text - Text to convert to speech
- * @param options - Generation options (maps to Kotlin GenerationConfig when using reference audio)
- * @returns Promise resolving to generated audio data
- * @example
- * ```typescript
- * // Basic usage
- * const audio = await generateSpeech('Hello, world!');
- *
- * // With sid/speed
- * const audio = await generateSpeech('Hello, world!', { sid: 0, speed: 1.2 });
- *
- * // Voice cloning (Zipvoice or Kotlin generateWithConfig)
- * const audio = await generateSpeech('Target text', {
- *   referenceAudio: { samples: refSamples, sampleRate: 22050 },
- *   referenceText: 'Transcript of reference',
- *   numSteps: 20,
- * });
- * ```
- */
-export async function generateSpeech(
-  text: string,
-  options?: TtsGenerationOptions
-): Promise<GeneratedAudio> {
-  return SherpaOnnx.generateTts(text, toNativeTtsOptions(options));
-}
-
-/**
- * Generate speech from text and return subtitle/timestamp metadata.
- *
- * Timestamps are estimated based on the output duration when models do not
- * provide native timing information. Accepts the same options as generateSpeech
- * (including reference audio for voice cloning).
- */
-export async function generateSpeechWithTimestamps(
-  text: string,
-  options?: TtsGenerationOptions
-): Promise<GeneratedAudioWithTimestamps> {
-  return SherpaOnnx.generateTtsWithTimestamps(
-    text,
-    toNativeTtsOptions(options)
-  );
-}
-
 const nativeTtsEventModule =
   SherpaOnnx &&
   typeof (SherpaOnnx as any).addListener === 'function' &&
@@ -227,192 +142,247 @@ const nativeTtsEventModule =
     : undefined;
 
 const ttsEventEmitter = new NativeEventEmitter(nativeTtsEventModule);
-export type TtsStreamHandlers = {
-  onChunk?: (chunk: TtsStreamChunk) => void;
-  onEnd?: (event: TtsStreamEnd) => void;
-  onError?: (event: TtsStreamError) => void;
-};
 
 /**
- * Generate speech in streaming mode (emits chunk events).
+ * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
  *
- * Returns an unsubscribe function to remove event listeners.
- * Supports the same options as generateSpeech; note: streaming with reference
- * audio is not supported for Zipvoice (use generateSpeech for that case).
+ * @param options - TTS initialization options or model path configuration
+ * @returns Promise resolving to a TtsEngine instance
+ * @example
+ * ```typescript
+ * const tts = await createTTS({
+ *   modelPath: { type: 'asset', path: 'models/vits-piper-en' },
+ *   modelType: 'vits',
+ *   modelOptions: { vits: { noiseScale: 0.667 } },
+ * });
+ * const audio = await tts.generateSpeech('Hello world');
+ * await tts.destroy();
+ * ```
  */
-export async function generateSpeechStream(
-  text: string,
-  options: TtsGenerationOptions | undefined,
-  handlers: TtsStreamHandlers
-): Promise<() => void> {
-  const subscriptions = [
-    ttsEventEmitter.addListener('ttsStreamChunk', (event) => {
-      handlers.onChunk?.(event as TtsStreamChunk);
-    }),
-    ttsEventEmitter.addListener('ttsStreamEnd', (event) => {
-      handlers.onEnd?.(event as TtsStreamEnd);
-    }),
-    ttsEventEmitter.addListener('ttsStreamError', (event) => {
-      handlers.onError?.(event as TtsStreamError);
-    }),
-  ];
+export async function createTTS(
+  options: TTSInitializeOptions | ModelPathConfig
+): Promise<TtsEngine> {
+  const instanceId = `tts_${++ttsInstanceCounter}`;
 
-  try {
-    await SherpaOnnx.generateTtsStream(text, toNativeTtsOptions(options));
-  } catch (error) {
-    // Clean up listeners if native call fails
-    subscriptions.forEach((sub) => sub.remove());
-    throw error;
+  let modelPath: ModelPathConfig;
+  let modelType: TTSModelType | undefined;
+  let numThreads: number | undefined;
+  let debug: boolean | undefined;
+  let modelOptions: TtsModelOptions | undefined;
+  let ruleFsts: string | undefined;
+  let ruleFars: string | undefined;
+  let maxNumSentences: number | undefined;
+  let silenceScale: number | undefined;
+
+  if ('modelPath' in options) {
+    modelPath = options.modelPath;
+    modelType = options.modelType;
+    numThreads = options.numThreads;
+    debug = options.debug;
+    modelOptions = options.modelOptions;
+    ruleFsts = options.ruleFsts;
+    ruleFars = options.ruleFars;
+    maxNumSentences = options.maxNumSentences;
+    silenceScale = options.silenceScale;
+  } else {
+    modelPath = options;
+    modelType = undefined;
+    numThreads = undefined;
+    debug = undefined;
+    modelOptions = undefined;
+    ruleFsts = undefined;
+    ruleFars = undefined;
+    maxNumSentences = undefined;
+    silenceScale = undefined;
   }
 
-  return () => {
-    subscriptions.forEach((sub) => sub.remove());
+  const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
+  const resolvedPath = await resolveModelPath(modelPath);
+
+  const result = await SherpaOnnx.initializeTts(
+    instanceId,
+    resolvedPath,
+    modelType ?? 'auto',
+    numThreads ?? 2,
+    debug ?? false,
+    flat.noiseScale,
+    flat.noiseScaleW,
+    flat.lengthScale,
+    ruleFsts,
+    ruleFars,
+    maxNumSentences,
+    silenceScale
+  );
+
+  if (!result.success) {
+    throw new Error(
+      `TTS initialization failed: ${JSON.stringify(
+        result.detectedModels ?? []
+      )}`
+    );
+  }
+
+  const firstDetected = result.detectedModels?.[0];
+  const effectiveModelType: TTSModelType | undefined =
+    modelType && modelType !== 'auto'
+      ? modelType
+      : (firstDetected?.type as TTSModelType);
+
+  let destroyed = false;
+
+  const guard = () => {
+    if (destroyed) {
+      throw new Error(
+        `TTS instance ${instanceId} has been destroyed; cannot call methods on it.`
+      );
+    }
   };
-}
 
-/**
- * Cancel ongoing streaming TTS generation.
- */
-export function cancelSpeechStream(): Promise<void> {
-  return SherpaOnnx.cancelTtsStream();
-}
+  const engine: TtsEngine = {
+    get instanceId() {
+      return instanceId;
+    },
 
-/**
- * Start PCM playback for streaming TTS.
- */
-export function startTtsPcmPlayer(
-  sampleRate: number,
-  channels: number
-): Promise<void> {
-  return SherpaOnnx.startTtsPcmPlayer(sampleRate, channels);
-}
+    async generateSpeech(
+      text: string,
+      opts?: TtsGenerationOptions
+    ): Promise<GeneratedAudio> {
+      guard();
+      return SherpaOnnx.generateTts(instanceId, text, toNativeTtsOptions(opts));
+    },
 
-/**
- * Write PCM samples to the streaming TTS player.
- */
-export function writeTtsPcmChunk(samples: number[]): Promise<void> {
-  return SherpaOnnx.writeTtsPcmChunk(samples);
-}
+    async generateSpeechWithTimestamps(
+      text: string,
+      opts?: TtsGenerationOptions
+    ): Promise<GeneratedAudioWithTimestamps> {
+      guard();
+      return SherpaOnnx.generateTtsWithTimestamps(
+        instanceId,
+        text,
+        toNativeTtsOptions(opts)
+      );
+    },
 
-/**
- * Stop PCM playback for streaming TTS.
- */
-export function stopTtsPcmPlayer(): Promise<void> {
-  return SherpaOnnx.stopTtsPcmPlayer();
-}
+    async generateSpeechStream(
+      text: string,
+      opts: TtsGenerationOptions | undefined,
+      handlers: TtsStreamHandlers
+    ): Promise<() => void> {
+      guard();
+      const subscriptions = [
+        ttsEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
+          const e = event as TtsStreamChunk;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
+          handlers.onChunk?.(e);
+        }),
+        ttsEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
+          const e = event as TtsStreamEnd;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
+          handlers.onEnd?.(e);
+        }),
+        ttsEventEmitter.addListener('ttsStreamError', (event: unknown) => {
+          const e = event as TtsStreamError;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
+          handlers.onError?.(e);
+        }),
+      ];
 
-/**
- * Get TTS model information.
- *
- * Returns the sample rate and number of available speakers/voices.
- * Call this after initialization to check model capabilities.
- *
- * @returns Promise resolving to model information
- * @example
- * ```typescript
- * await initializeTTS({ type: 'auto', path: 'models/kokoro-en' });
- * const info = await getModelInfo();
- *
- * console.log(`Sample rate: ${info.sampleRate} Hz`);
- * console.log(`Available speakers: ${info.numSpeakers}`);
- *
- * if (info.numSpeakers > 1) {
- *   // Multi-speaker model, can use different voices
- *   const audio = await generateSpeech('Hello', { sid: 1 });
- * }
- * ```
- */
-export async function getModelInfo(): Promise<TTSModelInfo> {
-  const [sampleRate, numSpeakers] = await Promise.all([
-    SherpaOnnx.getTtsSampleRate(),
-    SherpaOnnx.getTtsNumSpeakers(),
-  ]);
+      try {
+        await SherpaOnnx.generateTtsStream(
+          instanceId,
+          text,
+          toNativeTtsOptions(opts)
+        );
+      } catch (error) {
+        subscriptions.forEach((sub) => sub.remove());
+        throw error;
+      }
 
-  return {
-    sampleRate,
-    numSpeakers,
+      return () => {
+        subscriptions.forEach((sub) => sub.remove());
+      };
+    },
+
+    async cancelSpeechStream(): Promise<void> {
+      guard();
+      return SherpaOnnx.cancelTtsStream(instanceId);
+    },
+
+    async startPcmPlayer(sampleRate: number, channels: number): Promise<void> {
+      guard();
+      return SherpaOnnx.startTtsPcmPlayer(instanceId, sampleRate, channels);
+    },
+
+    async writePcmChunk(samples: number[]): Promise<void> {
+      guard();
+      return SherpaOnnx.writeTtsPcmChunk(instanceId, samples);
+    },
+
+    async stopPcmPlayer(): Promise<void> {
+      guard();
+      return SherpaOnnx.stopTtsPcmPlayer(instanceId);
+    },
+
+    async updateParams(opts: TtsUpdateOptions): Promise<{
+      success: boolean;
+      detectedModels: Array<{ type: string; modelDir: string }>;
+    }> {
+      guard();
+      const effectiveModelTypeForUpdate =
+        opts.modelType && opts.modelType !== 'auto'
+          ? opts.modelType
+          : effectiveModelType;
+      const flatOpts = flattenTtsModelOptionsForNative(
+        effectiveModelTypeForUpdate,
+        opts.modelOptions
+      );
+      const noiseArg =
+        flatOpts.noiseScale === undefined ? Number.NaN : flatOpts.noiseScale;
+      const noiseWArg =
+        flatOpts.noiseScaleW === undefined ? Number.NaN : flatOpts.noiseScaleW;
+      const lengthArg =
+        flatOpts.lengthScale === undefined ? Number.NaN : flatOpts.lengthScale;
+      return SherpaOnnx.updateTtsParams(
+        instanceId,
+        noiseArg,
+        noiseWArg,
+        lengthArg
+      );
+    },
+
+    async getModelInfo(): Promise<TTSModelInfo> {
+      guard();
+      const [sampleRate, numSpeakers] = await Promise.all([
+        SherpaOnnx.getTtsSampleRate(instanceId),
+        SherpaOnnx.getTtsNumSpeakers(instanceId),
+      ]);
+      return { sampleRate, numSpeakers };
+    },
+
+    async getSampleRate(): Promise<number> {
+      guard();
+      return SherpaOnnx.getTtsSampleRate(instanceId);
+    },
+
+    async getNumSpeakers(): Promise<number> {
+      guard();
+      return SherpaOnnx.getTtsNumSpeakers(instanceId);
+    },
+
+    async destroy(): Promise<void> {
+      if (destroyed) return;
+      destroyed = true;
+      await SherpaOnnx.unloadTts(instanceId);
+    },
   };
+
+  return engine;
 }
 
-/**
- * Get the sample rate of the initialized TTS model.
- *
- * @returns Promise resolving to sample rate in Hz
- * @example
- * ```typescript
- * const sampleRate = await getSampleRate();
- * console.log(`Model outputs audio at ${sampleRate} Hz`);
- * ```
- */
-export function getSampleRate(): Promise<number> {
-  return SherpaOnnx.getTtsSampleRate();
-}
-
-/**
- * Get the number of speakers/voices available in the model.
- *
- * @returns Promise resolving to number of speakers
- * - 0 or 1: Single-speaker model
- * - >1: Multi-speaker model
- * @example
- * ```typescript
- * const numSpeakers = await getNumSpeakers();
- *
- * if (numSpeakers > 1) {
- *   console.log(`Model has ${numSpeakers} different voices`);
- *   // Generate with different voices
- *   for (let i = 0; i < numSpeakers; i++) {
- *     const audio = await generateSpeech('Hello', { sid: i });
- *     // ... use audio
- *   }
- * }
- * ```
- */
-export function getNumSpeakers(): Promise<number> {
-  return SherpaOnnx.getTtsNumSpeakers();
-}
-
-/**
- * Release TTS resources.
- *
- * Call this when you're done using TTS to free up memory.
- * After calling this, you must call `initializeTTS()` again before
- * using TTS functions.
- *
- * @example
- * ```typescript
- * await initializeTTS({ type: 'auto', path: 'models/vits-piper-en' });
- * const audio = await generateSpeech('Hello');
- * // ... use audio
- * await unloadTTS(); // Free resources
- * ```
- */
-export function unloadTTS(): Promise<void> {
-  return SherpaOnnx.unloadTts();
-}
+// ========== Module-level utilities (stateless, no instance required) ==========
 
 /**
  * Save generated TTS audio to a WAV file.
- *
- * @param audio - Generated audio from generateSpeech()
- * @param filePath - Absolute path where to save the WAV file
- * @returns Promise resolving to the file path where audio was saved
- * @example
- * ```typescript
- * import { Platform } from 'react-native';
- * import {DocumentDirectoryPath, ExternalDirectoryPath} from '@dr.pogodin/react-native-fs';
- *
- * const audio = await generateSpeech('Hello, world!');
- *
- * // Save to documents directory
- * const documentsPath = Platform.OS === 'ios'
- *   ? DocumentDirectoryPath
- *   : ExternalDirectoryPath;
- * const filePath = `${documentsPath}/speech_${Date.now()}.wav`;
- *
- * const savedPath = await saveAudioToFile(audio, filePath);
- * console.log('Audio saved to:', savedPath);
- * ```
  */
 export function saveAudioToFile(
   audio: GeneratedAudio,
@@ -427,11 +397,6 @@ export function saveAudioToFile(
 
 /**
  * Save generated TTS audio to a WAV file via Android SAF content URI.
- *
- * @param audio - Generated audio from generateSpeech()
- * @param directoryUri - Directory content URI from SAF
- * @param filename - Desired file name
- * @returns Promise resolving to content URI of the saved file
  */
 export function saveAudioToContentUri(
   audio: GeneratedAudio,
@@ -448,12 +413,6 @@ export function saveAudioToContentUri(
 
 /**
  * Save a text file via Android SAF content URI.
- *
- * @param text - Text content to write
- * @param directoryUri - Directory content URI from SAF
- * @param filename - Desired file name
- * @param mimeType - MIME type (default: text/plain)
- * @returns Promise resolving to content URI of the saved file
  */
 export function saveTextToContentUri(
   text: string,
@@ -471,10 +430,6 @@ export function saveTextToContentUri(
 
 /**
  * Copy a SAF content URI to a cache file for local playback (Android only).
- *
- * @param fileUri - Content URI of the saved WAV file
- * @param filename - Desired cache filename
- * @returns Promise resolving to absolute path of the cached file
  */
 export function copyContentUriToCache(
   fileUri: string,
@@ -485,9 +440,6 @@ export function copyContentUriToCache(
 
 /**
  * Share a TTS audio file (file path or content URI).
- *
- * @param fileUri - File path or content URI
- * @param mimeType - MIME type (default: audio/wav)
  */
 export function shareAudioFile(
   fileUri: string,
@@ -500,11 +452,22 @@ export function shareAudioFile(
 export type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsModelOptions,
+  TtsVitsModelOptions,
+  TtsMatchaModelOptions,
+  TtsKokoroModelOptions,
+  TtsKittenModelOptions,
+  TtsPocketModelOptions,
+  TtsUpdateOptions,
   TtsGenerationOptions,
-  SynthesisOptions,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,
   TTSModelInfo,
+  TtsEngine,
+  TtsStreamHandlers,
+  TtsStreamChunk,
+  TtsStreamEnd,
+  TtsStreamError,
 } from './types';
 export { TTS_MODEL_TYPES } from './types';

@@ -260,9 +260,19 @@ export interface SttRecognitionResult {
 }
 
 /**
- * @deprecated Use SttRecognitionResult. Kept as alias for compatibility.
+ * Instance-based STT engine returned by createSTT().
+ * Call destroy() when done to free native resources.
  */
-export type TranscriptionResult = SttRecognitionResult;
+export interface SttEngine {
+  readonly instanceId: string;
+  transcribeFile(filePath: string): Promise<SttRecognitionResult>;
+  transcribeSamples(
+    samples: number[],
+    sampleRate: number
+  ): Promise<SttRecognitionResult>;
+  setConfig(options: SttRuntimeConfig): Promise<void>;
+  destroy(): Promise<void>;
+}
 
 /**
  * Runtime config for the offline recognizer (Kotlin OfflineRecognizerConfig).
