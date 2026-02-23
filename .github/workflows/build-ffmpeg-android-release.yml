@@ -8,14 +8,14 @@ name: Prebuilt - FFmpeg (Android) Release
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-    paths:
-      - 'third_party/ffmpeg_prebuilt/**'
-      - 'third_party/ffmpeg/**'
-      - 'third_party/shine_prebuilt/**'
-      - 'third_party/shine/**'
-      - '.github/workflows/build-ffmpeg-android-release.yml'
+    #branches:
+    #  - main
+    #paths:
+    #  - 'third_party/ffmpeg_prebuilt/**'
+    #  - 'third_party/ffmpeg/**'
+    #  - 'third_party/shine_prebuilt/**'
+    #  - 'third_party/shine/**'
+    #  - '.github/workflows/build-ffmpeg-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
