@@ -591,7 +591,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             }
         });
 
-        inst->streamRunning.store(false);
+        instRef->streamRunning.store(false);
         {
             std::lock_guard<std::mutex> lock(g_tts_mutex);
             g_tts_stream_cv.notify_all();
@@ -853,18 +853,6 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                 RCTLogInfo(@"TTS instance %@ released", instanceIdCopy);
                 dispatch_async(dispatch_get_main_queue(), ^{ resolveCopy(nil); });
             });
-        });
-
-        // Release the TTS wrapper on a background queue after any in-progress stream finishes,
-        // so the main thread is not blocked and the streaming thread is not using the wrapper.
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-            while (instToRelease->streamRunning.load()) {
-                [NSThread sleepForTimeInterval:0.05];
-            }
-            if (instToRelease->wrapper != nullptr) {
-                instToRelease->wrapper->release();
-                instToRelease->wrapper.reset();
-            }
         });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
