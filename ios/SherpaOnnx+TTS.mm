@@ -7,12 +7,14 @@
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
 
 struct TtsInstanceState {
     std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
@@ -36,6 +38,7 @@ struct TtsInstanceState {
 
 static std::unordered_map<std::string, std::unique_ptr<TtsInstanceState>> g_tts_instances;
 static std::mutex g_tts_mutex;
+static std::condition_variable g_tts_stream_cv;
 
 static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
     using K = sherpaonnx::TtsModelKind;
@@ -589,6 +592,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         });
 
         inst->streamRunning.store(false);
+        {
+            std::lock_guard<std::mutex> lock(g_tts_mutex);
+            g_tts_stream_cv.notify_all();
+        }
     });
 
     resolve(nil);
@@ -787,12 +794,20 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         return;
     }
     std::string instanceIdStr = [instanceId UTF8String];
+    RCTPromiseResolveBlock resolveCopy = resolve;
+    RCTPromiseRejectBlock rejectCopy = reject;
+    NSString *instanceIdCopy = [instanceId copy];
     @try {
         dispatch_async(dispatch_get_main_queue(), ^{
-            std::lock_guard<std::mutex> lock(g_tts_mutex);
-            auto it = g_tts_instances.find(instanceIdStr);
-            if (it != g_tts_instances.end()) {
-                TtsInstanceState *inst = it->second.get();
+            TtsInstanceState *inst = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(g_tts_mutex);
+                auto it = g_tts_instances.find(instanceIdStr);
+                if (it == g_tts_instances.end()) {
+                    resolveCopy(nil);
+                    return;
+                }
+                inst = it->second.get();
                 if (inst->player != nil) [inst->player stop];
                 if (inst->engine != nil) {
                     [inst->engine stop];
@@ -801,28 +816,48 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                 inst->player = nil;
                 inst->engine = nil;
                 inst->format = nil;
-                if (inst->wrapper != nullptr) {
-                    inst->wrapper->release();
-                    inst->wrapper.reset();
-                }
-                inst->modelDir = nil;
-                inst->modelType = nil;
-                inst->noiseScale = nil;
-                inst->noiseScaleW = nil;
-                inst->lengthScale = nil;
-                inst->ruleFsts = nil;
-                inst->ruleFars = nil;
-                inst->maxNumSentences = nil;
-                inst->silenceScale = nil;
-                g_tts_instances.erase(it);
+                inst->streamCancelled.store(true);
             }
-            RCTLogInfo(@"TTS instance %@ released", instanceId);
-            resolve(nil);
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                {
+                    std::unique_lock<std::mutex> lock(g_tts_mutex);
+                    auto it = g_tts_instances.find(instanceIdStr);
+                    if (it == g_tts_instances.end()) {
+                        dispatch_async(dispatch_get_main_queue(), ^{ resolveCopy(nil); });
+                        return;
+                    }
+                    TtsInstanceState *i = it->second.get();
+                    bool done = g_tts_stream_cv.wait_for(
+                        lock,
+                        std::chrono::seconds(5),
+                        [i] { return !i->streamRunning.load(); }
+                    );
+                    if (!done) {
+                        RCTLogWarn(@"TTS unload: stream did not stop within 5s, releasing anyway");
+                    }
+                    if (i->wrapper != nullptr) {
+                        i->wrapper->release();
+                        i->wrapper.reset();
+                    }
+                    i->modelDir = nil;
+                    i->modelType = nil;
+                    i->noiseScale = nil;
+                    i->noiseScaleW = nil;
+                    i->lengthScale = nil;
+                    i->ruleFsts = nil;
+                    i->ruleFars = nil;
+                    i->maxNumSentences = nil;
+                    i->silenceScale = nil;
+                    g_tts_instances.erase(it);
+                }
+                RCTLogInfo(@"TTS instance %@ released", instanceIdCopy);
+                dispatch_async(dispatch_get_main_queue(), ^{ resolveCopy(nil); });
+            });
         });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
-        reject(@"TTS_CLEANUP_ERROR", errorMsg, nil);
+        rejectCopy(@"TTS_CLEANUP_ERROR", errorMsg, nil);
     }
 }
 
