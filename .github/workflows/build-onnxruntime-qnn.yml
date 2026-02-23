@@ -52,15 +52,30 @@ jobs:
           QNN_SDK_TARBALL_URL: ${{ secrets.QNN_SDK_TARBALL_URL }}
         run: |
           if [ -z "$QNN_SDK_TARBALL_URL" ]; then
-            echo "::error::Secret QNN_SDK_TARBALL_URL is not set. Add a repository secret with the URL to a tarball of the Qualcomm QNN SDK (e.g. from https://qpm.qualcomm.com/)."
+            echo "::error::Secret QNN_SDK_TARBALL_URL is not set. Add a repository secret with the URL to a zip or tarball of the Qualcomm QNN SDK (e.g. from https://qpm.qualcomm.com/ or softwarecenter.qualcomm.com)."
             exit 1
           fi
           mkdir -p qnn-sdk
           cd qnn-sdk
           echo "Downloading QNN SDK from secret URL..."
-          curl -sSfL -o qnn-sdk.tar.gz "$QNN_SDK_TARBALL_URL"
-          tar -xzf qnn-sdk.tar.gz
-          rm qnn-sdk.tar.gz
+          curl -sSfL -o qnn-archive "$QNN_SDK_TARBALL_URL"
+          case "$(file -b --mime-type qnn-archive)" in
+            application/zip|application/x-zip*)
+              unzip -q -o qnn-archive
+              ;;
+            application/gzip*|application/x-gzip*)
+              tar -xzf qnn-archive
+              ;;
+            *)
+              # Try by extension from URL or unzip (Qualcomm often provides .zip)
+              if echo "$QNN_SDK_TARBALL_URL" | grep -q '\.zip'; then
+                unzip -q -o qnn-archive
+              else
+                tar -xzf qnn-archive
+              fi
+              ;;
+          esac
+          rm -f qnn-archive
           # QNN SDK may extract as a single top-level dir or multiple files
           TOP=$(find . -maxdepth 1 -type d ! -name . | head -1)
           if [ -n "$TOP" ] && [ -f "$TOP/include/QNN/QnnInterface.h" ] 2>/dev/null; then
@@ -68,7 +83,7 @@ jobs:
           elif [ -f "include/QNN/QnnInterface.h" ] 2>/dev/null; then
             QNN_ROOT="$(pwd)"
           else
-            echo "::error::QNN SDK tarball must contain include/QNN/QnnInterface.h (or a single top-level dir containing it)."
+            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h (or a single top-level dir containing it)."
             find . -name "QnnInterface.h" 2>/dev/null || true
             exit 1
           fi
