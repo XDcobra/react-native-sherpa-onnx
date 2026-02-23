@@ -36,7 +36,7 @@ function flattenTtsModelOptionsForNative(
     !modelOptions ||
     !modelType ||
     modelType === 'auto' ||
-    modelType === 'zipvoice'
+    modelType === 'zipvoice' // Zipvoice does not use noise/length scale; native uses its own defaults
   )
     return {
       noiseScale: undefined,
@@ -272,17 +272,17 @@ export async function createTTS(
       const subscriptions = [
         ttsEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
           const e = event as TtsStreamChunk;
-          if (e.instanceId !== instanceId) return;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onChunk?.(e);
         }),
         ttsEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
           const e = event as TtsStreamEnd;
-          if (e.instanceId !== instanceId) return;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onEnd?.(e);
         }),
         ttsEventEmitter.addListener('ttsStreamError', (event: unknown) => {
           const e = event as TtsStreamError;
-          if (e.instanceId !== instanceId) return;
+          if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onError?.(e);
         }),
       ];
