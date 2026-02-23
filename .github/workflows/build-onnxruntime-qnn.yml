@@ -1,0 +1,104 @@
+# Build ONNX Runtime for Android with QNN support and upload as artifact.
+# Requires repository secret QNN_SDK_TARBALL_URL: URL to a tarball of the Qualcomm QNN SDK
+# (download from https://qpm.qualcomm.com/, create a tarball of the extracted SDK, host it,
+# e.g. as a private release asset or internal URL, and set the secret).
+
+name: Build ONNX Runtime (Android + QNN)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'third_party/onnxruntime_prebuilt/**'
+      - 'third_party/onnxruntime/**'
+      - '.github/workflows/build-onnxruntime-qnn.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ort-qnn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Download and extract QNN SDK
+        id: qnn
+        env:
+          QNN_SDK_TARBALL_URL: ${{ secrets.QNN_SDK_TARBALL_URL }}
+        run: |
+          if [ -z "$QNN_SDK_TARBALL_URL" ]; then
+            echo "::error::Secret QNN_SDK_TARBALL_URL is not set. Add a repository secret with the URL to a tarball of the Qualcomm QNN SDK (e.g. from https://qpm.qualcomm.com/)."
+            exit 1
+          fi
+          mkdir -p qnn-sdk
+          cd qnn-sdk
+          echo "Downloading QNN SDK from secret URL..."
+          curl -sSfL -o qnn-sdk.tar.gz "$QNN_SDK_TARBALL_URL"
+          tar -xzf qnn-sdk.tar.gz
+          rm qnn-sdk.tar.gz
+          # QNN SDK may extract as a single top-level dir or multiple files
+          TOP=$(find . -maxdepth 1 -type d ! -name . | head -1)
+          if [ -n "$TOP" ] && [ -f "$TOP/include/QNN/QnnInterface.h" ] 2>/dev/null; then
+            QNN_ROOT="$(pwd)/$TOP"
+          elif [ -f "include/QNN/QnnInterface.h" ] 2>/dev/null; then
+            QNN_ROOT="$(pwd)"
+          else
+            echo "::error::QNN SDK tarball must contain include/QNN/QnnInterface.h (or a single top-level dir containing it)."
+            find . -name "QnnInterface.h" 2>/dev/null || true
+            exit 1
+          fi
+          echo "QNN_SDK_ROOT=$QNN_ROOT" >> "$GITHUB_ENV"
+          echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
+          echo "QNN SDK root: $QNN_ROOT"
+
+      - name: Build ONNX Runtime with QNN
+        run: |
+          cd third_party/onnxruntime_prebuilt
+          chmod +x build_onnxruntime.sh
+          export ANDROID_NDK="${{ steps.setup-ndk.outputs.ndk-path }}"
+          export ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
+          export ANDROID_NDK_ROOT="${{ steps.setup-ndk.outputs.ndk-path }}"
+          export ANDROID_HOME="$ANDROID_HOME"
+          ./build_onnxruntime.sh --qnn
+        env:
+          QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
+
+      - name: Upload ONNX Runtime Android + QNN artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-android-qnn
+          path: third_party/onnxruntime_prebuilt/android
+          retention-days: 30
+          compression-level: 6
+
+      - name: Summary
+        run: |
+          echo "## ONNX Runtime (Android + QNN) build complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifact \`onnxruntime-android-qnn\` contains \`android/<abi>/lib\` and \`android/<abi>/headers\` for arm64-v8a, armeabi-v7a, x86, x86_64." >> $GITHUB_STEP_SUMMARY
+          echo "Use as \`SHERPA_ONNXRUNTIME_LIB_DIR\` / \`SHERPA_ONNXRUNTIME_INCLUDE_DIR\` when building sherpa-onnx with QNN." >> $GITHUB_STEP_SUMMARY
