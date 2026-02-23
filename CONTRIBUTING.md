@@ -81,6 +81,9 @@ Remember to add tests for your change if possible. Run the unit tests by:
 yarn test
 ```
 
+### Building Android native libs (sherpa-onnx)
+
+If you need to rebuild the sherpa-onnx Android prebuilts (e.g. after updating the submodule or to enable Qualcomm NPU), see [third_party/sherpa-onnx-prebuilt/README.md](third_party/sherpa-onnx-prebuilt/README.md). Default build does not require the QNN SDK; use `./build_sherpa_onnx.sh --qnn` when `QNN_SDK_ROOT` is set to build with QNN support.
 
 ### Commit message convention
 

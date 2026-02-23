@@ -118,6 +118,8 @@ The Android build includes optional **Qualcomm NPU (QNN)** support for `arm64-v8
 
 The QNN SDK license does not allow redistributing these libraries in public repositories or npm packages, so they must be obtained and added by the app developer.
 
+See [Building sherpa-onnx Android prebuilts](third_party/sherpa-onnx-prebuilt/README.md) for more detailed information and instructions.
+
 ### iOS
 
 The sherpa-onnx XCFramework is **not included in the repository or npm package** due to its size (~80MB), but **no manual action is required**! The framework is automatically downloaded during `pod install`.
