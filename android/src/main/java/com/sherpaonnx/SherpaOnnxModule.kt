@@ -53,6 +53,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return NAME
   }
 
+  override fun onCatalystInstanceDestroy() {
+    super.onCatalystInstanceDestroy()
+    ttsHelper.shutdown()
+  }
+
   /**
    * Test method to verify sherpa-onnx native library is loaded.
    * This is a minimal "Hello World" test for Phase 1.
