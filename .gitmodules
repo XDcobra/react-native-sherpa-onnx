@@ -4,3 +4,6 @@
 [submodule "third_party/shine"]
 	path = third_party/shine
 	url = https://github.com/toots/shine
+[submodule "third_party/sherpa-onnx"]
+	path = third_party/sherpa-onnx
+	url = https://github.com/k2-fsa/sherpa-onnx.git
