@@ -135,8 +135,9 @@ android {
   }
 
   // The build expects prebuilt .so files under src/main/jniLibs/<abi>/.
-  // Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and
-  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js (or use npm package with prebuilts).
+  // If missing, Gradle downloads them from this repo's GitHub Releases (see downloadNativeLibsIfNeeded).
+  // Or run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and
+  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js for local builds.
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
   def requiredFfmpegSoFiles = [
@@ -146,12 +147,104 @@ android {
     'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
   ]
 
+  def jniLibsDir = file("${projectDir}/src/main/jniLibs")
+
+  def hasAllFfmpegLibs = {
+    for (abi in requiredAbis) {
+      def dir = new File(jniLibsDir, abi)
+      if (!dir.exists()) return false
+      for (soName in requiredFfmpegSoFiles) {
+        if (!new File(dir, soName).exists()) return false
+      }
+    }
+    return true
+  }
+
+  def hasAllSherpaLibs = {
+    for (abi in requiredAbis) {
+      def dir = new File(jniLibsDir, abi)
+      if (!dir.exists()) return false
+      for (soName in requiredSherpaOnnxSoFiles) {
+        if (!new File(dir, soName).exists()) return false
+      }
+    }
+    return true
+  }
+
+  def getGitHubRepo = {
+    try {
+      def proc = ['git', 'remote', 'get-url', 'origin'].execute(null, rootDir)
+      proc.waitFor()
+      if (proc.exitValue() != 0) return null
+      def url = proc.text.trim()
+      def m = (url =~ /github\.com[:\/]([^\/]+\/[^\/\s]+?)(\.git)?$/)
+      return m ? m[0][1] : null
+    } catch (Exception e) { return null }
+  }
+
+  def readReleaseTag = { File tagFile ->
+    if (!tagFile.exists()) return null
+    return tagFile.text.split(/\r?\n/).findResult { line ->
+      def t = line.replaceAll(/\s*#.*$/, '').trim()
+      t ? t : null
+    }
+  }
+
+  task downloadNativeLibsIfNeeded {
+    doLast {
+      def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
+      if (!repo) {
+        if (!hasAllFfmpegLibs() || !hasAllSherpaLibs()) {
+          throw new RuntimeException(
+            "Native libs missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
+            "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js."
+          )
+        }
+        return
+      }
+      def baseUrl = "https://github.com/${repo}/releases/download"
+      def downloadDir = file("${buildDir}/prebuilt-downloads")
+      downloadDir.mkdirs()
+
+      if (!hasAllFfmpegLibs()) {
+        def tagFile = file("${rootDir}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
+        def tag = readReleaseTag(tagFile)
+        if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
+        def zipFile = new File(downloadDir, "ffmpeg-android.zip")
+        def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
+        exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir projectDir }
+        if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+        copy {
+          from zipTree(zipFile)
+          into jniLibsDir
+        }
+        println "Downloaded and extracted FFmpeg prebuilts from ${tag}"
+      }
+
+      if (!hasAllSherpaLibs()) {
+        def tagFile = file("${rootDir}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
+        def tag = readReleaseTag(tagFile)
+        if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
+        def zipFile = new File(downloadDir, "sherpa-onnx-android.zip")
+        def url = "${baseUrl}/${tag}/sherpa-onnx-android.zip"
+        exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir projectDir }
+        if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+        copy {
+          from zipTree(zipFile)
+          into jniLibsDir
+        }
+        println "Downloaded and extracted sherpa-onnx prebuilts from ${tag}"
+      }
+    }
+  }
+
   task checkJniLibs {
+    dependsOn downloadNativeLibsIfNeeded
     doLast {
       requiredAbis.each { abi ->
         def dir = file("${projectDir}/src/main/jniLibs/${abi}")
         if (!dir.exists()) {
-          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js")
+          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG releases exist.")
         }
         requiredFfmpegSoFiles.each { soName ->
           def soFile = new File(dir, soName)

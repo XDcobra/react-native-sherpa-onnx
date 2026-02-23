@@ -2,6 +2,8 @@
 
 This folder contains scripts to build sherpa-onnx native libraries for Android and copy them into the SDK. The resulting `.so` files are used by the React Native Android build.
 
+**ONNX Runtime source:** The build **always** uses this repo’s GitHub Release (tag `ort-android-qnn-v*`, see `third_party/onnxruntime_prebuilt/VERSIONS`) when available. That release is built by `.github/workflows/build-onnxruntime-qnn.yml`. If the release is missing or the download fails, the script falls back to sherpa-onnx’s default (onnxruntime-libs). So the SDK is no longer tied to the stock onnxruntime from sherpa-onnx once the ORT+QNN release exists.
+
 ## Building (Linux / macOS)
 
 **Requirements:** Android NDK. Set one of `ANDROID_NDK`, `ANDROID_NDK_HOME`, or `ANDROID_NDK_ROOT`.

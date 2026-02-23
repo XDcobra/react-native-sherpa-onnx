@@ -77,12 +77,26 @@ fi
 echo ""
 
 # Always try to use this repo's ONNX Runtime Android+QNN release (no submodule change).
+# Release tag: ANDROID_RELEASE_TAG (same pattern as FFmpeg/sherpa-onnx) or fallback from VERSIONS.
 VERSIONS_FILE="$REPO_ROOT/third_party/onnxruntime_prebuilt/VERSIONS"
-if [ -f "$VERSIONS_FILE" ]; then
+TAG_FILE="$REPO_ROOT/third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG"
+RELEASE_TAG=""
+if [ -f "$TAG_FILE" ]; then
+    RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+fi
+if [ -z "$RELEASE_TAG" ] && [ -f "$VERSIONS_FILE" ]; then
     set -a
     source "$VERSIONS_FILE"
     set +a
     RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
+fi
+if [ -n "$RELEASE_TAG" ]; then
+    # VERSIONS is still needed for ONNXRUNTIME_VERSION (layout paths in build_abi)
+    if [ -f "$VERSIONS_FILE" ]; then
+        set -a
+        source "$VERSIONS_FILE"
+        set +a
+    fi
     REPO_SLUG="${GITHUB_REPOSITORY:-}"
     if [ -z "$REPO_SLUG" ]; then
         REPO_SLUG=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]([^/]+/[^/]+)(\.git)?$|\1|' || true)

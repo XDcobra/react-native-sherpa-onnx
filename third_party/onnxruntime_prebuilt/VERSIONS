@@ -6,6 +6,10 @@
 # ONNXRUNTIME_VERSION must match the directory layout expected by sherpa-onnx
 # Android scripts (e.g. 1.17.1/jni/arm64-v8a/, 1.17.1/headers/).
 # QNN_SDK_VERSION is used for the release tag and for the Qualcomm SDK download URL.
+#
+# The release tag is read from ANDROID_RELEASE_TAG (same pattern as FFmpeg/sherpa-onnx).
+# When bumping ONNXRUNTIME_VERSION or QNN_SDK_VERSION, update ANDROID_RELEASE_TAG to
+# e.g. ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>.
 
 ONNXRUNTIME_VERSION=1.17.1
 QNN_SDK_VERSION=2.43.1.260218
