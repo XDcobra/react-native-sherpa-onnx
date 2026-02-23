@@ -106,6 +106,27 @@ internal class SherpaOnnxTtsHelper(
   /** Single-thread executor for TTS init so the RN bridge thread is not blocked (avoids Inspector/dev WebSocket races in debug builds). */
   private val ttsInitExecutor = Executors.newSingleThreadExecutor()
 
+  /**
+   * Shuts down the TTS init executor and releases all engine instances.
+   * Call from the native module's onCatalystInstanceDestroy() to avoid leaking the executor thread.
+   */
+  fun shutdown() {
+    try {
+      ttsInitExecutor.shutdown()
+      if (!ttsInitExecutor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) {
+        ttsInitExecutor.shutdownNow()
+      }
+    } catch (e: InterruptedException) {
+      Thread.currentThread().interrupt()
+      ttsInitExecutor.shutdownNow()
+    }
+    instances.values.forEach { inst ->
+      inst.releaseEngines()
+      inst.stopPcmPlayer()
+    }
+    instances.clear()
+  }
+
   fun initializeTts(
     instanceId: String,
     modelDir: String,
