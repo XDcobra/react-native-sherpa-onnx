@@ -2,6 +2,14 @@
 
 Build ONNX Runtime for Android (all ABIs) for use with sherpa-onnx. Optional **QNN** (Qualcomm NPU, arm64-v8a only) and **NNAPI** support.
 
+## Version pinning and GitHub Release
+
+- **`VERSIONS`** – Pins `ONNXRUNTIME_VERSION` and `QNN_SDK_VERSION`. Used by:
+  - **`.github/workflows/build-onnxruntime-qnn.yml`** – Builds ORT with QNN, downloads the QNN SDK from Qualcomm, and publishes a **GitHub Release** with tag `ort-android-qnn-v<ORT>-qnn<QNN>` and asset `onnxruntime-android-qnn.zip`.
+  - **`third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh`** – When building sherpa-onnx for Android, **always** tries to download this release and use it instead of onnxruntime-libs. If the release is missing or download fails, sherpa-onnx falls back to its default download.
+
+No changes to the sherpa-onnx submodule are required (Variant B).
+
 ## Why build ONNX Runtime here?
 
 The sherpa-onnx Android build uses a **downloaded** ONNX Runtime prebuilt (from onnxruntime-libs), which does **not** include the QNN execution provider. To get QNN support in sherpa-onnx on Android, you must build ONNX Runtime from source with QNN and then point sherpa-onnx at these prebuilts. This folder provides a script to build ORT for all ABIs with optional QNN and NNAPI.

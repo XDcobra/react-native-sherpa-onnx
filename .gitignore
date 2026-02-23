@@ -128,6 +128,7 @@ third_party/shine_prebuilt/*
 third_party/onnxruntime_prebuilt/*
 !third_party/onnxruntime_prebuilt/README.md
 !third_party/onnxruntime_prebuilt/build_onnxruntime.sh
+!third_party/onnxruntime_prebuilt/VERSIONS
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default

@@ -1,7 +1,7 @@
-# Build ONNX Runtime for Android with QNN support and upload as artifact.
-# Requires repository secret QNN_SDK_TARBALL_URL: URL to a tarball of the Qualcomm QNN SDK
-# (download from https://qpm.qualcomm.com/, create a tarball of the extracted SDK, host it,
-# e.g. as a private release asset or internal URL, and set the secret).
+# Build ONNX Runtime for Android with QNN support and publish as GitHub Release.
+# Versions are read from third_party/onnxruntime_prebuilt/VERSIONS.
+# QNN SDK is downloaded from Qualcomm (public URL). Release tag format:
+#   ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>
 
 name: Build ONNX Runtime (Android + QNN)
 
@@ -23,12 +23,31 @@ jobs:
   build-ort-qnn:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Read VERSIONS
+        id: versions
+        run: |
+          VERSIONS_FILE=third_party/onnxruntime_prebuilt/VERSIONS
+          if [ ! -f "$VERSIONS_FILE" ]; then
+            echo "::error::Missing $VERSIONS_FILE"
+            exit 1
+          fi
+          set -a
+          source "$VERSIONS_FILE"
+          set +a
+          echo "ONNXRUNTIME_VERSION=$ONNXRUNTIME_VERSION" >> $GITHUB_OUTPUT
+          echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> $GITHUB_OUTPUT
+          RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "Release tag: $RELEASE_TAG"
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -48,46 +67,28 @@ jobs:
 
       - name: Download and extract QNN SDK
         id: qnn
-        env:
-          QNN_SDK_TARBALL_URL: ${{ secrets.QNN_SDK_TARBALL_URL }}
         run: |
-          if [ -z "$QNN_SDK_TARBALL_URL" ]; then
-            echo "::error::Secret QNN_SDK_TARBALL_URL is not set. Add a repository secret with the URL to a zip or tarball of the Qualcomm QNN SDK (e.g. from https://qpm.qualcomm.com/ or softwarecenter.qualcomm.com)."
-            exit 1
-          fi
+          QNN_VER="${{ steps.versions.outputs.QNN_SDK_VERSION }}"
+          QNN_URL="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${QNN_VER}/v${QNN_VER}.zip"
           mkdir -p qnn-sdk
           cd qnn-sdk
-          echo "Downloading QNN SDK from secret URL..."
-          curl -sSfL -o qnn-archive "$QNN_SDK_TARBALL_URL"
-          case "$(file -b --mime-type qnn-archive)" in
-            application/zip|application/x-zip*)
-              unzip -q -o qnn-archive
-              ;;
-            application/gzip*|application/x-gzip*)
-              tar -xzf qnn-archive
-              ;;
-            *)
-              # Try by extension from URL or unzip (Qualcomm often provides .zip)
-              if echo "$QNN_SDK_TARBALL_URL" | grep -q '\.zip'; then
-                unzip -q -o qnn-archive
-              else
-                tar -xzf qnn-archive
-              fi
-              ;;
-          esac
+          echo "Downloading QNN SDK ${QNN_VER} from Qualcomm..."
+          if ! curl -sSfL -o qnn-archive "$QNN_URL"; then
+            echo "::error::QNN SDK download failed."
+            exit 1
+          fi
+          unzip -q -o qnn-archive
           rm -f qnn-archive
-          # QNN SDK may extract as a single top-level dir or multiple files
           TOP=$(find . -maxdepth 1 -type d ! -name . | head -1)
           if [ -n "$TOP" ] && [ -f "$TOP/include/QNN/QnnInterface.h" ] 2>/dev/null; then
             QNN_ROOT="$(pwd)/$TOP"
           elif [ -f "include/QNN/QnnInterface.h" ] 2>/dev/null; then
             QNN_ROOT="$(pwd)"
           else
-            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h (or a single top-level dir containing it)."
+            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h"
             find . -name "QnnInterface.h" 2>/dev/null || true
             exit 1
           fi
-          echo "QNN_SDK_ROOT=$QNN_ROOT" >> "$GITHUB_ENV"
           echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
           echo "QNN SDK root: $QNN_ROOT"
 
@@ -103,17 +104,47 @@ jobs:
         env:
           QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
 
-      - name: Upload ONNX Runtime Android + QNN artifact
-        uses: actions/upload-artifact@v4
+      - name: Package for sherpa-onnx layout
+        run: |
+          ORT_VER="${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}"
+          ANDROID_DIR=third_party/onnxruntime_prebuilt/android
+          LAYOUT_DIR=ort-sherpa-layout
+          mkdir -p "$LAYOUT_DIR/$ORT_VER/headers"
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            mkdir -p "$LAYOUT_DIR/$ORT_VER/jni/$abi"
+            cp -v "$ANDROID_DIR/$abi/lib/libonnxruntime.so" "$LAYOUT_DIR/$ORT_VER/jni/$abi/"
+          done
+          cp -R "$ANDROID_DIR/arm64-v8a/headers/"* "$LAYOUT_DIR/$ORT_VER/headers/"
+          echo "Layout: $ORT_VER/jni/<abi>/libonnxruntime.so and $ORT_VER/headers/"
+
+      - name: Create release zip
+        run: |
+          cd ort-sherpa-layout
+          zip -r ../onnxruntime-android-qnn.zip .
+          cd ..
+          ls -la onnxruntime-android-qnn.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: onnxruntime-android-qnn
-          path: third_party/onnxruntime_prebuilt/android
-          retention-days: 30
-          compression-level: 6
+          tag_name: ${{ steps.versions.outputs.release_tag }}
+          name: ONNX Runtime Android + QNN ${{ steps.versions.outputs.release_tag }}
+          body: |
+            Prebuilt ONNX Runtime for Android with QNN (Qualcomm NPU) support.
+            Layout matches sherpa-onnx Android build scripts: `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so` and `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/`.
+            Used automatically by `third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh` when building sherpa-onnx for Android.
+          files: onnxruntime-android-qnn.zip
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
           echo "## ONNX Runtime (Android + QNN) build complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Artifact \`onnxruntime-android-qnn\` contains \`android/<abi>/lib\` and \`android/<abi>/headers\` for arm64-v8a, armeabi-v7a, x86, x86_64." >> $GITHUB_STEP_SUMMARY
-          echo "Use as \`SHERPA_ONNXRUNTIME_LIB_DIR\` / \`SHERPA_ONNXRUNTIME_INCLUDE_DIR\` when building sherpa-onnx with QNN." >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.versions.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.versions.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Asset \`onnxruntime-android-qnn.zip\` contains \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so\` and \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/\` for arm64-v8a, armeabi-v7a, x86, x86_64." >> $GITHUB_STEP_SUMMARY
+          echo "Sherpa-onnx Android build uses this release automatically when \`build_sherpa_onnx.sh\` runs." >> $GITHUB_STEP_SUMMARY

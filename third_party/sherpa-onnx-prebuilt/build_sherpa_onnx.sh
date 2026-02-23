@@ -8,6 +8,11 @@
 # Requires: ANDROID_NDK (or ANDROID_NDK_HOME / ANDROID_NDK_ROOT).
 # For --qnn: QNN_SDK_ROOT must point to the Qualcomm QNN SDK installation.
 # Sherpa-onnx source: third_party/sherpa-onnx (submodule).
+#
+# ONNX Runtime: Always tries to use this repo's GitHub Release (ort-android-qnn-v* tag)
+# from third_party/onnxruntime_prebuilt/VERSIONS. If the release is found, sherpa-onnx
+# uses that prebuilt instead of downloading from onnxruntime-libs. If not found, sherpa-onnx
+# scripts fall back to their default download.
 
 set -e
 
@@ -15,6 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SHERPA_SRC="$REPO_ROOT/third_party/sherpa-onnx"
 OUTPUT_BASE="$SCRIPT_DIR/android"
+ORT_PREBUILT_ROOT=""
+ONNXRUNTIME_VERSION=""
 
 # Default: no QNN (build works without QNN SDK)
 ENABLE_QNN=OFF
@@ -69,6 +76,37 @@ if [ "$ENABLE_QNN" = ON ]; then
 fi
 echo ""
 
+# Always try to use this repo's ONNX Runtime Android+QNN release (no submodule change).
+VERSIONS_FILE="$REPO_ROOT/third_party/onnxruntime_prebuilt/VERSIONS"
+if [ -f "$VERSIONS_FILE" ]; then
+    set -a
+    source "$VERSIONS_FILE"
+    set +a
+    RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
+    REPO_SLUG="${GITHUB_REPOSITORY:-}"
+    if [ -z "$REPO_SLUG" ]; then
+        REPO_SLUG=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]([^/]+/[^/]+)(\.git)?$|\1|' || true)
+    fi
+    if [ -n "$REPO_SLUG" ]; then
+        ORT_URL="https://github.com/${REPO_SLUG}/releases/download/${RELEASE_TAG}/onnxruntime-android-qnn.zip"
+        ORT_EXTRACT="$SHERPA_SRC/ort-prebuilt-qnn-$$"
+        if curl -sSfL -o "$SHERPA_SRC/ort-prebuilt-qnn.zip" "$ORT_URL"; then
+            mkdir -p "$ORT_EXTRACT"
+            if unzip -o -q "$SHERPA_SRC/ort-prebuilt-qnn.zip" -d "$ORT_EXTRACT"; then
+                rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+                ORT_PREBUILT_ROOT="$ORT_EXTRACT"
+                echo "Using ONNX Runtime from release $RELEASE_TAG"
+            else
+                rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+                rm -rf "$ORT_EXTRACT"
+            fi
+        else
+            rm -f "$SHERPA_SRC/ort-prebuilt-qnn.zip"
+            echo "Release $RELEASE_TAG not found or download failed; sherpa-onnx will use default onnxruntime-libs."
+        fi
+    fi
+fi
+
 # ABI -> build script name -> build dir (relative to sherpa-onnx)
 # build script is run from SHERPA_SRC; install dir is SHERPA_SRC/<build_dir>/install/lib
 build_abi() {
@@ -77,6 +115,14 @@ build_abi() {
     local BUILD_DIR=$3
 
     echo "===== Building sherpa-onnx for $ABI ====="
+
+    # If we have our ORT+QNN release prebuilt, lay it out so sherpa-onnx finds it (no onnxruntime-libs download).
+    if [ -n "$ORT_PREBUILT_ROOT" ] && [ -n "$ONNXRUNTIME_VERSION" ]; then
+        mkdir -p "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI"
+        mkdir -p "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers"
+        cp "$ORT_PREBUILT_ROOT/$ONNXRUNTIME_VERSION/jni/$ABI/libonnxruntime.so" "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI/"
+        cp -R "$ORT_PREBUILT_ROOT/$ONNXRUNTIME_VERSION/headers/"* "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/"
+    fi
 
     export BUILD_SHARED_LIBS=ON
     export SHERPA_ONNX_ENABLE_JNI=ON
@@ -111,6 +157,8 @@ build_abi "arm64-v8a"   "build-android-arm64-v8a.sh"   "build-android-arm64-v8a"
 build_abi "armeabi-v7a" "build-android-armv7-eabi.sh"  "build-android-armv7-eabi"
 build_abi "x86"         "build-android-x86.sh"        "build-android-x86"
 build_abi "x86_64"      "build-android-x86-64.sh"      "build-android-x86-64"
+
+[ -n "$ORT_PREBUILT_ROOT" ] && [ -d "$ORT_PREBUILT_ROOT" ] && rm -rf "$ORT_PREBUILT_ROOT"
 
 echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/"
 echo "Run: node $SCRIPT_DIR/copy_prebuilts_to_sdk.js to copy into android/src/main/jniLibs/"

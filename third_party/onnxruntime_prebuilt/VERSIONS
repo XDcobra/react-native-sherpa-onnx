@@ -1,0 +1,11 @@
+# Pinned versions for ONNX Runtime Android + QNN build and release.
+# Used by .github/workflows/build-onnxruntime-qnn.yml and by
+# third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh to download the
+# matching prebuilt from this repo's GitHub Release.
+#
+# ONNXRUNTIME_VERSION must match the directory layout expected by sherpa-onnx
+# Android scripts (e.g. 1.17.1/jni/arm64-v8a/, 1.17.1/headers/).
+# QNN_SDK_VERSION is used for the release tag and for the Qualcomm SDK download URL.
+
+ONNXRUNTIME_VERSION=1.17.1
+QNN_SDK_VERSION=2.43.1.260218
