@@ -22,7 +22,8 @@ concurrency:
 jobs:
   build-ort-qnn:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # ONNX Runtime for 4 ABIs + QNN can exceed 2h; GitHub max for jobs is 360.
+    timeout-minutes: 360
     permissions:
       contents: write
 
