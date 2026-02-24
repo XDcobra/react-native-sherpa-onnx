@@ -9,4 +9,4 @@
 	url = https://github.com/k2-fsa/sherpa-onnx.git
 [submodule "third_party/onnxruntime"]
 	path = third_party/onnxruntime
-	url = https://github.com/Microsoft/onnxruntime.git
+	url = https://github.com/XDcobra/onnxruntime.git
