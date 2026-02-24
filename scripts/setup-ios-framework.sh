@@ -303,7 +303,7 @@ else
       if [ "$version_cmp" = "0" ]; then
         [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
       elif [ "$version_cmp" = "-1" ]; then
-        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version → v$latest_version${NC}" >&2
+        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version --> v$latest_version${NC}" >&2
         if [ "$INTERACTIVE" = true ]; then
           read -p "Do you want to update? (y/N): " -n 1 -r
           echo

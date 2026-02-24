@@ -27,8 +27,8 @@ This guide covers the STT APIs for offline transcription.
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
 | Model type detection (no init) | ✅ | Native | `detectSttModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
-| Model initialization | ✅ | Kotlin API | `createSTT()` → `SttEngine`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
-| Offline file transcription | ✅ | Kotlin API | `stt.transcribeFile(filePath)` → full result object |
+| Model initialization | ✅ | Kotlin API | `createSTT()` --> `SttEngine`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
+| Offline file transcription | ✅ | Kotlin API | `stt.transcribeFile(filePath)` --> full result object |
 | Transcribe from samples | ✅ | Kotlin API | `stt.transcribeSamples(samples, sampleRate)` |
 | Full result (tokens, timestamps, lang, emotion, …) | ✅ | Kotlin API | Via `stt.transcribeFile` / `stt.transcribeSamples` return type |
 | Hotwords (init) | ✅ | Kotlin API | OfflineRecognizerConfig hotwordsFile, hotwordsScore |
@@ -272,8 +272,8 @@ Result normalization: the native layer returns an object with `text`, `tokens`, 
 
 - **Module:** `SherpaOnnxModule` implements `NativeSherpaOnnxSpec`; STT logic lives in `SherpaOnnxSttHelper`.
 - **Init:** `initializeStt(instanceId, ...)` creates or looks up an instance in a map, builds `OfflineRecognizerConfig` (including `hotwordsFile`, `hotwordsScore`, `numThreads`, `provider`, `ruleFsts`, `ruleFars`, and `FeatureConfig.dither`), creates `OfflineRecognizer`, and stores it per instance for `setSttConfig`.
-- **Transcribe file:** `transcribeFile(instanceId, path)` looks up the instance, uses sherpa-onnx `ReadWave` → `CreateStream` → `AcceptWaveform` → `Decode` → `GetResult`; the result is converted to a map via `resultToWritableMap(OfflineRecognizerResult)` (text, tokens, timestamps, lang, emotion, event, durations).
-- **Transcribe samples:** `transcribeSamples(instanceId, samples, sampleRate)` looks up the instance, creates a stream, converts `ReadableArray` to `FloatArray`, `AcceptWaveform` → `Decode` → `GetResult` → same map, then releases the stream.
+- **Transcribe file:** `transcribeFile(instanceId, path)` looks up the instance, uses sherpa-onnx `ReadWave` --> `CreateStream` --> `AcceptWaveform` --> `Decode` --> `GetResult`; the result is converted to a map via `resultToWritableMap(OfflineRecognizerResult)` (text, tokens, timestamps, lang, emotion, event, durations).
+- **Transcribe samples:** `transcribeSamples(instanceId, samples, sampleRate)` looks up the instance, creates a stream, converts `ReadableArray` to `FloatArray`, `AcceptWaveform` --> `Decode` --> `GetResult` --> same map, then releases the stream.
 - **Runtime config:** `setSttConfig(instanceId, options)` looks up the instance, reads the option map (including `ruleFsts`, `ruleFars`), merges into a copy of the instance's config, and calls `recognizer.setConfig(merged)`.
 - **Unload:** `unloadStt(instanceId)` releases the recognizer for that instance and removes it from the map.
 

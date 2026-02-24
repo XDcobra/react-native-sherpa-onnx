@@ -200,9 +200,17 @@ build_abi() {
         if [ -n "$ORT_PREBUILT_ANDROID_BASE" ]; then
             cp "$ORT_PREBUILT_ANDROID_BASE/$ABI/lib/libonnxruntime.so" "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI/"
             cp -R "$ORT_PREBUILT_ANDROID_HEADERS/"* "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/"
+            # Sherpa uses #include "onnxruntime_cxx_api.h" and SHERPA_ONNXRUNTIME_INCLUDE_DIR=.../headers/
+            # ORT layout is headers/onnxruntime/core/session/onnxruntime_cxx_api.h --> copy session/*.h into headers/ so the include resolves
+            if [ -d "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session" ]; then
+                cp -n "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session/"*.h "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/" 2>/dev/null || true
+            fi
         elif [ -n "$ORT_PREBUILT_ROOT" ]; then
             cp "$ORT_PREBUILT_ROOT/$ONNXRUNTIME_VERSION/jni/$ABI/libonnxruntime.so" "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI/"
             cp -R "$ORT_PREBUILT_ROOT/$ONNXRUNTIME_VERSION/headers/"* "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/"
+            if [ -d "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session" ]; then
+                cp -n "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session/"*.h "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/" 2>/dev/null || true
+            fi
         fi
     fi
 

@@ -43,7 +43,7 @@ data class OfflineTtsConfig(
 **Implementierung:**  
 Die vier Init-Optionen sind umgesetzt: `src/tts/types.ts` (`TTSInitializeOptions`), `src/tts/index.ts` (Durchreichung an `initializeTts`), `NativeSherpaOnnx.ts` (TurboModule-Spec), Android `SherpaOnnxTtsHelper` (TtsInitState, buildTtsConfig, initializeTts, updateTtsParams) und `SherpaOnnxModule`, iOS `sherpa-onnx-tts-wrapper` (initialize mit rule_fsts/rule_fars/max_num_sentences/silence_scale) und `SherpaOnnx+TTS.mm` (Parameter + Globals für updateTtsParams).
 
-**Kernaussage:** **Init: ruleFsts, ruleFars, maxNumSentences, silenceScale** sind in der Kotlin-API (`Tts.kt` → `OfflineTtsConfig`) vorhanden und in der RN-Bridge (Android + iOS) angeboten. **Stream-Progress** und **Zipvoice** erfordern weiterhin die C-API.
+**Kernaussage:** **Init: ruleFsts, ruleFars, maxNumSentences, silenceScale** sind in der Kotlin-API (`Tts.kt` --> `OfflineTtsConfig`) vorhanden und in der RN-Bridge (Android + iOS) angeboten. **Stream-Progress** und **Zipvoice** erfordern weiterhin die C-API.
 
 ---
 

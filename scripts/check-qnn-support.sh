@@ -51,7 +51,7 @@ QNN_NEEDED=""
 QNN_NEEDED=$(readelf -d "$LIB_FILE" 2>/dev/null | grep -i NEEDED | grep -i qnn) || true
 if [ -n "$QNN_NEEDED" ]; then
   echo "$QNN_NEEDED"
-  echo "-> QNN library in NEEDED list → built WITH QNN support (can use NPU at runtime)"
+  echo "-> QNN library in NEEDED list --> built WITH QNN support (can use NPU at runtime)"
 else
   echo "-> No QNN-related library in NEEDED list (no libQnnHtp.so etc.)"
 fi
