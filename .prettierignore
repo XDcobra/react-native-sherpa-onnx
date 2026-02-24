@@ -14,3 +14,5 @@ lib/
 *.log
 .DS_Store
 .yarn
+_codeql_detected_source_root/
+example/.model-cache/
