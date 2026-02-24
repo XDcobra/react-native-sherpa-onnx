@@ -73,6 +73,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
+   * This reflects whether the native shared libraries were built with QNN (libQnnHtp.so loadable),
+   * not whether the device has QNN-capable hardware.
+   */
+  override fun isQnnSupported(promise: Promise) {
+    try {
+      promise.resolve(nativeIsQnnSupported())
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "QNN check failed", e)
+      promise.resolve(false)
+    }
+  }
+
+  /**
    * Resolve model path based on configuration.
    * Handles asset paths, file system paths, and auto-detection.
    */
@@ -568,6 +582,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
+
+    /** True if the sherpa-onnx build has QNN support (QNN library loadable). */
+    @JvmStatic
+    private external fun nativeIsQnnSupported(): Boolean
 
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic

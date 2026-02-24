@@ -3,6 +3,10 @@
 #include <string>
 #include <optional>
 
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#endif
+
 #include "sherpa-onnx-model-detect.h"
 
 namespace {
@@ -125,6 +129,22 @@ extern "C" {
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(JNIEnv* env, jobject /* this */) {
   return env->NewStringUTF("sherpa-onnx native (libsherpaonnx) loaded");
+}
+
+// Check if the sherpa-onnx build has QNN support (Qualcomm NPU) by testing whether
+// the QNN HTP library can be loaded. This reflects the shared library build, not device hardware.
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeIsQnnSupported(JNIEnv* /* env */, jobject /* this */) {
+#if !defined(__ANDROID__)
+  return JNI_FALSE;
+#else
+  void* handle = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
+  if (handle) {
+    dlclose(handle);
+    return JNI_TRUE;
+  }
+  return JNI_FALSE;
+#endif
 }
 
 // Detect STT model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.

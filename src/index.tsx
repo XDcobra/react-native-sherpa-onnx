@@ -29,3 +29,12 @@ export {
 export function testSherpaInit(): Promise<string> {
   return SherpaOnnx.testSherpaInit();
 }
+
+/**
+ * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
+ * This reflects whether the native shared libraries were built with QNN (e.g. libQnnHtp.so is present),
+ * not whether the device has QNN-capable hardware.
+ */
+export function isQnnSupported(): Promise<boolean> {
+  return SherpaOnnx.isQnnSupported();
+}

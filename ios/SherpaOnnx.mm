@@ -192,6 +192,13 @@
     }
 }
 
+// QNN (Qualcomm NPU) is Android-only; on iOS the build never has QNN support.
+- (void)isQnnSupportedWithResolver:(RCTPromiseResolveBlock)resolve
+                      withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@NO);
+}
+
 - (void)extractTarBz2:(NSString *)sourcePath
            targetPath:(NSString *)targetPath
                 force:(BOOL)force
