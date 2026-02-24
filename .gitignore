@@ -133,7 +133,7 @@ third_party/shine_prebuilt/*
 # ONNX Runtime prebuilt build artifacts (when building prebuilts locally)
 third_party/onnxruntime_prebuilt/*
 !third_party/onnxruntime_prebuilt/README.md
-!third_party/onnxruntime_prebuilt/build_onnxruntime.sh
+!third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh
 !third_party/onnxruntime_prebuilt/VERSIONS
 !third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
 

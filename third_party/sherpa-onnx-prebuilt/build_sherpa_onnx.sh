@@ -10,8 +10,8 @@
 # Sherpa-onnx source: third_party/sherpa-onnx (submodule).
 #
 # ONNX Runtime: Resolved in order (1) SHERPA_ONNXRUNTIME_LIB_DIR + INCLUDE_DIR if set,
-# (2) third_party/onnxruntime_prebuilt/android/ if present, (3) GitHub Release (ort-android-qnn-v*).
-# See third_party/onnxruntime_prebuilt/build_onnxruntime.sh for LIB_DIR/INCLUDE_DIR layout.
+# (2) third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/ if present (output of build_onnxruntime_android_aar.sh),
+# (3) GitHub Release (ort-android-qnn-v*). Layout: <base>/<abi>/lib/libonnxruntime.so, <base>/<abi>/headers/.
 
 set -e
 
@@ -101,10 +101,10 @@ check_android_layout() {
     return 0
 }
 
-# Tier 1: Use SHERPA_ONNXRUNTIME_LIB_DIR / SHERPA_ONNXRUNTIME_INCLUDE_DIR if both are set (layout as in build_onnxruntime.sh: <LIB_DIR>/<abi>/lib, <INCLUDE_DIR> = headers).
+# Tier 1: Use SHERPA_ONNXRUNTIME_LIB_DIR / SHERPA_ONNXRUNTIME_INCLUDE_DIR if both are set (layout: <LIB_DIR>/<abi>/lib, <INCLUDE_DIR> = headers).
 if [ -n "$SHERPA_ONNXRUNTIME_LIB_DIR" ] || [ -n "$SHERPA_ONNXRUNTIME_INCLUDE_DIR" ]; then
     if [ -z "$SHERPA_ONNXRUNTIME_LIB_DIR" ] || [ -z "$SHERPA_ONNXRUNTIME_INCLUDE_DIR" ]; then
-        echo "Error: Set both SHERPA_ONNXRUNTIME_LIB_DIR and SHERPA_ONNXRUNTIME_INCLUDE_DIR (see third_party/onnxruntime_prebuilt/build_onnxruntime.sh)."
+        echo "Error: Set both SHERPA_ONNXRUNTIME_LIB_DIR and SHERPA_ONNXRUNTIME_INCLUDE_DIR (see third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh)."
         exit 1
     fi
     if [ -z "$ONNXRUNTIME_VERSION" ]; then
@@ -119,9 +119,9 @@ if [ -n "$SHERPA_ONNXRUNTIME_LIB_DIR" ] || [ -n "$SHERPA_ONNXRUNTIME_INCLUDE_DIR
     fi
 fi
 
-# Tier 2: If no env layout, use third_party/onnxruntime_prebuilt/android/ if present and complete.
+# Tier 2: If no env layout, use build output of build_onnxruntime_android_aar.sh if present.
 if [ -z "$ORT_PREBUILT_ANDROID_BASE" ]; then
-    ORT_ANDROID_LOCAL="$REPO_ROOT/third_party/onnxruntime_prebuilt/android"
+    ORT_ANDROID_LOCAL="$REPO_ROOT/third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug"
     if [ -d "$ORT_ANDROID_LOCAL" ]; then
         HEADERS_CANDIDATE="$ORT_ANDROID_LOCAL/arm64-v8a/headers"
         if [ ! -d "$HEADERS_CANDIDATE" ]; then
@@ -129,10 +129,10 @@ if [ -z "$ORT_PREBUILT_ANDROID_BASE" ]; then
         fi
         if check_android_layout "$ORT_ANDROID_LOCAL" "$HEADERS_CANDIDATE"; then
             if [ -z "$ONNXRUNTIME_VERSION" ]; then
-                echo "Error: VERSIONS file (ONNXRUNTIME_VERSION) required when using third_party/onnxruntime_prebuilt/android/."
+                echo "Error: VERSIONS file (ONNXRUNTIME_VERSION) required when using third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/."
                 exit 1
             fi
-            echo "Using ONNX Runtime from third_party/onnxruntime_prebuilt/android/"
+            echo "Using ONNX Runtime from third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/"
         fi
     fi
 fi
@@ -162,7 +162,7 @@ if [ -z "$ORT_PREBUILT_ANDROID_BASE" ] && [ -z "$ORT_PREBUILT_ROOT" ]; then
             echo "Error: Failed to download ONNX Runtime Android+QNN release from GitHub."
             echo "  Tag: $RELEASE_TAG"
             echo "  URL: $ORT_URL"
-            echo "  Build and publish the release (e.g. run the Build ONNX Runtime (Android + QNN) workflow) or use local prebuilts: set SHERPA_ONNXRUNTIME_LIB_DIR/INCLUDE_DIR or run third_party/onnxruntime_prebuilt/build_onnxruntime.sh and copy_prebuilts layout to third_party/onnxruntime_prebuilt/android/."
+            echo "  Build and publish the release (e.g. run the Build ONNX Runtime (Android + QNN) workflow) or use local prebuilts: set SHERPA_ONNXRUNTIME_LIB_DIR/INCLUDE_DIR or run third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh."
             exit 1
         fi
         mkdir -p "$ORT_EXTRACT"
@@ -180,7 +180,7 @@ fi
 
 # With --qnn we must have ORT prebuilts (from env, local android/, or GitHub).
 if [ "$ENABLE_QNN" = ON ] && [ -z "$ORT_PREBUILT_ROOT" ] && [ -z "$ORT_PREBUILT_ANDROID_BASE" ]; then
-    echo "Error: QNN build requires ONNX Runtime Android+QNN. Set SHERPA_ONNXRUNTIME_LIB_DIR and SHERPA_ONNXRUNTIME_INCLUDE_DIR, or ensure third_party/onnxruntime_prebuilt/android/ is populated (run build_onnxruntime.sh), or publish the GitHub Release (ANDROID_RELEASE_TAG / VERSIONS) and retry."
+    echo "Error: QNN build requires ONNX Runtime Android+QNN. Set SHERPA_ONNXRUNTIME_LIB_DIR and SHERPA_ONNXRUNTIME_INCLUDE_DIR, or run third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh, or publish the GitHub Release (ANDROID_RELEASE_TAG / VERSIONS) and retry."
     exit 1
 fi
 

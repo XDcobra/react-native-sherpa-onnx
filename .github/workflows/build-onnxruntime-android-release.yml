@@ -1,9 +1,9 @@
-# Build ONNX Runtime for Android with QNN support and publish as GitHub Release.
-# Release tag is read from third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG (same pattern as FFmpeg/sherpa-onnx).
-# VERSIONS is still used for ONNXRUNTIME_VERSION, QNN_SDK_VERSION and the build. Tag should match versions, e.g.:
-#   ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>
+# Build ONNX Runtime for Android (all ABIs) with QNN, NNAPI, XNNPACK, Java; produce .aar and sherpa-onnx zip; publish as GitHub Release.
+# Release tag is read from third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG.
+# VERSIONS: ONNXRUNTIME_VERSION, QNN_SDK_VERSION. Tag e.g. ort-android-qnn-v<ORT>-qnn<QNN>.
+# Build output is cached so other workflows or re-runs can reuse it.
 
-name: Prebuilt - ONNX Runtime (Android + QNN)
+name: Prebuilt - ONNX Runtime (Android) Release
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
     paths:
       - 'third_party/onnxruntime_prebuilt/**'
       - 'third_party/onnxruntime/**'
-      - '.github/workflows/build-onnxruntime-qnn.yml'
+      - '.github/workflows/build-onnxruntime-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -113,56 +113,61 @@ jobs:
           echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
           echo "QNN SDK root: $QNN_ROOT"
 
-      - name: Cache ONNX Runtime build output
+      - name: Cache ONNX Runtime build output (AAR + all ABIs)
         uses: actions/cache@v4
         id: ort-cache
         with:
-          path: third_party/onnxruntime_prebuilt/android
-          key: ort-android-qnn-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
+          path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug
+          key: ort-android-qnn-aar-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
 
-      - name: Build ONNX Runtime with QNN
+      - name: Build ONNX Runtime (all ABIs + AAR) with QNN
         if: steps.ort-cache.outputs.cache-hit != 'true'
         run: |
           cd third_party/onnxruntime_prebuilt
-          chmod +x build_onnxruntime.sh
+          chmod +x build_onnxruntime_android_aar.sh
           export ANDROID_NDK="${{ steps.setup-ndk.outputs.ndk-path }}"
           export ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
           export ANDROID_NDK_ROOT="${{ steps.setup-ndk.outputs.ndk-path }}"
           export ANDROID_HOME="$ANDROID_HOME"
-          ./build_onnxruntime.sh --qnn
+          ./build_onnxruntime_android_aar.sh
         env:
           QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
 
-      - name: Package for sherpa-onnx layout
+      - name: Package sherpa-onnx layout zip (from build output)
         run: |
           ORT_VER="${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}"
-          ANDROID_DIR=third_party/onnxruntime_prebuilt/android
+          ORT_DIR=third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug
           LAYOUT_DIR=ort-sherpa-layout
           mkdir -p "$LAYOUT_DIR/$ORT_VER/headers"
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
             mkdir -p "$LAYOUT_DIR/$ORT_VER/jni/$abi"
-            cp -v "$ANDROID_DIR/$abi/lib/libonnxruntime.so" "$LAYOUT_DIR/$ORT_VER/jni/$abi/"
+            cp -v "$ORT_DIR/$abi/lib/libonnxruntime.so" "$LAYOUT_DIR/$ORT_VER/jni/$abi/"
           done
-          cp -R "$ANDROID_DIR/arm64-v8a/headers/"* "$LAYOUT_DIR/$ORT_VER/headers/"
-          echo "Layout: $ORT_VER/jni/<abi>/libonnxruntime.so and $ORT_VER/headers/"
-
-      - name: Create release zip
-        run: |
+          cp -R "$ORT_DIR/arm64-v8a/headers/"* "$LAYOUT_DIR/$ORT_VER/headers/"
           cd ort-sherpa-layout
           zip -r ../onnxruntime-android-qnn.zip .
           cd ..
           ls -la onnxruntime-android-qnn.zip
+          echo "Sherpa-onnx layout: $ORT_VER/jni/<abi>/libonnxruntime.so and $ORT_VER/headers/"
 
-      - name: Create GitHub Release
+      - name: Prepare AAR for release asset
+        run: |
+          cp third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/aar_out/onnxruntime-release.aar onnxruntime-android-qnn.aar
+          ls -la onnxruntime-android-qnn.aar
+
+      - name: Create GitHub Release (AAR + zip)
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.versions.outputs.release_tag }}
           name: ONNX Runtime Android + QNN ${{ steps.versions.outputs.release_tag }}
           body: |
-            Prebuilt ONNX Runtime for Android with QNN (Qualcomm NPU) support.
-            Layout matches sherpa-onnx Android build scripts: `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so` and `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/`.
-            Used automatically by `third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh` when building sherpa-onnx for Android.
-          files: onnxruntime-android-qnn.zip
+            Prebuilt ONNX Runtime for Android (all ABIs) with QNN, NNAPI, XNNPACK, Java.
+            - **onnxruntime-android-qnn.aar** – Android library (arm64-v8a, armeabi-v7a, x86, x86_64). Use in apps via `implementation(name: "onnxruntime-release", ext: "aar")` or Maven.
+            - **onnxruntime-android-qnn.zip** – Sherpa-onnx layout: `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so` and `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/`. Used by `third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh`.
+          files: |
+            onnxruntime-android-qnn.aar
+            onnxruntime-android-qnn.zip
           draft: false
           prerelease: false
           skip_duplicate: true
@@ -175,5 +180,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** [${{ steps.versions.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.versions.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Asset \`onnxruntime-android-qnn.zip\` contains \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so\` and \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/\` for arm64-v8a, armeabi-v7a, x86, x86_64." >> $GITHUB_STEP_SUMMARY
-          echo "Sherpa-onnx Android build uses this release automatically when \`build_sherpa_onnx.sh\` runs." >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`onnxruntime-android-qnn.aar\` | Android library (all ABIs, QNN+NNAPI+XNNPACK+Java). Use in apps or Maven. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`onnxruntime-android-qnn.zip\` | Sherpa-onnx layout: \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so\` and \`headers/\`. Used by \`build_sherpa_onnx.sh\`. |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build output is cached; reuse key \`ort-android-qnn-aar-<ort_commit>-<script+VERSIONS hash>\` for other jobs if needed." >> $GITHUB_STEP_SUMMARY
