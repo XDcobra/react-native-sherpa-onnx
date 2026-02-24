@@ -1,5 +1,13 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { isQnnSupported } from 'react-native-sherpa-onnx';
 
 const appPkg = (() => {
   try {
@@ -40,6 +48,22 @@ const sdkVersion = (() => {
 })();
 
 export default function SettingsScreen() {
+  const [qnnChecking, setQnnChecking] = useState(false);
+  const [qnnSupported, setQnnSupported] = useState<boolean | null>(null);
+
+  const handleCheckQnn = useCallback(async () => {
+    setQnnChecking(true);
+    setQnnSupported(null);
+    try {
+      const supported = await isQnnSupported();
+      setQnnSupported(supported);
+    } catch {
+      setQnnSupported(false);
+    } finally {
+      setQnnChecking(false);
+    }
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.body}>
@@ -47,6 +71,28 @@ export default function SettingsScreen() {
           <Text style={styles.title}>App</Text>
           <Text style={styles.bodyText}>Version: {appVersion}</Text>
           <Text style={styles.bodyText}>SDK Version: {sdkVersion}</Text>
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>QNN (Qualcomm NPU)</Text>
+          <Text style={styles.bodyText}>
+            Check whether this build has QNN support (shared library available).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, qnnChecking && styles.buttonDisabled]}
+            onPress={handleCheckQnn}
+            disabled={qnnChecking}
+          >
+            {qnnChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check QNN support</Text>
+            )}
+          </TouchableOpacity>
+          {qnnSupported !== null && !qnnChecking && (
+            <Text style={[styles.bodyText, styles.qnnResult]}>
+              QNN supported: {qnnSupported ? 'Yes' : 'No'}
+            </Text>
+          )}
         </View>
       </View>
     </SafeAreaView>
@@ -78,6 +124,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#444444',
     marginBottom: 6,
+  },
+  qnnResult: {
+    marginTop: 12,
+    fontWeight: '600',
   },
   errorText: {
     color: '#C62828',
