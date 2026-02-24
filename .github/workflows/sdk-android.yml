@@ -192,16 +192,19 @@ jobs:
       - name: Copy sherpa-onnx prebuilts to jniLibs
         run: node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js
 
+      - name: Copy sherpa-onnx C API headers to Android include
+        run: |
+          SRC=third_party/sherpa-onnx/sherpa-onnx/c-api
+          DST=android/src/main/cpp/include/sherpa-onnx/c-api
+          mkdir -p "$DST"
+          cp -v "$SRC/c-api.h" "$SRC/cxx-api.h" "$DST/"
+        # When building from release zip, Gradle extracts these from the zip; here we have the submodule so copy directly.
+
       # ── Verification ───────────────────────────────────────────────────
       - name: Verify required files exist
         run: |
           echo "Verifying required files..."
-
-          if [ ! -f "android/src/main/cpp/include/sherpa-onnx/c-api/c-api.h" ]; then
-            echo "Error: Android header files not found at android/src/main/cpp/include/sherpa-onnx/c-api/c-api.h"
-            exit 1
-          fi
-          echo "[OK] Header files found"
+          # Android C API headers are provided by Gradle from the release zip when the build runs (downloadNativeLibsIfNeeded).
 
           if [ ! -f "android/src/main/cpp/CMakeLists.txt" ]; then
             echo "Error: CMakeLists.txt not found at android/src/main/cpp/CMakeLists.txt"

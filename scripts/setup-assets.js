@@ -60,7 +60,8 @@ function runCommand(cmd, options = {}) {
 }
 
 /**
- * Verify header files are in the correct locations
+ * Verify iOS header files are in the correct locations.
+ * Android headers are provided by Gradle from the GitHub release (sherpa-onnx-android.zip).
  */
 function verifyHeaders() {
   log('Verifying header files...', 'info');
@@ -84,30 +85,6 @@ function verifyHeaders() {
       'c-api',
       'cxx-api.h'
     ),
-    path.join(
-      __dirname,
-      '..',
-      'android',
-      'src',
-      'main',
-      'cpp',
-      'include',
-      'sherpa-onnx',
-      'c-api',
-      'c-api.h'
-    ),
-    path.join(
-      __dirname,
-      '..',
-      'android',
-      'src',
-      'main',
-      'cpp',
-      'include',
-      'sherpa-onnx',
-      'c-api',
-      'cxx-api.h'
-    ),
   ];
 
   const missingHeaders = requiredHeaders.filter(
@@ -115,11 +92,11 @@ function verifyHeaders() {
   );
 
   if (missingHeaders.length === 0) {
-    log('All header files verified at correct locations', 'success');
+    log('iOS header files verified at correct locations', 'success');
     return true;
   } else {
     log(
-      `Missing header files found (${missingHeaders.length}/${requiredHeaders.length}):`,
+      `Missing iOS header files (${missingHeaders.length}/${requiredHeaders.length}):`,
       'error'
     );
     missingHeaders.forEach((header) => {

@@ -134,10 +134,11 @@ android {
     jvmTarget = '17'
   }
 
-  // The build expects prebuilt .so files under src/main/jniLibs/<abi>/.
-  // If missing, Gradle downloads them from this repo's GitHub Releases (see downloadNativeLibsIfNeeded).
+  // The build expects prebuilt .so files under src/main/jniLibs/<abi>/ and (for sherpa-onnx) C API headers
+  // under src/main/cpp/include/sherpa-onnx/c-api/. If missing, Gradle downloads the sherpa-onnx-android
+  // release zip from this repo's GitHub Releases and extracts both libs and headers (single source).
   // Or run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and
-  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js for local builds.
+  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js for local builds (headers then from release or CI copy).
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
   def requiredFfmpegSoFiles = [
@@ -169,6 +170,10 @@ android {
       }
     }
     return true
+  }
+
+  def hasSherpaHeaders = {
+    return new File(projectDir, "src/main/cpp/include/sherpa-onnx/c-api/c-api.h").exists()
   }
 
   def getGitHubRepo = {
@@ -221,7 +226,7 @@ android {
         println "Downloaded and extracted FFmpeg prebuilts from ${tag}"
       }
 
-      if (!hasAllSherpaLibs()) {
+      if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
         def tagFile = file("${rootDir}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
         def tag = readReleaseTag(tagFile)
         if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
@@ -229,11 +234,23 @@ android {
         def url = "${baseUrl}/${tag}/sherpa-onnx-android.zip"
         exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir projectDir }
         if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+        def sherpaExtractDir = new File(downloadDir, "sherpa-onnx-extract")
+        if (sherpaExtractDir.exists()) sherpaExtractDir.deleteDir()
+        sherpaExtractDir.mkdirs()
         copy {
           from zipTree(zipFile)
+          into sherpaExtractDir
+        }
+        copy {
+          from fileTree(sherpaExtractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
           into jniLibsDir
         }
-        println "Downloaded and extracted sherpa-onnx prebuilts from ${tag}"
+        def includeSherpaDir = file("${projectDir}/src/main/cpp/include/sherpa-onnx")
+        copy {
+          from fileTree(sherpaExtractDir) { include 'c-api/**' }
+          into includeSherpaDir
+        }
+        println "Downloaded and extracted sherpa-onnx prebuilts (libs + C API headers) from ${tag}"
       }
     }
   }

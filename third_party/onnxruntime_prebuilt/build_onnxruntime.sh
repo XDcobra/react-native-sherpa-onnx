@@ -106,6 +106,10 @@ build_abi() {
     if [ "$ABI" = "arm64-v8a" ] && [ "$ENABLE_QNN" = ON ]; then
         EXTRA_ARGS+=(--use_qnn "static_lib" --qnn_home "$QNN_SDK_ROOT")
     fi
+    # Skip building unit tests (avoids e.g. -Wshorten-64-to-32 in test code on macOS/32-bit ABIs; we only need libonnxruntime.so)
+    EXTRA_ARGS+=(--cmake_extra_defines "onnxruntime_BUILD_UNIT_TESTS=OFF")
+    # Avoid -Werror=array-bounds in MLAS sqnbitgemm on macOS host (e.g. Android x86_64 build); ORT appends to CMAKE_CXX_FLAGS
+    EXTRA_ARGS+=(--cmake_extra_defines "CMAKE_CXX_FLAGS=-Wno-array-bounds")
 
     (cd "$ORT_SRC" && ./build.sh \
         --build_dir "$BUILD_DIR" \
