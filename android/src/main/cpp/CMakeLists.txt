@@ -25,19 +25,32 @@ endif()
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-# FFmpeg prebuilts (required). third_party/ffmpeg_prebuilt/android from repo root.
+# FFmpeg: libs and headers from (1) third_party/ffmpeg_prebuilt/android (local build) or (2) jniLibs + cpp/include/ffmpeg (release zip).
 # PROJECT_ROOT = android/; repo root = PROJECT_ROOT/..
 set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android")
-set(FFMPEG_ABI_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
-if(NOT EXISTS "${FFMPEG_PREBUILT_BASE}/include")
-    message(FATAL_ERROR "FFmpeg prebuilts missing: ${FFMPEG_PREBUILT_BASE}/include not found.\n"
-                        "Build them with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 (Windows) or ./build_ffmpeg.sh (Linux/macOS)")
+set(FFMPEG_PREBUILT_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(FFMPEG_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(FFMPEG_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/ffmpeg")
+if(EXISTS "${FFMPEG_PREBUILT_BASE}/include")
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_PREBUILT_BASE}/include")
+    message(STATUS "FFmpeg headers: prebuilts ${FFMPEG_INCLUDE_DIR}")
+elseif(EXISTS "${FFMPEG_INCLUDE_CPP}")
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_INCLUDE_CPP}")
+    message(STATUS "FFmpeg headers: jniLibs/release ${FFMPEG_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR "FFmpeg headers missing. Either:\n"
+                        "  - Build: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.sh (creates android/include)\n"
+                        "  - Or use a release that includes include/ (Gradle extracts to ${FFMPEG_INCLUDE_CPP})")
 endif()
-if(NOT EXISTS "${FFMPEG_ABI_LIB}")
-    message(FATAL_ERROR "FFmpeg prebuilts missing for ABI ${ANDROID_ABI}: ${FFMPEG_ABI_LIB} not found.\n"
-                        "Build for all ABIs with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 or ./build_ffmpeg.sh")
+if(EXISTS "${FFMPEG_PREBUILT_LIB}/libavcodec.so")
+    set(FFMPEG_LIB_DIR "${FFMPEG_PREBUILT_LIB}")
+    message(STATUS "FFmpeg libs: prebuilts ${FFMPEG_LIB_DIR}")
+elseif(EXISTS "${FFMPEG_JNILIBS}/libavcodec.so")
+    set(FFMPEG_LIB_DIR "${FFMPEG_JNILIBS}")
+    message(STATUS "FFmpeg libs: jniLibs ${FFMPEG_LIB_DIR}")
+else()
+    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
 endif()
-message(STATUS "FFmpeg prebuilts found: ${FFMPEG_PREBUILT_BASE}")
 
 # Source files (Archive, FFmpeg, model detection, Zipvoice C-API JNI; STT/TTS use Kotlin API)
 set(SOURCES
@@ -91,7 +104,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${FFMPEG_PREBUILT_BASE}/include
+    ${FFMPEG_INCLUDE_DIR}
 )
 target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
@@ -107,7 +120,7 @@ target_link_libraries(sherpaonnx
     android
     $<TARGET_NAME_IF_EXISTS:sherpa-onnx-c-api>
 )
-target_link_directories(sherpaonnx PRIVATE ${FFMPEG_ABI_LIB})
+target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

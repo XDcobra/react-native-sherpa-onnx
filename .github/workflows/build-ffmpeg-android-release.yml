@@ -117,8 +117,12 @@ jobs:
               done
             done
           done
+          if [ -d "third_party/ffmpeg_prebuilt/android/include" ]; then
+            mkdir -p "$LAYOUT/include"
+            cp -R third_party/ffmpeg_prebuilt/android/include/* "$LAYOUT/include/"
+          fi
           echo "Layout contents:"
-          find "$LAYOUT" -type f -name '*.so' | head -30
+          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' \) | head -50
 
       - name: Create release zip
         run: |
@@ -134,8 +138,7 @@ jobs:
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
           body: |
             Prebuilt FFmpeg and libshine for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
-            Zip layout: extract into `android/src/main/jniLibs/` so that `arm64-v8a/`, `armeabi-v7a/`, etc. contain the .so files.
-            Used by Gradle when native libs are missing (download from this release).
+            Zip contains `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
           files: ffmpeg-android.zip
           draft: false
           prerelease: false
@@ -149,4 +152,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Asset \`ffmpeg-android.zip\` contains \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` with FFmpeg and libshine .so files. Extract into \`android/src/main/jniLibs/\`." >> $GITHUB_STEP_SUMMARY
+          echo "Asset \`ffmpeg-android.zip\` contains \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so) and \`include/\` (headers). Gradle extracts to jniLibs and cpp/include/ffmpeg." >> $GITHUB_STEP_SUMMARY

@@ -212,7 +212,6 @@ android {
       downloadDir.mkdirs()
 
       if (!hasAllFfmpegLibs()) {
-        // Use projectDir.parent (repo/package root); rootDir is the app root when built from example
         def tagFile = file("${projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
         def tag = readReleaseTag(tagFile)
         if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
@@ -220,11 +219,20 @@ android {
         def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
         exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir projectDir }
         if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+        def ffmpegExtractDir = new File(downloadDir, "ffmpeg-extract")
+        if (ffmpegExtractDir.exists()) ffmpegExtractDir.deleteDir()
+        ffmpegExtractDir.mkdirs()
+        copy { from zipTree(zipFile); into ffmpegExtractDir }
         copy {
-          from zipTree(zipFile)
+          from fileTree(ffmpegExtractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
           into jniLibsDir
         }
-        println "Downloaded and extracted FFmpeg prebuilts from ${tag}"
+        def ffmpegIncludeDir = file("${projectDir}/src/main/cpp/include/ffmpeg")
+        def ffmpegIncludeInZip = new File(ffmpegExtractDir, "include")
+        if (ffmpegIncludeInZip.exists()) {
+          copy { from fileTree(ffmpegIncludeInZip); into ffmpegIncludeDir }
+        }
+        println "Downloaded and extracted FFmpeg prebuilts (libs + include) from ${tag}"
       }
 
       if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {

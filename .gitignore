@@ -107,6 +107,9 @@ example/models/
 # libs - .aar will be used instead
 android/src/main/jniLibs/*
 
+# FFmpeg headers (from release zip or local prebuilts; Gradle extracts to here)
+android/src/main/cpp/include/ffmpeg/
+
 # sherpa-onnx source submodule at repo root (not nested include/ dirs)
 /third_party/sherpa-onnx/
 # sherpa-onnx prebuilt build artifacts (when building with build_sherpa_onnx.sh)
