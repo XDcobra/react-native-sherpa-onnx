@@ -78,8 +78,12 @@ function main() {
 
   if (!fs.existsSync(SOURCE_DIR)) {
     console.error(`Error: Source directory not found: ${SOURCE_DIR}`);
-    console.error('Initialize submodule: git submodule update --init --recursive');
-    console.error('Android headers are provided by Gradle from the GitHub release.');
+    console.error(
+      'Initialize submodule: git submodule update --init --recursive'
+    );
+    console.error(
+      'Android headers are provided by Gradle from the GitHub release.'
+    );
     process.exit(1);
   }
 

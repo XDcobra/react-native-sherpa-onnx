@@ -295,5 +295,6 @@ For models **downloaded in-app** with the download API (`react-native-sherpa-onn
 ## See also
 
 - [STT API](./stt.md) and [TTS API](./tts.md) for initialization options and usage.
+- [QNN (Qualcomm NPU)](./qnn.md) for checking and using QNN support on Android.
 - [Model Download Manager](./download-manager.md) for downloading models in-app and cache/registry APIs.
 - Root [README](../../README.md) for supported model types and file requirements.

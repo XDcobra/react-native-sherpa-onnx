@@ -6,13 +6,6 @@ export interface Spec extends TurboModule {
    */
   testSherpaInit(): Promise<string>;
 
-  /**
-   * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
-   * This reflects whether the native shared libraries were built with QNN (e.g. libQnnHtp.so is present),
-   * not whether the device has QNN-capable hardware.
-   */
-  isQnnSupported(): Promise<boolean>;
-
   // ==================== STT Methods ====================
 
   /**
@@ -448,6 +441,15 @@ export interface Spec extends TurboModule {
    * Requires FFmpeg prebuilts when called on Android.
    */
   convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
+
+  // ==================== QNN Methods ====================
+
+  /**
+   * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
+   * This reflects whether the native shared libraries were built with QNN (e.g. libQnnHtp.so is present),
+   * not whether the device has QNN-capable hardware.
+   */
+  isQnnSupported(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

@@ -162,6 +162,7 @@ Then run `pod install` as usual.
 
 - [Speech-to-Text (STT)](./docs/stt.md)
 - [Text-to-Speech (TTS)](./docs/tts.md)
+- [QNN (Qualcomm NPU)](./docs/qnn.md) – Checking and using QNN support on Android
 - [Model Download Manager](./docs/download-manager.md)
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
