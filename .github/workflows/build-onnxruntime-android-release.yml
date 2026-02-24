@@ -8,12 +8,12 @@ name: Prebuilt - ONNX Runtime (Android) Release
 on:
   workflow_dispatch:
   push:
-    #branches:
-    #  - main
-    #paths:
-    #  - 'third_party/onnxruntime_prebuilt/**'
-    #  - 'third_party/onnxruntime/**'
-    #  - '.github/workflows/build-onnxruntime-android-release.yml'
+    branches:
+      - main
+    paths:
+      - 'third_party/onnxruntime_prebuilt/**'
+      - 'third_party/onnxruntime/**'
+      - '.github/workflows/build-onnxruntime-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
