@@ -95,7 +95,7 @@
     "typecheck": "tsc",
     "lint": "eslint --ignore-pattern \"sherpa-onnx/**\" \"**/*.{js,ts,tsx}\"",
     "lint:fix": "eslint --fix --ignore-pattern \"sherpa-onnx/**\" \"**/*.{js,ts,tsx}\"",
-    "prettier": "npx prettier --write \"**/*.{js,ts,tsx}\"",
+    "prettier": "npx prettier --write \"src/**/*.{js,ts,tsx}\" \"example/src/**/*.{js,ts,tsx}\" \"scripts/**/*.{js,ts,tsx}\"",
     "test": "jest",
     "verdaccio:start": "VERDACCIO_BODY_SIZE_LIMIT=100mb verdaccio --config verdaccio.config.yaml",
     "registry:local": "node scripts/switch-registry.js local",
