@@ -212,7 +212,8 @@ android {
       downloadDir.mkdirs()
 
       if (!hasAllFfmpegLibs()) {
-        def tagFile = file("${rootDir}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
+        // Use projectDir.parent (repo/package root); rootDir is the app root when built from example
+        def tagFile = file("${projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
         def tag = readReleaseTag(tagFile)
         if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
         def zipFile = new File(downloadDir, "ffmpeg-android.zip")
@@ -227,7 +228,7 @@ android {
       }
 
       if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
-        def tagFile = file("${rootDir}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
+        def tagFile = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
         def tag = readReleaseTag(tagFile)
         if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
         def zipFile = new File(downloadDir, "sherpa-onnx-android.zip")
@@ -250,7 +251,12 @@ android {
           from fileTree(sherpaExtractDir) { include 'c-api/**' }
           into includeSherpaDir
         }
-        println "Downloaded and extracted sherpa-onnx prebuilts (libs + C API headers) from ${tag}"
+        def sherpaJavaJar = new File(sherpaExtractDir, "java/classes.jar")
+        if (sherpaJavaJar.exists()) {
+          sherpaOnnxClassesDir.mkdirs()
+          copy { from sherpaJavaJar; into sherpaOnnxClassesDir }
+        }
+        println "Downloaded and extracted sherpa-onnx prebuilts (libs + C API headers + java/classes.jar) from ${tag}"
       }
     }
   }
@@ -287,11 +293,28 @@ android {
 repositories {
   mavenCentral()
   google()
-  maven { url 'https://jitpack.io' }
 }
 
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
+
+// Populate sherpa-onnx-classes from (1) release zip (done in downloadNativeLibsIfNeeded) or (2) local prebuilts. No JitPack.
+// Registered before dependencies so builtBy(extractSherpaOnnxClasses) can resolve.
+def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
+  outputs.dir sherpaOnnxClassesDir
+  doLast {
+    sherpaOnnxClassesDir.mkdirs()
+    if (sherpaOnnxClassesDir.listFiles()?.any { it.name.endsWith('.jar') }) return
+    def localJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
+    if (localJar.exists()) {
+      copy { from localJar; into sherpaOnnxClassesDir }
+      println "Using sherpa-onnx classes.jar from local prebuilts"
+      return
+    }
+    throw new RuntimeException(
+      "Missing sherpa-onnx classes.jar. Run third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh (produces android/java/classes.jar) or use a release that includes java/classes.jar.")
+  }
+}
 
 dependencies {
   // React Native dependency: explicit version ensures IDE (VS Code Kotlin LSP) and standalone
@@ -300,47 +323,20 @@ dependencies {
   implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
-  // sherpa-onnx Java/Kotlin classes only (extracted from AAR); native .so are from prebuilts in jniLibs.
-  implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar')
+  // sherpa-onnx Java API (classes.jar from build_sherpa_onnx.sh or release zip); native .so from prebuilts. No JitPack.
+  implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
-}
-
-// Extract Java/Kotlin classes from sherpa-onnx AAR (native .so built separately with QNN support)
-configurations {
-  sherpaOnnxClasses {
-    canBeResolved = true
-    canBeConsumed = false
-  }
-}
-dependencies {
-  sherpaOnnxClasses "com.github.k2-fsa:sherpa-onnx:v${sherpaOnnxVersion}"
-}
-def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
-  outputs.dir sherpaOnnxClassesDir
-  doLast {
-    sherpaOnnxClassesDir.mkdirs()
-    def foundAar = false
-    configurations.sherpaOnnxClasses.resolvedConfiguration.resolvedArtifacts.each { artifact ->
-      if (artifact.file.name.endsWith(".aar")) {
-        foundAar = true
-        copy {
-          from(zipTree(artifact.file)) { include "classes.jar" }
-          into sherpaOnnxClassesDir
-        }
-      }
-    }
-    if (!foundAar) {
-      throw new RuntimeException("No sherpa-onnx AAR found. Check sherpaOnnxVersion and JitPack resolution.")
-    }
-  }
 }
 
 // Codegen for TurboModule spec; in separate script to avoid Gradle 9 Groovy "source is null" with NodeTask in main script.
 apply from: file("${project.projectDir}/codegen.gradle")
 
 afterEvaluate {
+  if (!isStandaloneAarBuild && tasks.findByName("downloadNativeLibsIfNeeded") != null) {
+    tasks.named("extractSherpaOnnxClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
+  }
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractSherpaOnnxClasses
   }

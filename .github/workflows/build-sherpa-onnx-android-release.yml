@@ -1,7 +1,7 @@
 # Build sherpa-onnx for Android (all ABIs, with QNN) and publish as GitHub Release.
 # Release tag is read from third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.
-# Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ with .so files; c-api/ with C headers (c-api.h, cxx-api.h).
-# Gradle extracts to a staging dir, copies ABI dirs to jniLibs and c-api to include/sherpa-onnx/c-api/.
+# Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so); c-api/ (C headers); java/classes.jar (sherpa-onnx Java API).
+# Gradle extracts to staging, copies ABI dirs to jniLibs, c-api to include, java/classes.jar to sherpa-onnx-classes.
 
 name: Prebuilt - Sherpa-onnx (Android) Release
 
@@ -112,7 +112,7 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
 
-      - name: Package jniLibs layout (sherpa-onnx + onnxruntime + C API headers)
+      - name: Package jniLibs layout (sherpa-onnx + onnxruntime + C API headers + Java classes)
         run: |
           LAYOUT=sherpa-onnx-android-layout
           rm -rf "$LAYOUT"
@@ -131,8 +131,13 @@ jobs:
           SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
           mkdir -p "$LAYOUT/c-api"
           cp "$SHERPA_CAPI/c-api.h" "$SHERPA_CAPI/cxx-api.h" "$LAYOUT/c-api/"
+          # Include Java API classes.jar (built by build_sherpa_onnx.sh; no JitPack)
+          if [ -f "$PREBUILT/java/classes.jar" ]; then
+            mkdir -p "$LAYOUT/java"
+            cp "$PREBUILT/java/classes.jar" "$LAYOUT/java/"
+          fi
           echo "Layout contents:"
-          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' \) | head -40
+          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' -o -name '*.jar' \) | head -50
 
       - name: Create release zip
         run: |
@@ -148,7 +153,7 @@ jobs:
           name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
           body: |
             Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
-            Zip contains `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so files) and `c-api/` (C headers). Gradle extracts and copies libs to jniLibs and headers to include.
+            Zip contains `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so), `c-api/` (C headers), and `java/classes.jar`. Gradle copies libs to jniLibs, headers to include, and classes.jar to sherpa-onnx-classes.
             Used when native libs or C headers are missing (single source for Android).
           files: sherpa-onnx-android.zip
           draft: false
@@ -163,4 +168,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Asset \`sherpa-onnx-android.zip\` contains \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so) and \`c-api/\` (headers). Gradle copies to jniLibs and include/sherpa-onnx/c-api/." >> $GITHUB_STEP_SUMMARY
+          echo "Asset \`sherpa-onnx-android.zip\` contains \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so), \`c-api/\` (headers), and \`java/classes.jar\`. Gradle copies to jniLibs, include, and sherpa-onnx-classes." >> $GITHUB_STEP_SUMMARY

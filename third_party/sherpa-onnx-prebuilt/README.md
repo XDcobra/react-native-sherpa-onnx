@@ -51,4 +51,5 @@ Or run the repo’s setup script from the repo root: `node scripts/setup-assets.
 ## Output layout
 
 - `android/<abi>/lib/*.so` – built libraries (e.g. `libsherpa-onnx-jni.so`, `libonnxruntime.so`).
-- `copy_prebuilts_to_sdk.js` copies them to `android/src/main/jniLibs/<abi>/` for the Gradle build.
+- `android/java/classes.jar` – sherpa-onnx Java API (built from `sherpa-onnx/java-api`; no JitPack). Gradle uses it from this path when building from the repo; the release zip includes it so consumers need only the release.
+- `copy_prebuilts_to_sdk.js` copies the `.so` files to `android/src/main/jniLibs/<abi>/` for the Gradle build.

@@ -109,6 +109,9 @@ android/src/main/jniLibs/*
 
 # sherpa-onnx source submodule at repo root (not nested include/ dirs)
 /third_party/sherpa-onnx/
+# sherpa-onnx prebuilt build artifacts (when building with build_sherpa_onnx.sh)
+# android/<abi>/lib/*.so and android/java/classes.jar are generated; get them from release or build locally
+third_party/sherpa-onnx-prebuilt/android/
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")

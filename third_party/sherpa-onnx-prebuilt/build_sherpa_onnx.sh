@@ -248,7 +248,23 @@ build_abi "armeabi-v7a" "build-android-armv7-eabi.sh"  "build-android-armv7-eabi
 build_abi "x86"         "build-android-x86.sh"        "build-android-x86"
 build_abi "x86_64"      "build-android-x86-64.sh"      "build-android-x86-64"
 
+# Build sherpa-onnx Java API (classes.jar) from same source tree; no JitPack needed.
+# Output: OUTPUT_BASE/java/classes.jar (included in release zip; Gradle uses it when present).
+JAVA_API_DIR="$SHERPA_SRC/sherpa-onnx/java-api"
+JAVA_OUT_JAR="$OUTPUT_BASE/java/classes.jar"
+if [ -f "$JAVA_API_DIR/Makefile" ]; then
+  echo "===== Building sherpa-onnx Java API (classes.jar) ====="
+  mkdir -p "$(dirname "$JAVA_OUT_JAR")"
+  (cd "$JAVA_API_DIR" && make clean 2>/dev/null; make -j1) || { echo "Warning: Java API build failed (need javac). classes.jar will be missing."; }
+  if [ -f "$JAVA_API_DIR/build/sherpa-onnx.jar" ]; then
+    cp -v "$JAVA_API_DIR/build/sherpa-onnx.jar" "$JAVA_OUT_JAR"
+    echo "Copied classes.jar to $JAVA_OUT_JAR"
+  fi
+else
+  echo "Warning: $JAVA_API_DIR/Makefile not found; skipping classes.jar"
+fi
+
 [ -n "$ORT_PREBUILT_ROOT" ] && [ -d "$ORT_PREBUILT_ROOT" ] && rm -rf "$ORT_PREBUILT_ROOT"
 
-echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/"
+echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/ and $OUTPUT_BASE/java/classes.jar (if built)"
 echo "Run: node $SCRIPT_DIR/copy_prebuilts_to_sdk.js to copy into android/src/main/jniLibs/"
