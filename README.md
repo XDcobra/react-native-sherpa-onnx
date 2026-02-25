@@ -268,7 +268,7 @@ yarn android  # or yarn ios
 </tr>
 <tr>
 <td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
-<td></td>
+<td><img src="./docs/images/example_provider.png" alt="Text to speech generation" width="240" /></td>
 </tr>
 </table>
 </div>

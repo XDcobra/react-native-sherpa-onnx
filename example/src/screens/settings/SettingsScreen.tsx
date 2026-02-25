@@ -154,7 +154,7 @@ export default function SettingsScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ScrollView
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
@@ -377,12 +377,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
-    padding: 16,
+    paddingHorizontal: 16,
   },
   body: {
     flex: 1,
   },
   bodyContent: {
+    paddingTop: 12,
     paddingBottom: 32,
   },
   section: {
