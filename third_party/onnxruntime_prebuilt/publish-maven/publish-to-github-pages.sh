@@ -62,8 +62,8 @@ for f in "$AAR_NAME" "$POM_NAME"; do
   md5sum "$f" | cut -d' ' -f1 > "${f}.md5"
   sha1sum "$f" | cut -d' ' -f1 > "${f}.sha1"
 done
-cd ../../..
-# Now in maven-repo root so ARTIFACT_PATH / METADATA_FILE resolve correctly
+cd ../../../..
+# Now in maven-repo root (4 levels up from com/xdcobra/sherpa/onnxruntime/VERSION)
 
 METADATA_FILE="${ARTIFACT_PATH}/maven-metadata.xml"
 TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
