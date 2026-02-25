@@ -352,25 +352,31 @@ repositories {
 }
 
 // Resolve sherpa-onnx AAR from Maven (priority 2 for classes.jar extraction).
+// Declaring without classifier resolves the main artifact (sherpa-onnx-1.12.24.aar = Kotlin API).
+// Do not use classifier "java" here or the Java Builder API would be used and Kotlin helpers would fail.
 configurations { sherpaOnnxAar }
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
-// Populate sherpa-onnx-classes with priority: (1) local third_party build, (2) Maven AAR, (3) GitHub release.
-// Registered before dependencies so builtBy(extractSherpaOnnxClasses) can resolve.
+// Populate sherpa-onnx-classes with Kotlin API; priority: (1) local, (2) Maven AAR, (3) GitHub release.
+// Task has inputs so it re-runs when the chosen source changes (avoids stale Java API jars from old builds).
+def sherpaLocalJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
+def sherpaExtractedJar = file("${buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
 def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
   outputs.dir sherpaOnnxClassesDir
+  inputs.files(project.configurations.sherpaOnnxAar)
+  if (sherpaLocalJar.exists()) inputs.file(sherpaLocalJar)
   doLast {
     sherpaOnnxClassesDir.mkdirs()
-    if (sherpaOnnxClassesDir.listFiles()?.any { it.name.endsWith('.jar') }) return
-    // 1) Local third_party build (build_sherpa_onnx.sh)
-    def localJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
-    if (localJar.exists()) {
-      copy { from localJar; into sherpaOnnxClassesDir }
+    // Always overwrite from current source so we don't keep stale (e.g. Java) jars from previous runs.
+    file(sherpaOnnxClassesDir).listFiles()?.findAll { it.name.endsWith('.jar') }?.each { it.delete() }
+    // 1) Local third_party build (build_sherpa_onnx.sh; must be Kotlin API for Kotlin helpers)
+    if (sherpaLocalJar.exists()) {
+      copy { from sherpaLocalJar; into sherpaOnnxClassesDir }
       println "[sherpa-onnx] classes.jar: (1) local third_party"
       return
     }
-    // 2) Maven AAR (e.g. com.xdcobra.sherpa:sherpa-onnx on xdcobra.github.io/maven)
+    // 2) Maven AAR default = Kotlin API (com.xdcobra.sherpa:sherpa-onnx, no classifier)
     def aarFiles = project.configurations.sherpaOnnxAar.files
     if (!aarFiles.isEmpty()) {
       def aar = aarFiles.iterator().next()
@@ -379,18 +385,17 @@ def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
         include 'classes.jar'
         into sherpaOnnxClassesDir
       }
-      println "[sherpa-onnx] classes.jar: (2) Maven AAR (${aar.name})"
+      println "[sherpa-onnx] classes.jar: (2) Maven AAR Kotlin (${aar.name})"
       return
     }
     // 3) GitHub release (prebuilt-downloads extract from downloadNativeLibsIfNeeded)
-    def extractedJar = file("${buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
-    if (extractedJar.exists()) {
-      copy { from extractedJar; into sherpaOnnxClassesDir }
+    if (sherpaExtractedJar.exists()) {
+      copy { from sherpaExtractedJar; into sherpaOnnxClassesDir }
       println "[sherpa-onnx] classes.jar: (3) GitHub release extract"
       return
     }
     throw new RuntimeException(
-      "Missing sherpa-onnx classes.jar. Use (1) local third_party build_sherpa_onnx.sh, (2) Maven AAR (com.xdcobra.sherpa:sherpa-onnx), or (3) a GitHub release that includes java/classes.jar.")
+      "Missing sherpa-onnx classes.jar (Kotlin API). Use (1) local build_sherpa_onnx.sh, (2) Maven com.xdcobra.sherpa:sherpa-onnx, or (3) a GitHub release with java/classes.jar.")
   }
 }
 
