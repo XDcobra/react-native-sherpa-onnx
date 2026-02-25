@@ -5,6 +5,9 @@
 
 #if defined(__ANDROID__)
 #include <dlfcn.h>
+#if __ANDROID_API__ >= 29
+#include <NeuralNetworks.h>
+#endif
 #endif
 
 #include "sherpa-onnx-model-detect.h"
@@ -158,6 +161,29 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeCanInitQnnHtp(JNIEnv* /* env */, jobj
   }
   dlclose(handle);
   return (err == 0 && backend) ? JNI_TRUE : JNI_FALSE;
+#endif
+}
+
+// Check if the device has an NNAPI accelerator (GPU/DSP/NPU). Android API 29+.
+// Uses NDK NeuralNetworks API: device count and device type.
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeHasNnapiAccelerator(JNIEnv* /* env */, jobject /* this */) {
+#if !defined(__ANDROID__) || __ANDROID_API__ < 29
+  return JNI_FALSE;
+#else
+  uint32_t numDevices = 0;
+  int err = ANeuralNetworks_getDeviceCount(&numDevices);
+  if (err != ANEURALNETWORKS_NO_ERROR || numDevices == 0) return JNI_FALSE;
+  for (uint32_t i = 0; i < numDevices; ++i) {
+    ANeuralNetworksDevice* device = nullptr;
+    err = ANeuralNetworks_getDevice(i, &device);
+    if (err != ANEURALNETWORKS_NO_ERROR || !device) continue;
+    int32_t type = ANEURALNETWORKS_DEVICE_UNKNOWN;
+    err = ANeuralNetworksDevice_getType(device, &type);
+    if (err == ANEURALNETWORKS_NO_ERROR && type == ANEURALNETWORKS_DEVICE_ACCELERATOR)
+      return JNI_TRUE;
+  }
+  return JNI_FALSE;
 #endif
 }
 

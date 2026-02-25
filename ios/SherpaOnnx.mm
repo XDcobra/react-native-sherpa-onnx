@@ -205,6 +205,18 @@
     resolve(@NO);
 }
 
+// NNAPI is Android-only; on iOS we always return no support.
+- (void)getNnapiSupportWithModelBase64:(NSString *)modelBase64
+                          withResolver:(RCTPromiseResolveBlock)resolve
+                          withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{
+        @"providerCompiled": @NO,
+        @"hasAccelerator": @NO,
+        @"canInitNnapi": @NO,
+    });
+}
+
 - (void)extractTarBz2:(NSString *)sourcePath
            targetPath:(NSString *)targetPath
                 force:(BOOL)force

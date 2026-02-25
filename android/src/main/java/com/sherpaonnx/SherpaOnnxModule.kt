@@ -126,6 +126,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Extended NNAPI support: providerCompiled, hasAccelerator (NNAPI device type), canInitNnapi (session with NNAPI if model provided).
+   */
+  override fun getNnapiSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
+      val hasAccelerator = try { nativeHasNnapiAccelerator() } catch (_: Exception) { false }
+      val canInitNnapi = if (!providerCompiled) false
+      else modelBase64?.takeIf { it.isNotEmpty() }?.let { base64 ->
+        try {
+          canReallyUseNnapi(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
+        } catch (_: Exception) { false }
+      } ?: false
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("hasAccelerator", hasAccelerator)
+      map.putBoolean("canInitNnapi", canInitNnapi)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getNnapiSupport failed", e)
+      promise.reject("NNAPI_SUPPORT_ERROR", "Failed to get NNAPI support: ${e.message}", e)
+    }
+  }
+
+  private fun canReallyUseNnapi(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addNnapi()
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  /**
    * Resolve model path based on configuration.
    * Handles asset paths, file system paths, and auto-detection.
    */
@@ -625,6 +663,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
     @JvmStatic
     private external fun nativeCanInitQnnHtp(): Boolean
+
+    /** True if the device has an NNAPI accelerator (GPU/DSP). Android API 29+. */
+    @JvmStatic
+    private external fun nativeHasNnapiAccelerator(): Boolean
 
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic

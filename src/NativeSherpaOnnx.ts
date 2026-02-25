@@ -442,6 +442,14 @@ export interface Spec extends TurboModule {
    */
   convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
 
+  // ==================== Execution Provider Methods ====================
+
+  /**
+   * Return the list of available ONNX Runtime execution providers (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
+   * Requires the ORT Java bridge (libonnxruntime4j_jni.so + OrtEnvironment class) from the onnxruntime AAR.
+   */
+  getAvailableProviders(): Promise<string[]>;
+
   // ==================== QNN Methods ====================
 
   /**
@@ -459,11 +467,17 @@ export interface Spec extends TurboModule {
    */
   isQnnSupported(): Promise<boolean>;
 
+  // ==================== NNAPI Methods ====================
+
   /**
-   * Return the list of available ONNX Runtime execution providers (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
-   * Requires the ORT Java bridge (libonnxruntime4j_jni.so + OrtEnvironment class) from the onnxruntime AAR.
+   * Extended NNAPI support info: provider compiled in, device has accelerator, and (if model given) session can be created with NNAPI.
+   * Pass optional modelBase64 to test whether a real ONNX model can be loaded with NNAPI (canInitNnapi); otherwise canInitNnapi is false.
    */
-  getAvailableProviders(): Promise<string[]>;
+  getNnapiSupport(modelBase64?: string): Promise<{
+    providerCompiled: boolean;
+    hasAccelerator: boolean;
+    canInitNnapi: boolean;
+  }>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

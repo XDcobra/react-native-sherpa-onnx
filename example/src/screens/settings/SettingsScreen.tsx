@@ -8,7 +8,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getQnnSupport, getAvailableProviders } from 'react-native-sherpa-onnx';
+import {
+  getQnnSupport,
+  getNnapiSupport,
+  getAvailableProviders,
+} from 'react-native-sherpa-onnx';
 
 const appPkg = (() => {
   try {
@@ -53,10 +57,20 @@ type QnnSupportState = {
   canInitQnn: boolean;
 } | null;
 
+type NnapiSupportState = {
+  providerCompiled: boolean;
+  hasAccelerator: boolean;
+  canInitNnapi: boolean;
+} | null;
+
 export default function SettingsScreen() {
   const [qnnChecking, setQnnChecking] = useState(false);
   const [qnnSupport, setQnnSupport] = useState<QnnSupportState>(null);
   const [qnnError, setQnnError] = useState<string | null>(null);
+
+  const [nnapiChecking, setNnapiChecking] = useState(false);
+  const [nnapiSupport, setNnapiSupport] = useState<NnapiSupportState>(null);
+  const [nnapiError, setNnapiError] = useState<string | null>(null);
 
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -74,6 +88,21 @@ export default function SettingsScreen() {
       setQnnSupport(null);
     } finally {
       setQnnChecking(false);
+    }
+  }, []);
+
+  const handleCheckNnapi = useCallback(async () => {
+    setNnapiChecking(true);
+    setNnapiSupport(null);
+    setNnapiError(null);
+    try {
+      const result = await getNnapiSupport();
+      setNnapiSupport(result);
+    } catch (e: any) {
+      setNnapiError(e?.message ?? 'Unknown error');
+      setNnapiSupport(null);
+    } finally {
+      setNnapiChecking(false);
     }
   }, []);
 
@@ -139,6 +168,54 @@ export default function SettingsScreen() {
           )}
           {qnnError !== null && !qnnChecking && (
             <Text style={[styles.bodyText, styles.errorText]}>{qnnError}</Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>NNAPI (Android)</Text>
+          <Text style={styles.bodyText}>
+            Check whether the build has the NNAPI provider, the device has an
+            accelerator, and (with a model) whether a session can use NNAPI.
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, nnapiChecking && styles.buttonDisabled]}
+            onPress={handleCheckNnapi}
+            disabled={nnapiChecking}
+          >
+            {nnapiChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check NNAPI support</Text>
+            )}
+          </TouchableOpacity>
+          {nnapiSupport !== null && !nnapiChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                NNAPI provider compiled in:{' '}
+                {nnapiSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                Device has accelerator:{' '}
+                {nnapiSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                NNAPI usable (session init):{' '}
+                {nnapiSupport.canInitNnapi ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {nnapiSupport.canInitNnapi
+                  ? 'You can use provider: "nnapi" for STT.'
+                  : nnapiSupport.providerCompiled && nnapiSupport.hasAccelerator
+                  ? 'canInitNnapi is only true when a model is passed to getNnapiSupport(modelBase64).'
+                  : !nnapiSupport.providerCompiled
+                  ? 'This build does not include the NNAPI execution provider.'
+                  : 'No NNAPI accelerator on this device (or not Android).'}
+              </Text>
+            </View>
+          )}
+          {nnapiError !== null && !nnapiChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {nnapiError}
+            </Text>
           )}
         </View>
         <View style={styles.section}>

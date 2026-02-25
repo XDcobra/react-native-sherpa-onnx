@@ -121,6 +121,14 @@ target_link_libraries(sherpaonnx
     android
 )
 
+# NNAPI for nativeHasNnapiAccelerator (Android API 29+; C++ code is guarded by __ANDROID_API__ >= 29)
+if(ANDROID_ABI AND ANDROID_PLATFORM)
+    string(REGEX REPLACE "^android-" "" _api_num "${ANDROID_PLATFORM}")
+    if(_api_num GREATER_EQUAL 29)
+        target_link_libraries(sherpaonnx PRIVATE neuralnetworks)
+    endif()
+endif()
+
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE
     -Wall

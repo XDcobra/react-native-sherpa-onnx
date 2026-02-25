@@ -58,3 +58,18 @@ export function isQnnSupported(): Promise<boolean> {
 export function getAvailableProviders(): Promise<string[]> {
   return SherpaOnnx.getAvailableProviders();
 }
+
+/** NNAPI support details: providerCompiled, hasAccelerator, canInitNnapi (latter requires optional model test). */
+export type NnapiSupport = {
+  providerCompiled: boolean;
+  hasAccelerator: boolean;
+  canInitNnapi: boolean;
+};
+
+/**
+ * Extended NNAPI support info (Android). Optional modelBase64: if provided, canInitNnapi tests a real session with NNAPI.
+ * On iOS always returns { providerCompiled: false, hasAccelerator: false, canInitNnapi: false }.
+ */
+export function getNnapiSupport(modelBase64?: string): Promise<NnapiSupport> {
+  return SherpaOnnx.getNnapiSupport(modelBase64);
+}
