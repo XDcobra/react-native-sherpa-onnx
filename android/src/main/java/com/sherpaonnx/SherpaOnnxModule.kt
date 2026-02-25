@@ -481,6 +481,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ruleFars: String?,
     maxNumSentences: Double?,
     silenceScale: Double?,
+    provider: String?,
     promise: Promise
   ) {
     ttsHelper.initializeTts(
@@ -496,6 +497,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       ruleFars,
       maxNumSentences,
       silenceScale,
+      provider,
       promise
     )
   }

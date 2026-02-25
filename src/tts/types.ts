@@ -100,6 +100,14 @@ export interface TTSInitializeOptions {
   modelType?: TTSModelType;
 
   /**
+   * Execution provider (e.g. `'cpu'`, `'coreml'`, `'xnnpack'`, `'nnapi'`, `'qnn'`).
+   * Use getCoreMlSupport(), getXnnpackSupport(), etc. to check availability. See execution-providers.md.
+   *
+   * @default 'cpu'
+   */
+  provider?: string;
+
+  /**
    * Number of threads to use for inference.
    * More threads = faster processing but more CPU usage.
    *

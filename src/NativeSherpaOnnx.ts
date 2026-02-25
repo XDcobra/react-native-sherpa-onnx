@@ -136,6 +136,7 @@ export interface Spec extends TurboModule {
    * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
    * @param maxNumSentences - Optional max sentences per callback (default: 1)
    * @param silenceScale - Optional silence scale on config (default: 0.2)
+   * @param provider - Optional execution provider (e.g. 'cpu', 'coreml', 'xnnpack'; default: 'cpu')
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeTts(
@@ -150,7 +151,8 @@ export interface Spec extends TurboModule {
     ruleFsts?: string,
     ruleFars?: string,
     maxNumSentences?: number,
-    silenceScale?: number
+    silenceScale?: number,
+    provider?: string
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;

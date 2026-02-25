@@ -72,7 +72,8 @@ Java_com_sherpaonnx_ZipvoiceTtsWrapper_nativeCreate(
     jstring j_data_dir, jstring j_lexicon,
     jfloat feat_scale, jfloat t_shift, jfloat target_rms, jfloat guidance_scale,
     jint num_threads, jboolean debug,
-    jstring j_rule_fsts, jstring j_rule_fars, jint max_num_sentences, jfloat silence_scale) {
+    jstring j_rule_fsts, jstring j_rule_fars, jint max_num_sentences, jfloat silence_scale,
+    jstring j_provider) {
   JStringGuard tokens(env, j_tokens);
   JStringGuard encoder(env, j_encoder);
   JStringGuard decoder(env, j_decoder);
@@ -81,13 +82,14 @@ Java_com_sherpaonnx_ZipvoiceTtsWrapper_nativeCreate(
   JStringGuard lexicon(env, j_lexicon);
   JStringGuard ruleFsts(env, j_rule_fsts);
   JStringGuard ruleFars(env, j_rule_fars);
+  JStringGuard provider(env, j_provider);
 
   LOGI("nativeCreate: tokens=%s, encoder=%s, decoder=%s, vocoder=%s, dataDir=%s, lexicon=%s",
        tokens.get(), encoder.get(), decoder.get(), vocoder.get(), dataDir.get(), lexicon.get());
   LOGI("nativeCreate: featScale=%.3f, tShift=%.3f, targetRms=%.3f, guidanceScale=%.3f, threads=%d, debug=%d",
        feat_scale, t_shift, target_rms, guidance_scale, num_threads, debug);
-  LOGI("nativeCreate: ruleFsts=%s, ruleFars=%s, maxNumSentences=%d, silenceScale=%.3f",
-       ruleFsts.get(), ruleFars.get(), max_num_sentences, silence_scale);
+  LOGI("nativeCreate: ruleFsts=%s, ruleFars=%s, maxNumSentences=%d, silenceScale=%.3f, provider=%s",
+       ruleFsts.get(), ruleFars.get(), max_num_sentences, silence_scale, provider.get());
 
   SherpaOnnxOfflineTtsConfig config;
   memset(&config, 0, sizeof(config));
@@ -105,7 +107,7 @@ Java_com_sherpaonnx_ZipvoiceTtsWrapper_nativeCreate(
 
   config.model.num_threads = num_threads;
   config.model.debug = debug ? 1 : 0;
-  config.model.provider = "cpu";
+  config.model.provider = (provider.get() && *provider.get()) ? provider.get() : "cpu";
 
   config.rule_fsts = ruleFsts.get();
   config.rule_fars = ruleFars.get();

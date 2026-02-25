@@ -261,6 +261,7 @@ This "you add QNN libs yourself" approach keeps the SDK compliant (no redistribu
 
 ## Related documentation
 
-- [STT](./stt.md) — `provider` option (e.g. `'cpu'`, `'qnn'`, `'nnapi'`, `'xnnpack'`) when creating the recognizer.
+- [STT](./stt.md) — `provider` option when creating the recognizer.
+- [TTS](./tts.md) — `provider` option when creating the TTS engine (e.g. `createTTS({ modelPath, provider: 'coreml' })`).
 - [Model Setup](./MODEL_SETUP.md) — How to use bundled or downloaded models with STT/TTS.
 - [Building sherpa-onnx Android prebuilts](../../third_party/sherpa-onnx-prebuilt/README.md) — Building with `--qnn` and `QNN_SDK_ROOT`.

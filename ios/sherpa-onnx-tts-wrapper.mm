@@ -54,7 +54,8 @@ TtsInitializeResult TtsWrapper::initialize(
     const std::optional<std::string>& ruleFsts,
     const std::optional<std::string>& ruleFars,
     const std::optional<int32_t>& maxNumSentences,
-    const std::optional<float>& silenceScale
+    const std::optional<float>& silenceScale,
+    const std::optional<std::string>& provider
 ) {
     TtsInitializeResult result;
     result.success = false;
@@ -72,6 +73,9 @@ TtsInitializeResult TtsWrapper::initialize(
         sherpa_onnx::cxx::OfflineTtsConfig config;
         config.model.num_threads = numThreads;
         config.model.debug = debug;
+        if (provider.has_value() && !provider->empty()) {
+            config.model.provider = *provider;
+        }
 
         auto detect = DetectTtsModel(modelDir, modelType);
         if (!detect.ok) {

@@ -39,13 +39,15 @@ internal class ZipvoiceTtsWrapper private constructor(private var ptr: Long) {
       ruleFsts: String = "",
       ruleFars: String = "",
       maxNumSentences: Int = 1,
-      silenceScale: Float = 0.2f
+      silenceScale: Float = 0.2f,
+      provider: String = "cpu"
     ): ZipvoiceTtsWrapper? {
       val p = nativeCreate(
         tokens, encoder, decoder, vocoder, dataDir, lexicon,
         featScale, tShift, targetRms, guidanceScale,
         numThreads, debug,
-        ruleFsts, ruleFars, maxNumSentences, silenceScale
+        ruleFsts, ruleFars, maxNumSentences, silenceScale,
+        provider
       )
       if (p == 0L) {
         Log.e(TAG, "nativeCreate returned 0 — failed to create Zipvoice TTS engine")
@@ -61,7 +63,8 @@ internal class ZipvoiceTtsWrapper private constructor(private var ptr: Long) {
       dataDir: String, lexicon: String,
       featScale: Float, tShift: Float, targetRms: Float, guidanceScale: Float,
       numThreads: Int, debug: Boolean,
-      ruleFsts: String, ruleFars: String, maxNumSentences: Int, silenceScale: Float
+      ruleFsts: String, ruleFars: String, maxNumSentences: Int, silenceScale: Float,
+      provider: String
     ): Long
 
     @JvmStatic
