@@ -9,9 +9,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  type AccelerationSupport,
   getQnnSupport,
   getNnapiSupport,
   getXnnpackSupport,
+  getCoreMlSupport,
   getAvailableProviders,
 } from 'react-native-sherpa-onnx';
 
@@ -53,35 +55,25 @@ const sdkVersion = (() => {
   }
 })();
 
-type QnnSupportState = {
-  providerCompiled: boolean;
-  canInitQnn: boolean;
-} | null;
-
-type NnapiSupportState = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInitNnapi: boolean;
-} | null;
-
-type XnnpackSupportState = {
-  providerCompiled: boolean;
-  canInit: boolean;
-} | null;
+// Unified format for all backends (QNN, NNAPI, XNNPACK, Core ML)
+type SupportState = AccelerationSupport | null;
 
 export default function SettingsScreen() {
   const [qnnChecking, setQnnChecking] = useState(false);
-  const [qnnSupport, setQnnSupport] = useState<QnnSupportState>(null);
+  const [qnnSupport, setQnnSupport] = useState<SupportState>(null);
   const [qnnError, setQnnError] = useState<string | null>(null);
 
   const [nnapiChecking, setNnapiChecking] = useState(false);
-  const [nnapiSupport, setNnapiSupport] = useState<NnapiSupportState>(null);
+  const [nnapiSupport, setNnapiSupport] = useState<SupportState>(null);
   const [nnapiError, setNnapiError] = useState<string | null>(null);
 
   const [xnnpackChecking, setXnnpackChecking] = useState(false);
-  const [xnnpackSupport, setXnnpackSupport] =
-    useState<XnnpackSupportState>(null);
+  const [xnnpackSupport, setXnnpackSupport] = useState<SupportState>(null);
   const [xnnpackError, setXnnpackError] = useState<string | null>(null);
+
+  const [coremlChecking, setCoremlChecking] = useState(false);
+  const [coremlSupport, setCoremlSupport] = useState<SupportState>(null);
+  const [coremlError, setCoremlError] = useState<string | null>(null);
 
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -132,6 +124,21 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const handleCheckCoreMl = useCallback(async () => {
+    setCoremlChecking(true);
+    setCoremlSupport(null);
+    setCoremlError(null);
+    try {
+      const result = await getCoreMlSupport();
+      setCoremlSupport(result);
+    } catch (e: any) {
+      setCoremlError(e?.message ?? 'Unknown error');
+      setCoremlSupport(null);
+    } finally {
+      setCoremlChecking(false);
+    }
+  }, []);
+
   const handleCheckProviders = useCallback(async () => {
     setProvidersLoading(true);
     setProviders(null);
@@ -177,14 +184,16 @@ export default function SettingsScreen() {
           {qnnSupport !== null && !qnnChecking && (
             <View style={styles.qnnResultBox}>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                QNN provider compiled in:{' '}
-                {qnnSupport.providerCompiled ? 'Yes' : 'No'}
+                providerCompiled: {qnnSupport.providerCompiled ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                QNN usable (HTP init): {qnnSupport.canInitQnn ? 'Yes' : 'No'}
+                hasAccelerator: {qnnSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {qnnSupport.canInit ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnSummary]}>
-                {qnnSupport.canInitQnn
+                {qnnSupport.canInit
                   ? 'You can use provider: "qnn" for STT.'
                   : qnnSupport.providerCompiled
                   ? 'QNN is built in but not available on this device (e.g. missing runtime libs or unsupported SoC).'
@@ -216,22 +225,19 @@ export default function SettingsScreen() {
           {nnapiSupport !== null && !nnapiChecking && (
             <View style={styles.qnnResultBox}>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                NNAPI provider compiled in:{' '}
-                {nnapiSupport.providerCompiled ? 'Yes' : 'No'}
+                providerCompiled: {nnapiSupport.providerCompiled ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                Device has accelerator:{' '}
-                {nnapiSupport.hasAccelerator ? 'Yes' : 'No'}
+                hasAccelerator: {nnapiSupport.hasAccelerator ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                NNAPI usable (session init):{' '}
-                {nnapiSupport.canInitNnapi ? 'Yes' : 'No'}
+                canInit: {nnapiSupport.canInit ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnSummary]}>
-                {nnapiSupport.canInitNnapi
+                {nnapiSupport.canInit
                   ? 'You can use provider: "nnapi" for STT.'
                   : nnapiSupport.providerCompiled && nnapiSupport.hasAccelerator
-                  ? 'canInitNnapi is only true when a model is passed to getNnapiSupport(modelBase64).'
+                  ? 'canInit is only true when a model is passed to getNnapiSupport(modelBase64).'
                   : !nnapiSupport.providerCompiled
                   ? 'This build does not include the NNAPI execution provider.'
                   : 'No NNAPI accelerator on this device (or not Android).'}
@@ -264,12 +270,14 @@ export default function SettingsScreen() {
           {xnnpackSupport !== null && !xnnpackChecking && (
             <View style={styles.qnnResultBox}>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                XNNPACK provider compiled in:{' '}
+                providerCompiled:{' '}
                 {xnnpackSupport.providerCompiled ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnResult]}>
-                XNNPACK usable (session init):{' '}
-                {xnnpackSupport.canInit ? 'Yes' : 'No'}
+                hasAccelerator: {xnnpackSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {xnnpackSupport.canInit ? 'Yes' : 'No'}
               </Text>
               <Text style={[styles.bodyText, styles.qnnSummary]}>
                 {xnnpackSupport.canInit
@@ -283,6 +291,48 @@ export default function SettingsScreen() {
           {xnnpackError !== null && !xnnpackChecking && (
             <Text style={[styles.bodyText, styles.errorText]}>
               {xnnpackError}
+            </Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>Core ML (iOS)</Text>
+          <Text style={styles.bodyText}>
+            providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple
+            Neural Engine. canInit requires ORT session (stub on this module).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, coremlChecking && styles.buttonDisabled]}
+            onPress={handleCheckCoreMl}
+            disabled={coremlChecking}
+          >
+            {coremlChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check Core ML support</Text>
+            )}
+          </TouchableOpacity>
+          {coremlSupport !== null && !coremlChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                providerCompiled:{' '}
+                {coremlSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                hasAccelerator: {coremlSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {coremlSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {coremlSupport.hasAccelerator
+                  ? 'Apple Neural Engine is available (Core ML can use ANE).'
+                  : 'No ANE on this device/simulator. Core ML still available on CPU/GPU.'}
+              </Text>
+            </View>
+          )}
+          {coremlError !== null && !coremlChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {coremlError}
             </Text>
           )}
         </View>

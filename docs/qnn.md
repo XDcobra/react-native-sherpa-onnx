@@ -9,20 +9,23 @@ This document describes QNN-specific APIs and behavior in `react-native-sherpa-o
 
 - [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs)
 - [Overview](#overview)
+- [Unified format (AccelerationSupport)](#unified-format-accelerationsupport)
 - [API Reference](#api-reference)
   - [getQnnSupport()](#getqnnsupport)
   - [getAvailableProviders()](#getavailableproviders)
   - [getNnapiSupport()](#getnnapisupport)
   - [getXnnpackSupport()](#getxnnpacksupport)
+  - [getCoreMlSupport()](#getcoremlsupport)
 - [When does `getQnnSupport()` return what?](#when-does-getqnnsupport-return-what)
 - [When does `getNnapiSupport()` return what?](#when-does-getnnapisupport-return-what)
 - [When does `getXnnpackSupport()` return what?](#when-does-getxnnpacksupport-return-what)
+- [When does `getCoreMlSupport()` return what?](#when-does-getcoremlsupport-return-what)
 - [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk)
 - [Related documentation](#related-documentation)
 
 ## Quick start: adding QNN runtime libs
 
-To enable QNN in your app (so that `getQnnSupport().canInitQnn` is `true` and you can use `provider: 'qnn'` for STT):
+To enable QNN in your app (so that `getQnnSupport().canInit` is `true` and you can use `provider: 'qnn'` for STT):
 
 1. **Download the Qualcomm AI Runtime** (accept the license):  
    [Qualcomm AI Runtime Community](https://softwarecenter.qualcomm.com/catalog/item/Qualcomm_AI_Runtime_Community)
@@ -51,43 +54,56 @@ total 329768
 -rw-r--r--@ 1 user  staff   4.6M 21 Nov 22:38 libsherpa-onnx-jni.so
 ```
 
-3. **Rebuild the app.** After that, `getQnnSupport().canInitQnn` will be `true` on devices where the QNN libs load correctly.
+3. **Rebuild the app.** After that, `getQnnSupport().canInit` will be `true` on devices where the QNN libs load correctly.
 
 The sherpa-onnx and ONNX Runtime libs used by this SDK (from the GitHub Release) are **already built with QNN**; you only add the Qualcomm runtime libs. Do not remove Qualcomm’s copyright or proprietary notices; see [License and compliance](#license-and-compliance-qnn-sdk).
 
 ## Overview
 
 - **Android:** The sherpa-onnx and ONNX Runtime libs provided by this SDK (via the GitHub Release used in `build.gradle`) are **built with QNN**. To actually use QNN at runtime, the app must also ship the **QNN runtime libraries** (e.g. `libQnnHtp.so`). This SDK does not include them for license reasons — you add them yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). With the libs in place, the STT engine can use the `qnn` provider on supported devices.
-- **iOS:** QNN is not used; `getQnnSupport().canInitQnn` is always `false`.
-- The SDK exposes **`getQnnSupport()`** so the app can branch UI or config (e.g. show “Use NPU” only when `canInitQnn` is true, or explain why QNN is unavailable), and **`getAvailableProviders()`** to list all ONNX Runtime execution providers (including `QNN` when available) for the current build and device.
+- **iOS:** QNN is not used; `getQnnSupport().canInit` is always `false`.
+- The SDK exposes **`getQnnSupport()`** so the app can branch UI or config (e.g. show “Use NPU” only when `canInit` is true, or explain why QNN is unavailable), and **`getAvailableProviders()`** to list all ONNX Runtime execution providers (including `QNN` when available) for the current build and device.
+
+## Unified format (AccelerationSupport)
+
+All acceleration support getters (`getQnnSupport`, `getNnapiSupport`, `getXnnpackSupport`, `getCoreMlSupport`) return the same shape:
+
+```ts
+type AccelerationSupport = {
+  providerCompiled: boolean;  // ORT EP built in (Android) / Core ML present (iOS)
+  hasAccelerator: boolean;    // NPU/ANE present?
+  canInit: boolean;          // Session with EP successful?
+};
+```
+
+| Backend | providerCompiled | hasAccelerator | canInit |
+|--------|------------------|----------------|---------|
+| **QNN (Android)** | ORT providers contains QNN | Same as canInit (implicit) | QNN init test |
+| **NNAPI (Android)** | ORT providers contains NNAPI | nativeHasNnapiAccelerator() | NNAPI session test (optional model) |
+| **XNNPACK** | ORT providers contains XNNPACK | `true` when compiled (CPU-optimized) | XNNPACK session test (optional model) |
+| **Core ML (iOS)** | `true` (Core ML on iOS 11+) | Apple Neural Engine (MLModel.availableComputeDevices) | ORT session with CoreML EP (stub `false` in this module) |
 
 ## API Reference
 
 ### `getQnnSupport()`
 
 ```ts
-type QnnSupport = { providerCompiled: boolean; canInitQnn: boolean };
-function getQnnSupport(): Promise<QnnSupport>;
+function getQnnSupport(): Promise<AccelerationSupport>;
 ```
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns extended QNN support info:
-
-- **`providerCompiled`** — `true` if the QNN execution provider is in the list from `getAvailableProviders()` (ORT build has QNN linked).
-- **`canInitQnn`** — `true` if the QNN HTP backend can be initialized (native `QnnBackend_create` succeeds). Requires the QNN runtime libs to be present and the device to support them.
-
-Use this to show the user why QNN is or isn’t available (e.g. “QNN compiled but not usable on this device” when `providerCompiled && !canInitQnn`).
+Returns QNN support in unified format: **providerCompiled** (QNN in ORT providers), **hasAccelerator** (= canInit for QNN), **canInit** (HTP backend init succeeds). Use `canInit` to decide if you can use `provider: 'qnn'` for STT.
 
 **Example:**
 
 ```ts
 import { getQnnSupport } from 'react-native-sherpa-onnx';
 
-const { providerCompiled, canInitQnn } = await getQnnSupport();
-if (canInitQnn) {
+const support = await getQnnSupport();
+if (support.canInit) {
   // Use provider: 'qnn' for STT
-} else if (providerCompiled) {
+} else if (support.providerCompiled) {
   // Show "QNN built in but not available on this device"
 } else {
   // Use CPU or other providers only
@@ -123,109 +139,77 @@ if (hasQnn) {
 ### `getNnapiSupport()`
 
 ```ts
-type NnapiSupport = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInitNnapi: boolean;
-};
-function getNnapiSupport(modelBase64?: string): Promise<NnapiSupport>;
+function getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
 ```
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns extended **NNAPI (Android Neural Networks API)** support info. NNAPI allows using GPU/DSP/NPU accelerators on Android. On iOS this always returns `{ providerCompiled: false, hasAccelerator: false, canInitNnapi: false }`.
-
-- **`providerCompiled`** — `true` if the NNAPI execution provider is in the list from `getAvailableProviders()` (ORT build has NNAPI linked).
-- **`hasAccelerator`** — `true` if the device reports at least one NNAPI device of type accelerator (GPU/DSP/NPU). Uses the Android NDK Neural Networks API (API 29+).
-- **`canInitNnapi`** — `true` only if you pass **optional** `modelBase64` (a base64-encoded ONNX model) and a session with NNAPI can be created successfully with that model. Without `modelBase64`, this is always `false` (no model to test with).
-
-Use this to show the user whether NNAPI is available and whether they can use `provider: 'nnapi'` for STT. To get `canInitNnapi: true`, call `getNnapiSupport(modelBase64)` with a small ONNX model (e.g. an encoder) as base64.
-
-**Example:**
-
-```ts
-import { getNnapiSupport } from 'react-native-sherpa-onnx';
-
-// Without model: only providerCompiled and hasAccelerator are meaningful
-const support = await getNnapiSupport();
-if (support.providerCompiled && support.hasAccelerator) {
-  // Device has NNAPI accelerator; canInitNnapi is false unless you pass a model
-}
-
-// With model (e.g. from file or asset): tests whether NNAPI can load this model
-const modelBase64 = '...'; // base64 of ONNX model bytes
-const supportWithModel = await getNnapiSupport(modelBase64);
-if (supportWithModel.canInitNnapi) {
-  // Use provider: 'nnapi' for STT with this build/device
-}
-```
+Returns **NNAPI (Android)** support in unified format. **hasAccelerator** uses native NNAPI device enumeration; **canInit** requires optional `modelBase64` (session test). On iOS returns all `false`.
 
 ### `getXnnpackSupport()`
 
 ```ts
-type XnnpackSupport = { providerCompiled: boolean; canInit: boolean };
-function getXnnpackSupport(modelBase64?: string): Promise<XnnpackSupport>;
+function getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
 ```
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns **XNNPACK** support info. XNNPACK is a CPU-based acceleration backend (optimized operators). On iOS this returns `{ providerCompiled: false, canInit: false }` (stub).
+Returns **XNNPACK** support in unified format. **hasAccelerator** is `true` when providerCompiled (CPU-optimized). **canInit** requires optional `modelBase64`. On iOS returns all `false`.
 
-- **`providerCompiled`** — `true` if the XNNPACK execution provider is in the list from `getAvailableProviders()` (ORT build has XNNPACK linked).
-- **`canInit`** — `true` only if you pass **optional** `modelBase64` (a base64-encoded ONNX model) and a session with XNNPACK can be created successfully with that model. Without `modelBase64`, this is always `false`.
-
-Use this to check whether you can use `provider: 'xnnpack'` for STT. To get `canInit: true`, call `getXnnpackSupport(modelBase64)` with a valid ONNX model as base64.
-
-**Example:**
+### `getCoreMlSupport()`
 
 ```ts
-import { getXnnpackSupport } from 'react-native-sherpa-onnx';
-
-const support = await getXnnpackSupport();
-if (support.providerCompiled) {
-  // XNNPACK is in the build; pass a model to test canInit
-}
-
-const supportWithModel = await getXnnpackSupport(modelBase64);
-if (supportWithModel.canInit) {
-  // Use provider: 'xnnpack' for STT
-}
+function getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
 ```
+
+**Export:** `react-native-sherpa-onnx` (root).
+
+Returns **Core ML (iOS)** support in unified format. **providerCompiled** is always `true` (Core ML present on iOS 11+). **hasAccelerator** is true when Apple Neural Engine is available (`MLModel.availableComputeDevices` contains `.neuralEngine`, iOS 15+). **canInit** would require an ORT session with CoreML EP and is not implemented in this module (returns `false`). On Android returns all `false`.
 
 ## When does `getQnnSupport()` return what?
 
-| Situation | `providerCompiled` | `canInitQnn` | Notes |
+| Situation | `providerCompiled` | `hasAccelerator` | `canInit` | Notes |
 |-----------|--------------------|--------------|--------|
-| **Android, QNN runtime libs added** (sherpa-onnx QNN-built; you added Qualcomm runtime libs to jniLibs; device supports HTP) | `true` | `true` | Normal case. See [Quick start](#quick-start-adding-qnn-runtime-libs). |
-| **Android, QNN runtime libs not added** (sherpa-onnx QNN-built, but no Qualcomm `.so` files) | `true` | `false` | Add QNN libs so `QnnBackend_create` can succeed. |
-| **Android, build without QNN** (ORT/sherpa-onnx not built with QNN) | `false` | `false` | No QNN in `getAvailableProviders()`. |
-| **Android, QNN libs present but device/backend init fails** | `true` | `false` | e.g. unsupported SoC or driver; use CPU. |
-| **iOS** | `false` | `false` | QNN is Android/Qualcomm only. |
+| **Android, QNN runtime libs added** (sherpa-onnx QNN-built; you added Qualcomm runtime libs to jniLibs; device supports HTP) | `true` | `true` | `true` | Normal case. See [Quick start](#quick-start-adding-qnn-runtime-libs). |
+| **Android, QNN runtime libs not added** (sherpa-onnx QNN-built, but no Qualcomm `.so` files) | `true` | `false` | `false` | Add QNN libs so `QnnBackend_create` can succeed. |
+| **Android, build without QNN** (ORT/sherpa-onnx not built with QNN) | `false` | `false` | `false` | No QNN in `getAvailableProviders()`. |
+| **Android, QNN libs present but device/backend init fails** | `true` | `false` | `false` | e.g. unsupported SoC or driver; use CPU. |
+| **iOS** | `false` | `false` | `false` | QNN is Android/Qualcomm only. |
 
-**Summary:** `canInitQnn` is true only when **both** the QNN provider is compiled in and the HTP backend initializes. Use `getQnnSupport()` to show users why QNN is unavailable.
+**Summary:** `canInit` is true only when **both** the QNN provider is compiled in and the HTP backend initializes. Use `getQnnSupport()` to show users why QNN is unavailable.
 
 ## When does `getNnapiSupport()` return what?
 
-| Situation | `providerCompiled` | `hasAccelerator` | `canInitNnapi` | Notes |
-|-----------|--------------------|------------------|----------------|--------|
+| Situation | `providerCompiled` | `hasAccelerator` | `canInit` | Notes |
+|-----------|--------------------|------------------|-----------|--------|
 | **Android, NNAPI in build, device has accelerator, model passed and loads with NNAPI** | `true` | `true` | `true` | Use `provider: 'nnapi'` for STT. |
 | **Android, NNAPI in build, device has accelerator, no model passed** | `true` | `true` | `false` | Pass `modelBase64` to test session init. |
-| **Android, NNAPI in build, no accelerator (e.g. emulator)** | `true` | `false` | `false` | NNAPI may fall back to CPU; device has no dedicated accelerator. |
+| **Android, NNAPI in build, no accelerator (e.g. emulator)** | `true` | `false` | `false` | NNAPI may fall back to CPU. |
 | **Android, build without NNAPI** | `false` | `false` | `false` | NNAPI not in ORT build. |
 | **iOS** | `false` | `false` | `false` | NNAPI is Android-only. |
 
-**Summary:** `canInitNnapi` is only `true` when you call `getNnapiSupport(modelBase64)` with a valid ONNX model and the session with NNAPI is created successfully. Use `providerCompiled` and `hasAccelerator` to show why NNAPI might be unavailable.
+**Summary:** `canInit` is only `true` when you call `getNnapiSupport(modelBase64)` with a valid ONNX model and the session with NNAPI is created successfully.
 
 ## When does `getXnnpackSupport()` return what?
 
-| Situation | `providerCompiled` | `canInit` | Notes |
-|-----------|--------------------|-----------|--------|
-| **Build has XNNPACK, model passed and session created with XNNPACK** | `true` | `true` | Use `provider: 'xnnpack'` for STT. |
-| **Build has XNNPACK, no model passed** | `true` | `false` | Pass `modelBase64` to test session init. |
-| **Build without XNNPACK** | `false` | `false` | XNNPACK not in ORT build. |
-| **iOS (stub)** | `false` | `false` | Current implementation returns stub; could be extended. |
+| Situation | `providerCompiled` | `hasAccelerator` | `canInit` | Notes |
+|-----------|--------------------|------------------|-----------|--------|
+| **Build has XNNPACK, model passed and session created with XNNPACK** | `true` | `true` | `true` | Use `provider: 'xnnpack'` for STT. |
+| **Build has XNNPACK, no model passed** | `true` | `true` | `false` | Pass `modelBase64` to test session init. |
+| **Build without XNNPACK** | `false` | `false` | `false` | XNNPACK not in ORT build. |
+| **iOS (stub)** | `false` | `false` | `false` | Stub; could be extended. |
 
 **Summary:** `canInit` is only `true` when you call `getXnnpackSupport(modelBase64)` with a valid ONNX model and the session with XNNPACK is created successfully.
+
+## When does `getCoreMlSupport()` return what?
+
+| Situation | `providerCompiled` | `hasAccelerator` | `canInit` | Notes |
+|-----------|--------------------|------------------|-----------|--------|
+| **iOS 11+, device with ANE (e.g. A12+), iOS 15+** | `true` | `true` | `false` | ANE available; canInit not implemented in this module. |
+| **iOS 11+, device without ANE or simulator** | `true` | `false` | `false` | Core ML still available on CPU/GPU. |
+| **Android** | `false` | `false` | `false` | Core ML is iOS-only. |
+
+**Summary:** On iOS, `providerCompiled` is always `true`; `hasAccelerator` reflects Apple Neural Engine (iOS 15+). `canInit` would require ORT session with CoreML EP and is not implemented here.
 
 ## License and compliance (QNN SDK)
 

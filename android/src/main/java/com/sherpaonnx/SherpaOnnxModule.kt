@@ -80,16 +80,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Extended QNN support: providerCompiled = QNN in getAvailableProviders(), canInitQnn = native QnnBackend_create succeeds.
+   * QNN support (AccelerationSupport): providerCompiled, hasAccelerator (= canInit for QNN), canInit (HTP backend init).
    */
   override fun getQnnSupport(promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("QNN", ignoreCase = true) }
-      val canInitQnn = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      val canInit = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
-      map.putBoolean("canInitQnn", canInitQnn)
+      map.putBoolean("hasAccelerator", canInit) // QNN: implicit via init
+      map.putBoolean("canInit", canInit)
       promise.resolve(map)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getQnnSupport failed", e)
@@ -112,14 +113,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Extended NNAPI support: providerCompiled, hasAccelerator (NNAPI device type), canInitNnapi (session with NNAPI if model provided).
+   * NNAPI support (AccelerationSupport): providerCompiled, hasAccelerator (native), canInit (session test if model provided).
    */
   override fun getNnapiSupport(modelBase64: String?, promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
       val hasAccelerator = try { nativeHasNnapiAccelerator() } catch (_: Exception) { false }
-      val canInitNnapi = if (!providerCompiled) false
+      val canInit = if (!providerCompiled) false
       else modelBase64?.takeIf { it.isNotEmpty() }?.let { base64 ->
         try {
           canReallyUseNnapi(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
@@ -128,7 +129,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
       map.putBoolean("hasAccelerator", hasAccelerator)
-      map.putBoolean("canInitNnapi", canInitNnapi)
+      map.putBoolean("canInit", canInit)
       promise.resolve(map)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getNnapiSupport failed", e)
@@ -150,7 +151,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Extended XNNPACK support: providerCompiled, canInit (session with XNNPACK if model provided).
+   * XNNPACK support (AccelerationSupport): providerCompiled, hasAccelerator = true when compiled (CPU-optimized), canInit (session test if model provided).
    */
   override fun getXnnpackSupport(modelBase64: String?, promise: Promise) {
     try {
@@ -164,6 +165,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } ?: false
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("hasAccelerator", providerCompiled) // XNNPACK: CPU-optimized, always "has accelerator" when built in
       map.putBoolean("canInit", canInit)
       promise.resolve(map)
     } catch (e: Exception) {
@@ -182,6 +184,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       true
     } catch (_: Throwable) {
       false
+    }
+  }
+
+  /**
+   * Core ML support (AccelerationSupport). Android: always false (Core ML is iOS-only).
+   */
+  override fun getCoreMlSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", false)
+      map.putBoolean("hasAccelerator", false)
+      map.putBoolean("canInit", false)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getCoreMlSupport failed", e)
+      promise.reject("COREML_SUPPORT_ERROR", "Failed to get Core ML support: ${e.message}", e)
     }
   }
 

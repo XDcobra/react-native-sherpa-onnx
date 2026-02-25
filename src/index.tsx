@@ -1,6 +1,8 @@
 import SherpaOnnx from './NativeSherpaOnnx';
+import type { AccelerationSupport } from './NativeSherpaOnnx';
 
 // Export common types and utilities
+export type { AccelerationSupport } from './NativeSherpaOnnx';
 export type { ModelPathConfig } from './types';
 export {
   assetModelPath,
@@ -30,16 +32,10 @@ export function testSherpaInit(): Promise<string> {
   return SherpaOnnx.testSherpaInit();
 }
 
-/** QNN support details: providerCompiled (QNN in ORT providers), canInitQnn (HTP backend init succeeds). */
-export type QnnSupport = {
-  providerCompiled: boolean;
-  canInitQnn: boolean;
-};
-
 /**
- * Extended QNN support info. Use for UI (e.g. show "QNN available" vs "QNN compiled but not usable").
+ * QNN support (Android). Returns providerCompiled, hasAccelerator (= canInit for QNN), canInit (HTP backend init).
  */
-export function getQnnSupport(): Promise<QnnSupport> {
+export function getQnnSupport(): Promise<AccelerationSupport> {
   return SherpaOnnx.getQnnSupport();
 }
 
@@ -52,33 +48,29 @@ export function getAvailableProviders(): Promise<string[]> {
   return SherpaOnnx.getAvailableProviders();
 }
 
-/** NNAPI support details: providerCompiled, hasAccelerator, canInitNnapi (latter requires optional model test). */
-export type NnapiSupport = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInitNnapi: boolean;
-};
-
 /**
- * Extended NNAPI support info (Android). Optional modelBase64: if provided, canInitNnapi tests a real session with NNAPI.
- * On iOS always returns { providerCompiled: false, hasAccelerator: false, canInitNnapi: false }.
+ * NNAPI support (Android). Optional modelBase64 for canInit (session test). On iOS returns all false.
  */
-export function getNnapiSupport(modelBase64?: string): Promise<NnapiSupport> {
+export function getNnapiSupport(
+  modelBase64?: string
+): Promise<AccelerationSupport> {
   return SherpaOnnx.getNnapiSupport(modelBase64);
 }
 
-/** XNNPACK support details: providerCompiled, canInit (latter requires optional model test). */
-export type XnnpackSupport = {
-  providerCompiled: boolean;
-  canInit: boolean;
-};
-
 /**
- * XNNPACK support info. Optional modelBase64: if provided, canInit tests a real session with XNNPACK.
- * On iOS returns { providerCompiled: false, canInit: false } (stub).
+ * XNNPACK support. hasAccelerator = true when providerCompiled (CPU-optimized). Optional modelBase64 for canInit. On iOS returns all false.
  */
 export function getXnnpackSupport(
   modelBase64?: string
-): Promise<XnnpackSupport> {
+): Promise<AccelerationSupport> {
   return SherpaOnnx.getXnnpackSupport(modelBase64);
+}
+
+/**
+ * Core ML support (iOS). providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple Neural Engine. Optional modelBase64 for canInit. On Android returns all false.
+ */
+export function getCoreMlSupport(
+  modelBase64?: string
+): Promise<AccelerationSupport> {
+  return SherpaOnnx.getCoreMlSupport(modelBase64);
 }

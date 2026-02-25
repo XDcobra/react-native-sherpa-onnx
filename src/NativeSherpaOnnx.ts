@@ -1,5 +1,12 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
 
+/** Unified shape for all acceleration backends (QNN, NNAPI, XNNPACK, Core ML). */
+export type AccelerationSupport = {
+  providerCompiled: boolean;
+  hasAccelerator: boolean;
+  canInit: boolean;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -450,39 +457,16 @@ export interface Spec extends TurboModule {
    */
   getAvailableProviders(): Promise<string[]>;
 
-  // ==================== QNN Methods ====================
+  // ==================== Acceleration support (unified format) ====================
 
   /**
-   * Extended QNN support info: whether the QNN provider is compiled in and whether it can be initialized.
-   * Use this to decide if the user can choose QNN (e.g. in settings) or to show why QNN is unavailable.
+   * Unified acceleration support: providerCompiled (ORT EP built in), hasAccelerator (NPU/ANE present), canInit (session with EP works).
+   * All get*Support methods return this shape.
    */
-  getQnnSupport(): Promise<{
-    providerCompiled: boolean;
-    canInitQnn: boolean;
-  }>;
-
-  // ==================== NNAPI Methods ====================
-
-  /**
-   * Extended NNAPI support info: provider compiled in, device has accelerator, and (if model given) session can be created with NNAPI.
-   * Pass optional modelBase64 to test whether a real ONNX model can be loaded with NNAPI (canInitNnapi); otherwise canInitNnapi is false.
-   */
-  getNnapiSupport(modelBase64?: string): Promise<{
-    providerCompiled: boolean;
-    hasAccelerator: boolean;
-    canInitNnapi: boolean;
-  }>;
-
-  // ==================== XNNPACK Methods ====================
-
-  /**
-   * XNNPACK support: provider compiled in, and (if model given) session can be created with XNNPACK.
-   * Pass optional modelBase64 to test whether a real ONNX model can be loaded with XNNPACK (canInit); otherwise canInit is false.
-   */
-  getXnnpackSupport(modelBase64?: string): Promise<{
-    providerCompiled: boolean;
-    canInit: boolean;
-  }>;
+  getQnnSupport(): Promise<AccelerationSupport>;
+  getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
