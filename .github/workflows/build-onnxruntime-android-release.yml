@@ -51,7 +51,7 @@ jobs:
           TAG_FILE=third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
           VERSIONS_FILE=third_party/onnxruntime_prebuilt/VERSIONS
           if [ ! -f "$TAG_FILE" ]; then
-            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.17.1-qnn2.43.1.260218)"
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.24.2-qnn2.43.1.260218)"
             exit 1
           fi
           RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
@@ -129,7 +129,7 @@ jobs:
         uses: actions/cache@v4
         id: ort-cache
         with:
-          path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug
+          path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack
           key: ort-android-qnn-aar-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
 
       - name: Build ONNX Runtime (all ABIs + AAR) with QNN
@@ -148,7 +148,7 @@ jobs:
       - name: Package sherpa-onnx layout zip (from build output)
         run: |
           ORT_VER="${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}"
-          ORT_DIR=third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug
+          ORT_DIR=third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack
           LAYOUT_DIR=ort-sherpa-layout
           mkdir -p "$LAYOUT_DIR/$ORT_VER/headers"
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
@@ -164,7 +164,7 @@ jobs:
 
       - name: Prepare AAR for release asset
         run: |
-          cp third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/aar_out/onnxruntime-release.aar onnxruntime-android-qnn.aar
+          cp third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/aar_out/onnxruntime-release.aar onnxruntime-android-qnn.aar
           ls -la onnxruntime-android-qnn.aar
 
       - name: Create GitHub Release (AAR + zip)

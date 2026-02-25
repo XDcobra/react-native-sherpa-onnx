@@ -58,11 +58,11 @@ cd third_party/onnxruntime_prebuilt
 
 ## Output layout
 
-- `android-arm64-qnn-nnapi-debug/<abi>/lib/` – `libonnxruntime.so`, `libonnxruntime4j_jni.so` per ABI
-- `android-arm64-qnn-nnapi-debug/<abi>/headers/` – ONNX Runtime headers (same for all ABIs)
-- `android-arm64-qnn-nnapi-debug/aar_out/onnxruntime-release.aar` – Android AAR (all ABIs)
+- `android-arm64-qnn-nnapi-xnnpack/<abi>/lib/` – `libonnxruntime.so`, `libonnxruntime4j_jni.so` per ABI
+- `android-arm64-qnn-nnapi-xnnpack/<abi>/headers/` – ONNX Runtime headers (same for all ABIs)
+- `android-arm64-qnn-nnapi-xnnpack/aar_out/onnxruntime-release.aar` – Android AAR (all ABIs)
 
-Use `android-arm64-qnn-nnapi-debug` as base for `SHERPA_ONNXRUNTIME_LIB_DIR` (layout: `<base>/<abi>/lib`) and `SHERPA_ONNXRUNTIME_INCLUDE_DIR` (e.g. `<base>/arm64-v8a/headers`) when building sherpa-onnx. The workflow and `build_sherpa_onnx.sh` also accept this path automatically.
+Use `android-arm64-qnn-nnapi-xnnpack` as base for `SHERPA_ONNXRUNTIME_LIB_DIR` (layout: `<base>/<abi>/lib`) and `SHERPA_ONNXRUNTIME_INCLUDE_DIR` (e.g. `<base>/arm64-v8a/headers`) when building sherpa-onnx. The workflow and `build_sherpa_onnx.sh` also accept this path automatically.
 
 ## References
 

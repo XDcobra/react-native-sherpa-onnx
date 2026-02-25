@@ -112,9 +112,11 @@ android/src/main/cpp/include/ffmpeg/
 
 # sherpa-onnx source submodule at repo root (not nested include/ dirs)
 /third_party/sherpa-onnx/
-# sherpa-onnx prebuilt build artifacts (when building with build_sherpa_onnx.sh)
-# android/<abi>/lib/*.so and android/java/classes.jar are generated; get them from release or build locally
+# sherpa-onnx prebuilt: build output and local overrides
 third_party/sherpa-onnx-prebuilt/android/
+third_party/sherpa-onnx-prebuilt/publish-maven/publish.env
+# staging dir left behind if create_sherpa_onnx_aar.sh is interrupted
+sherpa-onnx-aar-staging.*
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")

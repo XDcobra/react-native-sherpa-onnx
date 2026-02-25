@@ -9,14 +9,14 @@
 #   ./build_onnxruntime_android_aar.sh --no-aar     # Skip Gradle step; only native libs + headers
 #
 # Requires: ANDROID_NDK, ANDROID_SDK (or ANDROID_HOME). For QNN: QNN_SDK_ROOT. For .aar: JAVA_HOME (use JDK 17; AGP 7.4.2 fails with Java 21).
-# Output: android-arm64-qnn-nnapi-debug/<abi>/lib and .../headers per ABI; and .../aar_out/ with the .aar (all ABIs).
+# Output: android-arm64-qnn-nnapi-xnnpack/<abi>/lib and .../headers per ABI; and .../aar_out/ with the .aar (all ABIs).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ORT_SRC="$REPO_ROOT/third_party/onnxruntime"
-OUTPUT_BASE="$SCRIPT_DIR/android-arm64-qnn-nnapi-debug"
+OUTPUT_BASE="$SCRIPT_DIR/android-arm64-qnn-nnapi-xnnpack"
 ABIS=(arm64-v8a armeabi-v7a x86 x86_64)
 ANDROID_API="${ANDROID_API:-27}"
 
