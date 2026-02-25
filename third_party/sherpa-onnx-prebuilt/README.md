@@ -6,7 +6,7 @@ This folder contains scripts to build sherpa-onnx native libraries for Android a
 
 ## Building (Linux / macOS)
 
-**Requirements:** Android NDK. Set one of `ANDROID_NDK`, `ANDROID_NDK_HOME`, or `ANDROID_NDK_ROOT`.
+**Requirements:** Android NDK (set one of `ANDROID_NDK`, `ANDROID_NDK_HOME`, or `ANDROID_NDK_ROOT`). For the default **Kotlin API** build, **Android SDK** is also required (set `ANDROID_HOME` or `ANDROID_SDK_ROOT`) so that `android.jar` is available when compiling the Kotlin API.
 
 Initialize the sherpa-onnx submodule if needed:
 
@@ -48,8 +48,21 @@ node copy_prebuilts_to_sdk.js
 
 Or run the repo’s setup script from the repo root: `node scripts/setup-assets.js` (it will copy prebuilts if present).
 
+## API variant: Kotlin (default) vs Java
+
+By default the script builds the **Kotlin API** (data classes, `WaveReader.readWave()`, etc.) so that Kotlin and React Native apps can use the same API style as the official sherpa-onnx AAR. You can switch to the Java API (Builder pattern) or build both:
+
+- `./build_sherpa_onnx.sh` — Kotlin API → `android/java/classes.jar` (default).
+- `./build_sherpa_onnx.sh --java` — Java API only → `android/java/classes.jar`.
+- `./build_sherpa_onnx.sh --both` — Kotlin → `classes.jar`, Java → `classes-java.jar` (for publishing a second Maven artifact with classifier `java`).
+
+**Publishing Kotlin and Java to Maven:** Use the same version and distinguish by **classifier**. Default AAR = Kotlin API. To publish a Java-only AAR, build with `--java` and publish that AAR with classifier `java`, e.g. `com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar`. Consumers then choose:
+
+- Kotlin/default: `com.xdcobra.sherpa:sherpa-onnx:VERSION` (or `@aar`).
+- Java: `com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar`.
+
 ## Output layout
 
 - `android/<abi>/lib/*.so` – built libraries (e.g. `libsherpa-onnx-jni.so`, `libonnxruntime.so`).
-- `android/java/classes.jar` – sherpa-onnx Java API (built from `sherpa-onnx/java-api`; no JitPack). Gradle uses it from this path when building from the repo; the release zip includes it so consumers need only the release.
+- `android/java/classes.jar` – sherpa-onnx API (default: Kotlin from `sherpa-onnx/kotlin-api`; or Java from `sherpa-onnx/java-api` when using `--java`). With `--both`, `classes-java.jar` is also produced.
 - `copy_prebuilts_to_sdk.js` copies the `.so` files to `android/src/main/jniLibs/<abi>/` for the Gradle build.

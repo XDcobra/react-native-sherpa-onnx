@@ -25,16 +25,24 @@ ORT_PREBUILT_ANDROID_HEADERS=""
 ONNXRUNTIME_VERSION=""
 REQUIRED_ABIS="arm64-v8a armeabi-v7a x86 x86_64"
 
-# Default: no QNN (build works without QNN SDK)
+# Default: no QNN (build works without QNN SDK). API: Kotlin (data-class API for Kotlin apps).
 ENABLE_QNN=OFF
+BUILD_KOTLIN_API=1
+BUILD_JAVA_API=0
 for arg in "$@"; do
     case "$arg" in
         --qnn|--enable-qnn) ENABLE_QNN=ON ;;
+        --kotlin) BUILD_KOTLIN_API=1; BUILD_JAVA_API=0 ;;
+        --java) BUILD_KOTLIN_API=0; BUILD_JAVA_API=1 ;;
+        --both) BUILD_KOTLIN_API=1; BUILD_JAVA_API=1 ;;
         -h|--help)
-            echo "Usage: $0 [--qnn]"
+            echo "Usage: $0 [--qnn] [--kotlin|--java|--both]"
             echo "  Build sherpa-onnx Android prebuilts (all ABIs)."
             echo "  --qnn    Enable Qualcomm NPU (QNN) for arm64-v8a. Requires QNN_SDK_ROOT to be set."
-            echo "  Default: build without QNN (no Qualcomm SDK needed)."
+            echo "  --kotlin Build Kotlin API (default): data classes, WaveReader.readWave(), etc. For Kotlin/RN apps."
+            echo "  --java   Build Java API only: Builder pattern. Use for Java consumers or Maven classifier 'java'."
+            echo "  --both   Build both; output: classes.jar (Kotlin) + classes-java.jar (Java, for Maven classifier)."
+            echo "  Default: build without QNN, Kotlin API. Kotlin build requires ANDROID_HOME (or ANDROID_SDK_ROOT)."
             exit 0
             ;;
     esac
@@ -248,23 +256,48 @@ build_abi "armeabi-v7a" "build-android-armv7-eabi.sh"  "build-android-armv7-eabi
 build_abi "x86"         "build-android-x86.sh"        "build-android-x86"
 build_abi "x86_64"      "build-android-x86-64.sh"      "build-android-x86-64"
 
-# Build sherpa-onnx Java API (classes.jar) from same source tree; no JitPack needed.
-# Output: OUTPUT_BASE/java/classes.jar (included in release zip; Gradle uses it when present).
+# Build sherpa-onnx API (classes.jar). Default: Kotlin API (data-class style for Kotlin/RN apps).
+# Optional: --java (Java Builder API only) or --both (Kotlin --> classes.jar, Java --> classes-java.jar for Maven classifier).
+# Maven: default artifact = Kotlin; use classifier "java" for Java API: com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar
 JAVA_API_DIR="$SHERPA_SRC/sherpa-onnx/java-api"
-JAVA_OUT_JAR="$OUTPUT_BASE/java/classes.jar"
-if [ -f "$JAVA_API_DIR/Makefile" ]; then
-  echo "===== Building sherpa-onnx Java API (classes.jar) ====="
-  mkdir -p "$(dirname "$JAVA_OUT_JAR")"
-  (cd "$JAVA_API_DIR" && make clean 2>/dev/null; make -j1) || { echo "Warning: Java API build failed (need javac). classes.jar will be missing."; }
-  if [ -f "$JAVA_API_DIR/build/sherpa-onnx.jar" ]; then
-    cp -v "$JAVA_API_DIR/build/sherpa-onnx.jar" "$JAVA_OUT_JAR"
-    echo "Copied classes.jar to $JAVA_OUT_JAR"
+KOTLIN_API_BUILD_DIR="$SCRIPT_DIR/kotlin-api-build"
+OUT_JAVA_DIR="$OUTPUT_BASE/java"
+mkdir -p "$OUT_JAVA_DIR"
+
+if [ "$BUILD_KOTLIN_API" = 1 ]; then
+  echo "===== Building sherpa-onnx Kotlin API (classes.jar) ====="
+  if [ -z "${ANDROID_HOME}" ] && [ -z "${ANDROID_SDK_ROOT}" ]; then
+    echo "Warning: ANDROID_HOME (or ANDROID_SDK_ROOT) not set; Kotlin API needs android.jar. Skipping Kotlin API."
+  elif [ -d "$KOTLIN_API_BUILD_DIR" ] && [ -f "$KOTLIN_API_BUILD_DIR/build.gradle" ]; then
+    (cd "$REPO_ROOT" && ./gradlew -p third_party/sherpa-onnx-prebuilt/kotlin-api-build jar --no-daemon -q) || { echo "Warning: Kotlin API Gradle build failed."; }
+    if [ -f "$KOTLIN_API_BUILD_DIR/build/libs/classes.jar" ]; then
+      cp -v "$KOTLIN_API_BUILD_DIR/build/libs/classes.jar" "$OUT_JAVA_DIR/classes.jar"
+      echo "Copied Kotlin API to $OUT_JAVA_DIR/classes.jar"
+    fi
+  else
+    echo "Warning: $KOTLIN_API_BUILD_DIR not found; skipping Kotlin API."
   fi
-else
-  echo "Warning: $JAVA_API_DIR/Makefile not found; skipping classes.jar"
+fi
+
+if [ "$BUILD_JAVA_API" = 1 ]; then
+  echo "===== Building sherpa-onnx Java API (Builder style) ====="
+  if [ -f "$JAVA_API_DIR/Makefile" ]; then
+    (cd "$JAVA_API_DIR" && make clean 2>/dev/null; make -j1) || { echo "Warning: Java API build failed (need javac)."; }
+    if [ -f "$JAVA_API_DIR/build/sherpa-onnx.jar" ]; then
+      if [ "$BUILD_KOTLIN_API" = 1 ]; then
+        cp -v "$JAVA_API_DIR/build/sherpa-onnx.jar" "$OUT_JAVA_DIR/classes-java.jar"
+        echo "Copied Java API to $OUT_JAVA_DIR/classes-java.jar (use Maven classifier 'java')"
+      else
+        cp -v "$JAVA_API_DIR/build/sherpa-onnx.jar" "$OUT_JAVA_DIR/classes.jar"
+        echo "Copied Java API to $OUT_JAVA_DIR/classes.jar"
+      fi
+    fi
+  else
+    echo "Warning: $JAVA_API_DIR/Makefile not found; skipping Java API."
+  fi
 fi
 
 [ -n "$ORT_PREBUILT_ROOT" ] && [ -d "$ORT_PREBUILT_ROOT" ] && rm -rf "$ORT_PREBUILT_ROOT"
 
-echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/ and $OUTPUT_BASE/java/classes.jar (if built)"
+echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/ and $OUTPUT_BASE/java/ (classes.jar [Kotlin] and/or classes-java.jar [Java])"
 echo "Run: node $SCRIPT_DIR/copy_prebuilts_to_sdk.js to copy into android/src/main/jniLibs/"

@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
-# Create a sherpa-onnx AAR from the prebuilt layout (android/<abi>/lib/*.so, android/java/classes.jar, optional android/c-api/*.h).
-# Usage: ./create_sherpa_onnx_aar.sh <prebuilt_dir> <version> [output_path]
+# Create a sherpa-onnx AAR from the prebuilt layout (android/<abi>/lib/*.so, android/java/classes.jar or classes-java.jar, optional android/c-api/*.h).
+# Usage: ./create_sherpa_onnx_aar.sh <prebuilt_dir> <version> [output_path] [java]
 # Example: ./create_sherpa_onnx_aar.sh third_party/sherpa-onnx-prebuilt/android 1.12.24
-# Output: sherpa-onnx-<version>.aar (modular: POM will declare dependency on com.xdcobra.sherpa:onnxruntime)
+#          ./create_sherpa_onnx_aar.sh third_party/sherpa-onnx-prebuilt/android 1.12.24 sherpa-onnx-1.12.24-java.aar java
+# Output: sherpa-onnx-<version>.aar (Kotlin API) or sherpa-onnx-<version>-java.aar (Java API if 4th arg = "java")
 # Includes C-API headers (c-api/) when present so Maven consumers get libs + headers without GitHub release.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ $# -lt 2 ]; then
-  echo "Usage: $0 <prebuilt_dir> <version> [output_path]"
+  echo "Usage: $0 <prebuilt_dir> <version> [output_path] [java]"
   echo "  prebuilt_dir  e.g. third_party/sherpa-onnx-prebuilt/android"
   echo "  version       Maven-style version, e.g. 1.12.24"
+  echo "  output_path   optional; default sherpa-onnx-<version>.aar or sherpa-onnx-<version>-java.aar if [java]"
+  echo "  java          if set, use classes-java.jar (Builder API) instead of classes.jar (Kotlin API)"
   exit 1
 fi
 
 PREBUILT_DIR="$1"
 VERSION="$2"
-OUTPUT_PATH="${3:-sherpa-onnx-${VERSION}.aar}"
+USE_JAVA="${4:-}"
+if [ -n "$USE_JAVA" ]; then
+  OUTPUT_PATH="${3:-sherpa-onnx-${VERSION}-java.aar}"
+  CLASSES_JAR="$PREBUILT_DIR/java/classes-java.jar"
+else
+  OUTPUT_PATH="${3:-sherpa-onnx-${VERSION}.aar}"
+  CLASSES_JAR="$PREBUILT_DIR/java/classes.jar"
+fi
 ABIS="arm64-v8a armeabi-v7a x86 x86_64"
 
 if [ ! -d "$PREBUILT_DIR" ]; then
@@ -38,10 +48,10 @@ for abi in $ABIS; do
   fi
 done
 
-if [ -f "$PREBUILT_DIR/java/classes.jar" ]; then
-  cp "$PREBUILT_DIR/java/classes.jar" "$AAR_DIR/classes.jar"
+if [ -f "$CLASSES_JAR" ]; then
+  cp "$CLASSES_JAR" "$AAR_DIR/classes.jar"
 else
-  echo "Warning: $PREBUILT_DIR/java/classes.jar not found; AAR will have no Java API."
+  echo "Warning: $CLASSES_JAR not found; AAR will have no Java/Kotlin API."
   touch "$AAR_DIR/classes.jar"
 fi
 

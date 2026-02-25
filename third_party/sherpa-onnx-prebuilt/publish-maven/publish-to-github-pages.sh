@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven).
 # Requires: MAVEN_VERSION, AAR_SRC, MAVEN_REPO_PAT in environment.
+# Optional: AAR_SRC_JAVA — path to Java API AAR (classifier "java"); if set and file exists, publish as artifactId-version-java.aar.
 # Optionally source publish.env.example (or publish.env) for GROUP_ID, ARTIFACT_ID.
 # Optional: DEPENDENCY_GROUP_ID, DEPENDENCY_ARTIFACT_ID, DEPENDENCY_VERSION for POM <dependencies> (modular / Best Practice).
 # Run from repository root (e.g. in CI after the AAR is built).
@@ -33,6 +34,7 @@ GROUP_PATH="${GROUP_ID//.//}"
 ARTIFACT_PATH="${GROUP_PATH}/${ARTIFACT_ID}"
 VERSION_PATH="${ARTIFACT_PATH}/${MAVEN_VERSION}"
 AAR_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}.aar"
+AAR_JAVA_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}-java.aar"
 POM_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}.pom"
 
 echo "Publishing ${GROUP_ID}:${ARTIFACT_ID}:${MAVEN_VERSION} to https://github.com/XDcobra/maven"
@@ -43,6 +45,12 @@ REPO_ROOT="$(pwd)"
 
 mkdir -p "$VERSION_PATH"
 cp "../${AAR_SRC}" "$VERSION_PATH/${AAR_NAME}"
+
+# Optional: publish Java API AAR with classifier "java" (same POM, second artifact)
+if [ -n "${AAR_SRC_JAVA:-}" ] && [ -f "../${AAR_SRC_JAVA}" ]; then
+  cp "../${AAR_SRC_JAVA}" "$VERSION_PATH/${AAR_JAVA_NAME}"
+  echo "Including Java API AAR as ${AAR_JAVA_NAME} (classifier 'java')"
+fi
 
 # Generate POM (with optional dependency on onnxruntime for modular / Best Practice)
 if [ -n "${DEPENDENCY_GROUP_ID}" ] && [ -n "${DEPENDENCY_ARTIFACT_ID}" ] && [ -n "${DEPENDENCY_VERSION}" ]; then
@@ -92,6 +100,12 @@ for f in "$AAR_NAME" "$POM_NAME"; do
   md5sum "$f" | cut -d' ' -f1 > "${f}.md5"
   sha1sum "$f" | cut -d' ' -f1 > "${f}.sha1"
 done
+if [ -f "$AAR_JAVA_NAME" ]; then
+  for f in "$AAR_JAVA_NAME"; do
+    md5sum "$f" | cut -d' ' -f1 > "${f}.md5"
+    sha1sum "$f" | cut -d' ' -f1 > "${f}.sha1"
+  done
+fi
 cd "$REPO_ROOT"
 
 METADATA_FILE="${REPO_ROOT}/${ARTIFACT_PATH}/maven-metadata.xml"

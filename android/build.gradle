@@ -199,6 +199,11 @@ android {
     doLast {
       def downloadDir = file("${buildDir}/prebuilt-downloads")
 
+      // Log which of the 3 methods is used for sherpa-onnx native libs + headers
+      if (hasAllSherpaLibs() && hasSherpaHeaders()) {
+        println "[sherpa-onnx] Native libs + headers: (1) local third_party (jniLibs + cpp/include already present)"
+      }
+
       // Priority 2 for sherpa-onnx: Maven AAR (libs + C-API headers; no GitHub repo needed).
       if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
         try {
@@ -220,10 +225,11 @@ android {
             def aarCapiDir = new File(aarExtractDir, "c-api")
             if (aarCapiDir.exists()) {
               includeSherpaDir.mkdirs()
-              copy { from aarCapiDir; into includeSherpaDir }
+              // Preserve c-api/ subdir so include path sherpa-onnx/c-api/c-api.h resolves (same as GitHub zip).
+              copy { from fileTree(aarExtractDir) { include 'c-api/**' }; into includeSherpaDir }
               println "Extracted sherpa-onnx C-API headers from Maven AAR"
             }
-            println "Extracted sherpa-onnx native libs (and headers if present) from Maven AAR (${aar.name})"
+            println "[sherpa-onnx] Native libs + headers: (2) Maven AAR (${aar.name})"
           }
         } catch (Exception e) {
           println "Could not resolve sherpa-onnx Maven AAR: ${e.message}"
@@ -297,7 +303,7 @@ android {
           sherpaOnnxClassesDir.mkdirs()
           copy { from sherpaJavaJar; into sherpaOnnxClassesDir }
         }
-        println "Downloaded and extracted sherpa-onnx prebuilts (libs + C API headers + java/classes.jar) from ${tag}"
+        println "[sherpa-onnx] Native libs + headers: (3) GitHub release (${tag})"
       } else {
         // Libs/headers already present (e.g. copy_prebuilts) but classes dir may be empty after clean
         def sherpaClassesJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
@@ -361,7 +367,7 @@ def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
     def localJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
     if (localJar.exists()) {
       copy { from localJar; into sherpaOnnxClassesDir }
-      println "Using sherpa-onnx classes.jar from local prebuilts (third_party)"
+      println "[sherpa-onnx] classes.jar: (1) local third_party"
       return
     }
     // 2) Maven AAR (e.g. com.xdcobra.sherpa:sherpa-onnx on xdcobra.github.io/maven)
@@ -373,14 +379,14 @@ def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
         include 'classes.jar'
         into sherpaOnnxClassesDir
       }
-      println "Using sherpa-onnx classes.jar from Maven AAR (${aar.name})"
+      println "[sherpa-onnx] classes.jar: (2) Maven AAR (${aar.name})"
       return
     }
     // 3) GitHub release (prebuilt-downloads extract from downloadNativeLibsIfNeeded)
     def extractedJar = file("${buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
     if (extractedJar.exists()) {
       copy { from extractedJar; into sherpaOnnxClassesDir }
-      println "Using sherpa-onnx classes.jar from GitHub release extract"
+      println "[sherpa-onnx] classes.jar: (3) GitHub release extract"
       return
     }
     throw new RuntimeException(

@@ -1,0 +1,50 @@
+// Builds sherpa-onnx Kotlin API (data classes, WaveReader.readWave, etc.) to a JAR for AAR inclusion.
+// Run from repo root: ./gradlew -p third_party/sherpa-onnx-prebuilt/kotlin-api-build jar
+// Requires ANDROID_HOME or ANDROID_SDK_ROOT (for android.jar). Optional: -PandroidJar=/path/to/android.jar
+
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.9.24'  // keep compatible with sherpa-onnx kotlin-api; RN SDK uses 2.0.x for app
+}
+
+repositories {
+    mavenCentral()
+}
+
+// From kotlin-api-build (third_party/sherpa-onnx-prebuilt/kotlin-api-build), sherpa-onnx is at ../../sherpa-onnx
+def kotlinApiDir = file("${projectDir}/../../sherpa-onnx/sherpa-onnx/kotlin-api")
+def androidJarPath = project.findProperty('androidJar')
+    ?: (System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT'))?.with { "${it}/platforms/android-34/android.jar" }
+    ?: (System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT'))?.with { "${it}/platforms/android-33/android.jar" }
+
+if (!kotlinApiDir.directory) {
+    throw new GradleException("Kotlin API source dir not found: ${kotlinApiDir} (run from repo with third_party/sherpa-onnx submodule)")
+}
+
+sourceSets {
+    main {
+        kotlin {
+            srcDirs = [kotlinApiDir]
+        }
+    }
+}
+
+dependencies {
+    if (androidJarPath && new File(androidJarPath).exists()) {
+        compileOnly files(androidJarPath)
+    } else {
+        throw new GradleException(
+            "Android SDK android.jar not found. Set ANDROID_HOME or ANDROID_SDK_ROOT, or -PandroidJar=/path/to/android.jar"
+        )
+    }
+}
+
+tasks.named('jar', Jar) {
+    archiveFileName = 'classes.jar'
+    // Library JAR: do not embed Kotlin stdlib (consumer provides it)
+}
+
+tasks.named('compileKotlin') {
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
