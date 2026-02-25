@@ -237,7 +237,7 @@ export default function SettingsScreen() {
                 {nnapiSupport.canInit
                   ? 'You can use provider: "nnapi" for STT.'
                   : nnapiSupport.providerCompiled && nnapiSupport.hasAccelerator
-                  ? 'canInit is only true when a model is passed to getNnapiSupport(modelBase64).'
+                  ? 'canInit indicates whether an NNAPI session can be initialized (using the embedded test model or a provided model).'
                   : !nnapiSupport.providerCompiled
                   ? 'This build does not include the NNAPI execution provider.'
                   : 'No NNAPI accelerator on this device (or not Android).'}
@@ -283,7 +283,7 @@ export default function SettingsScreen() {
                 {xnnpackSupport.canInit
                   ? 'You can use provider: "xnnpack" for STT.'
                   : xnnpackSupport.providerCompiled
-                  ? 'canInit is only true when a model is passed to getXnnpackSupport(modelBase64).'
+                  ? 'canInit is false if XNNPACK cannot initialize a session with the provided model (or the embedded test model when none is provided).'
                   : 'This build does not include the XNNPACK execution provider.'}
               </Text>
             </View>

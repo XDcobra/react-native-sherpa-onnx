@@ -174,8 +174,10 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeCanInitQnnHtp(JNIEnv* /* env */, jobj
 #if defined(__ANDROID__)
 namespace {
 constexpr int ANEURALNETWORKS_NO_ERROR = 0;
-constexpr int32_t ANEURALNETWORKS_DEVICE_GPU = 3;
-constexpr int32_t ANEURALNETWORKS_DEVICE_ACCELERATOR = 4;
+// Must match enum values in Android NDK NeuralNetworks.h:
+// OTHER = 0, CPU = 1, GPU = 2, ACCELERATOR = 3.
+constexpr int32_t ANEURALNETWORKS_DEVICE_GPU = 2;
+constexpr int32_t ANEURALNETWORKS_DEVICE_ACCELERATOR = 3;
 struct ANeuralNetworksDeviceOpaque {};
 using ANeuralNetworksDevice = ANeuralNetworksDeviceOpaque*;
 }  // namespace
