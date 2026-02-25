@@ -10,7 +10,7 @@
 # Sherpa-onnx source: third_party/sherpa-onnx (submodule).
 #
 # ONNX Runtime: Resolved in order (1) SHERPA_ONNXRUNTIME_LIB_DIR + INCLUDE_DIR if set,
-# (2) third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/ if present (output of build_onnxruntime_android_aar.sh),
+# (2) third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/ if present (output of build_onnxruntime_android_aar.sh),
 # (3) GitHub Release (ort-android-qnn-v*). Layout: <base>/<abi>/lib/libonnxruntime.so, <base>/<abi>/headers/.
 
 set -e
@@ -121,7 +121,7 @@ fi
 
 # Tier 2: If no env layout, use build output of build_onnxruntime_android_aar.sh if present.
 if [ -z "$ORT_PREBUILT_ANDROID_BASE" ]; then
-    ORT_ANDROID_LOCAL="$REPO_ROOT/third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug"
+    ORT_ANDROID_LOCAL="$REPO_ROOT/third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack"
     if [ -d "$ORT_ANDROID_LOCAL" ]; then
         HEADERS_CANDIDATE="$ORT_ANDROID_LOCAL/arm64-v8a/headers"
         if [ ! -d "$HEADERS_CANDIDATE" ]; then
@@ -129,10 +129,10 @@ if [ -z "$ORT_PREBUILT_ANDROID_BASE" ]; then
         fi
         if check_android_layout "$ORT_ANDROID_LOCAL" "$HEADERS_CANDIDATE"; then
             if [ -z "$ONNXRUNTIME_VERSION" ]; then
-                echo "Error: VERSIONS file (ONNXRUNTIME_VERSION) required when using third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/."
+                echo "Error: VERSIONS file (ONNXRUNTIME_VERSION) required when using third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/."
                 exit 1
             fi
-            echo "Using ONNX Runtime from third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-debug/"
+            echo "Using ONNX Runtime from third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/"
         fi
     fi
 fi
