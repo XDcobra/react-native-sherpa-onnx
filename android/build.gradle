@@ -417,8 +417,8 @@ dependencies {
 
   // ORT Java API (OrtEnvironment, OrtProvider) for getAvailableProviders().
   // compileOnly: the app provides the actual onnxruntime AAR at runtime.
-  // Version must exist on https://xdcobra.github.io/maven (use 1.17.1 until 1.24.2 is published).
-  compileOnly "com.xdcobra.sherpa:onnxruntime:1.17.1-qnn2.43.1.260218"
+  // Version must exist on https://xdcobra.github.io/maven.
+  compileOnly "com.xdcobra.sherpa:onnxruntime:1.24.2-qnn2.43.1.260218"
 }
 
 // Codegen for TurboModule spec; in separate script to avoid Gradle 9 Groovy "source is null" with NodeTask in main script.

@@ -149,8 +149,7 @@ repositories {
 }
 
 // ONNX Runtime AAR version (must match a version published to https://xdcobra.github.io/maven).
-// Use 1.17.1 until 1.24.2 is published via build-onnxruntime-android-release workflow.
-def ortMavenVersion = "1.17.1-qnn2.43.1.260218"
+def ortMavenVersion = "1.24.2-qnn2.43.1.260218"
 
 dependencies {
     // ONNX Runtime first so its libonnxruntime.so is picked by pickFirst (has OrtGetApiBase for getAvailableProviders).
