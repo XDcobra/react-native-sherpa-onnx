@@ -78,12 +78,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          PACK_OUTPUT=$(npm pack 2>&1) || true
-          # npm pack prints the tarball name on the last line; on failure it prints "npm error ..." — only use a line that looks like *.tgz
-          TARFILE=$(printf "%s" "$PACK_OUTPUT" | grep -E '\.tgz$' | tail -1 | tr -d '\r')
+          # Run npm pack; show output in log and capture so we see the real error if it fails
+          set +e
+          npm pack 2>&1 | tee pack.log
+          PACK_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$PACK_EXIT" -ne 0 ]; then
+            echo "--- npm pack failed with exit code $PACK_EXIT ---"
+            cat pack.log
+            exit 1
+          fi
+          TARFILE=$(grep -E '\.tgz$' pack.log | tail -1 | tr -d '\r')
           if [ -z "$TARFILE" ] || [ ! -f "$TARFILE" ]; then
-            echo "Error: npm pack did not produce a tarball. Full output:" >&2
-            printf "%s\n" "$PACK_OUTPUT" >&2
+            echo "--- npm pack succeeded but no .tgz file found. pack.log contents: ---"
+            cat pack.log
             exit 1
           fi
           echo "Created tarball: $TARFILE"
