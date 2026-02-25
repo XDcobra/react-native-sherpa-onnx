@@ -51,7 +51,7 @@ jobs:
           TAG_FILE=third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
           VERSIONS_FILE=third_party/onnxruntime_prebuilt/VERSIONS
           if [ ! -f "$TAG_FILE" ]; then
-            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.24.2-qnn2.43.1.260218)"
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.17.1-qnn2.43.1.260218)"
             exit 1
           fi
           RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
