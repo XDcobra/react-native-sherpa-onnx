@@ -142,26 +142,31 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeCanInitQnnHtp(JNIEnv* /* env */, jobj
 #if !defined(__ANDROID__)
   return JNI_FALSE;
 #else
+  static const char* QNN_LOG_TAG = "SherpaOnnx";
   void* handle = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
-  if (!handle) return JNI_FALSE;
-
-  // QNN backend API: Qnn_Error_t QnnBackend_create(const char*, const QnnBackend_Config_t*, QnnBackend_Handle_t*);
-  // Qnn_Error_t QnnBackend_free(QnnBackend_Handle_t);  QNN_SUCCESS is 0.
+  if (!handle) {
+    __android_log_print(ANDROID_LOG_INFO, QNN_LOG_TAG, "QNN: dlopen(libQnnHtp.so) failed: %s", dlerror());
+    return JNI_FALSE;
+  }
   using CreateFn = int (*)(const char*, const void*, void**);
   using FreeFn = int (*)(void*);
   auto create = reinterpret_cast<CreateFn>(dlsym(handle, "QnnBackend_create"));
   auto free_fn = reinterpret_cast<FreeFn>(dlsym(handle, "QnnBackend_free"));
   if (!create || !free_fn) {
+    __android_log_print(ANDROID_LOG_INFO, QNN_LOG_TAG, "QNN: dlsym failed: %s", dlerror());
     dlclose(handle);
     return JNI_FALSE;
   }
   void* backend = nullptr;
   const int err = create("QnnHtp", nullptr, &backend);
+  __android_log_print(ANDROID_LOG_INFO, QNN_LOG_TAG, "QNN: QnnBackend_create err=%d backend=%p", err, (void*)backend);
   if (err == 0 && backend) {
     free_fn(backend);
   }
   dlclose(handle);
-  return (err == 0 && backend) ? JNI_TRUE : JNI_FALSE;
+  jboolean ok = (err == 0 && backend) ? JNI_TRUE : JNI_FALSE;
+  __android_log_print(ANDROID_LOG_INFO, QNN_LOG_TAG, "QNN: canInit=%s", ok ? "true" : "false");
+  return ok;
 #endif
 }
 

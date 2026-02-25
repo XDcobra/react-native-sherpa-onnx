@@ -79,22 +79,48 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Asset path for embedded QNN test model (ORT testdata: qnn_multi_ctx_embed). */
+  private val qnnTestModelAsset = "testModels/qnn_multi_ctx_embed.onnx"
+
   /**
-   * QNN support (AccelerationSupport): providerCompiled, hasAccelerator (= canInit for QNN), canInit (HTP backend init).
+   * QNN support (AccelerationSupport): providerCompiled, hasAccelerator (native HTP init), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit (same pattern as NNAPI/XNNPACK).
    */
-  override fun getQnnSupport(promise: Promise) {
+  override fun getQnnSupport(modelBase64: String?, promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("QNN", ignoreCase = true) }
-      val canInit = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      val hasAccelerator = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(qnnTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseQnn(modelBytes)
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
-      map.putBoolean("hasAccelerator", canInit) // QNN: implicit via init
+      map.putBoolean("hasAccelerator", hasAccelerator)
       map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "QNN support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
       promise.resolve(map)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getQnnSupport failed", e)
       promise.reject("QNN_SUPPORT_ERROR", "Failed to get QNN support: ${e.message}", e)
+    }
+  }
+
+  private fun canReallyUseQnn(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addQnn(emptyMap())
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
     }
   }
 
@@ -124,6 +150,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
       val hasAccelerator = try { nativeHasNnapiAccelerator(android.os.Build.VERSION.SDK_INT) } catch (_: Exception) { false }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
       val modelBytes = when {
         !modelBase64.isNullOrEmpty() -> try {
           android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
@@ -135,6 +162,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       map.putBoolean("providerCompiled", providerCompiled)
       map.putBoolean("hasAccelerator", hasAccelerator)
       map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "NNAPI support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
       promise.resolve(map)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getNnapiSupport failed", e)
@@ -166,6 +194,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("XNNPACK", ignoreCase = true) }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
       val modelBytes = when {
         !modelBase64.isNullOrEmpty() -> try {
           android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
@@ -173,10 +202,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         else -> loadTestModelFromAssets(xnnpackTestModelAsset)
       }
       val canInit = providerCompiled && modelBytes != null && canReallyUseXnnpack(modelBytes)
+      val hasAccelerator = providerCompiled // XNNPACK: CPU-optimized
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
-      map.putBoolean("hasAccelerator", providerCompiled) // XNNPACK: CPU-optimized, always "has accelerator" when built in
+      map.putBoolean("hasAccelerator", hasAccelerator)
       map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "XNNPACK support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
       promise.resolve(map)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getXnnpackSupport failed", e)
