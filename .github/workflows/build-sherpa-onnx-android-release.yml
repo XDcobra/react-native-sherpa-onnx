@@ -131,7 +131,7 @@ jobs:
         id: sherpa-cache
         with:
           path: third_party/sherpa-onnx-prebuilt/android
-          key: sherpa-android-prebuilt-qnn-both-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
+          key: sherpa-android-prebuilt-qnn-both-v2-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
 
       - name: Build sherpa-onnx (Android, all ABIs, with QNN; Kotlin + Java API)
         if: steps.sherpa-cache.outputs.cache-hit != 'true'
@@ -145,7 +145,7 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
 
-      - name: Package jniLibs layout (sherpa-onnx + onnxruntime + C API headers + Java classes)
+      - name: Package jniLibs layout (sherpa-onnx + onnxruntime + C API headers + Java/Kotlin classes)
         run: |
           LAYOUT=sherpa-onnx-android-layout
           rm -rf "$LAYOUT"
@@ -163,9 +163,14 @@ jobs:
           SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
           mkdir -p "$LAYOUT/c-api"
           cp "$SHERPA_CAPI/c-api.h" "$SHERPA_CAPI/cxx-api.h" "$LAYOUT/c-api/"
-          if [ -f "$PREBUILT/java/classes.jar" ]; then
+          if [ -f "$PREBUILT/java/classes.jar" ] || [ -f "$PREBUILT/java/classes-java.jar" ]; then
             mkdir -p "$LAYOUT/java"
-            cp "$PREBUILT/java/classes.jar" "$LAYOUT/java/"
+            [ -f "$PREBUILT/java/classes.jar" ] && cp "$PREBUILT/java/classes.jar" "$LAYOUT/java/"
+            [ -f "$PREBUILT/java/classes-java.jar" ] && cp "$PREBUILT/java/classes-java.jar" "$LAYOUT/java/"
+          fi
+          if [ ! -f "$LAYOUT/java/classes.jar" ]; then
+            echo "::error::PREBUILT/java/classes.jar (Kotlin API) missing. Zip must include java/classes.jar. Invalidate cache or ensure ANDROID_HOME is set when building (Setup Android SDK step)."
+            exit 1
           fi
           echo "Layout contents:"
           find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' -o -name '*.jar' \) | head -50
@@ -216,17 +221,8 @@ jobs:
                 maven { url 'https://xdcobra.github.io/maven/' }
             }
             dependencies {
-                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}'
-            }
-            ```
-
-            **Java (Builder API, classifier `java`):**
-            ```gradle
-            repositories {
-                maven { url 'https://xdcobra.github.io/maven/' }
-            }
-            dependencies {
-                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}:java@aar'
+                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}'            // Kotlin / default (recommended for Kotlin and React Native)
+                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}:java@aar'   // Java (Builder API, classifier java)
             }
             ```
           files: |
