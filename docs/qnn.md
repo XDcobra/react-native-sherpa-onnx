@@ -11,6 +11,7 @@ This document describes QNN-specific APIs and behavior in `react-native-sherpa-o
 - [Overview](#overview)
 - [API Reference](#api-reference)
   - [isQnnSupported()](#isqnnsupported)
+  - [getAvailableProviders()](#getavailableproviders)
 - [When does `isQnnSupported()` return what?](#when-does-isqnnsupported-return-what)
 - [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk)
 - [Related documentation](#related-documentation)
@@ -54,7 +55,7 @@ The sherpa-onnx and ONNX Runtime libs used by this SDK (from the GitHub Release)
 
 - **Android:** The sherpa-onnx and ONNX Runtime libs provided by this SDK (via the GitHub Release used in `build.gradle`) are **built with QNN**. To actually use QNN at runtime, the app must also ship the **QNN runtime libraries** (e.g. `libQnnHtp.so`). This SDK does not include them for license reasons — you add them yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). With the libs in place, the STT engine can use the `qnn` provider on supported devices.
 - **iOS:** QNN is not used; `isQnnSupported()` always returns `false`.
-- The SDK exposes **`isQnnSupported()`** so the app can branch UI or config (e.g. show “Use NPU” only when the build has QNN).
+- The SDK exposes **`isQnnSupported()`** so the app can branch UI or config (e.g. show “Use NPU” only when the build has QNN), and **`getAvailableProviders()`** to list all ONNX Runtime execution providers (including `QNN` when available) for the current build and device.
 
 ## API Reference
 
@@ -83,6 +84,32 @@ if (hasQnn) {
   // Optionally use provider: 'qnn' when creating STT
 } else {
   // Use CPU or other providers only
+}
+```
+
+### `getAvailableProviders()`
+
+```ts
+function getAvailableProviders(): Promise<string[]>;
+```
+
+**Export:** `react-native-sherpa-onnx` (root).
+
+Returns the list of **ONNX Runtime execution providers** available in the current build (e.g. `'CPU'`, `'QNN'`, `'NNAPI'`, `'COREML'`, `'XNNPACK'`). This comes from `OrtEnvironment.getAvailableProviders()` on Android; on iOS it returns the providers supported by the iOS build.
+
+Use this to show the user which backends they can choose (e.g. in settings) or to decide which `provider` to pass when creating an STT recognizer. If the list contains `'QNN'`, the build has QNN linked and — provided the QNN runtime libs are present — you can use `provider: 'qnn'` for STT.
+
+**Return value:** `Promise<string[]>` — Provider names (e.g. `['CPU', 'QNN', 'NNAPI']`).
+
+**Example:**
+
+```ts
+import { getAvailableProviders } from 'react-native-sherpa-onnx';
+
+const providers = await getAvailableProviders();
+const hasQnn = providers.some(p => p.toUpperCase() === 'QNN');
+if (hasQnn) {
+  // Offer "Use NPU (QNN)" in UI or use provider: 'qnn' for STT
 }
 ```
 
