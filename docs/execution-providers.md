@@ -1,9 +1,9 @@
-# QNN (Qualcomm NPU) Support
+# Execution provider support (QNN, NNAPI, XNNPACK, Core ML)
 
-This document describes QNN-specific APIs and behavior in `react-native-sherpa-onnx`. QNN (Qualcomm Neural Network SDK) allows using the Qualcomm NPU (Hexagon) on supported Snapdragon devices for faster inference.
+This document describes how `react-native-sherpa-onnx` exposes **execution provider** and acceleration support: **QNN** (Qualcomm NPU), **NNAPI** (Android GPU/DSP/NPU), **XNNPACK** (CPU-optimized), and **Core ML** (iOS). It covers the unified `AccelerationSupport` API, `getAvailableProviders()`, and per-backend helpers. For QNN on Android, you must add the Qualcomm runtime libs yourself (see below).
 
 > **Disclaimer — QNN runtime libs not included**  
-> This SDK **supports** QNN (sherpa-onnx/ONNX Runtime are built with QNN linking). For **license reasons** we do **not** ship the Qualcomm QNN runtime libraries. If you want QNN/NPU acceleration, you must **obtain and add the QNN runtime libs yourself**. See [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs) and [License and compliance](#license-and-compliance-qnn-sdk) for how to do this in a compliant way.
+> This SDK **supports** QNN (sherpa-onnx/ONNX Runtime are built with QNN linking). For **license reasons** we do **not** ship the Qualcomm QNN runtime libraries. If you want QNN/NPU acceleration on Android, you must **obtain and add the QNN runtime libs yourself**. See [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs) and [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk) for how to do this in a compliant way.
 
 ## Table of contents
 
@@ -25,7 +25,7 @@ This document describes QNN-specific APIs and behavior in `react-native-sherpa-o
 
 ## Quick start: adding QNN runtime libs
 
-To enable QNN in your app (so that `getQnnSupport().canInit` is `true` and you can use `provider: 'qnn'` for STT):
+To enable QNN on Android (so that `getQnnSupport().canInit` is `true` and you can use `provider: 'qnn'` for STT):
 
 1. **Download the Qualcomm AI Runtime** (accept the license):  
    [Qualcomm AI Runtime Community](https://softwarecenter.qualcomm.com/catalog/item/Qualcomm_AI_Runtime_Community)
@@ -35,23 +35,23 @@ To enable QNN in your app (so that `getQnnSupport().canInit` is `true` and you c
 (py312) localhost:android/src/main/jniLibs/arm64-v8a user$ ls -lh
 total 329768
 -rw-r--r--@ 1 user  staff    15M 20 Nov 17:05 libonnxruntime.so
--rw-r--r--@ 1 user  staff   6.1M 20 Nov 13:32 libQnnCpu.so
--rw-r--r--@ 1 user  staff   2.4M 21 Nov 22:38 libQnnHtp.so
+-rw-r--r--@ 1 user  staff    6.1M 20 Nov 13:32 libQnnCpu.so
+-rw-r--r--@ 1 user  staff    2.4M 21 Nov 22:38 libQnnHtp.so
 -rw-r--r--@ 1 user  staff    71M 21 Nov 22:38 libQnnHtpPrepare.so
--rw-r--r--@ 1 user  staff   8.3M 21 Nov 22:38 libQnnHtpV68Skel.so
+-rw-r--r--@ 1 user  staff    8.3M 21 Nov 22:38 libQnnHtpV68Skel.so
 -rw-r--r--@ 1 user  staff   556K 21 Nov 22:38 libQnnHtpV68Stub.so
--rw-r--r--@ 1 user  staff   9.4M 21 Nov 22:38 libQnnHtpV69Skel.so
+-rw-r--r--@ 1 user  staff    9.4M 21 Nov 22:38 libQnnHtpV69Skel.so
 -rw-r--r--@ 1 user  staff   556K 21 Nov 22:38 libQnnHtpV69Stub.so
--rw-r--r--@ 1 user  staff   9.4M 21 Nov 22:38 libQnnHtpV73Skel.so
+-rw-r--r--@ 1 user  staff    9.4M 21 Nov 22:38 libQnnHtpV73Skel.so
 -rw-r--r--@ 1 user  staff   562K 21 Nov 22:38 libQnnHtpV73Stub.so
--rw-r--r--@ 1 user  staff   9.4M 21 Nov 22:38 libQnnHtpV75Skel.so
+-rw-r--r--@ 1 user  staff    9.4M 21 Nov 22:38 libQnnHtpV75Skel.so
 -rw-r--r--@ 1 user  staff   562K 21 Nov 22:38 libQnnHtpV75Stub.so
--rw-r--r--@ 1 user  staff   9.6M 21 Nov 22:38 libQnnHtpV79Skel.so
+-rw-r--r--@ 1 user  staff    9.6M 21 Nov 22:38 libQnnHtpV79Skel.so
 -rw-r--r--@ 1 user  staff   562K 21 Nov 22:38 libQnnHtpV79Stub.so
 -rw-r--r--@ 1 user  staff    10M 21 Nov 22:38 libQnnHtpV81Skel.so
 -rw-r--r--@ 1 user  staff   618K 21 Nov 22:38 libQnnHtpV81Stub.so
--rw-r--r--@ 1 user  staff   2.5M 21 Nov 22:38 libQnnSystem.so
--rw-r--r--@ 1 user  staff   4.6M 21 Nov 22:38 libsherpa-onnx-jni.so
+-rw-r--r--@ 1 user  staff    2.5M 21 Nov 22:38 libQnnSystem.so
+-rw-r--r--@ 1 user  staff    4.6M 21 Nov 22:38 libsherpa-onnx-jni.so
 ```
 
 3. **Rebuild the app.** After that, `getQnnSupport().canInit` will be `true` on devices where the QNN libs load correctly.
@@ -60,9 +60,17 @@ The sherpa-onnx and ONNX Runtime libs used by this SDK (from the GitHub Release)
 
 ## Overview
 
-- **Android:** The sherpa-onnx and ONNX Runtime libs provided by this SDK (via the GitHub Release used in `build.gradle`) are **built with QNN**. To actually use QNN at runtime, the app must also ship the **QNN runtime libraries** (e.g. `libQnnHtp.so`). This SDK does not include them for license reasons — you add them yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). With the libs in place, the STT engine can use the `qnn` provider on supported devices.
-- **iOS:** QNN is not used; `getQnnSupport().canInit` is always `false`.
-- The SDK exposes **`getQnnSupport()`** so the app can branch UI or config (e.g. show “Use NPU” only when `canInit` is true, or explain why QNN is unavailable), and **`getAvailableProviders()`** to list all ONNX Runtime execution providers (including `QNN` when available) for the current build and device.
+This SDK exposes a **unified API** for execution provider and acceleration support across backends:
+
+- **`getAvailableProviders()`** — List of ONNX Runtime execution providers (e.g. `'CPU'`, `'QNN'`, `'NNAPI'`, `'XNNPACK'`) for the current build and device.
+- **`getQnnSupport()`**, **`getNnapiSupport()`**, **`getXnnpackSupport()`**, **`getCoreMlSupport()`** — Each returns the same shape (`AccelerationSupport`: `providerCompiled`, `hasAccelerator`, `canInit`). Use these to decide which `provider` to pass when creating an STT recognizer (e.g. `'cpu'`, `'qnn'`, `'nnapi'`, `'xnnpack'`).
+
+**Per-backend notes:**
+
+- **QNN (Android):** ORT/sherpa-onnx are built with QNN; you must add the Qualcomm runtime libs yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). On iOS, QNN is not used.
+- **NNAPI (Android):** Uses Android’s Neural Networks API (GPU/DSP/NPU). No extra libs; `hasAccelerator` reflects device enumeration, `canInit` is a session test.
+- **XNNPACK:** CPU-optimized EP; `hasAccelerator` is `true` when the EP is compiled in.
+- **Core ML (iOS):** `providerCompiled` is always `true`; `hasAccelerator` reflects Apple Neural Engine. On Android, Core ML is not used.
 
 ## Unified format (AccelerationSupport)
 
@@ -152,7 +160,7 @@ Returns **NNAPI (Android)** support in unified format. **hasAccelerator** uses t
 
 The two values answer different questions:
 
-- **hasAccelerator** comes from the **Android NDK Neural Networks API**: it checks whether the system reports at least one NNAPI device of type **accelerator** (GPU/DSP/NPU). So it means: “Does the device advertise a dedicated NNAPI accelerator?”
+- **hasAccelerator** comes from the **Android NDK Neural Networks API**: it checks whether the system reports at least one NNAPI device of type **accelerator** (GPU/DSP/NPU). So it means: "Does the device advertise a dedicated NNAPI accelerator?"
 - **canInit** comes from **creating an ONNX Runtime session with the NNAPI execution provider**. That only tests whether the NNAPI EP can create a session; NNAPI can still run that session on **CPU** if no accelerator is available or reported.
 
 So **hasAccelerator: No, canInit: Yes** is normal: the NNAPI EP works and a session was created, but the device does not report a dedicated accelerator via the NDK API (execution may be on CPU through NNAPI). Use **canInit** to decide if you can use `provider: 'nnapi'`; use **hasAccelerator** only to show the user whether a dedicated accelerator is advertised.
@@ -165,7 +173,7 @@ function getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns **XNNPACK** support in unified format. **hasAccelerator** is `true` when providerCompiled (CPU-optimized). **canInit**: if you omit `modelBase64`, the SDK uses an embedded test model; pass `modelBase64` to test that exact model’s compatibility with XNNPACK. On iOS returns all `false`.
+Returns **XNNPACK** support in unified format. **hasAccelerator** is `true` when providerCompiled (CPU-optimized). **canInit**: if you omit `modelBase64`, the SDK uses an embedded test model; pass `modelBase64` to test that exact model's compatibility with XNNPACK. On iOS returns all `false`.
 
 ### `getCoreMlSupport()`
 
@@ -231,12 +239,12 @@ The Qualcomm AI Stack License (see `third_party/onnxruntime_prebuilt/license/lic
 
 1. **This SDK:** We do **not** ship QNN `.so` files in the repository or npm package. The SDK uses sherpa-onnx/ORT built with QNN but relies on the **app** to provide the QNN runtime libs.
 2. **You (app developer):** Download the [Qualcomm AI Runtime Community](https://softwarecenter.qualcomm.com/catalog/item/Qualcomm_AI_Runtime_Community), accept the license, and copy the required runtime libraries (e.g. `libQnnHtp.so`, `libQnnHtpV75Stub.so`, `libQnnSystem.so`) into your app (e.g. `android/app/src/main/jniLibs/arm64-v8a/`). The license permits distribution of these libraries when they are **incorporated in your software application**.
-3. **Notices:** Do not remove Qualcomm’s copyright or proprietary notices. If your app ships with QNN libraries, include the applicable Qualcomm license/notice (e.g. from the SDK) in your app’s legal/credits or documentation.
+3. **Notices:** Do not remove Qualcomm's copyright or proprietary notices. If your app ships with QNN libraries, include the applicable Qualcomm license/notice (e.g. from the SDK) in your app's legal/credits or documentation.
 
-This “you add QNN libs yourself” approach keeps the SDK compliant (no redistribution of QNN by us) while allowing your app to use NPU acceleration under Qualcomm’s terms.
+This "you add QNN libs yourself" approach keeps the SDK compliant (no redistribution of QNN by us) while allowing your app to use NPU acceleration under Qualcomm's terms.
 
 ## Related documentation
 
-- [STT](./stt.md) — `provider` option (e.g. `'cpu'`, `'qnn'`) when creating the recognizer.
+- [STT](./stt.md) — `provider` option (e.g. `'cpu'`, `'qnn'`, `'nnapi'`, `'xnnpack'`) when creating the recognizer.
 - [Model Setup](./MODEL_SETUP.md) — How to use bundled or downloaded models with STT/TTS.
 - [Building sherpa-onnx Android prebuilts](../../third_party/sherpa-onnx-prebuilt/README.md) — Building with `--qnn` and `QNN_SDK_ROOT`.

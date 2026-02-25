@@ -96,7 +96,7 @@ Create an STT engine instance. Returns `Promise<SttEngine>`. You **must** call `
 | `hotwordsFile` | `string` | Path to hotwords file for contextual biasing. **Only supported for transducer models** (`transducer`, `nemo_transducer`). For other model types the SDK rejects with `HOTWORDS_NOT_SUPPORTED`. Use `sttSupportsHotwords(modelType)` to show/hide hotword options. |
 | `hotwordsScore` | `number` | Hotwords score (default in native: 1.5). Only applies when `hotwordsFile` is set (transducer only). |
 | `numThreads` | `number` | Number of threads for inference (default in native: 1). |
-| `provider` | `string` | Provider string (e.g. `"cpu"` or `"qnn"` when [QNN](./qnn.md) support is available); stored in config only. |
+| `provider` | `string` | Provider string (e.g. `"cpu"`, `"qnn"`, `"nnapi"`, `"xnnpack"` when [execution provider support](./execution-providers.md) is available); stored in config only. |
 | `ruleFsts` | `string` | Comma-separated paths to rule FSTs for inverse text normalization (ITN). |
 | `ruleFars` | `string` | Comma-separated paths to rule FARs for ITN. |
 | `dither` | `number` | Dither for feature extraction (default: 0). |
@@ -183,7 +183,7 @@ See [Hotwords (contextual biasing)](./hotwords.md) for supported model types, fi
 
 ## Model Setup
 
-See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup steps. For using the Qualcomm NPU (QNN) with STT, see [QNN (Qualcomm NPU)](./qnn.md).
+See [STT_MODEL_SETUP.md](./STT_MODEL_SETUP.md) for model downloads and setup steps. For acceleration backends (QNN, NNAPI, XNNPACK, Core ML), see [Execution provider support](./execution-providers.md).
 
 ### Supported STT model types
 
