@@ -48,11 +48,15 @@ for abi in $ABIS; do
   fi
 done
 
-if [ -f "$CLASSES_JAR" ]; then
+if [ -f "$CLASSES_JAR" ] && [ -s "$CLASSES_JAR" ]; then
   cp "$CLASSES_JAR" "$AAR_DIR/classes.jar"
 else
-  echo "Warning: $CLASSES_JAR not found; AAR will have no Java/Kotlin API."
-  touch "$AAR_DIR/classes.jar"
+  if [ -n "$USE_JAVA" ]; then
+    echo "Error: $CLASSES_JAR not found or empty; Java AAR requires a valid classes-java.jar. Build with --both or --java."
+  else
+    echo "Error: $CLASSES_JAR not found or empty; Kotlin AAR requires a valid classes.jar. Build with --kotlin or --both and ensure ANDROID_HOME is set for the Kotlin API build."
+  fi
+  exit 1
 fi
 
 # C-API headers (for native SDK builds; same layout as release zip so Gradle can extract to include/sherpa-onnx/)

@@ -43,8 +43,13 @@ tasks.named('jar', Jar) {
     // Library JAR: do not embed Kotlin stdlib (consumer provides it)
 }
 
+// Align with Gradle/runner JVM (e.g. 17) to avoid "Inconsistent JVM-target compatibility" (compileJava vs compileKotlin)
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
 tasks.named('compileKotlin') {
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
     }
 }
