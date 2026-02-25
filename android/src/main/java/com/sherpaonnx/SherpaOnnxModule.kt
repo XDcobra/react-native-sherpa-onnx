@@ -112,20 +112,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Asset path for embedded NNAPI test model (ORT testdata: nnapi_internal_uint8_support). */
+  private val nnapiTestModelAsset = "testModels/nnapi_internal_uint8_support.onnx"
+
   /**
-   * NNAPI support (AccelerationSupport): providerCompiled, hasAccelerator (native), canInit (session test if model provided).
+   * NNAPI support (AccelerationSupport): providerCompiled, hasAccelerator (native), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit.
    */
   override fun getNnapiSupport(modelBase64: String?, promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
       val hasAccelerator = try { nativeHasNnapiAccelerator() } catch (_: Exception) { false }
-      val canInit = if (!providerCompiled) false
-      else modelBase64?.takeIf { it.isNotEmpty() }?.let { base64 ->
-        try {
-          canReallyUseNnapi(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
-        } catch (_: Exception) { false }
-      } ?: false
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(nnapiTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseNnapi(modelBytes)
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
       map.putBoolean("hasAccelerator", hasAccelerator)
@@ -150,19 +155,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Asset path for embedded XNNPACK test model (ORT testdata: add_mul_add). */
+  private val xnnpackTestModelAsset = "testModels/add_mul_add.onnx"
+
   /**
-   * XNNPACK support (AccelerationSupport): providerCompiled, hasAccelerator = true when compiled (CPU-optimized), canInit (session test if model provided).
+   * XNNPACK support (AccelerationSupport): providerCompiled, hasAccelerator = true when compiled (CPU-optimized), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit.
    */
   override fun getXnnpackSupport(modelBase64: String?, promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("XNNPACK", ignoreCase = true) }
-      val canInit = if (!providerCompiled) false
-      else modelBase64?.takeIf { it.isNotEmpty() }?.let { base64 ->
-        try {
-          canReallyUseXnnpack(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
-        } catch (_: Exception) { false }
-      } ?: false
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(xnnpackTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseXnnpack(modelBytes)
       val map = Arguments.createMap()
       map.putBoolean("providerCompiled", providerCompiled)
       map.putBoolean("hasAccelerator", providerCompiled) // XNNPACK: CPU-optimized, always "has accelerator" when built in
@@ -171,6 +181,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       android.util.Log.e(NAME, "getXnnpackSupport failed", e)
       promise.reject("XNNPACK_SUPPORT_ERROR", "Failed to get XNNPACK support: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Load embedded ONNX test model from module assets (used for NNAPI/XNNPACK canInit when no modelBase64 is passed).
+   */
+  private fun loadTestModelFromAssets(assetPath: String): ByteArray? {
+    return try {
+      reactApplicationContext.assets.open(assetPath).use { it.readBytes() }
+    } catch (e: Exception) {
+      android.util.Log.w(NAME, "Could not load test model from assets: $assetPath", e)
+      null
     }
   }
 
