@@ -79,9 +79,11 @@ type AccelerationSupport = {
 | Backend | providerCompiled | hasAccelerator | canInit |
 |--------|------------------|----------------|---------|
 | **QNN (Android)** | ORT providers contains QNN | Same as canInit (implicit) | QNN init test |
-| **NNAPI (Android)** | ORT providers contains NNAPI | nativeHasNnapiAccelerator() | NNAPI session test (optional model) |
+| **NNAPI (Android)** | ORT providers contains NNAPI | nativeHasNnapiAccelerator() (GPU or ACCELERATOR) | NNAPI session test (optional model) |
 | **XNNPACK** | ORT providers contains XNNPACK | `true` when compiled (CPU-optimized) | XNNPACK session test (optional model) |
 | **Core ML (iOS)** | `true` (Core ML on iOS 11+) | Apple Neural Engine (MLModel.availableComputeDevices) | ORT session with CoreML EP (stub `false` in this module) |
+
+**Optional `modelBase64` (NNAPI, XNNPACK):** If you omit it, the SDK uses its own small embedded test models to compute `canInit`, so you get a meaningful result without passing anything. Pass `modelBase64` (base64-encoded ONNX bytes) only when you want to test compatibility with a **specific** model (e.g. your real STT encoder).
 
 ## API Reference
 
@@ -144,7 +146,16 @@ function getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns **NNAPI (Android)** support in unified format. **hasAccelerator** uses native NNAPI device enumeration; **canInit** requires optional `modelBase64` (session test). On iOS returns all `false`.
+Returns **NNAPI (Android)** support in unified format. **hasAccelerator** uses the NDK Neural Networks API: `true` if any NNAPI device has type GPU or ACCELERATOR (DSP/NPU). **canInit** is the result of a session test: if you omit `modelBase64`, the SDK uses an embedded test model; pass `modelBase64` to test that exact model’s compatibility with NNAPI. On iOS returns all `false`.
+
+#### Why can `hasAccelerator` be No and `canInit` be Yes?
+
+The two values answer different questions:
+
+- **hasAccelerator** comes from the **Android NDK Neural Networks API**: it checks whether the system reports at least one NNAPI device of type **accelerator** (GPU/DSP/NPU). So it means: “Does the device advertise a dedicated NNAPI accelerator?”
+- **canInit** comes from **creating an ONNX Runtime session with the NNAPI execution provider**. That only tests whether the NNAPI EP can create a session; NNAPI can still run that session on **CPU** if no accelerator is available or reported.
+
+So **hasAccelerator: No, canInit: Yes** is normal: the NNAPI EP works and a session was created, but the device does not report a dedicated accelerator via the NDK API (execution may be on CPU through NNAPI). Use **canInit** to decide if you can use `provider: 'nnapi'`; use **hasAccelerator** only to show the user whether a dedicated accelerator is advertised.
 
 ### `getXnnpackSupport()`
 
@@ -154,7 +165,7 @@ function getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns **XNNPACK** support in unified format. **hasAccelerator** is `true` when providerCompiled (CPU-optimized). **canInit** requires optional `modelBase64`. On iOS returns all `false`.
+Returns **XNNPACK** support in unified format. **hasAccelerator** is `true` when providerCompiled (CPU-optimized). **canInit**: if you omit `modelBase64`, the SDK uses an embedded test model; pass `modelBase64` to test that exact model’s compatibility with XNNPACK. On iOS returns all `false`.
 
 ### `getCoreMlSupport()`
 
@@ -182,13 +193,14 @@ Returns **Core ML (iOS)** support in unified format. **providerCompiled** is alw
 
 | Situation | `providerCompiled` | `hasAccelerator` | `canInit` | Notes |
 |-----------|--------------------|------------------|-----------|--------|
-| **Android, NNAPI in build, device has accelerator, model passed and loads with NNAPI** | `true` | `true` | `true` | Use `provider: 'nnapi'` for STT. |
-| **Android, NNAPI in build, device has accelerator, no model passed** | `true` | `true` | `false` | Pass `modelBase64` to test session init. |
-| **Android, NNAPI in build, no accelerator (e.g. emulator)** | `true` | `false` | `false` | NNAPI may fall back to CPU. |
+| **Android, NNAPI in build, device reports accelerator, session OK** | `true` | `true` | `true` | Use `provider: 'nnapi'` for STT. |
+| **Android, NNAPI in build, device does not report accelerator, session OK** | `true` | `false` | `true` | NNAPI works (e.g. on CPU); use `provider: 'nnapi'`. See [hasAccelerator vs canInit](#why-can-hasaccelerator-be-no-and-caninit-be-yes). |
+| **Android, NNAPI in build, no accelerator (e.g. emulator), session OK** | `true` | `false` | `true` | Same as above. |
+| **Android, NNAPI in build, session fails** | `true` | * | `false` | Model or driver issue. |
 | **Android, build without NNAPI** | `false` | `false` | `false` | NNAPI not in ORT build. |
 | **iOS** | `false` | `false` | `false` | NNAPI is Android-only. |
 
-**Summary:** `canInit` is only `true` when you call `getNnapiSupport(modelBase64)` with a valid ONNX model and the session with NNAPI is created successfully.
+**Summary:** `canInit` is `true` when a session with NNAPI EP can be created (embedded test model or passed `modelBase64`). `hasAccelerator` is only whether the NDK reports a dedicated accelerator device; it can be `false` even when `canInit` is `true`.
 
 ## When does `getXnnpackSupport()` return what?
 
