@@ -16,18 +16,18 @@
 # ──────────────────────────────────────────────────────────
 # 5. Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven)
 # ──────────────────────────────────────────────────────────
+#
+# When to run manually (Actions → Prebuilt - Sherpa-onnx (Android) Release → Run workflow):
+# 1. After a new ONNX Runtime Android release exists (run "Prebuilt - ONNX Runtime (Android) Release" first).
+# 2. After updating third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG or sherpa-onnx submodule.
+# 3. When you want to publish a new sherpa-onnx Android zip/AAR (GitHub Release + Maven).
+# Ensure third_party/onnxruntime_prebuilt/VERSIONS and ANDROID_RELEASE_TAG match the ONNX Runtime
+# release that sherpa-onnx should use (the workflow downloads that release; it must already exist).
+#
 name: Prebuilt - Sherpa-onnx (Android) Release
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'third_party/sherpa-onnx-prebuilt/**'
-      - 'third_party/sherpa-onnx/**'
-      - 'third_party/onnxruntime_prebuilt/VERSIONS'
-      - '.github/workflows/build-sherpa-onnx-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
