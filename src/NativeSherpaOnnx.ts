@@ -450,6 +450,12 @@ export interface Spec extends TurboModule {
    * not whether the device has QNN-capable hardware.
    */
   isQnnSupported(): Promise<boolean>;
+
+  /**
+   * Return the list of available ONNX Runtime execution providers (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
+   * Requires the ORT Java bridge (libonnxruntime4j_jni.so + OrtEnvironment class) from the onnxruntime AAR.
+   */
+  getAvailableProviders(): Promise<string[]>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

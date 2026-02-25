@@ -174,7 +174,14 @@ jobs:
           cd ..
           ls -la sherpa-onnx-android.zip
 
-      - name: Create sherpa-onnx AAR (modular; POM will depend on onnxruntime)
+      - name: Add C-API headers to prebuilt layout (for AAR; Maven consumers get libs + headers)
+        run: |
+          SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          mkdir -p "$PREBUILT/c-api"
+          cp "$SHERPA_CAPI/c-api.h" "$SHERPA_CAPI/cxx-api.h" "$PREBUILT/c-api/"
+
+      - name: Create sherpa-onnx AAR (modular; POM will depend on onnxruntime; includes c-api headers)
         run: |
           chmod +x third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh
           third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh \

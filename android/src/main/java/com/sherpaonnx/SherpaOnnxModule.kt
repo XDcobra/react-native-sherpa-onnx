@@ -14,7 +14,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
 
   init {
-    // Load sherpa-onnx JNI first (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
+    // Load onnxruntime first so libsherpa-onnx-jni.so can resolve OrtGetApiBase.
+    // When the app adds com.xdcobra.sherpa:onnxruntime and uses pickFirst, this loads the AAR's version.
+    try {
+      System.loadLibrary("onnxruntime")
+    } catch (e: UnsatisfiedLinkError) {
+      android.util.Log.w(NAME, "onnxruntime not loaded (will use SDK copy if present): ${e.message}")
+    }
+    // Load sherpa-onnx JNI (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
     try {
       System.loadLibrary("sherpa-onnx-jni")
     } catch (e: UnsatisfiedLinkError) {
@@ -83,6 +90,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       android.util.Log.e(NAME, "QNN check failed", e)
       promise.resolve(false)
+    }
+  }
+
+  override fun getAvailableProviders(promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val list = Arguments.createArray()
+      for (p in providers) {
+        list.pushString(p.name)
+      }
+      promise.resolve(list)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getAvailableProviders failed", e)
+      promise.reject("PROVIDERS_ERROR", "Failed to get available providers: ${e.message}", e)
     }
   }
 

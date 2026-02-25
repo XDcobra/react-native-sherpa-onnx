@@ -1,13 +1,17 @@
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { isQnnSupported } from 'react-native-sherpa-onnx';
+import {
+  isQnnSupported,
+  getAvailableProviders,
+} from 'react-native-sherpa-onnx';
 
 const appPkg = (() => {
   try {
@@ -51,6 +55,10 @@ export default function SettingsScreen() {
   const [qnnChecking, setQnnChecking] = useState(false);
   const [qnnSupported, setQnnSupported] = useState<boolean | null>(null);
 
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
+
   const handleCheckQnn = useCallback(async () => {
     setQnnChecking(true);
     setQnnSupported(null);
@@ -64,9 +72,26 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const handleCheckProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    setProviders(null);
+    setProvidersError(null);
+    try {
+      const list = await getAvailableProviders();
+      setProviders(list);
+    } catch (e: any) {
+      setProvidersError(e?.message ?? 'Unknown error');
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.body}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyContent}
+      >
         <View style={styles.section}>
           <Text style={styles.title}>App</Text>
           <Text style={styles.bodyText}>Version: {appVersion}</Text>
@@ -94,7 +119,39 @@ export default function SettingsScreen() {
             </Text>
           )}
         </View>
-      </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>Execution Providers</Text>
+          <Text style={styles.bodyText}>
+            Query available ONNX Runtime execution providers (CPU, NNAPI, QNN,
+            XNNPACK, …).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, providersLoading && styles.buttonDisabled]}
+            onPress={handleCheckProviders}
+            disabled={providersLoading}
+          >
+            {providersLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Get available providers</Text>
+            )}
+          </TouchableOpacity>
+          {providers !== null && !providersLoading && (
+            <View style={styles.providerList}>
+              {providers.map((p) => (
+                <Text key={p} style={styles.providerItem}>
+                  • {p}
+                </Text>
+              ))}
+            </View>
+          )}
+          {providersError !== null && !providersLoading && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {providersError}
+            </Text>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -107,6 +164,9 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+  },
+  bodyContent: {
+    paddingBottom: 32,
   },
   section: {
     backgroundColor: '#FFFFFF',
@@ -128,6 +188,15 @@ const styles = StyleSheet.create({
   qnnResult: {
     marginTop: 12,
     fontWeight: '600',
+  },
+  providerList: {
+    marginTop: 12,
+  },
+  providerItem: {
+    fontSize: 14,
+    color: '#222222',
+    fontWeight: '500',
+    paddingVertical: 2,
   },
   errorText: {
     color: '#C62828',

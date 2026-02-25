@@ -25,7 +25,7 @@ endif()
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-# FFmpeg: libs and headers from (1) third_party/ffmpeg_prebuilt/android (local build) or (2) jniLibs + cpp/include/ffmpeg (release zip).
+# FFmpeg: libs and headers from (1) third_party/ffmpeg_prebuilt/android (local build) or (2) jniLibs + cpp/include/ffmpeg (GitHub release zip).
 # PROJECT_ROOT = android/; repo root = PROJECT_ROOT/..
 set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android")
 set(FFMPEG_PREBUILT_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
@@ -76,27 +76,22 @@ add_library(sherpaonnx SHARED
     ${SOURCES}
 )
 
-# sherpa-onnx C-API shared library (from prebuilts or jniLibs). Used by Zipvoice TTS JNI wrapper.
+# sherpa-onnx C-API: link by directory + library name only (no IMPORTED target).
+# The .so and headers land in jniLibs and cpp/include/sherpa-onnx via:
+#   (1) local third_party build, (2) Maven AAR extraction (libs + c-api headers), or (3) GitHub release zip (last resort).
+# If we used IMPORTED here, AGP would also copy .so from CMake → duplicate in mergeNativeLibs.
 set(SHERPA_ONNX_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/sherpa-onnx-prebuilt/android")
 set(SHERPA_ONNX_ABI_LIB "${SHERPA_ONNX_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(SHERPA_C_API_LIB_DIR "")
 if(EXISTS "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
-    add_library(sherpa-onnx-c-api SHARED IMPORTED)
-    set_target_properties(sherpa-onnx-c-api PROPERTIES
-        IMPORTED_LOCATION "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so"
-    )
-    message(STATUS "sherpa-onnx C-API found: ${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
+    set(SHERPA_C_API_LIB_DIR "${SHERPA_ONNX_ABI_LIB}")
+    message(STATUS "sherpa-onnx C-API (link only): ${SHERPA_C_API_LIB_DIR}")
+elseif(EXISTS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
+    set(SHERPA_C_API_LIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+    message(STATUS "sherpa-onnx C-API (link only, jniLibs): ${SHERPA_C_API_LIB_DIR}")
 else()
-    set(JNILIBS_C_API "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
-    if(EXISTS "${JNILIBS_C_API}")
-        add_library(sherpa-onnx-c-api SHARED IMPORTED)
-        set_target_properties(sherpa-onnx-c-api PROPERTIES
-            IMPORTED_LOCATION "${JNILIBS_C_API}"
-        )
-        message(STATUS "sherpa-onnx C-API found (jniLibs): ${JNILIBS_C_API}")
-    else()
-        message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
-                        "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
-    endif()
+    message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
+                    "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
 # Include directories (must be after add_library)
@@ -109,7 +104,13 @@ target_include_directories(sherpaonnx PRIVATE
 target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
 # Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
+target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
+if(SHERPA_C_API_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
+    target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
+endif()
 target_link_libraries(sherpaonnx
+    PRIVATE
     archive
     avcodec
     avformat
@@ -118,9 +119,7 @@ target_link_libraries(sherpaonnx
     swresample
     log
     android
-    $<TARGET_NAME_IF_EXISTS:sherpa-onnx-c-api>
 )
-target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

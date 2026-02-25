@@ -38,3 +38,12 @@ export function testSherpaInit(): Promise<string> {
 export function isQnnSupported(): Promise<boolean> {
   return SherpaOnnx.isQnnSupported();
 }
+
+/**
+ * Return the list of available ONNX Runtime execution providers
+ * (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
+ * Requires the ORT Java bridge from the onnxruntime AAR.
+ */
+export function getAvailableProviders(): Promise<string[]> {
+  return SherpaOnnx.getAvailableProviders();
+}

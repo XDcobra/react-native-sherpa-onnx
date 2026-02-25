@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Create a sherpa-onnx AAR from the prebuilt layout (android/<abi>/lib/*.so, android/java/classes.jar).
+# Create a sherpa-onnx AAR from the prebuilt layout (android/<abi>/lib/*.so, android/java/classes.jar, optional android/c-api/*.h).
 # Usage: ./create_sherpa_onnx_aar.sh <prebuilt_dir> <version> [output_path]
 # Example: ./create_sherpa_onnx_aar.sh third_party/sherpa-onnx-prebuilt/android 1.12.24
 # Output: sherpa-onnx-<version>.aar (modular: POM will declare dependency on com.xdcobra.sherpa:onnxruntime)
+# Includes C-API headers (c-api/) when present so Maven consumers get libs + headers without GitHub release.
 
 set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ $# -lt 2 ]; then
   echo "Usage: $0 <prebuilt_dir> <version> [output_path]"
@@ -41,6 +43,18 @@ if [ -f "$PREBUILT_DIR/java/classes.jar" ]; then
 else
   echo "Warning: $PREBUILT_DIR/java/classes.jar not found; AAR will have no Java API."
   touch "$AAR_DIR/classes.jar"
+fi
+
+# C-API headers (for native SDK builds; same layout as release zip so Gradle can extract to include/sherpa-onnx/)
+if [ -d "$PREBUILT_DIR/c-api" ]; then
+  mkdir -p "$AAR_DIR/c-api"
+  cp -v "$PREBUILT_DIR/c-api/"*.h "$AAR_DIR/c-api/" 2>/dev/null || true
+else
+  SHERPA_CAPI="$SCRIPT_DIR/../sherpa-onnx/sherpa-onnx/c-api"
+  if [ -d "$SHERPA_CAPI" ]; then
+    mkdir -p "$AAR_DIR/c-api"
+    cp -v "$SHERPA_CAPI/"*.h "$AAR_DIR/c-api/" 2>/dev/null || true
+  fi
 fi
 
 cat > "$AAR_DIR/AndroidManifest.xml" << 'EOF'

@@ -134,11 +134,11 @@ android {
     jvmTarget = '17'
   }
 
-  // The build expects prebuilt .so files under src/main/jniLibs/<abi>/ and (for sherpa-onnx) C API headers
-  // under src/main/cpp/include/sherpa-onnx/c-api/. If missing, Gradle downloads the sherpa-onnx-android
-  // release zip from this repo's GitHub Releases and extracts both libs and headers (single source).
-  // Or run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and
-  // third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js for local builds (headers then from release or CI copy).
+  // Sherpa-onnx native libs (.so) and C-API headers resolution priority:
+  //   1. Local third_party build (copy_prebuilts_to_sdk.js → jniLibs + cpp/include)
+  //   2. Maven AAR (com.xdcobra.sherpa:sherpa-onnx → jniLibs + c-api headers + classes.jar)
+  //   3. GitHub release zip (last resort: sherpa-onnx-android.zip → jniLibs + headers + classes.jar)
+  // FFmpeg libs/headers: (1) local third_party build → (3) GitHub release zip (no Maven AAR).
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
   def requiredFfmpegSoFiles = [
@@ -197,18 +197,51 @@ android {
 
   task downloadNativeLibsIfNeeded {
     doLast {
+      def downloadDir = file("${buildDir}/prebuilt-downloads")
+
+      // Priority 2 for sherpa-onnx: Maven AAR (libs + C-API headers; no GitHub repo needed).
+      if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
+        try {
+          def aarFiles = project.configurations.sherpaOnnxAar.files
+          if (!aarFiles.isEmpty()) {
+            downloadDir.mkdirs()
+            def aar = aarFiles.iterator().next()
+            def aarExtractDir = new File(downloadDir, "sherpa-onnx-aar-extract")
+            if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+            aarExtractDir.mkdirs()
+            copy { from zipTree(aar); into aarExtractDir }
+            requiredAbis.each { abi ->
+              def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+              if (aarJniDir.exists()) {
+                copy { from aarJniDir; into new File(jniLibsDir, abi) }
+              }
+            }
+            def includeSherpaDir = file("${projectDir}/src/main/cpp/include/sherpa-onnx")
+            def aarCapiDir = new File(aarExtractDir, "c-api")
+            if (aarCapiDir.exists()) {
+              includeSherpaDir.mkdirs()
+              copy { from aarCapiDir; into includeSherpaDir }
+              println "Extracted sherpa-onnx C-API headers from Maven AAR"
+            }
+            println "Extracted sherpa-onnx native libs (and headers if present) from Maven AAR (${aar.name})"
+          }
+        } catch (Exception e) {
+          println "Could not resolve sherpa-onnx Maven AAR: ${e.message}"
+        }
+      }
+
+      // Priority 3: GitHub release download for anything still missing
       def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
       if (!repo) {
-        if (!hasAllFfmpegLibs() || !hasAllSherpaLibs()) {
+        if (!hasAllFfmpegLibs() || !hasAllSherpaLibs() || !hasSherpaHeaders()) {
           throw new RuntimeException(
-            "Native libs missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
+            "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
             "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js."
           )
         }
         return
       }
       def baseUrl = "https://github.com/${repo}/releases/download"
-      def downloadDir = file("${buildDir}/prebuilt-downloads")
       downloadDir.mkdirs()
 
       if (!hasAllFfmpegLibs()) {
@@ -265,6 +298,14 @@ android {
           copy { from sherpaJavaJar; into sherpaOnnxClassesDir }
         }
         println "Downloaded and extracted sherpa-onnx prebuilts (libs + C API headers + java/classes.jar) from ${tag}"
+      } else {
+        // Libs/headers already present (e.g. copy_prebuilts) but classes dir may be empty after clean
+        def sherpaClassesJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
+        if (sherpaClassesJar.exists() && !sherpaOnnxClassesDir.listFiles()?.any { it.name.endsWith('.jar') }) {
+          sherpaOnnxClassesDir.mkdirs()
+          copy { from sherpaClassesJar; into sherpaOnnxClassesDir }
+          println "Copied sherpa-onnx classes.jar from local prebuilts into sherpa-onnx-classes"
+        }
       }
     }
   }
@@ -301,26 +342,49 @@ android {
 repositories {
   mavenCentral()
   google()
+  maven { url "https://xdcobra.github.io/maven" }
 }
 
+// Resolve sherpa-onnx AAR from Maven (priority 2 for classes.jar extraction).
+configurations { sherpaOnnxAar }
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
-// Populate sherpa-onnx-classes from (1) release zip (done in downloadNativeLibsIfNeeded) or (2) local prebuilts. No JitPack.
+// Populate sherpa-onnx-classes with priority: (1) local third_party build, (2) Maven AAR, (3) GitHub release.
 // Registered before dependencies so builtBy(extractSherpaOnnxClasses) can resolve.
 def extractSherpaOnnxClasses = tasks.register("extractSherpaOnnxClasses") {
   outputs.dir sherpaOnnxClassesDir
   doLast {
     sherpaOnnxClassesDir.mkdirs()
     if (sherpaOnnxClassesDir.listFiles()?.any { it.name.endsWith('.jar') }) return
+    // 1) Local third_party build (build_sherpa_onnx.sh)
     def localJar = file("${projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
     if (localJar.exists()) {
       copy { from localJar; into sherpaOnnxClassesDir }
-      println "Using sherpa-onnx classes.jar from local prebuilts"
+      println "Using sherpa-onnx classes.jar from local prebuilts (third_party)"
+      return
+    }
+    // 2) Maven AAR (e.g. com.xdcobra.sherpa:sherpa-onnx on xdcobra.github.io/maven)
+    def aarFiles = project.configurations.sherpaOnnxAar.files
+    if (!aarFiles.isEmpty()) {
+      def aar = aarFiles.iterator().next()
+      copy {
+        from zipTree(aar)
+        include 'classes.jar'
+        into sherpaOnnxClassesDir
+      }
+      println "Using sherpa-onnx classes.jar from Maven AAR (${aar.name})"
+      return
+    }
+    // 3) GitHub release (prebuilt-downloads extract from downloadNativeLibsIfNeeded)
+    def extractedJar = file("${buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
+    if (extractedJar.exists()) {
+      copy { from extractedJar; into sherpaOnnxClassesDir }
+      println "Using sherpa-onnx classes.jar from GitHub release extract"
       return
     }
     throw new RuntimeException(
-      "Missing sherpa-onnx classes.jar. Run third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh (produces android/java/classes.jar) or use a release that includes java/classes.jar.")
+      "Missing sherpa-onnx classes.jar. Use (1) local third_party build_sherpa_onnx.sh, (2) Maven AAR (com.xdcobra.sherpa:sherpa-onnx), or (3) a GitHub release that includes java/classes.jar.")
   }
 }
 
@@ -331,11 +395,19 @@ dependencies {
   implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
-  // sherpa-onnx Java API (classes.jar from build_sherpa_onnx.sh or release zip); native .so from prebuilts. No JitPack.
+  // Resolve sherpa-onnx AAR for classes.jar (priority 2); only used by extractSherpaOnnxClasses.
+  sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
+
+  // sherpa-onnx Java API (classes.jar: local third_party | Maven AAR | GitHub release); native .so from prebuilts.
   implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
+
+  // ORT Java API (OrtEnvironment, OrtProvider) for getAvailableProviders().
+  // compileOnly: the app provides the actual onnxruntime AAR at runtime.
+  // Version must exist on https://xdcobra.github.io/maven (use 1.17.1 until 1.24.2 is published).
+  compileOnly "com.xdcobra.sherpa:onnxruntime:1.17.1-qnn2.43.1.260218"
 }
 
 // Codegen for TurboModule spec; in separate script to avoid Gradle 9 Groovy "source is null" with NodeTask in main script.

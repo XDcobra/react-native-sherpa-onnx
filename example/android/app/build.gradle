@@ -130,8 +130,11 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
-    
 
+    packagingOptions {
+        // Prefer libonnxruntime.so from onnxruntime AAR (has OrtGetApiBase) over SDK's copy.
+        pickFirst '**/libonnxruntime.so'
+    }
 }
 
 task printJniLibs {
@@ -141,7 +144,25 @@ task printJniLibs {
   }
 }
 
+repositories {
+    maven { url "https://xdcobra.github.io/maven" }
+}
+
+// ONNX Runtime AAR version (must match a version published to https://xdcobra.github.io/maven).
+// Use 1.17.1 until 1.24.2 is published via build-onnxruntime-android-release workflow.
+def ortMavenVersion = "1.17.1-qnn2.43.1.260218"
+
 dependencies {
+    // ONNX Runtime first so its libonnxruntime.so is picked by pickFirst (has OrtGetApiBase for getAvailableProviders).
+    def ortAarLocal = file("${rootDir}/../../third_party/onnxruntime_prebuilt/onnxruntime-android-qnn.aar")
+    if (ortAarLocal.exists()) {
+        implementation files(ortAarLocal)
+        println "[app/build.gradle] Using local ONNX Runtime AAR: ${ortAarLocal}"
+    } else {
+        implementation "com.xdcobra.sherpa:onnxruntime:${ortMavenVersion}"
+        println "[app/build.gradle] Using Maven ONNX Runtime AAR: com.xdcobra.sherpa:onnxruntime:${ortMavenVersion}"
+    }
+
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
@@ -150,7 +171,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
-
 }
 
 // Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).
