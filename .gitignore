@@ -136,6 +136,16 @@ third_party/onnxruntime_prebuilt/*
 !third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh
 !third_party/onnxruntime_prebuilt/VERSIONS
 !third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
+# publish-maven: track scripts and config; ignore local env and Gradle build output
+!third_party/onnxruntime_prebuilt/publish-maven/
+third_party/onnxruntime_prebuilt/publish-maven/*
+!third_party/onnxruntime_prebuilt/publish-maven/publish.env.example
+!third_party/onnxruntime_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/onnxruntime_prebuilt/publish-maven/README.md
+!third_party/onnxruntime_prebuilt/publish-maven/build.gradle
+!third_party/onnxruntime_prebuilt/publish-maven/settings.gradle
+third_party/onnxruntime_prebuilt/publish-maven/publish.env
+third_party/onnxruntime_prebuilt/publish-maven/build/
 
 # FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default
