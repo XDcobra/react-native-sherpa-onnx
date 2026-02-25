@@ -201,12 +201,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish ONNX Runtime AAR to GitHub Pages Maven (XDcobra/maven)
-        if: success() && secrets.MAVEN_REPO_PAT != ''
+        if: success()
         env:
           MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
           MAVEN_VERSION: ${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}-qnn${{ steps.versions.outputs.QNN_SDK_VERSION }}
           AAR_SRC: onnxruntime-android-qnn.aar
         run: |
+          if [ -z "${MAVEN_REPO_PAT}" ]; then
+            echo "MAVEN_REPO_PAT not set, skipping Maven publish."
+            exit 0
+          fi
           chmod +x third_party/onnxruntime_prebuilt/publish-maven/publish-to-github-pages.sh
           third_party/onnxruntime_prebuilt/publish-maven/publish-to-github-pages.sh
 
