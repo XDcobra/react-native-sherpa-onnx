@@ -118,7 +118,7 @@ fi
 cd "$ARTIFACT_PATH"
 md5sum maven-metadata.xml | cut -d' ' -f1 > maven-metadata.xml.md5
 sha1sum maven-metadata.xml | cut -d' ' -f1 > maven-metadata.xml.sha1
-cd ../..
+cd "$(git rev-parse --show-toplevel)"
 
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
