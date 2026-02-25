@@ -131,7 +131,7 @@ jobs:
         id: sherpa-cache
         with:
           path: third_party/sherpa-onnx-prebuilt/android
-          key: sherpa-android-prebuilt-qnn-both-v2-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
+          key: sherpa-android-prebuilt-qnn-both-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
 
       - name: Build sherpa-onnx (Android, all ABIs, with QNN; Kotlin + Java API)
         if: steps.sherpa-cache.outputs.cache-hit != 'true'
