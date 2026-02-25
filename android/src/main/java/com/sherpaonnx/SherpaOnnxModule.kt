@@ -123,7 +123,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
       val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
-      val hasAccelerator = try { nativeHasNnapiAccelerator() } catch (_: Exception) { false }
+      val hasAccelerator = try { nativeHasNnapiAccelerator(android.os.Build.VERSION.SDK_INT) } catch (_: Exception) { false }
       val modelBytes = when {
         !modelBase64.isNullOrEmpty() -> try {
           android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
@@ -728,7 +728,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     /** True if the device has an NNAPI accelerator (GPU/DSP). Android API 29+. */
     @JvmStatic
-    private external fun nativeHasNnapiAccelerator(): Boolean
+    private external fun nativeHasNnapiAccelerator(sdkInt: Int): Boolean
 
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
