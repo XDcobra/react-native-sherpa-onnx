@@ -78,11 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          PACK_OUTPUT=$(npm pack 2>&1 || true)
-          TARFILE=$(printf "%s" "$PACK_OUTPUT" | awk 'NF{line=$0} END{print line}')
-          TARFILE=$(printf "%s" "$TARFILE" | tr -d '\r')
-          if [ -z "$TARFILE" ]; then
-            echo "Error: npm pack did not produce a tarball name. Full output:" >&2
+          PACK_OUTPUT=$(npm pack 2>&1) || true
+          # npm pack prints the tarball name on the last line; on failure it prints "npm error ..." — only use a line that looks like *.tgz
+          TARFILE=$(printf "%s" "$PACK_OUTPUT" | grep -E '\.tgz$' | tail -1 | tr -d '\r')
+          if [ -z "$TARFILE" ] || [ ! -f "$TARFILE" ]; then
+            echo "Error: npm pack did not produce a tarball. Full output:" >&2
             printf "%s\n" "$PACK_OUTPUT" >&2
             exit 1
           fi

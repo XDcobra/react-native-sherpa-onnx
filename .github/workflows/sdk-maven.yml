@@ -1,8 +1,10 @@
 # Build Android AAR (artifact only; publishing handled by sdk-release.yml).
-# Builds: libshine (shine_prebuilt), FFmpeg (ffmpeg_prebuilt, with libshine), libarchive (via CMake),
-# then produces the react-native-sherpa-onnx Android library .aar.
+# Native libs: sherpa-onnx + onnxruntime come from Maven (com.xdcobra.sherpa); Gradle task
+# downloadNativeLibsIfNeeded extracts the AAR into jniLibs. FFmpeg (with libshine) is still
+# built from third_party and copied to jniLibs (no Maven artifact). Then assembleRelease
+# produces the react-native-sherpa-onnx Android library .aar.
 
-name: Maven - Build AAR
+name: SDK - Maven Build AAR
 
 on:
   pull_request:
@@ -13,7 +15,7 @@ on:
     paths:
       - 'android/**'
       - 'third_party/**'
-      - '.github/workflows/maven-build.yml'
+      - '.github/workflows/sdk-maven.yml'
   workflow_dispatch:
   workflow_call:
 
@@ -26,8 +28,6 @@ env:
   NDK_VERSION: "29.0.14206865"
 
 jobs:
-  # Lint runs only for standalone triggers (PR, push, dispatch).
-  # When called via workflow_call (from sdk-release.yml), the caller runs lint centrally.
   lint:
     if: github.event_name != 'workflow_call'
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
 
   build-aar:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     needs: [lint]
     if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
 
@@ -87,19 +87,6 @@ jobs:
           ndk-version: r29
           add-to-path: true
 
-      - name: Get submodule versions (for sherpa-onnx cache key)
-        id: submodules
-        run: |
-          echo "sherpa=$(git -C third_party/sherpa-onnx rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
-
-      - name: Read VERSIONS (for QNN SDK)
-        id: versions
-        run: |
-          set -a
-          source third_party/onnxruntime_prebuilt/VERSIONS
-          set +a
-          echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Yarn install
         run: yarn install --frozen-lockfile
         env:
@@ -123,54 +110,11 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Copy prebuilts to SDK jniLibs
+      - name: Copy FFmpeg prebuilts to SDK jniLibs
         run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
 
-      - name: Cache sherpa-onnx prebuilts
-        uses: actions/cache@v4
-        id: sherpa-cache
-        with:
-          path: third_party/sherpa-onnx-prebuilt/android
-          key: sherpa-android-prebuilt-qnn-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
-
-      - name: Download and extract QNN SDK
-        if: steps.sherpa-cache.outputs.cache-hit != 'true'
-        id: qnn
-        run: |
-          QNN_VER="${{ steps.versions.outputs.QNN_SDK_VERSION }}"
-          QNN_URL="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${QNN_VER}/v${QNN_VER}.zip"
-          mkdir -p qnn-sdk
-          cd qnn-sdk
-          echo "Downloading QNN SDK ${QNN_VER} from Qualcomm..."
-          if ! curl -sSfL -o qnn-archive "$QNN_URL"; then
-            echo "::error::QNN SDK download failed."
-            exit 1
-          fi
-          unzip -q -o qnn-archive
-          rm -f qnn-archive
-          QNN_IFACE=$(find . -path '*/include/QNN/QnnInterface.h' -type f 2>/dev/null | head -1)
-          if [ -z "$QNN_IFACE" ]; then
-            echo "::error::QNN SDK archive must contain include/QNN/QnnInterface.h"
-            exit 1
-          fi
-          QNN_REL=$(dirname "$(dirname "$(dirname "$QNN_IFACE")")")
-          QNN_ROOT="$(cd "$QNN_REL" && pwd)"
-          echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
-
-      - name: Build sherpa-onnx (Android, all ABIs, with QNN)
-        if: steps.sherpa-cache.outputs.cache-hit != 'true'
-        run: |
-          cd third_party/sherpa-onnx-prebuilt
-          chmod +x build_sherpa_onnx.sh
-          ./build_sherpa_onnx.sh --qnn
-        env:
-          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
-
-      - name: Copy sherpa-onnx prebuilts to jniLibs
-        run: node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js
+      # sherpa-onnx native libs + C-API headers + classes.jar: resolved from Maven AAR by
+      # Gradle task downloadNativeLibsIfNeeded (android/build.gradle). No local build or copy.
 
       - name: Copy Gradle wrapper to root
         run: |
