@@ -445,9 +445,17 @@ export interface Spec extends TurboModule {
   // ==================== QNN Methods ====================
 
   /**
-   * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
-   * This reflects whether the native shared libraries were built with QNN (e.g. libQnnHtp.so is present),
-   * not whether the device has QNN-capable hardware.
+   * Extended QNN support info: whether the QNN provider is compiled in and whether it can be initialized.
+   * Use this to decide if the user can choose QNN (e.g. in settings) or to show why QNN is unavailable.
+   */
+  getQnnSupport(): Promise<{
+    providerCompiled: boolean;
+    canInitQnn: boolean;
+  }>;
+
+  /**
+   * Whether QNN can actually be used on this device (same as getQnnSupport().canInitQnn).
+   * True only if the build has the QNN provider and the QNN HTP backend initializes successfully.
    */
   isQnnSupported(): Promise<boolean>;
 

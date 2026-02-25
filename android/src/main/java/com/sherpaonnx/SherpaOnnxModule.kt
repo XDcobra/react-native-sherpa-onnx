@@ -80,13 +80,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
-   * This reflects whether the native shared libraries were built with QNN (libQnnHtp.so loadable),
-   * not whether the device has QNN-capable hardware.
+   * Extended QNN support: providerCompiled = QNN in getAvailableProviders(), canInitQnn = native QnnBackend_create succeeds.
+   */
+  override fun getQnnSupport(promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("QNN", ignoreCase = true) }
+      val canInitQnn = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("canInitQnn", canInitQnn)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getQnnSupport failed", e)
+      promise.reject("QNN_SUPPORT_ERROR", "Failed to get QNN support: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Whether QNN can actually be used (same as getQnnSupport().canInitQnn).
    */
   override fun isQnnSupported(promise: Promise) {
     try {
-      promise.resolve(nativeIsQnnSupported())
+      val support = ai.onnxruntime.OrtEnvironment.getAvailableProviders().any { it.name.contains("QNN", ignoreCase = true) } &&
+        try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      promise.resolve(support)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "QNN check failed", e)
       promise.resolve(false)
@@ -604,9 +622,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
-    /** True if the sherpa-onnx build has QNN support (QNN library loadable). */
+    /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
     @JvmStatic
-    private external fun nativeIsQnnSupported(): Boolean
+    private external fun nativeCanInitQnnHtp(): Boolean
 
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic

@@ -30,10 +30,21 @@ export function testSherpaInit(): Promise<string> {
   return SherpaOnnx.testSherpaInit();
 }
 
+/** QNN support details: providerCompiled (QNN in ORT providers), canInitQnn (HTP backend init succeeds). */
+export type QnnSupport = {
+  providerCompiled: boolean;
+  canInitQnn: boolean;
+};
+
 /**
- * Check whether the sherpa-onnx build has QNN (Qualcomm NPU) support.
- * This reflects whether the native shared libraries were built with QNN (e.g. libQnnHtp.so is present),
- * not whether the device has QNN-capable hardware.
+ * Extended QNN support info. Use for UI (e.g. show "QNN available" vs "QNN compiled but not usable").
+ */
+export function getQnnSupport(): Promise<QnnSupport> {
+  return SherpaOnnx.getQnnSupport();
+}
+
+/**
+ * Whether QNN can actually be used (same as (await getQnnSupport()).canInitQnn).
  */
 export function isQnnSupported(): Promise<boolean> {
   return SherpaOnnx.isQnnSupported();

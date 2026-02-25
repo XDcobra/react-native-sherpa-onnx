@@ -131,19 +131,33 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(JNIEnv* env, jobject /
   return env->NewStringUTF("sherpa-onnx native (libsherpaonnx) loaded");
 }
 
-// Check if the sherpa-onnx build has QNN support (Qualcomm NPU) by testing whether
-// the QNN HTP library can be loaded. This reflects the shared library build, not device hardware.
+// Check if QNN HTP backend can actually be initialized (QnnBackend_create + free).
+// Uses dlopen/dlsym so we do not need to link against QNN SDK at build time.
 JNIEXPORT jboolean JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeIsQnnSupported(JNIEnv* /* env */, jobject /* this */) {
+Java_com_sherpaonnx_SherpaOnnxModule_nativeCanInitQnnHtp(JNIEnv* /* env */, jobject /* this */) {
 #if !defined(__ANDROID__)
   return JNI_FALSE;
 #else
   void* handle = dlopen("libQnnHtp.so", RTLD_NOW | RTLD_LOCAL);
-  if (handle) {
+  if (!handle) return JNI_FALSE;
+
+  // QNN backend API: Qnn_Error_t QnnBackend_create(const char*, const QnnBackend_Config_t*, QnnBackend_Handle_t*);
+  // Qnn_Error_t QnnBackend_free(QnnBackend_Handle_t);  QNN_SUCCESS is 0.
+  using CreateFn = int (*)(const char*, const void*, void**);
+  using FreeFn = int (*)(void*);
+  auto create = reinterpret_cast<CreateFn>(dlsym(handle, "QnnBackend_create"));
+  auto free_fn = reinterpret_cast<FreeFn>(dlsym(handle, "QnnBackend_free"));
+  if (!create || !free_fn) {
     dlclose(handle);
-    return JNI_TRUE;
+    return JNI_FALSE;
   }
-  return JNI_FALSE;
+  void* backend = nullptr;
+  const int err = create("QnnHtp", nullptr, &backend);
+  if (err == 0 && backend) {
+    free_fn(backend);
+  }
+  dlclose(handle);
+  return (err == 0 && backend) ? JNI_TRUE : JNI_FALSE;
 #endif
 }
 

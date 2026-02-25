@@ -8,10 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  isQnnSupported,
-  getAvailableProviders,
-} from 'react-native-sherpa-onnx';
+import { getQnnSupport, getAvailableProviders } from 'react-native-sherpa-onnx';
 
 const appPkg = (() => {
   try {
@@ -51,9 +48,15 @@ const sdkVersion = (() => {
   }
 })();
 
+type QnnSupportState = {
+  providerCompiled: boolean;
+  canInitQnn: boolean;
+} | null;
+
 export default function SettingsScreen() {
   const [qnnChecking, setQnnChecking] = useState(false);
-  const [qnnSupported, setQnnSupported] = useState<boolean | null>(null);
+  const [qnnSupport, setQnnSupport] = useState<QnnSupportState>(null);
+  const [qnnError, setQnnError] = useState<string | null>(null);
 
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -61,12 +64,14 @@ export default function SettingsScreen() {
 
   const handleCheckQnn = useCallback(async () => {
     setQnnChecking(true);
-    setQnnSupported(null);
+    setQnnSupport(null);
+    setQnnError(null);
     try {
-      const supported = await isQnnSupported();
-      setQnnSupported(supported);
-    } catch {
-      setQnnSupported(false);
+      const result = await getQnnSupport();
+      setQnnSupport(result);
+    } catch (e: any) {
+      setQnnError(e?.message ?? 'Unknown error');
+      setQnnSupport(null);
     } finally {
       setQnnChecking(false);
     }
@@ -100,7 +105,8 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.title}>QNN (Qualcomm NPU)</Text>
           <Text style={styles.bodyText}>
-            Check whether this build has QNN support (shared library available).
+            Check whether the build has the QNN provider and whether it can be
+            used on this device (HTP backend init).
           </Text>
           <TouchableOpacity
             style={[styles.button, qnnChecking && styles.buttonDisabled]}
@@ -113,10 +119,26 @@ export default function SettingsScreen() {
               <Text style={styles.buttonText}>Check QNN support</Text>
             )}
           </TouchableOpacity>
-          {qnnSupported !== null && !qnnChecking && (
-            <Text style={[styles.bodyText, styles.qnnResult]}>
-              QNN supported: {qnnSupported ? 'Yes' : 'No'}
-            </Text>
+          {qnnSupport !== null && !qnnChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                QNN provider compiled in:{' '}
+                {qnnSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                QNN usable (HTP init): {qnnSupport.canInitQnn ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {qnnSupport.canInitQnn
+                  ? 'You can use provider: "qnn" for STT.'
+                  : qnnSupport.providerCompiled
+                  ? 'QNN is built in but not available on this device (e.g. missing runtime libs or unsupported SoC).'
+                  : 'This build does not include the QNN execution provider.'}
+              </Text>
+            </View>
+          )}
+          {qnnError !== null && !qnnChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>{qnnError}</Text>
           )}
         </View>
         <View style={styles.section}>
@@ -185,9 +207,17 @@ const styles = StyleSheet.create({
     color: '#444444',
     marginBottom: 6,
   },
-  qnnResult: {
+  qnnResultBox: {
     marginTop: 12,
+  },
+  qnnResult: {
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  qnnSummary: {
+    marginTop: 8,
+    fontStyle: 'italic',
+    color: '#555555',
   },
   providerList: {
     marginTop: 12,

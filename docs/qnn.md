@@ -10,6 +10,7 @@ This document describes QNN-specific APIs and behavior in `react-native-sherpa-o
 - [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs)
 - [Overview](#overview)
 - [API Reference](#api-reference)
+  - [getQnnSupport()](#getqnnsupport)
   - [isQnnSupported()](#isqnnsupported)
   - [getAvailableProviders()](#getavailableproviders)
 - [When does `isQnnSupported()` return what?](#when-does-isqnnsupported-return-what)
@@ -59,6 +60,37 @@ The sherpa-onnx and ONNX Runtime libs used by this SDK (from the GitHub Release)
 
 ## API Reference
 
+### `getQnnSupport()`
+
+```ts
+type QnnSupport = { providerCompiled: boolean; canInitQnn: boolean };
+function getQnnSupport(): Promise<QnnSupport>;
+```
+
+**Export:** `react-native-sherpa-onnx` (root).
+
+Returns extended QNN support info:
+
+- **`providerCompiled`** — `true` if the QNN execution provider is in the list from `getAvailableProviders()` (ORT build has QNN linked).
+- **`canInitQnn`** — `true` if the QNN HTP backend can be initialized (native `QnnBackend_create` succeeds). Requires the QNN runtime libs to be present and the device to support them.
+
+Use this to show the user why QNN is or isn’t available (e.g. “QNN compiled but not usable on this device” when `providerCompiled && !canInitQnn`).
+
+**Example:**
+
+```ts
+import { getQnnSupport } from 'react-native-sherpa-onnx';
+
+const { providerCompiled, canInitQnn } = await getQnnSupport();
+if (canInitQnn) {
+  // Use provider: 'qnn' for STT
+} else if (providerCompiled) {
+  // Show "QNN built in but not available on this device"
+} else {
+  // Use CPU or other providers only
+}
+```
+
 ### `isQnnSupported()`
 
 ```ts
@@ -67,12 +99,12 @@ function isQnnSupported(): Promise<boolean>;
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Checks whether the **current build** has QNN support available (i.e. the Qualcomm QNN library can be loaded). This reflects the **native shared libraries** shipped with the app, not whether the device has an NPU.
+Equivalent to `(await getQnnSupport()).canInitQnn`: whether QNN can **actually be used** on this device (provider compiled in and HTP backend initializes). Prefer `getQnnSupport()` when you need to distinguish “compiled but not usable” from “not compiled”.
 
 **Return value:** `Promise<boolean>`
 
-- **`true`** — The QNN library (`libQnnHtp.so`) could be loaded. The sherpa-onnx/ONNX Runtime build is typically a QNN build and can use the QNN execution provider (e.g. `provider: 'qnn'` for STT) on supported devices.
-- **`false`** — Either the QNN library is not present (non-QNN build), or the platform is iOS (no QNN), or the check failed.
+- **`true`** — QNN provider is in the build and the QNN HTP backend initialized successfully; you can use `provider: 'qnn'` for STT.
+- **`false`** — Either the build has no QNN provider, or the QNN runtime libs are missing, or the backend failed to initialize (e.g. unsupported device). On iOS always `false`.
 
 **Example:**
 
@@ -81,7 +113,7 @@ import { isQnnSupported } from 'react-native-sherpa-onnx';
 
 const hasQnn = await isQnnSupported();
 if (hasQnn) {
-  // Optionally use provider: 'qnn' when creating STT
+  // Use provider: 'qnn' when creating STT
 } else {
   // Use CPU or other providers only
 }
@@ -113,16 +145,17 @@ if (hasQnn) {
 }
 ```
 
-## When does `isQnnSupported()` return what?
+## When does `isQnnSupported()` / `getQnnSupport()` return what?
 
-| Situation | Result | Notes |
-|-----------|--------|--------|
-| **Android, QNN runtime libs added** (sherpa-onnx from this SDK is already QNN-built; you added the Qualcomm runtime libs to jniLibs) | `true` | Normal case for a QNN-enabled app. See [Quick start](#quick-start-adding-qnn-runtime-libs). |
-| **Android, QNN runtime libs not added** (sherpa-onnx from this SDK is QNN-built, but you have not added the Qualcomm `.so` files) | `false` | Default until you add the QNN libs yourself. |
-| **Android, libQnnHtp.so present but sherpa-onnx not built with QNN** | `true` | The function only tests whether the QNN library can be **loaded** (e.g. via `dlopen`). It does **not** verify that sherpa-onnx/ONNX Runtime were actually linked with QNN. In this edge case you may get a false positive. |
-| **iOS** | `false` | QNN is Android/Qualcomm only; the iOS implementation always returns `false`. |
+| Situation | `providerCompiled` | `canInitQnn` / `isQnnSupported()` | Notes |
+|-----------|--------------------|-----------------------------------|--------|
+| **Android, QNN runtime libs added** (sherpa-onnx QNN-built; you added Qualcomm runtime libs to jniLibs; device supports HTP) | `true` | `true` | Normal case. See [Quick start](#quick-start-adding-qnn-runtime-libs). |
+| **Android, QNN runtime libs not added** (sherpa-onnx QNN-built, but no Qualcomm `.so` files) | `true` | `false` | Add QNN libs so `QnnBackend_create` can succeed. |
+| **Android, build without QNN** (ORT/sherpa-onnx not built with QNN) | `false` | `false` | No QNN in `getAvailableProviders()`. |
+| **Android, QNN libs present but device/backend init fails** | `true` | `false` | e.g. unsupported SoC or driver; use CPU. |
+| **iOS** | `false` | `false` | QNN is Android/Qualcomm only. |
 
-**Summary:** `isQnnSupported()` is a **heuristic**: “can we load the QNN library?”
+**Summary:** `isQnnSupported()` is true only when **both** the QNN provider is compiled in and the HTP backend initializes. Use `getQnnSupport()` to show users why QNN is unavailable.
 
 ## License and compliance (QNN SDK)
 
