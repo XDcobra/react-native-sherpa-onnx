@@ -2,20 +2,16 @@
 # Release tag is read from third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG.
 # Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ with FFmpeg+shine .so only,
 # so extraction into android/src/main/jniLibs/ merges correctly.
-
+#
+# When to run manually (Actions → Prebuilt - FFmpeg (Android) Release → Run workflow):
+# 1. After updating third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG or FFmpeg/shine submodules.
+# 2. When you want to publish a new FFmpeg Android release (GitHub Release zip for jniLibs).
+# Sherpa-onnx Android build uses this release; run this before building sherpa-onnx if you changed FFmpeg.
+#
 name: Prebuilt - FFmpeg (Android) Release
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'third_party/ffmpeg_prebuilt/**'
-      - 'third_party/ffmpeg/**'
-      - 'third_party/shine_prebuilt/**'
-      - 'third_party/shine/**'
-      - '.github/workflows/build-ffmpeg-android-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
