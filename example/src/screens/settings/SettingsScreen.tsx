@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getQnnSupport,
   getNnapiSupport,
+  getXnnpackSupport,
   getAvailableProviders,
 } from 'react-native-sherpa-onnx';
 
@@ -63,6 +64,11 @@ type NnapiSupportState = {
   canInitNnapi: boolean;
 } | null;
 
+type XnnpackSupportState = {
+  providerCompiled: boolean;
+  canInit: boolean;
+} | null;
+
 export default function SettingsScreen() {
   const [qnnChecking, setQnnChecking] = useState(false);
   const [qnnSupport, setQnnSupport] = useState<QnnSupportState>(null);
@@ -71,6 +77,11 @@ export default function SettingsScreen() {
   const [nnapiChecking, setNnapiChecking] = useState(false);
   const [nnapiSupport, setNnapiSupport] = useState<NnapiSupportState>(null);
   const [nnapiError, setNnapiError] = useState<string | null>(null);
+
+  const [xnnpackChecking, setXnnpackChecking] = useState(false);
+  const [xnnpackSupport, setXnnpackSupport] =
+    useState<XnnpackSupportState>(null);
+  const [xnnpackError, setXnnpackError] = useState<string | null>(null);
 
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -103,6 +114,21 @@ export default function SettingsScreen() {
       setNnapiSupport(null);
     } finally {
       setNnapiChecking(false);
+    }
+  }, []);
+
+  const handleCheckXnnpack = useCallback(async () => {
+    setXnnpackChecking(true);
+    setXnnpackSupport(null);
+    setXnnpackError(null);
+    try {
+      const result = await getXnnpackSupport();
+      setXnnpackSupport(result);
+    } catch (e: any) {
+      setXnnpackError(e?.message ?? 'Unknown error');
+      setXnnpackSupport(null);
+    } finally {
+      setXnnpackChecking(false);
     }
   }, []);
 
@@ -215,6 +241,48 @@ export default function SettingsScreen() {
           {nnapiError !== null && !nnapiChecking && (
             <Text style={[styles.bodyText, styles.errorText]}>
               {nnapiError}
+            </Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>XNNPACK</Text>
+          <Text style={styles.bodyText}>
+            Check whether the build has the XNNPACK provider and (with a model)
+            whether a session can use XNNPACK (CPU-optimized).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, xnnpackChecking && styles.buttonDisabled]}
+            onPress={handleCheckXnnpack}
+            disabled={xnnpackChecking}
+          >
+            {xnnpackChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check XNNPACK support</Text>
+            )}
+          </TouchableOpacity>
+          {xnnpackSupport !== null && !xnnpackChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                XNNPACK provider compiled in:{' '}
+                {xnnpackSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                XNNPACK usable (session init):{' '}
+                {xnnpackSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {xnnpackSupport.canInit
+                  ? 'You can use provider: "xnnpack" for STT.'
+                  : xnnpackSupport.providerCompiled
+                  ? 'canInit is only true when a model is passed to getXnnpackSupport(modelBase64).'
+                  : 'This build does not include the XNNPACK execution provider.'}
+              </Text>
+            </View>
+          )}
+          {xnnpackError !== null && !xnnpackChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {xnnpackError}
             </Text>
           )}
         </View>

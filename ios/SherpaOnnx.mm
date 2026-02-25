@@ -199,12 +199,6 @@
     resolve(@{ @"providerCompiled": @NO, @"canInitQnn": @NO });
 }
 
-- (void)isQnnSupportedWithResolver:(RCTPromiseResolveBlock)resolve
-                      withRejecter:(RCTPromiseRejectBlock)reject
-{
-    resolve(@NO);
-}
-
 // NNAPI is Android-only; on iOS we always return no support.
 - (void)getNnapiSupportWithModelBase64:(NSString *)modelBase64
                           withResolver:(RCTPromiseResolveBlock)resolve
@@ -214,6 +208,17 @@
         @"providerCompiled": @NO,
         @"hasAccelerator": @NO,
         @"canInitNnapi": @NO,
+    });
+}
+
+// XNNPACK support: stub on iOS (could be extended to check ORT providers and session init).
+- (void)getXnnpackSupportWithModelBase64:(NSString *)modelBase64
+                            withResolver:(RCTPromiseResolveBlock)resolve
+                            withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{
+        @"providerCompiled": @NO,
+        @"canInit": @NO,
     });
 }
 

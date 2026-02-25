@@ -44,13 +44,6 @@ export function getQnnSupport(): Promise<QnnSupport> {
 }
 
 /**
- * Whether QNN can actually be used (same as (await getQnnSupport()).canInitQnn).
- */
-export function isQnnSupported(): Promise<boolean> {
-  return SherpaOnnx.isQnnSupported();
-}
-
-/**
  * Return the list of available ONNX Runtime execution providers
  * (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
  * Requires the ORT Java bridge from the onnxruntime AAR.
@@ -72,4 +65,20 @@ export type NnapiSupport = {
  */
 export function getNnapiSupport(modelBase64?: string): Promise<NnapiSupport> {
   return SherpaOnnx.getNnapiSupport(modelBase64);
+}
+
+/** XNNPACK support details: providerCompiled, canInit (latter requires optional model test). */
+export type XnnpackSupport = {
+  providerCompiled: boolean;
+  canInit: boolean;
+};
+
+/**
+ * XNNPACK support info. Optional modelBase64: if provided, canInit tests a real session with XNNPACK.
+ * On iOS returns { providerCompiled: false, canInit: false } (stub).
+ */
+export function getXnnpackSupport(
+  modelBase64?: string
+): Promise<XnnpackSupport> {
+  return SherpaOnnx.getXnnpackSupport(modelBase64);
 }

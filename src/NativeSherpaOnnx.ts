@@ -461,12 +461,6 @@ export interface Spec extends TurboModule {
     canInitQnn: boolean;
   }>;
 
-  /**
-   * Whether QNN can actually be used on this device (same as getQnnSupport().canInitQnn).
-   * True only if the build has the QNN provider and the QNN HTP backend initializes successfully.
-   */
-  isQnnSupported(): Promise<boolean>;
-
   // ==================== NNAPI Methods ====================
 
   /**
@@ -477,6 +471,17 @@ export interface Spec extends TurboModule {
     providerCompiled: boolean;
     hasAccelerator: boolean;
     canInitNnapi: boolean;
+  }>;
+
+  // ==================== XNNPACK Methods ====================
+
+  /**
+   * XNNPACK support: provider compiled in, and (if model given) session can be created with XNNPACK.
+   * Pass optional modelBase64 to test whether a real ONNX model can be loaded with XNNPACK (canInit); otherwise canInit is false.
+   */
+  getXnnpackSupport(modelBase64?: string): Promise<{
+    providerCompiled: boolean;
+    canInit: boolean;
   }>;
 }
 

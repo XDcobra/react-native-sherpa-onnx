@@ -97,20 +97,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /**
-   * Whether QNN can actually be used (same as getQnnSupport().canInitQnn).
-   */
-  override fun isQnnSupported(promise: Promise) {
-    try {
-      val support = ai.onnxruntime.OrtEnvironment.getAvailableProviders().any { it.name.contains("QNN", ignoreCase = true) } &&
-        try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
-      promise.resolve(support)
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "QNN check failed", e)
-      promise.resolve(false)
-    }
-  }
-
   override fun getAvailableProviders(promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
@@ -155,6 +141,42 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return try {
       ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
         opts.addNnapi()
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  /**
+   * Extended XNNPACK support: providerCompiled, canInit (session with XNNPACK if model provided).
+   */
+  override fun getXnnpackSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("XNNPACK", ignoreCase = true) }
+      val canInit = if (!providerCompiled) false
+      else modelBase64?.takeIf { it.isNotEmpty() }?.let { base64 ->
+        try {
+          canReallyUseXnnpack(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
+        } catch (_: Exception) { false }
+      } ?: false
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("canInit", canInit)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getXnnpackSupport failed", e)
+      promise.reject("XNNPACK_SUPPORT_ERROR", "Failed to get XNNPACK support: ${e.message}", e)
+    }
+  }
+
+  private fun canReallyUseXnnpack(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addXnnpack(emptyMap())
         ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
       }
       true
