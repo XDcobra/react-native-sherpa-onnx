@@ -33,10 +33,12 @@ export function testSherpaInit(): Promise<string> {
 }
 
 /**
- * QNN support (Android). Returns providerCompiled, hasAccelerator (= canInit for QNN), canInit (HTP backend init).
+ * QNN support (Android). Optional modelBase64 for canInit (session test); if omitted, SDK uses embedded test model.
  */
-export function getQnnSupport(): Promise<AccelerationSupport> {
-  return SherpaOnnx.getQnnSupport();
+export function getQnnSupport(
+  modelBase64?: string
+): Promise<AccelerationSupport> {
+  return SherpaOnnx.getQnnSupport(modelBase64);
 }
 
 /**

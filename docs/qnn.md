@@ -78,24 +78,24 @@ type AccelerationSupport = {
 
 | Backend | providerCompiled | hasAccelerator | canInit |
 |--------|------------------|----------------|---------|
-| **QNN (Android)** | ORT providers contains QNN | Same as canInit (implicit) | QNN init test |
+| **QNN (Android)** | ORT providers contains QNN | native HTP init (QnnBackend_create) | QNN session test (optional model) |
 | **NNAPI (Android)** | ORT providers contains NNAPI | nativeHasNnapiAccelerator() (GPU or ACCELERATOR) | NNAPI session test (optional model) |
 | **XNNPACK** | ORT providers contains XNNPACK | `true` when compiled (CPU-optimized) | XNNPACK session test (optional model) |
 | **Core ML (iOS)** | `true` (Core ML on iOS 11+) | Apple Neural Engine (MLModel.availableComputeDevices) | ORT session with CoreML EP (stub `false` in this module) |
 
-**Optional `modelBase64` (NNAPI, XNNPACK):** If you omit it, the SDK uses its own small embedded test models to compute `canInit`, so you get a meaningful result without passing anything. Pass `modelBase64` (base64-encoded ONNX bytes) only when you want to test compatibility with a **specific** model (e.g. your real STT encoder).
+**Optional `modelBase64` (QNN, NNAPI, XNNPACK):** If you omit it, the SDK uses its own small embedded test models to compute `canInit`, so you get a meaningful result without passing anything. Pass `modelBase64` (base64-encoded ONNX bytes) only when you want to test compatibility with a **specific** model (e.g. your real STT encoder).
 
 ## API Reference
 
 ### `getQnnSupport()`
 
 ```ts
-function getQnnSupport(): Promise<AccelerationSupport>;
+function getQnnSupport(modelBase64?: string): Promise<AccelerationSupport>;
 ```
 
 **Export:** `react-native-sherpa-onnx` (root).
 
-Returns QNN support in unified format: **providerCompiled** (QNN in ORT providers), **hasAccelerator** (= canInit for QNN), **canInit** (HTP backend init succeeds). Use `canInit` to decide if you can use `provider: 'qnn'` for STT.
+Returns QNN support in unified format: **providerCompiled** (QNN in ORT providers), **hasAccelerator** (native HTP init: `QnnBackend_create` succeeds), **canInit** (session test with QNN EP; uses embedded test model or optional `modelBase64`). Same pattern as NNAPI/XNNPACK. Use `canInit` to decide if you can use `provider: 'qnn'` for STT.
 
 **Example:**
 
@@ -187,7 +187,7 @@ Returns **Core ML (iOS)** support in unified format. **providerCompiled** is alw
 | **Android, QNN libs present but device/backend init fails** | `true` | `false` | `false` | e.g. unsupported SoC or driver; use CPU. |
 | **iOS** | `false` | `false` | `false` | QNN is Android/Qualcomm only. |
 
-**Summary:** `canInit` is true only when **both** the QNN provider is compiled in and the HTP backend initializes. Use `getQnnSupport()` to show users why QNN is unavailable.
+**Summary:** **hasAccelerator** is true when the native QNN HTP backend initializes (`QnnBackend_create`). **canInit** is true when a session with the QNN EP can be created (embedded test model or optional `modelBase64`). Use `getQnnSupport()` to show users why QNN is unavailable.
 
 ## When does `getNnapiSupport()` return what?
 

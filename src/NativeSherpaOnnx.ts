@@ -461,9 +461,9 @@ export interface Spec extends TurboModule {
 
   /**
    * Unified acceleration support: providerCompiled (ORT EP built in), hasAccelerator (NPU/ANE present), canInit (session with EP works).
-   * All get*Support methods return this shape.
+   * All get*Support methods return this shape. Optional modelBase64: if omitted, SDK uses embedded test model for canInit.
    */
-  getQnnSupport(): Promise<AccelerationSupport>;
+  getQnnSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
