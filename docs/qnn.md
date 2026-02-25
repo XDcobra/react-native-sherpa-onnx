@@ -13,7 +13,9 @@ This document describes QNN-specific APIs and behavior in `react-native-sherpa-o
   - [getQnnSupport()](#getqnnsupport)
   - [isQnnSupported()](#isqnnsupported)
   - [getAvailableProviders()](#getavailableproviders)
+  - [getNnapiSupport()](#getnnapisupport)
 - [When does `isQnnSupported()` return what?](#when-does-isqnnsupported-return-what)
+- [When does `getNnapiSupport()` return what?](#when-does-getnnapisupport-return-what)
 - [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk)
 - [Related documentation](#related-documentation)
 
@@ -145,6 +147,46 @@ if (hasQnn) {
 }
 ```
 
+### `getNnapiSupport()`
+
+```ts
+type NnapiSupport = {
+  providerCompiled: boolean;
+  hasAccelerator: boolean;
+  canInitNnapi: boolean;
+};
+function getNnapiSupport(modelBase64?: string): Promise<NnapiSupport>;
+```
+
+**Export:** `react-native-sherpa-onnx` (root).
+
+Returns extended **NNAPI (Android Neural Networks API)** support info. NNAPI allows using GPU/DSP/NPU accelerators on Android. On iOS this always returns `{ providerCompiled: false, hasAccelerator: false, canInitNnapi: false }`.
+
+- **`providerCompiled`** — `true` if the NNAPI execution provider is in the list from `getAvailableProviders()` (ORT build has NNAPI linked).
+- **`hasAccelerator`** — `true` if the device reports at least one NNAPI device of type accelerator (GPU/DSP/NPU). Uses the Android NDK Neural Networks API (API 29+).
+- **`canInitNnapi`** — `true` only if you pass **optional** `modelBase64` (a base64-encoded ONNX model) and a session with NNAPI can be created successfully with that model. Without `modelBase64`, this is always `false` (no model to test with).
+
+Use this to show the user whether NNAPI is available and whether they can use `provider: 'nnapi'` for STT. To get `canInitNnapi: true`, call `getNnapiSupport(modelBase64)` with a small ONNX model (e.g. an encoder) as base64.
+
+**Example:**
+
+```ts
+import { getNnapiSupport } from 'react-native-sherpa-onnx';
+
+// Without model: only providerCompiled and hasAccelerator are meaningful
+const support = await getNnapiSupport();
+if (support.providerCompiled && support.hasAccelerator) {
+  // Device has NNAPI accelerator; canInitNnapi is false unless you pass a model
+}
+
+// With model (e.g. from file or asset): tests whether NNAPI can load this model
+const modelBase64 = '...'; // base64 of ONNX model bytes
+const supportWithModel = await getNnapiSupport(modelBase64);
+if (supportWithModel.canInitNnapi) {
+  // Use provider: 'nnapi' for STT with this build/device
+}
+```
+
 ## When does `isQnnSupported()` / `getQnnSupport()` return what?
 
 | Situation | `providerCompiled` | `canInitQnn` / `isQnnSupported()` | Notes |
@@ -156,6 +198,18 @@ if (hasQnn) {
 | **iOS** | `false` | `false` | QNN is Android/Qualcomm only. |
 
 **Summary:** `isQnnSupported()` is true only when **both** the QNN provider is compiled in and the HTP backend initializes. Use `getQnnSupport()` to show users why QNN is unavailable.
+
+## When does `getNnapiSupport()` return what?
+
+| Situation | `providerCompiled` | `hasAccelerator` | `canInitNnapi` | Notes |
+|-----------|--------------------|------------------|----------------|--------|
+| **Android, NNAPI in build, device has accelerator, model passed and loads with NNAPI** | `true` | `true` | `true` | Use `provider: 'nnapi'` for STT. |
+| **Android, NNAPI in build, device has accelerator, no model passed** | `true` | `true` | `false` | Pass `modelBase64` to test session init. |
+| **Android, NNAPI in build, no accelerator (e.g. emulator)** | `true` | `false` | `false` | NNAPI may fall back to CPU; device has no dedicated accelerator. |
+| **Android, build without NNAPI** | `false` | `false` | `false` | NNAPI not in ORT build. |
+| **iOS** | `false` | `false` | `false` | NNAPI is Android-only. |
+
+**Summary:** `canInitNnapi` is only `true` when you call `getNnapiSupport(modelBase64)` with a valid ONNX model and the session with NNAPI is created successfully. Use `providerCompiled` and `hasAccelerator` to show why NNAPI might be unavailable.
 
 ## License and compliance (QNN SDK)
 
