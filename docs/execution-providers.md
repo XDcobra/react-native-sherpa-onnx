@@ -5,6 +5,22 @@ This document describes how `react-native-sherpa-onnx` exposes **execution provi
 > **Disclaimer — QNN runtime libs not included**  
 > This SDK **supports** QNN (sherpa-onnx/ONNX Runtime are built with QNN linking). For **license reasons** we do **not** ship the Qualcomm QNN runtime libraries. If you want QNN/NPU acceleration on Android, you must **obtain and add the QNN runtime libs yourself**. See [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs) and [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk) for how to do this in a compliant way.
 
+### Execution provider overview
+
+| Execution Provider | Supported | provider_id | Notes |
+|-------------------|-----------|-------------|--------|
+| CPU | ✅ | `cpu` | Default fallback; always available. |
+| Core ML | ✅ | `coreml` | iOS only. Apple Neural Engine when available. |
+| XNNPACK | ✅ | `xnnpack` | CPU-optimized; Android/iOS when built in. |
+| NNAPI | ✅ | `nnapi` | Android only. Uses GPU/DSP/NPU via [Android Neural Networks API](https://developer.android.com/ndk/guides/neuralnetworks). |
+| QNN | ✅ | `qnn` | Android only (Qualcomm NPU). Requires [adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs) yourself. |
+| CUDA | ❌ | — | NVIDIA GPUs; targets desktop/server. React Native targets mobile (iOS/Android), so not applicable. |
+| TRT (TensorRT) | ❌ | — | NVIDIA TensorRT; desktop/server. Same as CUDA — not relevant for mobile React Native apps. |
+| DirectML | ❌ | — | Windows GPU acceleration. React Native does not target Windows as a primary platform for this SDK. |
+| SpacemiT | ❌ | — | Not part of the current build; targets specific NPU hardware not in scope for this SDK. |
+
+> **Unsupported providers (CUDA, TRT, DirectML, SpacemiT):** Implementation is not planned. If you need support for one of these, please open an issue.
+
 ## Table of contents
 
 - [Quick start: adding QNN runtime libs](#quick-start-adding-qnn-runtime-libs)
