@@ -4,6 +4,18 @@
 # AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:sherpa-onnx (POM depends on com.xdcobra.sherpa:onnxruntime).
 # If MAVEN_REPO_PAT is set, the AAR is also published to XDcobra/maven with MD5/SHA1 checksums.
 
+# 
+# ──────────────────────────────────────────────────────────
+# 1. Build sherpa-onnx (Android, all ABIs, with QNN)
+# ──────────────────────────────────────────────────────────
+# 2. Package sherpa-onnx layout zip (from build output)
+# ──────────────────────────────────────────────────────────
+# 3. Prepare AAR for release asset
+# ──────────────────────────────────────────────────────────
+# 4. Create GitHub Release (AAR + zip)
+# ──────────────────────────────────────────────────────────
+# 5. Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven)
+# ──────────────────────────────────────────────────────────
 name: Prebuilt - Sherpa-onnx (Android) Release
 
 on:
