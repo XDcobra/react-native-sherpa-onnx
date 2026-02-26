@@ -53,14 +53,15 @@ fi
 if [ -n "$SHERPA_ONNX_VERSION" ]; then
   DESIRED_VERSION="$SHERPA_ONNX_VERSION"
 fi
-# If no env var was provided, use repo-level ANDROID_RELEASE_TAG (single source of truth for sherpa-onnx version).
+# If no env var was provided, use repo-level IOS_RELEASE_TAG (pinned iOS framework version).
+# Format: framework-vX.Y.Z (e.g. framework-v1.12.24). Do not use ANDROID_RELEASE_TAG for iOS.
 if [ -z "$DESIRED_VERSION" ]; then
-  TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG"
-  if [ -f "$TAG_FILE" ]; then
-    TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
-    if [ -n "$TAG" ] && [ "${TAG#sherpa-onnx-android-v}" != "$TAG" ]; then
-      DESIRED_VERSION="${TAG#sherpa-onnx-android-v}"
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using sherpa-onnx version from ANDROID_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
+  IOS_TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
+  if [ -f "$IOS_TAG_FILE" ]; then
+    TAG=$(grep -v '^#' "$IOS_TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+    if [ -n "$TAG" ] && [ "${TAG#framework-v}" != "$TAG" ]; then
+      DESIRED_VERSION="${TAG#framework-v}"
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using iOS framework version from IOS_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
     fi
   fi
 fi

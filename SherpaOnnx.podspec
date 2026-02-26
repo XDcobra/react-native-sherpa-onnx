@@ -12,8 +12,11 @@ Pod::Spec.new do |s|
 
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
-  
-  s.source_files = "ios/**/*.{h,m,mm,swift,cpp}"
+
+  # Download sherpa-onnx XCFramework from GitHub Releases before pod install (uses IOS_RELEASE_TAG for pinned version).
+  s.prepare_command = "bash scripts/setup-ios-framework.sh"
+
+  s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}"]
   s.private_header_files = "ios/**/*.h"
 
   install_modules_dependencies(s)
