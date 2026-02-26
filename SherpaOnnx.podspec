@@ -2,18 +2,6 @@ require "json"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
-# Compute absolute paths
-pod_root = __dir__
-ios_include_path = File.join(pod_root, 'ios', 'include')
-ios_path = File.join(pod_root, 'ios')
-framework_path = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
-libarchive_dir = File.join(pod_root, 'third_party', 'libarchive', 'libarchive')
-# Libarchive C sources for iOS: exclude test/, Windows, and non-Darwin platform files
-libarchive_sources = Dir.glob(File.join(libarchive_dir, '*.c'))
-  .reject { |f| File.basename(f) =~ /^test\./ }
-  .reject { |f| base = File.basename(f, '.c'); base.include?('windows') || base.include?('linux') || base.include?('sunos') || base.include?('freebsd') }
-  .map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub('\\', '/') }
-
 Pod::Spec.new do |s|
   s.name         = "SherpaOnnx"
   s.version      = package["version"]
@@ -25,83 +13,8 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
   
-  # Source files (implementation)
-  # Include .cc for cxx-api.cc (C++ wrapper around C API)
-  # Include vendored libarchive .c for iOS (system does not provide libarchive)
-  s.source_files = ["ios/**/*.{h,m,mm,swift,cpp,cc}", *libarchive_sources]
-  
-  # Private headers (our wrapper headers)
-  s.private_header_files = [
-    "ios/*.h",
-    "ios/include/**/*.h"
-  ]
-  
-  # Link with required frameworks and libraries
-  # CoreML is required by ONNX Runtime's CoreML execution provider
-  s.frameworks = 'Foundation', 'Accelerate', 'CoreML'
-  # Link zlib (system on iOS); libarchive is built from vendored source above
-  s.libraries = 'c++', 'z'
-  
-  # iOS: Headers are committed; XCFramework can be downloaded with yarn download-ios-framework (or from GitHub Releases).
-  
-  # Verify XCFramework exists
-  unless File.exist?(framework_path)
-    raise <<~MSG
-      [SherpaOnnx] ERROR: iOS Framework not found.
-      
-      The sherpa-onnx XCFramework should have been downloaded automatically during pod install.
-      If the automatic download failed, you can manually download it by running:
-      
-      yarn download-ios-framework
-      
-      Or download from GitHub Releases:
-      https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework
-      
-      Then extract to: #{framework_path}
-    MSG
-  end
-  
-  # Log paths for debugging (visible during pod install)
-  puts "[SherpaOnnx] Pod root: #{pod_root}"
-  puts "[SherpaOnnx] Include path: #{ios_include_path}"
-  puts "[SherpaOnnx] Framework path: #{framework_path}"
-  framework_version = File.read(File.join(pod_root, 'ios', 'Frameworks', '.framework-version')).strip rescue 'unknown'
-  puts "[SherpaOnnx] Framework version: #{framework_version}"
-  
-  # Use vendored_frameworks for the XCFramework
-  s.vendored_frameworks = 'ios/Frameworks/sherpa_onnx.xcframework'
-  
-  # Explicit library search paths and link flags so the app target actually links
-  # libsherpa-onnx.a (C++ API). CocoaPods does not always add -l for static libs inside
-  # xcframeworks, which can cause "Undefined symbols: sherpa_onnx::cxx::*" on iOS/simulator.
-  xcframework_root = File.join(pod_root, 'ios', 'Frameworks', 'sherpa_onnx.xcframework')
-  simulator_slice = File.join(xcframework_root, 'ios-arm64_x86_64-simulator')
-  device_slice = File.join(xcframework_root, 'ios-arm64')
-  
-  s.pod_target_xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
-    'CLANG_CXX_LIBRARY' => 'libc++',
-    'HEADER_SEARCH_PATHS' => "$(inherited) \"#{ios_include_path}\" \"#{libarchive_dir}\" \"#{ios_path}\"",
-    # Quotes in macro value must be escaped so #include PLATFORM_CONFIG_H becomes #include "libarchive_darwin_config.h"
-    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
-    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]' => "$(inherited) \"#{device_slice}\"",
-    'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]' => "$(inherited) \"#{simulator_slice}\"",
-    'OTHER_LDFLAGS' => '$(inherited) -lsherpa-onnx',
-  }
-  
-  s.user_target_xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
-    'CLANG_CXX_LIBRARY' => 'libc++',
-    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]' => "$(inherited) \"#{device_slice}\"",
-    'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]' => "$(inherited) \"#{simulator_slice}\"",
-    'OTHER_LDFLAGS' => '$(inherited) -lsherpa-onnx',
-  }
-  
-  # Preserve headers and config files
-  s.preserve_paths = [
-    'ios/SherpaOnnx.xcconfig',
-    'ios/include/**/*'
-  ]
-  
+  s.source_files = "ios/**/*.{h,m,mm,swift,cpp}"
+  s.private_header_files = "ios/**/*.h"
+
   install_modules_dependencies(s)
 end
