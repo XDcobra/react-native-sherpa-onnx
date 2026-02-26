@@ -10,7 +10,6 @@ name: Prebuilt - libarchive (iOS) Release
 
 on:
   workflow_dispatch:
-  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -2,9 +2,13 @@ require "json"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 pod_root = __dir__
-# Android-style fallback: prefer local third_party, else use downloaded ios/Downloads/libarchive (from setup-ios-libarchive.sh, run in Podfile pre_install).
+# Android-style fallback: prefer local third_party, else download to ios/Downloads/libarchive (run automatically when podspec is loaded).
 libarchive_third_party = File.join(pod_root, "third_party", "libarchive", "libarchive")
 libarchive_downloads = File.join(pod_root, "ios", "Downloads", "libarchive")
+unless File.directory?(libarchive_third_party)
+  libarchive_script = File.join(pod_root, "ios", "scripts", "setup-ios-libarchive.sh")
+  system("bash", libarchive_script) if File.executable?(libarchive_script)
+end
 libarchive_dir = File.directory?(libarchive_third_party) ? libarchive_third_party : libarchive_downloads
 # Libarchive C sources for iOS: exclude test/, Windows, and non-Darwin platform files.
 libarchive_sources = if File.directory?(libarchive_dir)
@@ -35,7 +39,7 @@ Pod::Spec.new do |s|
 
   s.pod_target_xcconfig = {
     "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{libarchive_dir}\"",
-    "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H="libarchive_darwin_config.h"'
+    "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
   }
 
   s.libraries = "c++", "z"
