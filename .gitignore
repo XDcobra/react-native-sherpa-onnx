@@ -119,6 +119,8 @@ third_party/sherpa-onnx-prebuilt/publish-maven/publish.env
 sherpa-onnx-aar-staging.*
 # staging dir left behind if create_ffmpeg_aar.sh is interrupted
 ffmpeg-aar-staging.*
+# staging dir left behind if create_libarchive_aar.sh is interrupted
+libarchive-aar-staging.*
 
 # shine build artifacts (when building prebuilts locally)
 # ignore everything under shine_prebuilt by default
@@ -162,6 +164,24 @@ third_party/ffmpeg_prebuilt/publish-maven/*
 !third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
 !third_party/ffmpeg_prebuilt/publish-maven/README.md
 third_party/ffmpeg_prebuilt/publish-maven/publish.env
+
+# libarchive prebuilt: build output (when building prebuilts locally)
+# ignore everything under libarchive_prebuilt by default
+third_party/libarchive_prebuilt/*
+# but allow tracked files
+!third_party/libarchive_prebuilt/README.md
+!third_party/libarchive_prebuilt/build_libarchive.sh
+!third_party/libarchive_prebuilt/create_libarchive_aar.sh
+!third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js
+!third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG
+!third_party/libarchive_prebuilt/publish-maven/
+third_party/libarchive_prebuilt/publish-maven/*
+!third_party/libarchive_prebuilt/publish-maven/publish.env.example
+!third_party/libarchive_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/libarchive_prebuilt/publish-maven/README.md
+third_party/libarchive_prebuilt/publish-maven/publish.env
+third_party/libarchive_prebuilt/android/
+third_party/libarchive_prebuilt/build-*/
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
