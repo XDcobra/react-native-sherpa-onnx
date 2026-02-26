@@ -44,11 +44,11 @@ jobs:
         run: yarn typecheck
 
   build-ios:
-    runs-on: macos-15
+    runs-on: macos-26
     needs: lint
 
     env:
-      XCODE_VERSION: 16.4
+      XCODE_VERSION: 26.2
       # Pass token so download-models.js can call GitHub API (higher rate limit, avoids 403)
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
