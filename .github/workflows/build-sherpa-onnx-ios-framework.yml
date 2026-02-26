@@ -4,13 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       sherpa_onnx_version:
-        description: 'sherpa-onnx version/tag to build (e.g., v1.12.24 or main)'
-        required: true
-        default: 'v1.12.24'
-
+        description: 'sherpa-onnx version/tag to build (e.g. v1.12.24 or main). Leave empty to use third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.'
+        required: false
+        default: ''
 
 env:
-  SHERPA_ONNX_VERSION: ${{ github.event.inputs.sherpa_onnx_version || 'v1.12.24' }}
   XCODE_VERSION: '16.3'
 
 jobs:
@@ -27,6 +25,29 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
           persist-credentials: true
+
+      - name: Set sherpa-onnx version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.sherpa_onnx_version }}" ]; then
+            VER="${{ github.event.inputs.sherpa_onnx_version }}"
+          else
+            TAG_FILE=third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
+            if [ ! -f "$TAG_FILE" ]; then
+              echo "::error::No input version and $TAG_FILE missing"
+              exit 1
+            fi
+            TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+            if [ -z "$TAG" ] || [ "${TAG#sherpa-onnx-android-v}" = "$TAG" ]; then
+              echo "::error::ANDROID_RELEASE_TAG must be set to sherpa-onnx-android-vX.Y.Z"
+              exit 1
+            fi
+            VER="v${TAG#sherpa-onnx-android-v}"
+          fi
+          [ "${VER#v}" = "$VER" ] && VER="v$VER"
+          echo "SHERPA_ONNX_VERSION=$VER" >> $GITHUB_ENV
+          echo "version=${VER#v}" >> $GITHUB_OUTPUT
+          echo "Using sherpa-onnx version: $VER"
 
       - name: Use appropriate Xcode version
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
@@ -305,22 +326,11 @@ jobs:
           path: ios/Frameworks/sherpa_onnx.xcframework.zip
           retention-days: 90
 
-      - name: Extract version number from tag
-        id: extract_version
-        run: |
-          # Extract version from SHERPA_ONNX_VERSION (e.g., "v1.12.24" -> "1.12.24")
-          VERSION="${{ env.SHERPA_ONNX_VERSION }}"
-          if [[ $VERSION == v* ]]; then
-            VERSION="${VERSION:1}"  # Remove leading 'v'
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Release version: $VERSION"
-
       - name: Create GitHub Release with Framework
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: framework-v${{ steps.extract_version.outputs.version }}
-          name: sherpa-onnx Framework v${{ steps.extract_version.outputs.version }}
+          tag_name: framework-v${{ steps.version.outputs.version }}
+          name: sherpa-onnx Framework v${{ steps.version.outputs.version }}
           body: |
             This release contains the prebuilt sherpa-onnx XCFramework for iOS development with ONNX Runtime support.
 
@@ -363,7 +373,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ env.SHERPA_ONNX_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Framework Location:** \`ios/Frameworks/sherpa_onnx.xcframework\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GitHub Release:** [framework-v${{ steps.extract_version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.extract_version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Release:** [framework-v${{ steps.version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Methods" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -373,6 +383,6 @@ jobs:
           echo "```" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Manual:**" >> $GITHUB_STEP_SUMMARY
-          echo "1. Download from [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.extract_version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download from [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
           echo "2. Extract: \`unzip sherpa_onnx.xcframework.zip\`" >> $GITHUB_STEP_SUMMARY
           echo "3. Copy: \`cp -r sherpa_onnx.xcframework ios/Frameworks/\`" >> $GITHUB_STEP_SUMMARY
