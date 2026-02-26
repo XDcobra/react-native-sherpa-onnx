@@ -41,6 +41,25 @@ if (!ffmpegVersion) {
   }
 }
 
+// libarchive version for Maven AAR (com.xdcobra.sherpa:libarchive).
+// 1. LIBARCHIVE_VERSION env 2. ANDROID_RELEASE_TAG (libarchive-android-vX.Y.Z → X.Y.Z) 3. project property 4. default
+def libarchiveVersion = System.getenv('LIBARCHIVE_VERSION')
+if (!libarchiveVersion) {
+  def tagFile = new File(rootDir, 'third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG')
+  if (tagFile.exists()) {
+    def tag = tagFile.text.split(/\r?\n/).findResult { line ->
+      def t = line.replaceAll(/\s*#.*$/, '').trim()
+      t ? t : null
+    }
+    if (tag?.startsWith('libarchive-android-v')) {
+      libarchiveVersion = tag.replaceFirst('^libarchive-android-v', '')
+    }
+  }
+  if (!libarchiveVersion) {
+    libarchiveVersion = project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5'
+  }
+}
+
 def sherpaOnnxClassesDir = file("${buildDir}/sherpa-onnx-classes")
 
 buildscript {
@@ -155,6 +174,7 @@ android {
   //   2. Maven AAR (com.xdcobra.sherpa:sherpa-onnx → jniLibs + c-api headers + classes.jar)
   //   3. GitHub release zip (last resort: sherpa-onnx-android.zip → jniLibs + headers + classes.jar)
   // FFmpeg libs/headers: (1) local third_party build → (2) Maven AAR com.xdcobra.sherpa:ffmpeg → (3) GitHub release zip.
+  // libarchive libs/headers: (1) local third_party build → (2) Maven AAR com.xdcobra.sherpa:libarchive → (3) GitHub release zip.
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
   def requiredFfmpegSoFiles = [
@@ -163,6 +183,7 @@ android {
   def requiredSherpaOnnxSoFiles = [
     'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
   ]
+  def requiredLibarchiveSoFiles = ['libarchive.so']
 
   def jniLibsDir = file("${projectDir}/src/main/jniLibs")
 
@@ -190,6 +211,21 @@ android {
 
   def hasSherpaHeaders = {
     return new File(projectDir, "src/main/cpp/include/sherpa-onnx/c-api/c-api.h").exists()
+  }
+
+  def hasAllLibarchiveLibs = {
+    for (abi in requiredAbis) {
+      def dir = new File(jniLibsDir, abi)
+      if (!dir.exists()) return false
+      for (soName in requiredLibarchiveSoFiles) {
+        if (!new File(dir, soName).exists()) return false
+      }
+    }
+    return true
+  }
+
+  def hasLibarchiveHeaders = {
+    return new File(projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
   }
 
   def getGitHubRepo = {
@@ -279,17 +315,48 @@ android {
             println "[FFmpeg] Native libs + headers: (2) Maven AAR (${aar.name})"
           }
         } catch (Exception e) {
-          println "Could not resolve FFmpeg Maven AAR: ${e.message}"
+            println "Could not resolve FFmpeg Maven AAR: ${e.message}"
+        }
+      }
+
+      // Priority 2 for libarchive: Maven AAR (libs + include; no GitHub repo needed).
+      if (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
+        try {
+          def aarFiles = project.configurations.libarchiveAar.files
+          if (!aarFiles.isEmpty()) {
+            downloadDir.mkdirs()
+            def aar = aarFiles.iterator().next()
+            def aarExtractDir = new File(downloadDir, "libarchive-aar-extract")
+            if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+            aarExtractDir.mkdirs()
+            copy { from zipTree(aar); into aarExtractDir }
+            requiredAbis.each { abi ->
+              def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+              if (aarJniDir.exists()) {
+                copy { from aarJniDir; into new File(jniLibsDir, abi) }
+              }
+            }
+            def libarchiveIncludeDir = file("${projectDir}/src/main/cpp/include/libarchive")
+            def aarIncludeDir = new File(aarExtractDir, "include")
+            if (aarIncludeDir.exists()) {
+              libarchiveIncludeDir.mkdirs()
+              copy { from aarIncludeDir; into libarchiveIncludeDir }
+              println "Extracted libarchive headers from Maven AAR"
+            }
+            println "[libarchive] Native libs + headers: (2) Maven AAR (${aar.name})"
+          }
+        } catch (Exception e) {
+          println "Could not resolve libarchive Maven AAR: ${e.message}"
         }
       }
 
       // Priority 3: GitHub release download for anything still missing
       def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
       if (!repo) {
-        if (!hasAllFfmpegLibs() || !hasAllSherpaLibs() || !hasSherpaHeaders()) {
+        if (!hasAllFfmpegLibs() || !hasAllSherpaLibs() || !hasSherpaHeaders() || !hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
           throw new RuntimeException(
             "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-            "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx), or ensure ANDROID_RELEASE_TAG releases exist."
+            "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist."
           )
         }
         return
@@ -319,6 +386,31 @@ android {
           copy { from fileTree(ffmpegIncludeInZip); into ffmpegIncludeDir }
         }
         println "Downloaded and extracted FFmpeg prebuilts (libs + include) from ${tag}"
+      }
+
+      if (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
+        def tagFile = file("${projectDir.parent}/third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
+        def tag = readReleaseTag(tagFile)
+        if (!tag) throw new RuntimeException("Missing or empty third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
+        def zipFile = new File(downloadDir, "libarchive-android.zip")
+        def url = "${baseUrl}/${tag}/libarchive-android.zip"
+        exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir projectDir }
+        if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+        def libarchiveExtractDir = new File(downloadDir, "libarchive-extract")
+        if (libarchiveExtractDir.exists()) libarchiveExtractDir.deleteDir()
+        libarchiveExtractDir.mkdirs()
+        copy { from zipTree(zipFile); into libarchiveExtractDir }
+        copy {
+          from fileTree(libarchiveExtractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
+          into jniLibsDir
+        }
+        def libarchiveIncludeDir = file("${projectDir}/src/main/cpp/include/libarchive")
+        def libarchiveIncludeInZip = new File(libarchiveExtractDir, "include")
+        if (libarchiveIncludeInZip.exists()) {
+          libarchiveIncludeDir.mkdirs()
+          copy { from libarchiveIncludeInZip; into libarchiveIncludeDir }
+        }
+        println "Downloaded and extracted libarchive prebuilts (libs + include) from ${tag}"
       }
 
       if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
@@ -369,7 +461,7 @@ android {
       requiredAbis.each { abi ->
         def dir = file("${projectDir}/src/main/jniLibs/${abi}")
         if (!dir.exists()) {
-          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx), or ensure ANDROID_RELEASE_TAG releases exist.")
+          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist.")
         }
         requiredFfmpegSoFiles.each { soName ->
           def soFile = new File(dir, soName)
@@ -381,6 +473,12 @@ android {
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
             throw new RuntimeException("Missing required sherpa-onnx library '${soName}' for ABI ${abi}. Run third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js")
+          }
+        }
+        requiredLibarchiveSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required libarchive library '${soName}' for ABI ${abi}. Run third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:libarchive is available.")
           }
         }
       }
@@ -401,7 +499,7 @@ repositories {
 // Resolve sherpa-onnx AAR from Maven (priority 2 for classes.jar extraction).
 // Declaring without classifier resolves the main artifact (sherpa-onnx-1.12.24.aar = Kotlin API).
 // Do not use classifier "java" here or the Java Builder API would be used and Kotlin helpers would fail.
-configurations { sherpaOnnxAar; ffmpegAar }
+configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar }
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
@@ -458,6 +556,9 @@ dependencies {
 
   // Resolve FFmpeg AAR for jniLibs + include (priority 2); only used by downloadNativeLibsIfNeeded.
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
+
+  // Resolve libarchive AAR for jniLibs + include (priority 2); only used by downloadNativeLibsIfNeeded.
+  libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
 
   // sherpa-onnx Java API (classes.jar: local third_party | Maven AAR | GitHub release); native .so from prebuilts.
   implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))

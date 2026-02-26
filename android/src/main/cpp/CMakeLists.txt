@@ -65,11 +65,34 @@ set(SOURCES
     crypto/sha256.cpp
 )
 
-# Build libarchive from bundled source (shared by Android and iOS)
-# PROJECT_ROOT is android/; third_party is at repo root (one level above PROJECT_ROOT)
-message(STATUS "Building libarchive from bundled source...")
-add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
-message(STATUS "libarchive built successfully")
+# libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
+set(LIBARCHIVE_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libarchive_prebuilt/android")
+set(LIBARCHIVE_PREBUILT_LIB "${LIBARCHIVE_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LIBARCHIVE_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LIBARCHIVE_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/libarchive")
+set(USE_LIBARCHIVE_PREBUILT OFF)
+if(EXISTS "${LIBARCHIVE_PREBUILT_LIB}/libarchive.so")
+    set(USE_LIBARCHIVE_PREBUILT ON)
+    set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_PREBUILT_LIB}")
+    if(EXISTS "${LIBARCHIVE_PREBUILT_BASE}/include")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_PREBUILT_BASE}/include")
+    elseif(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
+    endif()
+elseif(EXISTS "${LIBARCHIVE_JNILIBS}/libarchive.so")
+    set(USE_LIBARCHIVE_PREBUILT ON)
+    set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_JNILIBS}")
+    if(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
+    endif()
+endif()
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
+    message(STATUS "libarchive: using prebuilt (libs: ${LIBARCHIVE_LIB_DIR}, include: ${LIBARCHIVE_INCLUDE_DIR})")
+else()
+    message(STATUS "Building libarchive from bundled source...")
+    add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
+    message(STATUS "libarchive built successfully")
+endif()
 
 # Create shared library
 add_library(sherpaonnx SHARED
@@ -101,10 +124,16 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${FFMPEG_INCLUDE_DIR}
 )
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
+endif()
 target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
 # Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
 target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
+endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
