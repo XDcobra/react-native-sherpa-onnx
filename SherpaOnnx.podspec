@@ -37,9 +37,30 @@ Pod::Spec.new do |s|
   s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}", *libarchive_sources]
   s.private_header_files = "ios/**/*.h"
 
+  s.frameworks = "Foundation", "Accelerate", "CoreML"
+  s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework"
+  xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
+  simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  device_headers = File.join(xcframework_root, "ios-arm64", "Headers")
+  simulator_slice = File.join(xcframework_root, "ios-arm64_x86_64-simulator")
+  device_slice = File.join(xcframework_root, "ios-arm64")
+
   s.pod_target_xcconfig = {
-    "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{libarchive_dir}\"",
-    "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
+    "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{libarchive_dir}\" \"#{device_headers}\" \"#{simulator_headers}\"",
+    "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
+    "CLANG_CXX_LIBRARY" => "libc++",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
+    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
+  }
+
+  s.user_target_xcconfig = {
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
+    "CLANG_CXX_LIBRARY" => "libc++",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
+    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
   }
 
   s.libraries = "c++", "z"
