@@ -430,6 +430,7 @@ afterEvaluate {
   }
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn extractSherpaOnnxClasses
+    dependsOn tasks.named("checkJniLibs")
   }
 
   // With includesGeneratedCode=false, codegen is always run by our custom task (not RNGP).
