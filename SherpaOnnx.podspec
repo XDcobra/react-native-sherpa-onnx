@@ -49,7 +49,6 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
 
   # Download sherpa-onnx XCFramework from GitHub Releases before pod install (uses IOS_RELEASE_TAG for pinned version).
-  # Use absolute path so the script resolves PROJECT_ROOT correctly in all contexts (pod install, Xcode).
   setup_script = File.join(pod_root, "scripts", "setup-ios-framework.sh")
   s.prepare_command = "bash \"#{setup_script}\""
 
