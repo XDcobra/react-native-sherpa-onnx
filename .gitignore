@@ -197,6 +197,7 @@ ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive
 ios/Downloads/
+ios/patched_libarchive/
 
 # Verdaccio (lokales npm Registry)
 .npmrc

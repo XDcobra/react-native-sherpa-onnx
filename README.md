@@ -149,7 +149,10 @@ cp -r build-ios/sherpa_onnx.xcframework /path/to/react-native-sherpa-onnx/ios/Fr
 
 Then run `pod install` as usual.
 
-**Note:** The iOS implementation uses the same C++ wrapper as Android, ensuring consistent behavior across platforms.
+**Build details (for maintainers):**
+
+- **C++ API:** The iOS native code uses sherpa-onnx’s **C++ API** (Obj-C++). The XCFramework must therefore include the C++ API library (`libsherpa-onnx-cxx-api.a`). The official upstream `build-ios.sh` only merges the C-API into `libsherpa-onnx.a`; the [Framework build workflow](.github/workflows/build-sherpa-onnx-ios-framework.yml) patches `build-ios.sh` before running it so that `libsherpa-onnx-cxx-api.a` is also merged, ensuring all `sherpa_onnx::cxx::*` symbols are available at link time.
+- **Libarchive:** TTS and other features use libarchive. Libarchive is **not** shipped as a prebuilt; it is compiled from source as part of the Pod. Sources are taken from `third_party/libarchive` (if present) or downloaded via `ios/scripts/setup-ios-libarchive.sh` (version pinned in `third_party/libarchive_prebuilt/IOS_RELEASE_TAG`). The podspec runs `ios/scripts/patch-libarchive-includes.sh` to copy `.c` files into `ios/patched_libarchive/` with added `#include <stdio.h>` and `#include <unistd.h>` so they compile without modifying the submodule. If you see “Libarchive sources missing” at `pod install`, ensure the download has run or the patch script has access to the libarchive source directory.
 
 ## Documentation
 

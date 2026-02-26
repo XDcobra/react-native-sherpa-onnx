@@ -85,7 +85,9 @@
     "!./third_party/ffmpeg/**",
     "!ios/Frameworks/.gitkeep",
     "!ios/Downloads",
-    "!ios/Downloads/**"
+    "!ios/Downloads/**",
+    "!ios/patched_libarchive",
+    "!ios/patched_libarchive/**"
   ],
   "scripts": {
     "example": "yarn workspace react-native-sherpa-onnx-example",

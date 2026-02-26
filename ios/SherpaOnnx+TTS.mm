@@ -647,6 +647,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             TtsInstanceState *inst = nullptr;
             NSError *startError = nil;
             NSString *errorMsg = nil;
+            AVAudioSession *session = nil;
             {
                 std::lock_guard<std::mutex> lock(g_tts_mutex);
                 auto it = g_tts_instances.find(instanceIdStr);
@@ -669,7 +670,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                 inst->format = nil;
             }
 
-            AVAudioSession *session = [AVAudioSession sharedInstance];
+            session = [AVAudioSession sharedInstance];
             [session setCategory:AVAudioSessionCategoryPlayback error:nil];
             [session setActive:YES error:nil];
 

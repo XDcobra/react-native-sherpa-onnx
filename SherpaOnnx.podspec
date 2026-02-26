@@ -10,14 +10,22 @@ unless File.directory?(libarchive_third_party)
   system("bash", libarchive_script) if File.executable?(libarchive_script)
 end
 libarchive_dir = File.directory?(libarchive_third_party) ? libarchive_third_party : libarchive_downloads
-# Libarchive C sources for iOS: exclude test/, Windows, and non-Darwin platform files.
-libarchive_sources = if File.directory?(libarchive_dir)
-  Dir.glob(File.join(libarchive_dir, "*.c")).reject { |f|
+# Patch libarchive .c files (copy to ios/patched_libarchive with stdio.h/unistd.h added) so we don't modify the submodule.
+patched_dir = File.join(pod_root, "ios", "patched_libarchive")
+patch_script = File.join(pod_root, "ios", "scripts", "patch-libarchive-includes.sh")
+system("bash", patch_script, libarchive_dir) if File.directory?(libarchive_dir) && File.executable?(patch_script)
+# Libarchive C sources: use patched copies (same exclude as before: test, windows, linux, sunos, freebsd).
+libarchive_sources = if File.directory?(patched_dir)
+  Dir.glob(File.join(patched_dir, "*.c")).reject { |f|
     base = File.basename(f, ".c")
     File.basename(f) =~ /^test\./ || base.include?("windows") || base.include?("linux") || base.include?("sunos") || base.include?("freebsd")
   }.map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub("\\", "/") }
 else
   []
+end
+
+if libarchive_sources.empty?
+  abort("[SherpaOnnx] Libarchive sources missing. Ensure ios/scripts/setup-ios-libarchive.sh has run (or third_party/libarchive is present) and that ios/scripts/patch-libarchive-includes.sh succeeds. Check pod install logs for patch script errors.")
 end
 
 Pod::Spec.new do |s|
