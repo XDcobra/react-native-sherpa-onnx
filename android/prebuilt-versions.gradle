@@ -1,0 +1,36 @@
+// Resolve prebuilt versions from env, ANDROID_RELEASE_TAG files, or defaults.
+// Used by dependencies (AAR coordinates) and by prebuilt-download.gradle.
+// Returns version string from tag file (e.g. ffmpeg-android-v8.0.1 -> 8.0.1) or null if not found.
+def readVersionFromTagFile(File tagFile, String prefix) {
+  if (!tagFile.exists()) return null
+  def tag = tagFile.text.split(/\r?\n/).findResult { line ->
+    def t = line.replaceAll(/\s*#.*$/, '').trim()
+    t ? t : null
+  }
+  if (tag?.startsWith(prefix)) return tag.replaceFirst(~/^\Q${prefix}\E/, '')
+  return null
+}
+
+// sherpa-onnx: 1. SHERPA_ONNX_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def sherpaOnnxVersion = System.getenv('SHERPA_ONNX_VERSION')
+if (!sherpaOnnxVersion) {
+  def v = readVersionFromTagFile(new File(rootDir, 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG'), 'sherpa-onnx-android-v')
+  sherpaOnnxVersion = v ?: (project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.24')
+}
+project.ext.sherpaOnnxVersion = sherpaOnnxVersion
+
+// FFmpeg: 1. FFMPEG_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def ffmpegVersion = System.getenv('FFMPEG_VERSION')
+if (!ffmpegVersion) {
+  def v = readVersionFromTagFile(new File(rootDir, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG'), 'ffmpeg-android-v')
+  ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1')
+}
+project.ext.ffmpegVersion = ffmpegVersion
+
+// libarchive: 1. LIBARCHIVE_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def libarchiveVersion = System.getenv('LIBARCHIVE_VERSION')
+if (!libarchiveVersion) {
+  def v = readVersionFromTagFile(new File(rootDir, 'third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG'), 'libarchive-android-v')
+  libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5')
+}
+project.ext.libarchiveVersion = libarchiveVersion
