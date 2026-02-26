@@ -25,6 +25,25 @@ if (!sherpaOnnxVersion) {
   }
 }
 
+// FFmpeg version for Maven AAR (com.xdcobra.sherpa:ffmpeg).
+// 1. FFMPEG_VERSION env 2. ANDROID_RELEASE_TAG (ffmpeg-android-vX.Y.Z → X.Y.Z) 3. project property 4. default
+def ffmpegVersion = System.getenv('FFMPEG_VERSION')
+if (!ffmpegVersion) {
+  def tagFile = new File(rootDir, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG')
+  if (tagFile.exists()) {
+    def tag = tagFile.text.split(/\r?\n/).findResult { line ->
+      def t = line.replaceAll(/\s*#.*$/, '').trim()
+      t ? t : null
+    }
+    if (tag?.startsWith('ffmpeg-android-v')) {
+      ffmpegVersion = tag.replaceFirst('^ffmpeg-android-v', '')
+    }
+  }
+  if (!ffmpegVersion) {
+    ffmpegVersion = project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1'
+  }
+}
+
 def sherpaOnnxClassesDir = file("${buildDir}/sherpa-onnx-classes")
 
 buildscript {
@@ -138,7 +157,7 @@ android {
   //   1. Local third_party build (copy_prebuilts_to_sdk.js → jniLibs + cpp/include)
   //   2. Maven AAR (com.xdcobra.sherpa:sherpa-onnx → jniLibs + c-api headers + classes.jar)
   //   3. GitHub release zip (last resort: sherpa-onnx-android.zip → jniLibs + headers + classes.jar)
-  // FFmpeg libs/headers: (1) local third_party build → (3) GitHub release zip (no Maven AAR).
+  // FFmpeg libs/headers: (1) local third_party build → (2) Maven AAR com.xdcobra.sherpa:ffmpeg → (3) GitHub release zip.
 
   def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
   def requiredFfmpegSoFiles = [
@@ -236,13 +255,44 @@ android {
         }
       }
 
+      // Priority 2 for FFmpeg: Maven AAR (libs + include; no GitHub repo needed).
+      if (!hasAllFfmpegLibs()) {
+        try {
+          def aarFiles = project.configurations.ffmpegAar.files
+          if (!aarFiles.isEmpty()) {
+            downloadDir.mkdirs()
+            def aar = aarFiles.iterator().next()
+            def aarExtractDir = new File(downloadDir, "ffmpeg-aar-extract")
+            if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+            aarExtractDir.mkdirs()
+            copy { from zipTree(aar); into aarExtractDir }
+            requiredAbis.each { abi ->
+              def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+              if (aarJniDir.exists()) {
+                copy { from aarJniDir; into new File(jniLibsDir, abi) }
+              }
+            }
+            def ffmpegIncludeDir = file("${projectDir}/src/main/cpp/include/ffmpeg")
+            def aarIncludeDir = new File(aarExtractDir, "include")
+            if (aarIncludeDir.exists()) {
+              ffmpegIncludeDir.mkdirs()
+              copy { from aarIncludeDir; into ffmpegIncludeDir }
+              println "Extracted FFmpeg headers from Maven AAR"
+            }
+            println "[FFmpeg] Native libs + headers: (2) Maven AAR (${aar.name})"
+          }
+        } catch (Exception e) {
+          println "Could not resolve FFmpeg Maven AAR: ${e.message}"
+        }
+      }
+
       // Priority 3: GitHub release download for anything still missing
       def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
       if (!repo) {
         if (!hasAllFfmpegLibs() || !hasAllSherpaLibs() || !hasSherpaHeaders()) {
           throw new RuntimeException(
             "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-            "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js."
+            "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx), or ensure ANDROID_RELEASE_TAG releases exist."
           )
         }
         return
@@ -322,12 +372,12 @@ android {
       requiredAbis.each { abi ->
         def dir = file("${projectDir}/src/main/jniLibs/${abi}")
         if (!dir.exists()) {
-          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG releases exist.")
+          throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js and third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx), or ensure ANDROID_RELEASE_TAG releases exist.")
         }
         requiredFfmpegSoFiles.each { soName ->
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
-            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js")
+            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:ffmpeg is available.")
           }
         }
         requiredSherpaOnnxSoFiles.each { soName ->
@@ -354,7 +404,7 @@ repositories {
 // Resolve sherpa-onnx AAR from Maven (priority 2 for classes.jar extraction).
 // Declaring without classifier resolves the main artifact (sherpa-onnx-1.12.24.aar = Kotlin API).
 // Do not use classifier "java" here or the Java Builder API would be used and Kotlin helpers would fail.
-configurations { sherpaOnnxAar }
+configurations { sherpaOnnxAar; ffmpegAar }
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
@@ -408,6 +458,9 @@ dependencies {
 
   // Resolve sherpa-onnx AAR for classes.jar (priority 2); only used by extractSherpaOnnxClasses.
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
+
+  // Resolve FFmpeg AAR for jniLibs + include (priority 2); only used by downloadNativeLibsIfNeeded.
+  ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
 
   // sherpa-onnx Java API (classes.jar: local third_party | Maven AAR | GitHub release); native .so from prebuilts.
   implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))

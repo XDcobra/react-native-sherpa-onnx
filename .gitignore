@@ -117,12 +117,8 @@ third_party/sherpa-onnx-prebuilt/android/
 third_party/sherpa-onnx-prebuilt/publish-maven/publish.env
 # staging dir left behind if create_sherpa_onnx_aar.sh is interrupted
 sherpa-onnx-aar-staging.*
-
-# FFmpeg build artifacts (when building prebuilts locally)
-# (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")
-third_party/ffmpeg_prebuilt/ffmpeg-*/
-third_party/ffmpeg_prebuilt/build/
-third_party/ffmpeg_prebuilt/*.tar.bz2
+# staging dir left behind if create_ffmpeg_aar.sh is interrupted
+ffmpeg-aar-staging.*
 
 # shine build artifacts (when building prebuilts locally)
 # ignore everything under shine_prebuilt by default
@@ -152,12 +148,20 @@ third_party/onnxruntime_prebuilt/publish-maven/build/
 # FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default
 third_party/ffmpeg_prebuilt/*
-# but allow the README, build scripts and release tag to be tracked
+# but allow the README, build scripts, release tag and AAR script to be tracked
 !third_party/ffmpeg_prebuilt/README.md
 !third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
 !third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
 !third_party/ffmpeg_prebuilt/build_ffmpeg.sh
+!third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh
 !third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG
+# publish-maven: track scripts and config; ignore local env (MAVEN_REPO_PAT etc.)
+!third_party/ffmpeg_prebuilt/publish-maven/
+third_party/ffmpeg_prebuilt/publish-maven/*
+!third_party/ffmpeg_prebuilt/publish-maven/publish.env.example
+!third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/ffmpeg_prebuilt/publish-maven/README.md
+third_party/ffmpeg_prebuilt/publish-maven/publish.env
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
