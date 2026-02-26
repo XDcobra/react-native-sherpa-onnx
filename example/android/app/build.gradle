@@ -130,7 +130,7 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
-    
+
 
 }
 
@@ -150,7 +150,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
-
 }
 
 // Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).

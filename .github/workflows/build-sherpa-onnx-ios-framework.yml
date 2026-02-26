@@ -1,0 +1,388 @@
+name: Framework - Build sherpa-onnx XCFramework
+
+on:
+  workflow_dispatch:
+    inputs:
+      sherpa_onnx_version:
+        description: 'sherpa-onnx version/tag to build (e.g. v1.12.24 or main). Leave empty to use third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.'
+        required: false
+        default: ''
+
+env:
+  XCODE_VERSION: '16.3'
+
+jobs:
+  build-framework:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Set sherpa-onnx version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.sherpa_onnx_version }}" ]; then
+            VER="${{ github.event.inputs.sherpa_onnx_version }}"
+          else
+            TAG_FILE=third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
+            if [ ! -f "$TAG_FILE" ]; then
+              echo "::error::No input version and $TAG_FILE missing"
+              exit 1
+            fi
+            TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+            if [ -z "$TAG" ] || [ "${TAG#sherpa-onnx-android-v}" = "$TAG" ]; then
+              echo "::error::ANDROID_RELEASE_TAG must be set to sherpa-onnx-android-vX.Y.Z"
+              exit 1
+            fi
+            VER="v${TAG#sherpa-onnx-android-v}"
+          fi
+          [ "${VER#v}" = "$VER" ] && VER="v$VER"
+          echo "SHERPA_ONNX_VERSION=$VER" >> $GITHUB_ENV
+          echo "version=${VER#v}" >> $GITHUB_OUTPUT
+          echo "Using sherpa-onnx version: $VER"
+
+      - name: Use appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Install CMake
+        run: |
+          brew install cmake
+
+      - name: Clone sherpa-onnx repository
+        run: |
+          git clone --depth 1 --branch ${{ env.SHERPA_ONNX_VERSION }} https://github.com/k2-fsa/sherpa-onnx.git sherpa-onnx-source || \
+          git clone --depth 1 https://github.com/k2-fsa/sherpa-onnx.git sherpa-onnx-source
+          cd sherpa-onnx-source
+          git checkout ${{ env.SHERPA_ONNX_VERSION }} || git checkout main
+          git log -1 --oneline
+
+      - name: Build sherpa-onnx XCFramework
+        run: |
+          cd sherpa-onnx-source
+          chmod +x build-ios.sh
+
+          echo "Building sherpa-onnx XCFramework (this may take several minutes)..."
+
+          # Accept Xcode license if needed
+          sudo xcodebuild -license accept > /dev/null 2>&1 || true
+
+          # Build the framework with reduced output
+          # Suppress libtool warnings (they're normal and not critical)
+          # Only show progress indicators and errors
+          ./build-ios.sh 2>&1 | grep -E "(Building|Generating|Creating|Error|error|fatal|FAILED|SUCCESS|xcframework|Framework)" || true
+
+          # Check for both possible framework names (sherpa-onnx.xcframework or sherpa_onnx.xcframework)
+          FRAMEWORK_NAME=""
+          if [ -d "build-ios/sherpa-onnx.xcframework" ]; then
+            FRAMEWORK_NAME="sherpa-onnx.xcframework"
+          elif [ -d "build-ios/sherpa_onnx.xcframework" ]; then
+            FRAMEWORK_NAME="sherpa_onnx.xcframework"
+          else
+            echo "Error: XCFramework not found after build"
+            echo "Contents of build-ios/:"
+            ls -la build-ios/ | head -20
+            exit 1
+          fi
+
+          echo "XCFramework built: $FRAMEWORK_NAME"
+          echo "Framework size (before adding onnxruntime):"
+          du -sh "build-ios/$FRAMEWORK_NAME"
+
+      - name: Add ONNX Runtime to XCFramework
+        run: |
+          cd sherpa-onnx-source/build-ios
+
+          echo "Adding ONNX Runtime library to sherpa-onnx static library..."
+
+          # The build script downloads onnxruntime to ios-onnxruntime/
+          ONNXRUNTIME_DIR="ios-onnxruntime/onnxruntime.xcframework"
+
+          if [ ! -d "$ONNXRUNTIME_DIR" ]; then
+            echo "Error: ONNX Runtime XCFramework not found at $ONNXRUNTIME_DIR"
+            ls -la ios-onnxruntime/ || true
+            exit 1
+          fi
+
+          echo "Found ONNX Runtime at: $ONNXRUNTIME_DIR"
+          ls -la "$ONNXRUNTIME_DIR"
+
+          # Determine framework name
+          if [ -d "sherpa-onnx.xcframework" ]; then
+            FRAMEWORK_NAME="sherpa-onnx.xcframework"
+          else
+            FRAMEWORK_NAME="sherpa_onnx.xcframework"
+          fi
+
+          # For each architecture slice, combine sherpa-onnx.a with onnxruntime.a
+          echo ""
+          echo "=== Combining libraries for ios-arm64 ==="
+          SHERPA_LIB="$FRAMEWORK_NAME/ios-arm64/libsherpa-onnx.a"
+          ONNX_LIB="$ONNXRUNTIME_DIR/ios-arm64/onnxruntime.a"
+
+          if [ -f "$SHERPA_LIB" ] && [ -f "$ONNX_LIB" ]; then
+            echo "Combining: $SHERPA_LIB + $ONNX_LIB"
+            mv "$SHERPA_LIB" "${SHERPA_LIB}.original"
+            libtool -static -o "$SHERPA_LIB" "${SHERPA_LIB}.original" "$ONNX_LIB"
+            rm "${SHERPA_LIB}.original"
+            echo "Combined library size:"
+            ls -lh "$SHERPA_LIB"
+          else
+            echo "Error: Missing libraries"
+            echo "  SHERPA_LIB exists: $([ -f "$SHERPA_LIB" ] && echo 'yes' || echo 'no')"
+            echo "  ONNX_LIB exists: $([ -f "$ONNX_LIB" ] && echo 'yes' || echo 'no')"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Combining libraries for ios-arm64_x86_64-simulator ==="
+          SHERPA_LIB="$FRAMEWORK_NAME/ios-arm64_x86_64-simulator/libsherpa-onnx.a"
+          ONNX_LIB="$ONNXRUNTIME_DIR/ios-arm64_x86_64-simulator/onnxruntime.a"
+
+          if [ -f "$SHERPA_LIB" ] && [ -f "$ONNX_LIB" ]; then
+            echo "Combining: $SHERPA_LIB + $ONNX_LIB"
+            mv "$SHERPA_LIB" "${SHERPA_LIB}.original"
+            libtool -static -o "$SHERPA_LIB" "${SHERPA_LIB}.original" "$ONNX_LIB"
+            rm "${SHERPA_LIB}.original"
+            echo "Combined library size:"
+            ls -lh "$SHERPA_LIB"
+          else
+            echo "Error: Missing libraries"
+            echo "  SHERPA_LIB exists: $([ -f "$SHERPA_LIB" ] && echo 'yes' || echo 'no')"
+            echo "  ONNX_LIB exists: $([ -f "$ONNX_LIB" ] && echo 'yes' || echo 'no')"
+            exit 1
+          fi
+
+          echo ""
+          echo "XCFramework updated with ONNX Runtime"
+          echo "Final framework size:"
+          du -sh "$FRAMEWORK_NAME"
+
+      - name: Include nlohmann headers in XCFramework
+        run: |
+          echo "Locating nlohmann include directory (searching sherpa-onnx build and repo)..."
+
+          # Locate nlohmann include dir under sherpa-onnx-source, preferring
+          # paths that include 'include' or 'single_include' to avoid picking
+          # the repo root or build output directories.
+          NLOHMANN_DIR=""
+          for d in $(cd sherpa-onnx-source || exit 1; find . -type d -name 'nlohmann' -print 2>/dev/null); do
+            case "$d" in
+              */include/*|*/single_include/*|./include/*|./single_include/*)
+                NLOHMANN_DIR="sherpa-onnx-source/${d#./}"
+                break
+                ;;
+            esac
+          done
+
+          # If not found, try a specific search for include/nlohmann or single_include/nlohmann
+          if [ -z "$NLOHMANN_DIR" ]; then
+            D=$(cd sherpa-onnx-source || exit 1; find . -type d \( -path './**/include/nlohmann' -o -path './**/single_include/nlohmann' \) 2>/dev/null | head -n1 || true)
+            if [ -n "$D" ]; then
+              NLOHMANN_DIR="sherpa-onnx-source/${D#./}"
+            fi
+          fi
+
+          if [ -z "$NLOHMANN_DIR" ]; then
+            echo "Warning: could not find nlohmann include directory inside sherpa-onnx-source; skipping header copy"
+            exit 0
+          fi
+
+          echo "Found nlohmann include dir: $NLOHMANN_DIR"
+
+          # Determine built XCFramework dir
+          if [ -d "sherpa-onnx-source/build-ios/sherpa-onnx.xcframework" ]; then
+            FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa-onnx.xcframework"
+          elif [ -d "sherpa-onnx-source/build-ios/sherpa_onnx.xcframework" ]; then
+            FRAMEWORK_DIR="sherpa-onnx-source/build-ios/sherpa_onnx.xcframework"
+          else
+            echo "Build output XCFramework not found, skipping nlohmann copy"
+            exit 0
+          fi
+
+          # Copy only header files (.hpp/.h) to avoid dragging binaries/build artifacts
+          for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
+            echo "Installing nlohmann headers into $HDR_DIR/nlohmann/"
+            mkdir -p "$HDR_DIR/nlohmann"
+            if command -v rsync >/dev/null 2>&1; then
+              rsync -a --include='*/' --include='*.hpp' --include='*.h' --exclude='*' "$NLOHMANN_DIR/" "$HDR_DIR/nlohmann/"
+            else
+              # Fallback: copy only matching files
+              (cd "$NLOHMANN_DIR" && find . -type f \( -name '*.hpp' -o -name '*.h' \) -print0) | while IFS= read -r -d '' file; do
+                mkdir -p "$HDR_DIR/nlohmann/$(dirname "$file")"
+                cp -v "$NLOHMANN_DIR/$file" "$HDR_DIR/nlohmann/$file" || true
+              done
+            fi
+          done
+
+      - name: Prepare framework directory
+        run: |
+          mkdir -p ios/Frameworks
+
+          # Determine framework name from build output
+          if [ -d "sherpa-onnx-source/build-ios/sherpa-onnx.xcframework" ]; then
+            SOURCE_FRAMEWORK="sherpa-onnx.xcframework"
+            TARGET_FRAMEWORK="sherpa_onnx.xcframework"
+          elif [ -d "sherpa-onnx-source/build-ios/sherpa_onnx.xcframework" ]; then
+            SOURCE_FRAMEWORK="sherpa_onnx.xcframework"
+            TARGET_FRAMEWORK="sherpa_onnx.xcframework"
+          else
+            echo "Error: Framework not found in build directory"
+            echo "Contents of sherpa-onnx-source/build-ios/:"
+            ls -la sherpa-onnx-source/build-ios/ | head -20
+            exit 1
+          fi
+
+          # IMPORTANT: Remove existing framework first to avoid nesting issues
+          # cp -R on macOS copies INTO existing directories instead of replacing them
+          echo "Removing existing framework (if any)..."
+          rm -rf "ios/Frameworks/$TARGET_FRAMEWORK"
+
+          # Copy framework to target location
+          cp -R "sherpa-onnx-source/build-ios/$SOURCE_FRAMEWORK" "ios/Frameworks/$TARGET_FRAMEWORK"
+
+          # Verify copy succeeded
+          if [ ! -d "ios/Frameworks/$TARGET_FRAMEWORK" ]; then
+            echo "Error: Failed to copy XCFramework"
+            exit 1
+          fi
+
+          echo "Framework copied successfully to ios/Frameworks/$TARGET_FRAMEWORK"
+          du -sh ios/Frameworks/$TARGET_FRAMEWORK
+
+      - name: Verify library sizes
+        run: |
+          echo "Verifying library sizes contain ONNX Runtime..."
+          MIN_SIZE=52428800  # 50MB in bytes - libraries with ONNX Runtime should be >50MB
+
+          DEVICE_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64/libsherpa-onnx.a"
+          SIM_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/libsherpa-onnx.a"
+
+          for lib in "$DEVICE_LIB" "$SIM_LIB"; do
+            if [ ! -f "$lib" ]; then
+              echo "ERROR: Library not found: $lib"
+              echo "Contents of ios/Frameworks/sherpa_onnx.xcframework:"
+              find ios/Frameworks/sherpa_onnx.xcframework -type f -name "*.a" 2>/dev/null || echo "No .a files found!"
+              exit 1
+            fi
+            
+            size_bytes=$(stat -f%z "$lib" 2>/dev/null || stat -c%s "$lib")
+            size_human=$(ls -lh "$lib" | awk '{print $5}')
+            
+            echo "  $lib: $size_human ($size_bytes bytes)"
+            
+            if [ "$size_bytes" -lt "$MIN_SIZE" ]; then
+              echo ""
+              echo "ERROR: Library is too small! ONNX Runtime was NOT properly merged."
+              echo "  Expected: >50MB"
+              echo "  Got: $size_human"
+              echo ""
+              echo "This indicates a problem with the 'Add ONNX Runtime to XCFramework' step."
+              exit 1
+            fi
+          done
+
+          echo ""
+          echo "SUCCESS: Both libraries are correctly sized with ONNX Runtime included."
+
+      - name: Create version info file
+        run: |
+          cat > ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt << EOF
+          sherpa-onnx version: ${{ env.SHERPA_ONNX_VERSION }}
+          Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          GitHub Actions Run: ${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          EOF
+          cat ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt
+
+      - name: Upload XCFramework as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-onnx-xcframework-${{ env.SHERPA_ONNX_VERSION }}
+          path: ios/Frameworks/sherpa_onnx.xcframework
+          retention-days: 90
+          compression-level: 6
+
+      - name: Create framework archive
+        run: |
+          cd ios/Frameworks
+          zip -r sherpa_onnx.xcframework.zip sherpa_onnx.xcframework
+          cd ../..
+          ls -lh ios/Frameworks/sherpa_onnx.xcframework.zip
+
+      - name: Upload framework archive as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-onnx-xcframework-zip-${{ env.SHERPA_ONNX_VERSION }}
+          path: ios/Frameworks/sherpa_onnx.xcframework.zip
+          retention-days: 90
+
+      - name: Create GitHub Release with Framework
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: framework-v${{ steps.version.outputs.version }}
+          name: sherpa-onnx Framework v${{ steps.version.outputs.version }}
+          body: |
+            This release contains the prebuilt sherpa-onnx XCFramework for iOS development with ONNX Runtime support.
+
+            ## Automatic Installation
+
+            If you're using the `react-native-sherpa-onnx` SDK, the iOS framework is downloaded automatically during `pod install`. No manual setup required!
+
+            ## Manual Installation
+
+            1. Download `sherpa_onnx.xcframework.zip` from the Assets below
+            2. Extract it:
+               ```bash
+               unzip sherpa_onnx.xcframework.zip
+               ```
+            3. Copy to your project:
+               ```bash
+               cp -r sherpa_onnx.xcframework /path/to/react-native-sherpa-onnx/ios/Frameworks/
+               ```
+            4. Run `pod install` in the example directory
+
+            ## Framework Details
+
+            - **Version:** ${{ env.SHERPA_ONNX_VERSION }}
+            - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
+            - **iOS Deployment Target:** 13.0+
+            - **ONNX Runtime:** Included in this build
+
+            ## Build Information
+            - **GitHub Actions Run:** ${{ github.run_id }}
+            - **Commit:** ${{ github.sha }}
+          files: ios/Frameworks/sherpa_onnx.xcframework.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## sherpa-onnx XCFramework Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ env.SHERPA_ONNX_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Framework Location:** \`ios/Frameworks/sherpa_onnx.xcframework\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Release:** [framework-v${{ steps.version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation Methods" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Automatic (Recommended):**" >> $GITHUB_STEP_SUMMARY
+          echo "```bash" >> $GITHUB_STEP_SUMMARY
+          echo "pod install  # Framework downloads automatically" >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Manual:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download from [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "2. Extract: \`unzip sherpa_onnx.xcframework.zip\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Copy: \`cp -r sherpa_onnx.xcframework ios/Frameworks/\`" >> $GITHUB_STEP_SUMMARY

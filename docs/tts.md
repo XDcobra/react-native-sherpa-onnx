@@ -26,7 +26,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
 | Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
-| Model initialization | ✅ | Kotlin API | `createTTS()` → `TtsEngine` |
+| Model initialization | ✅ | Kotlin API | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | Kotlin API | `tts.generateSpeech()` |
 | Streaming generation | ✅ | Kotlin API | `tts.generateSpeechStream()` |
 | Native PCM playback | ✅ | Kotlin API | `tts.startPcmPlayer()` / `tts.writePcmChunk()` |
@@ -329,7 +329,7 @@ See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup ste
 
 ### Zipvoice: full vs distill
 
-- **Full Zipvoice** (supported): encoder + decoder + **vocoder** (e.g. `vocos_24khz.onnx`), plus `tokens.txt`, `lexicon.txt`, and `espeak-ng-data`. The pipeline is: encoder/decoder → mel-spectrogram → vocoder → waveform.
+- **Full Zipvoice** (supported): encoder + decoder + **vocoder** (e.g. `vocos_24khz.onnx`), plus `tokens.txt`, `lexicon.txt`, and `espeak-ng-data`. The pipeline is: encoder/decoder --> mel-spectrogram --> vocoder --> waveform.
 - **Zipvoice distill** (encoder + decoder only, no vocoder): These models are **detected** as zipvoice so they appear in the model list, but **initialization will fail** with a clear error. The sherpa-onnx C-API and C++ implementation require a vocoder; there is no optional-vocoder or waveform-from-decoder path in the current upstream. Use a full Zipvoice model that includes a vocoder file (e.g. `vocos_24khz.onnx`) for successful initialization.
 
 **Memory and model variants:** The full fp32 Zipvoice model (e.g. `sherpa-onnx-zipvoice-zh-en-emilia`, ~605 MB compressed) uses significant RAM when loading. On devices with **less than 8 GB RAM**, prefer the **int8 distill** variant: `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` (~104 MB compressed). The SDK checks free memory before loading Zipvoice and rejects with an actionable error if below ~800 MB; the error message suggests using the int8 variant or closing other apps.

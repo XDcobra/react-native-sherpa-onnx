@@ -53,7 +53,7 @@ jobs:
 
   build-aar:
     needs: [lint]
-    uses: ./.github/workflows/maven-build.yml
+    uses: ./.github/workflows/sdk-maven.yml
     secrets: inherit
 
   # ──────────────────────────────────────────────────────────

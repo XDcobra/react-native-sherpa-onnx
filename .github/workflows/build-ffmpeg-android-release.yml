@@ -1,0 +1,183 @@
+# Build FFmpeg (+ libshine) for Android and publish as GitHub Release and to Maven.
+# Release tag is read from third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG.
+# Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ with FFmpeg+shine .so only,
+# so extraction into android/src/main/jniLibs/ merges correctly.
+# AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:ffmpeg when MAVEN_REPO_PAT is set.
+#
+# When to run manually (Actions → Prebuilt - FFmpeg (Android) Release → Run workflow):
+# 1. After updating third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG or FFmpeg/shine submodules.
+# 2. When you want to publish a new FFmpeg Android release (GitHub Release zip + AAR, optional Maven).
+# Sherpa-onnx Android build uses this release; run this before building sherpa-onnx if you changed FFmpeg.
+#
+name: Prebuilt - FFmpeg (Android) Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ffmpeg-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ffmpeg-android-v1)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          MAVEN_VERSION=$(echo "$RELEASE_TAG" | sed 's/^ffmpeg-android-v//')
+          echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache FFmpeg prebuilts
+        uses: actions/cache@v4
+        id: ffmpeg-cache
+        with:
+          path: |
+            third_party/ffmpeg_prebuilt/android
+            third_party/shine_prebuilt/android
+          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh') }}
+
+      - name: Install FFmpeg build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libunistring-dev libaom-dev libdav1d-dev
+
+      - name: Build libshine
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine.sh
+          ./build_shine.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (with libshine)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg.sh
+          ./build_ffmpeg.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Package jniLibs layout (FFmpeg + shine only)
+        run: |
+          LAYOUT=ffmpeg-android-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          FFMPEG_SO="libavcodec.so libavformat.so libavutil.so libswresample.so libavfilter.so"
+          SHINE_SO="libshine.so"
+          for abi in $ABIS; do
+            mkdir -p "$LAYOUT/$abi"
+            for so in $FFMPEG_SO; do
+              SRC="third_party/ffmpeg_prebuilt/android/$abi/lib/$so"
+              if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; fi
+            done
+            for so in $SHINE_SO; do
+              for root in third_party/ffmpeg_prebuilt/android third_party/shine_prebuilt/android; do
+                SRC="$root/$abi/lib/$so"
+                if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; break; fi
+              done
+            done
+          done
+          if [ -d "third_party/ffmpeg_prebuilt/android/include" ]; then
+            mkdir -p "$LAYOUT/include"
+            cp -R third_party/ffmpeg_prebuilt/android/include/* "$LAYOUT/include/"
+          fi
+          echo "Layout contents:"
+          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' \) | head -50
+
+      - name: Create release zip
+        run: |
+          cd ffmpeg-android-layout
+          zip -r ../ffmpeg-android.zip .
+          cd ..
+          ls -la ffmpeg-android.zip
+
+      - name: Create FFmpeg AAR (for Maven and release asset)
+        run: |
+          chmod +x third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh
+          VER="${{ steps.tag.outputs.maven_version }}"
+          third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh ffmpeg-android-layout "$VER" "ffmpeg-${VER}.aar"
+          ls -la "ffmpeg-${VER}.aar"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
+          body: |
+            Prebuilt FFmpeg and libshine for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
+            - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
+            - **ffmpeg-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg`.
+
+            **Maven:** The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:ffmpeg` when MAVEN_REPO_PAT is set.
+          files: |
+            ffmpeg-android.zip
+            ffmpeg-${{ steps.tag.outputs.maven_version }}.aar
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish FFmpeg AAR to GitHub Pages Maven (XDcobra/maven)
+        if: success()
+        env:
+          MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
+          MAVEN_VERSION: ${{ steps.tag.outputs.maven_version }}
+          AAR_SRC: ffmpeg-${{ steps.tag.outputs.maven_version }}.aar
+        run: |
+          if [ -z "${MAVEN_REPO_PAT}" ]; then
+            echo "MAVEN_REPO_PAT not set, skipping Maven publish."
+            exit 0
+          fi
+          chmod +x third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+          third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+
+      - name: Summary
+        run: |
+          echo "## FFmpeg Android release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-android.zip\` | Layout: \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so) and \`include/\` (headers). Gradle extracts to jniLibs and cpp/include/ffmpeg. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-${{ steps.tag.outputs.maven_version }}.aar\` | Android library (native libs + headers). Published to Maven as \`com.xdcobra.sherpa:ffmpeg\` when MAVEN_REPO_PAT is set. |" >> $GITHUB_STEP_SUMMARY

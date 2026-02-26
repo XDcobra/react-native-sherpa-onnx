@@ -295,5 +295,6 @@ For models **downloaded in-app** with the download API (`react-native-sherpa-onn
 ## See also
 
 - [STT API](./stt.md) and [TTS API](./tts.md) for initialization options and usage.
+- [Execution provider support](./execution-providers.md) for checking and using QNN, NNAPI, XNNPACK, and Core ML.
 - [Model Download Manager](./download-manager.md) for downloading models in-app and cache/registry APIs.
 - Root [README](../../README.md) for supported model types and file requirements.

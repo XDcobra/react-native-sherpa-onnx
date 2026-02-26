@@ -1,0 +1,270 @@
+# Build sherpa-onnx for Android (all ABIs, with QNN); produce zip + AAR; publish as GitHub Release and to Maven.
+# Release tag is read from third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.
+# Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so); c-api/ (C headers); java/classes.jar.
+# AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:sherpa-onnx (POM depends on com.xdcobra.sherpa:onnxruntime).
+# If MAVEN_REPO_PAT is set, the AAR is also published to XDcobra/maven with MD5/SHA1 checksums.
+
+# 
+# ──────────────────────────────────────────────────────────
+# 1. Build sherpa-onnx (Android, all ABIs, with QNN)
+# ──────────────────────────────────────────────────────────
+# 2. Package sherpa-onnx layout zip (from build output)
+# ──────────────────────────────────────────────────────────
+# 3. Prepare AAR for release asset
+# ──────────────────────────────────────────────────────────
+# 4. Create GitHub Release (AAR + zip)
+# ──────────────────────────────────────────────────────────
+# 5. Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven)
+# ──────────────────────────────────────────────────────────
+#
+# When to run manually (Actions → Prebuilt - Sherpa-onnx (Android) Release → Run workflow):
+# 1. After a new ONNX Runtime Android release exists (run "Prebuilt - ONNX Runtime (Android) Release" first).
+# 2. After updating third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG or sherpa-onnx submodule.
+# 3. When you want to publish a new sherpa-onnx Android zip/AAR (GitHub Release + Maven).
+# Ensure third_party/onnxruntime_prebuilt/VERSIONS and ANDROID_RELEASE_TAG match the ONNX Runtime
+# release that sherpa-onnx should use (the workflow downloads that release; it must already exist).
+#
+name: Prebuilt - Sherpa-onnx (Android) Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-sherpa-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Read release tag and Maven version
+        id: tag
+        run: |
+          TAG_FILE=third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. sherpa-onnx-android-v1.12.24)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          MAVEN_VERSION=$(echo "$RELEASE_TAG" | sed 's/^sherpa-onnx-android-v//')
+          echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
+
+      - name: Read VERSIONS (QNN SDK + ONNX Runtime for POM dependency)
+        id: versions
+        run: |
+          set -a
+          source third_party/onnxruntime_prebuilt/VERSIONS
+          set +a
+          echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ONNXRUNTIME_VERSION=$ONNXRUNTIME_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ort_maven_version=${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Set up Android SDK (for Kotlin API build; needs android.jar)
+        uses: android-actions/setup-android@v3
+
+      - name: Get sherpa-onnx submodule version
+        id: submodules
+        run: |
+          echo "sherpa=$(git -C third_party/sherpa-onnx rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache QNN SDK
+        uses: actions/cache@v4
+        id: qnn-cache
+        with:
+          path: qnn-sdk
+          key: qnn-sdk-${{ steps.versions.outputs.QNN_SDK_VERSION }}
+
+      - name: Download and extract QNN SDK
+        if: steps.qnn-cache.outputs.cache-hit != 'true'
+        run: |
+          QNN_VER="${{ steps.versions.outputs.QNN_SDK_VERSION }}"
+          QNN_URL="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${QNN_VER}/v${QNN_VER}.zip"
+          mkdir -p qnn-sdk
+          cd qnn-sdk
+          echo "Downloading QNN SDK ${QNN_VER} from Qualcomm..."
+          if ! curl -sSfL -o qnn-archive "$QNN_URL"; then
+            echo "::error::QNN SDK download failed."
+            exit 1
+          fi
+          unzip -q -o qnn-archive
+          rm -f qnn-archive
+
+      - name: Get QNN SDK root
+        id: qnn
+        run: |
+          cd qnn-sdk
+          QNN_IFACE=$(find . -path '*/include/QNN/QnnInterface.h' -type f 2>/dev/null | head -1)
+          if [ -z "$QNN_IFACE" ]; then
+            echo "::error::QNN SDK must contain include/QNN/QnnInterface.h"
+            find . -name "QnnInterface.h" 2>/dev/null || true
+            exit 1
+          fi
+          QNN_REL=$(dirname "$(dirname "$(dirname "$QNN_IFACE")")")
+          QNN_ROOT="$(cd "$QNN_REL" && pwd)"
+          echo "root=$QNN_ROOT" >> "$GITHUB_OUTPUT"
+          echo "QNN SDK root: $QNN_ROOT"
+
+      - name: Cache sherpa-onnx prebuilts
+        uses: actions/cache@v4
+        id: sherpa-cache
+        with:
+          path: third_party/sherpa-onnx-prebuilt/android
+          key: sherpa-android-prebuilt-qnn-both-v2-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
+
+      - name: Build sherpa-onnx (Android, all ABIs, with QNN; Kotlin + Java API)
+        if: steps.sherpa-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/sherpa-onnx-prebuilt
+          chmod +x build_sherpa_onnx.sh
+          ./build_sherpa_onnx.sh --qnn --both
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
+
+      - name: Package jniLibs layout (sherpa-onnx + onnxruntime + C API headers + Java/Kotlin classes)
+        run: |
+          LAYOUT=sherpa-onnx-android-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libonnxruntime.so"
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          for abi in $ABIS; do
+            mkdir -p "$LAYOUT/$abi"
+            for so in $SHERPA_SO; do
+              SRC="$PREBUILT/$abi/lib/$so"
+              if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; fi
+            done
+          done
+          SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
+          mkdir -p "$LAYOUT/c-api"
+          cp "$SHERPA_CAPI/c-api.h" "$SHERPA_CAPI/cxx-api.h" "$LAYOUT/c-api/"
+          if [ -f "$PREBUILT/java/classes.jar" ] || [ -f "$PREBUILT/java/classes-java.jar" ]; then
+            mkdir -p "$LAYOUT/java"
+            [ -f "$PREBUILT/java/classes.jar" ] && cp "$PREBUILT/java/classes.jar" "$LAYOUT/java/"
+            [ -f "$PREBUILT/java/classes-java.jar" ] && cp "$PREBUILT/java/classes-java.jar" "$LAYOUT/java/"
+          fi
+          if [ ! -f "$LAYOUT/java/classes.jar" ]; then
+            echo "::error::PREBUILT/java/classes.jar (Kotlin API) missing. Zip must include java/classes.jar. Invalidate cache or ensure ANDROID_HOME is set when building (Setup Android SDK step)."
+            exit 1
+          fi
+          echo "Layout contents:"
+          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' -o -name '*.jar' \) | head -50
+
+      - name: Create release zip
+        run: |
+          cd sherpa-onnx-android-layout
+          zip -r ../sherpa-onnx-android.zip .
+          cd ..
+          ls -la sherpa-onnx-android.zip
+
+      - name: Add C-API headers to prebuilt layout (for AAR; Maven consumers get libs + headers)
+        run: |
+          SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          mkdir -p "$PREBUILT/c-api"
+          cp "$SHERPA_CAPI/c-api.h" "$SHERPA_CAPI/cxx-api.h" "$PREBUILT/c-api/"
+
+      - name: Create sherpa-onnx AARs (Kotlin + Java; POM depends on onnxruntime; includes c-api headers)
+        run: |
+          chmod +x third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          VER="${{ steps.tag.outputs.maven_version }}"
+          third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh "$PREBUILT" "$VER" sherpa-onnx-"$VER".aar
+          if [ -f "$PREBUILT/java/classes-java.jar" ]; then
+            third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh "$PREBUILT" "$VER" sherpa-onnx-"$VER"-java.aar java
+          else
+            echo "classes-java.jar not found (build without --both?); skipping Java AAR."
+          fi
+          ls -la sherpa-onnx-"$VER".aar sherpa-onnx-"$VER"-java.aar 2>/dev/null || ls -la sherpa-onnx-"$VER".aar
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
+          body: |
+            Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
+            - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so), `c-api/` (C headers), `java/classes.jar` (Kotlin API). Gradle copies to jniLibs, include, and sherpa-onnx-classes.
+            - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar** – Android library (Kotlin API: data classes, `WaveReader.readWave()`, etc.). Also on Maven as default artifact; depends on `com.xdcobra.sherpa:onnxruntime`.
+            - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar** – Same library with **Java API** (Builder pattern). Use Maven classifier `java` or this file for Java projects.
+
+            **Maven:** The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:sherpa-onnx`. Add `com.xdcobra.sherpa:onnxruntime` to your repo if not already present (sherpa-onnx POM declares it as dependency).
+
+            **Kotlin / default (recommended for Kotlin and React Native):**
+            ```gradle
+            repositories {
+                maven { url 'https://xdcobra.github.io/maven/' }
+            }
+            dependencies {
+                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}'            // Kotlin / default (recommended for Kotlin and React Native)
+                implementation 'com.xdcobra.sherpa:sherpa-onnx:${{ steps.tag.outputs.maven_version }}:java@aar'   // Java (Builder API, classifier java)
+            }
+            ```
+          files: |
+            sherpa-onnx-android.zip
+            sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar
+            sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven)
+        if: success()
+        env:
+          MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
+          MAVEN_VERSION: ${{ steps.tag.outputs.maven_version }}
+          AAR_SRC: sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar
+          AAR_SRC_JAVA: sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar
+          DEPENDENCY_GROUP_ID: com.xdcobra.sherpa
+          DEPENDENCY_ARTIFACT_ID: onnxruntime
+          DEPENDENCY_VERSION: ${{ steps.versions.outputs.ort_maven_version }}
+        run: |
+          if [ -z "${MAVEN_REPO_PAT}" ]; then
+            echo "MAVEN_REPO_PAT not set, skipping Maven publish."
+            exit 0
+          fi
+          chmod +x third_party/sherpa-onnx-prebuilt/publish-maven/publish-to-github-pages.sh
+          third_party/sherpa-onnx-prebuilt/publish-maven/publish-to-github-pages.sh
+
+      - name: Summary
+        run: |
+          echo "## Sherpa-onnx Android release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-android.zip\` | Layout: \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so), \`c-api/\`, \`java/classes.jar\` (Kotlin API). |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar\` | Android library (Kotlin API, default on Maven). |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar\` | Android library (Java API; Maven classifier \`java\`). |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "If \`MAVEN_REPO_PAT\` is set, both AARs (Kotlin + Java) are published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) with MD5/SHA1 checksums." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build output is cached; key \`sherpa-android-prebuilt-qnn-<sherpa_commit>-<script+VERSIONS+ANDROID_RELEASE_TAG hash>\`." >> $GITHUB_STEP_SUMMARY

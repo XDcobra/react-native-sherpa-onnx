@@ -53,16 +53,17 @@ fi
 if [ -n "$SHERPA_ONNX_VERSION" ]; then
   DESIRED_VERSION="$SHERPA_ONNX_VERSION"
 fi
- # If no env var was provided, prefer a repo-level pinned version file
- # so each SDK release can pin a specific framework version.
- if [ -z "$DESIRED_VERSION" ]; then
-  REPO_VER_FILE="$PROJECT_ROOT/.sherpa_onnx_version"
-  if [ -f "$REPO_VER_FILE" ]; then
-    # Read first semantic version-like token from file, ignoring comments
-    DESIRED_VERSION=$(grep -Eo '([0-9]+\.)+[0-9]+' "$REPO_VER_FILE" | head -n1 || true)
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using repo-pinned framework version: $DESIRED_VERSION${NC}" >&2
+# If no env var was provided, use repo-level ANDROID_RELEASE_TAG (single source of truth for sherpa-onnx version).
+if [ -z "$DESIRED_VERSION" ]; then
+  TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG"
+  if [ -f "$TAG_FILE" ]; then
+    TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+    if [ -n "$TAG" ] && [ "${TAG#sherpa-onnx-android-v}" != "$TAG" ]; then
+      DESIRED_VERSION="${TAG#sherpa-onnx-android-v}"
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using sherpa-onnx version from ANDROID_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
+    fi
   fi
- fi
+fi
 
 # Function to compare semantic versions (e.g., "1.12.23" vs "1.12.24")
 compare_versions() {
@@ -303,7 +304,7 @@ else
       if [ "$version_cmp" = "0" ]; then
         [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
       elif [ "$version_cmp" = "-1" ]; then
-        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version → v$latest_version${NC}" >&2
+        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version --> v$latest_version${NC}" >&2
         if [ "$INTERACTIVE" = true ]; then
           read -p "Do you want to update? (y/N): " -n 1 -r
           echo

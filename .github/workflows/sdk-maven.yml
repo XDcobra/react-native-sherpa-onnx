@@ -1,0 +1,145 @@
+# Build Android AAR (artifact only; publishing handled by sdk-release.yml).
+# Native libs: sherpa-onnx + onnxruntime come from Maven (com.xdcobra.sherpa); Gradle task
+# downloadNativeLibsIfNeeded extracts the AAR into jniLibs. FFmpeg (with libshine) is still
+# built from third_party and copied to jniLibs (no Maven artifact). Then assembleRelease
+# produces the react-native-sherpa-onnx Android library .aar.
+
+name: SDK - Maven Build AAR
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'third_party/**'
+      - '.github/workflows/sdk-maven.yml'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+env:
+  ANDROID_API: "24"
+  NDK_VERSION: "29.0.14206865"
+
+jobs:
+  lint:
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Cache SherpaOnnx models
+        uses: actions/cache@v4
+        with:
+          path: example/.model-cache
+          key: ${{ runner.os }}-sherpa-models-${{ hashFiles('example/scripts/model-download-config.json', 'example/scripts/download-models.js') }}
+          restore-keys: |
+            ${{ runner.os }}-sherpa-models-
+
+      - name: Lint files
+        run: yarn lint
+
+      - name: Typecheck files
+        run: yarn typecheck
+
+  build-aar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [lint]
+    if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "yarn"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install build deps (pkg-config, FFmpeg deps)
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libunistring-dev libaom-dev libdav1d-dev
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Yarn install
+        run: yarn install --frozen-lockfile
+        env:
+          CI: "true"
+
+      - name: Build libshine
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine.sh
+          ./build_shine.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (with libshine)
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg.sh
+          ./build_ffmpeg.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Copy FFmpeg prebuilts to SDK jniLibs
+        run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
+
+      # sherpa-onnx native libs + C-API headers + classes.jar: resolved from Maven AAR by
+      # Gradle task downloadNativeLibsIfNeeded (android/build.gradle). No local build or copy.
+
+      - name: Copy Gradle wrapper to root
+        run: |
+          cp example/android/gradlew .
+          cp example/android/gradlew.bat .
+          chmod +x gradlew
+          cp -r example/android/gradle .
+
+      - name: Build Android AAR
+        run: ./gradlew :android:assembleRelease -PstandaloneAarBuild=true --no-daemon --console=plain
+
+      - name: Prepare AAR artifact with checksums
+        run: |
+          mkdir -p build-artifact
+          cp android/build/outputs/aar/*.aar build-artifact/ || true
+          for f in build-artifact/*.aar; do
+            if [ -f "$f" ]; then
+              sha1sum "$f" | awk '{print $1}' > "$f.sha1"
+              md5sum "$f" | awk '{print $1}' > "$f.md5"
+            fi
+          done
+
+      - name: Upload AAR artifact (with checksums)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-onnx-android-aar
+          path: build-artifact/**
+          if-no-files-found: error

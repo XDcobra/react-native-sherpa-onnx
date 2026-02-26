@@ -35,14 +35,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | Platform | Status | Notes |
 |----------|--------|-------|
 | **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
-| **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>✅ GitHub Actions builds pass<br/>❌ **No local Xcode testing** *(Windows-only dev)* |
-
-**Full iOS support is a priority!** Help bring sherpa-onnx to iOS devices.
-**What's needed:**
-- **Local Xcode testing** (Simulator + Device)
-- **iOS example app** (beyond CI)
-- **TurboModule iOS testing** 
-- **Edge case testing**
+| **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>**Full support soon** |
 
 ## Supported Model Types
 
@@ -103,6 +96,23 @@ YARN_NODE_LINKER=node-modules yarn install
 
 No additional setup required. The library automatically handles native dependencies via Gradle.
 
+#### QNN (Qualcomm NPU) Acceleration
+
+The Android build includes optional **Qualcomm NPU (QNN)** support for `arm64-v8a`. On devices with a supported Snapdragon SoC, inference can use the NPU for acceleration when the QNN runtime libraries are present.
+
+- **Without QNN libraries:** The SDK runs normally using CPU (and NNAPI where available). No extra steps required.
+- **With QNN libraries:** To enable NPU acceleration:
+  1. Download the [Qualcomm AI Engine Direct SDK](https://qpm.qualcomm.com/) (QNN SDK) and accept its license terms.
+  2. Copy the required runtime libraries into your app’s `jniLibs/arm64-v8a/` (e.g. under `android/app/src/main/jniLibs/arm64-v8a/`), for example:
+     - `libQnnHtp.so`
+     - `libQnnHtpV75Stub.so` (or the stub matching your chipset)
+     - `libQnnSystem.so`
+  3. Rebuild your app. ONNX Runtime will use the QNN execution provider when these libraries are available; otherwise it falls back to CPU automatically.
+
+The QNN SDK license does not allow redistributing these libraries in public repositories or npm packages, so they must be obtained and added by the app developer.
+
+See [Building sherpa-onnx Android prebuilts](third_party/sherpa-onnx-prebuilt/README.md) for more detailed information and instructions.
+
 ### iOS
 
 The sherpa-onnx XCFramework is **not included in the repository or npm package** due to its size (~80MB), but **no manual action is required**! The framework is automatically downloaded during `pod install`.
@@ -145,6 +155,7 @@ Then run `pod install` as usual.
 
 - [Speech-to-Text (STT)](./docs/stt.md)
 - [Text-to-Speech (TTS)](./docs/tts.md)
+- [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Model Download Manager](./docs/download-manager.md)
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
@@ -250,7 +261,7 @@ yarn android  # or yarn ios
 </tr>
 <tr>
 <td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
-<td></td>
+<td><img src="./docs/images/example_provider.png" alt="Text to speech generation" width="240" /></td>
 </tr>
 </table>
 </div>

@@ -5,3 +5,6 @@
 # R8/ProGuard must not rename or remove the callback class or method.
 -keep class com.sherpaonnx.SherpaOnnxArchiveHelper { *; }
 -keep class com.sherpaonnx.SherpaOnnxArchiveHelper$* { *; }
+
+# ORT Java bridge: loaded via JNI from libonnxruntime4j_jni.so.
+-keep class ai.onnxruntime.** { *; }

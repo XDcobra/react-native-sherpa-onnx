@@ -1,5 +1,21 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  type AccelerationSupport,
+  getQnnSupport,
+  getNnapiSupport,
+  getXnnpackSupport,
+  getCoreMlSupport,
+  getAvailableProviders,
+} from 'react-native-sherpa-onnx';
 
 const appPkg = (() => {
   try {
@@ -39,16 +55,320 @@ const sdkVersion = (() => {
   }
 })();
 
+// Unified format for all backends (QNN, NNAPI, XNNPACK, Core ML)
+type SupportState = AccelerationSupport | null;
+
 export default function SettingsScreen() {
+  const [qnnChecking, setQnnChecking] = useState(false);
+  const [qnnSupport, setQnnSupport] = useState<SupportState>(null);
+  const [qnnError, setQnnError] = useState<string | null>(null);
+
+  const [nnapiChecking, setNnapiChecking] = useState(false);
+  const [nnapiSupport, setNnapiSupport] = useState<SupportState>(null);
+  const [nnapiError, setNnapiError] = useState<string | null>(null);
+
+  const [xnnpackChecking, setXnnpackChecking] = useState(false);
+  const [xnnpackSupport, setXnnpackSupport] = useState<SupportState>(null);
+  const [xnnpackError, setXnnpackError] = useState<string | null>(null);
+
+  const [coremlChecking, setCoremlChecking] = useState(false);
+  const [coremlSupport, setCoremlSupport] = useState<SupportState>(null);
+  const [coremlError, setCoremlError] = useState<string | null>(null);
+
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
+
+  const handleCheckQnn = useCallback(async () => {
+    setQnnChecking(true);
+    setQnnSupport(null);
+    setQnnError(null);
+    try {
+      const result = await getQnnSupport();
+      setQnnSupport(result);
+    } catch (e: any) {
+      setQnnError(e?.message ?? 'Unknown error');
+      setQnnSupport(null);
+    } finally {
+      setQnnChecking(false);
+    }
+  }, []);
+
+  const handleCheckNnapi = useCallback(async () => {
+    setNnapiChecking(true);
+    setNnapiSupport(null);
+    setNnapiError(null);
+    try {
+      const result = await getNnapiSupport();
+      setNnapiSupport(result);
+    } catch (e: any) {
+      setNnapiError(e?.message ?? 'Unknown error');
+      setNnapiSupport(null);
+    } finally {
+      setNnapiChecking(false);
+    }
+  }, []);
+
+  const handleCheckXnnpack = useCallback(async () => {
+    setXnnpackChecking(true);
+    setXnnpackSupport(null);
+    setXnnpackError(null);
+    try {
+      const result = await getXnnpackSupport();
+      setXnnpackSupport(result);
+    } catch (e: any) {
+      setXnnpackError(e?.message ?? 'Unknown error');
+      setXnnpackSupport(null);
+    } finally {
+      setXnnpackChecking(false);
+    }
+  }, []);
+
+  const handleCheckCoreMl = useCallback(async () => {
+    setCoremlChecking(true);
+    setCoremlSupport(null);
+    setCoremlError(null);
+    try {
+      const result = await getCoreMlSupport();
+      setCoremlSupport(result);
+    } catch (e: any) {
+      setCoremlError(e?.message ?? 'Unknown error');
+      setCoremlSupport(null);
+    } finally {
+      setCoremlChecking(false);
+    }
+  }, []);
+
+  const handleCheckProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    setProviders(null);
+    setProvidersError(null);
+    try {
+      const list = await getAvailableProviders();
+      setProviders(list);
+    } catch (e: any) {
+      setProvidersError(e?.message ?? 'Unknown error');
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.body}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyContent}
+      >
         <View style={styles.section}>
           <Text style={styles.title}>App</Text>
           <Text style={styles.bodyText}>Version: {appVersion}</Text>
           <Text style={styles.bodyText}>SDK Version: {sdkVersion}</Text>
         </View>
-      </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>QNN (Qualcomm NPU)</Text>
+          <Text style={styles.bodyText}>
+            Check whether the build has the QNN provider and whether it can be
+            used on this device (HTP backend init).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, qnnChecking && styles.buttonDisabled]}
+            onPress={handleCheckQnn}
+            disabled={qnnChecking}
+          >
+            {qnnChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check QNN support</Text>
+            )}
+          </TouchableOpacity>
+          {qnnSupport !== null && !qnnChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                providerCompiled: {qnnSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                hasAccelerator: {qnnSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {qnnSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {qnnSupport.canInit
+                  ? 'You can use provider: "qnn" for STT.'
+                  : qnnSupport.providerCompiled
+                  ? 'QNN is built in but not available on this device (e.g. missing runtime libs or unsupported SoC).'
+                  : 'This build does not include the QNN execution provider.'}
+              </Text>
+            </View>
+          )}
+          {qnnError !== null && !qnnChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>{qnnError}</Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>NNAPI (Android)</Text>
+          <Text style={styles.bodyText}>
+            Check whether the build has the NNAPI provider, the device has an
+            accelerator, and (with a model) whether a session can use NNAPI.
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, nnapiChecking && styles.buttonDisabled]}
+            onPress={handleCheckNnapi}
+            disabled={nnapiChecking}
+          >
+            {nnapiChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check NNAPI support</Text>
+            )}
+          </TouchableOpacity>
+          {nnapiSupport !== null && !nnapiChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                providerCompiled: {nnapiSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                hasAccelerator: {nnapiSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {nnapiSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {nnapiSupport.canInit
+                  ? 'You can use provider: "nnapi" for STT.'
+                  : nnapiSupport.providerCompiled && nnapiSupport.hasAccelerator
+                  ? 'canInit indicates whether an NNAPI session can be initialized (using the embedded test model or a provided model).'
+                  : !nnapiSupport.providerCompiled
+                  ? 'This build does not include the NNAPI execution provider.'
+                  : 'No NNAPI accelerator on this device (or not Android).'}
+              </Text>
+            </View>
+          )}
+          {nnapiError !== null && !nnapiChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {nnapiError}
+            </Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>XNNPACK</Text>
+          <Text style={styles.bodyText}>
+            Check whether the build has the XNNPACK provider and (with a model)
+            whether a session can use XNNPACK (CPU-optimized).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, xnnpackChecking && styles.buttonDisabled]}
+            onPress={handleCheckXnnpack}
+            disabled={xnnpackChecking}
+          >
+            {xnnpackChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check XNNPACK support</Text>
+            )}
+          </TouchableOpacity>
+          {xnnpackSupport !== null && !xnnpackChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                providerCompiled:{' '}
+                {xnnpackSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                hasAccelerator: {xnnpackSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {xnnpackSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {xnnpackSupport.canInit
+                  ? 'You can use provider: "xnnpack" for STT.'
+                  : xnnpackSupport.providerCompiled
+                  ? 'canInit is false if XNNPACK cannot initialize a session with the provided model (or the embedded test model when none is provided).'
+                  : 'This build does not include the XNNPACK execution provider.'}
+              </Text>
+            </View>
+          )}
+          {xnnpackError !== null && !xnnpackChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {xnnpackError}
+            </Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>Core ML (iOS)</Text>
+          <Text style={styles.bodyText}>
+            providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple
+            Neural Engine. canInit requires ORT session (stub on this module).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, coremlChecking && styles.buttonDisabled]}
+            onPress={handleCheckCoreMl}
+            disabled={coremlChecking}
+          >
+            {coremlChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Check Core ML support</Text>
+            )}
+          </TouchableOpacity>
+          {coremlSupport !== null && !coremlChecking && (
+            <View style={styles.qnnResultBox}>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                providerCompiled:{' '}
+                {coremlSupport.providerCompiled ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                hasAccelerator: {coremlSupport.hasAccelerator ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnResult]}>
+                canInit: {coremlSupport.canInit ? 'Yes' : 'No'}
+              </Text>
+              <Text style={[styles.bodyText, styles.qnnSummary]}>
+                {coremlSupport.hasAccelerator
+                  ? 'Apple Neural Engine is available (Core ML can use ANE).'
+                  : 'No ANE on this device/simulator. Core ML still available on CPU/GPU.'}
+              </Text>
+            </View>
+          )}
+          {coremlError !== null && !coremlChecking && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {coremlError}
+            </Text>
+          )}
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.title}>Execution Providers</Text>
+          <Text style={styles.bodyText}>
+            Query available ONNX Runtime execution providers (CPU, NNAPI, QNN,
+            XNNPACK, …).
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, providersLoading && styles.buttonDisabled]}
+            onPress={handleCheckProviders}
+            disabled={providersLoading}
+          >
+            {providersLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Get available providers</Text>
+            )}
+          </TouchableOpacity>
+          {providers !== null && !providersLoading && (
+            <View style={styles.providerList}>
+              {providers.map((p) => (
+                <Text key={p} style={styles.providerItem}>
+                  • {p}
+                </Text>
+              ))}
+            </View>
+          )}
+          {providersError !== null && !providersLoading && (
+            <Text style={[styles.bodyText, styles.errorText]}>
+              {providersError}
+            </Text>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -57,10 +377,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
-    padding: 16,
+    paddingHorizontal: 16,
   },
   body: {
     flex: 1,
+  },
+  bodyContent: {
+    paddingTop: 12,
+    paddingBottom: 32,
   },
   section: {
     backgroundColor: '#FFFFFF',
@@ -78,6 +402,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#444444',
     marginBottom: 6,
+  },
+  qnnResultBox: {
+    marginTop: 12,
+  },
+  qnnResult: {
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  qnnSummary: {
+    marginTop: 8,
+    fontStyle: 'italic',
+    color: '#555555',
+  },
+  providerList: {
+    marginTop: 12,
+  },
+  providerItem: {
+    fontSize: 14,
+    color: '#222222',
+    fontWeight: '500',
+    paddingVertical: 2,
   },
   errorText: {
     color: '#C62828',

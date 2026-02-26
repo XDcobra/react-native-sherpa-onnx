@@ -1,5 +1,12 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
 
+/** Unified shape for all acceleration backends (QNN, NNAPI, XNNPACK, Core ML). */
+export type AccelerationSupport = {
+  providerCompiled: boolean;
+  hasAccelerator: boolean;
+  canInit: boolean;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -129,6 +136,7 @@ export interface Spec extends TurboModule {
    * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
    * @param maxNumSentences - Optional max sentences per callback (default: 1)
    * @param silenceScale - Optional silence scale on config (default: 0.2)
+   * @param provider - Optional execution provider (e.g. 'cpu', 'coreml', 'xnnpack'; default: 'cpu')
    * @returns Object with success boolean and array of detected models (each with type and modelDir)
    */
   initializeTts(
@@ -143,7 +151,8 @@ export interface Spec extends TurboModule {
     ruleFsts?: string,
     ruleFars?: string,
     maxNumSentences?: number,
-    silenceScale?: number
+    silenceScale?: number,
+    provider?: string
   ): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -441,6 +450,25 @@ export interface Spec extends TurboModule {
    * Requires FFmpeg prebuilts when called on Android.
    */
   convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
+
+  // ==================== Execution Provider Methods ====================
+
+  /**
+   * Return the list of available ONNX Runtime execution providers (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
+   * Requires the ORT Java bridge (libonnxruntime4j_jni.so + OrtEnvironment class) from the onnxruntime AAR.
+   */
+  getAvailableProviders(): Promise<string[]>;
+
+  // ==================== Acceleration support (unified format) ====================
+
+  /**
+   * Unified acceleration support: providerCompiled (ORT EP built in), hasAccelerator (NPU/ANE present), canInit (session with EP works).
+   * All get*Support methods return this shape. Optional modelBase64: if omitted, SDK uses embedded test model for canInit.
+   */
+  getQnnSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

@@ -14,7 +14,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
 
   init {
-    // Load sherpa-onnx JNI first (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
+    // Load onnxruntime first so libsherpa-onnx-jni.so can resolve OrtGetApiBase.
+    // When the app adds com.xdcobra.sherpa:onnxruntime and uses pickFirst, this loads the AAR's version.
+    try {
+      System.loadLibrary("onnxruntime")
+    } catch (e: UnsatisfiedLinkError) {
+      android.util.Log.w(NAME, "onnxruntime not loaded (will use SDK copy if present): ${e.message}")
+    }
+    // Load sherpa-onnx JNI (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
     try {
       System.loadLibrary("sherpa-onnx-jni")
     } catch (e: UnsatisfiedLinkError) {
@@ -69,6 +76,183 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       android.util.Log.e(NAME, "INIT_ERROR: Failed to test sherpa-onnx initialization", e)
       promise.reject("INIT_ERROR", "Failed to test sherpa-onnx initialization", e)
+    }
+  }
+
+  /** Asset path for embedded QNN test model (ORT testdata: qnn_multi_ctx_embed). */
+  private val qnnTestModelAsset = "testModels/qnn_multi_ctx_embed.onnx"
+
+  /**
+   * QNN support (AccelerationSupport): providerCompiled, hasAccelerator (native HTP init), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit (same pattern as NNAPI/XNNPACK).
+   */
+  override fun getQnnSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("QNN", ignoreCase = true) }
+      val hasAccelerator = try { nativeCanInitQnnHtp() } catch (_: Exception) { false }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(qnnTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseQnn(modelBytes)
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("hasAccelerator", hasAccelerator)
+      map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "QNN support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getQnnSupport failed", e)
+      promise.reject("QNN_SUPPORT_ERROR", "Failed to get QNN support: ${e.message}", e)
+    }
+  }
+
+  private fun canReallyUseQnn(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addQnn(emptyMap())
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  override fun getAvailableProviders(promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val list = Arguments.createArray()
+      for (p in providers) {
+        list.pushString(p.name)
+      }
+      promise.resolve(list)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getAvailableProviders failed", e)
+      promise.reject("PROVIDERS_ERROR", "Failed to get available providers: ${e.message}", e)
+    }
+  }
+
+  /** Asset path for embedded NNAPI test model (ORT testdata: nnapi_internal_uint8_support). */
+  private val nnapiTestModelAsset = "testModels/nnapi_internal_uint8_support.onnx"
+
+  /**
+   * NNAPI support (AccelerationSupport): providerCompiled, hasAccelerator (native), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit.
+   */
+  override fun getNnapiSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("NNAPI", ignoreCase = true) }
+      val hasAccelerator = try { nativeHasNnapiAccelerator(android.os.Build.VERSION.SDK_INT) } catch (_: Exception) { false }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(nnapiTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseNnapi(modelBytes)
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("hasAccelerator", hasAccelerator)
+      map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "NNAPI support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getNnapiSupport failed", e)
+      promise.reject("NNAPI_SUPPORT_ERROR", "Failed to get NNAPI support: ${e.message}", e)
+    }
+  }
+
+  private fun canReallyUseNnapi(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addNnapi()
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  /** Asset path for embedded XNNPACK test model (ORT testdata: add_mul_add). */
+  private val xnnpackTestModelAsset = "testModels/add_mul_add.onnx"
+
+  /**
+   * XNNPACK support (AccelerationSupport): providerCompiled, hasAccelerator = true when compiled (CPU-optimized), canInit (session test).
+   * If modelBase64 is not provided, uses embedded test model from assets for canInit.
+   */
+  override fun getXnnpackSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
+      val providerCompiled = providers.any { it.name.contains("XNNPACK", ignoreCase = true) }
+      val modelSource = if (!modelBase64.isNullOrEmpty()) "user-provided modelBase64" else "embedded test model"
+      val modelBytes = when {
+        !modelBase64.isNullOrEmpty() -> try {
+          android.util.Base64.decode(modelBase64, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        else -> loadTestModelFromAssets(xnnpackTestModelAsset)
+      }
+      val canInit = providerCompiled && modelBytes != null && canReallyUseXnnpack(modelBytes)
+      val hasAccelerator = providerCompiled // XNNPACK: CPU-optimized
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", providerCompiled)
+      map.putBoolean("hasAccelerator", hasAccelerator)
+      map.putBoolean("canInit", canInit)
+      android.util.Log.i(NAME, "XNNPACK support: providerCompiled=$providerCompiled hasAccelerator=$hasAccelerator canInit=$canInit (canInit test: $modelSource)")
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getXnnpackSupport failed", e)
+      promise.reject("XNNPACK_SUPPORT_ERROR", "Failed to get XNNPACK support: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Load embedded ONNX test model from module assets (used for NNAPI/XNNPACK canInit when no modelBase64 is passed).
+   */
+  private fun loadTestModelFromAssets(assetPath: String): ByteArray? {
+    return try {
+      reactApplicationContext.assets.open(assetPath).use { it.readBytes() }
+    } catch (e: Exception) {
+      android.util.Log.w(NAME, "Could not load test model from assets: $assetPath", e)
+      null
+    }
+  }
+
+  private fun canReallyUseXnnpack(modelBytes: ByteArray): Boolean {
+    if (modelBytes.isEmpty()) return false
+    return try {
+      ai.onnxruntime.OrtSession.SessionOptions().use { opts ->
+        opts.addXnnpack(emptyMap())
+        ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(modelBytes, opts).use { }
+      }
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  /**
+   * Core ML support (AccelerationSupport). Android: always false (Core ML is iOS-only).
+   */
+  override fun getCoreMlSupport(modelBase64: String?, promise: Promise) {
+    try {
+      val map = Arguments.createMap()
+      map.putBoolean("providerCompiled", false)
+      map.putBoolean("hasAccelerator", false)
+      map.putBoolean("canInit", false)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "getCoreMlSupport failed", e)
+      promise.reject("COREML_SUPPORT_ERROR", "Failed to get Core ML support: ${e.message}", e)
     }
   }
 
@@ -297,6 +481,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ruleFars: String?,
     maxNumSentences: Double?,
     silenceScale: Double?,
+    provider: String?,
     promise: Promise
   ) {
     ttsHelper.initializeTts(
@@ -312,6 +497,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       ruleFars,
       maxNumSentences,
       silenceScale,
+      provider,
       promise
     )
   }
@@ -568,6 +754,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
+
+    /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
+    @JvmStatic
+    private external fun nativeCanInitQnnHtp(): Boolean
+
+    /** True if the device has an NNAPI accelerator (GPU/DSP). Android API 29+. */
+    @JvmStatic
+    private external fun nativeHasNnapiAccelerator(sdkInt: Int): Boolean
 
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic

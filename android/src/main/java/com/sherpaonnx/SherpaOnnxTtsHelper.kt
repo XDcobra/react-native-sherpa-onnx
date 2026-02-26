@@ -57,7 +57,8 @@ internal class SherpaOnnxTtsHelper(
     val ruleFsts: String?,
     val ruleFars: String?,
     val maxNumSentences: Int?,
-    val silenceScale: Double?
+    val silenceScale: Double?,
+    val provider: String?
   )
 
   private data class TtsEngineInstance(
@@ -146,6 +147,7 @@ internal class SherpaOnnxTtsHelper(
     ruleFars: String?,
     maxNumSentences: Double?,
     silenceScale: Double?,
+    provider: String?,
     promise: Promise
   ) {
     ttsInitExecutor.execute init@{
@@ -214,7 +216,8 @@ internal class SherpaOnnxTtsHelper(
           ruleFsts = ruleFsts?.takeIf { it.isNotBlank() } ?: "",
           ruleFars = ruleFars?.takeIf { it.isNotBlank() } ?: "",
           maxNumSentences = maxNumSentences?.toInt()?.coerceAtLeast(1) ?: 1,
-          silenceScale = silenceScale?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f
+          silenceScale = silenceScale?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f,
+          provider = provider?.takeIf { it.isNotBlank() } ?: "cpu"
         )
         if (am != null) {
           val memInfo = ActivityManager.MemoryInfo()
@@ -233,7 +236,8 @@ internal class SherpaOnnxTtsHelper(
         val config = buildTtsConfig(
           paths, modelTypeStr, numThreads.toInt(), debug,
           noiseScale, noiseScaleW, lengthScale,
-          ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale
+          ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale,
+          provider
         )
         inst.tts = OfflineTts(config = config)
         sampleRate = inst.tts!!.sampleRate()
@@ -263,7 +267,8 @@ internal class SherpaOnnxTtsHelper(
         ruleFsts?.takeIf { it.isNotBlank() },
         ruleFars?.takeIf { it.isNotBlank() },
         maxNumSentences?.toInt()?.takeIf { it > 0 },
-        silenceScale?.takeUnless { it.isNaN() }
+        silenceScale?.takeUnless { it.isNaN() },
+        provider?.takeIf { it.isNotBlank() }
       )
 
       val resultMap = Arguments.createMap()
@@ -308,6 +313,7 @@ internal class SherpaOnnxTtsHelper(
         state.modelDir, state.modelType, state.numThreads.toDouble(), state.debug,
         noiseScale, noiseScaleW, lengthScale,
         state.ruleFsts, state.ruleFars, state.maxNumSentences?.toDouble(), state.silenceScale,
+        state.provider,
         promise
       )
       return
@@ -344,7 +350,8 @@ internal class SherpaOnnxTtsHelper(
       val config = buildTtsConfig(
         paths, modelTypeStr, state.numThreads, state.debug,
         nextNoiseScale, nextNoiseScaleW, nextLengthScale,
-        state.ruleFsts, state.ruleFars, state.maxNumSentences, state.silenceScale
+        state.ruleFsts, state.ruleFars, state.maxNumSentences, state.silenceScale,
+        state.provider
       )
       inst.tts = OfflineTts(config = config)
       val ttsInstance = inst.tts!!
@@ -906,11 +913,13 @@ internal class SherpaOnnxTtsHelper(
     ruleFsts: String?,
     ruleFars: String?,
     maxNumSentences: Int?,
-    silenceScale: Double?
+    silenceScale: Double?,
+    provider: String?
   ): OfflineTtsConfig {
     val ns = noiseScale?.toFloat() ?: 0.667f
     val nsw = noiseScaleW?.toFloat() ?: 0.8f
     val ls = lengthScale?.toFloat() ?: 1.0f
+    val prov = provider?.takeIf { it.isNotBlank() } ?: "cpu"
     val modelConfig = when (modelType) {
       "vits" -> OfflineTtsModelConfig(
         vits = OfflineTtsVitsModelConfig(
@@ -923,7 +932,8 @@ internal class SherpaOnnxTtsHelper(
           lengthScale = ls
         ),
         numThreads = numThreads,
-        debug = debug
+        debug = debug,
+        provider = prov
       )
       "matcha" -> OfflineTtsModelConfig(
         matcha = OfflineTtsMatchaModelConfig(
@@ -936,7 +946,8 @@ internal class SherpaOnnxTtsHelper(
           lengthScale = ls
         ),
         numThreads = numThreads,
-        debug = debug
+        debug = debug,
+        provider = prov
       )
       "kokoro" -> OfflineTtsModelConfig(
         kokoro = OfflineTtsKokoroModelConfig(
@@ -948,7 +959,8 @@ internal class SherpaOnnxTtsHelper(
           lengthScale = ls
         ),
         numThreads = numThreads,
-        debug = debug
+        debug = debug,
+        provider = prov
       )
       "kitten" -> OfflineTtsModelConfig(
         kitten = OfflineTtsKittenModelConfig(
@@ -959,7 +971,8 @@ internal class SherpaOnnxTtsHelper(
           lengthScale = ls
         ),
         numThreads = numThreads,
-        debug = debug
+        debug = debug,
+        provider = prov
       )
       "pocket" -> OfflineTtsModelConfig(
         pocket = OfflineTtsPocketModelConfig(
@@ -972,7 +985,8 @@ internal class SherpaOnnxTtsHelper(
           tokenScoresJson = path(paths, "tokenScoresJson")
         ),
         numThreads = numThreads,
-        debug = debug
+        debug = debug,
+        provider = prov
       )
       "zipvoice" -> {
         // Zipvoice is handled by ZipvoiceTtsWrapper (C-API), not OfflineTts (Kotlin API).
@@ -995,7 +1009,8 @@ internal class SherpaOnnxTtsHelper(
               lengthScale = ls
             ),
             numThreads = numThreads,
-            debug = debug
+            debug = debug,
+            provider = prov
           )
         } else if (path(paths, "voices").isNotEmpty()) {
           OfflineTtsModelConfig(
@@ -1008,7 +1023,8 @@ internal class SherpaOnnxTtsHelper(
               lengthScale = ls
             ),
             numThreads = numThreads,
-            debug = debug
+            debug = debug,
+            provider = prov
           )
         } else {
           OfflineTtsModelConfig(
@@ -1022,7 +1038,8 @@ internal class SherpaOnnxTtsHelper(
               lengthScale = ls
             ),
             numThreads = numThreads,
-            debug = debug
+            debug = debug,
+            provider = prov
           )
         }
       }

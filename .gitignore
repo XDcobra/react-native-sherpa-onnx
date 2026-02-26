@@ -107,14 +107,22 @@ example/models/
 # libs - .aar will be used instead
 android/src/main/jniLibs/*
 
-# sherpa-onnx source submodule at repo root (not nested include/ dirs)
-/sherpa-onnx/
+# FFmpeg headers (from release zip or local prebuilts; Gradle extracts to here)
+android/src/main/cpp/include/ffmpeg/
+# libarchive headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/libarchive/
 
-# FFmpeg build artifacts (when building prebuilts locally)
-# (FFmpeg source is in submodule third_party/ffmpeg; excluded from npm via package.json "files")
-third_party/ffmpeg_prebuilt/ffmpeg-*/
-third_party/ffmpeg_prebuilt/build/
-third_party/ffmpeg_prebuilt/*.tar.bz2
+# sherpa-onnx source submodule at repo root (not nested include/ dirs)
+/third_party/sherpa-onnx/
+# sherpa-onnx prebuilt: build output and local overrides
+third_party/sherpa-onnx-prebuilt/android/
+third_party/sherpa-onnx-prebuilt/publish-maven/publish.env
+# staging dir left behind if create_sherpa_onnx_aar.sh is interrupted
+sherpa-onnx-aar-staging.*
+# staging dir left behind if create_ffmpeg_aar.sh is interrupted
+ffmpeg-aar-staging.*
+# staging dir left behind if create_libarchive_aar.sh is interrupted
+libarchive-aar-staging.*
 
 # shine build artifacts (when building prebuilts locally)
 # ignore everything under shine_prebuilt by default
@@ -124,14 +132,58 @@ third_party/shine_prebuilt/*
 !third_party/shine_prebuilt/build_shine_msys2.sh
 !third_party/shine_prebuilt/build_shine.sh
 
-# ffmpeg build artifacts (when building prebuilts locally)
+# ONNX Runtime prebuilt build artifacts (when building prebuilts locally)
+third_party/onnxruntime_prebuilt/*
+!third_party/onnxruntime_prebuilt/README.md
+!third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh
+!third_party/onnxruntime_prebuilt/VERSIONS
+!third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
+# publish-maven: track scripts and config; ignore local env and Gradle build output
+!third_party/onnxruntime_prebuilt/publish-maven/
+third_party/onnxruntime_prebuilt/publish-maven/*
+!third_party/onnxruntime_prebuilt/publish-maven/publish.env.example
+!third_party/onnxruntime_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/onnxruntime_prebuilt/publish-maven/README.md
+!third_party/onnxruntime_prebuilt/publish-maven/build.gradle
+!third_party/onnxruntime_prebuilt/publish-maven/settings.gradle
+third_party/onnxruntime_prebuilt/publish-maven/publish.env
+third_party/onnxruntime_prebuilt/publish-maven/build/
+
+# FFmpeg build artifacts (when building prebuilts locally)
 # ignore everything under ffmpeg_prebuilt by default
 third_party/ffmpeg_prebuilt/*
-# but allow the README, build scripts to be tracked
+# but allow the README, build scripts, release tag and AAR script to be tracked
 !third_party/ffmpeg_prebuilt/README.md
 !third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
 !third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
 !third_party/ffmpeg_prebuilt/build_ffmpeg.sh
+!third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh
+!third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG
+# publish-maven: track scripts and config; ignore local env (MAVEN_REPO_PAT etc.)
+!third_party/ffmpeg_prebuilt/publish-maven/
+third_party/ffmpeg_prebuilt/publish-maven/*
+!third_party/ffmpeg_prebuilt/publish-maven/publish.env.example
+!third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/ffmpeg_prebuilt/publish-maven/README.md
+third_party/ffmpeg_prebuilt/publish-maven/publish.env
+
+# libarchive prebuilt: build output (when building prebuilts locally)
+# ignore everything under libarchive_prebuilt by default
+third_party/libarchive_prebuilt/*
+# but allow tracked files
+!third_party/libarchive_prebuilt/README.md
+!third_party/libarchive_prebuilt/build_libarchive.sh
+!third_party/libarchive_prebuilt/create_libarchive_aar.sh
+!third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js
+!third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG
+!third_party/libarchive_prebuilt/publish-maven/
+third_party/libarchive_prebuilt/publish-maven/*
+!third_party/libarchive_prebuilt/publish-maven/publish.env.example
+!third_party/libarchive_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/libarchive_prebuilt/publish-maven/README.md
+third_party/libarchive_prebuilt/publish-maven/publish.env
+third_party/libarchive_prebuilt/android/
+third_party/libarchive_prebuilt/build-*/
 
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git

@@ -38,7 +38,8 @@ public:
         const std::optional<std::string>& ruleFsts = std::nullopt,
         const std::optional<std::string>& ruleFars = std::nullopt,
         const std::optional<int32_t>& maxNumSentences = std::nullopt,
-        const std::optional<float>& silenceScale = std::nullopt
+        const std::optional<float>& silenceScale = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt
     );
 
     struct AudioResult {

@@ -1,0 +1,120 @@
+plugins {
+    id 'maven-publish'
+}
+
+def aarPath = project.findProperty('aarPath') ?: ''
+def mavenVersion = project.findProperty('mavenVersion') ?: '1.0.0'
+def groupId = 'com.xdcobra.sherpa'
+def artifactId = 'onnxruntime'
+
+// Optional: publish to Git-based Maven repo (XDcobra/maven). Set MAVEN_REPO_PAT env or -PmavenRepoPat.
+def mavenRepoPat = project.findProperty('mavenRepoPat') ?: System.getenv('MAVEN_REPO_PAT') ?: ''
+def gitMavenRepoUrl = 'https://github.com/XDcobra/maven.git'
+
+if (!aarPath || !new File(aarPath).exists()) {
+    throw new GradleException("Missing or invalid aarPath. Pass -PaarPath=/path/to/onnxruntime-release.aar -PmavenVersion=1.24.2-qnn2.43.1.260218")
+}
+
+def repoDir = layout.buildDirectory.dir('repo').get().asFile
+def groupPath = groupId.replace('.', '/')
+def artifactPath = "$groupPath/$artifactId"
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = groupId
+            artifactId = artifactId
+            version = mavenVersion
+            artifact(file(aarPath)) {
+                extension = 'aar'
+            }
+            pom {
+                name = artifactId
+                description = 'ONNX Runtime for Android (QNN, NNAPI, XNNPACK). Built from react-native-sherpa-onnx.'
+            }
+        }
+    }
+    repositories {
+        maven {
+            url = repoDir.toURI()
+        }
+    }
+}
+
+tasks.named('publishMavenPublicationToMavenRepository').configure {
+    doFirst {
+        println "Publishing ${groupId}:${artifactId}:${mavenVersion} to build/repo"
+    }
+}
+
+// Sync published artifacts to Git Maven repo (clone, copy, merge metadata, push). All logic in Gradle; no shell parsing.
+tasks.register('pushToGitMavenRepo') {
+    dependsOn tasks.named('publishMavenPublicationToMavenRepository')
+    onlyIf { mavenRepoPat?.trim() }
+    doLast {
+        if (!mavenRepoPat?.trim()) {
+            throw new GradleException("MAVEN_REPO_PAT (env) or -PmavenRepoPat is required to push to Git Maven repo.")
+        }
+        def repo = layout.buildDirectory.dir('repo').get().asFile
+        def versionDir = file("$repo/$artifactPath/$mavenVersion")
+        if (!versionDir.directory) {
+            throw new GradleException("Publish output not found: $versionDir. Run publish first.")
+        }
+        def cloneDir = layout.buildDirectory.dir('maven-repo-clone').get().asFile
+        if (cloneDir.exists()) cloneDir.deleteDir()
+        project.exec {
+            commandLine 'git', 'clone', '--depth', '1',
+                "https://x-access-token:${mavenRepoPat}@github.com/XDcobra/maven.git",
+                cloneDir.absolutePath
+            workingDir project.projectDir
+            ignoreExitValue false
+        }
+        def destVersion = file("$cloneDir/$artifactPath/$mavenVersion")
+        destVersion.mkdirs()
+        versionDir.listFiles().each { f -> new File(destVersion, f.name).bytes = f.bytes }
+
+        def metadataFile = file("$cloneDir/$artifactPath/maven-metadata.xml")
+        file("$cloneDir/$artifactPath").mkdirs()
+        def timestamp = java.time.Instant.now().toString().replaceAll(/[-:T.Z]/, '').take(14)
+        def existingVersions = [] as Set
+        if (metadataFile.exists()) {
+            def meta = new groovy.xml.XmlSlurper().parse(metadataFile)
+            existingVersions = meta.versioning.versions.version.collect { it.text().trim() } as Set
+        }
+        if (!existingVersions.contains(mavenVersion)) {
+            existingVersions.add(mavenVersion)
+        }
+        def versionsXml = existingVersions.sort().reverse().collect { "      <version>${it}</version>" }.join('\n')
+        metadataFile.text = """<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>${groupId}</groupId>
+  <artifactId>${artifactId}</artifactId>
+  <versioning>
+    <latest>${mavenVersion}</latest>
+    <release>${mavenVersion}</release>
+    <versions>
+${versionsXml}
+    </versions>
+    <lastUpdated>${timestamp}</lastUpdated>
+  </versioning>
+</metadata>
+"""
+
+        def md = java.security.MessageDigest.getInstance('MD5')
+        def sha = java.security.MessageDigest.getInstance('SHA-1')
+        def bytes = metadataFile.bytes
+        file("${metadataFile}.md5").text = md.digest(bytes).encodeHex().toString()
+        file("${metadataFile}.sha1").text = sha.digest(bytes).encodeHex().toString()
+
+        project.exec { commandLine 'git', 'config', 'user.name', 'github-actions[bot]'; workingDir cloneDir; ignoreExitValue false }
+        project.exec { commandLine 'git', 'config', 'user.email', 'github-actions[bot]@users.noreply.github.com'; workingDir cloneDir; ignoreExitValue false }
+        project.exec { commandLine 'git', 'add', groupPath; workingDir cloneDir; ignoreExitValue false }
+        def diffResult = project.exec { commandLine 'git', 'diff', '--staged', '--quiet'; workingDir cloneDir; ignoreExitValue true }
+        if (diffResult.exitValue != 0) {
+            project.exec { commandLine 'git', 'commit', '-m', "Maven: add ${artifactId} ${mavenVersion}"; workingDir cloneDir; ignoreExitValue false }
+            project.exec { commandLine 'git', 'push'; workingDir cloneDir; ignoreExitValue false }
+        }
+        cloneDir.deleteDir()
+        println "Published ${groupId}:${artifactId}:${mavenVersion} to https://github.com/XDcobra/maven"
+    }
+}

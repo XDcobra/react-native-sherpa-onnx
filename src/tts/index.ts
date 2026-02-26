@@ -166,6 +166,7 @@ export async function createTTS(
 
   let modelPath: ModelPathConfig;
   let modelType: TTSModelType | undefined;
+  let provider: string | undefined;
   let numThreads: number | undefined;
   let debug: boolean | undefined;
   let modelOptions: TtsModelOptions | undefined;
@@ -177,6 +178,7 @@ export async function createTTS(
   if ('modelPath' in options) {
     modelPath = options.modelPath;
     modelType = options.modelType;
+    provider = options.provider;
     numThreads = options.numThreads;
     debug = options.debug;
     modelOptions = options.modelOptions;
@@ -187,6 +189,7 @@ export async function createTTS(
   } else {
     modelPath = options;
     modelType = undefined;
+    provider = undefined;
     numThreads = undefined;
     debug = undefined;
     modelOptions = undefined;
@@ -211,7 +214,8 @@ export async function createTTS(
     ruleFsts,
     ruleFars,
     maxNumSentences,
-    silenceScale
+    silenceScale,
+    provider
   );
 
   if (!result.success) {

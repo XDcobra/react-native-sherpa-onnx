@@ -25,19 +25,32 @@ endif()
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-# FFmpeg prebuilts (required). third_party/ffmpeg_prebuilt/android from repo root.
+# FFmpeg: libs and headers from (1) third_party/ffmpeg_prebuilt/android (local build) or (2) jniLibs + cpp/include/ffmpeg (GitHub release zip).
 # PROJECT_ROOT = android/; repo root = PROJECT_ROOT/..
 set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android")
-set(FFMPEG_ABI_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
-if(NOT EXISTS "${FFMPEG_PREBUILT_BASE}/include")
-    message(FATAL_ERROR "FFmpeg prebuilts missing: ${FFMPEG_PREBUILT_BASE}/include not found.\n"
-                        "Build them with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 (Windows) or ./build_ffmpeg.sh (Linux/macOS)")
+set(FFMPEG_PREBUILT_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(FFMPEG_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(FFMPEG_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/ffmpeg")
+if(EXISTS "${FFMPEG_PREBUILT_BASE}/include")
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_PREBUILT_BASE}/include")
+    message(STATUS "FFmpeg headers: prebuilts ${FFMPEG_INCLUDE_DIR}")
+elseif(EXISTS "${FFMPEG_INCLUDE_CPP}")
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_INCLUDE_CPP}")
+    message(STATUS "FFmpeg headers: jniLibs/release ${FFMPEG_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR "FFmpeg headers missing. Either:\n"
+                        "  - Build: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.sh (creates android/include)\n"
+                        "  - Or use a release that includes include/ (Gradle extracts to ${FFMPEG_INCLUDE_CPP})")
 endif()
-if(NOT EXISTS "${FFMPEG_ABI_LIB}")
-    message(FATAL_ERROR "FFmpeg prebuilts missing for ABI ${ANDROID_ABI}: ${FFMPEG_ABI_LIB} not found.\n"
-                        "Build for all ABIs with: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.ps1 or ./build_ffmpeg.sh")
+if(EXISTS "${FFMPEG_PREBUILT_LIB}/libavcodec.so")
+    set(FFMPEG_LIB_DIR "${FFMPEG_PREBUILT_LIB}")
+    message(STATUS "FFmpeg libs: prebuilts ${FFMPEG_LIB_DIR}")
+elseif(EXISTS "${FFMPEG_JNILIBS}/libavcodec.so")
+    set(FFMPEG_LIB_DIR "${FFMPEG_JNILIBS}")
+    message(STATUS "FFmpeg libs: jniLibs ${FFMPEG_LIB_DIR}")
+else()
+    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
 endif()
-message(STATUS "FFmpeg prebuilts found: ${FFMPEG_PREBUILT_BASE}")
 
 # Source files (Archive, FFmpeg, model detection, Zipvoice C-API JNI; STT/TTS use Kotlin API)
 set(SOURCES
@@ -52,34 +65,56 @@ set(SOURCES
     crypto/sha256.cpp
 )
 
-# Build libarchive from bundled source (shared by Android and iOS)
-# PROJECT_ROOT is android/; third_party is at repo root (one level above PROJECT_ROOT)
-message(STATUS "Building libarchive from bundled source...")
-add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
-message(STATUS "libarchive built successfully")
+# libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
+set(LIBARCHIVE_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libarchive_prebuilt/android")
+set(LIBARCHIVE_PREBUILT_LIB "${LIBARCHIVE_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LIBARCHIVE_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LIBARCHIVE_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/libarchive")
+set(USE_LIBARCHIVE_PREBUILT OFF)
+if(EXISTS "${LIBARCHIVE_PREBUILT_LIB}/libarchive.so")
+    set(USE_LIBARCHIVE_PREBUILT ON)
+    set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_PREBUILT_LIB}")
+    if(EXISTS "${LIBARCHIVE_PREBUILT_BASE}/include")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_PREBUILT_BASE}/include")
+    elseif(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
+    endif()
+elseif(EXISTS "${LIBARCHIVE_JNILIBS}/libarchive.so")
+    set(USE_LIBARCHIVE_PREBUILT ON)
+    set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_JNILIBS}")
+    if(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
+    endif()
+endif()
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
+    message(STATUS "libarchive: using prebuilt (libs: ${LIBARCHIVE_LIB_DIR}, include: ${LIBARCHIVE_INCLUDE_DIR})")
+else()
+    message(STATUS "Building libarchive from bundled source...")
+    add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
+    message(STATUS "libarchive built successfully")
+endif()
 
 # Create shared library
 add_library(sherpaonnx SHARED
     ${SOURCES}
 )
 
-# sherpa-onnx C-API shared library (from AAR, extracted by Gradle extractNativeLibs task).
-# Used by Zipvoice TTS JNI wrapper; the Kotlin API does not expose Zipvoice.
-if(SHERPA_ONNX_EXTRACTED_LIBS)
-    set(SHERPA_ONNX_C_API_SO "${SHERPA_ONNX_EXTRACTED_LIBS}/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
-    if(EXISTS "${SHERPA_ONNX_C_API_SO}")
-        add_library(sherpa-onnx-c-api SHARED IMPORTED)
-        set_target_properties(sherpa-onnx-c-api PROPERTIES
-            IMPORTED_LOCATION "${SHERPA_ONNX_C_API_SO}"
-        )
-        message(STATUS "sherpa-onnx C-API found: ${SHERPA_ONNX_C_API_SO}")
-    else()
-        message(WARNING "sherpa-onnx C-API not found at ${SHERPA_ONNX_C_API_SO}. "
-                        "Zipvoice TTS will not be available. "
-                        "Ensure extractNativeLibs ran before CMake configure.")
-    endif()
+# sherpa-onnx C-API: link by directory + library name only (no IMPORTED target).
+# The .so and headers land in jniLibs and cpp/include/sherpa-onnx via:
+#   (1) local third_party build, (2) Maven AAR extraction (libs + c-api headers), or (3) GitHub release zip (last resort).
+# If we used IMPORTED here, AGP would also copy .so from CMake → duplicate in mergeNativeLibs.
+set(SHERPA_ONNX_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/sherpa-onnx-prebuilt/android")
+set(SHERPA_ONNX_ABI_LIB "${SHERPA_ONNX_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(SHERPA_C_API_LIB_DIR "")
+if(EXISTS "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
+    set(SHERPA_C_API_LIB_DIR "${SHERPA_ONNX_ABI_LIB}")
+    message(STATUS "sherpa-onnx C-API (link only): ${SHERPA_C_API_LIB_DIR}")
+elseif(EXISTS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
+    set(SHERPA_C_API_LIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+    message(STATUS "sherpa-onnx C-API (link only, jniLibs): ${SHERPA_C_API_LIB_DIR}")
 else()
-    message(WARNING "SHERPA_ONNX_EXTRACTED_LIBS not set. Zipvoice TTS will not be available.")
+    message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
+                    "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
 # Include directories (must be after add_library)
@@ -87,12 +122,24 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${FFMPEG_PREBUILT_BASE}/include
+    ${FFMPEG_INCLUDE_DIR}
 )
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
+endif()
 target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 
 # Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
+target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
+if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
+endif()
+if(SHERPA_C_API_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
+    target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
+endif()
 target_link_libraries(sherpaonnx
+    PRIVATE
     archive
     avcodec
     avformat
@@ -101,9 +148,7 @@ target_link_libraries(sherpaonnx
     swresample
     log
     android
-    $<TARGET_NAME_IF_EXISTS:sherpa-onnx-c-api>
 )
-target_link_directories(sherpaonnx PRIVATE ${FFMPEG_ABI_LIB})
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

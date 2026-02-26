@@ -6,6 +6,9 @@
 #import "SherpaOnnx.h"
 #import "SherpaOnnxArchiveHelper.h"
 #import <React/RCTLog.h>
+#if __has_include("SherpaOnnx-Swift.h")
+#import "SherpaOnnx-Swift.h"
+#endif
 
 @implementation SherpaOnnx
 
@@ -190,6 +193,48 @@
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during test: %@", exception.reason];
         reject(@"TEST_ERROR", errorMsg, nil);
     }
+}
+
+// QNN (Qualcomm NPU) is Android-only; on iOS the build never has QNN support.
+- (void)getQnnSupportWithModelBase64:(NSString *)modelBase64
+                         withResolver:(RCTPromiseResolveBlock)resolve
+                         withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
+}
+
+// NNAPI is Android-only; on iOS we always return no support.
+- (void)getNnapiSupportWithModelBase64:(NSString *)modelBase64
+                          withResolver:(RCTPromiseResolveBlock)resolve
+                          withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
+}
+
+// XNNPACK support: stub on iOS (could be extended to check ORT providers and session init).
+- (void)getXnnpackSupportWithModelBase64:(NSString *)modelBase64
+                            withResolver:(RCTPromiseResolveBlock)resolve
+                            withRejecter:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
+}
+
+// Core ML support (iOS): providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple Neural Engine, canInit = session test (stub false unless ORT linked).
+- (void)getCoreMlSupportWithModelBase64:(NSString *)modelBase64
+                           withResolver:(RCTPromiseResolveBlock)resolve
+                           withRejecter:(RCTPromiseRejectBlock)reject
+{
+    BOOL hasANE = NO;
+#if __has_include("SherpaOnnx-Swift.h")
+    if ([SherpaOnnxCoreMLHelper respondsToSelector:@selector(hasAppleNeuralEngine)]) {
+        hasANE = [SherpaOnnxCoreMLHelper hasAppleNeuralEngine];
+    }
+#endif
+    resolve(@{
+        @"providerCompiled": @YES,  // Core ML always present on iOS 11+
+        @"hasAccelerator": hasANE ? @YES : @NO,
+        @"canInit": @NO,  // Would require ORT session with CoreML EP; not implemented here
+    });
 }
 
 - (void)extractTarBz2:(NSString *)sourcePath
