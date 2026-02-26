@@ -8,7 +8,9 @@ import SherpaOnnx from './NativeSherpaOnnx';
 
 /**
  * Get the default model directory path for the current platform.
- * This is a helper for apps that want to use a standard location.
+ * This is a logical name (e.g. `'Documents/models'` on iOS), not an absolute path.
+ * On iOS, when using file-based models without PAD, pass an absolute base path to
+ * `getFileModelPath` instead (e.g. `DocumentDirectoryPath + '/models'` from react-native-fs).
  *
  * @returns Platform-specific default path
  */
@@ -40,7 +42,9 @@ export function assetModelPath(assetPath: string): ModelPathConfig {
  * Create a model path configuration for file system models.
  * Use this when models are downloaded or stored in file system.
  *
- * @param filePath - Absolute path to model directory
+ * @param filePath - Absolute path to model directory. On iOS, use an absolute path
+ *   (e.g. from react-native-fs: `DocumentDirectoryPath + '/models/' + modelName` when
+ *   using getFileModelPath without PAD).
  * @returns Model path configuration
  */
 export function fileModelPath(filePath: string): ModelPathConfig {

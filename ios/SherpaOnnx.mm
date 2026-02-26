@@ -63,18 +63,37 @@
     resolve(resolvedPath);
 }
 
+// Documents/models: used for downloaded assets and for listAssetModels.
+- (NSString *)canonicalModelsDir
+{
+    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    return [documentsPath stringByAppendingPathComponent:@"models"];
+}
+
 - (NSString *)resolveAssetPath:(NSString *)assetPath error:(NSError **)error
 {
     NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *folderName = [assetPath lastPathComponent];
+    NSString *modelDir = [[self canonicalModelsDir] stringByAppendingPathComponent:folderName];
 
-    // First, try to find directly in bundle (for folder references)
+    // 1. Documents/models/<folder>: downloaded assets (no copy; bundle is read in place).
+    BOOL isDirectory = NO;
+    if ([fileManager fileExistsAtPath:modelDir isDirectory:&isDirectory] && isDirectory) {
+        return modelDir;
+    }
+
+    // 2. Bundle (resourcePath/assetPath): return path directly; do not copy.
+    NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
+    NSString *sourcePath = [bundleResourcePath stringByAppendingPathComponent:assetPath];
+    if ([fileManager fileExistsAtPath:sourcePath]) {
+        return sourcePath;
+    }
+
+    // 3. Fallback: pathForResource / inDirectory for non-standard bundle layouts.
     NSString *bundlePath = [[NSBundle mainBundle] pathForResource:assetPath ofType:nil];
-
     if (bundlePath && [fileManager fileExistsAtPath:bundlePath]) {
         return bundlePath;
     }
-
-    // Try with directory structure (for resources in subdirectories)
     NSArray *pathComponents = [assetPath componentsSeparatedByString:@"/"];
     if (pathComponents.count > 1) {
         NSString *directory = pathComponents[0];
@@ -83,50 +102,9 @@
         }
         NSString *resourceName = pathComponents.lastObject;
         bundlePath = [[NSBundle mainBundle] pathForResource:resourceName ofType:nil inDirectory:directory];
-
         if (bundlePath && [fileManager fileExistsAtPath:bundlePath]) {
             return bundlePath;
         }
-    }
-
-    // If not found in bundle, try to copy from bundle to Documents
-    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *targetDir = [documentsPath stringByAppendingPathComponent:@"models"];
-    NSString *modelDir = [targetDir stringByAppendingPathComponent:[assetPath lastPathComponent]];
-
-    // Check if already copied
-    if ([fileManager fileExistsAtPath:modelDir]) {
-        return modelDir;
-    }
-
-    // Try to find and copy from bundle resource path
-    NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
-    NSString *sourcePath = [bundleResourcePath stringByAppendingPathComponent:assetPath];
-
-    if ([fileManager fileExistsAtPath:sourcePath]) {
-        NSError *copyError = nil;
-        [fileManager createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&copyError];
-        if (copyError) {
-            if (error) *error = copyError;
-            return nil;
-        }
-
-        // Copy recursively if it's a directory
-        BOOL isDirectory = NO;
-        [fileManager fileExistsAtPath:sourcePath isDirectory:&isDirectory];
-
-        if (isDirectory) {
-            [fileManager copyItemAtPath:sourcePath toPath:modelDir error:&copyError];
-        } else {
-            [fileManager copyItemAtPath:sourcePath toPath:modelDir error:&copyError];
-        }
-
-        if (copyError) {
-            if (error) *error = copyError;
-            return nil;
-        }
-
-        return modelDir;
     }
 
     if (error) {
@@ -289,50 +267,48 @@
     resolve(digest);
 }
 
+// Collects directory names (model folder names) under path into the set. Skips hidden items.
+static void collectModelFolderNames(NSFileManager *fileManager, NSString *path, NSMutableSet *outNames)
+{
+    BOOL isDirectory = NO;
+    if (![fileManager fileExistsAtPath:path isDirectory:&isDirectory] || !isDirectory) {
+        return;
+    }
+    NSError *err = nil;
+    NSArray<NSString *> *items = [fileManager contentsOfDirectoryAtPath:path error:&err];
+    if (err) {
+        return;
+    }
+    for (NSString *item in items) {
+        if ([item hasPrefix:@"."]) {
+            continue;
+        }
+        NSString *itemPath = [path stringByAppendingPathComponent:item];
+        BOOL itemIsDir = NO;
+        [fileManager fileExistsAtPath:itemPath isDirectory:&itemIsDir];
+        if (itemIsDir) {
+            [outNames addObject:item];
+        }
+    }
+}
+
 - (void)listAssetModels:(RCTPromiseResolveBlock)resolve
           reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSMutableArray<NSString *> *modelFolders = [NSMutableArray array];
+        NSMutableSet *folderNames = [NSMutableSet set];
 
-        // Get the main bundle resource path
-        NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
-        NSString *modelsPath = [bundleResourcePath stringByAppendingPathComponent:@"models"];
+        // List from Documents/models: downloaded assets
+        NSString *canonicalDir = [self canonicalModelsDir];
+        collectModelFolderNames(fileManager, canonicalDir, folderNames);
 
-        // Check if models directory exists
-        BOOL isDirectory = NO;
-        BOOL exists = [fileManager fileExistsAtPath:modelsPath isDirectory:&isDirectory];
-
-        if (exists && isDirectory) {
-            NSError *error = nil;
-            NSArray<NSString *> *items = [fileManager contentsOfDirectoryAtPath:modelsPath error:&error];
-
-            if (error) {
-                RCTLogWarn(@"Could not list models directory: %@", error.localizedDescription);
-            } else {
-                // Filter to only include directories
-                for (NSString *item in items) {
-                    // Skip hidden files (starting with .)
-                    if ([item hasPrefix:@"."]) {
-                        continue;
-                    }
-
-                    NSString *itemPath = [modelsPath stringByAppendingPathComponent:item];
-                    BOOL itemIsDirectory = NO;
-                    [fileManager fileExistsAtPath:itemPath isDirectory:&itemIsDirectory];
-
-                    if (itemIsDirectory) {
-                        [modelFolders addObject:item];
-                    }
-                }
-            }
-        } else {
-            RCTLogWarn(@"Models directory not found at: %@", modelsPath);
-        }
+        // List from bundle (App.app/models): bundled assets (read in place, no copy)
+        NSString *bundleModelsPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"models"];
+        collectModelFolderNames(fileManager, bundleModelsPath, folderNames);
 
         NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
-        for (NSString *folder in modelFolders) {
+        for (NSString *folder in [[folderNames allObjects] sortedArrayUsingSelector:@selector(compare:)]) {
             NSString *hint = [self inferModelHint:folder];
             [result addObject:@{ @"folder": folder, @"hint": hint }];
         }
@@ -358,8 +334,7 @@
         BOOL isDirectory = NO;
         BOOL exists = [fileManager fileExistsAtPath:path isDirectory:&isDirectory];
         if (!exists || !isDirectory) {
-            NSString *errorMsg = [NSString stringWithFormat:@"Path is not a directory: %@", path];
-            reject(@"LIST_MODELS_ERROR", errorMsg, nil);
+            resolve(@[]);
             return;
         }
 

@@ -138,6 +138,9 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.zipvoice.tokens = detect.paths.tokens;
                 config.model.zipvoice.data_dir = detect.paths.dataDir;
                 break;
+            case TtsModelKind::kPocket:
+                LOGE("TTS: Pocket model type is detected but not yet supported on iOS");
+                return result;
             case TtsModelKind::kUnknown:
             default:
                 LOGE("TTS: Unknown model type: %s", modelType.c_str());

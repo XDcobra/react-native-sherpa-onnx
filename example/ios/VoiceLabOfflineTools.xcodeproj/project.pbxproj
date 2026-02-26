@@ -113,6 +113,7 @@
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				F2A6B1C2D3E4F5061728394A /* Download SherpaOnnx Models */,
+				A7B8C9D0E1F2031425364758 /* Copy Sherpa models from sherpa_models */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
@@ -203,6 +204,21 @@
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
+		};
+		A7B8C9D0E1F2031425364758 /* Copy Sherpa models from sherpa_models */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/sherpa_models/models",
+			);
+			name = "Copy Sherpa models from sherpa_models";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nMODEL_OUTPUT_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models\"\nMANUAL_SRC=\"${SRCROOT}/sherpa_models/models\"\nif [ -d \"$MANUAL_SRC\" ]; then\n  mkdir -p \"$MODEL_OUTPUT_DIR\"\n  for dir in \"$MANUAL_SRC\"/*; do\n    if [ -d \"$dir\" ]; then\n      name=\"$(basename \"$dir\")\";\n      if [ -n \"$name\" ] && [ \"$name\" != \"*\" ]; then\n        echo \"[SherpaOnnx] Copying manual model: $name\"\n        cp -R \"$dir\" \"$MODEL_OUTPUT_DIR/\"\n      fi\n    fi\n  done\nfi\n";
 		};
 		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
