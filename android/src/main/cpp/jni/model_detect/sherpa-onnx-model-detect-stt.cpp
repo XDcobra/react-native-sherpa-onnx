@@ -1,3 +1,9 @@
+/**
+ * sherpa-onnx-model-detect-stt.cpp
+ *
+ * Purpose: Detects STT model type and fills SttModelPaths from a model directory. Supports
+ * transducer, paraformer, whisper, and other STT variants. Used by nativeDetectSttModel (module-jni).
+ */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include <android/log.h>

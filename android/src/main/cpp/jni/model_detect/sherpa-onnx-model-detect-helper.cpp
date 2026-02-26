@@ -1,3 +1,9 @@
+/**
+ * sherpa-onnx-model-detect-helper.cpp
+ *
+ * Purpose: Shared filesystem and string helpers for model detection (file/dir listing, token-based
+ * ONNX search, path resolution). Used by sherpa-onnx-model-detect-stt.cpp and -tts.cpp on Android.
+ */
 #include "sherpa-onnx-model-detect-helper.h"
 
 #include <algorithm>

@@ -1,3 +1,10 @@
+/**
+ * SherpaOnnxAssetHelper.kt
+ *
+ * Purpose: Asset and model path logic for the SherpaOnnx module: resolveModelPath (asset/file/auto),
+ * listAssetModels, listModelsAtPath, getAssetPackPath (PAD), and path/hint helpers. Aligns with
+ * iOS SherpaOnnx+Assets.mm. Used by SherpaOnnxModule.
+ */
 package com.sherpaonnx
 
 import android.util.Log
@@ -11,7 +18,7 @@ import com.google.android.play.core.assetpacks.model.AssetPackStorageMethod
 import java.io.File
 import java.io.FileOutputStream
 
-internal class SherpaOnnxCoreHelper(
+internal class SherpaOnnxAssetHelper(
   private val context: ReactApplicationContext,
   private val logTag: String
 ) {

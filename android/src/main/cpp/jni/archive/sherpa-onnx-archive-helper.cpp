@@ -1,3 +1,9 @@
+/**
+ * sherpa-onnx-archive-helper.cpp
+ *
+ * Purpose: Extracts .tar.bz2 archives to a target directory and computes file SHA-256. Used by
+ * sherpa-onnx-archive-jni.cpp for model download and verification on Android.
+ */
 #include "sherpa-onnx-archive-helper.h"
 
 #include <archive.h>

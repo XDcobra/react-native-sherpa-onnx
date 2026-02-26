@@ -1,3 +1,10 @@
+/**
+ * sherpa-onnx-model-detect-helper.mm
+ *
+ * Purpose: Shared filesystem and string helpers for model detection (file/dir listing, token-based
+ * ONNX search, path resolution). Used by sherpa-onnx-model-detect-stt.mm and -tts.mm on iOS.
+ */
+
 #include "sherpa-onnx-model-detect-helper.h"
 
 #include <algorithm>

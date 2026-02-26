@@ -1,3 +1,9 @@
+/**
+ * sha256.cpp
+ *
+ * Purpose: SHA-256 implementation for file hashing. Used by the archive helper (Android) for
+ * integrity verification of extracted model archives.
+ */
 #include "crypto/sha256.h"
 
 #include <cstring>

@@ -39,7 +39,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     instance = this
   }
 
-  private val coreHelper = SherpaOnnxCoreHelper(reactApplicationContext, NAME)
+  private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
     reactApplicationContext,
     { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
@@ -261,7 +261,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Handles asset paths, file system paths, and auto-detection.
    */
   override fun resolveModelPath(config: ReadableMap, promise: Promise) {
-    coreHelper.resolveModelPath(config, promise)
+    assetHelper.resolveModelPath(config, promise)
   }
 
   override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
@@ -731,18 +731,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * Scans the platform-specific model directory and returns folder names.
    */
   override fun listAssetModels(promise: Promise) {
-    coreHelper.listAssetModels(promise)
+    assetHelper.listAssetModels(promise)
   }
 
   /**
    * List model folders under a specific filesystem path.
    */
   override fun listModelsAtPath(path: String, recursive: Boolean, promise: Promise) {
-    coreHelper.listModelsAtPath(path, recursive, promise)
+    assetHelper.listModelsAtPath(path, recursive, promise)
   }
 
   override fun getAssetPackPath(packName: String, promise: Promise) {
-    coreHelper.getAssetPackPath(packName, promise)
+    assetHelper.getAssetPackPath(packName, promise)
   }
 
   companion object {

@@ -1,7 +1,9 @@
-// JNI wrapper for Zipvoice TTS via the sherpa-onnx C-API.
-// The Kotlin API (Tts.kt) does not expose OfflineTtsZipvoiceModelConfig,
-// so we call the C-API directly from native code.
-
+/**
+ * sherpa-onnx-tts-zipvoice-jni.cpp
+ *
+ * Purpose: JNI for Zipvoice TTS using the sherpa-onnx C-API (OfflineTtsZipvoiceModelConfig). The
+ * Kotlin TTS API does not expose Zipvoice config, so this native layer is used for Zipvoice-only flows.
+ */
 #include <jni.h>
 #include <cstring>
 #include <android/log.h>

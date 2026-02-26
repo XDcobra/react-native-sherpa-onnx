@@ -3,7 +3,7 @@
 // - install-time: pack is installed with the app; at runtime the path is available via
 //   AssetPackManager.getPackLocation("sherpa_models") (see getAssetPackPath in the library).
 // - Source layout: sherpa_models/src/main/assets/models/<model-folders> (e.g. models/vits-piper-...).
-// - At runtime the models directory is at [packRoot]/assets/models (see SherpaOnnxCoreHelper.getAssetPackPath).
+// - At runtime the models directory is at [packRoot]/assets/models (see SherpaOnnxAssetHelper.getAssetPackPath).
 apply plugin: 'com.android.asset-pack'
 
 assetPack {

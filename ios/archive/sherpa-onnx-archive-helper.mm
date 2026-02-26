@@ -1,4 +1,11 @@
-#import "SherpaOnnxArchiveHelper.h"
+/**
+ * sherpa-onnx-archive-helper.mm
+ *
+ * Purpose: Extracts .tar.bz2 archives (e.g. downloaded model bundles) to a target directory and
+ * computes file SHA-256. Used by the main module for model download and verification on iOS.
+ */
+
+#import "sherpa-onnx-archive-helper.h"
 #import <archive.h>
 #import <archive_entry.h>
 #import <CommonCrypto/CommonCrypto.h>

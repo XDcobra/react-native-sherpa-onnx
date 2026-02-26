@@ -1,3 +1,10 @@
+/**
+ * SherpaOnnx+TTS.mm
+ *
+ * Purpose: TTS (text-to-speech) TurboModule methods: createTTS, releaseTTS, generateTTS, and event
+ * emission. Uses sherpa-onnx-tts-wrapper for native synthesis and sherpa-onnx-model-detect for model detection.
+ */
+
 #import "SherpaOnnx.h"
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>

@@ -1,3 +1,10 @@
+/**
+ * sherpa-onnx-stt-wrapper.mm
+ *
+ * Purpose: Wraps the sherpa-onnx C++ OfflineRecognizer for iOS. Builds config from SttModelPaths,
+ * creates/destroys recognizer and streams, runs recognition and returns results. Used by SherpaOnnx+STT.mm.
+ */
+
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include <algorithm>

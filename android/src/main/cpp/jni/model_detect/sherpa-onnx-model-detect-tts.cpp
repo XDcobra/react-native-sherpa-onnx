@@ -1,3 +1,9 @@
+/**
+ * sherpa-onnx-model-detect-tts.cpp
+ *
+ * Purpose: Detects TTS model type and fills TtsModelPaths from a model directory. Supports Vits,
+ * Piper, Kokoro, Zipvoice, Pocket, etc. Used by nativeDetectTtsModel (module-jni).
+ */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include <android/log.h>

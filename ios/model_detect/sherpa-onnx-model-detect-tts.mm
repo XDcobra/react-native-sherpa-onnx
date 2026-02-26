@@ -1,3 +1,10 @@
+/**
+ * sherpa-onnx-model-detect-tts.mm
+ *
+ * Purpose: Detects TTS (text-to-speech) model type and fills TtsModelPaths from a model directory.
+ * Supports Vits, Piper, Kokoro, Zipvoice, Pocket, etc. Used by the TTS wrapper on iOS.
+ */
+
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 

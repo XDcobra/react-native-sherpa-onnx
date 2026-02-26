@@ -1,3 +1,10 @@
+/**
+ * sherpa-onnx-model-detect-stt.mm
+ *
+ * Purpose: Detects STT (speech-to-text) model type and fills SttModelPaths from a model directory.
+ * Supports transducer, paraformer, whisper, and other STT variants. Used by the STT wrapper on iOS.
+ */
+
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 

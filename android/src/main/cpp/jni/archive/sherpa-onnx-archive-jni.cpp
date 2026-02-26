@@ -1,3 +1,9 @@
+/**
+ * sherpa-onnx-archive-jni.cpp
+ *
+ * Purpose: JNI bindings for SherpaOnnxArchiveHelper (Kotlin): nativeExtractTarBz2,
+ * nativeCancelExtract, nativeComputeFileSha256. Bridges to sherpa-onnx-archive-helper.cpp.
+ */
 #include <jni.h>
 #include <string>
 #include <memory>

@@ -52,16 +52,19 @@ else()
     message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
 endif()
 
-# Source files (Archive, FFmpeg, model detection, Zipvoice C-API JNI; STT/TTS use Kotlin API)
+# Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). Move .cpp into subdirs; .h go alongside for include path.
 set(SOURCES
-    jni/sherpa-onnx-module-jni.cpp
-    jni/sherpa-onnx-archive-jni.cpp
-    jni/sherpa-onnx-audio-convert-jni.cpp
-    jni/sherpa-onnx-model-detect-helper.cpp
-    jni/sherpa-onnx-model-detect-stt.cpp
-    jni/sherpa-onnx-model-detect-tts.cpp
-    jni/sherpa-onnx-tts-zipvoice-jni.cpp
-    jni/sherpa-onnx-archive-helper.cpp
+    jni/module/sherpa-onnx-module-jni.cpp
+    jni/archive/sherpa-onnx-archive-helper.cpp
+    jni/archive/sherpa-onnx-archive-jni.cpp
+    jni/model_detect/sherpa-onnx-model-detect-helper.cpp
+    jni/model_detect/sherpa-onnx-model-detect-stt.cpp
+    jni/model_detect/sherpa-onnx-model-detect-tts.cpp
+    jni/model_detect/sherpa-onnx-detect-jni-common.cpp
+    jni/model_detect/sherpa-onnx-stt-wrapper.cpp
+    jni/model_detect/sherpa-onnx-tts-wrapper.cpp
+    jni/audio/sherpa-onnx-audio-convert-jni.cpp
+    jni/tts/sherpa-onnx-tts-zipvoice-jni.cpp
     crypto/sha256.cpp
 )
 
@@ -117,10 +120,15 @@ else()
                     "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
-# Include directories (must be after add_library)
+# Include directories (must be after add_library). Subdirs so #include "sherpa-onnx-*.h" resolves after move.
 target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${FFMPEG_INCLUDE_DIR}
 )

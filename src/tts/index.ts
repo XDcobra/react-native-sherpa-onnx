@@ -1,4 +1,4 @@
-import { NativeEventEmitter } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
@@ -134,10 +134,8 @@ function toNativeTtsOptions(
   return out;
 }
 
-// NativeEventEmitter requires a non-null native module; pass SherpaOnnx so the module loads.
-// If the native side does not emit TTS stream events, addListener will simply not receive any.
-const ttsEventEmitter = new NativeEventEmitter(SherpaOnnx as any);
-
+// TTS stream events are sent from native via sendEventWithName; use DeviceEventEmitter
+// so we don't need NativeEventEmitter (which expects addListener/removeListeners on the module).
 /**
  * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
  *
@@ -269,17 +267,17 @@ export async function createTTS(
     ): Promise<() => void> {
       guard();
       const subscriptions = [
-        ttsEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
+        DeviceEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
           const e = event as TtsStreamChunk;
           if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onChunk?.(e);
         }),
-        ttsEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
+        DeviceEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
           const e = event as TtsStreamEnd;
           if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onEnd?.(e);
         }),
-        ttsEventEmitter.addListener('ttsStreamError', (event: unknown) => {
+        DeviceEventEmitter.addListener('ttsStreamError', (event: unknown) => {
           const e = event as TtsStreamError;
           if (e.instanceId != null && e.instanceId !== instanceId) return;
           handlers.onError?.(e);

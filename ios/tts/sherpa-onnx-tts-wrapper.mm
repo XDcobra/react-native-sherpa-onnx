@@ -1,3 +1,10 @@
+/**
+ * sherpa-onnx-tts-wrapper.mm
+ *
+ * Purpose: Wraps the sherpa-onnx C++ OfflineTts for iOS. Builds config from TtsModelPaths, creates
+ * TTS instance, generates audio from text. Used by SherpaOnnx+TTS.mm.
+ */
+
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include <algorithm>

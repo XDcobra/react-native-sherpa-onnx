@@ -1,7 +1,10 @@
-// JNI for converting arbitrary audio files to WAV 16 kHz mono 16-bit PCM (sherpa-onnx input format).
-// When HAVE_FFMPEG is defined (CMake), FFmpeg prebuilts are linked and conversion is available.
-// When not defined, nativeConvertAudioToWav16k returns failure with "FFmpeg not available".
-
+/**
+ * sherpa-onnx-audio-convert-jni.cpp
+ *
+ * Purpose: JNI for converting arbitrary audio files to WAV 16 kHz mono 16-bit PCM (sherpa-onnx
+ * input format). When HAVE_FFMPEG is set, FFmpeg is used; otherwise nativeConvertAudioToWav16k
+ * returns an error. Used by the Kotlin audio conversion API.
+ */
 #include <android/log.h>
 #include <jni.h>
 #include <string>
