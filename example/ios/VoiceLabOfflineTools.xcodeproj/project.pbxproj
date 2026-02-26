@@ -205,20 +205,21 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		A7B8C9D0E1F2031425364758 /* Copy Sherpa models from sherpa_models */ = {
+		A7B8C9D0E1F2031425364758 /* Copy Sherpa models and test_wavs from sherpa_models */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputPaths = (
 				"$(SRCROOT)/sherpa_models/models",
+				"$(SRCROOT)/sherpa_models/test_wavs",
 			);
-			name = "Copy Sherpa models from sherpa_models";
+			name = "Copy Sherpa models and test_wavs from sherpa_models";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nMODEL_OUTPUT_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models\"\nMANUAL_SRC=\"${SRCROOT}/sherpa_models/models\"\nif [ -d \"$MANUAL_SRC\" ]; then\n  mkdir -p \"$MODEL_OUTPUT_DIR\"\n  for dir in \"$MANUAL_SRC\"/*; do\n    if [ -d \"$dir\" ]; then\n      name=\"$(basename \"$dir\")\";\n      if [ -n \"$name\" ] && [ \"$name\" != \"*\" ]; then\n        echo \"[SherpaOnnx] Copying manual model: $name\"\n        cp -R \"$dir\" \"$MODEL_OUTPUT_DIR/\"\n      fi\n    fi\n  done\nfi\n";
+			shellScript = "set -e\nRESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n# Copy manual models: sherpa_models/models/ -> App.app/models/\nMODEL_OUTPUT_DIR=\"$RESOURCES/models\"\nMANUAL_SRC=\"${SRCROOT}/sherpa_models/models\"\nif [ -d \"$MANUAL_SRC\" ]; then\n  mkdir -p \"$MODEL_OUTPUT_DIR\"\n  for dir in \"$MANUAL_SRC\"/*; do\n    if [ -d \"$dir\" ]; then\n      name=\"$(basename \"$dir\")\";\n      if [ -n \"$name\" ] && [ \"$name\" != \"*\" ]; then\n        echo \"[SherpaOnnx] Copying manual model: $name\"\n        cp -R \"$dir\" \"$MODEL_OUTPUT_DIR/\"\n      fi\n    fi\n  done\nfi\n# Copy example test audios: sherpa_models/test_wavs/ -> App.app/test_wavs/\nWAV_SRC=\"${SRCROOT}/sherpa_models/test_wavs\"\nif [ -d \"$WAV_SRC\" ]; then\n  WAV_OUT=\"$RESOURCES/test_wavs\"\n  mkdir -p \"$WAV_OUT\"\n  for f in \"$WAV_SRC\"/*; do\n    if [ -e \"$f\" ]; then\n      name=\"$(basename \"$f\")\";\n      if [ -n \"$name\" ] && [ \"$name\" != \"*\" ]; then\n        echo \"[SherpaOnnx] Copying test audio: $name\"\n        cp -R \"$f\" \"$WAV_OUT/\"\n      fi\n    fi\n  done\nfi\n";
 		};
 		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
