@@ -53,6 +53,10 @@ def hasAllLibarchiveLibs = {
   return true
 }
 
+def hasFfmpegHeaders = {
+  return new File(project.projectDir, "src/main/cpp/include/ffmpeg/libavcodec/avcodec.h").exists()
+}
+
 def hasLibarchiveHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
 }
@@ -125,7 +129,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     }
 
-    if (!hasAllFfmpegLibs()) {
+    if (!hasAllFfmpegLibs() || !hasFfmpegHeaders()) {
       try {
         def aarFiles = project.configurations.ffmpegAar.files
         if (!aarFiles.isEmpty()) {
@@ -217,7 +221,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
 
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
-      if (!hasAllFfmpegLibs() || !hasAllSherpaLibs() || !hasSherpaHeaders() || !hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
+      if (!hasAllFfmpegLibs() || !hasFfmpegHeaders() || !hasAllSherpaLibs() || !hasSherpaHeaders() || !hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
           "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist."
@@ -228,7 +232,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
 
-    if (!hasAllFfmpegLibs()) {
+    if (!hasAllFfmpegLibs() || !hasFfmpegHeaders()) {
       def tagFile = file("${project.projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
