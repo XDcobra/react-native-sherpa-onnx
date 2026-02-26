@@ -42,8 +42,7 @@ Pod::Spec.new do |s|
   # Link zlib (system on iOS); libarchive is built from vendored source above
   s.libraries = 'c++', 'z'
   
-  # Note: Header files and framework are set up by postinstall script (yarn setup-assets)
-  # This runs automatically after yarn/npm install and handles all setup tasks
+  # iOS: Headers are committed; XCFramework can be downloaded with yarn download-ios-framework (or from GitHub Releases).
   
   # Verify XCFramework exists
   unless File.exist?(framework_path)

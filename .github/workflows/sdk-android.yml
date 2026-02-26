@@ -69,13 +69,6 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
-      - name: Setup SherpaOnnx assets (headers and framework)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Setting up SherpaOnnx assets..."
-          yarn setup-assets
-
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:

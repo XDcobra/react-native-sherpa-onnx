@@ -46,7 +46,7 @@ After building, copy the `.so` files into the Android module’s `jniLibs`:
 node copy_prebuilts_to_sdk.js
 ```
 
-Or run the repo’s setup script from the repo root: `node scripts/setup-assets.js` (it will copy prebuilts if present).
+Or run from the repo root: `node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js` (from repo root so paths resolve).
 
 ## API variant: Kotlin (default) vs Java
 
