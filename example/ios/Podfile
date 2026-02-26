@@ -10,6 +10,15 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
+# Download libarchive iOS sources so podspec can use them when third_party is not present (e.g. npm).
+pre_install do |_installer|
+  sdk_root = File.expand_path("../..", __dir__)
+  libarchive_script = File.join(sdk_root, "ios", "scripts", "setup-ios-libarchive.sh")
+  if File.executable?(libarchive_script)
+    system("bash", libarchive_script) || abort("setup-ios-libarchive.sh failed")
+  end
+end
+
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil
   Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
