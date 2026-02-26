@@ -249,13 +249,15 @@
 			files = (
 			);
 			inputPaths = (
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/.xcode.env",
 			);
 			name = "Download SherpaOnnx Models";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\nMODEL_OUTPUT_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models\"\nMODEL_CACHE_DIR=\"${SRCROOT}/../.model-cache\"\nMODEL_SCRIPT=\"${SRCROOT}/../scripts/download-models.js\"\n\nnode \"$MODEL_SCRIPT\" --platform ios --output \"$MODEL_OUTPUT_DIR\" --cache \"$MODEL_CACHE_DIR\"\n";
+			shellScript = "set -e\n# Load NODE_BINARY from .xcode.env (use . for POSIX sh, not source)\nif [ -n \"$SRCROOT\" ] && [ -f \"$SRCROOT/.xcode.env.local\" ]; then . \"$SRCROOT/.xcode.env.local\"; fi\nif [ -n \"$SRCROOT\" ] && [ -f \"$SRCROOT/.xcode.env\" ]; then . \"$SRCROOT/.xcode.env\"; fi\n# Fallback: nvm/fnm often not in PATH under Xcode\nif [ -z \"$NODE_BINARY\" ] && [ -f \"$HOME/.nvm/nvm.sh\" ]; then export NVM_DIR=\"$HOME/.nvm\"; . \"$HOME/.nvm/nvm.sh\"; NODE_BINARY=$(command -v node); fi\nif [ -z \"$NODE_BINARY\" ] && [ -x \"$HOME/.fnm/current/bin/node\" ]; then NODE_BINARY=\"$HOME/.fnm/current/bin/node\"; fi\nif [ -z \"$NODE_BINARY\" ]; then NODE_BINARY=$(command -v node); fi\nif [ -z \"$NODE_BINARY\" ]; then echo \"error: node not found. Create example/ios/.xcode.env.local with: export NODE_BINARY=$(which node)\" >&2; exit 1; fi\n\nMODEL_OUTPUT_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models\"\nMODEL_CACHE_DIR=\"${SRCROOT}/../.model-cache\"\nMODEL_SCRIPT=\"${SRCROOT}/../scripts/download-models.js\"\n\n\"$NODE_BINARY\" \"$MODEL_SCRIPT\" --platform ios --output \"$MODEL_OUTPUT_DIR\" --cache \"$MODEL_CACHE_DIR\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
