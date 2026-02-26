@@ -16,13 +16,14 @@ DOWNLOADS_DIR="$SDK_ROOT/ios/Downloads"
 LIBARCHIVE_DIR="$DOWNLOADS_DIR/libarchive"
 TAG_FILE="$SDK_ROOT/third_party/libarchive_prebuilt/IOS_RELEASE_TAG"
 
-# Resolve release tag: env LIBARCHIVE_IOS_RELEASE_TAG, or IOS_RELEASE_TAG file, or default (for npm where third_party is excluded).
+# Resolve release tag: env LIBARCHIVE_IOS_RELEASE_TAG, or IOS_RELEASE_TAG file (single source of truth; committed and included in npm package).
 RELEASE_TAG="${LIBARCHIVE_IOS_RELEASE_TAG:-}"
 if [ -z "$RELEASE_TAG" ] && [ -f "$TAG_FILE" ]; then
   RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
 fi
 if [ -z "$RELEASE_TAG" ]; then
-  RELEASE_TAG="libarchive-ios-v3.8.5"
+  echo "Error: IOS_RELEASE_TAG not found at $TAG_FILE. Reinstall the package or run from repo." >&2
+  exit 1
 fi
 
 AUTH_ARGS=()
