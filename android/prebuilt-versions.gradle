@@ -34,3 +34,10 @@ if (!libarchiveVersion) {
   libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5')
 }
 project.ext.libarchiveVersion = libarchiveVersion
+
+// onnxruntime (ORT Java bridge): 1. ORT_VERSION env 2. property 3. default
+def ortVersion = System.getenv('ORT_VERSION')
+if (!ortVersion) {
+  ortVersion = project.hasProperty('ortVersion') ? project.ortVersion : '1.24.2-qnn2.43.1.260218'
+}
+project.ext.ortVersion = ortVersion

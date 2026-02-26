@@ -1,6 +1,6 @@
 // Prebuilt download and check logic. Applied after android {} and configurations.
-// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion (from prebuilt-versions.gradle)
-// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar (from build.gradle).
+// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, ortVersion (from prebuilt-versions.gradle)
+// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, onnxruntimeAar (from build.gradle).
 
 def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def requiredFfmpegSoFiles = [
@@ -10,9 +10,11 @@ def requiredSherpaOnnxSoFiles = [
   'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
 ]
 def requiredLibarchiveSoFiles = ['libarchive.so']
+def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
 
 def jniLibsDir = file("${project.projectDir}/src/main/jniLibs")
 def sherpaOnnxClassesDir = file("${project.buildDir}/sherpa-onnx-classes")
+def onnxruntimeClassesDir = file("${project.buildDir}/onnxruntime-classes")
 
 def hasAllFfmpegLibs = {
   for (abi in requiredAbis) {
@@ -53,6 +55,17 @@ def hasAllLibarchiveLibs = {
 
 def hasLibarchiveHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
+}
+
+def hasAllOnnxruntimeJniLibs = {
+  for (abi in requiredAbis) {
+    def dir = new File(jniLibsDir, abi)
+    if (!dir.exists()) return false
+    for (soName in requiredOnnxruntimeJniSoFiles) {
+      if (!new File(dir, soName).exists()) return false
+    }
+  }
+  return true
 }
 
 def getGitHubRepo = {
@@ -169,6 +182,36 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         }
       } catch (Exception e) {
         println "Could not resolve libarchive Maven AAR: ${e.message}"
+      }
+    }
+
+    // onnxruntime AAR: extract only libonnxruntime4j_jni.so (the Java↔C bridge)
+    // into jniLibs. We do NOT extract libonnxruntime.so from this AAR because
+    // jniLibs already has it from the sherpa-onnx prebuilts — avoids duplicates.
+    if (!hasAllOnnxruntimeJniLibs()) {
+      try {
+        def aarFiles = project.configurations.onnxruntimeAar.files
+        if (!aarFiles.isEmpty()) {
+          downloadDir.mkdirs()
+          def aar = aarFiles.iterator().next()
+          def aarExtractDir = new File(downloadDir, "onnxruntime-aar-extract")
+          if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+          aarExtractDir.mkdirs()
+          copy { from zipTree(aar); into aarExtractDir }
+          requiredAbis.each { abi ->
+            def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+            if (aarJniDir.exists()) {
+              copy {
+                from aarJniDir
+                include 'libonnxruntime4j_jni.so'
+                into new File(jniLibsDir, abi)
+              }
+            }
+          }
+          println "[onnxruntime] JNI bridge: Maven AAR (${aar.name})"
+        }
+      } catch (Exception e) {
+        println "Could not resolve onnxruntime Maven AAR: ${e.message}"
       }
     }
 
@@ -301,6 +344,12 @@ project.tasks.register("checkJniLibs") {
           throw new RuntimeException("Missing required libarchive library '${soName}' for ABI ${abi}. Run third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:libarchive is available.")
         }
       }
+      requiredOnnxruntimeJniSoFiles.each { soName ->
+        def soFile = new File(dir, soName)
+        if (!soFile.exists()) {
+          throw new RuntimeException("Missing onnxruntime JNI bridge '${soName}' for ABI ${abi}. Ensure Maven com.xdcobra.sherpa:onnxruntime is available.")
+        }
+      }
     }
   }
 }
@@ -342,5 +391,34 @@ project.tasks.register("extractSherpaOnnxClasses") {
     }
     throw new RuntimeException(
       "Missing sherpa-onnx classes.jar (Kotlin API). Use (1) local build_sherpa_onnx.sh, (2) Maven com.xdcobra.sherpa:sherpa-onnx, or (3) a GitHub release with java/classes.jar.")
+  }
+}
+
+// Extract classes.jar from the onnxruntime AAR so ai.onnxruntime.* Java classes
+// are bundled directly in the SDK. No compileOnly needed; users get it for free.
+project.tasks.register("extractOnnxruntimeClasses") {
+  outputs.dir onnxruntimeClassesDir
+  inputs.files(project.configurations.onnxruntimeAar)
+  doLast {
+    onnxruntimeClassesDir.mkdirs()
+    file(onnxruntimeClassesDir).listFiles()?.findAll { it.name.endsWith('.jar') }?.each { it.delete() }
+    def aarFiles = project.configurations.onnxruntimeAar.files
+    if (!aarFiles.isEmpty()) {
+      def aar = aarFiles.iterator().next()
+      copy {
+        from zipTree(aar)
+        include 'classes.jar'
+        into onnxruntimeClassesDir
+      }
+      def extractedJar = new File(onnxruntimeClassesDir, "classes.jar")
+      if (extractedJar.exists()) {
+        def renamed = new File(onnxruntimeClassesDir, "onnxruntime-classes.jar")
+        extractedJar.renameTo(renamed)
+      }
+      println "[onnxruntime] classes.jar: Maven AAR (${aar.name})"
+      return
+    }
+    throw new RuntimeException(
+      "Missing onnxruntime classes.jar. Ensure Maven com.xdcobra.sherpa:onnxruntime is available.")
   }
 }

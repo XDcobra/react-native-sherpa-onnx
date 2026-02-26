@@ -119,11 +119,11 @@ repositories {
   maven { url "https://xdcobra.github.io/maven" }
 }
 
-// Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR → jniLibs + headers)
-// and extractSherpaOnnxClasses (sherpa-onnx classes.jar). Main artifact = Kotlin API; do not use classifier "java".
-configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar }
+// Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR → jniLibs + headers),
+// extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
+configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; onnxruntimeAar }
 
-// Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses; wires preBuild.dependsOn checkJniLibs.
+// Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
 apply from: file("${project.projectDir}/prebuilt-download.gradle")
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
@@ -139,18 +139,20 @@ dependencies {
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
+  onnxruntimeAar "com.xdcobra.sherpa:onnxruntime:${ortVersion}@aar"
 
   // sherpa-onnx Java API: extractSherpaOnnxClasses (in prebuilt-download.gradle) fills sherpaOnnxClassesDir.
   // Source: local third_party | Maven AAR | GitHub release. Native .so from same prebuilt pipeline.
   implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))
 
+  // ORT Java API (OrtEnvironment, OrtSession, OrtProvider) for getAvailableProviders/getQnnSupport/etc.
+  // Extracted classes.jar from onnxruntime AAR (no compileOnly needed; bundled directly in the SDK).
+  // libonnxruntime4j_jni.so is also extracted to jniLibs so the Java bridge works at runtime.
+  def onnxruntimeClassesDir = file("${buildDir}/onnxruntime-classes")
+  implementation fileTree(dir: onnxruntimeClassesDir, include: '*.jar').builtBy(tasks.named('extractOnnxruntimeClasses'))
+
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
-
-  // ORT Java API (OrtEnvironment, OrtProvider) for getAvailableProviders().
-  // compileOnly: the app provides the actual onnxruntime AAR at runtime.
-  // Version must exist on https://xdcobra.github.io/maven.
-  compileOnly "com.xdcobra.sherpa:onnxruntime:1.24.2-qnn2.43.1.260218"
 }
 
 // TurboModule codegen; separate script to avoid Gradle 9 Groovy "source is null" with NodeTask.
@@ -161,9 +163,11 @@ apply from: file("${project.projectDir}/codegen.gradle")
 afterEvaluate {
   if (!isStandaloneAarBuild && tasks.findByName("downloadNativeLibsIfNeeded") != null) {
     tasks.named("extractSherpaOnnxClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
+    tasks.named("extractOnnxruntimeClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
   }
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
     dependsOn tasks.named("extractSherpaOnnxClasses")
+    dependsOn tasks.named("extractOnnxruntimeClasses")
     dependsOn tasks.named("checkJniLibs")
   }
 
@@ -172,6 +176,7 @@ afterEvaluate {
   def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
   tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
     dependsOn tasks.named("extractSherpaOnnxClasses")
+    dependsOn tasks.named("extractOnnxruntimeClasses")
     dependsOn tasks.named('generateCodegenSpec')
     inputs.dir(codegenJavaDir)
   }
