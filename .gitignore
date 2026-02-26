@@ -172,7 +172,7 @@ third_party/ffmpeg_prebuilt/publish-maven/publish.env
 third_party/libarchive_prebuilt/*
 # but allow tracked files
 !third_party/libarchive_prebuilt/README.md
-!third_party/libarchive_prebuilt/build_libarchive.sh
+!third_party/libarchive_prebuilt/build_libarchive_android.sh
 !third_party/libarchive_prebuilt/build_libarchive_ios.sh
 !third_party/libarchive_prebuilt/create_libarchive_aar.sh
 !third_party/libarchive_prebuilt/IOS_RELEASE_TAG

@@ -73,7 +73,7 @@ function main() {
   }
 
   if (!any) {
-    console.error('No .so or include files copied. Run build_libarchive.sh first.')
+    console.error('No .so or include files copied. Run build_libarchive_android.sh first.')
     process.exit(2)
   }
 
