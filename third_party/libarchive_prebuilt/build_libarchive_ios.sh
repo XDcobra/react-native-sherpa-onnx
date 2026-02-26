@@ -35,11 +35,10 @@ for f in "$LIBARCHIVE_LIB"/*.c; do
     cp -v "$f" "$OUTPUT_DIR/"
 done
 
-# Copy headers required to build and use libarchive.
-for h in archive.h archive_entry.h archive_platform.h archive_platform_acl.h archive_platform_xattr.h archive_platform_stat.h; do
-    if [ -f "$LIBARCHIVE_LIB/$h" ]; then
-        cp -v "$LIBARCHIVE_LIB/$h" "$OUTPUT_DIR/"
-    fi
+# Copy all headers from libarchive (public and private) so .c files that include
+# e.g. archive_write_private.h, archive_cmdline_private.h, archive_xxhash.h resolve.
+for h in "$LIBARCHIVE_LIB"/*.h; do
+    [ -f "$h" ] && cp -v "$h" "$OUTPUT_DIR/"
 done
 
 echo "Done. Output: $OUTPUT_DIR"

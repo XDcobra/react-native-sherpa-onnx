@@ -13,13 +13,13 @@ PATCHED_DIR="$SDK_ROOT/ios/patched_libarchive"
 
 if [ -z "$LIBARCHIVE_SRC" ]; then
   echo "Error: libarchive source dir not set. Usage: $0 <libarchive_source_dir>" >&2
-  echo "Use the same path as libarchive_dir in the pod (e.g. third_party/libarchive/libarchive or ios/Downloads/libarchive)." >&2
+  echo "Use the same path as libarchive_dir in the pod (e.g. third_party/libarchive_prebuilt/libarchive-ios-layout or ios/Downloads/libarchive)." >&2
   exit 1
 fi
 
 if [ ! -d "$LIBARCHIVE_SRC" ]; then
   echo "Error: libarchive source dir not found: $LIBARCHIVE_SRC" >&2
-  echo "Run ios/scripts/setup-ios-libarchive.sh first or ensure third_party/libarchive is present." >&2
+  echo "Run third_party/libarchive_prebuilt/build_libarchive_ios.sh (repo) or ios/scripts/setup-ios-libarchive.sh (npm)." >&2
   exit 1
 fi
 

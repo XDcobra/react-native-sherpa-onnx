@@ -26,6 +26,11 @@ if [ -z "$RELEASE_TAG" ]; then
   exit 1
 fi
 
+# Skip download if already present (podspec can be evaluated multiple times during pod install).
+if [ -d "$LIBARCHIVE_DIR" ] && [ -f "$LIBARCHIVE_DIR/archive.h" ] && [ -n "$(find "$LIBARCHIVE_DIR" -maxdepth 1 -name '*.c' -print -quit 2>/dev/null)" ]; then
+  exit 0
+fi
+
 AUTH_ARGS=()
 if [ -n "$GITHUB_TOKEN" ]; then
   AUTH_ARGS+=(-H "Authorization: Bearer $GITHUB_TOKEN")
