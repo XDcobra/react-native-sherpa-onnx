@@ -78,7 +78,7 @@ tasks.register('pushToGitMavenRepo') {
         def timestamp = java.time.Instant.now().toString().replaceAll(/[-:T.Z]/, '').take(14)
         def existingVersions = [] as Set
         if (metadataFile.exists()) {
-            def meta = new XmlSlurper().parse(metadataFile)
+            def meta = new groovy.xml.XmlSlurper().parse(metadataFile)
             existingVersions = meta.versioning.versions.version.collect { it.text().trim() } as Set
         }
         if (!existingVersions.contains(mavenVersion)) {
