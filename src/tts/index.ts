@@ -134,14 +134,9 @@ function toNativeTtsOptions(
   return out;
 }
 
-const nativeTtsEventModule =
-  SherpaOnnx &&
-  typeof (SherpaOnnx as any).addListener === 'function' &&
-  typeof (SherpaOnnx as any).removeListeners === 'function'
-    ? (SherpaOnnx as any)
-    : undefined;
-
-const ttsEventEmitter = new NativeEventEmitter(nativeTtsEventModule);
+// NativeEventEmitter requires a non-null native module; pass SherpaOnnx so the module loads.
+// If the native side does not emit TTS stream events, addListener will simply not receive any.
+const ttsEventEmitter = new NativeEventEmitter(SherpaOnnx as any);
 
 /**
  * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
