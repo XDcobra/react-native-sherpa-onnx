@@ -13,15 +13,15 @@ runs:
     - name: Determine submodule revision
       id: submodule-rev
       shell: bash
-      run: echo "rev=$(git ls-tree HEAD sherpa-onnx | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+      run: echo "rev=$(git ls-tree HEAD third_party/sherpa-onnx | awk '{print $3}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore sherpa-onnx cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: |
-          sherpa-onnx
-          .git/modules/sherpa-onnx
+          third_party/sherpa-onnx
+          .git/modules/third_party/sherpa-onnx
         key: sherpa-onnx-${{ steps.submodule-rev.outputs.rev }}
         restore-keys: |
           sherpa-onnx-
@@ -30,9 +30,9 @@ runs:
       shell: bash
       run: |
         set -e
-        git submodule update --init --recursive sherpa-onnx || true
-        if [ ! -d "sherpa-onnx" ]; then
-          echo "Submodule sherpa-onnx missing after cache/checkout"
+        git submodule update --init --recursive third_party/sherpa-onnx || true
+        if [ ! -d "third_party/sherpa-onnx" ]; then
+          echo "Submodule third_party/sherpa-onnx missing after cache/checkout"
           exit 1
         fi
 
@@ -41,8 +41,8 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: |
-          sherpa-onnx
-          .git/modules/sherpa-onnx
+          third_party/sherpa-onnx
+          .git/modules/third_party/sherpa-onnx
         key: ${{ steps.submodule-cache.outputs.cache-primary-key }}
 
     - name: Setup Node.js
