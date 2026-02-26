@@ -141,7 +141,8 @@ SttInitializeResult SttWrapper::initialize(
     }
 
     if (modelDir.empty()) {
-        LOGE("Model directory is empty");
+        result.error = "Model directory is empty";
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
@@ -152,7 +153,8 @@ SttInitializeResult SttWrapper::initialize(
 
         auto detect = DetectSttModel(modelDir, preferInt8, modelType, debug);
         if (!detect.ok) {
-            LOGE("%s", detect.error.c_str());
+            result.error = detect.error;
+            LOGE("%s", result.error.c_str());
             return result;
         }
 
@@ -216,7 +218,8 @@ SttInitializeResult SttWrapper::initialize(
                 break;
             case SttModelKind::kUnknown:
             default:
-                LOGE("No compatible model type detected in %s", modelDir.c_str());
+                result.error = "No compatible model type detected in " + modelDir;
+                LOGE("%s", result.error.c_str());
                 return result;
         }
 
@@ -346,10 +349,12 @@ SttInitializeResult SttWrapper::initialize(
         result.decodingMethod = config.decoding_method;
         return result;
     } catch (const std::exception& e) {
-        LOGE("Exception during initialization: %s", e.what());
+        result.error = std::string("Exception during initialization: ") + e.what();
+        LOGE("%s", result.error.c_str());
         return result;
     } catch (...) {
-        LOGE("Unknown exception during initialization");
+        result.error = "Unknown exception during initialization";
+        LOGE("%s", result.error.c_str());
         return result;
     }
 }
