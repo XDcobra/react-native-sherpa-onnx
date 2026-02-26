@@ -26,12 +26,35 @@ on_exit() {
 }
 trap on_exit EXIT
 
-# When run as Xcode build phase, cwd may not be the pod root; use PODS_TARGET_SRCROOT if set.
+# Resolve project root so the script works from pod install (cwd = pod root) and from Xcode/build phases.
+# 1) PODS_TARGET_SRCROOT is set when building the SherpaOnnx pod (points to the pod root = package root).
+# 2) SRCROOT sometimes points to the app's ios dir; ../../ is then the package root in a typical example/ setup.
+# 3) Script-relative: BASH_SOURCE is the script path (absolute when invoked via pod prepare_command with absolute path).
+# 4) PWD: when CocoaPods runs prepare_command, cwd is the pod root (package root).
+PROJECT_ROOT=""
 if [ -n "${PODS_TARGET_SRCROOT}" ] && [ -d "${PODS_TARGET_SRCROOT}" ]; then
   PROJECT_ROOT="${PODS_TARGET_SRCROOT}"
-else
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -n "${SRCROOT}" ] && [ -d "${SRCROOT}/../../ios/Frameworks" ]; then
+  PROJECT_ROOT="$(cd "${SRCROOT}/../.." && pwd)"
+fi
+if [ -z "$PROJECT_ROOT" ]; then
+  SCRIPT_PATH="${BASH_SOURCE[0]}"
+  [ -z "$SCRIPT_PATH" ] && SCRIPT_PATH="$0"
+  if [ -n "$SCRIPT_PATH" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)"
+    # Parent of scripts/ is the package root (even if ios/Frameworks does not exist yet).
+    if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/../ios" ]; then
+      PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    fi
+  fi
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -d "$(pwd)/ios/Frameworks" ]; then
+  PROJECT_ROOT="$(pwd)"
+fi
+if [ -z "$PROJECT_ROOT" ]; then
+  echo "Error: Could not resolve project root (tried PODS_TARGET_SRCROOT, SRCROOT/../.., script dir, PWD). Run this script from the package root or run 'pod install' from example/ios." >&2
+  exit 1
 fi
 FRAMEWORKS_DIR="$PROJECT_ROOT/ios/Frameworks"
 VERSION_FILE="$FRAMEWORKS_DIR/.framework-version"

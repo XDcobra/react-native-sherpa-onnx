@@ -83,8 +83,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
        maxNumSentences:(NSNumber *)maxNumSentences
          silenceScale:(NSNumber *)silenceScale
             provider:(NSString *)provider
-         withResolver:(RCTPromiseResolveBlock)resolve
-         withRejecter:(RCTPromiseRejectBlock)reject
+         resolve:(RCTPromiseResolveBlock)resolve
+         reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_INIT_ERROR", @"instanceId is required", nil);
@@ -201,8 +201,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
 - (void)detectTtsModel:(NSString *)modelDir
             modelType:(NSString *)modelType
-         withResolver:(RCTPromiseResolveBlock)resolve
-         withRejecter:(RCTPromiseRejectBlock)reject
+         resolve:(RCTPromiseResolveBlock)resolve
+         reject:(RCTPromiseRejectBlock)reject
 {
     RCTLogInfo(@"Detecting TTS model in: %@", modelDir);
     @try {
@@ -237,8 +237,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             noiseScale:(NSNumber *)noiseScale
            noiseScaleW:(NSNumber *)noiseScaleW
            lengthScale:(NSNumber *)lengthScale
-           withResolver:(RCTPromiseResolveBlock)resolve
-           withRejecter:(RCTPromiseRejectBlock)reject
+           resolve:(RCTPromiseResolveBlock)resolve
+           reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_UPDATE_ERROR", @"instanceId is required", nil);
@@ -370,8 +370,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 - (void)generateTts:(NSString *)instanceId
               text:(NSString *)text
             options:(NSDictionary *)options
-       withResolver:(RCTPromiseResolveBlock)resolve
-       withRejecter:(RCTPromiseRejectBlock)reject
+       resolve:(RCTPromiseResolveBlock)resolve
+       reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
@@ -431,8 +431,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 - (void)generateTtsWithTimestamps:(NSString *)instanceId
                             text:(NSString *)text
                           options:(NSDictionary *)options
-                     withResolver:(RCTPromiseResolveBlock)resolve
-                     withRejecter:(RCTPromiseRejectBlock)reject
+                     resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
@@ -510,8 +510,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 - (void)generateTtsStream:(NSString *)instanceId
                     text:(NSString *)text
                   options:(NSDictionary *)options
-             withResolver:(RCTPromiseResolveBlock)resolve
-             withRejecter:(RCTPromiseRejectBlock)reject
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_STREAM_ERROR", @"instanceId is required", nil);
@@ -615,8 +615,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)cancelTtsStream:(NSString *)instanceId
-           withResolver:(RCTPromiseResolveBlock)resolve
-           withRejecter:(RCTPromiseRejectBlock)reject
+           resolve:(RCTPromiseResolveBlock)resolve
+           reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         resolve(nil);
@@ -634,8 +634,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 - (void)startTtsPcmPlayer:(NSString *)instanceId
                sampleRate:(double)sampleRate
                  channels:(double)channels
-             withResolver:(RCTPromiseResolveBlock)resolve
-             withRejecter:(RCTPromiseRejectBlock)reject
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_PCM_ERROR", @"instanceId is required", nil);
@@ -714,8 +714,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
 - (void)writeTtsPcmChunk:(NSString *)instanceId
                  samples:(NSArray<NSNumber *> *)samples
-            withResolver:(RCTPromiseResolveBlock)resolve
-            withRejecter:(RCTPromiseRejectBlock)reject
+            resolve:(RCTPromiseResolveBlock)resolve
+            reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_PCM_ERROR", @"instanceId is required", nil);
@@ -748,8 +748,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)stopTtsPcmPlayer:(NSString *)instanceId
-            withResolver:(RCTPromiseResolveBlock)resolve
-            withRejecter:(RCTPromiseRejectBlock)reject
+            resolve:(RCTPromiseResolveBlock)resolve
+            reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         resolve(nil);
@@ -782,8 +782,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)getTtsSampleRate:(NSString *)instanceId
-            withResolver:(RCTPromiseResolveBlock)resolve
-            withRejecter:(RCTPromiseRejectBlock)reject
+            resolve:(RCTPromiseResolveBlock)resolve
+            reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_ERROR", @"instanceId is required", nil);
@@ -801,8 +801,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)getTtsNumSpeakers:(NSString *)instanceId
-             withResolver:(RCTPromiseResolveBlock)resolve
-             withRejecter:(RCTPromiseRejectBlock)reject
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_ERROR", @"instanceId is required", nil);
@@ -820,8 +820,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)unloadTts:(NSString *)instanceId
-     withResolver:(RCTPromiseResolveBlock)resolve
-     withRejecter:(RCTPromiseRejectBlock)reject
+     resolve:(RCTPromiseResolveBlock)resolve
+     reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         resolve(nil);
@@ -897,10 +897,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)saveTtsAudioToFile:(NSArray<NSNumber *> *)samples
-             withSampleRate:(double)sampleRate
-               withFilePath:(NSString *)filePath
-               withResolver:(RCTPromiseResolveBlock)resolve
-               withRejecter:(RCTPromiseRejectBlock)reject
+                sampleRate:(double)sampleRate
+                  filePath:(NSString *)filePath
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         std::vector<float> samplesVec;
@@ -928,12 +928,92 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
+- (void)saveTtsAudioToContentUri:(NSArray<NSNumber *> *)samples
+                      sampleRate:(double)sampleRate
+                    directoryUri:(NSString *)directoryUri
+                        filename:(NSString *)filename
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if ([directoryUri hasPrefix:@"content://"]) {
+            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+            return;
+        }
+        std::vector<float> samplesVec;
+        samplesVec.reserve([samples count]);
+        for (NSNumber *num in samples) {
+            samplesVec.push_back([num floatValue]);
+        }
+        NSString *dirPath = [directoryUri hasPrefix:@"file://"]
+            ? [[NSURL URLWithString:directoryUri] path]
+            : directoryUri;
+        NSString *filePath = [dirPath stringByAppendingPathComponent:filename];
+        std::string filePathStr = std::string([filePath UTF8String]);
+        bool success = sherpaonnx::TtsWrapper::saveToWavFile(
+            samplesVec,
+            static_cast<int32_t>(sampleRate),
+            filePathStr
+        );
+        if (success) {
+            resolve(filePath);
+        } else {
+            reject(@"TTS_SAVE_ERROR", @"Failed to save audio to file", nil);
+        }
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception saving TTS audio: %@", exception.reason];
+        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)copyTtsContentUriToCache:(NSString *)fileUri
+                        filename:(NSString *)filename
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if ([fileUri hasPrefix:@"content://"]) {
+            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+            return;
+        }
+        NSString *srcPath = [fileUri hasPrefix:@"file://"]
+            ? [[NSURL URLWithString:fileUri] path]
+            : fileUri;
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:srcPath]) {
+            reject(@"TTS_SAVE_ERROR", @"Source file does not exist", nil);
+            return;
+        }
+        NSArray *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        NSString *cacheDir = caches.firstObject;
+        NSString *destPath = [[cacheDir stringByAppendingPathComponent:@"sherpa_tts"] stringByAppendingPathComponent:filename];
+        NSError *err = nil;
+        [fm createDirectoryAtPath:[destPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:&err];
+        if (err) {
+            reject(@"TTS_SAVE_ERROR", err.localizedDescription, err);
+            return;
+        }
+        if ([fm fileExistsAtPath:destPath]) {
+            [fm removeItemAtPath:destPath error:nil];
+        }
+        BOOL ok = [fm copyItemAtPath:srcPath toPath:destPath error:&err];
+        if (!ok || err) {
+            reject(@"TTS_SAVE_ERROR", err ? err.localizedDescription : @"Copy failed", err);
+            return;
+        }
+        resolve(destPath);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Exception copying file: %@", exception.reason];
+        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
+    }
+}
+
 - (void)saveTtsTextToContentUri:(NSString *)text
                  directoryUri:(NSString *)directoryUri
                      filename:(NSString *)filename
                      mimeType:(NSString *)mimeType
-                  withResolver:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         if ([directoryUri hasPrefix:@"content://"]) {
@@ -976,8 +1056,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
 - (void)shareTtsAudio:(NSString *)fileUri
             mimeType:(NSString *)mimeType
-         withResolver:(RCTPromiseResolveBlock)resolve
-         withRejecter:(RCTPromiseRejectBlock)reject
+         resolve:(RCTPromiseResolveBlock)resolve
+         reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         NSURL *url = nil;
