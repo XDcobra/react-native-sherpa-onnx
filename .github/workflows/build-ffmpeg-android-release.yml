@@ -4,7 +4,7 @@
 # so extraction into android/src/main/jniLibs/ merges correctly.
 # AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:ffmpeg when MAVEN_REPO_PAT is set.
 #
-# When to run manually (Actions → Prebuilt - FFmpeg (Android) Release → Run workflow):
+# When to run manually (Actions --> Prebuilt - FFmpeg (Android) Release --> Run workflow):
 # 1. After updating third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG or FFmpeg/shine submodules.
 # 2. When you want to publish a new FFmpeg Android release (GitHub Release zip + AAR, optional Maven).
 # Sherpa-onnx Android build uses this release; run this before building sherpa-onnx if you changed FFmpeg.

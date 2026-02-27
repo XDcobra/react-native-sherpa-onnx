@@ -1,5 +1,5 @@
 // Prebuilt versions (sherpa-onnx, FFmpeg, libarchive) from prebuilt-versions.gradle.
-// Resolution: env → ANDROID_RELEASE_TAG files → project property → default.
+// Resolution: env --> ANDROID_RELEASE_TAG files --> project property --> default.
 apply from: file("${project.projectDir}/prebuilt-versions.gradle")
 
 // Used by dependencies below and by prebuilt-download.gradle (extractSherpaOnnxClasses, downloadNativeLibsIfNeeded).
@@ -39,13 +39,7 @@ buildscript {
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
-
-// Standalone AAR build: set in root build.gradle (ext.standaloneAarBuild = true) or via -PstandaloneAarBuild=true
-def isStandaloneAarBuild = rootProject.findProperty("standaloneAarBuild") in [true, "true"]
-// Only apply React Native plugin when building inside a React Native app (e.g. example app).
-if (!isStandaloneAarBuild) {
-  apply plugin: "com.facebook.react"
-}
+apply plugin: "com.facebook.react"
 
 android {
   namespace "com.sherpaonnx"
@@ -54,10 +48,6 @@ android {
 
   // Native .so and headers: filled by prebuilt-download.gradle (local jniLibs, Maven AAR, or GitHub release).
   // Alternatively by third_party/*/copy_prebuilts_to_sdk.js or shipped in npm package.
-
-  // Codegen Java output: always use the flat path. For app builds RNGP writes here directly;
-  // for standalone AAR builds the codegen task normalises the nested output to this path.
-  sourceSets.main.java.srcDirs += file("${buildDir}/generated/source/codegen/java")
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
@@ -119,7 +109,7 @@ repositories {
   maven { url "https://xdcobra.github.io/maven" }
 }
 
-// Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR → jniLibs + headers),
+// Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
 // extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
 configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; onnxruntimeAar }
 
@@ -129,8 +119,7 @@ apply from: file("${project.projectDir}/prebuilt-download.gradle")
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
 dependencies {
-  // React Native dependency: explicit version ensures IDE (VS Code Kotlin LSP) and standalone
-  // AAR builds can resolve com.facebook.react types. When consumed by a React Native app,
+  // React Native dependency: explicit version for IDE (VS Code Kotlin LSP). When consumed by a React Native app,
   // Gradle's dependency resolution picks the app's react-android version (typically higher).
   implementation "com.facebook.react:react-android:0.83.0"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
@@ -155,13 +144,10 @@ dependencies {
   implementation "com.google.android.play:asset-delivery:2.3.0"
 }
 
-// TurboModule codegen; separate script to avoid Gradle 9 Groovy "source is null" with NodeTask.
-apply from: file("${project.projectDir}/codegen.gradle")
-
-// Wire prebuilt tasks: extractSherpaOnnxClasses → downloadNativeLibsIfNeeded when not standalone;
+// Wire prebuilt tasks: extractSherpaOnnxClasses --> downloadNativeLibsIfNeeded;
 // CMake/compile tasks depend on extractSherpaOnnxClasses and checkJniLibs.
 afterEvaluate {
-  if (!isStandaloneAarBuild && tasks.findByName("downloadNativeLibsIfNeeded") != null) {
+  if (tasks.findByName("downloadNativeLibsIfNeeded") != null) {
     tasks.named("extractSherpaOnnxClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
     tasks.named("extractOnnxruntimeClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
   }
@@ -170,14 +156,8 @@ afterEvaluate {
     dependsOn tasks.named("extractOnnxruntimeClasses")
     dependsOn tasks.named("checkJniLibs")
   }
-
-  // With includesGeneratedCode=false, codegen is always run by our custom task (not RNGP).
-  // Kotlin compile must depend on it for both standalone AAR and app-dependency builds.
-  def codegenJavaDir = project.file("${project.buildDir}/generated/source/codegen/java")
   tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
     dependsOn tasks.named("extractSherpaOnnxClasses")
     dependsOn tasks.named("extractOnnxruntimeClasses")
-    dependsOn tasks.named('generateCodegenSpec')
-    inputs.dir(codegenJavaDir)
   }
 }

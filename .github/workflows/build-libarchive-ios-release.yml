@@ -2,7 +2,7 @@
 # Release tag is read from third_party/libarchive_prebuilt/IOS_RELEASE_TAG.
 # No compilation: only sources + headers are zipped for the pod to build.
 #
-# When to run manually (Actions → Prebuilt - libarchive (iOS) Release → Run workflow):
+# When to run manually (Actions --> Prebuilt - libarchive (iOS) Release --> Run workflow):
 # 1. After updating third_party/libarchive_prebuilt/IOS_RELEASE_TAG or libarchive submodule.
 # 2. When you want to publish a new libarchive iOS release (sources zip for npm/small package).
 #

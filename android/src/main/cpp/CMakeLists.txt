@@ -105,7 +105,7 @@ add_library(sherpaonnx SHARED
 # sherpa-onnx C-API: link by directory + library name only (no IMPORTED target).
 # The .so and headers land in jniLibs and cpp/include/sherpa-onnx via:
 #   (1) local third_party build, (2) Maven AAR extraction (libs + c-api headers), or (3) GitHub release zip (last resort).
-# If we used IMPORTED here, AGP would also copy .so from CMake → duplicate in mergeNativeLibs.
+# If we used IMPORTED here, AGP would also copy .so from CMake --> duplicate in mergeNativeLibs.
 set(SHERPA_ONNX_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/sherpa-onnx-prebuilt/android")
 set(SHERPA_ONNX_ABI_LIB "${SHERPA_ONNX_PREBUILT_BASE}/${ANDROID_ABI}/lib")
 set(SHERPA_C_API_LIB_DIR "")

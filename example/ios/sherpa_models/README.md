@@ -25,12 +25,12 @@ If the folder is empty, the example app’s sample-audio options will show “Pa
 sherpa_models/
   README.md          (this file)
   models/
-    my-whisper/      → App.app/models/my-whisper
+    my-whisper/      --> App.app/models/my-whisper
       encoder.onnx
       decoder.onnx
       tokens.txt
   test_wavs/
-    0-en.wav         → App.app/test_wavs/0-en.wav
+    0-en.wav         --> App.app/test_wavs/0-en.wav
     1-en.wav
     ...
 ```

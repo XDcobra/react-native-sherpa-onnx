@@ -2,7 +2,7 @@
 # Release tag is read from third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG.
 # AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:libarchive when MAVEN_REPO_PAT is set.
 #
-# When to run manually (Actions → Prebuilt - libarchive (Android) Release → Run workflow):
+# When to run manually (Actions --> Prebuilt - libarchive (Android) Release --> Run workflow):
 # 1. After updating third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG or libarchive submodule.
 # 2. When you want to publish a new libarchive Android release (zip + AAR, optional Maven).
 #
