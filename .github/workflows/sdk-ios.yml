@@ -63,12 +63,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "Working directory: $(pwd)"
           yarn download-ios-framework
           echo "=== Expected framework location ==="
-          ls -la ios/Frameworks/sherpa_onnx.xcframework || true
-          echo "=== Simulator slice Headers (for sherpa-onnx/c-api/cxx-api.h) ==="
-          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers 2>/dev/null || true
-          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api 2>/dev/null || true
+          ls -la ios/Frameworks/sherpa_onnx.xcframework
+          echo "=== Simulator slice Headers (required for sherpa-onnx/c-api/cxx-api.h) ==="
+          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers
+          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api
 
       - name: Use appropriate Xcode version
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0

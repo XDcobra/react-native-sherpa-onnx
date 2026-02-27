@@ -67,13 +67,24 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
+# Helper: check if a framework path is valid for building (has library + required headers for compiler)
+framework_valid() {
+  local fw_root="$1"
+  [ -f "$fw_root/ios-arm64/libsherpa-onnx.a" ] || return 1
+  [ -f "$fw_root/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" ] || return 1
+  return 0
+}
+
 # When run as Xcode build phase (prepare_command): if framework is already present and valid, exit successfully.
 # Avoids network/TAG-file dependency during build and prevents "PhaseScriptExecution failed" when nothing is needed.
+# We require both the library and the Headers (sherpa-onnx/c-api/cxx-api.h) so an incomplete framework triggers a re-download.
 if [ "$FORCE_DOWNLOAD" != true ]; then
-  if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ] && [ -f "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64/libsherpa-onnx.a" ]; then
+  if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
+    echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa_onnx.xcframework, skipping download." >&2
     exit 0
   fi
-  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ -f "$FRAMEWORKS_DIR/sherpa-onnx.xcframework/ios-arm64/libsherpa-onnx.a" ]; then
+  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa-onnx.xcframework"; then
+    echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa-onnx.xcframework, skipping download." >&2
     exit 0
   fi
 fi
@@ -277,10 +288,30 @@ download_and_extract_framework() {
   echo -e "${YELLOW}Extracting framework...${NC}" >&2
   unzip -q -o "$zip_path" -d "$FRAMEWORKS_DIR"
 
+  # Normalize name: podspec expects sherpa_onnx.xcframework; zip may contain sherpa-onnx.xcframework
+  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
+    mv "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  fi
+
   if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
     echo -e "${RED}Error: Framework extraction failed${NC}" >&2
     echo "Contents of $FRAMEWORKS_DIR:" >&2
     ls -la "$FRAMEWORKS_DIR" 2>/dev/null | head -20 >&2 || true
+    rm -f "$zip_path"
+    return 1
+  fi
+
+  # Verify required headers are present (needed for iOS build: #include "sherpa-onnx/c-api/cxx-api.h")
+  if ! framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
+    echo -e "${RED}Error: Downloaded framework is missing required headers for building.${NC}" >&2
+    echo "Expected: $FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" >&2
+    echo "Simulator Headers directory:" >&2
+    ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" 2>/dev/null || echo "  (missing)" >&2
+    if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" ]; then
+      echo "sherpa-onnx/c-api under Headers:" >&2
+      ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api" 2>/dev/null || echo "  (missing)" >&2
+    fi
+    rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
     rm -f "$zip_path"
     return 1
   fi
