@@ -219,6 +219,19 @@ export async function createSTT(
   return engine;
 }
 
+// Streaming (online) STT
+export { createStreamingSTT } from './streaming';
+export type {
+  OnlineSTTModelType,
+  StreamingSttEngine,
+  StreamingSttInitOptions,
+  StreamingSttResult,
+  SttStream,
+  EndpointConfig,
+  EndpointRule,
+} from './streamingTypes';
+export { ONLINE_STT_MODEL_TYPES } from './streamingTypes';
+
 // Export types and runtime type list
 export type {
   STTInitializeOptions,
