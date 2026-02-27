@@ -35,8 +35,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
-| **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>**Full support soon** |
+| **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
+| **iOS** | ✅ **Production Ready** | XCFramework + Podspec ready, CI/CD automated, multiple models supported |
 
 ## Supported Model Types
 
