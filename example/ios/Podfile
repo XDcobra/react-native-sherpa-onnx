@@ -17,7 +17,6 @@ if linkage != nil
 end
 
 target 'VoiceLabOfflineTools' do
-
   config = use_native_modules!
 
   use_react_native!(
@@ -27,30 +26,16 @@ target 'VoiceLabOfflineTools' do
   )
 
   post_install do |installer|
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
     react_native_post_install(
       installer,
       config[:reactNativePath],
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
-  end
-end
-
-# Ensure codegen runs for the iOS native spec when pods are installed in CI
-# or fresh checkouts. This runs the RN codegen script if the generated
-# `SherpaOnnxSpec/SherpaOnnxSpec.h` header is missing.
-pre_install do |installer|
-  spec_header = File.join(Dir.pwd, '..', 'ios', 'SherpaOnnxSpec', 'SherpaOnnxSpec.h')
-  unless File.exist?(spec_header)
-    UI.message("SherpaOnnxSpec not found; running iOS codegen to generate spec headers...")
-    sh = 'node'
-    script = File.join(Dir.pwd, '..', 'node_modules', 'react-native', 'scripts', 'generate-codegen-artifacts.js')
-    if File.exist?(script)
-      Dir.chdir(File.join(Dir.pwd, '..')) do
-        system(sh, script, '-p', '.', '-t', 'ios', '-o', 'ios', '-s', 'library')
-      end
-    else
-      UI.warn("React Native codegen script not found at #{script}; install node_modules first.")
-    end
   end
 end

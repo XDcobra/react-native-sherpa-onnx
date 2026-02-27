@@ -1,3 +1,10 @@
+/**
+ * SherpaOnnx+STT.mm
+ *
+ * Purpose: STT (speech-to-text) TurboModule methods: initializeStt, releaseStt, runStt, and related.
+ * Uses sherpa-onnx-stt-wrapper for native recognition and sherpa-onnx-model-detect for model detection.
+ */
+
 #import "SherpaOnnx.h"
 #import <React/RCTLog.h>
 

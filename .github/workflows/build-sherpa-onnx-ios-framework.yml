@@ -1,3 +1,5 @@
+# Builds sherpa-onnx XCFramework for iOS (device + simulator).
+# The framework includes the C++ API (libsherpa-onnx-cxx-api.a) so that Obj-C++ native code can link without undefined symbols.
 name: Framework - Build sherpa-onnx XCFramework
 
 on:
@@ -66,6 +68,17 @@ jobs:
           git checkout ${{ env.SHERPA_ONNX_VERSION }} || git checkout main
           git log -1 --oneline
 
+      - name: Patch build-ios.sh to include C++ API library
+        run: |
+          cd sherpa-onnx-source
+          # Upstream build-ios.sh merges only C-API into libsherpa-onnx.a; we need cxx-api for Obj-C++ usage.
+          # Add libsherpa-onnx-cxx-api.a to the simulator for-loop (lipo) and both libtool merge commands.
+          sed -i.bak 's/libsherpa-onnx-c-api.a libsherpa-onnx-core.a/libsherpa-onnx-c-api.a libsherpa-onnx-cxx-api.a libsherpa-onnx-core.a/g' build-ios.sh
+          sed -i.bak 's|build/simulator/lib/libsherpa-onnx-c-api.a|build/simulator/lib/libsherpa-onnx-c-api.a build/simulator/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
+          sed -i.bak 's|build/os64/lib/libsherpa-onnx-c-api.a|build/os64/lib/libsherpa-onnx-c-api.a build/os64/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
+          echo "Patched build-ios.sh to include libsherpa-onnx-cxx-api.a"
+          grep -n "cxx-api" build-ios.sh || true
+
       - name: Build sherpa-onnx XCFramework
         run: |
           cd sherpa-onnx-source
@@ -97,6 +110,15 @@ jobs:
           echo "XCFramework built: $FRAMEWORK_NAME"
           echo "Framework size (before adding onnxruntime):"
           du -sh "build-ios/$FRAMEWORK_NAME"
+
+          # Verify C++ API symbols are present (required for Obj-C++ usage)
+          if [ -d "build-ios/build/os64" ] && [ -f "build-ios/build/os64/libsherpa-onnx.a" ]; then
+            if nm "build-ios/build/os64/libsherpa-onnx.a" 2>/dev/null | grep -q "OfflineTts::Create"; then
+              echo "C++ API symbols verified in libsherpa-onnx.a"
+            else
+              echo "Warning: C++ symbol OfflineTts::Create not found in build-ios/build/os64/libsherpa-onnx.a"
+            fi
+          fi
 
       - name: Add ONNX Runtime to XCFramework
         run: |

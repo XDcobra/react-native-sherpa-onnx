@@ -1,10 +1,15 @@
-/*
- * Core SherpaOnnx module helpers (paths, assets, and event registration).
- * Feature-specific methods are implemented in SherpaOnnx+STT.mm and SherpaOnnx+TTS.mm.
+/**
+ * SherpaOnnx.mm
+ *
+ * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
+ * SherpaOnnx+Assets.mm), extractTarBz2/computeFileSha256 via sherpa-onnx-archive-helper, capability
+ * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
+ * SherpaOnnx+Assets.mm; STT/TTS in SherpaOnnx+STT.mm and SherpaOnnx+TTS.mm.
  */
 
 #import "SherpaOnnx.h"
-#import "SherpaOnnxArchiveHelper.h"
+#import "SherpaOnnx+Assets.h"
+#import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
@@ -12,17 +17,28 @@
 
 @implementation SherpaOnnx
 
++ (NSString *)moduleName
+{
+    return @"SherpaOnnx";
+}
+
+- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
+    (const facebook::react::ObjCTurboModule::InitParams &)params
+{
+    return std::make_shared<facebook::react::NativeSherpaOnnxSpecJSI>(params);
+}
+
 - (NSArray<NSString *> *)supportedEvents
 {
     return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress" ];
 }
 
-- (void)resolveModelPath:(NSDictionary *)config
-            withResolver:(RCTPromiseResolveBlock)resolve
-            withRejecter:(RCTPromiseRejectBlock)reject
+- (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
-    NSString *type = config[@"type"] ?: @"auto";
-    NSString *path = config[@"path"];
+    NSString *type = config.type() ?: @"auto";
+    NSString *path = config.path();
 
     if (!path) {
         reject(@"PATH_REQUIRED", @"Path is required", nil);
@@ -52,140 +68,8 @@
     resolve(resolvedPath);
 }
 
-- (NSString *)resolveAssetPath:(NSString *)assetPath error:(NSError **)error
-{
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-
-    // First, try to find directly in bundle (for folder references)
-    NSString *bundlePath = [[NSBundle mainBundle] pathForResource:assetPath ofType:nil];
-
-    if (bundlePath && [fileManager fileExistsAtPath:bundlePath]) {
-        return bundlePath;
-    }
-
-    // Try with directory structure (for resources in subdirectories)
-    NSArray *pathComponents = [assetPath componentsSeparatedByString:@"/"];
-    if (pathComponents.count > 1) {
-        NSString *directory = pathComponents[0];
-        for (NSInteger i = 1; i < pathComponents.count - 1; i++) {
-            directory = [directory stringByAppendingPathComponent:pathComponents[i]];
-        }
-        NSString *resourceName = pathComponents.lastObject;
-        bundlePath = [[NSBundle mainBundle] pathForResource:resourceName ofType:nil inDirectory:directory];
-
-        if (bundlePath && [fileManager fileExistsAtPath:bundlePath]) {
-            return bundlePath;
-        }
-    }
-
-    // If not found in bundle, try to copy from bundle to Documents
-    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *targetDir = [documentsPath stringByAppendingPathComponent:@"models"];
-    NSString *modelDir = [targetDir stringByAppendingPathComponent:[assetPath lastPathComponent]];
-
-    // Check if already copied
-    if ([fileManager fileExistsAtPath:modelDir]) {
-        return modelDir;
-    }
-
-    // Try to find and copy from bundle resource path
-    NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
-    NSString *sourcePath = [bundleResourcePath stringByAppendingPathComponent:assetPath];
-
-    if ([fileManager fileExistsAtPath:sourcePath]) {
-        NSError *copyError = nil;
-        [fileManager createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&copyError];
-        if (copyError) {
-            if (error) *error = copyError;
-            return nil;
-        }
-
-        // Copy recursively if it's a directory
-        BOOL isDirectory = NO;
-        [fileManager fileExistsAtPath:sourcePath isDirectory:&isDirectory];
-
-        if (isDirectory) {
-            [fileManager copyItemAtPath:sourcePath toPath:modelDir error:&copyError];
-        } else {
-            [fileManager copyItemAtPath:sourcePath toPath:modelDir error:&copyError];
-        }
-
-        if (copyError) {
-            if (error) *error = copyError;
-            return nil;
-        }
-
-        return modelDir;
-    }
-
-    if (error) {
-        *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                      code:1
-                                  userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Asset path not found: %@", assetPath]}];
-    }
-    return nil;
-}
-
-- (NSString *)resolveFilePath:(NSString *)filePath error:(NSError **)error
-{
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    BOOL isDirectory = NO;
-    BOOL exists = [fileManager fileExistsAtPath:filePath isDirectory:&isDirectory];
-
-    if (!exists) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                          code:2
-                                      userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"File path does not exist: %@", filePath]}];
-        }
-        return nil;
-    }
-
-    if (!isDirectory) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                          code:3
-                                      userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Path is not a directory: %@", filePath]}];
-        }
-        return nil;
-    }
-
-    return [filePath stringByStandardizingPath];
-}
-
-- (NSString *)resolveAutoPath:(NSString *)path error:(NSError **)error
-{
-    // Try asset first
-    NSError *assetError = nil;
-    NSString *resolvedPath = [self resolveAssetPath:path error:&assetError];
-
-    if (resolvedPath) {
-        return resolvedPath;
-    }
-
-    // If asset fails, try file system
-    NSError *fileError = nil;
-    resolvedPath = [self resolveFilePath:path error:&fileError];
-
-    if (resolvedPath) {
-        return resolvedPath;
-    }
-
-    // Both failed
-    if (error) {
-        NSString *errorMessage = [NSString stringWithFormat:@"Path not found as asset or file: %@. Asset error: %@, File error: %@",
-                                   path,
-                                   assetError.localizedDescription ?: @"Unknown",
-                                   fileError.localizedDescription ?: @"Unknown"];
-        *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                      code:4
-                                  userInfo:@{NSLocalizedDescriptionKey: errorMessage}];
-    }
-    return nil;
-}
-
-- (void)testSherpaInitWithResolver:(RCTPromiseResolveBlock)resolve
-                      withRejecter:(RCTPromiseRejectBlock)reject
+- (void)testSherpaInit:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         resolve(@"Sherpa ONNX loaded!");
@@ -196,33 +80,33 @@
 }
 
 // QNN (Qualcomm NPU) is Android-only; on iOS the build never has QNN support.
-- (void)getQnnSupportWithModelBase64:(NSString *)modelBase64
-                         withResolver:(RCTPromiseResolveBlock)resolve
-                         withRejecter:(RCTPromiseRejectBlock)reject
+- (void)getQnnSupport:(NSString *)modelBase64
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
 {
     resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
 }
 
 // NNAPI is Android-only; on iOS we always return no support.
-- (void)getNnapiSupportWithModelBase64:(NSString *)modelBase64
-                          withResolver:(RCTPromiseResolveBlock)resolve
-                          withRejecter:(RCTPromiseRejectBlock)reject
+- (void)getNnapiSupport:(NSString *)modelBase64
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject
 {
     resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
 }
 
 // XNNPACK support: stub on iOS (could be extended to check ORT providers and session init).
-- (void)getXnnpackSupportWithModelBase64:(NSString *)modelBase64
-                            withResolver:(RCTPromiseResolveBlock)resolve
-                            withRejecter:(RCTPromiseRejectBlock)reject
+- (void)getXnnpackSupport:(NSString *)modelBase64
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
     resolve(@{ @"providerCompiled": @NO, @"hasAccelerator": @NO, @"canInit": @NO });
 }
 
 // Core ML support (iOS): providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple Neural Engine, canInit = session test (stub false unless ORT linked).
-- (void)getCoreMlSupportWithModelBase64:(NSString *)modelBase64
-                           withResolver:(RCTPromiseResolveBlock)resolve
-                           withRejecter:(RCTPromiseRejectBlock)reject
+- (void)getCoreMlSupport:(NSString *)modelBase64
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
     BOOL hasANE = NO;
 #if __has_include("SherpaOnnx-Swift.h")
@@ -240,8 +124,8 @@
 - (void)extractTarBz2:(NSString *)sourcePath
            targetPath:(NSString *)targetPath
                 force:(BOOL)force
-         withResolver:(RCTPromiseResolveBlock)resolve
-         withRejecter:(RCTPromiseRejectBlock)reject
+         resolve:(RCTPromiseResolveBlock)resolve
+         reject:(RCTPromiseRejectBlock)reject
 {
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
     NSDictionary *result = [helper extractTarBz2:sourcePath
@@ -258,15 +142,15 @@
 }
 
 - (void)cancelExtractTarBz2:(RCTPromiseResolveBlock)resolve
-               withRejecter:(RCTPromiseRejectBlock)reject
+               reject:(RCTPromiseRejectBlock)reject
 {
     [SherpaOnnxArchiveHelper cancelExtractTarBz2];
     resolve(nil);
 }
 
 - (void)computeFileSha256:(NSString *)filePath
-             withResolver:(RCTPromiseResolveBlock)resolve
-             withRejecter:(RCTPromiseRejectBlock)reject
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
 {
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
     NSError *error = nil;
@@ -278,213 +162,45 @@
     resolve(digest);
 }
 
-- (void)listAssetModels:(RCTPromiseResolveBlock)resolve
-          withRejecter:(RCTPromiseRejectBlock)reject
+- (void)getAssetPackPath:(NSString *)packName
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSMutableArray<NSString *> *modelFolders = [NSMutableArray array];
-
-        // Get the main bundle resource path
-        NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
-        NSString *modelsPath = [bundleResourcePath stringByAppendingPathComponent:@"models"];
-
-        // Check if models directory exists
-        BOOL isDirectory = NO;
-        BOOL exists = [fileManager fileExistsAtPath:modelsPath isDirectory:&isDirectory];
-
-        if (exists && isDirectory) {
-            NSError *error = nil;
-            NSArray<NSString *> *items = [fileManager contentsOfDirectoryAtPath:modelsPath error:&error];
-
-            if (error) {
-                RCTLogWarn(@"Could not list models directory: %@", error.localizedDescription);
-            } else {
-                // Filter to only include directories
-                for (NSString *item in items) {
-                    // Skip hidden files (starting with .)
-                    if ([item hasPrefix:@"."]) {
-                        continue;
-                    }
-
-                    NSString *itemPath = [modelsPath stringByAppendingPathComponent:item];
-                    BOOL itemIsDirectory = NO;
-                    [fileManager fileExistsAtPath:itemPath isDirectory:&itemIsDirectory];
-
-                    if (itemIsDirectory) {
-                        [modelFolders addObject:item];
-                    }
-                }
-            }
-        } else {
-            RCTLogWarn(@"Models directory not found at: %@", modelsPath);
-        }
-
-        NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
-        for (NSString *folder in modelFolders) {
-            NSString *hint = [self inferModelHint:folder];
-            [result addObject:@{ @"folder": folder, @"hint": hint }];
-        }
-        resolve(result);
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception listing asset models: %@", exception.reason];
-        reject(@"LIST_ASSETS_ERROR", errorMsg, nil);
-    }
+    // Play Asset Delivery is Android-only; on iOS there is no asset pack path.
+    resolve([NSNull null]);
 }
 
-- (void)listModelsAtPath:(NSString *)path
-               recursive:(BOOL)recursive
-            withResolver:(RCTPromiseResolveBlock)resolve
-            withRejecter:(RCTPromiseRejectBlock)reject
+- (void)convertAudioToFormat:(NSString *)inputPath
+                 outputPath:(NSString *)outputPath
+                     format:(NSString *)format
+         outputSampleRateHz:(NSNumber *)outputSampleRateHz
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
-        if (!path || path.length == 0) {
-            reject(@"PATH_REQUIRED", @"Path is required", nil);
-            return;
-        }
-
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        BOOL isDirectory = NO;
-        BOOL exists = [fileManager fileExistsAtPath:path isDirectory:&isDirectory];
-        if (!exists || !isDirectory) {
-            NSString *errorMsg = [NSString stringWithFormat:@"Path is not a directory: %@", path];
-            reject(@"LIST_MODELS_ERROR", errorMsg, nil);
-            return;
-        }
-
-        NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
-        NSMutableSet<NSString *> *seen = [NSMutableSet set];
-        NSString *basePath = [path stringByStandardizingPath];
-
-        if (!recursive) {
-            NSError *error = nil;
-            NSArray<NSString *> *items = [fileManager contentsOfDirectoryAtPath:basePath error:&error];
-            if (error) {
-                NSString *errorMsg = [NSString stringWithFormat:@"Failed to list directory: %@", error.localizedDescription];
-                reject(@"LIST_MODELS_ERROR", errorMsg, error);
-                return;
-            }
-
-            for (NSString *item in items) {
-                if ([item hasPrefix:@"."]) {
-                    continue;
-                }
-                NSString *itemPath = [basePath stringByAppendingPathComponent:item];
-                BOOL itemIsDir = NO;
-                [fileManager fileExistsAtPath:itemPath isDirectory:&itemIsDir];
-                if (itemIsDir && ![seen containsObject:item]) {
-                    NSString *hint = [self inferModelHint:item];
-                    [result addObject:@{ @"folder": item, @"hint": hint }];
-                    [seen addObject:item];
-                }
-            }
-        } else {
-            NSURL *baseURL = [NSURL fileURLWithPath:basePath];
-            NSArray<NSURLResourceKey> *keys = @[ NSURLIsDirectoryKey ];
-            NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtURL:baseURL
-                                                  includingPropertiesForKeys:keys
-                                                                     options:NSDirectoryEnumerationSkipsHiddenFiles
-                                                                errorHandler:^BOOL(NSURL *url, NSError *error) {
-                RCTLogWarn(@"Failed to enumerate %@: %@", url.path, error.localizedDescription);
-                return YES;
-            }];
-
-            for (NSURL *url in enumerator) {
-                NSNumber *isDirValue = nil;
-                [url getResourceValue:&isDirValue forKey:NSURLIsDirectoryKey error:nil];
-                if (![isDirValue boolValue]) {
-                    continue;
-                }
-
-                NSString *fullPath = url.path;
-                NSString *relativePath = nil;
-                if ([fullPath hasPrefix:[basePath stringByAppendingString:@"/"]]) {
-                    relativePath = [fullPath substringFromIndex:basePath.length + 1];
-                } else if ([fullPath isEqualToString:basePath]) {
-                    continue;
-                } else {
-                    continue;
-                }
-
-                if (relativePath.length == 0 || [seen containsObject:relativePath]) {
-                    continue;
-                }
-
-                NSString *hintName = url.lastPathComponent;
-                NSString *hint = [self inferModelHint:hintName];
-                [result addObject:@{ @"folder": relativePath, @"hint": hint }];
-                [seen addObject:relativePath];
-            }
-        }
-
-        resolve(result);
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception listing models: %@", exception.reason];
-        reject(@"LIST_MODELS_ERROR", errorMsg, nil);
-    }
+    reject(@"UNSUPPORTED", @"convertAudioToFormat is not implemented on iOS", nil);
 }
 
-// Infer a high-level model type hint from a folder name.
-- (NSString *)inferModelHint:(NSString *)folderName
+- (void)convertAudioToWav16k:(NSString *)inputPath
+                 outputPath:(NSString *)outputPath
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
 {
-    NSString *name = [folderName lowercaseString];
-    NSArray<NSString *> *sttHints = @[
-        @"zipformer",
-        @"paraformer",
-        @"nemo",
-        @"parakeet",
-        @"whisper",
-        @"wenet",
-        @"sensevoice",
-        @"sense-voice",
-        @"sense",
-        @"funasr",
-        @"transducer",
-        @"ctc",
-        @"asr"
-    ];
-    NSArray<NSString *> *ttsHints = @[
-        @"vits",
-        @"piper",
-        @"matcha",
-        @"kokoro",
-        @"kitten",
-        @"zipvoice",
-        @"melo",
-        @"coqui",
-        @"mms",
-        @"tts"
-    ];
+    reject(@"UNSUPPORTED", @"convertAudioToWav16k is not implemented on iOS", nil);
+}
 
-    BOOL isStt = NO;
-    for (NSString *hint in sttHints) {
-        if ([name containsString:hint]) {
-            isStt = YES;
-            break;
-        }
+- (void)getAvailableProviders:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        NSMutableArray<NSString *> *providers = [NSMutableArray arrayWithObject:@"CPUExecutionProvider"];
+#if __has_include(<onnxruntime/coreml_provider_factory.h>)
+        [providers addObject:@"CoreMLExecutionProvider"];
+#endif
+        resolve(providers);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"Failed to get providers: %@", exception.reason];
+        reject(@"PROVIDERS_ERROR", errorMsg, nil);
     }
-
-    BOOL isTts = NO;
-    for (NSString *hint in ttsHints) {
-        if ([name containsString:hint]) {
-            isTts = YES;
-            break;
-        }
-    }
-
-    if (isStt && isTts) {
-        return @"unknown";
-    }
-
-    if (isStt) {
-        return @"stt";
-    }
-
-    if (isTts) {
-        return @"tts";
-    }
-
-    return @"unknown";
 }
 
 @end

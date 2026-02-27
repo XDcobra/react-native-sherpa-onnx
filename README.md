@@ -24,6 +24,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 |---------|--------|
 | Offline Speech-to-Text | ✅ **Supported** |
 | Text-to-Speech | ✅ **Supported** |
+| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** (see [Execution provider support](./docs/execution-providers.md)) |
 | Play Asset Delivery (PAD) | ✅ **Supported** (Android; see [Model Setup](./docs/MODEL_SETUP.md)) |
 | Speaker Diarization | ❌ Not yet supported |
 | Speech Enhancement | ❌ Not yet supported |
@@ -34,8 +35,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| **Android** | ✅ **Production Ready** | Fully tested, CI/CD automated, multiple models supported |
-| **iOS** | 🟡 **Beta / Experimental** | XCFramework + Podspec ready<br/>**Full support soon** |
+| **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
+| **iOS** | ✅ **Production Ready** | XCFramework + Podspec ready, CI/CD automated, multiple models supported |
 
 ## Supported Model Types
 
@@ -60,18 +61,21 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **Kokoro**       | `'kokoro'`        | Multi-speaker, multi-language. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`    | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **Zipvoice**     | `'zipvoice'`      | Voice cloning capable. Requires `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`        | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
+| **Pocket**       | `'pocket'`        | Flow-matching TTS. Requires `lm_flow.onnx`, `lm_main.onnx`, `encoder.onnx`, `decoder.onnx`, `text_conditioner.onnx`, `vocab.json`, `token_scores.json` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
 ## Features
 
-- ✅ **Offline Speech-to-Text** - No internet connection required for speech recognition
-- ✅ **Multiple Model Types** - Supports Zipformer/Transducer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, and FunASR Nano models
-- ✅ **Model type detection** - `detectSttModel()` and `detectTtsModel()` let you query the model type for a path **automatically**. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization).
-- ✅ **Model Quantization** - Automatic detection and preference for quantized (int8) models
-- ✅ **Flexible Model Loading** - Asset models, file system models, or auto-detection
-- ✅ **Android Support** - Fully supported on Android
-- ✅ **iOS Support** - Fully supported on iOS (requires sherpa-onnx XCFramework)
-- ✅ **TypeScript Support** - Full TypeScript definitions included
-- ✅ **Play Asset Delivery (PAD)** - Ship large models in an Android asset pack; [Model Setup](./docs/MODEL_SETUP.md) covers PAD, debug with Metro, and release
+- ✅ **Offline Speech-to-Text** – No internet connection required for speech recognition
+- ✅ **Multiple STT model types** – Zipformer/Transducer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano
+- ✅ **Multiple TTS model types** – VITS (Piper, Coqui, etc.), Matcha, Kokoro, KittenTTS, Zipvoice, Pocket
+- ✅ **Model type detection** – `detectSttModel()` and `detectTtsModel()` let you query the model type for a path **automatically**. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization).
+- ✅ **Model quantization** – Automatic detection and preference for quantized (int8) models
+- ✅ **Flexible model loading** – Asset models, file system models, or auto-detection
+- ✅ **Execution providers** – CPU, NNAPI (Android), XNNPACK, Core ML (iOS), QNN (Android, optional). See [Execution provider support](./docs/execution-providers.md).
+- ✅ **Android** – Fully supported; native libs and optional QNN via [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md)
+- ✅ **iOS** – Fully Supported;
+- ✅ **TypeScript** – Full TypeScript definitions included
+- ✅ **Play Asset Delivery (PAD)** – Ship large models in an Android asset pack; [Model Setup](./docs/MODEL_SETUP.md) covers PAD, debug with Metro, and release
 
 ## Installation
 
@@ -94,74 +98,41 @@ YARN_NODE_LINKER=node-modules yarn install
 
 ### Android
 
-No additional setup required. The library automatically handles native dependencies via Gradle.
+No additional setup required. The library automatically handles native dependencies via Gradle. For execution provider support (CPU, NNAPI, XNNPACK, QNN) and optional QNN setup, see [Execution provider support](./docs/execution-providers.md). For building Android native libs yourself, see [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md).
 
-#### QNN (Qualcomm NPU) Acceleration
-
-The Android build includes optional **Qualcomm NPU (QNN)** support for `arm64-v8a`. On devices with a supported Snapdragon SoC, inference can use the NPU for acceleration when the QNN runtime libraries are present.
-
-- **Without QNN libraries:** The SDK runs normally using CPU (and NNAPI where available). No extra steps required.
-- **With QNN libraries:** To enable NPU acceleration:
-  1. Download the [Qualcomm AI Engine Direct SDK](https://qpm.qualcomm.com/) (QNN SDK) and accept its license terms.
-  2. Copy the required runtime libraries into your app’s `jniLibs/arm64-v8a/` (e.g. under `android/app/src/main/jniLibs/arm64-v8a/`), for example:
-     - `libQnnHtp.so`
-     - `libQnnHtpV75Stub.so` (or the stub matching your chipset)
-     - `libQnnSystem.so`
-  3. Rebuild your app. ONNX Runtime will use the QNN execution provider when these libraries are available; otherwise it falls back to CPU automatically.
-
-The QNN SDK license does not allow redistributing these libraries in public repositories or npm packages, so they must be obtained and added by the app developer.
-
-See [Building sherpa-onnx Android prebuilts](third_party/sherpa-onnx-prebuilt/README.md) for more detailed information and instructions.
 
 ### iOS
 
-The sherpa-onnx XCFramework is **not included in the repository or npm package** due to its size (~80MB), but **no manual action is required**! The framework is automatically downloaded during `pod install`.
+The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework).
 
-#### Quick Setup
+#### Setup
 
 ```sh
-cd example
+cd your-app/ios
 bundle install
-bundle exec pod install --project-directory=ios
+bundle exec pod install
 ```
 
-That's it! The `Podfile` automatically:
-1. Copies required header files from the git submodule
-2. Downloads the latest XCFramework from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework)
-3. Verifies everything is in place before building
+The podspec runs `scripts/setup-ios-framework.sh`, which downloads the XCFramework (and, if needed, libarchive sources) so the Pod builds correctly. Libarchive is compiled from source as part of the Pod; its version is pinned in `third_party/libarchive_prebuilt/IOS_RELEASE_TAG`.
 
 #### For Advanced Users: Building the Framework Locally
+#### Advanced: Building the iOS framework yourself
 
-If you want to build the XCFramework yourself instead of using the prebuilt release:
+If you need a custom sherpa-onnx build (e.g. different version or patches), you can build the XCFramework and place it in `ios/Frameworks/` before running `pod install`. The repo does not include an iOS build script; use one of:
 
-```sh
-# Clone sherpa-onnx repository
-git clone https://github.com/k2-fsa/sherpa-onnx.git
-cd sherpa-onnx
-git checkout v1.12.24
+- **This repo's CI:** The [build-sherpa-onnx-ios-framework](.github/workflows/build-sherpa-onnx-ios-framework.yml) workflow produces the XCFramework and publishes it as a GitHub Release. You can run equivalent steps locally or inspect the workflow for the exact build and merge steps (including `libsherpa-onnx-cxx-api.a` and libarchive).
+- **Version and layout:** Pinned version and release layout are documented in [third_party/sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md) (Android focus; for iOS, see `IOS_RELEASE_TAG` and the [iOS framework workflow](.github/workflows/build-sherpa-onnx-ios-framework.yml)).
 
-# Build the iOS XCFramework (requires macOS, Xcode, CMake, and ONNX Runtime)
-./build-ios.sh
+The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or linked) so that the iOS Obj-C++ code can use `sherpa_onnx::cxx::*`. The workflow's build script ensures this; if you use upstream `build-ios.sh` from sherpa-onnx, you may need to merge the C++ API into the static library yourself.
 
-# Copy to your project
-cp -r build-ios/sherpa_onnx.xcframework /path/to/react-native-sherpa-onnx/ios/Frameworks/
-```
-
-Then run `pod install` as usual.
-
-**Note:** The iOS implementation uses the same C++ wrapper as Android, ensuring consistent behavior across platforms.
-
-## Documentation
-
-- [Speech-to-Text (STT)](./docs/stt.md)
 - [Text-to-Speech (TTS)](./docs/tts.md)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
-- [Model Download Manager](./docs/download-manager.md)
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Speech Enhancement](./docs/enhancement.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/MODEL_SETUP.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
+- [Model Download Manager](./docs/download-manager.md)
 
 Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 

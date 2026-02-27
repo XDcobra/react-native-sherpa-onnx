@@ -5,12 +5,36 @@
 # Usage:
 #   ./scripts/setup-ios-framework.sh          # Downloads/updates framework (auto mode, no interactive)
 #   ./scripts/setup-ios-framework.sh 1.12.24  # Downloads specific version
+#   ./scripts/setup-ios-framework.sh --force  # Remove local cache and re-download (same version from IOS_RELEASE_TAG)
 #   ./scripts/setup-ios-framework.sh --interactive  # Interactive mode with prompts
+# To force re-download during pod install: SHERPA_ONNX_IOS_FORCE_DOWNLOAD=1 pod install
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Resolve package root: explicit (CI), then pod install, then script dir or PWD.
+PROJECT_ROOT=""
+if [ -n "${SHERPA_ONNX_PROJECT_ROOT}" ] && [ -d "${SHERPA_ONNX_PROJECT_ROOT}" ]; then
+  PROJECT_ROOT="${SHERPA_ONNX_PROJECT_ROOT}"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -n "${GITHUB_WORKSPACE}" ] && [ -d "${GITHUB_WORKSPACE}/ios" ]; then
+  PROJECT_ROOT="${GITHUB_WORKSPACE}"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -n "${PODS_TARGET_SRCROOT}" ] && [ -d "${PODS_TARGET_SRCROOT}" ]; then
+  PROJECT_ROOT="${PODS_TARGET_SRCROOT}"
+fi
+if [ -z "$PROJECT_ROOT" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+  if [ -d "$SCRIPT_DIR/../ios" ]; then
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  fi
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -d "$(pwd)/ios" ]; then
+  PROJECT_ROOT="$(pwd)"
+fi
+if [ -z "$PROJECT_ROOT" ]; then
+  echo "Error: Could not resolve project root. Run from package root or run 'pod install' from example/ios." >&2
+  exit 1
+fi
 FRAMEWORKS_DIR="$PROJECT_ROOT/ios/Frameworks"
 VERSION_FILE="$FRAMEWORKS_DIR/.framework-version"
 
@@ -26,9 +50,17 @@ INTERACTIVE=false
 [ -t 0 ] && INTERACTIVE=true
 
 # Check for explicit flags
+FORCE_DOWNLOAD=false
 if [ "$1" = "--interactive" ]; then
   INTERACTIVE=true
   shift
+fi
+if [ "$1" = "--force" ]; then
+  FORCE_DOWNLOAD=true
+  shift
+fi
+if [ -n "$SHERPA_ONNX_IOS_FORCE_DOWNLOAD" ] && [ "$SHERPA_ONNX_IOS_FORCE_DOWNLOAD" != "0" ]; then
+  FORCE_DOWNLOAD=true
 fi
 
 # Only print header if interactive
@@ -40,6 +72,28 @@ fi
 
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
+
+# Helper: check if a framework path is valid for building (has library + required headers for compiler)
+framework_valid() {
+  local fw_root="$1"
+  [ -f "$fw_root/ios-arm64/libsherpa-onnx.a" ] || return 1
+  [ -f "$fw_root/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" ] || return 1
+  return 0
+}
+
+# When run as Xcode build phase (prepare_command): if framework is already present and valid, exit successfully.
+# Avoids network/TAG-file dependency during build and prevents "PhaseScriptExecution failed" when nothing is needed.
+# We require both the library and the Headers (sherpa-onnx/c-api/cxx-api.h) so an incomplete framework triggers a re-download.
+if [ "$FORCE_DOWNLOAD" != true ]; then
+  if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
+    echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa_onnx.xcframework, skipping download." >&2
+    exit 0
+  fi
+  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa-onnx.xcframework"; then
+    echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa-onnx.xcframework, skipping download." >&2
+    exit 0
+  fi
+fi
 
 # Prepare GitHub auth header if GITHUB_TOKEN is provided (helps avoid API rate limits)
 AUTH_ARGS=()
@@ -53,15 +107,20 @@ fi
 if [ -n "$SHERPA_ONNX_VERSION" ]; then
   DESIRED_VERSION="$SHERPA_ONNX_VERSION"
 fi
-# If no env var was provided, use repo-level ANDROID_RELEASE_TAG (single source of truth for sherpa-onnx version).
+# If no env var was provided, use repo-level IOS_RELEASE_TAG (single source of truth for iOS framework version).
+# Format: framework-vX.Y.Z (e.g. framework-v1.12.24). Do not use ANDROID_RELEASE_TAG for iOS.
 if [ -z "$DESIRED_VERSION" ]; then
-  TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG"
-  if [ -f "$TAG_FILE" ]; then
-    TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
-    if [ -n "$TAG" ] && [ "${TAG#sherpa-onnx-android-v}" != "$TAG" ]; then
-      DESIRED_VERSION="${TAG#sherpa-onnx-android-v}"
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using sherpa-onnx version from ANDROID_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
+  IOS_TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
+  if [ -f "$IOS_TAG_FILE" ]; then
+    TAG=$(grep -v '^#' "$IOS_TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+    if [ -n "$TAG" ] && [ "${TAG#framework-v}" != "$TAG" ]; then
+      DESIRED_VERSION="${TAG#framework-v}"
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using iOS framework version from IOS_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
     fi
+  fi
+  if [ -z "$DESIRED_VERSION" ]; then
+    echo -e "${RED}Error: IOS_RELEASE_TAG not found at $IOS_TAG_FILE. Reinstall the package or run from repo.${NC}" >&2
+    exit 1
   fi
 fi
 
@@ -235,10 +294,30 @@ download_and_extract_framework() {
   echo -e "${YELLOW}Extracting framework...${NC}" >&2
   unzip -q -o "$zip_path" -d "$FRAMEWORKS_DIR"
 
+  # Normalize name: podspec expects sherpa_onnx.xcframework; zip may contain sherpa-onnx.xcframework
+  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
+    mv "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  fi
+
   if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
     echo -e "${RED}Error: Framework extraction failed${NC}" >&2
     echo "Contents of $FRAMEWORKS_DIR:" >&2
     ls -la "$FRAMEWORKS_DIR" 2>/dev/null | head -20 >&2 || true
+    rm -f "$zip_path"
+    return 1
+  fi
+
+  # Verify required headers are present (needed for iOS build: #include "sherpa-onnx/c-api/cxx-api.h")
+  if ! framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
+    echo -e "${RED}Error: Downloaded framework is missing required headers for building.${NC}" >&2
+    echo "Expected: $FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" >&2
+    echo "Simulator Headers directory:" >&2
+    ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" 2>/dev/null || echo "  (missing)" >&2
+    if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" ]; then
+      echo "sherpa-onnx/c-api under Headers:" >&2
+      ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api" 2>/dev/null || echo "  (missing)" >&2
+    fi
+    rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
     rm -f "$zip_path"
     return 1
   fi
@@ -253,6 +332,13 @@ download_and_extract_framework() {
   return 0
 }
 
+# Force: remove existing framework and version file so we always re-download
+if [ "$FORCE_DOWNLOAD" = true ]; then
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Force download: removing local framework and version file${NC}" >&2
+  rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  rm -f "$VERSION_FILE"
+fi
+
 # Main logic
 if [ -n "$1" ]; then
   # User provided a specific version -> explicit, always honor
@@ -262,62 +348,20 @@ else
   if [ -n "$DESIRED_VERSION" ]; then
     [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using SHERPA_ONNX_VERSION=$DESIRED_VERSION${NC}" >&2
     local_version=$(get_local_framework_version)
-    if [ "$local_version" != "$DESIRED_VERSION" ]; then
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Local framework v$local_version differs, downloading v$DESIRED_VERSION...${NC}" >&2
+    if [ "$local_version" != "$DESIRED_VERSION" ] || [ "$FORCE_DOWNLOAD" = true ]; then
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Downloading v$DESIRED_VERSION...${NC}" >&2
       download_and_extract_framework "$DESIRED_VERSION" || exit 1
     else
       [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is already v$local_version${NC}" >&2
     fi
   else
-    # Auto mode: check version and download only if needed
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Checking framework version...${NC}" >&2
-
+    # DESIRED_VERSION is set above from IOS_RELEASE_TAG (required).
+    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using pinned version from IOS_RELEASE_TAG.${NC}" >&2
     local_version=$(get_local_framework_version)
-
-    if ! latest_version=$(get_latest_framework_version); then
-      if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-        echo -e "${YELLOW}Warning: Could not fetch latest framework version, using existing local framework.${NC}" >&2
-        exit 0
-      fi
-      exit 1
-    fi
-
-    if [ -z "$latest_version" ]; then
-      echo -e "${RED}Error: Could not fetch framework version from GitHub${NC}" >&2
-      exit 1
-    fi
-    
-    [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Latest framework version: $latest_version${NC}" >&2
-    
-    # Check if framework exists
-    if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-      [ "$INTERACTIVE" = true ] && echo "Framework not found locally, downloading..." >&2
-      download_and_extract_framework "$latest_version" || exit 1
-    elif [ -z "$local_version" ]; then
-      # Framework exists but no version file
-      [ "$INTERACTIVE" = true ] && echo "Framework exists but no version info, updating version file..." >&2
-      echo "$latest_version" > "$VERSION_FILE"
+    if [ "$local_version" != "$DESIRED_VERSION" ] || [ "$FORCE_DOWNLOAD" = true ]; then
+      download_and_extract_framework "$DESIRED_VERSION" || exit 1
     else
-      # Compare versions
-      version_cmp=$(compare_versions "$local_version" "$latest_version")
-      
-      if [ "$version_cmp" = "0" ]; then
-        [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is up to date (v$local_version)${NC}" >&2
-      elif [ "$version_cmp" = "-1" ]; then
-        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Update available: v$local_version --> v$latest_version${NC}" >&2
-        if [ "$INTERACTIVE" = true ]; then
-          read -p "Do you want to update? (y/N): " -n 1 -r
-          echo
-          if [[ $REPLY =~ ^[Yy]$ ]]; then
-            download_and_extract_framework "$latest_version" || exit 1
-          fi
-        else
-          # Auto-update in non-interactive mode (e.g., from Podfile)
-          download_and_extract_framework "$latest_version" || exit 1
-        fi
-      else
-        [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Local version (v$local_version) is newer than latest release (v$latest_version)${NC}" >&2
-      fi
+      [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is already v$local_version${NC}" >&2
     fi
   fi
 fi
@@ -332,3 +376,4 @@ if [ "$INTERACTIVE" = true ]; then
   echo "  2. pod install" >&2
   echo "  3. Open ios/SherpaOnnxExample.xcworkspace in Xcode" >&2
 fi
+exit 0

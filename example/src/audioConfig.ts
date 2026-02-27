@@ -1,8 +1,8 @@
 /**
  * Configuration for test audio files.
  * Audio files should be placed in:
- * - Android: android/app/src/main/assets/test_wavs/
- * - iOS: Add to Xcode project as folder reference in test_wavs/
+ * - Android: example/android/app/src/main/assets/test_wavs/
+ * - iOS: example/ios/sherpa_models/test_wavs/ (copied into the app bundle at build time)
  */
 
 export const TEST_AUDIO_FILES = {

@@ -63,14 +63,14 @@ jobs:
         id: libarchive-cache
         with:
           path: third_party/libarchive_prebuilt/android
-          key: libarchive-android-prebuilt-${{ steps.submodules.outputs.libarchive }}-${{ hashFiles('third_party/libarchive_prebuilt/build_libarchive.sh') }}
+          key: libarchive-android-prebuilt-${{ steps.submodules.outputs.libarchive }}-${{ hashFiles('third_party/libarchive_prebuilt/build_libarchive_android.sh') }}
 
       - name: Build libarchive
         if: steps.libarchive-cache.outputs.cache-hit != 'true'
         run: |
           cd third_party/libarchive_prebuilt
-          chmod +x build_libarchive.sh
-          ./build_libarchive.sh
+          chmod +x build_libarchive_android.sh
+          ./build_libarchive_android.sh
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}

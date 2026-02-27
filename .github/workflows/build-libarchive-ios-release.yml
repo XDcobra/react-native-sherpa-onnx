@@ -1,0 +1,86 @@
+# Package libarchive sources for iOS and publish as GitHub Release.
+# Release tag is read from third_party/libarchive_prebuilt/IOS_RELEASE_TAG.
+# No compilation: only sources + headers are zipped for the pod to build.
+#
+# When to run manually (Actions → Prebuilt - libarchive (iOS) Release → Run workflow):
+# 1. After updating third_party/libarchive_prebuilt/IOS_RELEASE_TAG or libarchive submodule.
+# 2. When you want to publish a new libarchive iOS release (sources zip for npm/small package).
+#
+name: Prebuilt - libarchive (iOS) Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-libarchive-ios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/libarchive_prebuilt/IOS_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. libarchive-ios-v3.8.5)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$RELEASE_TAG" | sed 's/^libarchive-ios-v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (version: $VERSION)"
+
+      - name: Package libarchive iOS sources
+        run: |
+          chmod +x third_party/libarchive_prebuilt/build_libarchive_ios.sh
+          third_party/libarchive_prebuilt/build_libarchive_ios.sh
+          echo "Layout contents (sample):"
+          ls third_party/libarchive_prebuilt/libarchive-ios-layout/ | head -30
+
+      - name: Create release zip
+        run: |
+          cd third_party/libarchive_prebuilt/libarchive-ios-layout
+          zip -r ../libarchive-ios-sources.zip .
+          cd ..
+          ls -la libarchive-ios-sources.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: libarchive iOS ${{ steps.tag.outputs.release_tag }}
+          body: |
+            Prebuilt libarchive sources for iOS (vendored in the SDK pod; no binary in this zip).
+            - **libarchive-ios-sources.zip** – C sources and headers from `third_party/libarchive/libarchive`. Extract to `ios/Downloads/libarchive` for the SherpaOnnx pod when `third_party` is not present (e.g. npm install).
+          files: third_party/libarchive_prebuilt/libarchive-ios-sources.zip
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## libarchive iOS release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`libarchive-ios-sources.zip\` | C sources + headers for iOS. Extract to \`ios/Downloads/libarchive\` when using the SDK from npm (no \`third_party\`). |" >> $GITHUB_STEP_SUMMARY
