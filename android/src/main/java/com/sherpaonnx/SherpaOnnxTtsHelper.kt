@@ -41,9 +41,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class SherpaOnnxTtsHelper(
   private val context: ReactApplicationContext,
   private val detectTtsModel: (modelDir: String, modelType: String) -> HashMap<String, Any>?,
-  private val emitChunk: (String, FloatArray, Int, Float, Boolean) -> Unit,
-  private val emitError: (String, String) -> Unit,
-  private val emitEnd: (String, Boolean) -> Unit
+  private val emitChunk: (String, String, FloatArray, Int, Float, Boolean) -> Unit,
+  private val emitError: (String, String, String) -> Unit,
+  private val emitEnd: (String, String, Boolean) -> Unit
 ) {
 
   private data class TtsInitState(
@@ -501,7 +501,7 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
-  fun generateTtsStream(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
+  fun generateTtsStream(instanceId: String, requestId: String, text: String, options: ReadableMap?, promise: Promise) {
     val inst = getInstance(instanceId) ?: run {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS instance not found: $instanceId")
       promise.reject("TTS_STREAM_ERROR", "TTS instance not found: $instanceId")
@@ -534,34 +534,34 @@ internal class SherpaOnnxTtsHelper(
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
             inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
               if (inst.ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
-              emitChunk(instanceId, chunk, sampleRate, 0f, false)
+              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
           inst.zipvoiceTts != null -> {
             inst.zipvoiceTts!!.generateWithCallback(text, sid, speed) { chunk ->
               if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
-              emitChunk(instanceId, chunk, sampleRate, 0f, false)
+              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
           else -> {
             inst.tts!!.generateWithCallback(text, sid, speed) { chunk ->
               if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
-              emitChunk(instanceId, chunk, sampleRate, 0f, false)
+              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
               chunk.size
             }
           }
         }
         if (!inst.ttsStreamCancelled.get()) {
-          emitChunk(instanceId, FloatArray(0), sampleRate, 1f, true)
+          emitChunk(instanceId, requestId, FloatArray(0), sampleRate, 1f, true)
         }
       } catch (e: Exception) {
         if (!inst.ttsStreamCancelled.get()) {
-          emitError(instanceId, "TTS streaming failed: ${e.message}")
+          emitError(instanceId, requestId, "TTS streaming failed: ${e.message}")
         }
       } finally {
-        emitEnd(instanceId, inst.ttsStreamCancelled.get())
+        emitEnd(instanceId, requestId, inst.ttsStreamCancelled.get())
         inst.ttsStreamRunning.set(false)
       }
     }
