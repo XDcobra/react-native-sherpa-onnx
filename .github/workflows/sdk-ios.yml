@@ -150,11 +150,8 @@ jobs:
           fi
 
           # Use React Native CLI instead of calling pod install + xcodebuild directly (avoids deprecation warning).
-          # Build for simulator with a fixed output path for artifacts.
-          yarn build:ios \
-            --mode Debug \
-            --buildFolder ios/build \
-            2>&1 | tee /tmp/build.full.log
+          # Build for simulator (output goes to Xcode DerivedData when --buildFolder is not set).
+          yarn build:ios 2>&1 | tee /tmp/build.full.log
           BUILD_EXIT=${PIPESTATUS[0]}
           if [ "$BUILD_EXIT" -ne 0 ]; then BUILD_FAILED=1; fi
 
@@ -188,47 +185,45 @@ jobs:
 
       - name: Verify build artifacts
         run: |
-          echo "Verifying build artifacts..."
+          echo "Verifying build artifacts (looking for .app in Xcode DerivedData)..."
 
-          if [ -d "example/ios/build" ]; then
-            echo "[OK] Build directory exists"
-            
-            # Check for the app
-            APP_PATH=$(find example/ios/build -name "*.app" -type d | head -1)
-            if [ -n "$APP_PATH" ]; then
-              echo "[OK] App bundle found: $APP_PATH"
-            else
-              echo "Warning: App bundle not found in build directory"
-            fi
-          else
-            echo "Warning: Build directory not found"
+          # Build output is in DerivedData when not using --buildFolder; find the app by name (newest if multiple).
+          APP_PATH=$(find "$HOME/Library/Developer/Xcode/DerivedData" -name "VoiceLabOfflineTools.app" -type d 2>/dev/null | while IFS= read -r p; do printf '%d %s\n' "$(stat -f %m "$p" 2>/dev/null)" "$p"; done | sort -rn | head -1 | cut -d' ' -f2-)
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "Error: App bundle VoiceLabOfflineTools.app not found in DerivedData"
+            echo "Searched under: $HOME/Library/Developer/Xcode/DerivedData"
+            ls -la "$HOME/Library/Developer/Xcode/DerivedData" 2>/dev/null | head -20 || true
+            exit 1
           fi
+          echo "[OK] App bundle found: $APP_PATH"
+          # Persist for next step
+          echo "$APP_PATH" > /tmp/ci-app-path.txt
 
       - name: Create iOS IPA file
         if: startsWith(github.ref, 'refs/tags/sdk-v')
         run: |
           echo "Creating iOS IPA file..."
 
-          # Find the app bundle
-          APP_PATH=$(find example/ios/build -name "*.app" -type d | head -1)
-
-          if [ -z "$APP_PATH" ]; then
+          APP_PATH=$(cat /tmp/ci-app-path.txt)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            # Fallback: find again
+            APP_PATH=$(find "$HOME/Library/Developer/Xcode/DerivedData" -name "VoiceLabOfflineTools.app" -type d 2>/dev/null | while IFS= read -r p; do printf '%d %s\n' "$(stat -f %m "$p" 2>/dev/null)" "$p"; done | sort -rn | head -1 | cut -d' ' -f2-)
+          fi
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
             echo "Error: App bundle not found"
             exit 1
           fi
 
           echo "Found app bundle: $APP_PATH"
 
-          # Create IPA structure
-          IPA_DIR="example/ios/build/ipa"
+          # Create IPA in a fixed path for artifact upload
+          IPA_DIR="example/ios/ipa"
           PAYLOAD_DIR="$IPA_DIR/Payload"
-
           mkdir -p "$PAYLOAD_DIR"
 
-          # Copy app bundle to Payload directory
           cp -R "$APP_PATH" "$PAYLOAD_DIR/"
 
-          # Create IPA file (ZIP archive)
           IPA_NAME="VoiceLabOfflineTools.ipa"
           IPA_PATH="$IPA_DIR/$IPA_NAME"
 
@@ -242,8 +237,7 @@ jobs:
             echo "[OK] IPA file created: $IPA_PATH (${IPA_SIZE_MB}MB)"
           else
             echo "Error: IPA file was not created at $IPA_PATH"
-            echo "Checking for IPA files in build directory:"
-            find example/ios/build -name "*.ipa" -type f || echo "No IPA files found"
+            find example/ios/ipa -name "*.ipa" -type f 2>/dev/null || true
             exit 1
           fi
 
@@ -252,6 +246,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-app-bundle
-          path: example/ios/build/ipa/*.ipa
+          path: example/ios/ipa/*.ipa
           retention-days: 7
           if-no-files-found: error
