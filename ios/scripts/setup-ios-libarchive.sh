@@ -73,4 +73,26 @@ mkdir -p "$LIBARCHIVE_DIR"
 unzip -q -o "$zip_path" -d "$LIBARCHIVE_DIR"
 rm -f "$zip_path"
 
+# If the zip had a single top-level dir (e.g. libarchive-ios-sources), flatten so
+# archive.h and archive_xxhash.h are directly in LIBARCHIVE_DIR (podspec HEADER_SEARCH_PATHS expects that).
+subdirs=("$LIBARCHIVE_DIR"/*/)
+if [ -d "${subdirs[0]}" ] && [ "${#subdirs[@]}" -eq 1 ] && [ ! -f "$LIBARCHIVE_DIR/archive.h" ]; then
+  subdir="${subdirs[0]}"
+  echo "Flattening single top-level directory: $(basename "$subdir")"
+  shopt -s dotglob
+  mv "$subdir"* "$LIBARCHIVE_DIR/"
+  shopt -u dotglob
+  rmdir "$subdir" 2>/dev/null || true
+fi
+
+# Ensure required headers exist (e.g. archive_xxhash.h for LZ4 support)
+if [ ! -f "$LIBARCHIVE_DIR/archive.h" ]; then
+  echo "Error: $LIBARCHIVE_DIR/archive.h missing after extract. Zip layout may be unexpected." >&2
+  exit 1
+fi
+if [ ! -f "$LIBARCHIVE_DIR/archive_xxhash.h" ]; then
+  echo "Error: $LIBARCHIVE_DIR/archive_xxhash.h missing. Re-publish libarchive iOS release (build_libarchive_ios.sh copies all *.h)." >&2
+  exit 1
+fi
+
 echo "Libarchive iOS sources extracted to $LIBARCHIVE_DIR"
