@@ -34,29 +34,22 @@ yarn android
 
 ### iOS
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+Use the React Native CLI to build and run iOS (recommended). The CLI runs `pod install` automatically when needed, so you should not call `pod install` directly (that flow is deprecated).
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+From the **example** directory:
 
 ```sh
+# One-time: install Ruby gems (CocoaPods) if you haven’t already
 bundle install
-```
 
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
+# Run on simulator (triggers pod install if needed)
 yarn ios
+
+# Or build only (e.g. for CI), output in ios/build
+yarn build:ios
 ```
+
+For more on CocoaPods, see the [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
 
 If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
 

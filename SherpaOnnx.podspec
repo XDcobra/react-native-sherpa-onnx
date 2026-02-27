@@ -57,27 +57,28 @@ Pod::Spec.new do |s|
 
   s.frameworks = "Foundation", "Accelerate", "CoreML"
   s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework"
-  # Use PODS_TARGET_SRCROOT so header/library paths resolve at build time (CI, workspaces, node_modules).
-  xcframework_headers_simulator = "$(PODS_TARGET_SRCROOT)/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers"
-  xcframework_headers_device = "$(PODS_TARGET_SRCROOT)/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64/Headers"
-  xcframework_slice_simulator = "$(PODS_TARGET_SRCROOT)/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator"
-  xcframework_slice_device = "$(PODS_TARGET_SRCROOT)/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64"
+  # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
+  xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
+  simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  device_headers = File.join(xcframework_root, "ios-arm64", "Headers")
+  simulator_slice = File.join(xcframework_root, "ios-arm64_x86_64-simulator")
+  device_slice = File.join(xcframework_root, "ios-arm64")
 
   s.pod_target_xcconfig = {
-    "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{pod_root}/ios/archive\" \"#{pod_root}/ios/model_detect\" \"#{pod_root}/ios/stt\" \"#{pod_root}/ios/tts\" \"#{libarchive_dir}\" \"#{xcframework_headers_device}\" \"#{xcframework_headers_simulator}\"",
+    "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{pod_root}/ios/archive\" \"#{pod_root}/ios/model_detect\" \"#{pod_root}/ios/stt\" \"#{pod_root}/ios/tts\" \"#{libarchive_dir}\" \"#{device_headers}\" \"#{simulator_headers}\"",
     "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
-    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{xcframework_slice_device}\"",
-    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{xcframework_slice_simulator}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
     "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
   }
 
   s.user_target_xcconfig = {
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
-    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{xcframework_slice_device}\"",
-    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{xcframework_slice_simulator}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
     "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
   }
 

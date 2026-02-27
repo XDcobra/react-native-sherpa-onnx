@@ -62,7 +62,13 @@ jobs:
       - name: Download iOS framework
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: yarn download-ios-framework
+        run: |
+          yarn download-ios-framework
+          echo "=== Expected framework location ==="
+          ls -la ios/Frameworks/sherpa_onnx.xcframework || true
+          echo "=== Simulator slice Headers (for sherpa-onnx/c-api/cxx-api.h) ==="
+          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers 2>/dev/null || true
+          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api 2>/dev/null || true
 
       - name: Use appropriate Xcode version
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
@@ -75,95 +81,45 @@ jobs:
           ruby-version: '4.0'
           bundler: '4.0.3'
 
-      - name: Install CocoaPods dependencies
-        run: |
-          set -e
-          cd example
-          bundle install
-
-          echo "Running pod install (vendored_frameworks handles XCFramework linking automatically)..."
-          echo ""
-
-          # Run pod install and capture output. Use PIPESTATUS so the step fails if pod install fails (tee alone would hide exit code).
-          bundle exec pod install --project-directory=ios 2>&1 | tee /tmp/pod_install.log
-          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
-            echo "Error: pod install failed with exit code ${PIPESTATUS[0]}"
-            exit "${PIPESTATUS[0]}"
-          fi
-
-          echo ""
-          echo "=== Filtering SherpaOnnx messages from pod install ==="
-          grep -E "\[SherpaOnnx\]" /tmp/pod_install.log || echo "No SherpaOnnx messages found in pod install output"
-
-          # Verify workspace and Pods were created (fail fast so we don't run xcodebuild without Pods)
-          if [ ! -f "ios/VoiceLabOfflineTools.xcworkspace/contents.xcworkspacedata" ]; then
-            echo "Error: Xcode workspace not created"
-            exit 1
-          fi
-          if [ ! -f "ios/Pods/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools.debug.xcconfig" ]; then
-            echo "Error: Pods Target Support Files not found (pod install may have failed or been skipped)"
-            ls -la ios/Pods 2>/dev/null || echo "ios/Pods directory missing"
-            exit 1
-          fi
-
-          echo ""
-          echo "[OK] CocoaPods dependencies installed"
-
       - name: Build example for iOS
         run: |
           set -o pipefail
-          echo "Building iOS example app for simulator..."
+          echo "Building iOS example app via React Native CLI (pod install runs automatically)..."
+          BUILD_FAILED=0
 
           cd example
+          bundle install
 
-          if [ ! -f "ios/Pods/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools.debug.xcconfig" ]; then
-            echo "Error: Pods not found; pod install may have failed in the previous step."
-            exit 1
-          fi
-
-          # Build for simulator using -sdk flag (more reliable than -destination)
-          # This builds for the current architecture of the Mac runner
-          if ! xcodebuild \
-            -workspace ios/VoiceLabOfflineTools.xcworkspace \
-            -scheme VoiceLabOfflineTools \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -arch arm64 \
-            -derivedDataPath ios/build \
-            CODE_SIGNING_ALLOWED=NO \
-            > /tmp/build.full.log 2>&1; then
-            BUILD_FAILED=1
-          fi
+          # Use React Native CLI instead of calling pod install + xcodebuild directly (avoids deprecation warning).
+          # Build for simulator with a fixed output path for artifacts.
+          yarn build:ios \
+            --mode Debug \
+            --buildFolder ios/build \
+            --extra-params "-sdk iphonesimulator -arch arm64 CODE_SIGNING_ALLOWED=NO" \
+            2>&1 | tee /tmp/build.full.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          if [ "$BUILD_EXIT" -ne 0 ]; then BUILD_FAILED=1; fi
 
           # Display filtered output (errors, warnings, important messages)
+          echo ""
           echo "=== Filtered Build Output ==="
           grep -E "(: error:|: warning:|BUILD SUCCEEDED|BUILD FAILED|Undefined symbols|fatal error)" /tmp/build.full.log | head -100 || true
 
           if [ "${BUILD_FAILED:-0}" = "1" ]; then
             echo ""
             echo "=== Build failed. Full error analysis ==="
-            
-            # Show all lines containing "error:" with context
             echo ""
             echo "--- Compilation/Linker Errors ---"
             grep -B 2 -A 5 ": error:" /tmp/build.full.log | head -100 || echo "No 'error:' lines found"
-            
-            # Show fatal errors
             echo ""
             echo "--- Fatal Errors ---"
             grep -B 2 -A 5 "fatal error" /tmp/build.full.log | head -50 || echo "No fatal errors found"
-            
-            # Check for undefined symbols (linking)
             echo ""
             echo "--- Undefined Symbols ---"
             grep -B 2 -A 10 "Undefined symbols" /tmp/build.full.log | head -50 || echo "No undefined symbols"
-            
-            # Show the CompileC failure details
             echo ""
             echo "--- Failed Commands ---"
             grep -B 5 -A 2 "following build commands failed" /tmp/build.full.log | head -30 || true
-            
-            # Last part of log for context
             echo ""
             echo "--- Last 50 lines of build log ---"
             tail -50 /tmp/build.full.log
