@@ -59,20 +59,6 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
-      - name: Download iOS framework
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Force project root to workspace so the framework is written where we expect it (avoid PODS_TARGET_SRCROOT etc.)
-          SHERPA_ONNX_PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          echo "Working directory: $(pwd)"
-          yarn download-ios-framework
-          echo "=== Expected framework location ==="
-          ls -la ios/Frameworks/sherpa_onnx.xcframework
-          echo "=== Simulator slice Headers (required for sherpa-onnx/c-api/cxx-api.h) ==="
-          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers
-          ls -la ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api
-
       - name: Use appropriate Xcode version
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
         with:
@@ -85,6 +71,9 @@ jobs:
           bundler: '4.0.3'
 
       - name: Build example for iOS
+        env:
+          # So prepare_command in SherpaOnnx.podspec downloads framework to workspace/ios/Frameworks (not elsewhere)
+          SHERPA_ONNX_PROJECT_ROOT: ${{ github.workspace }}
         run: |
           set -o pipefail
           echo "Building iOS example app via React Native CLI (pod install runs automatically)..."
