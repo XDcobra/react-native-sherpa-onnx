@@ -14,8 +14,9 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# When called via workflow_call (release), use -ios so parallel release jobs don't share one group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-ios
   cancel-in-progress: true
 
 jobs:

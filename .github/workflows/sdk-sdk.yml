@@ -15,8 +15,9 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# When called via workflow_call (release), use -sdk so parallel release jobs don't share one group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-sdk
   cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:

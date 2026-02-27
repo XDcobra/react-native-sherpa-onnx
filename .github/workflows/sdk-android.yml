@@ -16,9 +16,9 @@ on:
   workflow_call:
 
 # Only cancel in-progress runs for the same workflow+ref when running standalone.
-# When called via workflow_call, the caller manages concurrency.
+# When called via workflow_call, use -android so parallel release jobs don't share one group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-android
   cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
