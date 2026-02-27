@@ -201,7 +201,6 @@ jobs:
           echo "$APP_PATH" > /tmp/ci-app-path.txt
 
       - name: Create iOS IPA file
-        if: startsWith(github.ref, 'refs/tags/sdk-v')
         run: |
           echo "Creating iOS IPA file..."
 
@@ -242,7 +241,6 @@ jobs:
           fi
 
       - name: Upload iOS IPA artifact
-        if: startsWith(github.ref, 'refs/tags/sdk-v')
         uses: actions/upload-artifact@v4
         with:
           name: ios-app-bundle
