@@ -289,6 +289,8 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
 export interface TtsStreamChunk {
   /** Instance ID (set by native for multi-instance routing). */
   instanceId?: string;
+  /** Request ID for this generation (distinguishes concurrent streams on same instance). */
+  requestId?: string;
   samples: number[];
   sampleRate: number;
   progress: number;
@@ -301,6 +303,8 @@ export interface TtsStreamChunk {
 export interface TtsStreamEnd {
   /** Instance ID (set by native for multi-instance routing). */
   instanceId?: string;
+  /** Request ID for this generation. */
+  requestId?: string;
   cancelled: boolean;
 }
 
@@ -310,7 +314,20 @@ export interface TtsStreamEnd {
 export interface TtsStreamError {
   /** Instance ID (set by native for multi-instance routing). */
   instanceId?: string;
+  /** Request ID for this generation. */
+  requestId?: string;
   message: string;
+}
+
+/**
+ * Controller returned by generateSpeechStream().
+ * Use cancel() to stop generation, unsubscribe() to remove event listeners.
+ */
+export interface TtsStreamController {
+  /** Cancel the ongoing TTS generation. */
+  cancel(): Promise<void>;
+  /** Remove event listeners (called automatically on end/error, or manually). */
+  unsubscribe(): void;
 }
 
 /**
@@ -340,7 +357,7 @@ export interface TtsEngine {
     text: string,
     options: TtsGenerationOptions | undefined,
     handlers: TtsStreamHandlers
-  ): Promise<() => void>;
+  ): Promise<TtsStreamController>;
   cancelSpeechStream(): Promise<void>;
   startPcmPlayer(sampleRate: number, channels: number): Promise<void>;
   writePcmChunk(samples: number[]): Promise<void>;
