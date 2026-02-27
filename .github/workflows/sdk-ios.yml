@@ -82,6 +82,11 @@ jobs:
           cd example
           bundle install
 
+          # Run pod install explicitly with bundle so we use the same CocoaPods and get clear errors
+          # (React Native CLI also runs it; doing it first avoids opaque "Something went wrong" messages).
+          echo "Running bundle exec pod install..."
+          (cd ios && SHERPA_ONNX_PROJECT_ROOT="$SHERPA_ONNX_PROJECT_ROOT" bundle exec pod install) || { echo "pod install failed; see above for errors"; exit 1; }
+
           # Use React Native CLI instead of calling pod install + xcodebuild directly (avoids deprecation warning).
           # Build for simulator with a fixed output path for artifacts.
           yarn build:ios \
