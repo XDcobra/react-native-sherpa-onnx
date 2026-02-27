@@ -120,6 +120,116 @@ export interface Spec extends TurboModule {
    */
   unloadStt(instanceId: string): Promise<void>;
 
+  // ==================== Online (streaming) STT Methods ====================
+
+  /**
+   * Initialize OnlineRecognizer for streaming STT.
+   * @param instanceId - Unique ID for this engine instance (from createStreamingSTT)
+   * @param modelDir - Absolute path to model directory (use resolveModelPath first)
+   * @param modelType - One of: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc
+   * @param enableEndpoint - Enable endpoint detection (default true)
+   * @param decodingMethod - greedy_search or modified_beam_search
+   * @param maxActivePaths - Max active paths for beam search (e.g. 4)
+   * @param hotwordsFile - Optional path to hotwords file
+   * @param hotwordsScore - Optional hotwords score (default 1.5)
+   * @param numThreads - Optional number of threads (default 1)
+   * @param provider - Optional provider (e.g. cpu)
+   * @param ruleFsts - Optional path(s) to rule FSTs
+   * @param ruleFars - Optional path(s) to rule FARs
+   * @param blankPenalty - Optional blank penalty
+   * @param debug - Optional debug logging
+   * @param rule1MustContainNonSilence - Endpoint rule 1
+   * @param rule1MinTrailingSilence - Endpoint rule 1 (seconds)
+   * @param rule1MinUtteranceLength - Endpoint rule 1 (seconds)
+   * @param rule2MustContainNonSilence - Endpoint rule 2
+   * @param rule2MinTrailingSilence - Endpoint rule 2 (seconds)
+   * @param rule2MinUtteranceLength - Endpoint rule 2 (seconds)
+   * @param rule3MustContainNonSilence - Endpoint rule 3
+   * @param rule3MinTrailingSilence - Endpoint rule 3 (seconds)
+   * @param rule3MinUtteranceLength - Endpoint rule 3 (seconds)
+   */
+  initializeOnlineStt(
+    instanceId: string,
+    modelDir: string,
+    modelType: string,
+    enableEndpoint: boolean,
+    decodingMethod: string,
+    maxActivePaths: number,
+    hotwordsFile?: string,
+    hotwordsScore?: number,
+    numThreads?: number,
+    provider?: string,
+    ruleFsts?: string,
+    ruleFars?: string,
+    blankPenalty?: number,
+    debug?: boolean,
+    rule1MustContainNonSilence?: boolean,
+    rule1MinTrailingSilence?: number,
+    rule1MinUtteranceLength?: number,
+    rule2MustContainNonSilence?: boolean,
+    rule2MinTrailingSilence?: number,
+    rule2MinUtteranceLength?: number,
+    rule3MustContainNonSilence?: boolean,
+    rule3MinTrailingSilence?: number,
+    rule3MinUtteranceLength?: number
+  ): Promise<{ success: boolean }>;
+
+  /** Create a new stream for the given OnlineRecognizer instance. */
+  createSttStream(
+    instanceId: string,
+    streamId: string,
+    hotwords?: string
+  ): Promise<void>;
+
+  /** Feed PCM samples to a streaming STT stream. */
+  acceptSttWaveform(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<void>;
+
+  /** Signal end of input for a streaming STT stream. */
+  sttStreamInputFinished(streamId: string): Promise<void>;
+
+  /** Run decoding on the stream (call when isSttStreamReady is true). */
+  decodeSttStream(streamId: string): Promise<void>;
+
+  /** True if the stream has enough audio to decode. */
+  isSttStreamReady(streamId: string): Promise<boolean>;
+
+  /** Get current partial or final result (call after decodeSttStream). */
+  getSttStreamResult(streamId: string): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+  }>;
+
+  /** True if endpoint (end of utterance) was detected. */
+  isSttStreamEndpoint(streamId: string): Promise<boolean>;
+
+  /** Reset stream state for reuse. */
+  resetSttStream(streamId: string): Promise<void>;
+
+  /** Release stream and remove from native state. */
+  releaseSttStream(streamId: string): Promise<void>;
+
+  /** Release OnlineRecognizer and all its streams. */
+  unloadOnlineStt(instanceId: string): Promise<void>;
+
+  /**
+   * Convenience: feed audio, decode while ready, return result and endpoint status in one call.
+   */
+  processSttAudioChunk(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    isEndpoint: boolean;
+  }>;
+
   // ==================== TTS Methods ====================
 
   /**
@@ -230,14 +340,18 @@ export interface Spec extends TurboModule {
     estimated: boolean;
   }>;
 
+  // ==================== Online (streaming) TTS Methods ====================
+
   /**
    * Generate speech in streaming mode (emits chunk events).
    * @param instanceId - Unique ID for this engine instance
+   * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
    * @param text - Text to convert to speech
    * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    */
   generateTtsStream(
     instanceId: string,
+    requestId: string,
     text: string,
     options: Object
   ): Promise<void>;
