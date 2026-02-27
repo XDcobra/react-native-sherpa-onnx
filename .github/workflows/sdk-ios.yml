@@ -87,7 +87,6 @@ jobs:
           yarn build:ios \
             --mode Debug \
             --buildFolder ios/build \
-            --extra-params "-sdk iphonesimulator -arch arm64 CODE_SIGNING_ALLOWED=NO" \
             2>&1 | tee /tmp/build.full.log
           BUILD_EXIT=${PIPESTATUS[0]}
           if [ "$BUILD_EXIT" -ne 0 ]; then BUILD_FAILED=1; fi
