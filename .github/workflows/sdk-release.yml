@@ -56,6 +56,11 @@ jobs:
     uses: ./.github/workflows/sdk-maven.yml
     secrets: inherit
 
+  build-ios:
+    needs: [lint]
+    uses: ./.github/workflows/sdk-ios.yml
+    secrets: inherit
+
   # ──────────────────────────────────────────────────────────
   # 3. Publish AAR to Maven repository
   # ──────────────────────────────────────────────────────────
@@ -174,7 +179,7 @@ jobs:
   # ──────────────────────────────────────────────────────────
   create-release:
     runs-on: ubuntu-latest
-    needs: [build-android, build-sdk, build-aar, publish-maven]
+    needs: [build-android, build-sdk, build-aar, publish-maven, build-ios]
     permissions:
       contents: write
 
@@ -234,6 +239,15 @@ jobs:
             echo "[WARN] AAR file not found"
           fi
 
+          # iOS app bundle (from sdk-ios workflow)
+          IOS_IPA=$(find artifacts/ios-app-bundle -name "*.ipa" -type f 2>/dev/null | head -1)
+          if [ -n "$IOS_IPA" ]; then
+            cp "$IOS_IPA" release-assets/SherpaOnnxExample-ios.ipa
+            echo "[OK] iOS IPA: $IOS_IPA"
+          else
+            echo "[WARN] iOS IPA not found"
+          fi
+
           echo ""
           echo "Release assets:"
           ls -lh release-assets/
@@ -258,6 +272,7 @@ jobs:
             | `react-native-sherpa-onnx-*.tgz` | NPM package tarball (install via `yarn add <file>` or `npm install <file>`) |
             | `sherpa-onnx-react-native-*.aar` | Android AAR library (also published to Maven) |
             | `SherpaOnnxExample-android-debug.apk` | Android example app (debug build) |
+            | `SherpaOnnxExample-ios.ipa` | iOS example app (simulator build) |
 
             ### Maven
 
