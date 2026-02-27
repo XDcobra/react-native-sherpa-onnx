@@ -14,11 +14,13 @@ import type {
   TtsStreamEnd,
   TtsStreamError,
   TtsStreamHandlers,
+  TtsStreamController,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 
 let ttsInstanceCounter = 0;
+let ttsRequestIdCounter = 0;
 
 /**
  * Flatten model-specific options for the given model type to native init/update params.
@@ -264,40 +266,69 @@ export async function createTTS(
       text: string,
       opts: TtsGenerationOptions | undefined,
       handlers: TtsStreamHandlers
-    ): Promise<() => void> {
+    ): Promise<TtsStreamController> {
       guard();
-      const subscriptions = [
+      const requestId = `tts_req_${++ttsRequestIdCounter}`;
+      const subscriptions: Array<{ remove: () => void }> = [];
+      let unsubscribed = false;
+
+      const unsubscribe = () => {
+        if (unsubscribed) return;
+        unsubscribed = true;
+        subscriptions.forEach((sub) => sub.remove());
+      };
+
+      const matchesRequest = (e: { instanceId?: string; requestId?: string }) =>
+        (e.instanceId == null || e.instanceId === instanceId) &&
+        (e.requestId == null || e.requestId === requestId);
+
+      subscriptions.push(
         DeviceEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
           const e = event as TtsStreamChunk;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
+          if (!matchesRequest(e)) return;
           handlers.onChunk?.(e);
         }),
         DeviceEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
           const e = event as TtsStreamEnd;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
-          handlers.onEnd?.(e);
+          if (!matchesRequest(e)) return;
+          try {
+            handlers.onEnd?.(e);
+          } finally {
+            unsubscribe();
+          }
         }),
         DeviceEventEmitter.addListener('ttsStreamError', (event: unknown) => {
           const e = event as TtsStreamError;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
-          handlers.onError?.(e);
-        }),
-      ];
+          if (!matchesRequest(e)) return;
+          try {
+            handlers.onError?.(e);
+          } finally {
+            unsubscribe();
+          }
+        })
+      );
 
       try {
         await SherpaOnnx.generateTtsStream(
           instanceId,
+          requestId,
           text,
           toNativeTtsOptions(opts)
         );
       } catch (error) {
-        subscriptions.forEach((sub) => sub.remove());
+        unsubscribe();
         throw error;
       }
 
-      return () => {
-        subscriptions.forEach((sub) => sub.remove());
+      const controller: TtsStreamController = {
+        async cancel(): Promise<void> {
+          guard();
+          await SherpaOnnx.cancelTtsStream(instanceId);
+          unsubscribe();
+        },
+        unsubscribe,
       };
+      return controller;
     },
 
     async cancelSpeechStream(): Promise<void> {
@@ -462,6 +493,7 @@ export type {
   TtsSubtitleItem,
   TTSModelInfo,
   TtsEngine,
+  TtsStreamController,
   TtsStreamHandlers,
   TtsStreamChunk,
   TtsStreamEnd,
