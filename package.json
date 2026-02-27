@@ -107,7 +107,7 @@
     "verdaccio:start": "VERDACCIO_BODY_SIZE_LIMIT=100mb verdaccio --config verdaccio.config.yaml",
     "registry:local": "node scripts/switch-registry.js local",
     "registry:public": "node scripts/switch-registry.js public",
-    "release": "release-it --only-version"
+    "release": "release-it"
   },
   "keywords": [
     "react-native",
