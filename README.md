@@ -16,27 +16,56 @@ React Native SDK for sherpa-onnx - providing offline speech processing capabilit
 
 </div>
 
+> **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
+> Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
+
 A React Native TurboModule that provides offline speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
+
+## Table of contents
+
+- [Feature Support](#feature-support)
+- [Platform Support Status](#platform-support-status)
+- [Supported Model Types](#supported-model-types)
+  - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
+  - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
+- [Installation](#installation)
+  - [Android](#android)
+  - [iOS](#ios)
+- [Documentation](#documentation)
+- [Requirements](#requirements)
+- [Breaking changes (upgrading to 0.3.0)](#breaking-changes-upgrading-to-030)
+  - [Instance-based API (TTS + STT)](#instance-based-api-tts--stt)
+  - [Speech-to-Text (STT)](#speech-to-text-stt)
+  - [Text-to-Speech (TTS)](#text-to-speech-tts)
+- [Example Apps](#example-apps)
+  - [Example App (Audio to Text)](#example-app-audio-to-text)
+  - [Video to Text Comparison App](#video-to-text-comparison-app)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Feature Support
 
-| Feature | Status |
-|---------|--------|
-| Offline Speech-to-Text | ✅ **Supported** |
-| Text-to-Speech | ✅ **Supported** |
-| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** (see [Execution provider support](./docs/execution-providers.md)) |
-| Play Asset Delivery (PAD) | ✅ **Supported** (Android; see [Model Setup](./docs/MODEL_SETUP.md)) |
-| Speaker Diarization | ❌ Not yet supported |
-| Speech Enhancement | ❌ Not yet supported |
-| Source Separation | ❌ Not yet supported |
-| VAD (Voice Activity Detection) | ❌ Not yet supported |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types). |
+| Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
+| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
+| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/MODEL_SETUP.md). |
+| Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization). |
+| Model quantization | ✅ **Supported** | Automatic detection and preference for quantized (int8) models. |
+| Flexible model loading | ✅ **Supported** | Asset models, file system models, or auto-detection. |
+| TypeScript | ✅ **Supported** | Full type definitions included. |
+| Speaker Diarization | ❌ Not yet supported | Scheduled for release 0.4.0 |
+| Speech Enhancement | ❌ Not yet supported | Scheduled for release 0.5.0 |
+| Source Separation | ❌ Not yet supported | Scheduled for release 0.6.0 |
+| VAD (Voice Activity Detection) | ❌ Not yet supported | Scheduled for release 0.7.0 |
 
 ## Platform Support Status
 
 | Platform | Status | Notes |
 |----------|--------|-------|
 | **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
-| **iOS** | ✅ **Production Ready** | XCFramework + Podspec ready, CI/CD automated, multiple models supported |
+| **iOS** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 
 ## Supported Model Types
 
@@ -62,20 +91,6 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`    | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **Zipvoice**     | `'zipvoice'`      | Voice cloning capable. Requires `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`        | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. Requires `lm_flow.onnx`, `lm_main.onnx`, `encoder.onnx`, `decoder.onnx`, `text_conditioner.onnx`, `vocab.json`, `token_scores.json` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
-
-## Features
-
-- ✅ **Offline Speech-to-Text** – No internet connection required for speech recognition
-- ✅ **Multiple STT model types** – Zipformer/Transducer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano
-- ✅ **Multiple TTS model types** – VITS (Piper, Coqui, etc.), Matcha, Kokoro, KittenTTS, Zipvoice, Pocket
-- ✅ **Model type detection** – `detectSttModel()` and `detectTtsModel()` let you query the model type for a path **automatically**. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization).
-- ✅ **Model quantization** – Automatic detection and preference for quantized (int8) models
-- ✅ **Flexible model loading** – Asset models, file system models, or auto-detection
-- ✅ **Execution providers** – CPU, NNAPI (Android), XNNPACK, Core ML (iOS), QNN (Android, optional). See [Execution provider support](./docs/execution-providers.md).
-- ✅ **Android** – Fully supported; native libs and optional QNN via [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md)
-- ✅ **iOS** – Fully Supported;
-- ✅ **TypeScript** – Full TypeScript definitions included
-- ✅ **Play Asset Delivery (PAD)** – Ship large models in an Android asset pack; [Model Setup](./docs/MODEL_SETUP.md) covers PAD, debug with Metro, and release
 
 ## Installation
 
@@ -125,6 +140,8 @@ If you need a custom sherpa-onnx build (e.g. different version or patches), you 
 
 The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or linked) so that the iOS Obj-C++ code can use `sherpa_onnx::cxx::*`. The workflow's build script ensures this; if you use upstream `build-ios.sh` from sherpa-onnx, you may need to merge the C++ API into the static library yourself.
 
+## Documentation
+
 - [Text-to-Speech (TTS)](./docs/tts.md)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
@@ -141,66 +158,6 @@ Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to com
 - React Native >= 0.70
 - Android API 24+ (Android 7.0+)
 - iOS 13.0+
-
-## Breaking changes (upgrading to 0.3.0)
-
-If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
-
-### Instance-based API (TTS + STT)
-
-TTS and STT now use an instance-based factory pattern instead of module-level singletons. Each call to `createTTS()` / `createSTT()` returns an independent engine instance. You **must** call `.destroy()` when done to free native resources.
-
-**TTS Before:**
-
-```ts
-initializeTTS({ modelPath: { type: 'asset', path: 'models/vits' } });
-const audio = await generateSpeech('Hello');
-await unloadTTS();
-```
-
-**TTS After:**
-
-```ts
-const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/vits' } });
-const audio = await tts.generateSpeech('Hello');
-await tts.destroy();
-```
-
-**STT Before:**
-
-```ts
-await initializeSTT({ modelPath: { type: 'asset', path: 'models/whisper' } });
-const result = await transcribeFile('/audio.wav');
-await unloadSTT();
-```
-
-**STT After:**
-
-```ts
-const stt = await createSTT({ modelPath: { type: 'asset', path: 'models/whisper' } });
-const result = await stt.transcribeFile('/audio.wav');
-await stt.destroy();
-```
-
-### Speech-to-Text (STT)
-
-- **`transcribeFile`** now returns `Promise<SttRecognitionResult>` (an object with `text`, `tokens`, `timestamps`, `lang`, `emotion`, `event`, `durations`) instead of `Promise<string>`. For text only, use `(await transcribeFile(path)).text`.
-- **`initializeSTT`** supports two additional optional options: `hotwordsFile` and `hotwordsScore`. The native TurboModule methods were renamed from `initializeSherpaOnnx` / `unloadSherpaOnnx` to `initializeStt` / `unloadStt`.
-- **Removed deprecated type:** `TranscriptionResult` has been removed. Use `SttRecognitionResult` instead (same shape).
-
-### Text-to-Speech (TTS)
-
-- **Instance-based API:** Use `createTTS()` to get a `TtsEngine`; call `tts.generateSpeech()`, `tts.generateSpeechStream()`, etc., then `tts.destroy()`. See [Instance-based API (TTS + STT)](#instance-based-api-tts--stt) above. If you call the **TurboModule directly**, all instance-bound methods now take `instanceId` as the first parameter (see [docs/tts.md – Mapping to Native API](./docs/tts.md#mapping-to-native-api)).
-- **TTS model-specific options (breaking for versions &lt; 0.3.0):**  
-  Init and update no longer use flat `noiseScale`, `noiseScaleW`, and `lengthScale` on the options object. Use **`modelOptions`** instead, with one block per model type (aligned with the STT `modelOptions` design):
-  - **`createTTS` (init):** Replace flat `noiseScale`, `noiseScaleW`, `lengthScale` with `modelOptions`. Only the block for the loaded model type is applied.  
-    **Before (old API):** `initializeTTS({ modelPath, modelType: 'vits', noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 })`  
-    **After:** `createTTS({ modelPath, modelType: 'vits', modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } } })`
-  - **`tts.updateParams`:** Replace flat `noiseScale` / `noiseScaleW` / `lengthScale` with `modelOptions` (and optionally `modelType`). When `modelType` is omitted, the engine uses the type from `createTTS()`.  
-    **Before (old API):** `updateTtsParams({ noiseScale: 0.7, lengthScale: 1.2 })`  
-    **After:** `tts.updateParams({ modelOptions: { vits: { noiseScale: 0.7, lengthScale: 1.2 } } })` or `tts.updateParams({ modelType: 'vits', modelOptions: { vits: { ... } } })`
-  - Types: `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, `TtsKokoroModelOptions`, `TtsKittenModelOptions`, `TtsPocketModelOptions` are exported from the TTS module. See [docs/tts.md](./docs/tts.md) for details.
-- **Removed deprecated type:** `SynthesisOptions` has been removed. Use `TtsGenerationOptions` instead (same shape).
 
 ## Example Apps
 
@@ -272,3 +229,4 @@ MIT
 ---
 
 Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
+
