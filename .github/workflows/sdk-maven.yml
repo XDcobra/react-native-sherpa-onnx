@@ -7,17 +7,19 @@
 name: SDK - Maven Build AAR
 
 on:
-  pull_request:
-    branches:
-      - main
-  push:
-    branches: [main]
-    paths:
-      - 'android/**'
-      - 'third_party/**'
-      - '.github/workflows/sdk-maven.yml'
-  workflow_dispatch:
-  workflow_call:
+  # Disabled for now;
+  # TODO: Create aar with a standlone script (not Gradle wrapper)
+  # pull_request:
+  #   branches:
+  #     - main
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'android/**'
+  #     - 'third_party/**'
+  #     - '.github/workflows/sdk-maven.yml'
+  # workflow_dispatch:
+  # workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
