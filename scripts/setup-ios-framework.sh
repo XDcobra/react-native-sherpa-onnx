@@ -11,9 +11,15 @@
 
 set -e
 
-# Resolve package root: pod install sets PODS_TARGET_SRCROOT when building the pod; otherwise use script dir or PWD.
+# Resolve package root: explicit (CI), then pod install, then script dir or PWD.
 PROJECT_ROOT=""
-if [ -n "${PODS_TARGET_SRCROOT}" ] && [ -d "${PODS_TARGET_SRCROOT}" ]; then
+if [ -n "${SHERPA_ONNX_PROJECT_ROOT}" ] && [ -d "${SHERPA_ONNX_PROJECT_ROOT}" ]; then
+  PROJECT_ROOT="${SHERPA_ONNX_PROJECT_ROOT}"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -n "${GITHUB_WORKSPACE}" ] && [ -d "${GITHUB_WORKSPACE}/ios" ]; then
+  PROJECT_ROOT="${GITHUB_WORKSPACE}"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -n "${PODS_TARGET_SRCROOT}" ] && [ -d "${PODS_TARGET_SRCROOT}" ]; then
   PROJECT_ROOT="${PODS_TARGET_SRCROOT}"
 fi
 if [ -z "$PROJECT_ROOT" ]; then

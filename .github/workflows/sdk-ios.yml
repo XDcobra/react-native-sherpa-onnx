@@ -62,6 +62,8 @@ jobs:
       - name: Download iOS framework
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Force project root to workspace so the framework is written where we expect it (avoid PODS_TARGET_SRCROOT etc.)
+          SHERPA_ONNX_PROJECT_ROOT: ${{ github.workspace }}
         run: |
           echo "Working directory: $(pwd)"
           yarn download-ios-framework
