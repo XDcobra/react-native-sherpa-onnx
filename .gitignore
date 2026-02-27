@@ -196,6 +196,7 @@ third_party/libarchive_prebuilt/build-*/
 ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive
+ios/Frameworks/.framework-version
 ios/Downloads/
 ios/patched_libarchive/
 
