@@ -92,10 +92,10 @@ jobs:
         run: |
           mkdir -p release-assets
 
-          # Android debug APK
-          ANDROID_APK=$(find artifacts/android-debug-apk -name "*.apk" -type f 2>/dev/null | head -1)
+          # Android release APK (standalone, no Metro required; signed with debug key)
+          ANDROID_APK=$(find artifacts/android-release-apk -name "*.apk" -type f 2>/dev/null | head -1)
           if [ -n "$ANDROID_APK" ]; then
-            cp "$ANDROID_APK" release-assets/SherpaOnnxExample-android-debug.apk
+            cp "$ANDROID_APK" release-assets/SherpaOnnxExample-android-release.apk
             echo "[OK] Android APK: $ANDROID_APK"
           else
             echo "[WARN] Android APK not found"
@@ -142,7 +142,7 @@ jobs:
             | Artifact | Description |
             |----------|-------------|
             | `react-native-sherpa-onnx-*.tgz` | NPM package tarball (install via `yarn add <file>` or `npm install <file>`) |
-            | `SherpaOnnxExample-android-debug.apk` | Android example app (debug build) |
+            | `SherpaOnnxExample-android-release.apk` | Android example app (release build, debug key, no Metro) |
             | `SherpaOnnxExample-ios.ipa` | iOS example app (simulator build) |
 
             ### iOS Framework

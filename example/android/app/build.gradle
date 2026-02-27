@@ -120,9 +120,10 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
+            // Allow disabling release signing for local/CI via -PdisableReleaseSigning=true (uses debug key)
             if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
-                println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
+                println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true, using debug key"
+                signingConfig signingConfigs.debug
             } else {
                 signingConfig signingConfigs.release
             }
