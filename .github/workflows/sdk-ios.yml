@@ -70,6 +70,40 @@ jobs:
           ruby-version: '4.0'
           bundler: '4.0.3'
 
+      - name: Check ios/Frameworks before any download (no cache used)
+        run: |
+          # This workflow does NOT use actions/cache for ios/Frameworks, so no stale/incomplete cache is restored.
+          echo "=== ios/Frameworks state before download (this workflow does not cache ios/Frameworks) ==="
+          if [ -d "ios/Frameworks" ]; then
+            ls -la ios/Frameworks
+            [ -d "ios/Frameworks/sherpa_onnx.xcframework" ] && find ios/Frameworks/sherpa_onnx.xcframework -maxdepth 3 -type d | head -20
+          else
+            echo "ios/Frameworks does not exist yet"
+          fi
+
+      - name: Download iOS framework (early – same as yarn download-ios-framework)
+        env:
+          SHERPA_ONNX_PROJECT_ROOT: ${{ github.workspace }}
+        run: |
+          echo "Running yarn download-ios-framework from repo root..."
+          yarn download-ios-framework
+          echo "Download step finished (exit code: $?)"
+
+      - name: Verify iOS framework and headers after download
+        run: |
+          echo "=== Verifying framework and required header right after download ==="
+          HEADER="${{ github.workspace }}/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h"
+          if [ -f "$HEADER" ]; then
+            echo "[OK] Header present: $HEADER"
+            ls -la "$(dirname "$HEADER")"
+          else
+            echo "ERROR: Header missing after download: $HEADER"
+            echo "--- Contents of ${{ github.workspace }}/ios/Frameworks ---"
+            ls -la "${{ github.workspace }}/ios/Frameworks" 2>/dev/null || true
+            find "${{ github.workspace }}/ios/Frameworks" -maxdepth 4 2>/dev/null | head -60
+            exit 1
+          fi
+
       - name: Build example for iOS
         env:
           # So prepare_command in SherpaOnnx.podspec downloads framework to workspace/ios/Frameworks (not elsewhere)
@@ -86,6 +120,34 @@ jobs:
           # (React Native CLI also runs it; doing it first avoids opaque "Something went wrong" messages).
           echo "Running bundle exec pod install..."
           (cd ios && SHERPA_ONNX_PROJECT_ROOT="$SHERPA_ONNX_PROJECT_ROOT" bundle exec pod install) || { echo "pod install failed; see above for errors"; exit 1; }
+
+          # Verify SherpaOnnx framework and headers exist where the pod expects them (fail early with clear diagnostics)
+          echo ""
+          echo "=== Verifying SherpaOnnx framework and required headers ==="
+          REPO_ROOT="$SHERPA_ONNX_PROJECT_ROOT"
+          HEADER_PATH="$REPO_ROOT/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h"
+          if [ -f "$HEADER_PATH" ]; then
+            echo "[OK] Required header found: $HEADER_PATH"
+          else
+            echo "ERROR: Required header NOT found: $HEADER_PATH"
+            echo ""
+            echo "--- Contents of $REPO_ROOT/ios/Frameworks ---"
+            ls -la "$REPO_ROOT/ios/Frameworks" 2>/dev/null || echo "(directory missing or unreadable)"
+            if [ -d "$REPO_ROOT/ios/Frameworks" ]; then
+              echo ""
+              echo "--- Recursive listing (first 80 lines) ---"
+              find "$REPO_ROOT/ios/Frameworks" -maxdepth 4 2>/dev/null | head -80
+            fi
+            echo ""
+            echo "--- If present: example node_modules react-native-sherpa-onnx ios/Frameworks ---"
+            for dir in example/node_modules/react-native-sherpa-onnx/ios/Frameworks node_modules/react-native-sherpa-onnx/ios/Frameworks; do
+              if [ -d "$REPO_ROOT/$dir" ]; then
+                echo "  $dir:"
+                ls -la "$REPO_ROOT/$dir" 2>/dev/null | head -15
+              fi
+            done
+            exit 1
+          fi
 
           # Use React Native CLI instead of calling pod install + xcodebuild directly (avoids deprecation warning).
           # Build for simulator with a fixed output path for artifacts.
