@@ -53,8 +53,8 @@ export interface EndpointConfig {
 export interface StreamingSttInitOptions {
   /** Model path configuration (asset, file, or auto). */
   modelPath: ModelPathConfig;
-  /** Online model type; required (no auto-detect initially). */
-  modelType: OnlineSTTModelType;
+  /** Online model type. Use 'auto' to detect from model directory (calls detectSttModel and maps to an online type). */
+  modelType: OnlineSTTModelType | 'auto';
   /** Enable endpoint detection. Default: true. */
   enableEndpoint?: boolean;
   /** Endpoint rules. Defaults match Kotlin (rule1: 2.4s silence, rule2: 1.4s + speech, rule3: 20s max). */

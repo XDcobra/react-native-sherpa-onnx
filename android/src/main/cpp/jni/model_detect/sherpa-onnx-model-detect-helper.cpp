@@ -419,5 +419,21 @@ std::string FindLargestOnnxExcludingTokens(
     return ChooseLargest(files, excludeTokens, false, false);
 }
 
+bool ContainsWord(const std::string& haystack, const std::string& word) {
+    if (word.empty()) return false;
+    size_t pos = 0;
+    auto isSep = [](char c) {
+        return c == '\0' || c == '/' || c == '-' || c == '_' || c == '.' || c == ' ';
+    };
+    while ((pos = haystack.find(word, pos)) != std::string::npos) {
+        char before = (pos == 0) ? '\0' : haystack[pos - 1];
+        size_t afterPos = pos + word.size();
+        char after = (afterPos >= haystack.size()) ? '\0' : haystack[afterPos];
+        if (isSep(before) && isSep(after)) return true;
+        pos++;
+    }
+    return false;
+}
+
 } // namespace model_detect
 } // namespace sherpaonnx

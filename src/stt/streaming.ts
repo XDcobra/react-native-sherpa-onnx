@@ -1,6 +1,7 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveModelPath } from '../utils';
 import type {
+  OnlineSTTModelType,
   StreamingSttEngine,
   StreamingSttInitOptions,
   StreamingSttResult,
@@ -8,6 +9,31 @@ import type {
 } from './streamingTypes';
 
 let streamingSttInstanceCounter = 0;
+
+/**
+ * Map detected STT model type (from detectSttModel) to an online (streaming) model type.
+ * Throws if the detected type has no streaming support.
+ */
+function mapDetectedToOnlineType(detectedType: string | undefined): OnlineSTTModelType {
+  const t = detectedType ?? '';
+  switch (t) {
+    case 'transducer':
+      return 'transducer';
+    case 'paraformer':
+      return 'paraformer';
+    case 'nemo_ctc':
+      return 'nemo_ctc';
+    case 'zipformer_ctc':
+    case 'ctc':
+      return 'zipformer2_ctc';
+    case 'tone_ctc':
+      return 'tone_ctc';
+    default:
+      throw new Error(
+        `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
+      );
+  }
+}
 let sttStreamCounter = 0;
 
 function normalizeStreamingResult(raw: {
@@ -81,13 +107,19 @@ function flattenInitOptionsForNative(options: StreamingSttInitOptions): {
  * Create a streaming (online) STT engine. Use this for real-time recognition with
  * partial results and endpoint detection. Call destroy() when done.
  *
- * @param options - Streaming STT init options (modelPath, modelType required)
+ * @param options - Streaming STT init options (modelPath required; modelType optional, use 'auto' to detect from directory)
  * @returns Promise resolving to a StreamingSttEngine
  * @example
  * ```typescript
+ * // With explicit model type
  * const engine = await createStreamingSTT({
  *   modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
  *   modelType: 'transducer',
+ * });
+ * // With auto-detection
+ * const engine = await createStreamingSTT({
+ *   modelPath: { type: 'asset', path: 'models/sherpa-onnx-streaming-t-one-russian-2025-09-08' },
+ *   modelType: 'auto',
  * });
  * const stream = await engine.createStream();
  * await stream.acceptWaveform(samples, 16000);
@@ -105,7 +137,23 @@ export async function createStreamingSTT(
 ): Promise<StreamingSttEngine> {
   const instanceId = `streaming_stt_${++streamingSttInstanceCounter}`;
   const resolvedPath = await resolveModelPath(options.modelPath);
-  const flat = flattenInitOptionsForNative(options);
+
+  let effectiveModelType: OnlineSTTModelType;
+  if (options.modelType === 'auto' || options.modelType === undefined) {
+    const detectResult = await SherpaOnnx.detectSttModel(resolvedPath, undefined, undefined);
+    if (!detectResult.success) {
+      const errMsg = 'error' in detectResult && typeof (detectResult as { error?: string }).error === 'string'
+        ? (detectResult as { error: string }).error
+        : 'Unknown error';
+      throw new Error(`Streaming STT auto-detection failed for ${resolvedPath}. ${errMsg}`);
+    }
+    effectiveModelType = mapDetectedToOnlineType(detectResult.modelType);
+  } else {
+    effectiveModelType = options.modelType;
+  }
+
+  const optionsWithResolvedType = { ...options, modelType: effectiveModelType };
+  const flat = flattenInitOptionsForNative(optionsWithResolvedType);
   flat.modelDir = resolvedPath;
 
   const result = await SherpaOnnx.initializeOnlineStt(

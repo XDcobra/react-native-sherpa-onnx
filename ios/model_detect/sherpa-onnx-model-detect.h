@@ -25,7 +25,8 @@ enum class SttModelKind {
     kCanary,
     kOmnilingual,
     kMedAsr,
-    kTeleSpeechCtc
+    kTeleSpeechCtc,
+    kToneCtc
 };
 
 enum class TtsModelKind {
