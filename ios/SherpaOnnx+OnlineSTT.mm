@@ -1,7 +1,7 @@
 /**
  * SherpaOnnx+OnlineSTT.mm
  *
- * Purpose: iOS TurboModule methods for streaming (online) STT: initializeOnlineStt,
+ * Purpose: iOS TurboModule methods for streaming (online) STT: initializeOnlineSttWithOptions,
  * createSttStream, acceptSttWaveform, decodeSttStream, getSttStreamResult, etc.
  * Uses sherpa-onnx-online-stt-wrapper for native OnlineRecognizer.
  */
@@ -37,38 +37,22 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     return (it != g_online_stt_instances.end() && it->second != nullptr) ? it->second.get() : nullptr;
 }
 
+
 @implementation SherpaOnnx (OnlineSTT)
 
-- (void)initializeOnlineStt:(NSString *)instanceId
-                   modelDir:(NSString *)modelDir
-                  modelType:(NSString *)modelType
-             enableEndpoint:(NSNumber *)enableEndpoint
-            decodingMethod:(NSString *)decodingMethod
-            maxActivePaths:(NSNumber *)maxActivePaths
-              hotwordsFile:(NSString *)hotwordsFile
-             hotwordsScore:(NSNumber *)hotwordsScore
-                numThreads:(NSNumber *)numThreads
-                  provider:(NSString *)provider
-                  ruleFsts:(NSString *)ruleFsts
-                  ruleFars:(NSString *)ruleFars
-               blankPenalty:(NSNumber *)blankPenalty
-                     debug:(NSNumber *)debug
-   rule1MustContainNonSilence:(NSNumber *)rule1MustContainNonSilence
-    rule1MinTrailingSilence:(NSNumber *)rule1MinTrailingSilence
-  rule1MinUtteranceLength:(NSNumber *)rule1MinUtteranceLength
-   rule2MustContainNonSilence:(NSNumber *)rule2MustContainNonSilence
-    rule2MinTrailingSilence:(NSNumber *)rule2MinTrailingSilence
-  rule2MinUtteranceLength:(NSNumber *)rule2MinUtteranceLength
-   rule3MustContainNonSilence:(NSNumber *)rule3MustContainNonSilence
-    rule3MinTrailingSilence:(NSNumber *)rule3MinTrailingSilence
-  rule3MinUtteranceLength:(NSNumber *)rule3MinUtteranceLength
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
+- (void)initializeOnlineSttWithOptions:(NSString *)instanceId
+                               options:(JS::NativeSherpaOnnx::SpecInitializeOnlineSttWithOptionsOptions &)options
+                               resolve:(RCTPromiseResolveBlock)resolve
+                                reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"INIT_ERROR", @"instanceId is required", nil);
         return;
     }
+    NSString *modelDir = options.modelDir();
+    NSString *modelType = options.modelType();
+    RCTLogInfo(@"[SherpaOnnx OnlineSTT] initializeOnlineSttWithOptions instanceId=%@ modelDir=%@ modelType=%@",
+               instanceId, modelDir, modelType);
     if (modelDir == nil || [modelDir length] == 0) {
         reject(@"INIT_ERROR", @"modelDir is required", nil);
         return;
@@ -77,44 +61,67 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     std::string modelDirStr = [modelDir UTF8String];
     std::string modelTypeStr = (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "transducer";
 
+    auto enableEndpoint = options.enableEndpoint();
+    NSString *decodingMethod = options.decodingMethod();
+    auto maxActivePaths = options.maxActivePaths();
+    NSString *hotwordsFile = options.hotwordsFile();
+    auto hotwordsScore = options.hotwordsScore();
+    auto numThreads = options.numThreads();
+    NSString *provider = options.provider();
+    NSString *ruleFsts = options.ruleFsts();
+    NSString *ruleFars = options.ruleFars();
+    auto blankPenalty = options.blankPenalty();
+    auto debug = options.debug();
+    auto rule1MustContainNonSilence = options.rule1MustContainNonSilence();
+    auto rule1MinTrailingSilence = options.rule1MinTrailingSilence();
+    auto rule1MinUtteranceLength = options.rule1MinUtteranceLength();
+    auto rule2MustContainNonSilence = options.rule2MustContainNonSilence();
+    auto rule2MinTrailingSilence = options.rule2MinTrailingSilence();
+    auto rule2MinUtteranceLength = options.rule2MinUtteranceLength();
+    auto rule3MustContainNonSilence = options.rule3MustContainNonSilence();
+    auto rule3MinTrailingSilence = options.rule3MinTrailingSilence();
+    auto rule3MinUtteranceLength = options.rule3MinUtteranceLength();
+
     @try {
         std::lock_guard<std::mutex> lock(g_online_stt_mutex);
         if (g_online_stt_instances.find(instanceIdStr) != g_online_stt_instances.end()) {
             reject(@"INIT_ERROR", @"Online STT instance already exists", nil);
             return;
         }
+        RCTLogInfo(@"[SherpaOnnx OnlineSTT] creating wrapper and calling initialize");
         auto wrapper = std::make_unique<sherpaonnx::OnlineSttWrapper>();
         sherpaonnx::OnlineSttInitResult result = wrapper->initialize(
             modelDirStr,
             modelTypeStr,
-            enableEndpoint != nil && [enableEndpoint boolValue],
+            enableEndpoint.has_value() && enableEndpoint.value(),
             decodingMethod != nil ? [decodingMethod UTF8String] : "greedy_search",
-            maxActivePaths != nil ? [maxActivePaths intValue] : 4,
+            maxActivePaths.has_value() ? (int32_t)maxActivePaths.value() : 4,
             hotwordsFile != nil ? [hotwordsFile UTF8String] : "",
-            hotwordsScore != nil ? [hotwordsScore floatValue] : 1.5f,
-            numThreads != nil ? [numThreads intValue] : 1,
+            hotwordsScore.has_value() ? (float)hotwordsScore.value() : 1.5f,
+            numThreads.has_value() ? (int32_t)numThreads.value() : 1,
             provider != nil ? [provider UTF8String] : "cpu",
             ruleFsts != nil ? [ruleFsts UTF8String] : "",
             ruleFars != nil ? [ruleFars UTF8String] : "",
-            blankPenalty != nil ? [blankPenalty floatValue] : 0.f,
-            debug != nil && [debug boolValue],
-            rule1MustContainNonSilence != nil && [rule1MustContainNonSilence boolValue],
-            rule1MinTrailingSilence != nil ? [rule1MinTrailingSilence floatValue] : 2.4f,
-            rule1MinUtteranceLength != nil ? [rule1MinUtteranceLength floatValue] : 0.f,
-            rule2MustContainNonSilence != nil && [rule2MustContainNonSilence boolValue],
-            rule2MinTrailingSilence != nil ? [rule2MinTrailingSilence floatValue] : 1.2f,
-            rule2MinUtteranceLength != nil ? [rule2MinUtteranceLength floatValue] : 0.f,
-            rule3MustContainNonSilence != nil && [rule3MustContainNonSilence boolValue],
-            rule3MinTrailingSilence != nil ? [rule3MinTrailingSilence floatValue] : 0.f,
-            rule3MinUtteranceLength != nil ? [rule3MinUtteranceLength floatValue] : 20.f
+            blankPenalty.has_value() ? (float)blankPenalty.value() : 0.f,
+            debug.has_value() && debug.value(),
+            rule1MustContainNonSilence.has_value() && rule1MustContainNonSilence.value(),
+            rule1MinTrailingSilence.has_value() ? (float)rule1MinTrailingSilence.value() : 2.4f,
+            rule1MinUtteranceLength.has_value() ? (float)rule1MinUtteranceLength.value() : 0.f,
+            rule2MustContainNonSilence.has_value() && rule2MustContainNonSilence.value(),
+            rule2MinTrailingSilence.has_value() ? (float)rule2MinTrailingSilence.value() : 1.2f,
+            rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
+            rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
+            rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
+            rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
         );
         if (!result.success) {
+            RCTLogError(@"[SherpaOnnx OnlineSTT] initialize failed: %s", result.error.c_str());
             reject(@"INIT_ERROR", [NSString stringWithUTF8String:result.error.c_str()], nil);
             return;
         }
         g_online_stt_instances[instanceIdStr] = std::move(wrapper);
+        RCTLogInfo(@"[SherpaOnnx OnlineSTT] init success for instanceId=%@", instanceId);
         resolve(@{ @"success": @YES });
-        return;
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Online STT init failed: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
@@ -146,8 +153,8 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 }
 
 - (void)acceptSttWaveform:(NSString *)streamId
-                  samples:(NSArray<NSNumber *> *)samples
-               sampleRate:(NSNumber *)sampleRate
+                  samples:(NSArray *)samples
+               sampleRate:(double)sampleRate
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject
 {
@@ -162,7 +169,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         floatSamples.push_back([n floatValue]);
     }
     std::string streamIdStr = [streamId UTF8String];
-    wrapper->acceptWaveform(streamIdStr, [sampleRate intValue], floatSamples.data(), floatSamples.size());
+    wrapper->acceptWaveform(streamIdStr, (int32_t)sampleRate, floatSamples.data(), floatSamples.size());
     resolve(nil);
 }
 
@@ -305,8 +312,8 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 }
 
 - (void)processSttAudioChunk:(NSString *)streamId
-                     samples:(NSArray<NSNumber *> *)samples
-                  sampleRate:(NSNumber *)sampleRate
+                     samples:(NSArray *)samples
+                  sampleRate:(double)sampleRate
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
@@ -317,11 +324,23 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     }
     std::string streamIdStr = [streamId UTF8String];
     std::vector<float> floatSamples;
-    floatSamples.reserve([samples count]);
-    for (NSNumber* n in samples) {
-        floatSamples.push_back([n floatValue]);
+    NSUInteger count = [samples count];
+    floatSamples.reserve(count);
+    for (NSUInteger i = 0; i < count; i++) {
+        id obj = [samples objectAtIndex:i];
+        float val = 0.0f;
+        if ([obj isKindOfClass:[NSNumber class]]) {
+            val = [(NSNumber *)obj floatValue];
+        } else if ([obj respondsToSelector:@selector(doubleValue)]) {
+            val = (float)[(id)obj doubleValue];
+        }
+        floatSamples.push_back(val);
     }
-    wrapper->acceptWaveform(streamIdStr, [sampleRate intValue], floatSamples.data(), floatSamples.size());
+    if (floatSamples.empty()) {
+        RCTLogWarn(@"[SherpaOnnx OnlineSTT] processSttAudioChunk: no samples (count=%lu)", (unsigned long)count);
+    }
+
+    wrapper->acceptWaveform(streamIdStr, (int32_t)sampleRate, floatSamples.data(), floatSamples.size());
     while (wrapper->isReady(streamIdStr)) {
         wrapper->decode(streamIdStr);
     }

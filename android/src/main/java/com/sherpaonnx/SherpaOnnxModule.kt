@@ -385,39 +385,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Online (streaming) STT Methods ====================
 
-  override fun initializeOnlineStt(
-    instanceId: String,
-    modelDir: String,
-    modelType: String,
-    enableEndpoint: Boolean,
-    decodingMethod: String,
-    maxActivePaths: Double,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    blankPenalty: Double?,
-    debug: Boolean?,
-    rule1MustContainNonSilence: Boolean?,
-    rule1MinTrailingSilence: Double?,
-    rule1MinUtteranceLength: Double?,
-    rule2MustContainNonSilence: Boolean?,
-    rule2MinTrailingSilence: Double?,
-    rule2MinUtteranceLength: Double?,
-    rule3MustContainNonSilence: Boolean?,
-    rule3MinTrailingSilence: Double?,
-    rule3MinUtteranceLength: Double?,
-    promise: Promise
-  ) {
+  override fun initializeOnlineSttWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
+    val modelDir = options.getString("modelDir")
+    if (modelDir.isNullOrEmpty()) {
+      promise.reject("INIT_ERROR", "modelDir is required")
+      return
+    }
+    val modelType = options.getString("modelType") ?: "transducer"
+    val enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else true
+    val decodingMethod = options.getString("decodingMethod") ?: "greedy_search"
+    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 4
+    val hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null
+    val hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null
+    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
+    val provider = if (options.hasKey("provider")) options.getString("provider") else null
+    val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
+    val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
+    val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
+    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
+    val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
+    val rule1MinTrailingSilence = if (options.hasKey("rule1MinTrailingSilence")) options.getDouble("rule1MinTrailingSilence") else null
+    val rule1MinUtteranceLength = if (options.hasKey("rule1MinUtteranceLength")) options.getDouble("rule1MinUtteranceLength") else null
+    val rule2MustContainNonSilence = if (options.hasKey("rule2MustContainNonSilence")) options.getBoolean("rule2MustContainNonSilence") else null
+    val rule2MinTrailingSilence = if (options.hasKey("rule2MinTrailingSilence")) options.getDouble("rule2MinTrailingSilence") else null
+    val rule2MinUtteranceLength = if (options.hasKey("rule2MinUtteranceLength")) options.getDouble("rule2MinUtteranceLength") else null
+    val rule3MustContainNonSilence = if (options.hasKey("rule3MustContainNonSilence")) options.getBoolean("rule3MustContainNonSilence") else null
+    val rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null
+    val rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null
     onlineSttHelper.initializeOnlineStt(
       instanceId,
       modelDir,
       modelType,
       enableEndpoint,
       decodingMethod,
-      maxActivePaths.toInt(),
+      maxActivePaths,
       hotwordsFile,
       hotwordsScore,
       numThreads,
