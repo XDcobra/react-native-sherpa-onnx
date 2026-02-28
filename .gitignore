@@ -101,6 +101,7 @@ example/android/app/src/main/assets/models/**
 !example/android/app/src/main/assets/models/**/README.md
 !example/android/app/src/main/assets/models/README.md
 example/android/sherpa_models/src/main/assets/models/**
+example/ios/sherpa_models/
 example/.model-cache/
 example/models/
 
