@@ -21,7 +21,7 @@ import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
 // 1) Create streaming TTS engine (use createTTS() for batch one-shot synthesis)
 const tts = await createStreamingTTS({
   modelPath: { type: 'asset', path: 'models/sherpa-onnx-vits-piper-en' },
-  modelType: 'vits',
+  modelType: 'vits', // or 'auto' to detect
 });
 
 // 2) Generate speech in streaming mode with handlers
