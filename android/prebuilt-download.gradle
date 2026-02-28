@@ -1,6 +1,9 @@
 // Prebuilt download and check logic. Applied after android {} and configurations.
 // Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, ortVersion (from prebuilt-versions.gradle)
 // and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, onnxruntimeAar (from build.gradle).
+// When sherpaOnnxDisableFfmpeg=true (gradle.properties), FFmpeg is not required; see docs/disable-ffmpeg.md.
+
+def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
 
 def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def requiredFfmpegSoFiles = [
@@ -129,7 +132,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     }
 
-    if (!hasAllFfmpegLibs() || !hasFfmpegHeaders()) {
+    if (!sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())) {
       try {
         def aarFiles = project.configurations.ffmpegAar.files
         if (!aarFiles.isEmpty()) {
@@ -221,10 +224,12 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
 
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
-      if (!hasAllFfmpegLibs() || !hasFfmpegHeaders() || !hasAllSherpaLibs() || !hasSherpaHeaders() || !hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
+      def needFfmpeg = !sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())
+      if (needFfmpeg || !hasAllSherpaLibs() || !hasSherpaHeaders() || !hasAllLibarchiveLibs() || !hasLibarchiveHeaders()) {
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-          "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist."
+          "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist. " +
+          (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.)" : "")
         )
       }
       return
@@ -232,7 +237,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
 
-    if (!hasAllFfmpegLibs() || !hasFfmpegHeaders()) {
+    if (!sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())) {
       def tagFile = file("${project.projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
@@ -330,10 +335,12 @@ project.tasks.register("checkJniLibs") {
       if (!dir.exists()) {
         throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist.")
       }
-      requiredFfmpegSoFiles.each { soName ->
-        def soFile = new File(dir, soName)
-        if (!soFile.exists()) {
-          throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:ffmpeg is available.")
+      if (!sherpaOnnxDisableFfmpeg) {
+        requiredFfmpegSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:ffmpeg is available. Or set sherpaOnnxDisableFfmpeg=true in gradle.properties (see docs/disable-ffmpeg.md).")
+          }
         }
       }
       requiredSherpaOnnxSoFiles.each { soName ->

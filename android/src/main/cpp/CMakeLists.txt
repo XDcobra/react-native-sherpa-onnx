@@ -25,6 +25,14 @@ endif()
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
+# Optional: disable FFmpeg (gradle.properties: sherpaOnnxDisableFfmpeg=true). See docs/disable-ffmpeg.md.
+set(USE_FFMPEG ON)
+if(SHERPA_ONNX_DISABLE_FFMPEG)
+    set(USE_FFMPEG OFF)
+    message(STATUS "FFmpeg disabled (SHERPA_ONNX_DISABLE_FFMPEG=ON). convertAudioToWav16k/convertAudioToFormat will return an error at runtime.")
+endif()
+
+if(USE_FFMPEG)
 # FFmpeg: libs and headers from (1) third_party/ffmpeg_prebuilt/android (local build) or (2) jniLibs + cpp/include/ffmpeg (GitHub release zip).
 # PROJECT_ROOT = android/; repo root = PROJECT_ROOT/..
 set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android")
@@ -51,6 +59,7 @@ elseif(EXISTS "${FFMPEG_JNILIBS}/libavcodec.so")
 else()
     message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
 endif()
+endif(USE_FFMPEG)
 
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). Move .cpp into subdirs; .h go alongside for include path.
 set(SOURCES
@@ -130,15 +139,23 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${FFMPEG_INCLUDE_DIR}
 )
+if(USE_FFMPEG)
+    target_include_directories(sherpaonnx PRIVATE ${FFMPEG_INCLUDE_DIR})
+endif()
 if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
 endif()
-target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
+# When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
+# in C++ and the stub (#else) branches are used — no FFmpeg headers needed.
+if(USE_FFMPEG)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
-target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
+if(USE_FFMPEG)
+    target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
+endif()
 if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
 endif()
@@ -146,17 +163,26 @@ if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
 endif()
-target_link_libraries(sherpaonnx
-    PRIVATE
-    archive
-    avcodec
-    avformat
-    avutil
-    avfilter
-    swresample
-    log
-    android
-)
+if(USE_FFMPEG)
+    target_link_libraries(sherpaonnx
+        PRIVATE
+        archive
+        avcodec
+        avformat
+        avutil
+        avfilter
+        swresample
+        log
+        android
+    )
+else()
+    target_link_libraries(sherpaonnx
+        PRIVATE
+        archive
+        log
+        android
+    )
+endif()
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

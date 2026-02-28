@@ -49,6 +49,9 @@ android {
   // Native .so and headers: filled by prebuilt-download.gradle (local jniLibs, Maven AAR, or GitHub release).
   // Alternatively by third_party/*/copy_prebuilts_to_sdk.js or shipped in npm package.
 
+  // When true, FFmpeg is not linked; convertAudioToWav16k/convertAudioToFormat will fail at runtime. See docs/disable-ffmpeg.md.
+  def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
+
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
     targetSdkVersion getExtOrDefault("targetSdkVersion")
@@ -61,7 +64,11 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        arguments "-DANDROID_STL=c++_shared"
+        if (sherpaOnnxDisableFfmpeg) {
+          arguments "-DANDROID_STL=c++_shared", "-DSHERPA_ONNX_DISABLE_FFMPEG=ON"
+        } else {
+          arguments "-DANDROID_STL=c++_shared"
+        }
       }
     }
 
@@ -86,6 +93,18 @@ android {
   buildTypes {
     release {
       minifyEnabled false
+    }
+  }
+
+  // When FFmpeg is disabled, exclude FFmpeg .so from our output to avoid merge conflicts with other libs (e.g. react-native-audio-api).
+  if (sherpaOnnxDisableFfmpeg) {
+    packaging {
+      jniLibs {
+        excludes += [
+          "**/libavcodec.so", "**/libavformat.so", "**/libavutil.so",
+          "**/libavfilter.so", "**/libswresample.so", "**/libshine.so"
+        ]
+      }
     }
   }
 
