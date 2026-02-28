@@ -157,7 +157,8 @@
   "peerDependencies": {
     "@dr.pogodin/react-native-fs": "*",
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-audio-api": "*"
   },
   "workspaces": [
     "example"
