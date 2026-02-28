@@ -316,6 +316,10 @@ export const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  sourceChoiceButtonDisabled: {
+    backgroundColor: '#999',
+    opacity: 0.8,
+  },
   sourceChoiceButtonText: {
     fontSize: 16,
     fontWeight: '600',
@@ -324,7 +328,122 @@ export const styles = StyleSheet.create({
   },
   sourceChoiceRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
     marginBottom: 20,
+  },
+  liveMicButton: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  liveMicButtonActive: {
+    backgroundColor: '#FF3B30',
+  },
+  liveMicButtonDisabled: {
+    backgroundColor: '#999',
+    opacity: 0.8,
+  },
+  liveMicIcon: {
+    color: '#fff',
+  },
+  liveHint: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  audioDeviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 10,
+  },
+  audioDeviceLabel: {
+    fontSize: 14,
+    color: '#555',
+    minWidth: 90,
+  },
+  audioDevicePicker: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  audioDevicePickerText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#000',
+  },
+  audioDeviceChevron: {
+    color: '#666',
+  },
+  deviceModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  deviceModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    maxHeight: '70%',
+  },
+  deviceModalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 12,
+  },
+  deviceModalItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+  },
+  deviceModalItemActive: {
+    backgroundColor: '#e8f4fd',
+  },
+  deviceModalItemText: {
+    fontSize: 15,
+    color: '#000',
+  },
+  deviceModalItemCategory: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  deviceModalCancel: {
+    marginTop: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  deviceModalCancelText: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  /** Reserve space for live result so layout doesn't jump when first partial result arrives */
+  liveResultContainer: {
+    minHeight: 220,
+  },
+  liveResultPlaceholder: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontStyle: 'italic',
   },
   flex1: {
     flex: 1,

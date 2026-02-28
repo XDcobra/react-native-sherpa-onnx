@@ -14,7 +14,7 @@ let streamingSttInstanceCounter = 0;
  * Map detected STT model type (from detectSttModel) to an online (streaming) model type.
  * Throws if the detected type has no streaming support.
  */
-function mapDetectedToOnlineType(
+export function mapDetectedToOnlineType(
   detectedType: string | undefined
 ): OnlineSTTModelType {
   const t = detectedType ?? '';
@@ -34,6 +34,20 @@ function mapDetectedToOnlineType(
       throw new Error(
         `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
       );
+  }
+}
+
+/**
+ * Returns the online (streaming) model type for a detected STT model type, or null if streaming is not supported.
+ * Use this to check whether the current model can be used with createStreamingSTT() (e.g. for live transcription).
+ */
+export function getOnlineTypeOrNull(
+  detectedType: string | undefined
+): OnlineSTTModelType | null {
+  try {
+    return mapDetectedToOnlineType(detectedType);
+  } catch {
+    return null;
   }
 }
 let sttStreamCounter = 0;
@@ -168,36 +182,56 @@ export async function createStreamingSTT(
   const flat = flattenInitOptionsForNative(optionsWithResolvedType);
   flat.modelDir = resolvedPath;
 
-  const result = await SherpaOnnx.initializeOnlineStt(
+  // Build options with only defined values (no undefined) to avoid iOS TurboModule marshalling crash when options contain undefined.
+  const nativeOptions: Parameters<
+    typeof SherpaOnnx.initializeOnlineSttWithOptions
+  >[1] = {
+    modelDir: flat.modelDir,
+    modelType: flat.modelType,
+    enableEndpoint: flat.enableEndpoint,
+    decodingMethod: flat.decodingMethod,
+    maxActivePaths: flat.maxActivePaths,
+  };
+  if (flat.hotwordsFile !== undefined)
+    nativeOptions.hotwordsFile = flat.hotwordsFile;
+  if (flat.hotwordsScore !== undefined)
+    nativeOptions.hotwordsScore = flat.hotwordsScore;
+  if (flat.numThreads !== undefined) nativeOptions.numThreads = flat.numThreads;
+  if (flat.provider !== undefined) nativeOptions.provider = flat.provider;
+  if (flat.ruleFsts !== undefined) nativeOptions.ruleFsts = flat.ruleFsts;
+  if (flat.ruleFars !== undefined) nativeOptions.ruleFars = flat.ruleFars;
+  if (flat.blankPenalty !== undefined)
+    nativeOptions.blankPenalty = flat.blankPenalty;
+  if (flat.debug !== undefined) nativeOptions.debug = flat.debug;
+  if (flat.rule1MustContainNonSilence !== undefined)
+    nativeOptions.rule1MustContainNonSilence = flat.rule1MustContainNonSilence;
+  if (flat.rule1MinTrailingSilence !== undefined)
+    nativeOptions.rule1MinTrailingSilence = flat.rule1MinTrailingSilence;
+  if (flat.rule1MinUtteranceLength !== undefined)
+    nativeOptions.rule1MinUtteranceLength = flat.rule1MinUtteranceLength;
+  if (flat.rule2MustContainNonSilence !== undefined)
+    nativeOptions.rule2MustContainNonSilence = flat.rule2MustContainNonSilence;
+  if (flat.rule2MinTrailingSilence !== undefined)
+    nativeOptions.rule2MinTrailingSilence = flat.rule2MinTrailingSilence;
+  if (flat.rule2MinUtteranceLength !== undefined)
+    nativeOptions.rule2MinUtteranceLength = flat.rule2MinUtteranceLength;
+  if (flat.rule3MustContainNonSilence !== undefined)
+    nativeOptions.rule3MustContainNonSilence = flat.rule3MustContainNonSilence;
+  if (flat.rule3MinTrailingSilence !== undefined)
+    nativeOptions.rule3MinTrailingSilence = flat.rule3MinTrailingSilence;
+  if (flat.rule3MinUtteranceLength !== undefined)
+    nativeOptions.rule3MinUtteranceLength = flat.rule3MinUtteranceLength;
+
+  const result = await SherpaOnnx.initializeOnlineSttWithOptions(
     instanceId,
-    flat.modelDir,
-    flat.modelType,
-    flat.enableEndpoint,
-    flat.decodingMethod,
-    flat.maxActivePaths,
-    flat.hotwordsFile,
-    flat.hotwordsScore,
-    flat.numThreads,
-    flat.provider,
-    flat.ruleFsts,
-    flat.ruleFars,
-    flat.blankPenalty,
-    flat.debug,
-    flat.rule1MustContainNonSilence,
-    flat.rule1MinTrailingSilence,
-    flat.rule1MinUtteranceLength,
-    flat.rule2MustContainNonSilence,
-    flat.rule2MinTrailingSilence,
-    flat.rule2MinUtteranceLength,
-    flat.rule3MustContainNonSilence,
-    flat.rule3MinTrailingSilence,
-    flat.rule3MinUtteranceLength
+    nativeOptions
   );
 
   if (!result.success) {
     throw new Error(`Streaming STT initialization failed for ${instanceId}`);
   }
 
+  const enableInputNormalization = options.enableInputNormalization !== false;
   let destroyed = false;
 
   const guard = () => {
@@ -287,9 +321,15 @@ export async function createStreamingSTT(
           sampleRate: number
         ): Promise<{ result: StreamingSttResult; isEndpoint: boolean }> {
           streamGuard();
+          let toSend: number[] = samples;
+          if (enableInputNormalization && samples.length > 0) {
+            const maxAbs = Math.max(...samples.map((s) => Math.abs(s)), 1e-10);
+            const scale = maxAbs < 0.01 ? 80 : Math.min(80, 0.8 / maxAbs);
+            toSend = samples.map((s) => Math.max(-1, Math.min(1, s * scale)));
+          }
           const raw = await SherpaOnnx.processSttAudioChunk(
             streamId,
-            samples,
+            toSend,
             sampleRate
           );
           return {

@@ -79,6 +79,12 @@ export interface StreamingSttInitOptions {
   blankPenalty?: number;
   /** Enable debug logging. Default: false. */
   debug?: boolean;
+  /**
+   * Enable adaptive input normalization for audio chunks in processAudioChunk().
+   * When true (default), input is scaled so the peak is ~0.8 to handle varying device levels (e.g. quiet mics on iOS).
+   * Set to false if your audio is already in the expected range [-1, 1] and you want to pass it through unchanged.
+   */
+  enableInputNormalization?: boolean;
 }
 
 /**

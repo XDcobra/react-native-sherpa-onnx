@@ -220,7 +220,11 @@ export async function createSTT(
 }
 
 // Streaming (online) STT
-export { createStreamingSTT } from './streaming';
+export {
+  createStreamingSTT,
+  mapDetectedToOnlineType,
+  getOnlineTypeOrNull,
+} from './streaming';
 export type {
   OnlineSTTModelType,
   StreamingSttEngine,
