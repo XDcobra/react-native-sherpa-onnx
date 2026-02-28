@@ -65,9 +65,18 @@ function flattenTtsModelOptionsForNative(
     lengthScale?: number;
   };
   return {
-    noiseScale: n.noiseScale !== undefined && typeof n.noiseScale === 'number' ? n.noiseScale : undefined,
-    noiseScaleW: n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number' ? n.noiseScaleW : undefined,
-    lengthScale: n.lengthScale !== undefined && typeof n.lengthScale === 'number' ? n.lengthScale : undefined,
+    noiseScale:
+      n.noiseScale !== undefined && typeof n.noiseScale === 'number'
+        ? n.noiseScale
+        : undefined,
+    noiseScaleW:
+      n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number'
+        ? n.noiseScaleW
+        : undefined,
+    lengthScale:
+      n.lengthScale !== undefined && typeof n.lengthScale === 'number'
+        ? n.lengthScale
+        : undefined,
   };
 }
 
@@ -216,12 +225,16 @@ export async function createStreamingTTS(
       subscriptions.push(
         DeviceEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
           const e = event as TtsStreamChunk;
-          if (!matchesRequest(e)) return;
+          if (!matchesRequest(e)) {
+            return;
+          }
           handlers.onChunk?.(e);
         }),
         DeviceEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
           const e = event as TtsStreamEnd;
-          if (!matchesRequest(e)) return;
+          if (!matchesRequest(e)) {
+            return;
+          }
           try {
             handlers.onEnd?.(e);
           } finally {
@@ -230,7 +243,9 @@ export async function createStreamingTTS(
         }),
         DeviceEventEmitter.addListener('ttsStreamError', (event: unknown) => {
           const e = event as TtsStreamError;
-          if (!matchesRequest(e)) return;
+          if (!matchesRequest(e)) {
+            return;
+          }
           try {
             handlers.onError?.(e);
           } finally {
@@ -238,6 +253,15 @@ export async function createStreamingTTS(
           }
         })
       );
+
+      // Yield so the bridge can register listeners before native emits (avoids "no listeners" / "already in progress")
+      await new Promise<void>((resolve) => {
+        if (typeof setImmediate === 'function') {
+          setImmediate(resolve);
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
 
       try {
         await SherpaOnnx.generateTtsStream(

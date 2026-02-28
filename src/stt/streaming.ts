@@ -14,7 +14,9 @@ let streamingSttInstanceCounter = 0;
  * Map detected STT model type (from detectSttModel) to an online (streaming) model type.
  * Throws if the detected type has no streaming support.
  */
-function mapDetectedToOnlineType(detectedType: string | undefined): OnlineSTTModelType {
+function mapDetectedToOnlineType(
+  detectedType: string | undefined
+): OnlineSTTModelType {
   const t = detectedType ?? '';
   switch (t) {
     case 'transducer':
@@ -44,7 +46,9 @@ function normalizeStreamingResult(raw: {
   return {
     text: typeof raw.text === 'string' ? raw.text : '',
     tokens: Array.isArray(raw.tokens) ? (raw.tokens as string[]) : [],
-    timestamps: Array.isArray(raw.timestamps) ? (raw.timestamps as number[]) : [],
+    timestamps: Array.isArray(raw.timestamps)
+      ? (raw.timestamps as number[])
+      : [],
   };
 }
 
@@ -140,12 +144,20 @@ export async function createStreamingSTT(
 
   let effectiveModelType: OnlineSTTModelType;
   if (options.modelType === 'auto' || options.modelType === undefined) {
-    const detectResult = await SherpaOnnx.detectSttModel(resolvedPath, undefined, undefined);
+    const detectResult = await SherpaOnnx.detectSttModel(
+      resolvedPath,
+      undefined,
+      undefined
+    );
     if (!detectResult.success) {
-      const errMsg = 'error' in detectResult && typeof (detectResult as { error?: string }).error === 'string'
-        ? (detectResult as { error: string }).error
-        : 'Unknown error';
-      throw new Error(`Streaming STT auto-detection failed for ${resolvedPath}. ${errMsg}`);
+      const errMsg =
+        'error' in detectResult &&
+        typeof (detectResult as { error?: string }).error === 'string'
+          ? (detectResult as { error: string }).error
+          : 'Unknown error';
+      throw new Error(
+        `Streaming STT auto-detection failed for ${resolvedPath}. ${errMsg}`
+      );
     }
     effectiveModelType = mapDetectedToOnlineType(detectResult.modelType);
   } else {
@@ -225,7 +237,10 @@ export async function createStreamingSTT(
           return streamId;
         },
 
-        async acceptWaveform(samples: number[], sampleRate: number): Promise<void> {
+        async acceptWaveform(
+          samples: number[],
+          sampleRate: number
+        ): Promise<void> {
           streamGuard();
           await SherpaOnnx.acceptSttWaveform(streamId, samples, sampleRate);
         },

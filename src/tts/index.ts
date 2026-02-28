@@ -130,7 +130,7 @@ function toNativeTtsOptions(
 }
 
 // TTS stream events are sent from native via sendEventWithName; use DeviceEventEmitter
-// so we don't need NativeEventEmitter (which expects addListener/removeListeners on the module).
+
 /**
  * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
  *

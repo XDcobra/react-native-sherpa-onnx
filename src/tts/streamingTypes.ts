@@ -1,7 +1,4 @@
 import type {
-  TtsStreamChunk,
-  TtsStreamEnd,
-  TtsStreamError,
   TtsStreamHandlers,
   TtsStreamController,
   TtsGenerationOptions,

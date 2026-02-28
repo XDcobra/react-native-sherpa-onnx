@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   createTTS,
+  createStreamingTTS,
   detectTtsModel,
   saveAudioToFile,
   saveAudioToContentUri,
@@ -22,7 +23,11 @@ import {
   type TTSModelType,
   type TtsGenerationOptions,
 } from 'react-native-sherpa-onnx/tts';
-import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
+import type {
+  TtsEngine,
+  StreamingTtsEngine,
+  TtsStreamController,
+} from 'react-native-sherpa-onnx/tts';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
@@ -130,12 +135,15 @@ export default function TTSScreen() {
   const soundInstanceRef = useRef<Sound | null>(null);
   const streamChunksRef = useRef<number[][]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
-  const streamUnsubscribeRef = useRef<(() => void) | null>(null);
-  const streamPlaybackStartedRef = useRef(false);
+  const streamControllerRef = useRef<TtsStreamController | null>(null);
+  const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
   const streamQueueRef = useRef<string[]>([]);
   const streamInFlightRef = useRef(false);
   const streamLastTextRef = useRef('');
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamInitialScheduleRef = useRef(false);
+  const streamProcessSchedulePendingRef = useRef(false);
+  const streamProcessCallSourceRef = useRef<string>('');
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
   }, [soundInstance]);
@@ -168,50 +176,62 @@ export default function TTSScreen() {
     }
   }, []);
 
-  // On unmount: release sound and stream only; do NOT destroy the TTS engine (it stays in cache)
+  // On unmount: release sound and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
       if (soundInstanceRef.current) {
         soundInstanceRef.current.release();
       }
-      if (streamUnsubscribeRef.current) {
-        streamUnsubscribeRef.current();
-        streamUnsubscribeRef.current = null;
+      const controller = streamControllerRef.current;
+      if (controller) {
+        controller.cancel().catch(() => {});
+        streamControllerRef.current = null;
       }
-      const engine = ttsEngineRef.current;
-      if (engine) {
-        engine.stopPcmPlayer().catch((err) => {
-          console.warn('Failed to stop PCM player:', err);
-        });
+      const streamingEngine = streamingTtsEngineRef.current;
+      if (streamingEngine) {
+        streamingEngine.stopPcmPlayer().catch(() => {});
+        streamingEngine.destroy().catch(() => {});
+        streamingTtsEngineRef.current = null;
       }
     };
   }, []);
 
-  const resetStreamingState = useCallback((clearBuffer = true) => {
-    if (streamUnsubscribeRef.current) {
-      streamUnsubscribeRef.current();
-      streamUnsubscribeRef.current = null;
-    }
-    if (clearBuffer) {
-      streamChunksRef.current = [];
-      streamSampleRateRef.current = null;
-      setStreamSampleCount(0);
-    }
-    streamQueueRef.current = [];
-    streamInFlightRef.current = false;
-    streamLastTextRef.current = '';
-    streamPlaybackStartedRef.current = false;
-    const engine = ttsEngineRef.current;
-    if (engine) {
-      engine.stopPcmPlayer().catch((err) => {
-        console.warn('Failed to stop PCM player:', err);
-      });
-    }
-    setStreamProgress(null);
-    setStreaming(false);
-  }, []);
+  const resetStreamingState = useCallback(
+    (clearBuffer = true, options?: { resetScheduleRef?: boolean }) => {
+      const controller = streamControllerRef.current;
+      if (controller) {
+        controller.cancel().catch(() => {});
+        streamControllerRef.current = null;
+      }
+      const streamingEngine = streamingTtsEngineRef.current;
+      if (streamingEngine) {
+        streamingEngine.stopPcmPlayer().catch(() => {});
+        streamingEngine.destroy().catch(() => {});
+        streamingTtsEngineRef.current = null;
+      }
+      streamQueueRef.current = [];
+      streamInFlightRef.current = false;
+      streamLastTextRef.current = '';
+      if (options?.resetScheduleRef !== false) {
+        streamInitialScheduleRef.current = false;
+      }
+      streamProcessSchedulePendingRef.current = false;
+      if (streamDebounceRef.current) {
+        clearTimeout(streamDebounceRef.current);
+        streamDebounceRef.current = null;
+      }
+      if (clearBuffer) {
+        streamChunksRef.current = [];
+        streamSampleRateRef.current = null;
+        setStreamSampleCount(0);
+      }
+      setStreamProgress(null);
+      setStreaming(false);
+    },
+    []
+  );
 
-  const buildStreamedAudio = () => {
+  const buildStreamedAudio = useCallback(() => {
     const chunks = streamChunksRef.current;
     if (chunks.length === 0) {
       return null;
@@ -228,19 +248,24 @@ export default function TTSScreen() {
     const sampleRate =
       streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
     return { samples: combined, sampleRate };
-  };
+  }, [modelInfo?.sampleRate]);
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
     return { sid: 0, speed: 1.0 };
   }, []);
 
   const processStreamQueue = useCallback(async () => {
-    if (!streaming || streamInFlightRef.current) {
+    if (streamInFlightRef.current) {
       return;
     }
-
+    const engine = streamingTtsEngineRef.current;
+    if (!engine) {
+      return;
+    }
+    streamInFlightRef.current = true;
     const nextText = streamQueueRef.current.shift();
-    if (!nextText) {
+    if (!nextText?.trim()) {
+      streamInFlightRef.current = false;
       return;
     }
 
@@ -248,93 +273,83 @@ export default function TTSScreen() {
     try {
       options = getSynthesisOptions();
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMessage);
-      resetStreamingState(false);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setError(msg);
       return;
     }
-
-    const engine = ttsEngineRef.current;
-    if (!engine) {
-      streamInFlightRef.current = false;
-      return;
-    }
-
-    streamInFlightRef.current = true;
 
     try {
-      const unsubscribe = await engine.generateSpeechStream(nextText, options, {
+      const controller = await engine.generateSpeechStream(nextText, options, {
         onChunk: (chunk) => {
-          if (streamSampleRateRef.current === null) {
-            streamSampleRateRef.current = chunk.sampleRate;
+          streamSampleRateRef.current = chunk.sampleRate;
+          if (chunk.samples.length > 0) {
+            streamingTtsEngineRef.current?.writePcmChunk(chunk.samples);
           }
-          if (!streamPlaybackStartedRef.current) {
-            streamPlaybackStartedRef.current = true;
-            engine.startPcmPlayer(chunk.sampleRate, 1).catch((err) => {
-              console.warn('Failed to start PCM player:', err);
-            });
-          }
-          engine.writePcmChunk(chunk.samples).catch((err) => {
-            console.warn('Failed to write PCM chunk:', err);
-          });
           streamChunksRef.current.push(chunk.samples);
           setStreamSampleCount((prev) => prev + chunk.samples.length);
           setStreamProgress(chunk.progress);
         },
-        onEnd: () => {
+        onEnd: (event) => {
           streamInFlightRef.current = false;
-          if (streamUnsubscribeRef.current) {
-            streamUnsubscribeRef.current();
-            streamUnsubscribeRef.current = null;
+          streamControllerRef.current = null;
+          if (event.cancelled) {
+            const eng = streamingTtsEngineRef.current;
+            if (eng) {
+              eng.stopPcmPlayer().catch(() => {});
+              eng.destroy().catch(() => {});
+            }
+            streamingTtsEngineRef.current = null;
+            setStreamProgress(null);
+            setStreaming(false);
+            const audio = buildStreamedAudio();
+            if (audio) setGeneratedAudio(audio);
+          } else {
+            setStreamProgress(null);
+            streamProcessCallSourceRef.current = 'onEnd';
+            processStreamQueue().catch((err) => {
+              console.warn('processStreamQueue:', err);
+            });
           }
-          setStreamProgress(null);
-          processStreamQueue().catch((err) => {
-            console.warn('Failed to process stream queue:', err);
-          });
         },
-        onError: ({ message }) => {
-          setError(message);
+        onError: (event) => {
           streamInFlightRef.current = false;
-          if (streamUnsubscribeRef.current) {
-            streamUnsubscribeRef.current();
-            streamUnsubscribeRef.current = null;
+          streamControllerRef.current = null;
+          const eng = streamingTtsEngineRef.current;
+          if (eng) {
+            eng.stopPcmPlayer().catch(() => {});
+            eng.destroy().catch(() => {});
           }
-          resetStreamingState(false);
+          streamingTtsEngineRef.current = null;
+          setError(event.message);
+          setStreamProgress(null);
+          setStreaming(false);
         },
       });
-
-      streamUnsubscribeRef.current = unsubscribe;
+      streamControllerRef.current = controller;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMessage);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
       streamInFlightRef.current = false;
-      resetStreamingState(false);
+      setError(msg);
+      setStreaming(false);
     }
-  }, [getSynthesisOptions, resetStreamingState, streaming]);
+  }, [getSynthesisOptions, buildStreamedAudio]);
 
   const enqueueStreamingText = useCallback(
     (text: string) => {
-      if (!text.trim()) {
-        return;
-      }
-
+      const trimmed = text;
       const lastText = streamLastTextRef.current;
-      let delta = text;
-
-      if (text.startsWith(lastText)) {
-        delta = text.slice(lastText.length);
+      if (trimmed.startsWith(lastText)) {
+        const delta = trimmed.slice(lastText.length);
+        if (!delta.trim()) return;
+        streamLastTextRef.current = trimmed;
+        streamQueueRef.current.push(delta);
+        streamProcessCallSourceRef.current = 'enqueueStreamingText';
+        processStreamQueue().catch((err) => {
+          console.warn('processStreamQueue:', err);
+        });
+      } else {
+        streamLastTextRef.current = trimmed;
       }
-
-      if (!delta.trim()) {
-        streamLastTextRef.current = text;
-        return;
-      }
-
-      streamLastTextRef.current = text;
-      streamQueueRef.current.push(delta);
-      processStreamQueue().catch((err) => {
-        console.warn('Failed to process stream queue:', err);
-      });
     },
     [processStreamQueue]
   );
@@ -347,22 +362,17 @@ export default function TTSScreen() {
       }
       return;
     }
-
-    if (streamDebounceRef.current) {
-      clearTimeout(streamDebounceRef.current);
-    }
-
+    if (streamDebounceRef.current) clearTimeout(streamDebounceRef.current);
     streamDebounceRef.current = setTimeout(() => {
       enqueueStreamingText(inputText);
     }, 400);
-
     return () => {
       if (streamDebounceRef.current) {
         clearTimeout(streamDebounceRef.current);
         streamDebounceRef.current = null;
       }
     };
-  }, [enqueueStreamingText, inputText, streaming]);
+  }, [streaming, inputText, enqueueStreamingText]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -386,12 +396,6 @@ export default function TTSScreen() {
           .map((m) => m.folder);
         if (padFolders.length > 0) {
           resolvedPadPath = padPath;
-          console.log(
-            'TTSScreen: Found PAD/filesystem TTS models:',
-            padFolders,
-            'at',
-            padPath
-          );
         }
       } catch (e) {
         console.warn('TTSScreen: PAD/listModelsAtPath failed', e);
@@ -406,9 +410,6 @@ export default function TTSScreen() {
         ...ttsFolders.filter((f) => !padFolders.includes(f)),
       ];
 
-      if (ttsFolders.length > 0) {
-        console.log('TTSScreen: Found asset models:', ttsFolders);
-      }
       setAvailableModels(combined);
 
       if (combined.length === 0) {
@@ -441,8 +442,6 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      const eng = ttsEngineRef.current;
-      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -608,8 +607,6 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      const eng = ttsEngineRef.current;
-      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -684,8 +681,6 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      const eng = ttsEngineRef.current;
-      if (eng) await eng.cancelSpeechStream();
       resetStreamingState(true);
     }
     if (soundInstance) {
@@ -744,17 +739,25 @@ export default function TTSScreen() {
   };
 
   const handleStartStreaming = async () => {
+    if (streamInitialScheduleRef.current) {
+      return;
+    }
+    streamInitialScheduleRef.current = true;
+
     if (!currentModelFolder) {
       setError('Please initialize a model first');
+      streamInitialScheduleRef.current = false;
       return;
     }
 
-    if (!selectedModelType) {
-      setError('Please select a model type first');
+    if (!inputText.trim()) {
+      setError('Please enter text to synthesize');
+      streamInitialScheduleRef.current = false;
       return;
     }
 
     if (streaming) {
+      streamInitialScheduleRef.current = false;
       return;
     }
 
@@ -766,22 +769,74 @@ export default function TTSScreen() {
     setSavedSubtitlePath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
-    resetStreamingState(true);
-    setStreaming(true);
-    setStreamProgress(0);
+    resetStreamingState(true, { resetScheduleRef: false });
+    // Do NOT set streaming=true here: the useEffect would start a 400ms debounce and
+    // enqueueStreamingText(inputText) could run before we set streamLastTextRef below,
+    // causing a duplicate processStreamQueue. Set streaming only after queue + ref are set.
     if (soundInstance) {
       soundInstance.release();
       setSoundInstance(null);
       setIsPlaying(false);
     }
 
+    const useFilePath = padModelIds.includes(currentModelFolder);
+    const modelPath = useFilePath
+      ? padModelsPath
+        ? getFileModelPath(currentModelFolder, undefined, padModelsPath)
+        : getFileModelPath(currentModelFolder, ModelCategory.Tts)
+      : getAssetModelPath(currentModelFolder);
+
     try {
-      streamLastTextRef.current = '';
-      enqueueStreamingText(inputText);
+      let streamingEngine: StreamingTtsEngine;
+      try {
+        streamingEngine = await createStreamingTTS({
+          modelPath,
+          numThreads: TTS_NUM_THREADS,
+          debug: false,
+        });
+      } catch (initErr) {
+        console.warn(
+          'createStreamingTTS failed, retrying with fewer threads',
+          initErr
+        );
+        streamingEngine = await createStreamingTTS({
+          modelPath,
+          numThreads: 1,
+          debug: false,
+        });
+      }
+
+      streamingTtsEngineRef.current = streamingEngine;
+      const sampleRate = await streamingEngine.getSampleRate();
+      await streamingEngine.startPcmPlayer(sampleRate, 1);
+
+      streamChunksRef.current = [];
+      streamSampleRateRef.current = null;
+      streamQueueRef.current = [inputText.trim()];
+      streamLastTextRef.current = inputText.trim();
+      streamInFlightRef.current = false;
+
+      setStreaming(true);
+      setStreamProgress(0);
+      setStreamSampleCount(0);
+      if (!streamProcessSchedulePendingRef.current) {
+        streamProcessSchedulePendingRef.current = true;
+        setTimeout(() => {
+          streamProcessSchedulePendingRef.current = false;
+          streamProcessCallSourceRef.current =
+            'handleStartStreaming-setTimeout';
+          processStreamQueue();
+        }, 0);
+      }
     } catch (err) {
+      streamInitialScheduleRef.current = false;
+      streamProcessSchedulePendingRef.current = false;
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
-      resetStreamingState(true);
+      setStreamProgress(null);
+      setStreaming(false);
+      streamingTtsEngineRef.current = null;
+      streamControllerRef.current = null;
     }
   };
 
@@ -790,8 +845,10 @@ export default function TTSScreen() {
       return;
     }
     try {
-      const eng = ttsEngineRef.current;
-      if (eng) await eng.cancelSpeechStream();
+      const controller = streamControllerRef.current;
+      if (controller) {
+        await controller.cancel();
+      }
     } catch (err) {
       console.warn('Failed to cancel streaming:', err);
     } finally {
@@ -875,12 +932,7 @@ export default function TTSScreen() {
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
 
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedUri)}`, [
-          {
-            text: 'OK',
-            onPress: () => console.log('Audio saved:', savedUri),
-          },
-        ]);
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedUri)}`);
         return;
       }
 
@@ -898,16 +950,7 @@ export default function TTSScreen() {
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
 
-        Alert.alert(
-          'Success',
-          `Audio saved to:\n${getDisplayPath(savedPath)}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => console.log('Audio saved:', savedPath),
-            },
-          ]
-        );
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
       } else {
         // Save as WAV first, then convert to requested format
         const tempWav = `${targetDirectory}/tts_${timestamp}.wav`;
@@ -924,13 +967,7 @@ export default function TTSScreen() {
           } catch {}
           Alert.alert(
             'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`,
-            [
-              {
-                text: 'OK',
-                onPress: () => console.log('Audio saved:', targetPath),
-              },
-            ]
+            `Audio saved to:\n${getDisplayPath(targetPath)}`
           );
         } catch (convErr) {
           // Conversion failed: fall back to WAV
@@ -986,16 +1023,7 @@ export default function TTSScreen() {
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
 
-        Alert.alert(
-          'Success',
-          `Audio saved to:\n${getDisplayPath(savedPath)}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => console.log('Audio saved:', savedPath),
-            },
-          ]
-        );
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
       } else {
         // Save WAV first then convert
         const tempWav = `${directoryPath}/tts_${timestamp}.wav`;
@@ -1011,13 +1039,7 @@ export default function TTSScreen() {
           } catch {}
           Alert.alert(
             'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`,
-            [
-              {
-                text: 'OK',
-                onPress: () => console.log('Audio saved:', targetPath),
-              },
-            ]
+            `Audio saved to:\n${getDisplayPath(targetPath)}`
           );
         } catch (convErr) {
           console.warn('Conversion failed, WAV saved at', tempWav, convErr);
@@ -1293,8 +1315,6 @@ export default function TTSScreen() {
   const handleFree = async () => {
     try {
       if (streaming) {
-        const eng = ttsEngineRef.current;
-        if (eng) await eng.cancelSpeechStream();
         resetStreamingState(true);
       }
       if (soundInstance) {
@@ -1586,15 +1606,21 @@ export default function TTSScreen() {
                   onPress={handleCancelStreaming}
                   disabled={!streaming}
                 >
-                  <Text style={styles.generateButtonText}>Cancel</Text>
+                  <Text style={styles.generateButtonText}>Stop Streaming</Text>
                 </TouchableOpacity>
               </View>
 
               {streaming && (
-                <Text style={styles.streamInfoText}>
-                  Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
-                  {streamSampleCount} samples)
-                </Text>
+                <>
+                  <Text style={styles.streamInfoText}>
+                    Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
+                    {streamSampleCount} samples)
+                  </Text>
+                  <Text style={styles.streamInfoText}>
+                    Weitere Eingabe im Textfeld wird automatisch vorgelesen
+                    (Live-Modus).
+                  </Text>
+                </>
               )}
             </View>
           </>
