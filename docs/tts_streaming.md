@@ -334,9 +334,9 @@ graph TD
     TtsSharedMethods["Shared: getTtsSampleRate, getTtsNumSpeakers, updateTtsParams"]
   end
 
-  subgraph androidLayer [Android Native - single helper]
-    TtsHelper["SherpaOnnxTtsHelper - unchanged"]
-    OfflineTts["OfflineTts: generate + generateWithCallback"]
+  subgraph nativeLayer [Android / iOS Native - single helper]
+    TtsHelper["SherpaOnnxTtsHelper (Android) / TtsWrapper (iOS)"]
+    OfflineTts["OfflineTts: generate + generateWithCallback / generateStream"]
   end
 
   createTTS --> TtsEngine
@@ -352,3 +352,5 @@ graph TD
   TtsSharedMethods --> TtsHelper
   TtsHelper --> OfflineTts
 ```
+
+On both Android and iOS, **one** native TTS helper serves both batch (`createTTS`) and streaming (`createStreamingTTS`). Streaming uses `generateTtsStream` (with `requestId` for event routing), `cancelTtsStream`, and optional PCM player APIs; events `ttsStreamChunk`, `ttsStreamEnd`, and `ttsStreamError` include `requestId` so the JS layer can match them to the correct request.
