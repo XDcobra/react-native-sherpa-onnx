@@ -340,7 +340,9 @@ export interface TtsStreamHandlers {
 }
 
 /**
- * Instance-based TTS engine returned by createTTS().
+ * Instance-based batch TTS engine returned by createTTS().
+ * Use for one-shot synthesis (generateSpeech, generateSpeechWithTimestamps).
+ * For streaming, use createStreamingTTS() and StreamingTtsEngine instead.
  * Call destroy() when done to free native resources.
  */
 export interface TtsEngine {
@@ -353,15 +355,6 @@ export interface TtsEngine {
     text: string,
     options?: TtsGenerationOptions
   ): Promise<GeneratedAudioWithTimestamps>;
-  generateSpeechStream(
-    text: string,
-    options: TtsGenerationOptions | undefined,
-    handlers: TtsStreamHandlers
-  ): Promise<TtsStreamController>;
-  cancelSpeechStream(): Promise<void>;
-  startPcmPlayer(sampleRate: number, channels: number): Promise<void>;
-  writePcmChunk(samples: number[]): Promise<void>;
-  stopPcmPlayer(): Promise<void>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
