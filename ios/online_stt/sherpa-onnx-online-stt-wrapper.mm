@@ -105,14 +105,18 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     const std::string& ruleFars,
     float blankPenalty,
     bool debug,
+    // NOTE: rule*MustContainNonSilence, rule1/2MinUtteranceLength, and
+    // rule3MinTrailingSilence are not exposed by the sherpa-onnx C++ CXX API
+    // (cxx-api.h). Only rule1_min_trailing_silence, rule2_min_trailing_silence,
+    // and rule3_min_utterance_length are supported on iOS.
     bool /* rule1MustContainNonSilence */,
     float rule1MinTrailingSilence,
-    float rule1MinUtteranceLength,
+    float /* rule1MinUtteranceLength */,
     bool /* rule2MustContainNonSilence */,
     float rule2MinTrailingSilence,
-    float rule2MinUtteranceLength,
+    float /* rule2MinUtteranceLength */,
     bool /* rule3MustContainNonSilence */,
-    float rule3MinTrailingSilence,
+    float /* rule3MinTrailingSilence */,
     float rule3MinUtteranceLength
 ) {
     OnlineSttInitResult result;
@@ -138,7 +142,7 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     config.max_active_paths = maxActivePaths;
     config.enable_endpoint = enableEndpoint;
     config.rule1_min_trailing_silence = rule1MinTrailingSilence > 0 ? rule1MinTrailingSilence : 2.4f;
-    config.rule2_min_trailing_silence = rule2MinTrailingSilence > 0 ? rule2MinTrailingSilence : 1.2f;
+    config.rule2_min_trailing_silence = rule2MinTrailingSilence > 0 ? rule2MinTrailingSilence : 1.4f;
     config.rule3_min_utterance_length = rule3MinUtteranceLength > 0 ? rule3MinUtteranceLength : 20.f;
     config.hotwords_file = hotwordsFile;
     config.hotwords_score = hotwordsScore;

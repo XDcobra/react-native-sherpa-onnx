@@ -473,9 +473,10 @@ internal class SherpaOnnxOnlineSttHelper(
         promise.resolve(null)
         return
       }
+      val streamIds = inst.streams.keys.toList()
       inst.streams.values.forEach { it.release() }
       inst.streams.clear()
-      inst.streams.keys.forEach { streamToInstance.remove(it) }
+      streamIds.forEach { streamToInstance.remove(it) }
       inst.recognizer.release()
       promise.resolve(null)
     } catch (e: Exception) {
@@ -520,9 +521,10 @@ internal class SherpaOnnxOnlineSttHelper(
     instances.keys.toList().forEach { instanceId ->
       try {
         val inst = instances.remove(instanceId) ?: return@forEach
+        val streamIds = inst.streams.keys.toList()
         inst.streams.values.forEach { it.release() }
         inst.streams.clear()
-        inst.streams.keys.forEach { streamToInstance.remove(it) }
+        streamIds.forEach { streamToInstance.remove(it) }
         inst.recognizer.release()
       } catch (e: Exception) {
         Log.w(logTag, "shutdown: failed to release instance $instanceId: ${e.message}")

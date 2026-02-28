@@ -323,9 +323,17 @@ export async function createStreamingSTT(
           streamGuard();
           let toSend: number[] = samples;
           if (enableInputNormalization && samples.length > 0) {
-            const maxAbs = Math.max(...samples.map((s) => Math.abs(s)), 1e-10);
+            let maxAbs = 1e-10;
+            for (let i = 0; i < samples.length; i++) {
+              const abs = Math.abs(samples[i]!);
+              if (abs > maxAbs) maxAbs = abs;
+            }
             const scale = maxAbs < 0.01 ? 80 : Math.min(80, 0.8 / maxAbs);
-            toSend = samples.map((s) => Math.max(-1, Math.min(1, s * scale)));
+            toSend = new Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+              const v = samples[i]! * scale;
+              toSend[i] = v < -1 ? -1 : v > 1 ? 1 : v;
+            }
           }
           const raw = await SherpaOnnx.processSttAudioChunk(
             streamId,
