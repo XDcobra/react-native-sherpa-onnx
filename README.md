@@ -80,6 +80,7 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **WeNet CTC**            | `'wenet_ctc'`     | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/wenet/index.html)  |
 | **SenseVoice**           | `'sense_voice'`   | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/sense-voice/index.html)        |
 | **FunASR Nano**          | `'funasr_nano'`   | Requires `encoder_adaptor.onnx`, `llm.onnx`, `embedding.onnx`, and `tokenizer` directory | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/funasr-nano/index.html)        |
+| **Tone CTC (t-one)**     | `'tone_ctc'`      | Single `model.onnx` + `tokens.txt`. Folder name usually contains `t-one`, `t_one` or `tone` | [Donwload](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-ctc/index.html) |
 
 ### Text-to-Speech (TTS) Models
 

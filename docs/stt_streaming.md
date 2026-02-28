@@ -18,10 +18,10 @@ This guide covers the **streaming STT** API for real-time recognition with parti
 ```typescript
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 
-// 1) Create streaming engine (modelType is required; no auto-detect)
+// 1) Create streaming engine (use modelType: 'auto' to detect from directory)
 const engine = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/sherpa-onnx-streaming-zipformer-en-2023-06-26' },
-  modelType: 'transducer',
+  modelType: 'transducer', // or 'auto' to detect
 });
 
 // 2) Create a stream (one stream per recognition session)
@@ -65,14 +65,14 @@ function createStreamingSTT(
 ): Promise<StreamingSttEngine>;
 ```
 
-Creates a **streaming (online) STT engine** backed by sherpa-onnx’s `OnlineRecognizer`. You must call `engine.destroy()` when done. Use **only** with streaming-capable models; `modelType` is required (no auto-detect).
+Creates a **streaming (online) STT engine** backed by sherpa-onnx’s `OnlineRecognizer`. You must call `engine.destroy()` when done. Use **only** with streaming-capable models. Pass `modelType: 'auto'` to detect the model type from the directory (uses `detectSttModel` and maps to an online type).
 
 **Options (`StreamingSttInitOptions`):**
 
 | Option | Type | Description |
 |--------|------|-------------|
 | `modelPath` | `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto', path: string }`. Resolved to an absolute path before init. |
-| `modelType` | `OnlineSTTModelType` | **Required.** One of: `'transducer'`, `'paraformer'`, `'zipformer2_ctc'`, `'nemo_ctc'`, `'tone_ctc'`. |
+| `modelType` | `OnlineSTTModelType \| 'auto'` | One of: `'transducer'`, `'paraformer'`, `'zipformer2_ctc'`, `'nemo_ctc'`, `'tone_ctc'`, or `'auto'` to detect. Default: `'auto'`. |
 | `enableEndpoint` | `boolean` | Enable endpoint (end-of-utterance) detection. Default: `true`. |
 | `endpointConfig` | `EndpointConfig` | Optional. Rules for when an utterance is considered finished. See [EndpointConfig](#endpointconfig). |
 | `decodingMethod` | `'greedy_search' \| 'modified_beam_search'` | Default: `'greedy_search'`. |
@@ -279,13 +279,14 @@ await engine.destroy();
 
 ### Model types and assets
 
-Streaming models differ from offline (e.g. Whisper, SenseVoice). Use **streaming** model assets and set `modelType` to one of:
+Streaming models differ from offline (e.g. Whisper, SenseVoice). Use **streaming** model assets and set `modelType` to one of (or use `'auto'` to detect):
 
 - `transducer` – encoder + decoder + joiner (+ `tokens.txt`)
 - `paraformer` – encoder + decoder (+ `tokens.txt`)
-- `zipformer2_ctc` / `nemo_ctc` / `tone_ctc` – single `model*.onnx` + `tokens.txt`
+- `zipformer2_ctc` / `nemo_ctc` – single `model*.onnx` + `tokens.txt`
+- `tone_ctc` – single `model.onnx` + `tokens.txt`; folder name usually contains `t-one`, `t_one`, or the word `tone` (e.g. `sherpa-onnx-streaming-t-one-russian-2025-09-08`). The string `tone` is matched only as a standalone word (not e.g. inside "cantonese").
 
-The SDK resolves `modelPath` via `resolveModelPath`; for assets use `{ type: 'asset', path: 'models/...' }`.
+The SDK resolves `modelPath` via `resolveModelPath`; for assets use `{ type: 'asset', path: 'models/...' }`. With `modelType: 'auto'`, the SDK calls `detectSttModel` and maps the detected type to a streaming type (unsupported types such as whisper throw a clear error).
 
 ### Cleanup and guards
 
@@ -293,40 +294,44 @@ The SDK resolves `modelPath` via `resolveModelPath`; for assets use `{ type: 'as
 - After `destroy()` or `release()`, calling methods on that engine/stream will throw.
 - Use a single stream per “session” (e.g. one utterance); call `reset()` to reuse the same stream for the next utterance if desired.
 
-## Internal Architecture Overview
+## Internal Architecture Overview - batch vs streaming split
+
+STT uses two JS engines (batch and streaming) with three native helper -  one for offline and two for online:
+
+### STT (Speech-to-Text)
 
 ```mermaid
 graph TD
   subgraph jsLayer [JS/TS Public API]
+    createSTT["createSTT()"]
+    SttEngine[SttEngine]
     createStreamingSTT["createStreamingSTT()"]
     StreamingSttEngine[StreamingSttEngine]
     SttStream[SttStream]
-    createTTS["createTTS() - improved"]
-    TtsEngine[TtsEngine]
   end
 
   subgraph bridgeLayer [Native Bridge - NativeSherpaOnnx.ts]
+    OfflineSttMethods["Offline STT Methods"]
     OnlineSttMethods["Online STT Methods"]
-    TtsStreamMethods["TTS Stream Methods - improved"]
   end
 
   subgraph androidLayer [Android Native]
-    OnlineSttHelper[SherpaOnnxOnlineSttHelper.kt]
-    TtsHelper[SherpaOnnxTtsHelper.kt - improved]
-    OnlineRecognizer["OnlineRecognizer (sherpa-onnx)"]
-    OnlineStreamNative["OnlineStream (sherpa-onnx)"]
-    OfflineTts["OfflineTts (sherpa-onnx)"]
+    SttHelper["SherpaOnnxSttHelper"]
+    OnlineSttHelper["SherpaOnnxOnlineSttHelper"]
+    OfflineRecognizer["OfflineRecognizer"]
+    OnlineRecognizer["OnlineRecognizer"]
+    OnlineStreamNative["OnlineStream"]
   end
+
+  createSTT --> SttEngine
+  SttEngine -->|"transcribeFile, transcribeSamples"| OfflineSttMethods
+  OfflineSttMethods --> SttHelper
+  SttHelper --> OfflineRecognizer
 
   createStreamingSTT --> StreamingSttEngine
   StreamingSttEngine --> SttStream
-  SttStream --> OnlineSttMethods
+  SttStream -->|"acceptWaveform, decode, getResult"| OnlineSttMethods
   OnlineSttMethods --> OnlineSttHelper
   OnlineSttHelper --> OnlineRecognizer
   OnlineSttHelper --> OnlineStreamNative
-
-  createTTS --> TtsEngine
-  TtsEngine --> TtsStreamMethods
-  TtsStreamMethods --> TtsHelper
-  TtsHelper --> OfflineTts
 ```
