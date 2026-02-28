@@ -1,6 +1,6 @@
 # react-native-sherpa-onnx
 
-React Native SDK for sherpa-onnx - providing offline speech processing capabilities
+React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 <div align="center">
   <img src="./docs/images/banner.png" alt="Banner" width="560" />
@@ -19,7 +19,7 @@ React Native SDK for sherpa-onnx - providing offline speech processing capabilit
 > **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
 > Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
 
-A React Native TurboModule that provides offline speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
+A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
 ## Table of contents
 
@@ -47,8 +47,10 @@ A React Native TurboModule that provides offline speech processing capabilities 
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types). |
-| Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
+| Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types) and [STT documentation](./docs/stt.md). |
+| Online (streaming) Speech-to-Text | ✅ **Supported** | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). See [Streaming STT](./docs/stt_streaming.md). |
+| Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types) and [TTS documentation](./docs/tts.md). |
+| Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts_streaming.md). |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
 | Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/MODEL_SETUP.md). |
 | Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization). |
@@ -80,7 +82,9 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **WeNet CTC**            | `'wenet_ctc'`     | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/wenet/index.html)  |
 | **SenseVoice**           | `'sense_voice'`   | Requires `model.onnx` (or `model.int8.onnx`) and `tokens.txt`                            | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/sense-voice/index.html)        |
 | **FunASR Nano**          | `'funasr_nano'`   | Requires `encoder_adaptor.onnx`, `llm.onnx`, `embedding.onnx`, and `tokenizer` directory | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/funasr-nano/index.html)        |
-| **Tone CTC (t-one)**     | `'tone_ctc'`      | Single `model.onnx` + `tokens.txt`. Folder name usually contains `t-one`, `t_one` or `tone` | [Donwload](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-ctc/index.html) |
+| **Tone CTC (t-one)**     | `'tone_ctc'`      | Single `model.onnx` + `tokens.txt`. Folder name usually contains `t-one`, `t_one` or `tone` | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-ctc/index.html) |
+
+For **real-time (streaming) recognition** from a microphone or audio stream, use streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, or `tone_ctc`. See [Streaming (Online) Speech-to-Text](./docs/stt_streaming.md).
 
 ### Text-to-Speech (TTS) Models
 
@@ -92,6 +96,8 @@ A React Native TurboModule that provides offline speech processing capabilities 
 | **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Requires `model.onnx`, `voices.bin`, `tokens.txt`, `espeak-ng-data/`    | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **Zipvoice**     | `'zipvoice'`      | Voice cloning capable. Requires `encoder.onnx`, `decoder.onnx`, `vocoder.onnx`, `tokens.txt`        | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. Requires `lm_flow.onnx`, `lm_main.onnx`, `encoder.onnx`, `decoder.onnx`, `text_conditioner.onnx`, `vocab.json`, `token_scores.json` | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
+
+For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts_streaming.md).
 
 ## Installation
 
@@ -143,7 +149,10 @@ The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or l
 
 ## Documentation
 
-- [Text-to-Speech (TTS)](./docs/tts.md)
+- [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
+- [Streaming (Online) Speech-to-Text](./docs/stt_streaming.md) – Real-time recognition, partial results, endpoint detection
+- [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
+- [Streaming Text-to-Speech](./docs/tts_streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
@@ -166,11 +175,13 @@ We provide example applications to help you get started with `react-native-sherp
 
 ### Example App (Audio to Text)
 
-The example app included in this repository demonstrates basic audio-to-text transcription capabilities. It includes:
+The example app included in this repository demonstrates audio-to-text transcription, text-to-speech, and streaming features. It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano)
 - Model selection and configuration
-- Audio file transcription
+- **Offline** audio file transcription
+- **Online (streaming) STT** – live transcription from the microphone with partial results
+- **Streaming TTS** – incremental speech generation and playback
 - Test audio files for different languages
 
 **Getting started:**

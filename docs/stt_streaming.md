@@ -85,6 +85,7 @@ Creates a **streaming (online) STT engine** backed by sherpa-onnx’s `OnlineRec
 | `ruleFars` | `string` | Path(s) to rule FARs for ITN. |
 | `blankPenalty` | `number` | Blank penalty. |
 | `debug` | `boolean` | Enable debug logging. Default: `false`. |
+| `enableInputNormalization` | `boolean` | When `true` (default), audio chunks passed to `processAudioChunk()` are adaptively scaled so the peak is ~0.8, which helps with varying device input levels (e.g. quiet mics on iOS, different Android devices). Set to `false` if your audio is already in the expected range [-1, 1] and you want to pass it through unchanged [Input normalization](#input-normalization) |
 
 **Returns:** `Promise<StreamingSttEngine>`.
 
@@ -159,6 +160,8 @@ Import from `react-native-sherpa-onnx/stt`:
 ```ts
 import {
   createStreamingSTT,
+  mapDetectedToOnlineType,
+  getOnlineTypeOrNull,
   ONLINE_STT_MODEL_TYPES,
 } from 'react-native-sherpa-onnx/stt';
 import type {
@@ -171,6 +174,25 @@ import type {
   OnlineSTTModelType,
 } from 'react-native-sherpa-onnx/stt';
 ```
+
+### Checking if a model supports streaming
+
+Use **`getOnlineTypeOrNull(detectedType)`** to check whether a detected STT model type (e.g. from `detectSttModel`) can be used with streaming (live transcription). Returns the corresponding `OnlineSTTModelType` or `null` if the model is offline-only (e.g. Whisper, SenseVoice).
+
+```ts
+import { getOnlineTypeOrNull, createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+
+const detectedType = 'transducer'; // or from detectSttModel().modelType
+const onlineType = getOnlineTypeOrNull(detectedType);
+if (onlineType !== null) {
+  // Model supports streaming; e.g. show "Live Transcription" and create engine with modelType: onlineType
+  const engine = await createStreamingSTT({ modelPath: { type: 'asset', path: '...' }, modelType: onlineType });
+} else {
+  // Model is offline-only; disable or hide live UI
+}
+```
+
+**`mapDetectedToOnlineType(detectedType)`** does the same mapping but throws if the type is not supported for streaming. Use it when you already know the model is streaming-capable (e.g. after checking with `getOnlineTypeOrNull`) and need the typed `OnlineSTTModelType` for `createStreamingSTT`.
 
 ---
 
@@ -287,6 +309,18 @@ Streaming models differ from offline (e.g. Whisper, SenseVoice). Use **streaming
 - `tone_ctc` – single `model.onnx` + `tokens.txt`; folder name usually contains `t-one`, `t_one`, or the word `tone` (e.g. `sherpa-onnx-streaming-t-one-russian-2025-09-08`). The string `tone` is matched only as a standalone word (not e.g. inside "cantonese").
 
 The SDK resolves `modelPath` via `resolveModelPath`; for assets use `{ type: 'asset', path: 'models/...' }`. With `modelType: 'auto'`, the SDK calls `detectSttModel` and maps the detected type to a streaming type (unsupported types such as whisper throw a clear error).
+
+### Input normalization
+
+By default, `processAudioChunk()` applies **adaptive input normalization**: it scales each chunk so the peak is about 0.8, which improves recognition when the microphone or device delivers very quiet or very loud input (e.g. on some iOS devices or simulators). If your audio source already provides samples in the expected range [-1, 1] (e.g. from a pre-normalized file or another SDK), you can disable this to avoid double-scaling:
+
+```typescript
+const engine = await createStreamingSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelType: 'transducer',
+  enableInputNormalization: false,  // pass audio through unchanged
+});
+```
 
 ### Cleanup and guards
 
