@@ -1617,8 +1617,8 @@ export default function TTSScreen() {
                     {streamSampleCount} samples)
                   </Text>
                   <Text style={styles.streamInfoText}>
-                    Weitere Eingabe im Textfeld wird automatisch vorgelesen
-                    (Live-Modus).
+                    Further input in the text field will be read aloud automatically
+                    (live mode).
                   </Text>
                 </>
               )}
