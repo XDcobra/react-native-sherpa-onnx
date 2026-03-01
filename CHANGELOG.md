@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.2](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.1...v0.3.2) (2026-03-01)
+
+
+### Bug Fixes
+
+* address PR review comments - ordering bugs, iOS defaults, perf, i18n, peerDeps, signing ([b443d58](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b443d584978678426064d42725950bb2d45a0d96))
+
+
+### Features
+
+* **bridge_spec:** extend interface with new streaming STT and TTS methods, including initialization, processing, and endpoint detection ([25a4ee9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/25a4ee9b1451c319bb075107d2bfb7feb1bd116b))
+* **ffmpeg_flag:** introduced a gradle flag to disable the ffmpeg library to solve double linking issues ([dc2db8e](https://github.com/XDcobra/react-native-sherpa-onnx/commit/dc2db8e6d9655631868be17c7b0b6cb6719b1251))
+* **kotlin_helper:** implement SherpaOnnxOnlineSttHelper for streaming STT, including model path resolution and configuration management ([12b402a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/12b402aafc8fb8898943f713b9a6e91efe3b98d9))
+* **libarchive_flag:** add support to disable libarchive in the Android build via gradle properties ([63779d9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/63779d9f5589c4e71c37cf5051f6b3f658cdf826))
+* **module_wiring:** integrate online STT functionality and enhance TTS methods with request ID support ([9d51c4a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9d51c4a2f30dbb7f8f9807e164d06a3999e56643))
+* **online_stt_ios:** implement Online STT functionality with initialization, stream management, and waveform processing ([c2c3aa3](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c2c3aa3c3ed2462eed4225d34ab79939a779955c))
+* **online_stt:** refactor initializeOnlineStt to initializeOnlineSttWithOptions for improved parameter handling and flexibility ([8e6f763](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8e6f763b1a1cea06fbdff888f1bf1c7e6dc24c24))
+* **online_tts_ios:** update TTS streaming implementation to unify native helper for Android and iOS, adding request ID support for event routing ([36a81f0](https://github.com/XDcobra/react-native-sherpa-onnx/commit/36a81f0ccdf2d5460db178e05bb0eb68d082f7bd))
+* **stt_auto_detect:** add support for Tone CTC model detection and auto detect for online stt models ([d4d7b00](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d4d7b00c79c7474a03e8c7f33cbcc2739d02a3ed))
+* **stt_live:** implement live transcription functionality with audio input management and UI updates ([042a0f6](https://github.com/XDcobra/react-native-sherpa-onnx/commit/042a0f64b57a6b56f6dcbff14388c6a105429663))
+* **stt_streaming:** add streaming STT functionality with initialization and processing methods ([2bf0dc7](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2bf0dc72f67ecb6a13a63cb6b2784f8dd803f003))
+* **tts_streaming:** enhance TTS stream handling with request ID support and improved unsubscribe logic ([8d35f22](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8d35f221b5f03b7b221a1452ccc14323e69376b3))
+* **tts_streaming:** enhance TTS streaming implementation with new streaming engine support and improved state management ([ea3d9f5](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ea3d9f5f445f8c4da37ef5febfab2fd697376e6d))
+* **tts_streaming:** introduce streaming TTS engine with support for incremental speech generation and PCM playback ([2158f97](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2158f97ee195110c6b5848c98dce2e2247b38b32))
+* **types:** add streaming STT and TTS types, including model configurations and endpoint detection options ([76ea2b0](https://github.com/XDcobra/react-native-sherpa-onnx/commit/76ea2b02a5b3578a378210e5e337f92a59ec3a98))
+
 ## [0.3.1](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.0...v0.3.1) (2026-02-27)
 
 # [0.3.0](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.2.0...v0.3.0) (2026-02-27)
