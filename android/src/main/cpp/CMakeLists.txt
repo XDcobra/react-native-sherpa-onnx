@@ -61,6 +61,13 @@ else()
 endif()
 endif(USE_FFMPEG)
 
+# Optional: disable libarchive (gradle.properties: sherpaOnnxDisableLibarchive=true). See docs/disable-libarchive.md.
+set(USE_LIBARCHIVE ON)
+if(SHERPA_ONNX_DISABLE_LIBARCHIVE)
+    set(USE_LIBARCHIVE OFF)
+    message(STATUS "libarchive disabled (SHERPA_ONNX_DISABLE_LIBARCHIVE=ON). extractTarBz2/cancelExtractTarBz2 will return an error at runtime.")
+endif()
+
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). Move .cpp into subdirs; .h go alongside for include path.
 set(SOURCES
     jni/module/sherpa-onnx-module-jni.cpp
@@ -77,6 +84,7 @@ set(SOURCES
     crypto/sha256.cpp
 )
 
+if(USE_LIBARCHIVE)
 # libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
 set(LIBARCHIVE_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libarchive_prebuilt/android")
 set(LIBARCHIVE_PREBUILT_LIB "${LIBARCHIVE_PREBUILT_BASE}/${ANDROID_ABI}/lib")
@@ -105,6 +113,7 @@ else()
     add_subdirectory(${PROJECT_ROOT}/../third_party/libarchive ${CMAKE_BINARY_DIR}/libarchive)
     message(STATUS "libarchive built successfully")
 endif()
+endif(USE_LIBARCHIVE)
 
 # Create shared library
 add_library(sherpaonnx SHARED
@@ -143,7 +152,7 @@ target_include_directories(sherpaonnx PRIVATE
 if(USE_FFMPEG)
     target_include_directories(sherpaonnx PRIVATE ${FFMPEG_INCLUDE_DIR})
 endif()
-if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
+if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
@@ -151,38 +160,37 @@ endif()
 if(USE_FFMPEG)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_FFMPEG=1)
 endif()
+# When USE_LIBARCHIVE=OFF, do NOT define HAVE_LIBARCHIVE; extractTarBz2 stubs return an error.
+if(USE_LIBARCHIVE)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBARCHIVE=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
 if(USE_FFMPEG)
     target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
 endif()
-if(USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
+if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
 endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
 endif()
+# Link archive only when USE_LIBARCHIVE (otherwise libsherpaonnx.so would depend on libarchive.so at load time).
 if(USE_FFMPEG)
     target_link_libraries(sherpaonnx
         PRIVATE
-        archive
         avcodec
         avformat
         avutil
         avfilter
         swresample
-        log
-        android
-    )
-else()
-    target_link_libraries(sherpaonnx
-        PRIVATE
-        archive
-        log
-        android
     )
 endif()
+if(USE_LIBARCHIVE)
+    target_link_libraries(sherpaonnx PRIVATE archive)
+endif()
+target_link_libraries(sherpaonnx PRIVATE log android)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

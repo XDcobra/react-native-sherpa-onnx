@@ -6,8 +6,10 @@
  */
 #include "sherpa-onnx-archive-helper.h"
 
+#ifdef HAVE_LIBARCHIVE
 #include <archive.h>
 #include <archive_entry.h>
+#endif
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -23,6 +25,7 @@
 std::atomic<bool> ArchiveHelper::cancel_requested_(false);
 
 namespace {
+#ifdef HAVE_LIBARCHIVE
 struct ArchiveReadContext {
   FILE* file = nullptr;
   std::array<unsigned char, 64 * 1024> buffer{};
@@ -72,6 +75,7 @@ static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
   fclose(ctx->file);
   ctx->file = nullptr;
 }
+#endif  // HAVE_LIBARCHIVE
 
 static std::string ToHex(const unsigned char* data, size_t size) {
   static const char* kHex = "0123456789abcdef";
@@ -103,6 +107,15 @@ bool ArchiveHelper::ExtractTarBz2(
   std::string* out_sha256) {
   cancel_requested_.store(false);
 
+#ifndef HAVE_LIBARCHIVE
+  (void)source_path;
+  (void)target_path;
+  (void)force;
+  (void)on_progress;
+  (void)out_sha256;
+  if (out_error) *out_error = "libarchive not available. Build with libarchive or set sherpaOnnxDisableLibarchive=false in gradle.properties. See docs/disable-libarchive.md.";
+  return false;
+#else
   // Validate source file exists
   if (!std::filesystem::exists(source_path)) {
     if (out_error) *out_error = "Source file does not exist";
@@ -360,6 +373,7 @@ bool ArchiveHelper::ExtractTarBz2(
   }
 
   return true;
+#endif  // HAVE_LIBARCHIVE
 }
 
 bool ArchiveHelper::ComputeFileSha256(

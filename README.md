@@ -161,6 +161,7 @@ The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or l
 - [Model Setup](./docs/MODEL_SETUP.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
 - [Disable FFMPEG](./docs/disable-ffmpeg.md)
+- [Disable LIBARCHIVE](./docs/disable-libarchive.md)
 
 Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
 

@@ -51,6 +51,8 @@ android {
 
   // When true, FFmpeg is not linked; convertAudioToWav16k/convertAudioToFormat will fail at runtime. See docs/disable-ffmpeg.md.
   def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
+  // When true, libarchive is not linked; extractTarBz2/cancelExtractTarBz2 will fail at runtime. See docs/disable-libarchive.md.
+  def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
@@ -64,11 +66,10 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        if (sherpaOnnxDisableFfmpeg) {
-          arguments "-DANDROID_STL=c++_shared", "-DSHERPA_ONNX_DISABLE_FFMPEG=ON"
-        } else {
-          arguments "-DANDROID_STL=c++_shared"
-        }
+        def cmakeArgList = ["-DANDROID_STL=c++_shared"]
+        if (sherpaOnnxDisableFfmpeg) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_FFMPEG=ON")
+        if (sherpaOnnxDisableLibarchive) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBARCHIVE=ON")
+        arguments(*cmakeArgList)
       }
     }
 
@@ -104,6 +105,15 @@ android {
           "**/libavcodec.so", "**/libavformat.so", "**/libavutil.so",
           "**/libavfilter.so", "**/libswresample.so", "**/libshine.so"
         ]
+      }
+    }
+  }
+
+  // When libarchive is disabled, exclude libarchive.so from our output to avoid merge conflicts.
+  if (sherpaOnnxDisableLibarchive) {
+    packaging {
+      jniLibs {
+        excludes += ["**/libarchive.so"]
       }
     }
   }
