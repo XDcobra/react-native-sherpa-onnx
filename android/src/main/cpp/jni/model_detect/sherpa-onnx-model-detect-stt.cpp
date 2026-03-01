@@ -35,6 +35,7 @@ SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "omnilingual") return SttModelKind::kOmnilingual;
     if (modelType == "medasr") return SttModelKind::kMedAsr;
     if (modelType == "telespeech_ctc") return SttModelKind::kTeleSpeechCtc;
+    if (modelType == "tone_ctc") return SttModelKind::kToneCtc;
     return SttModelKind::kUnknown;
 }
 
@@ -163,6 +164,10 @@ SttDetectResult DetectSttModel(
     bool isLikelyOmnilingual = modelDirLower.find("omnilingual") != std::string::npos;
     bool isLikelyMedAsr = modelDirLower.find("medasr") != std::string::npos;
     bool isLikelyTeleSpeech = modelDirLower.find("telespeech") != std::string::npos;
+    // Tone CTC: match "tone" only as standalone word (not e.g. "cantonese"); also accept "t-one" / "t_one"
+    bool isLikelyToneCtc = modelDirLower.find("t-one") != std::string::npos ||
+                           modelDirLower.find("t_one") != std::string::npos ||
+                           model_detect::ContainsWord(modelDirLower, "tone");
 
     bool hasMoonshine = !moonshinePreprocessor.empty() && !moonshineUncachedDecoder.empty() &&
                         !moonshineCachedDecoder.empty() && !moonshineEncoder.empty();
@@ -173,6 +178,7 @@ SttDetectResult DetectSttModel(
     bool hasOmnilingual = !ctcModelPath.empty() && isLikelyOmnilingual;
     bool hasMedAsr = !ctcModelPath.empty() && isLikelyMedAsr;
     bool hasTeleSpeechCtc = (!ctcModelPath.empty() || !paraformerModelPath.empty()) && isLikelyTeleSpeech;
+    bool hasToneCtc = !ctcModelPath.empty() && isLikelyToneCtc;
 
     if (hasTransducer) {
         if (isLikelyNemo || isLikelyTdt) {
@@ -224,6 +230,9 @@ SttDetectResult DetectSttModel(
     if (hasTeleSpeechCtc) {
         result.detectedModels.push_back({"telespeech_ctc", modelDir});
     }
+    if (hasToneCtc) {
+        result.detectedModels.push_back({"tone_ctc", modelDir});
+    }
 
     SttModelKind selected = SttModelKind::kUnknown;
 
@@ -247,7 +256,8 @@ SttDetectResult DetectSttModel(
             return result;
         }
         if ((selected == SttModelKind::kNemoCtc || selected == SttModelKind::kWenetCtc ||
-             selected == SttModelKind::kSenseVoice || selected == SttModelKind::kZipformerCtc) &&
+             selected == SttModelKind::kSenseVoice || selected == SttModelKind::kZipformerCtc ||
+             selected == SttModelKind::kToneCtc) &&
             ctcModelPath.empty()) {
             result.error = "CTC model requested but model file not found in " + modelDir;
             return result;
@@ -288,6 +298,10 @@ SttDetectResult DetectSttModel(
             result.error = "TeleSpeech CTC model requested but model not found in " + modelDir;
             return result;
         }
+        if (selected == SttModelKind::kToneCtc && !hasToneCtc) {
+            result.error = "Tone CTC model requested but path does not contain 'tone' (as a word), 't-one', or 't_one' (e.g. sherpa-onnx-streaming-t-one-*) in " + modelDir;
+            return result;
+        }
     } else {
         if (hasTransducer) {
             selected = (isLikelyNemo || isLikelyTdt) ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
@@ -321,6 +335,8 @@ SttDetectResult DetectSttModel(
             selected = SttModelKind::kMedAsr;
         } else if (hasTeleSpeechCtc) {
             selected = SttModelKind::kTeleSpeechCtc;
+        } else if (hasToneCtc) {
+            selected = SttModelKind::kToneCtc;
         } else if (!ctcModelPath.empty()) {
             selected = SttModelKind::kZipformerCtc;
         }
@@ -346,7 +362,8 @@ SttDetectResult DetectSttModel(
     } else if (selected == SttModelKind::kParaformer) {
         result.paths.paraformerModel = paraformerModelPath;
     } else if (selected == SttModelKind::kNemoCtc || selected == SttModelKind::kWenetCtc ||
-               selected == SttModelKind::kSenseVoice || selected == SttModelKind::kZipformerCtc) {
+               selected == SttModelKind::kSenseVoice || selected == SttModelKind::kZipformerCtc ||
+               selected == SttModelKind::kToneCtc) {
         result.paths.ctcModel = ctcModelPath;
     } else if (selected == SttModelKind::kWhisper) {
         result.paths.whisperEncoder = encoderPath;

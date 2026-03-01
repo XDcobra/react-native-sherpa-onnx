@@ -515,10 +515,11 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 }
 
 - (void)generateTtsStream:(NSString *)instanceId
-                    text:(NSString *)text
+                requestId:(NSString *)requestId
+                     text:(NSString *)text
                   options:(NSDictionary *)options
-             resolve:(RCTPromiseResolveBlock)resolve
-             reject:(RCTPromiseRejectBlock)reject
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_STREAM_ERROR", @"instanceId is required", nil);
@@ -551,6 +552,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     std::string textStr = [text UTF8String];
     int32_t sampleRate = instRef->wrapper->getSampleRate();
     NSString *instanceIdCopy = [instanceId copy];
+    NSString *requestIdCopy = (requestId != nil && [requestId length] > 0) ? [requestId copy] : nil;
 
     __weak SherpaOnnx *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -560,7 +562,7 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
@@ -570,13 +572,14 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                         [samplesArray addObject:@(samples[i])];
                     }
 
-                    NSDictionary *payload = @{
+                    NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
                         @"instanceId": instanceIdCopy,
                         @"samples": samplesArray,
                         @"sampleRate": @(sampleRate),
                         @"progress": @(progress),
                         @"isFinal": @NO
-                    };
+                    }];
+                    if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
 
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (weakSelf) {
@@ -589,25 +592,48 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             );
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];
+            NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"message": errorMsg }];
+            if (requestIdCopy != nil) errPayload[@"requestId"] = requestIdCopy;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
-                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"instanceId": instanceIdCopy, @"message": errorMsg }];
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:errPayload];
                 }
             });
         }
 
         bool cancelled = instRef->streamCancelled.load();
         if (!success && !cancelled) {
+            NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"message": @"TTS streaming generation failed" }];
+            if (requestIdCopy != nil) errPayload[@"requestId"] = requestIdCopy;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
-                    [weakSelf sendEventWithName:@"ttsStreamError" body:@{ @"instanceId": instanceIdCopy, @"message": @"TTS streaming generation failed" }];
+                    [weakSelf sendEventWithName:@"ttsStreamError" body:errPayload];
                 }
             });
         }
 
+        // Emit final chunk (empty, progress 1, isFinal YES) when not cancelled, matching Android behaviour
+        if (!cancelled) {
+            NSMutableDictionary *finalPayload = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"instanceId": instanceIdCopy,
+                @"samples": @[],
+                @"sampleRate": @(sampleRate),
+                @"progress": @1.0f,
+                @"isFinal": @YES
+            }];
+            if (requestIdCopy != nil) finalPayload[@"requestId"] = requestIdCopy;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamChunk" body:finalPayload];
+                }
+            });
+        }
+
+        NSMutableDictionary *endPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"cancelled": @(cancelled) }];
+        if (requestIdCopy != nil) endPayload[@"requestId"] = requestIdCopy;
         dispatch_async(dispatch_get_main_queue(), ^{
             if (weakSelf) {
-                [weakSelf sendEventWithName:@"ttsStreamEnd" body:@{ @"instanceId": instanceIdCopy, @"cancelled": @(cancelled) }];
+                [weakSelf sendEventWithName:@"ttsStreamEnd" body:endPayload];
             }
         });
 

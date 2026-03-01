@@ -120,9 +120,10 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            // Allow disabling release signing for local/debugging via -PdisableReleaseSigning=true
+            // Allow disabling release signing for local/CI via -PdisableReleaseSigning=true (uses debug key)
             if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
-                println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true"
+                println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true, using debug key"
+                signingConfig signingConfigs.debug
             } else {
                 signingConfig signingConfigs.release
             }
@@ -130,8 +131,17 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
-
-
+    // we use react-native-audio-api which has its own FFmpeg so we are facing a double linking issue
+    // https://docs.swmansion.com/react-native-audio-api/docs/other/ffmpeg-info?platform=android
+    // unfortunately, setting disableAudioapiFFmpeg=true does not work
+    // as we dont use AudioAPI FFmpeg functions and our ffmpeg libaries are getting loaded first, we can use pickFirst for this example app
+    packaging {
+        pickFirst '**/libavcodec.so'
+        pickFirst '**/libavformat.so'
+        pickFirst '**/libavutil.so'
+        pickFirst '**/libswresample.so'
+        pickFirst '**/libswscale.so'
+    }
 }
 
 task printJniLibs {

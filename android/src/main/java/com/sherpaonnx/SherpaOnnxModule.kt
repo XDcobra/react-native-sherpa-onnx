@@ -46,12 +46,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     },
     NAME
   )
+  private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
-    { instanceId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, samples, sampleRate, progress, isFinal) },
-    { instanceId, message -> emitTtsStreamError(instanceId, message) },
-    { instanceId, cancelled -> emitTtsStreamEnd(instanceId, cancelled) }
+    { instanceId, requestId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, requestId, samples, sampleRate, progress, isFinal) },
+    { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
+    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
 
@@ -61,6 +62,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun onCatalystInstanceDestroy() {
     super.onCatalystInstanceDestroy()
+    onlineSttHelper.shutdown()
     ttsHelper.shutdown()
   }
 
@@ -381,6 +383,107 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     sttHelper.unloadStt(instanceId, promise)
   }
 
+  // ==================== Online (streaming) STT Methods ====================
+
+  override fun initializeOnlineSttWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
+    val modelDir = options.getString("modelDir")
+    if (modelDir.isNullOrEmpty()) {
+      promise.reject("INIT_ERROR", "modelDir is required")
+      return
+    }
+    val modelType = options.getString("modelType") ?: "transducer"
+    val enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else true
+    val decodingMethod = options.getString("decodingMethod") ?: "greedy_search"
+    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 4
+    val hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null
+    val hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null
+    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
+    val provider = if (options.hasKey("provider")) options.getString("provider") else null
+    val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
+    val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
+    val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
+    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
+    val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
+    val rule1MinTrailingSilence = if (options.hasKey("rule1MinTrailingSilence")) options.getDouble("rule1MinTrailingSilence") else null
+    val rule1MinUtteranceLength = if (options.hasKey("rule1MinUtteranceLength")) options.getDouble("rule1MinUtteranceLength") else null
+    val rule2MustContainNonSilence = if (options.hasKey("rule2MustContainNonSilence")) options.getBoolean("rule2MustContainNonSilence") else null
+    val rule2MinTrailingSilence = if (options.hasKey("rule2MinTrailingSilence")) options.getDouble("rule2MinTrailingSilence") else null
+    val rule2MinUtteranceLength = if (options.hasKey("rule2MinUtteranceLength")) options.getDouble("rule2MinUtteranceLength") else null
+    val rule3MustContainNonSilence = if (options.hasKey("rule3MustContainNonSilence")) options.getBoolean("rule3MustContainNonSilence") else null
+    val rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null
+    val rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null
+    onlineSttHelper.initializeOnlineStt(
+      instanceId,
+      modelDir,
+      modelType,
+      enableEndpoint,
+      decodingMethod,
+      maxActivePaths,
+      hotwordsFile,
+      hotwordsScore,
+      numThreads,
+      provider,
+      ruleFsts,
+      ruleFars,
+      blankPenalty,
+      debug,
+      rule1MustContainNonSilence,
+      rule1MinTrailingSilence,
+      rule1MinUtteranceLength,
+      rule2MustContainNonSilence,
+      rule2MinTrailingSilence,
+      rule2MinUtteranceLength,
+      rule3MustContainNonSilence,
+      rule3MinTrailingSilence,
+      rule3MinUtteranceLength,
+      promise
+    )
+  }
+
+  override fun createSttStream(instanceId: String, streamId: String, hotwords: String?, promise: Promise) {
+    onlineSttHelper.createSttStream(instanceId, streamId, hotwords, promise)
+  }
+
+  override fun acceptSttWaveform(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    onlineSttHelper.acceptSttWaveform(streamId, samples, sampleRate.toInt(), promise)
+  }
+
+  override fun sttStreamInputFinished(streamId: String, promise: Promise) {
+    onlineSttHelper.sttStreamInputFinished(streamId, promise)
+  }
+
+  override fun decodeSttStream(streamId: String, promise: Promise) {
+    onlineSttHelper.decodeSttStream(streamId, promise)
+  }
+
+  override fun isSttStreamReady(streamId: String, promise: Promise) {
+    onlineSttHelper.isSttStreamReady(streamId, promise)
+  }
+
+  override fun getSttStreamResult(streamId: String, promise: Promise) {
+    onlineSttHelper.getSttStreamResult(streamId, promise)
+  }
+
+  override fun isSttStreamEndpoint(streamId: String, promise: Promise) {
+    onlineSttHelper.isSttStreamEndpoint(streamId, promise)
+  }
+
+  override fun resetSttStream(streamId: String, promise: Promise) {
+    onlineSttHelper.resetSttStream(streamId, promise)
+  }
+
+  override fun releaseSttStream(streamId: String, promise: Promise) {
+    onlineSttHelper.releaseSttStream(streamId, promise)
+  }
+
+  override fun unloadOnlineStt(instanceId: String, promise: Promise) {
+    onlineSttHelper.unloadOnlineStt(instanceId, promise)
+  }
+
+  override fun processSttAudioChunk(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
+  }
+
   // ==================== STT Methods ====================
 
   /**
@@ -576,8 +679,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Generate speech in streaming mode (emits chunk events).
    */
-  override fun generateTtsStream(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTtsStream(instanceId, text, options, promise)
+  override fun generateTtsStream(instanceId: String, requestId: String, text: String, options: ReadableMap?, promise: Promise) {
+    ttsHelper.generateTtsStream(instanceId, requestId, text, options, promise)
   }
 
   /**
@@ -610,6 +713,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   private fun emitTtsStreamChunk(
     instanceId: String,
+    requestId: String,
     samples: FloatArray,
     sampleRate: Int,
     progress: Float,
@@ -623,6 +727,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
+    payload.putString("requestId", requestId)
     payload.putArray("samples", samplesArray)
     payload.putInt("sampleRate", sampleRate)
     payload.putDouble("progress", progress.toDouble())
@@ -630,20 +735,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     eventEmitter.emit("ttsStreamChunk", payload)
   }
 
-  private fun emitTtsStreamError(instanceId: String, message: String) {
+  private fun emitTtsStreamError(instanceId: String, requestId: String, message: String) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
+    payload.putString("requestId", requestId)
     payload.putString("message", message)
     eventEmitter.emit("ttsStreamError", payload)
   }
 
-  private fun emitTtsStreamEnd(instanceId: String, cancelled: Boolean) {
+  private fun emitTtsStreamEnd(instanceId: String, requestId: String, cancelled: Boolean) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
+    payload.putString("requestId", requestId)
     payload.putBoolean("cancelled", cancelled)
     eventEmitter.emit("ttsStreamEnd", payload)
   }

@@ -30,6 +30,7 @@ const char* SttModelKindToString(SttModelKind k) {
     case SttModelKind::kOmnilingual: return "omnilingual";
     case SttModelKind::kMedAsr: return "medasr";
     case SttModelKind::kTeleSpeechCtc: return "telespeech_ctc";
+    case SttModelKind::kToneCtc: return "tone_ctc";
     default: return "unknown";
   }
 }

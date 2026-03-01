@@ -156,6 +156,22 @@ std::string FindFileByName(const std::string& baseDir, const std::string& fileNa
     return "";
 }
 
+bool ContainsWord(const std::string& haystack, const std::string& word) {
+    if (word.empty()) return false;
+    size_t pos = 0;
+    auto isSep = [](char c) {
+        return c == '\0' || c == '/' || c == '-' || c == '_' || c == '.' || c == ' ';
+    };
+    while ((pos = haystack.find(word, pos)) != std::string::npos) {
+        char before = (pos == 0) ? '\0' : haystack[pos - 1];
+        size_t afterPos = pos + word.size();
+        char after = (afterPos >= haystack.size()) ? '\0' : haystack[afterPos];
+        if (isSep(before) && isSep(after)) return true;
+        pos++;
+    }
+    return false;
+}
+
 std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth) {
     std::string target = ToLower(dirName);
     std::vector<std::string> toVisit = ListDirectories(baseDir);

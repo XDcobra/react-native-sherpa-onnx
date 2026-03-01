@@ -120,6 +120,97 @@ export interface Spec extends TurboModule {
    */
   unloadStt(instanceId: string): Promise<void>;
 
+  // ==================== Online (streaming) STT Methods ====================
+
+  /**
+   * Initialize OnlineRecognizer for streaming STT (single options object to avoid iOS TurboModule marshalling crash with many args).
+   * @param instanceId - Unique ID for this engine instance (from createStreamingSTT)
+   * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params)
+   */
+  initializeOnlineSttWithOptions(
+    instanceId: string,
+    options: {
+      modelDir: string;
+      modelType: string;
+      enableEndpoint?: boolean;
+      decodingMethod?: string;
+      maxActivePaths?: number;
+      hotwordsFile?: string;
+      hotwordsScore?: number;
+      numThreads?: number;
+      provider?: string;
+      ruleFsts?: string;
+      ruleFars?: string;
+      blankPenalty?: number;
+      debug?: boolean;
+      rule1MustContainNonSilence?: boolean;
+      rule1MinTrailingSilence?: number;
+      rule1MinUtteranceLength?: number;
+      rule2MustContainNonSilence?: boolean;
+      rule2MinTrailingSilence?: number;
+      rule2MinUtteranceLength?: number;
+      rule3MustContainNonSilence?: boolean;
+      rule3MinTrailingSilence?: number;
+      rule3MinUtteranceLength?: number;
+    }
+  ): Promise<{ success: boolean }>;
+
+  /** Create a new stream for the given OnlineRecognizer instance. */
+  createSttStream(
+    instanceId: string,
+    streamId: string,
+    hotwords?: string
+  ): Promise<void>;
+
+  /** Feed PCM samples to a streaming STT stream. */
+  acceptSttWaveform(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<void>;
+
+  /** Signal end of input for a streaming STT stream. */
+  sttStreamInputFinished(streamId: string): Promise<void>;
+
+  /** Run decoding on the stream (call when isSttStreamReady is true). */
+  decodeSttStream(streamId: string): Promise<void>;
+
+  /** True if the stream has enough audio to decode. */
+  isSttStreamReady(streamId: string): Promise<boolean>;
+
+  /** Get current partial or final result (call after decodeSttStream). */
+  getSttStreamResult(streamId: string): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+  }>;
+
+  /** True if endpoint (end of utterance) was detected. */
+  isSttStreamEndpoint(streamId: string): Promise<boolean>;
+
+  /** Reset stream state for reuse. */
+  resetSttStream(streamId: string): Promise<void>;
+
+  /** Release stream and remove from native state. */
+  releaseSttStream(streamId: string): Promise<void>;
+
+  /** Release OnlineRecognizer and all its streams. */
+  unloadOnlineStt(instanceId: string): Promise<void>;
+
+  /**
+   * Convenience: feed audio, decode while ready, return result and endpoint status in one call.
+   */
+  processSttAudioChunk(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    isEndpoint: boolean;
+  }>;
+
   // ==================== TTS Methods ====================
 
   /**
@@ -230,14 +321,18 @@ export interface Spec extends TurboModule {
     estimated: boolean;
   }>;
 
+  // ==================== Online (streaming) TTS Methods ====================
+
   /**
    * Generate speech in streaming mode (emits chunk events).
    * @param instanceId - Unique ID for this engine instance
+   * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
    * @param text - Text to convert to speech
    * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
    */
   generateTtsStream(
     instanceId: string,
+    requestId: string,
     text: string,
     options: Object
   ): Promise<void>;

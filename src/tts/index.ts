@@ -1,4 +1,3 @@
-import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
@@ -10,10 +9,6 @@ import type {
   GeneratedAudioWithTimestamps,
   TTSModelInfo,
   TtsEngine,
-  TtsStreamChunk,
-  TtsStreamEnd,
-  TtsStreamError,
-  TtsStreamHandlers,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
@@ -135,7 +130,7 @@ function toNativeTtsOptions(
 }
 
 // TTS stream events are sent from native via sendEventWithName; use DeviceEventEmitter
-// so we don't need NativeEventEmitter (which expects addListener/removeListeners on the module).
+
 /**
  * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
  *
@@ -258,66 +253,6 @@ export async function createTTS(
         text,
         toNativeTtsOptions(opts)
       );
-    },
-
-    async generateSpeechStream(
-      text: string,
-      opts: TtsGenerationOptions | undefined,
-      handlers: TtsStreamHandlers
-    ): Promise<() => void> {
-      guard();
-      const subscriptions = [
-        DeviceEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
-          const e = event as TtsStreamChunk;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
-          handlers.onChunk?.(e);
-        }),
-        DeviceEventEmitter.addListener('ttsStreamEnd', (event: unknown) => {
-          const e = event as TtsStreamEnd;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
-          handlers.onEnd?.(e);
-        }),
-        DeviceEventEmitter.addListener('ttsStreamError', (event: unknown) => {
-          const e = event as TtsStreamError;
-          if (e.instanceId != null && e.instanceId !== instanceId) return;
-          handlers.onError?.(e);
-        }),
-      ];
-
-      try {
-        await SherpaOnnx.generateTtsStream(
-          instanceId,
-          text,
-          toNativeTtsOptions(opts)
-        );
-      } catch (error) {
-        subscriptions.forEach((sub) => sub.remove());
-        throw error;
-      }
-
-      return () => {
-        subscriptions.forEach((sub) => sub.remove());
-      };
-    },
-
-    async cancelSpeechStream(): Promise<void> {
-      guard();
-      return SherpaOnnx.cancelTtsStream(instanceId);
-    },
-
-    async startPcmPlayer(sampleRate: number, channels: number): Promise<void> {
-      guard();
-      return SherpaOnnx.startTtsPcmPlayer(instanceId, sampleRate, channels);
-    },
-
-    async writePcmChunk(samples: number[]): Promise<void> {
-      guard();
-      return SherpaOnnx.writeTtsPcmChunk(instanceId, samples);
-    },
-
-    async stopPcmPlayer(): Promise<void> {
-      guard();
-      return SherpaOnnx.stopTtsPcmPlayer(instanceId);
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
@@ -445,6 +380,10 @@ export function shareAudioFile(
   return SherpaOnnx.shareTtsAudio(fileUri, mimeType);
 }
 
+// Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
+export { createStreamingTTS } from './streaming';
+export type { StreamingTtsEngine } from './streamingTypes';
+
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
@@ -462,6 +401,7 @@ export type {
   TtsSubtitleItem,
   TTSModelInfo,
   TtsEngine,
+  TtsStreamController,
   TtsStreamHandlers,
   TtsStreamChunk,
   TtsStreamEnd,

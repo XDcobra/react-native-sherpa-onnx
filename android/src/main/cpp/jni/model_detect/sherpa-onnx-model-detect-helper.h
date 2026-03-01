@@ -49,6 +49,9 @@ std::string FindLargestOnnxExcludingTokens(
     const std::vector<std::string>& excludeTokens
 );
 
+/** Returns true if \p word appears in \p haystack as a standalone token (surrounded by separators: / - _ . space). */
+bool ContainsWord(const std::string& haystack, const std::string& word);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 
