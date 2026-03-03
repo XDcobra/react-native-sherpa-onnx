@@ -2,13 +2,41 @@
  * sherpa-onnx-model-detect-tts.mm
  *
  * Purpose: Detects TTS (text-to-speech) model type and fills TtsModelPaths from a model directory.
- * Supports Vits, Piper, Kokoro, Zipvoice, Pocket, etc. Used by the TTS wrapper on iOS.
+ * Used by the TTS wrapper on iOS. Supports Vits, Matcha, Kokoro, Kitten, Pocket, Zipvoice.
+ *
+ * --- Detection pipeline (overview) ---
+ *
+ * 1. Gather files in modelDir (recursive), then map file names to logical paths (ttsModel,
+ *    acousticModel, vocoder, encoder, decoder, lmFlow, lmMain, textConditioner, tokens, lexicon,
+ *    dataDir, voices, vocabJson, tokenScoresJson). Path hints from directory name (isLikelyVits,
+ *    isLikelyKitten, isLikelyKokoro).
+ *
+ * 2. Capabilities (hasVits, hasMatcha, hasPocket, hasZipvoice, hasVoicesFile, hasDataDir): which
+ *    model types are *possible* given the paths. Multiple can be true (e.g. voices.bin can satisfy
+ *    both Kokoro and Kitten).
+ *
+ * 3. detectedModels (for UI "Select model type"): built from capabilities only. Every kind with
+ *    the corresponding has* == true is added (with existing rules: zipvoice only if !hasMatcha,
+ *    vits when hasVits and no voices or ambiguous folder name).
+ *
+ * 4. selectedKind: from ResolveTtsKind(). If modelType is explicit, use it if capabilities allow.
+ *    If modelType == "auto": Priority 1 = folder name (GetKindsFromDirNameTts: tokens like "vits",
+ *    "matcha", "kokoro" in dir name → candidate kinds). Priority 2 = among those candidates, pick
+ *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha → pocket →
+ *    zipvoice → kokoro/kitten → vits).
+ *
+ * 5. paths: all gathered paths are written into result.paths; the selected kind determines which
+ *    engine is used at runtime.
+ *
+ * Result to caller: ok, error, detectedModels (list), selectedKind (single), paths.
  */
 
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace sherpaonnx {
 namespace {
@@ -23,6 +51,59 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
     if (modelType == "pocket") return TtsModelKind::kPocket;
     if (modelType == "zipvoice") return TtsModelKind::kZipvoice;
     return TtsModelKind::kUnknown;
+}
+
+/** Returns true if the given kind is supported by the current paths and hints (required files present). */
+static bool CapabilitySupportsTtsKind(
+    TtsModelKind kind,
+    bool hasVits,
+    bool hasMatcha,
+    bool hasPocket,
+    bool hasZipvoice,
+    bool hasVoicesFile,
+    bool hasDataDir
+) {
+    switch (kind) {
+        case TtsModelKind::kVits:
+            return hasVits && hasDataDir;
+        case TtsModelKind::kMatcha:
+            return hasMatcha && hasDataDir;
+        case TtsModelKind::kKokoro:
+        case TtsModelKind::kKitten:
+            return hasVoicesFile && hasDataDir;
+        case TtsModelKind::kPocket:
+            return hasPocket;
+        case TtsModelKind::kZipvoice:
+            return hasZipvoice;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Priority 1: Collect candidate TTS kinds from the model directory name (last path component).
+ * Tokens like "vits", "matcha", "kokoro" are matched case-insensitively. Returns candidates in a
+ * fixed priority order for file-based disambiguation when multiple names match.
+ */
+static std::vector<TtsModelKind> GetKindsFromDirNameTts(const std::string& modelDir) {
+    size_t pos = modelDir.find_last_of("/\\");
+    std::string base = (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+    std::string lower = ToLower(base);
+
+    std::vector<TtsModelKind> out;
+    auto add = [&out](TtsModelKind k) {
+        if (std::find(out.begin(), out.end(), k) == out.end())
+            out.push_back(k);
+    };
+
+    if (lower.find("matcha") != std::string::npos) add(TtsModelKind::kMatcha);
+    if (lower.find("pocket") != std::string::npos) add(TtsModelKind::kPocket);
+    if (lower.find("zipvoice") != std::string::npos) add(TtsModelKind::kZipvoice);
+    if (lower.find("kokoro") != std::string::npos) add(TtsModelKind::kKokoro);
+    if (lower.find("kitten") != std::string::npos) add(TtsModelKind::kKitten);
+    if (lower.find("vits") != std::string::npos) add(TtsModelKind::kVits);
+
+    return out;
 }
 
 } // namespace
@@ -120,22 +201,36 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
             return result;
         }
     } else {
-        if (hasMatcha) {
-            selected = TtsModelKind::kMatcha;
-        } else if (hasPocket) {
-            selected = TtsModelKind::kPocket;
-        } else if (hasZipvoice) {
-            selected = TtsModelKind::kZipvoice;
-        } else if (hasVoicesFile) {
-            if (isLikelyKitten && !isLikelyKokoro) {
-                selected = TtsModelKind::kKitten;
-            } else if (isLikelyKokoro && !isLikelyKitten) {
-                selected = TtsModelKind::kKokoro;
-            } else {
-                selected = TtsModelKind::kKokoro;
+        // Auto: Priority 1 – folder name candidates; Priority 2 – file-based disambiguation.
+        std::vector<TtsModelKind> nameCandidates = GetKindsFromDirNameTts(modelDir);
+        if (!nameCandidates.empty()) {
+            for (TtsModelKind k : nameCandidates) {
+                if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice,
+                                              hasVoicesFile, hasDataDir)) {
+                    selected = k;
+                    break;
+                }
             }
-        } else if (hasVits) {
-            selected = TtsModelKind::kVits;
+        }
+        // Fallback: no name-based candidates or none supported – use file-only order.
+        if (selected == TtsModelKind::kUnknown) {
+            if (hasMatcha) {
+                selected = TtsModelKind::kMatcha;
+            } else if (hasPocket) {
+                selected = TtsModelKind::kPocket;
+            } else if (hasZipvoice) {
+                selected = TtsModelKind::kZipvoice;
+            } else if (hasVoicesFile) {
+                if (isLikelyKitten && !isLikelyKokoro) {
+                    selected = TtsModelKind::kKitten;
+                } else if (isLikelyKokoro && !isLikelyKitten) {
+                    selected = TtsModelKind::kKokoro;
+                } else {
+                    selected = TtsModelKind::kKokoro;
+                }
+            } else if (hasVits) {
+                selected = TtsModelKind::kVits;
+            }
         }
     }
 
