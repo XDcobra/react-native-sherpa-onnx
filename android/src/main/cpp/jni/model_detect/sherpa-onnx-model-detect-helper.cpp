@@ -223,6 +223,20 @@ std::string FindFileByName(const std::string& baseDir, const std::string& fileNa
     return "";
 }
 
+std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::string& suffix) {
+    std::string targetSuffix = ToLower(suffix);
+    for (const auto& entry : files) {
+        if (entry.nameLower == targetSuffix) return entry.path;
+    }
+    for (const auto& entry : files) {
+        if (targetSuffix.size() <= entry.nameLower.size() &&
+            std::equal(targetSuffix.rbegin(), targetSuffix.rend(), entry.nameLower.rbegin())) {
+            return entry.path;
+        }
+    }
+    return "";
+}
+
 std::string FindFileEndingWith(const std::string& baseDir, const std::string& suffix, int maxDepth) {
     std::string targetSuffix = ToLower(suffix);
     auto files = ListFilesRecursive(baseDir, maxDepth);

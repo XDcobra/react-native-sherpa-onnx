@@ -49,6 +49,8 @@ struct SttModelPaths {
     std::string whisperEncoder;
     std::string whisperDecoder;
     std::string tokens;
+    /** BPE vocabulary for hotwords tokenization (sentencepiece export bpe.vocab). Optional. */
+    std::string bpeVocab;
     std::string funasrEncoderAdaptor;
     std::string funasrLLM;
     std::string funasrEmbedding;
@@ -67,6 +69,62 @@ struct SttModelPaths {
     std::string fireRedDecoder;
     std::string canaryEncoder;
     std::string canaryDecoder;
+};
+
+/** All candidate paths gathered before model kind selection (used by STT detection steps). */
+struct SttCandidatePaths {
+    std::string encoder;
+    std::string decoder;
+    std::string joiner;
+    std::string paraformerModel;
+    std::string ctcModel;
+    std::string tokens;
+    std::string bpeVocab;
+    std::string funasrEncoderAdaptor;
+    std::string funasrLLM;
+    std::string funasrEmbedding;
+    std::string funasrTokenizerDir;
+    std::string moonshinePreprocessor;
+    std::string moonshineEncoder;
+    std::string moonshineUncachedDecoder;
+    std::string moonshineCachedDecoder;
+    std::string moonshineMergedDecoder;
+    std::string encoderForV2;
+};
+
+/** Path hints derived from model directory name (isLikely* flags). */
+struct SttPathHints {
+    bool isLikelyNemo = false;
+    bool isLikelyTdt = false;
+    bool isLikelyWenetCtc = false;
+    bool isLikelySenseVoice = false;
+    bool isLikelyFunAsrNano = false;
+    bool isLikelyZipformer = false;
+    bool isLikelyMoonshine = false;
+    bool isLikelyDolphin = false;
+    bool isLikelyFireRedAsr = false;
+    bool isLikelyCanary = false;
+    bool isLikelyOmnilingual = false;
+    bool isLikelyMedAsr = false;
+    bool isLikelyTeleSpeech = false;
+    bool isLikelyToneCtc = false;
+};
+
+/** Which model types are possible given paths and hints (has* flags). */
+struct SttCapabilities {
+    bool hasTransducer = false;
+    bool hasWhisper = false;
+    bool hasMoonshine = false;
+    bool hasMoonshineV2 = false;
+    bool hasParaformer = false;
+    bool hasFunAsrNano = false;
+    bool hasDolphin = false;
+    bool hasFireRedAsr = false;
+    bool hasCanary = false;
+    bool hasOmnilingual = false;
+    bool hasMedAsr = false;
+    bool hasTeleSpeechCtc = false;
+    bool hasToneCtc = false;
 };
 
 struct TtsModelPaths {
