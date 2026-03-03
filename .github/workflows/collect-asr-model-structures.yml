@@ -35,11 +35,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Restore tree cache
-        uses: actions/cache@v5
         id: tree-cache
+        uses: actions/cache/restore@v5
         with:
           path: tree-cache
           key: asr-models-trees-asr-models
+      - name: Log cache restore result
+        run: |
+          echo "cache-hit: ${{ steps.tree-cache.outputs.cache-hit }}"
+          echo "tree-cache contents:"
+          ls -la tree-cache 2>/dev/null || echo "(empty or missing)"
 
       - name: Get asset list (filter .tar.bz2 and .onnx, cap from input)
         id: assets
@@ -100,6 +105,15 @@ jobs:
             rm -f "$dl"
           done < asset-list.txt
           rm -rf work
+
+      # Save immediately after processing so the cache is persisted even if a later step
+      # (e.g. commit) fails. The default cache post-step only runs on job success.
+      - name: Save tree cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: tree-cache
+          key: asr-models-trees-asr-models
 
       - name: Build aggregated output file
         run: |
