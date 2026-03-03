@@ -4,7 +4,6 @@
 ./vits-vctk/vits-vctk.onnx
 ./vits-vctk/vits-vctk.int8.onnx
 ./vits-vctk/tokens.txt
-./vits-vctk/espeak-ng-data/phonemap
 
 # Asset: espeak-ng-data.tar.bz2
 espeak-ng-data/
