@@ -137,7 +137,16 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::string lexiconFile = FindFileByName(files, "lexicon.txt");
-    std::string dataDirPath = FindDirectoryByName(modelDir, "espeak-ng-data", 2);
+    std::string dataDirPath;
+    {
+        const std::string prefix = modelDir + "/espeak-ng-data/";
+        for (const auto& entry : files) {
+            if (entry.path.size() > prefix.size() && entry.path.compare(0, prefix.size(), prefix) == 0) {
+                dataDirPath = modelDir + "/espeak-ng-data";
+                break;
+            }
+        }
+    }
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     LOGI("DetectTtsModel: tokens=%s, lexicon=%s, dataDir=%s, voices=%s",
@@ -175,13 +184,12 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
-    bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
+    bool hasVoicesFile = !voicesFile.empty();
     // Zipvoice requires encoder + decoder + vocoder (full model). Distill variants (no vocoder) are not supported by the native layer.
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
-                     !textConditioner.empty() && !vocabJsonFile.empty() && FileExists(vocabJsonFile) &&
-                     !tokenScoresJsonFile.empty() && FileExists(tokenScoresJsonFile);
-    bool hasDataDir = !dataDirPath.empty() && IsDirectory(dataDirPath);
+                     !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
+    bool hasDataDir = !dataDirPath.empty();
 
     std::string modelDirLower = ToLower(modelDir);
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
@@ -303,7 +311,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = !lexiconFile.empty() && FileExists(lexiconFile) ? lexiconFile : "";
+    result.paths.lexicon = !lexiconFile.empty() ? lexiconFile : "";
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;
@@ -321,7 +329,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     LOGI("DetectTtsModel: final paths — tokens=%s, dataDir=%s",
          result.paths.tokens.c_str(), result.paths.dataDir.c_str());
 
-    if (selected != TtsModelKind::kPocket && (tokensFile.empty() || !FileExists(tokensFile))) {
+    if (selected != TtsModelKind::kPocket && tokensFile.empty()) {
         result.error = "TTS: tokens.txt not found in " + modelDir;
         LOGE("%s", result.error.c_str());
         return result;
