@@ -35,7 +35,7 @@ bool ContainsToken(const std::string& value, const std::string& token) {
     return value.find(token) != std::string::npos;
 }
 
-bool IsOnnxFile(const FileEntry& entry) {
+bool IsOnnxOrOrtFile(const FileEntry& entry) {
     return EndsWith(entry.nameLower, ".onnx") || EndsWith(entry.nameLower, ".ort");
 }
 
@@ -55,7 +55,7 @@ std::string ChooseLargest(
     std::uint64_t bestSize = 0;
 
     for (const auto& entry : files) {
-        if (!IsOnnxFile(entry)) continue;
+        if (!IsOnnxOrOrtFile(entry)) continue;
 
         bool hasExcluded = false;
         for (const auto& token : excludeTokens) {
@@ -391,7 +391,7 @@ std::string FindOnnxByToken(
     std::vector<FileEntry> matches;
     std::string tokenLower = ToLower(token);
     for (const auto& entry : files) {
-        if (!IsOnnxFile(entry)) continue;
+        if (!IsOnnxOrOrtFile(entry)) continue;
         if (ContainsToken(entry.nameLower, tokenLower)) {
             matches.push_back(entry);
         }
@@ -431,7 +431,7 @@ std::string FindOnnxByAnyTokenExcluding(
         std::string tokenLower = ToLower(token);
         std::vector<FileEntry> matches;
         for (const auto& entry : files) {
-            if (!IsOnnxFile(entry)) continue;
+            if (!IsOnnxOrOrtFile(entry)) continue;
             if (!ContainsToken(entry.nameLower, tokenLower)) continue;
             bool excluded = false;
             for (const auto& ex : excludeInName) {

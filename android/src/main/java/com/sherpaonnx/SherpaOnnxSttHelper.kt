@@ -2,8 +2,7 @@ package com.sherpaonnx
 
 import android.content.Context
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -52,6 +51,9 @@ internal class SherpaOnnxSttHelper(
   )
 
   private val instances = ConcurrentHashMap<String, SttEngineInstance>()
+
+  private val initThread = HandlerThread("stt-init").also { it.start() }
+  private val initHandler = android.os.Handler(initThread.looper)
 
   private fun getInstance(instanceId: String): SttEngineInstance? = instances[instanceId]
 
@@ -279,9 +281,9 @@ internal class SherpaOnnxSttHelper(
       )
       inst.lastRecognizerConfig = config
       inst.currentSttModelType = modelTypeStr
-      // Defer recognizer creation to next looper tick so release() of the previous
-      // recognizer can complete (avoids "destroyed mutex" / SIGSEGV when switching models).
-      Handler(Looper.getMainLooper()).post {
+      // Defer recognizer creation to the dedicated background thread so release() of the previous
+      // recognizer can complete off the UI thread (avoids "destroyed mutex" / SIGSEGV when switching models).
+      initHandler.post {
         try {
           inst.recognizer = OfflineRecognizer(config = config)
           val resultMap = Arguments.createMap()
