@@ -153,7 +153,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add test/fixtures/asr-models-structure.txt test/fixtures/asr-models-expected.csv
           git status --short
-          if [ -n "$(git status --porcelain)" ]; then
+          # Only commit when our tracked files actually changed (ignore untracked asset-list.txt, tree-cache/)
+          if ! git diff --staged --quiet; then
             git commit -m "chore(testdata): update ASR model structures and expected CSV from asr-models release"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
           else
