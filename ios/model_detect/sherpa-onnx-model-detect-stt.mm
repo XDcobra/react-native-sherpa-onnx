@@ -2,13 +2,41 @@
  * sherpa-onnx-model-detect-stt.mm
  *
  * Purpose: Detects STT (speech-to-text) model type and fills SttModelPaths from a model directory.
- * Supports transducer, paraformer, whisper, and other STT variants. Used by the STT wrapper on iOS.
+ * Used by the STT wrapper on iOS. Supports transducer, paraformer, whisper, moonshine, etc.
+ *
+ * --- Detection pipeline (overview) ---
+ *
+ * 1. Gather files in modelDir (recursive), then:
+ *    - SttCandidatePaths: map file names to logical paths (encoder, decoder, joiner, moonshine
+ *      preprocessor/encoder/mergedDecoder, paraformer/ctc model, tokens, etc.).
+ *    - SttPathHints: from directory name only (isLikelyMoonshine, isLikelyNemo, ...).
+ *    - SttCapabilities: which model types are *possible* given paths + hints (hasWhisper,
+ *      hasMoonshineV2, hasTransducer, ...). Multiple can be true at once (e.g. same files
+ *      can satisfy both Whisper and Moonshine v2).
+ *
+ * 2. detectedModels (for UI "Select model type"): built from capabilities only. Every kind
+ *    with has* == true is added. So the list shows all types that could work with the files,
+ *    not the single chosen type.
+ *
+ * 3. selectedKind (which type we actually use): from ResolveSttKind():
+ *    - If modelType is explicit (e.g. "whisper"): use it if capabilities allow.
+ *    - If modelType == "auto": Priority 1 = folder name (GetKindsFromDirName: tokens like
+ *      "moonshine", "whisper" in dir name → candidate kinds). Priority 2 = among those
+ *      candidates, pick the first that CapabilitySupportsKind(). Fallback = if no name
+ *      candidates, use file-only order (transducer → moonshine v2/v1 → CTC → paraformer →
+ *      whisper → ...).
+ *
+ * 4. paths: ApplyPathsForSttKind(selectedKind) copies the relevant candidate paths into
+ *    SttModelPaths (encoder/decoder, moonshine encoder/mergedDecoder, etc.) for the chosen kind.
+ *
+ * Result to caller: ok, error, detectedModels (list), selectedKind (single), paths (for selectedKind).
  */
 
 #import <Foundation/Foundation.h>
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 
+#include <algorithm>
 #include <string>
 
 #define LOGI(fmt, ...) NSLog(@"[SttModelDetect] " fmt, ##__VA_ARGS__)
@@ -66,6 +94,117 @@ SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "telespeech_ctc") return SttModelKind::kTeleSpeechCtc;
     if (modelType == "tone_ctc") return SttModelKind::kToneCtc;
     return SttModelKind::kUnknown;
+}
+
+/** Returns true if \p cap and hints/paths support the given \p kind (required files present). */
+static bool CapabilitySupportsKind(
+    SttModelKind kind,
+    const SttCapabilities& cap,
+    const SttPathHints& hints,
+    const SttCandidatePaths& paths
+) {
+    switch (kind) {
+        case SttModelKind::kTransducer:
+            return cap.hasTransducer && !(hints.isLikelyNemo || hints.isLikelyTdt);
+        case SttModelKind::kNemoTransducer:
+            return cap.hasTransducer;
+        case SttModelKind::kParaformer:
+            return cap.hasParaformer;
+        case SttModelKind::kNemoCtc:
+            return !paths.ctcModel.empty() && hints.isLikelyNemo;
+        case SttModelKind::kWenetCtc:
+            return !paths.ctcModel.empty() && hints.isLikelyWenetCtc;
+        case SttModelKind::kSenseVoice:
+            return !paths.ctcModel.empty() && hints.isLikelySenseVoice;
+        case SttModelKind::kZipformerCtc:
+            return !paths.ctcModel.empty() && hints.isLikelyZipformer;
+        case SttModelKind::kWhisper:
+            return cap.hasWhisper;
+        case SttModelKind::kFunAsrNano:
+            return cap.hasFunAsrNano;
+        case SttModelKind::kFireRedAsr:
+            return cap.hasFireRedAsr;
+        case SttModelKind::kMoonshine:
+            return cap.hasMoonshine;
+        case SttModelKind::kMoonshineV2:
+            return cap.hasMoonshineV2;
+        case SttModelKind::kDolphin:
+            return cap.hasDolphin;
+        case SttModelKind::kCanary:
+            return cap.hasCanary;
+        case SttModelKind::kOmnilingual:
+            return cap.hasOmnilingual;
+        case SttModelKind::kMedAsr:
+            return cap.hasMedAsr;
+        case SttModelKind::kTeleSpeechCtc:
+            return cap.hasTeleSpeechCtc;
+        case SttModelKind::kToneCtc:
+            return cap.hasToneCtc;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Priority 1: Collect candidate STT kinds from the model directory name (last path component).
+ * Tokens like "moonshine", "whisper", "paraformer" are matched case-insensitively. Returns
+ * candidates in a fixed priority order so that when multiple kinds match the name, file-based
+ * disambiguation picks the first supported one.
+ */
+static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir) {
+    size_t pos = modelDir.find_last_of("/\\");
+    std::string base = (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+    std::string lower = ToLower(base);
+
+    std::vector<SttModelKind> out;
+    auto add = [&out](SttModelKind k) {
+        if (std::find(out.begin(), out.end(), k) == out.end())
+            out.push_back(k);
+    };
+
+    if (lower.find("moonshine") != std::string::npos) {
+        add(SttModelKind::kMoonshineV2);
+        add(SttModelKind::kMoonshine);
+    }
+    if (lower.find("whisper") != std::string::npos)
+        add(SttModelKind::kWhisper);
+    if (lower.find("paraformer") != std::string::npos)
+        add(SttModelKind::kParaformer);
+    if (lower.find("nemo") != std::string::npos || lower.find("parakeet") != std::string::npos) {
+        add(SttModelKind::kNemoTransducer);
+        add(SttModelKind::kNemoCtc);
+    }
+    if (lower.find("tdt") != std::string::npos)
+        add(SttModelKind::kNemoTransducer);
+    if (lower.find("wenet") != std::string::npos)
+        add(SttModelKind::kWenetCtc);
+    if (lower.find("sense") != std::string::npos || lower.find("sensevoice") != std::string::npos)
+        add(SttModelKind::kSenseVoice);
+    if (lower.find("zipformer") != std::string::npos)
+        add(SttModelKind::kZipformerCtc);
+    if (lower.find("funasr") != std::string::npos)
+        add(SttModelKind::kFunAsrNano);
+    if (lower.find("canary") != std::string::npos)
+        add(SttModelKind::kCanary);
+    if (lower.find("fire_red") != std::string::npos || lower.find("fire-red") != std::string::npos)
+        add(SttModelKind::kFireRedAsr);
+    if (lower.find("dolphin") != std::string::npos)
+        add(SttModelKind::kDolphin);
+    if (lower.find("omnilingual") != std::string::npos)
+        add(SttModelKind::kOmnilingual);
+    if (lower.find("medasr") != std::string::npos)
+        add(SttModelKind::kMedAsr);
+    if (lower.find("telespeech") != std::string::npos)
+        add(SttModelKind::kTeleSpeechCtc);
+    if (lower.find("t-one") != std::string::npos || lower.find("t_one") != std::string::npos ||
+        ContainsWord(lower, "tone"))
+        add(SttModelKind::kToneCtc);
+    if (lower.find("transducer") != std::string::npos) {
+        add(SttModelKind::kTransducer);
+        add(SttModelKind::kNemoTransducer);
+    }
+
+    return out;
 }
 
 static SttCandidatePaths GatherSttCandidatePaths(
@@ -273,6 +412,18 @@ static SttModelKind ResolveSttKind(
         }
         return selected;
     }
+
+    // Auto: Priority 1 – resolve from folder name candidates; Priority 2 – file-based disambiguation.
+    std::vector<SttModelKind> nameCandidates = GetKindsFromDirName(modelDir);
+    if (!nameCandidates.empty()) {
+        for (SttModelKind k : nameCandidates) {
+            if (CapabilitySupportsKind(k, cap, hints, paths))
+                return k;
+        }
+        // Name hinted at a model type but no candidate had required files; fall through to file-only.
+    }
+
+    // Fallback: no name-based candidates, or none supported – use file-only detection order.
     if (cap.hasTransducer) {
         return (hints.isLikelyNemo || hints.isLikelyTdt) ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
     }
