@@ -135,10 +135,10 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
     }
 
-    std::string tokensFile = FindFileByName(modelDir, "tokens.txt", 2);
-    std::string lexiconFile = FindFileByName(modelDir, "lexicon.txt", 2);
+    std::string tokensFile = FindFileByName(files, "tokens.txt");
+    std::string lexiconFile = FindFileByName(files, "lexicon.txt");
     std::string dataDirPath = FindDirectoryByName(modelDir, "espeak-ng-data", 2);
-    std::string voicesFile = FindFileByName(modelDir, "voices.bin", 2);
+    std::string voicesFile = FindFileByName(files, "voices.bin");
 
     LOGI("DetectTtsModel: tokens=%s, lexicon=%s, dataDir=%s, voices=%s",
          tokensFile.c_str(), lexiconFile.c_str(), dataDirPath.c_str(), voicesFile.c_str());
@@ -151,8 +151,8 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
     std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, std::nullopt);
     std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
-    std::string vocabJsonFile = FindFileByName(modelDir, "vocab.json", 2);
-    std::string tokenScoresJsonFile = FindFileByName(modelDir, "token_scores.json", 2);
+    std::string vocabJsonFile = FindFileByName(files, "vocab.json");
+    std::string tokenScoresJsonFile = FindFileByName(files, "token_scores.json");
 
     LOGI("DetectTtsModel: acousticModel=%s, vocoder=%s, encoder=%s, decoder=%s",
          acousticModel.c_str(), vocoder.c_str(), encoder.c_str(), decoder.c_str());

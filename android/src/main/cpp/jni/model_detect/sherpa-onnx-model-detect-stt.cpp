@@ -221,7 +221,28 @@ static SttCandidatePaths GatherSttCandidatePaths(
     p.funasrEncoderAdaptor = FindOnnxByAnyToken(files, {"encoder_adaptor", "encoder-adaptor"}, preferInt8);
     p.funasrLLM = FindOnnxByAnyToken(files, {"llm"}, preferInt8);
     p.funasrEmbedding = FindOnnxByAnyToken(files, {"embedding"}, preferInt8);
-    p.funasrTokenizerDir = ResolveTokenizerDir(modelDir);
+    {
+        std::string vocabInSubdir;
+        const std::string vocabName = "vocab.json";
+        for (const auto& entry : files) {
+            if (entry.nameLower != vocabName) continue;
+            const std::string& path = entry.path;
+            if (path.size() >= modelDir.size() && path.compare(0, modelDir.size(), modelDir) == 0 &&
+                (modelDir.empty() || path[modelDir.size()] == '/')) {
+                if (path.size() == modelDir.size() + 12 && path.compare(modelDir.size(), 12, "/vocab.json") == 0) {
+                    p.funasrTokenizerDir = modelDir;
+                    break;
+                }
+                if (vocabInSubdir.empty())
+                    vocabInSubdir = path;
+            }
+        }
+        if (p.funasrTokenizerDir.empty() && !vocabInSubdir.empty()) {
+            size_t lastSlash = vocabInSubdir.find_last_of("/\\");
+            if (lastSlash != std::string::npos)
+                p.funasrTokenizerDir = vocabInSubdir.substr(0, lastSlash);
+        }
+    }
     p.moonshinePreprocessor = FindOnnxByAnyToken(files, {"preprocess", "preprocessor"}, preferInt8);
     p.moonshineEncoder = FindOnnxByAnyToken(files, {"encode", "encoder_model"}, preferInt8);
     p.moonshineUncachedDecoder = FindOnnxByAnyToken(files, {"uncached_decode", "uncached"}, preferInt8);
@@ -254,7 +275,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
     if (p.ctcModel.empty())
         p.ctcModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
     p.tokens = FindFileEndingWith(files, "tokens.txt");
-    p.bpeVocab = FindFileByName(modelDir, "bpe.vocab", maxDepth);
+    p.bpeVocab = FindFileByName(files, "bpe.vocab");
     p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
     return p;
 }
@@ -288,7 +309,7 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     bool hasWhisperEnc = !paths.encoder.empty();
     bool hasWhisperDec = !paths.decoder.empty();
     c.hasWhisper = hasWhisperEnc && hasWhisperDec && paths.joiner.empty();
-    bool hasFunAsrTok = !paths.funasrTokenizerDir.empty() && FileExists(paths.funasrTokenizerDir + "/vocab.json");
+    bool hasFunAsrTok = !paths.funasrTokenizerDir.empty();
     c.hasFunAsrNano = !paths.funasrEncoderAdaptor.empty() && !paths.funasrLLM.empty() &&
                       !paths.funasrEmbedding.empty() && hasFunAsrTok;
     c.hasMoonshine = !paths.moonshinePreprocessor.empty() && !paths.moonshineUncachedDecoder.empty() &&
