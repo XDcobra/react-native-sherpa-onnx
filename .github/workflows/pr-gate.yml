@@ -1,0 +1,79 @@
+# PR Gate: On pull_request to main, run Validator (ASR CSV check) first.
+# If Validator passes, run SDK workflows (Android, iOS, NPM). This way the heavy
+# SDK builds only run after the expected ASR model results are declared in the CSV.
+# For assets whose model type we do not support yet, set model_type to "unsupported"
+# in test/fixtures/asr-models-expected.csv so the gate passes and SDK builds run.
+
+name: PR Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validator:
+    name: Validate ASR expected results
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Check ASR assets vs CSV
+        run: |
+          CSV="test/fixtures/asr-models-expected.csv"
+          if [ ! -f "$CSV" ]; then
+            echo "::error::Missing $CSV"
+            exit 1
+          fi
+          RESP=$(curl -sL "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/asr-models")
+          if ! echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
+            echo "::error::Could not fetch asr-models release or it has no assets"
+            exit 1
+          fi
+          ASSETS=$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name')
+          MISSING=""
+          EMPTY=""
+          while IFS= read -r asset; do
+            [ -z "$asset" ] && continue
+            esc="${asset//./\\.}"
+            line=$(grep -E "^(\"${esc}\"|${esc})," "$CSV" 2>/dev/null | head -1)
+            if [ -z "$line" ]; then
+              MISSING="${MISSING}  - ${asset} (no row in CSV)\n"
+              continue
+            fi
+            model_type=$(echo "$line" | awk -F',' '{ gsub(/^ *"|" *$/, "", $2); print $2 }')
+            # Empty = not declared; "unsupported" = we don't support this model type yet (gate still passes)
+            if [ -z "$model_type" ]; then
+              EMPTY="${EMPTY}  - ${asset} (model_type empty; use \"unsupported\" if we don't support this type yet)\n"
+            fi
+          done <<< "$ASSETS"
+          if [ -n "$MISSING" ] || [ -n "$EMPTY" ]; then
+            echo "::error::ASR expected results incomplete in test/fixtures/asr-models-expected.csv"
+            [ -n "$MISSING" ] && echo -e "Missing rows:\n$MISSING"
+            [ -n "$EMPTY" ] && echo -e "Empty model_type:\n$EMPTY"
+            exit 1
+          fi
+          echo "All ASR assets have a non-empty model_type in CSV."
+
+  build-android:
+    needs: [validator]
+    uses: ./.github/workflows/sdk-android.yml
+    secrets: inherit
+
+  build-ios:
+    needs: [validator]
+    uses: ./.github/workflows/sdk-ios.yml
+    secrets: inherit
+
+  build-sdk:
+    needs: [validator]
+    uses: ./.github/workflows/sdk-sdk.yml
+    secrets: inherit

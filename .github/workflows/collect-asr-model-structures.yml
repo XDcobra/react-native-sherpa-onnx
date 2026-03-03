@@ -1,8 +1,8 @@
 # Collect ASR model archive structures from k2-fsa/sherpa-onnx asr-models release.
 # For each .tar.bz2 asset: list contents with tar -tjf (no extraction).
 # For each .onnx asset: record single-file entry.
-# Results are cached per asset; aggregated output is written to test/fixtures/asr-models-structure.txt and committed.
-# Cap: first 5 matching assets (for testing); remove cap later to process all.
+# Creates or extends test/fixtures/asr-models-expected.csv (new assets get empty model_type).
+# Results are cached per asset; aggregated output is written to test/fixtures and committed.
 
 name: Testdata - Collect ASR model structures
 
@@ -56,9 +56,11 @@ jobs:
               echo "$LIST" | head -n "$ASSET_LIMIT" > asset-list.txt
               echo "Limit: first $ASSET_LIMIT assets"
             fi
+            # Full asset names (no cap) for CSV sync
+            echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name' > all-asset-names.txt
           else
             echo "::warning::Release asr-models not found or has no assets"
-            touch asset-list.txt
+            touch asset-list.txt all-asset-names.txt
           fi
           echo "count=$(wc -l < asset-list.txt)" >> $GITHUB_OUTPUT
           echo "Asset list:"
@@ -119,14 +121,42 @@ jobs:
           echo "Output preview:"
           head -80 "$out" || true
 
+      - name: Create or extend CSV (add missing assets with empty model_type)
+        run: |
+          CSV="test/fixtures/asr-models-expected.csv"
+          mkdir -p test/fixtures
+          if [ ! -s all-asset-names.txt ]; then
+            echo "No assets from release, skipping CSV update."
+            exit 0
+          fi
+          if [ ! -f "$CSV" ]; then
+            echo "asset_name,model_type" > "$CSV"
+          fi
+          # For each asset from release, ensure a row exists; keep existing model_type
+          tmp=$(mktemp)
+          echo "asset_name,model_type" > "$tmp"
+          while IFS= read -r asset; do
+            [ -z "$asset" ] && continue
+            esc="${asset//./\\.}"
+            line=$(grep -E "^(\"${esc}\"|${esc})," "$CSV" 2>/dev/null | head -1)
+            if [ -n "$line" ]; then
+              echo "$line" >> "$tmp"
+            else
+              echo "${asset}," >> "$tmp"
+            fi
+          done < all-asset-names.txt
+          mv "$tmp" "$CSV"
+          echo "CSV updated (new assets get empty model_type):"
+          wc -l "$CSV"
+
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add test/fixtures/asr-models-structure.txt
+          git add test/fixtures/asr-models-structure.txt test/fixtures/asr-models-expected.csv
           git status --short
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "chore(testdata): update ASR model structures from asr-models release"
+            git commit -m "chore(testdata): update ASR model structures and expected CSV from asr-models release"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
           else
             echo "No changes to commit."
