@@ -85,3 +85,21 @@ sherpa-onnx-paraformer-en-2024-03-09/am.mvn
 sherpa-onnx-paraformer-en-2024-03-09/model.int8.onnx
 sherpa-onnx-paraformer-en-2024-03-09/model.onnx
 
+# Asset: sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2
+sherpa-onnx-paraformer-zh-small-2024-03-09/
+sherpa-onnx-paraformer-zh-small-2024-03-09/README.md
+sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt
+sherpa-onnx-paraformer-zh-small-2024-03-09/add-model-metadata.py
+sherpa-onnx-paraformer-zh-small-2024-03-09/config.yaml
+sherpa-onnx-paraformer-zh-small-2024-03-09/generate-tokens.py
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/2-zh-en.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/5-henan.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/8k.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/0.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/1.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/4-tianjin.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/3-sichuan.wav
+sherpa-onnx-paraformer-zh-small-2024-03-09/am.mvn
+sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx
+
