@@ -2,6 +2,8 @@ package com.sherpaonnx
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -277,26 +279,33 @@ internal class SherpaOnnxSttHelper(
       )
       inst.lastRecognizerConfig = config
       inst.currentSttModelType = modelTypeStr
-      inst.recognizer = OfflineRecognizer(config = config)
-
-      
-
-      val resultMap = Arguments.createMap()
-      resultMap.putBoolean("success", true)
-      resultMap.putString("modelType", modelTypeStr)
-      resultMap.putString("decodingMethod", config.decodingMethod)
-      val detectedModelsArray = Arguments.createArray()
-      for (model in detectedModels) {
-        val modelMap = model as? HashMap<*, *>
-        if (modelMap != null) {
-          val modelResultMap = Arguments.createMap()
-          modelResultMap.putString("type", modelMap["type"] as? String ?: "")
-          modelResultMap.putString("modelDir", modelMap["modelDir"] as? String ?: "")
-          detectedModelsArray.pushMap(modelResultMap)
+      // Defer recognizer creation to next looper tick so release() of the previous
+      // recognizer can complete (avoids "destroyed mutex" / SIGSEGV when switching models).
+      Handler(Looper.getMainLooper()).post {
+        try {
+          inst.recognizer = OfflineRecognizer(config = config)
+          val resultMap = Arguments.createMap()
+          resultMap.putBoolean("success", true)
+          resultMap.putString("modelType", modelTypeStr)
+          resultMap.putString("decodingMethod", config.decodingMethod)
+          val detectedModelsArray = Arguments.createArray()
+          for (model in detectedModels) {
+            val modelMap = model as? HashMap<*, *>
+            if (modelMap != null) {
+              val modelResultMap = Arguments.createMap()
+              modelResultMap.putString("type", modelMap["type"] as? String ?: "")
+              modelResultMap.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+              detectedModelsArray.pushMap(modelResultMap)
+            }
+          }
+          resultMap.putArray("detectedModels", detectedModelsArray)
+          promise.resolve(resultMap)
+        } catch (e: Exception) {
+          val errorMsg = "Exception creating recognizer: ${e.message ?: e.javaClass.simpleName}"
+          Log.e(logTag, errorMsg, e)
+          promise.reject("INIT_ERROR", errorMsg, e)
         }
       }
-      resultMap.putArray("detectedModels", detectedModelsArray)
-      promise.resolve(resultMap)
     } catch (e: Exception) {
       val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMsg, e)
@@ -588,7 +597,16 @@ internal class SherpaOnnxSttHelper(
           preprocessor = path(paths, "moonshinePreprocessor"),
           encoder = path(paths, "moonshineEncoder"),
           uncachedDecoder = path(paths, "moonshineUncachedDecoder"),
-          cachedDecoder = path(paths, "moonshineCachedDecoder")
+          cachedDecoder = path(paths, "moonshineCachedDecoder"),
+          mergedDecoder = ""
+        ),
+        tokens = path(paths, "tokens"),
+        modelType = "moonshine"
+      )
+      "moonshine_v2" -> OfflineModelConfig(
+        moonshine = OfflineMoonshineModelConfig(
+          encoder = path(paths, "moonshineEncoder"),
+          mergedDecoder = path(paths, "moonshineMergedDecoder")
         ),
         tokens = path(paths, "tokens"),
         modelType = "moonshine"
