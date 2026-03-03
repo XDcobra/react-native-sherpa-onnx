@@ -102,14 +102,6 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def currentSherpaVersion = project.ext.sherpaOnnxVersion
     def sherpaVersionFile = new File(downloadDir, "sherpa-onnx-version.txt")
     def storedSherpaVersion = (sherpaVersionFile.exists() ? sherpaVersionFile.text.trim() : null)
-    // If libs+headers are already present but the version file is missing, backfill it so
-    // we don't trigger an unnecessary re-download on every build.
-    if (hasAllSherpaLibs() && hasSherpaHeaders() && storedSherpaVersion == null) {
-      downloadDir.mkdirs()
-      sherpaVersionFile.text = currentSherpaVersion
-      storedSherpaVersion = currentSherpaVersion
-      println "[sherpa-onnx] Backfilled version file with ${currentSherpaVersion} (libs+headers already present)"
-    }
     def sherpaNeedsUpdate = !hasAllSherpaLibs() || !hasSherpaHeaders() || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
 
     if (hasAllSherpaLibs() && hasSherpaHeaders() && !sherpaNeedsUpdate) {
