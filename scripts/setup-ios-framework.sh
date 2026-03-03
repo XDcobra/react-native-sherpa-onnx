@@ -154,47 +154,6 @@ compare_versions() {
   echo "0"  # v1 == v2
 }
 
-# Function to get latest framework version from GitHub
-get_latest_framework_version() {
-  echo -e "${YELLOW}Fetching latest framework release from GitHub...${NC}" >&2
-
-  local releases_json=$(curl -s "${AUTH_ARGS[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases" 2>/dev/null || echo "")
-
-  if [ -z "$releases_json" ]; then
-    echo -e "${RED}Error: Could not fetch releases from GitHub API${NC}" >&2
-    return 1
-  fi
-
-  # Avoid jq errors on rate-limit HTML or plain-text responses
-  if ! echo "$releases_json" | grep -q '"tag_name"'; then
-    echo -e "${RED}Error: GitHub API response did not contain release data (possible rate limit).${NC}" >&2
-    echo "Response (truncated):" >&2
-    echo "$releases_json" | head -5 >&2
-    return 1
-  fi
-
-  local version=""
-
-  if command -v jq &> /dev/null; then
-    if echo "$releases_json" | jq -e . > /dev/null 2>&1; then
-      version=$(echo "$releases_json" | jq -r '.[] | select(.tag_name | startswith("framework-v")) | .tag_name' | head -1 | sed 's/framework-v//')
-    else
-      echo -e "${RED}Error: GitHub releases response is not valid JSON${NC}" >&2
-      echo "$releases_json" | head -5 >&2
-      return 1
-    fi
-  else
-    version=$(echo "$releases_json" | grep -o '"tag_name": "framework-v[0-9.]*' | head -1 | sed 's/.*framework-v//')
-  fi
-
-  if [ -z "$version" ]; then
-    echo -e "${RED}Error: No framework releases found with tag format 'framework-vX.Y.Z'${NC}" >&2
-    return 1
-  fi
-
-  echo "$version"
-}
-
 # Function to get local framework version
 get_local_framework_version() {
   # Prefer explicit version file written by this script
