@@ -182,9 +182,8 @@ std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::s
     return "";
 }
 
-std::string FindFileByName(const std::string& baseDir, const std::string& fileName, int maxDepth) {
+std::string FindFileByName(const std::vector<FileEntry>& files, const std::string& fileName) {
     std::string target = ToLower(fileName);
-    auto files = ListFilesRecursive(baseDir, maxDepth);
     for (const auto& entry : files) {
         if (entry.nameLower == target) return entry.path;
     }
@@ -205,56 +204,6 @@ bool ContainsWord(const std::string& haystack, const std::string& word) {
         pos++;
     }
     return false;
-}
-
-std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth) {
-    std::string target = ToLower(dirName);
-    std::vector<std::string> toVisit = ListDirectories(baseDir);
-    int depth = 0;
-    while (!toVisit.empty() && depth <= maxDepth) {
-        std::vector<std::string> next;
-        for (const auto& dir : toVisit) {
-            std::string name = fs::path(dir).filename().string();
-            if (ToLower(name) == target) return dir;
-            if (depth < maxDepth) {
-                auto nested = ListDirectories(dir);
-                next.insert(next.end(), nested.begin(), nested.end());
-            }
-        }
-        toVisit.swap(next);
-        depth += 1;
-    }
-    return "";
-}
-
-std::string ResolveTokenizerDir(const std::string& modelDir) {
-    std::string vocabInMain = modelDir + "/vocab.json";
-    if (FileExists(vocabInMain)) {
-        return modelDir;
-    }
-
-    try {
-        for (const auto& entry : fs::directory_iterator(modelDir)) {
-            if (entry.is_directory()) {
-                std::string dirName = entry.path().filename().string();
-                std::string dirNameLower = ToLower(dirName);
-                if (dirNameLower.find("qwen3") != std::string::npos) {
-                    std::string vocabPath = entry.path().string() + "/vocab.json";
-                    if (FileExists(vocabPath)) {
-                        return entry.path().string();
-                    }
-                }
-            }
-        }
-    } catch (const std::exception&) {
-    }
-
-    std::string commonPath = modelDir + "/Qwen3-0.6B";
-    if (FileExists(commonPath + "/vocab.json")) {
-        return commonPath;
-    }
-
-    return "";
 }
 
 } // namespace model_detect
