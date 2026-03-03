@@ -1,21 +1,19 @@
 /**
  * model_detect_test.cpp
  *
- * Host-side GTest suite for STT (speech-to-text) model detection. Tests run without
- * real model files: they use path-only fixtures that describe the directory layout
- * of ASR model assets (e.g. from k2-fsa/sherpa-onnx asr-models release).
+ * Host-side GTest suite for STT and TTS model detection. Tests run without real model files:
+ * they use path-only fixtures that describe the directory layout of ASR/TTS model assets
+ * (e.g. from k2-fsa/sherpa-onnx asr-models and tts-models releases).
  *
- * Fixtures:
- *   - asr-models-structure.txt: One block per asset (# Asset: name.tar.bz2), each block
- *     lists relative paths (modelDir/encoder.onnx, modelDir/tokens.txt, ...) as produced
- *     by the collect-asr-model-structures workflow.
- *   - asr-models-expected.csv: Header "asset_name,model_type"; each row declares the
- *     expected detection result (e.g. transducer, paraformer, zipformer) or "unsupported".
+ * Fixtures (ASR):
+ *   - asr-models-structure.txt, asr-models-expected.csv (see collect-asr-model-structures workflow).
+ * Fixtures (TTS):
+ *   - tts-models-structure.txt, tts-models-expected.csv (see collect-tts-model-structures workflow).
  *
- * The tests build a FileEntry list from the structure file, call DetectSttModelFromFileList
- * (test-only API that uses no filesystem), and assert that the selected model kind matches
- * the expected value from the CSV. Run from repo root so "test/fixtures" resolves, or set
- * TEST_FIXTURES_DIR to the directory containing the two fixture files.
+ * The tests build a FileEntry list from each structure file, call DetectSttModelFromFileList
+ * or DetectTtsModelFromFileList (test-only APIs, no filesystem), and assert that the
+ * selected model kind matches the expected value from the CSV. Run from repo root so
+ * "test/fixtures" resolves, or set TEST_FIXTURES_DIR.
  */
 
 #include "model_detect_test_utils.h"
@@ -39,19 +37,21 @@ std::string GetFixturesDir() {
 /**
  * FixturesExist
  *
- * Checks that the fixture files exist and are readable. Fails with a clear
- * error message if asr-models-structure.txt or asr-models-expected.csv
- * are missing (e.g., incorrect working directory or TEST_FIXTURES_DIR). Should be run as the
- * first test so that subsequent tests do not abort with cryptic parse errors
- * .
+ * Checks that ASR and TTS fixture files exist and are readable. Fails with a clear
+ * error message if any of the structure or CSV files are missing (e.g. wrong working
+ * directory or TEST_FIXTURES_DIR). Should run first so later tests do not abort with
+ * cryptic parse errors.
  */
 TEST(ModelDetectTest, FixturesExist) {
     std::string dir = GetFixturesDir();
-    std::string structurePath = dir + "/asr-models-structure.txt";
-    std::string csvPath = dir + "/asr-models-expected.csv";
-    std::ifstream s(structurePath), c(csvPath);
-    ASSERT_TRUE(s.is_open()) << "Missing fixture: " << structurePath;
-    ASSERT_TRUE(c.is_open()) << "Missing fixture: " << csvPath;
+    std::ifstream asrStruct(dir + "/asr-models-structure.txt");
+    std::ifstream asrCsv(dir + "/asr-models-expected.csv");
+    std::ifstream ttsStruct(dir + "/tts-models-structure.txt");
+    std::ifstream ttsCsv(dir + "/tts-models-expected.csv");
+    ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
+    ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
+    ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
+    ASSERT_TRUE(ttsCsv.is_open()) << "Missing: " << dir << "/tts-models-expected.csv";
 }
 
 /**
@@ -117,6 +117,60 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
             << ") but got " << model_detect_test::SttKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
+/**
+ * DetectTtsFromFileListMatchesExpected
+ *
+ * TTS counterpart of DetectSttFromFileListMatchesExpected. Loads tts-models-structure.txt
+ * and tts-models-expected.csv, builds FileEntry lists per asset block, calls
+ * DetectTtsModelFromFileList(files, modelDir, "auto"), and asserts that result.ok is true
+ * and result.selectedKind matches the CSV model_type (vits, matcha, kokoro, kitten, pocket,
+ * zipvoice). For model_type == "unsupported" only checks that the call does not crash.
+ * Note: Some TTS types (e.g. vits) require espeak-ng-data in the fixture; otherwise
+ * detection may return result.ok == false.
+ */
+TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/tts-models-structure.txt";
+    std::string csvPath = dir + "/tts-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectTtsModelFromFileList(files, block.modelDir, "auto");
+            EXPECT_TRUE(result.ok || result.selectedKind != sherpaonnx::TtsModelKind::kUnknown)
+                << "Asset " << block.assetName << ": unsupported should not crash; ok=" << result.ok;
+            continue;
+        }
+
+        sherpaonnx::TtsModelKind expectedKind = model_detect_test::TtsKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::TtsModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result = sherpaonnx::DetectTtsModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got " << model_detect_test::TtsKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
 }

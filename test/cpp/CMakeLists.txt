@@ -11,6 +11,7 @@ set(JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni")
 set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-helper.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-stt.cpp"
+  "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-tts.cpp"
 )
 
 add_executable(model_detect_test

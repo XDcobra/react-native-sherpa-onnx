@@ -164,4 +164,27 @@ std::string SttKindToString(SttModelKind kind) {
     }
 }
 
+TtsModelKind TtsKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "vits") return TtsModelKind::kVits;
+    if (t == "matcha") return TtsModelKind::kMatcha;
+    if (t == "kokoro") return TtsModelKind::kKokoro;
+    if (t == "kitten") return TtsModelKind::kKitten;
+    if (t == "pocket") return TtsModelKind::kPocket;
+    if (t == "zipvoice") return TtsModelKind::kZipvoice;
+    return TtsModelKind::kUnknown;
+}
+
+std::string TtsKindToString(TtsModelKind kind) {
+    switch (kind) {
+        case TtsModelKind::kVits: return "vits";
+        case TtsModelKind::kMatcha: return "matcha";
+        case TtsModelKind::kKokoro: return "kokoro";
+        case TtsModelKind::kKitten: return "kitten";
+        case TtsModelKind::kPocket: return "pocket";
+        case TtsModelKind::kZipvoice: return "zipvoice";
+        default: return "unknown";
+    }
+}
+
 }  // namespace model_detect_test
