@@ -315,11 +315,11 @@ static void CollectDetectedModels(
     if (cap.hasTransducer) {
         out.push_back({(hints.isLikelyNemo || hints.isLikelyTdt) ? "nemo_transducer" : "transducer", modelDir});
     }
-    if (!paths.ctcModel.empty() && (hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
+    if (!paths.ctcModel.empty() && (hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice || hints.isLikelyZipformer)) {
         if (hints.isLikelyNemo) out.push_back({"nemo_ctc", modelDir});
         else if (hints.isLikelyWenetCtc) out.push_back({"wenet_ctc", modelDir});
         else if (hints.isLikelySenseVoice) out.push_back({"sense_voice", modelDir});
-        else out.push_back({"ctc", modelDir});
+        else out.push_back({"zipformer_ctc", modelDir});
     } else if (!paths.paraformerModel.empty()) {
         out.push_back({"paraformer", modelDir});
     }
@@ -562,23 +562,25 @@ SttDetectResult DetectSttModel(
     SttPathHints hints = GetSttPathHints(modelDir);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
 
-    LOGI("DetectSttModel: tokens=%s", EmptyOrPath(candidate.tokens));
-    LOGI("DetectSttModel: transducer encoder=%s decoder=%s joiner=%s",
-         EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder), EmptyOrPath(candidate.joiner));
-    LOGI("DetectSttModel: paraformerModel=%s ctcModel=%s tokens=%s bpeVocab=%s",
-         EmptyOrPath(candidate.paraformerModel), EmptyOrPath(candidate.ctcModel), EmptyOrPath(candidate.tokens), EmptyOrPath(candidate.bpeVocab));
-    LOGI("DetectSttModel: moonshine preprocessor=%s encoder=%s uncachedDecoder=%s cachedDecoder=%s mergedDecoder=%s",
-         EmptyOrPath(candidate.moonshinePreprocessor), EmptyOrPath(candidate.moonshineEncoder), EmptyOrPath(candidate.moonshineUncachedDecoder),
-         EmptyOrPath(candidate.moonshineCachedDecoder), EmptyOrPath(candidate.moonshineMergedDecoder));
-    LOGI("DetectSttModel: whisper encoder=%s decoder=%s (same as transducer; joiner empty => whisper)",
-         EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder));
-    LOGI("DetectSttModel: funasr encoderAdaptor=%s llm=%s embedding=%s tokenizerDir=%s",
-         EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
-    LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d",
-         (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
-         (int)cap.hasParaformer, (int)cap.hasFunAsrNano);
-    LOGI("DetectSttModel: isLikelyMoonshine=%d isLikelyNemo=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d",
-         (int)hints.isLikelyMoonshine, (int)hints.isLikelyNemo, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice);
+    if (debug) {
+        LOGI("DetectSttModel: tokens=%s", EmptyOrPath(candidate.tokens));
+        LOGI("DetectSttModel: transducer encoder=%s decoder=%s joiner=%s",
+             EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder), EmptyOrPath(candidate.joiner));
+        LOGI("DetectSttModel: paraformerModel=%s ctcModel=%s tokens=%s bpeVocab=%s",
+             EmptyOrPath(candidate.paraformerModel), EmptyOrPath(candidate.ctcModel), EmptyOrPath(candidate.tokens), EmptyOrPath(candidate.bpeVocab));
+        LOGI("DetectSttModel: moonshine preprocessor=%s encoder=%s uncachedDecoder=%s cachedDecoder=%s mergedDecoder=%s",
+             EmptyOrPath(candidate.moonshinePreprocessor), EmptyOrPath(candidate.moonshineEncoder), EmptyOrPath(candidate.moonshineUncachedDecoder),
+             EmptyOrPath(candidate.moonshineCachedDecoder), EmptyOrPath(candidate.moonshineMergedDecoder));
+        LOGI("DetectSttModel: whisper encoder=%s decoder=%s (same as transducer; joiner empty => whisper)",
+             EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder));
+        LOGI("DetectSttModel: funasr encoderAdaptor=%s llm=%s embedding=%s tokenizerDir=%s",
+             EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
+        LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d",
+             (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
+             (int)cap.hasParaformer, (int)cap.hasFunAsrNano);
+        LOGI("DetectSttModel: isLikelyMoonshine=%d isLikelyNemo=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d",
+             (int)hints.isLikelyMoonshine, (int)hints.isLikelyNemo, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice);
+    }
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
 
