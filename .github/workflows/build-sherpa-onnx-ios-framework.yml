@@ -353,6 +353,7 @@ jobs:
         with:
           tag_name: framework-v${{ steps.version.outputs.version }}
           name: sherpa-onnx Framework v${{ steps.version.outputs.version }}
+          make_latest: false
           body: |
             This release contains the prebuilt sherpa-onnx XCFramework for iOS development with ONNX Runtime support.
 

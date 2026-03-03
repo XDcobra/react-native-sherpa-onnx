@@ -207,6 +207,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
+          make_latest: false  # do not set this release as GitHub's "latest" (e.g. to keep app/npm release as latest)
           body: |
             Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
             - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so), `c-api/` (C headers), `java/classes.jar` (Kotlin API). Gradle copies to jniLibs, include, and sherpa-onnx-classes.

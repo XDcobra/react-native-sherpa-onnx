@@ -65,6 +65,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: libarchive iOS ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
           body: |
             Prebuilt libarchive sources for iOS (vendored in the SDK pod; no binary in this zip).
             - **libarchive-ios-sources.zip** – C sources and headers from `third_party/libarchive/libarchive`. Extract to `ios/Downloads/libarchive` for the SherpaOnnx pod when `third_party` is not present (e.g. npm install).

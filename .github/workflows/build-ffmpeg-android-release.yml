@@ -142,6 +142,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
           body: |
             Prebuilt FFmpeg and libshine for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
             - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
