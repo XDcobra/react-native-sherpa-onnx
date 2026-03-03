@@ -11,18 +11,22 @@ def readVersionFromTagFile(File tagFile, String prefix) {
   return null
 }
 
+// Module root: parent of android/ (so tag files resolve when SDK is used as dependency, e.g. node_modules/react-native-sherpa-onnx).
+def moduleRoot = project.projectDir.parentFile
+
 // sherpa-onnx: 1. SHERPA_ONNX_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def sherpaOnnxVersion = System.getenv('SHERPA_ONNX_VERSION')
 if (!sherpaOnnxVersion) {
-  def v = readVersionFromTagFile(new File(rootDir, 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG'), 'sherpa-onnx-android-v')
-  sherpaOnnxVersion = v ?: (project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.24')
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG'), 'sherpa-onnx-android-v')
+  sherpaOnnxVersion = v ?: (project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.28')
 }
 project.ext.sherpaOnnxVersion = sherpaOnnxVersion
+println "[react-native-sherpa-onnx] sherpa-onnx version (extracted/used): ${sherpaOnnxVersion}"
 
 // FFmpeg: 1. FFMPEG_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def ffmpegVersion = System.getenv('FFMPEG_VERSION')
 if (!ffmpegVersion) {
-  def v = readVersionFromTagFile(new File(rootDir, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG'), 'ffmpeg-android-v')
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG'), 'ffmpeg-android-v')
   ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1')
 }
 project.ext.ffmpegVersion = ffmpegVersion
@@ -30,7 +34,7 @@ project.ext.ffmpegVersion = ffmpegVersion
 // libarchive: 1. LIBARCHIVE_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def libarchiveVersion = System.getenv('LIBARCHIVE_VERSION')
 if (!libarchiveVersion) {
-  def v = readVersionFromTagFile(new File(rootDir, 'third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG'), 'libarchive-android-v')
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG'), 'libarchive-android-v')
   libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5')
 }
 project.ext.libarchiveVersion = libarchiveVersion
