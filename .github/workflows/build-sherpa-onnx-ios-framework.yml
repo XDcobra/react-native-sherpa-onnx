@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       sherpa_onnx_version:
-        description: 'sherpa-onnx version/tag to build (e.g. v1.12.24 or main). Leave empty to use third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.'
+        description: 'sherpa-onnx version/tag to build (e.g. v1.12.24 or main). Leave empty to use third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG.'
         required: false
         default: ''
 
@@ -34,17 +34,17 @@ jobs:
           if [ -n "${{ github.event.inputs.sherpa_onnx_version }}" ]; then
             VER="${{ github.event.inputs.sherpa_onnx_version }}"
           else
-            TAG_FILE=third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
+            TAG_FILE=third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG
             if [ ! -f "$TAG_FILE" ]; then
               echo "::error::No input version and $TAG_FILE missing"
               exit 1
             fi
             TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
-            if [ -z "$TAG" ] || [ "${TAG#sherpa-onnx-android-v}" = "$TAG" ]; then
-              echo "::error::ANDROID_RELEASE_TAG must be set to sherpa-onnx-android-vX.Y.Z"
+            if [ -z "$TAG" ] || [ "${TAG#framework-v}" = "$TAG" ]; then
+              echo "::error::IOS_RELEASE_TAG must be set to framework-vX.Y.Z"
               exit 1
             fi
-            VER="v${TAG#sherpa-onnx-android-v}"
+            VER="v${TAG#framework-v}"
           fi
           [ "${VER#v}" = "$VER" ] && VER="v$VER"
           echo "SHERPA_ONNX_VERSION=$VER" >> $GITHUB_ENV
