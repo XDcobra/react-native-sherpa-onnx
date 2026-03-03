@@ -84,12 +84,21 @@ framework_valid() {
 # When run as Xcode build phase (prepare_command): if framework is already present and valid, exit successfully.
 # Avoids network/TAG-file dependency during build and prevents "PhaseScriptExecution failed" when nothing is needed.
 # We require both the library and the Headers (sherpa-onnx/c-api/cxx-api.h) so an incomplete framework triggers a re-download.
+# If .framework-version is missing, populate it from VERSION.txt so version is known for future runs (e.g. after clone/copy).
 if [ "$FORCE_DOWNLOAD" != true ]; then
   if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
+    if [ ! -f "$VERSION_FILE" ] && [ -f "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/VERSION.txt" ]; then
+      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/VERSION.txt" | head -n1 || true)
+      [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
+    fi
     echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa_onnx.xcframework, skipping download." >&2
     exit 0
   fi
   if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa-onnx.xcframework"; then
+    if [ ! -f "$VERSION_FILE" ] && [ -f "$FRAMEWORKS_DIR/sherpa-onnx.xcframework/VERSION.txt" ]; then
+      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/sherpa-onnx.xcframework/VERSION.txt" | head -n1 || true)
+      [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
+    fi
     echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa-onnx.xcframework, skipping download." >&2
     exit 0
   fi
