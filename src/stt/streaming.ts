@@ -329,7 +329,7 @@ export async function createStreamingSTT(
               if (abs > maxAbs) maxAbs = abs;
             }
             const scale = maxAbs < 0.01 ? 80 : Math.min(80, 0.8 / maxAbs);
-            toSend = new Array(samples.length);
+            toSend = new Array<number>(samples.length);
             for (let i = 0; i < samples.length; i++) {
               const v = samples[i]! * scale;
               toSend[i] = v < -1 ? -1 : v > 1 ? 1 : v;
