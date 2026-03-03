@@ -56,11 +56,9 @@ jobs:
               echo "$LIST" | head -n "$ASSET_LIMIT" > asset-list.txt
               echo "Limit: first $ASSET_LIMIT assets"
             fi
-            # Full asset names (no cap) for CSV sync
-            echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name' > all-asset-names.txt
           else
             echo "::warning::Release asr-models not found or has no assets"
-            touch asset-list.txt all-asset-names.txt
+            touch asset-list.txt
           fi
           echo "count=$(wc -l < asset-list.txt)" >> $GITHUB_OUTPUT
           echo "Asset list:"
@@ -125,17 +123,17 @@ jobs:
         run: |
           CSV="test/fixtures/asr-models-expected.csv"
           mkdir -p test/fixtures
-          if [ ! -s all-asset-names.txt ]; then
+          if [ ! -s asset-list.txt ]; then
             echo "No assets from release, skipping CSV update."
             exit 0
           fi
           if [ ! -f "$CSV" ]; then
             echo "asset_name,model_type" > "$CSV"
           fi
-          # For each asset from release, ensure a row exists; keep existing model_type
+          # For each asset in asset-list (same set as structure file; respects asset_limit), ensure a row exists
           tmp=$(mktemp)
           echo "asset_name,model_type" > "$tmp"
-          while IFS= read -r asset; do
+          while IFS='|' read -r asset _; do
             [ -z "$asset" ] && continue
             esc="${asset//./\\.}"
             line=$(grep -E "^(\"${esc}\"|${esc})," "$CSV" 2>/dev/null | head -1)
@@ -144,7 +142,7 @@ jobs:
             else
               echo "${asset}," >> "$tmp"
             fi
-          done < all-asset-names.txt
+          done < asset-list.txt
           mv "$tmp" "$CSV"
           echo "CSV updated (new assets get empty model_type):"
           wc -l "$CSV"
