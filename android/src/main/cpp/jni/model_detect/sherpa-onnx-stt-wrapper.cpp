@@ -25,6 +25,7 @@ const char* SttModelKindToString(SttModelKind k) {
     case SttModelKind::kFunAsrNano: return "funasr_nano";
     case SttModelKind::kFireRedAsr: return "fire_red_asr";
     case SttModelKind::kMoonshine: return "moonshine";
+    case SttModelKind::kMoonshineV2: return "moonshine_v2";
     case SttModelKind::kDolphin: return "dolphin";
     case SttModelKind::kCanary: return "canary";
     case SttModelKind::kOmnilingual: return "omnilingual";
@@ -81,6 +82,7 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
       PutString(env, pathsMap, mapPut, "moonshineEncoder", result.paths.moonshineEncoder);
       PutString(env, pathsMap, mapPut, "moonshineUncachedDecoder", result.paths.moonshineUncachedDecoder);
       PutString(env, pathsMap, mapPut, "moonshineCachedDecoder", result.paths.moonshineCachedDecoder);
+      PutString(env, pathsMap, mapPut, "moonshineMergedDecoder", result.paths.moonshineMergedDecoder);
       PutString(env, pathsMap, mapPut, "dolphinModel", result.paths.dolphinModel);
       PutString(env, pathsMap, mapPut, "omnilingualModel", result.paths.omnilingualModel);
       PutString(env, pathsMap, mapPut, "medasrModel", result.paths.medasrModel);

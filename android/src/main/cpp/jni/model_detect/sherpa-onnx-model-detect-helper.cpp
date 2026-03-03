@@ -36,7 +36,7 @@ bool ContainsToken(const std::string& value, const std::string& token) {
 }
 
 bool IsOnnxFile(const FileEntry& entry) {
-    return EndsWith(entry.nameLower, ".onnx");
+    return EndsWith(entry.nameLower, ".onnx") || EndsWith(entry.nameLower, ".ort");
 }
 
 std::string BaseName(const std::string& path) {
@@ -403,6 +403,40 @@ std::string FindOnnxByAnyToken(
     for (const auto& token : tokens) {
         std::string match = FindOnnxByToken(files, token, preferInt8);
         if (!match.empty()) return match;
+    }
+    return "";
+}
+
+std::string FindOnnxByAnyTokenExcluding(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::vector<std::string>& excludeInName,
+    const std::optional<bool>& preferInt8
+) {
+    for (const auto& token : tokens) {
+        std::string tokenLower = ToLower(token);
+        std::vector<FileEntry> matches;
+        for (const auto& entry : files) {
+            if (!IsOnnxFile(entry)) continue;
+            if (!ContainsToken(entry.nameLower, tokenLower)) continue;
+            bool excluded = false;
+            for (const auto& ex : excludeInName) {
+                std::string exLower = ToLower(ex);
+                if (ContainsToken(entry.nameLower, exLower)) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) matches.push_back(entry);
+        }
+        if (matches.empty()) continue;
+        std::vector<std::string> emptyTokens;
+        bool wantInt8 = preferInt8.has_value() && preferInt8.value();
+        bool wantNonInt8 = preferInt8.has_value() && !preferInt8.value();
+        std::string chosen = ChooseLargest(matches, emptyTokens, wantInt8, wantNonInt8);
+        if (!chosen.empty()) return chosen;
+        chosen = ChooseLargest(matches, emptyTokens, false, false);
+        if (!chosen.empty()) return chosen;
     }
     return "";
 }
