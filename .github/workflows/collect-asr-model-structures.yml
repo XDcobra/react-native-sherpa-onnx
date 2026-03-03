@@ -2,7 +2,8 @@
 # For each .tar.bz2 asset: list contents with tar -tjf (no extraction).
 # For each .onnx asset: record single-file entry.
 # Creates or extends test/fixtures/asr-models-expected.csv (new assets get empty model_type).
-# Results are cached per asset; aggregated output is written to test/fixtures and committed.
+# Already-processed assets are read from asr-models-structure.txt; only new assets are downloaded.
+# Aggregated output is written to test/fixtures and committed.
 
 name: Testdata - Collect ASR model structures
 
@@ -34,24 +35,6 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # Restore latest cache (restore-keys matches any asr-models-trees-*). Save uses
-      # job.check_run_id so each run has a unique key and never hits ReserveCacheError.
-      # See https://github.com/gradle/actions/issues/722 and
-      # https://github.com/orgs/community/discussions/8945#discussioncomment-14374985
-      - name: Restore tree cache
-        id: tree-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: tree-cache
-          key: asr-models-trees-${{ job.check_run_id }}
-          restore-keys: |
-            asr-models-trees-
-      - name: Log cache restore result
-        run: |
-          echo "cache-hit: ${{ steps.tree-cache.outputs.cache-hit }}"
-          echo "tree-cache contents:"
-          ls -la tree-cache 2>/dev/null || echo "(empty or missing)"
-
       - name: Get asset list (filter .tar.bz2 and .onnx, cap from input)
         id: assets
         env:
@@ -75,7 +58,30 @@ jobs:
           echo "Asset list:"
           cat asset-list.txt || true
 
-      - name: Process each asset (download, list, cache, cleanup)
+      - name: Parse existing asr-models-structure.txt into tree-cache
+        run: |
+          STRUCTURE_FILE="test/fixtures/asr-models-structure.txt"
+          mkdir -p tree-cache
+          if [[ -f "$STRUCTURE_FILE" ]]; then
+            cur=""
+            safe=""
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^#\ Asset:\ (.+)$ ]]; then
+                cur="${BASH_REMATCH[1]}"
+                safe="${cur//\//-}"
+                safe="${safe//\\/-}"
+                : > "tree-cache/${safe}.txt"
+              elif [[ -n "$cur" ]]; then
+                printf '%s\n' "$line" >> "tree-cache/${safe}.txt"
+              fi
+            done < "$STRUCTURE_FILE"
+            count=$(find tree-cache -name '*.txt' 2>/dev/null | wc -l)
+            echo "Parsed $count assets from $STRUCTURE_FILE"
+          else
+            echo "No existing structure file, tree-cache will be populated by downloads only"
+          fi
+
+      - name: Process each asset (download, list, cleanup)
         run: |
           mkdir -p tree-cache work
           while IFS='|' read -r name url; do
@@ -85,7 +91,7 @@ jobs:
             safe="${safe//\\/-}"
             cache_file="tree-cache/${safe}.txt"
             if [ -f "$cache_file" ]; then
-              echo "Skip (cached): $name"
+              echo "Skip (already in structure file): $name"
               continue
             fi
             echo "Processing: $name"
@@ -111,15 +117,6 @@ jobs:
             rm -f "$dl"
           done < asset-list.txt
           rm -rf work
-
-      # Save with key unique to this job to avoid ReserveCacheError (another job may be
-      # creating this cache). Restore uses restore-keys asr-models-trees- to load the latest.
-      - name: Save tree cache
-        if: always()
-        uses: actions/cache/save@v5
-        with:
-          path: tree-cache
-          key: asr-models-trees-${{ job.check_run_id }}
 
       - name: Build aggregated output file
         run: |
@@ -173,7 +170,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add test/fixtures/asr-models-structure.txt test/fixtures/asr-models-expected.csv
           git status --short
-          # Only commit when our tracked files actually changed (ignore untracked asset-list.txt, tree-cache/)
+          # Only commit when our tracked files actually changed (ignore untracked asset-list.txt, tree-cache)
           if ! git diff --staged --quiet; then
             git commit -m "chore(testdata): update ASR model structures and expected CSV from asr-models release"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
