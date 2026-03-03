@@ -33,14 +33,18 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
-#include <android/log.h>
 #include <cstdlib>
 #include <string>
 #include <algorithm>
-
+#ifdef __ANDROID__
+#include <android/log.h>
 #define LOG_TAG "SttModelDetect"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) ((void)0)
+#define LOGE(...) ((void)0)
+#endif
 
 namespace sherpaonnx {
 namespace {
@@ -669,6 +673,53 @@ SttDetectResult DetectSttModel(
     }
     LOGI("DetectSttModel: tokens=%s (required=%d)", EmptyOrPath(result.paths.tokens), (int)result.tokensRequired);
     LOGI("DetectSttModel: detection OK for %s", modelDir.c_str());
+    result.ok = true;
+    return result;
+}
+
+// Test-only: used by host-side model_detect_test; not used in production (Android/iOS use DetectSttModel).
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::optional<bool>& preferInt8,
+    const std::optional<std::string>& modelType
+) {
+    using namespace model_detect;
+
+    SttDetectResult result;
+    const int kMaxSearchDepth = 4;
+
+    if (modelDir.empty()) {
+        result.error = "Model directory is empty";
+        return result;
+    }
+
+    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, kMaxSearchDepth, preferInt8);
+    SttPathHints hints = GetSttPathHints(modelDir);
+    SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
+
+    CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
+
+    result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
+    if (result.selectedKind == SttModelKind::kUnknown) {
+        if (result.error.empty())
+            result.error = "No compatible model type detected in " + modelDir;
+        result.ok = false;
+        return result;
+    }
+
+    result.tokensRequired = (result.selectedKind != SttModelKind::kFunAsrNano);
+    ApplyPathsForSttKind(result.selectedKind, candidate, result.paths);
+
+    result.paths.tokens = candidate.tokens;
+    result.paths.bpeVocab = candidate.bpeVocab;
+
+    if (result.tokensRequired && candidate.tokens.empty()) {
+        result.error = "Tokens file not found in " + modelDir;
+        result.ok = false;
+        return result;
+    }
+
     result.ok = true;
     return result;
 }

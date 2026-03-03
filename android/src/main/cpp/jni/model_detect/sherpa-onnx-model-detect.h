@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_DETECT_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect-helper.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -170,6 +171,17 @@ SttDetectResult DetectSttModel(
     const std::optional<bool>& preferInt8,
     const std::optional<std::string>& modelType,
     bool debug = false
+);
+
+/** Test-only: Like DetectSttModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). Not used in
+ *  production (Android/iOS use DetectSttModel). Does not validate modelDir existence or
+ *  call FileExists on tokens/bpeVocab. */
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::optional<bool>& preferInt8 = std::nullopt,
+    const std::optional<std::string>& modelType = std::nullopt
 );
 
 TtsDetectResult DetectTtsModel(
