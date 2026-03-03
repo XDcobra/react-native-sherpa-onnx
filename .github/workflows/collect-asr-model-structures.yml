@@ -4,17 +4,16 @@
 # Results are cached per asset; aggregated output is written to test/fixtures/asr-models-structure.txt and committed.
 # Cap: first 5 matching assets (for testing); remove cap later to process all.
 
-name: Collect ASR model structures
+name: Testdata - Collect ASR model structures
 
 on:
-  push:
-  #workflow_dispatch:
-  #  inputs:
-  #    asset_limit:
-  #      description: 'Max number of assets to process (0 = no limit)'
-  #      required: false
-  #      default: 5
-  #      type: number
+  workflow_dispatch:
+    inputs:
+      asset_limit:
+        description: 'Max number of assets to process (0 or empty = no limit, process all)'
+        required: false
+        default: 0
+        type: number
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -50,17 +49,19 @@ jobs:
           RESP=$(curl -sL "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/asr-models")
           if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
             LIST=$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)"')
-            if [ "${ASSET_LIMIT:-5}" = "0" ]; then
+            if [ -z "$ASSET_LIMIT" ] || [ "$ASSET_LIMIT" = "0" ]; then
               echo "$LIST" > asset-list.txt
+              echo "No limit: processing all matching assets"
             else
-              echo "$LIST" | head -n "${ASSET_LIMIT:-5}" > asset-list.txt
+              echo "$LIST" | head -n "$ASSET_LIMIT" > asset-list.txt
+              echo "Limit: first $ASSET_LIMIT assets"
             fi
           else
             echo "::warning::Release asr-models not found or has no assets"
             touch asset-list.txt
           fi
           echo "count=$(wc -l < asset-list.txt)" >> $GITHUB_OUTPUT
-          echo "Asset list (limit=${ASSET_LIMIT:-5}):"
+          echo "Asset list:"
           cat asset-list.txt || true
 
       - name: Process each asset (download, list, cache, cleanup)
@@ -125,7 +126,7 @@ jobs:
           git add test/fixtures/asr-models-structure.txt
           git status --short
           if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "chore: update ASR model structures from asr-models release"
+            git commit -m "chore(testdata): update ASR model structures from asr-models release"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
           else
             echo "No changes to commit."
