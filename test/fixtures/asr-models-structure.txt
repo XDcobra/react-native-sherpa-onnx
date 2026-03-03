@@ -103,3 +103,19 @@ sherpa-onnx-paraformer-zh-small-2024-03-09/test_wavs/3-sichuan.wav
 sherpa-onnx-paraformer-zh-small-2024-03-09/am.mvn
 sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx
 
+# Asset: sherpa-onnx-paraformer-zh-2023-03-28.tar.bz2
+sherpa-onnx-paraformer-zh-2023-03-28/
+sherpa-onnx-paraformer-zh-2023-03-28/README.md
+sherpa-onnx-paraformer-zh-2023-03-28/tokens.txt
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/6-zh-en.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/5-henan.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/8k.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/0.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/2.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/1.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/4-tianjin.wav
+sherpa-onnx-paraformer-zh-2023-03-28/test_wavs/3-sichuan.wav
+sherpa-onnx-paraformer-zh-2023-03-28/model.int8.onnx
+sherpa-onnx-paraformer-zh-2023-03-28/model.onnx
+
