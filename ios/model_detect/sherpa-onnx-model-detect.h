@@ -21,6 +21,7 @@ enum class SttModelKind {
     kFunAsrNano,
     kFireRedAsr,
     kMoonshine,
+    kMoonshineV2,
     kDolphin,
     kCanary,
     kOmnilingual,
@@ -56,6 +57,8 @@ struct SttModelPaths {
     std::string moonshineEncoder;
     std::string moonshineUncachedDecoder;
     std::string moonshineCachedDecoder;
+    /** Moonshine v2: encoder + mergedDecoder (reuse moonshineEncoder for encoder path). */
+    std::string moonshineMergedDecoder;
     std::string dolphinModel;
     std::string omnilingualModel;
     std::string medasrModel;

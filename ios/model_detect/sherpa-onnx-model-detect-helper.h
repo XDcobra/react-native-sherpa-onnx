@@ -38,6 +38,13 @@ std::string FindOnnxByAnyToken(
     const std::vector<std::string>& tokens,
     const std::optional<bool>& preferInt8
 );
+/** Like FindOnnxByAnyToken but skips any file whose nameLower contains any of \p excludeInName. */
+std::string FindOnnxByAnyTokenExcluding(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::vector<std::string>& excludeInName,
+    const std::optional<bool>& preferInt8
+);
 std::string FindLargestOnnxExcludingTokens(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& excludeTokens

@@ -207,6 +207,10 @@ SttInitializeResult SttWrapper::initialize(
                 config.model_config.moonshine.uncached_decoder = detect.paths.moonshineUncachedDecoder;
                 config.model_config.moonshine.cached_decoder = detect.paths.moonshineCachedDecoder;
                 break;
+            case SttModelKind::kMoonshineV2:
+                config.model_config.moonshine.encoder = detect.paths.moonshineEncoder;
+                config.model_config.moonshine.merged_decoder = detect.paths.moonshineMergedDecoder;
+                break;
             case SttModelKind::kDolphin:
                 config.model_config.dolphin.model = detect.paths.dolphinModel;
                 break;
