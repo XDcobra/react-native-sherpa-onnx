@@ -9,14 +9,13 @@
 name: Testdata - Collect TTS model structures
 
 on:
-  push:
-  #workflow_dispatch:
-  #  inputs:
-  #    asset_limit:
-  #      description: 'Max number of assets to process (0 or empty = no limit, process all)'
-  #      required: false
-  #      default: 0
-  #      type: number
+  workflow_dispatch:
+    inputs:
+      asset_limit:
+        description: 'Max number of assets to process (0 or empty = no limit, process all)'
+        required: false
+        default: 0
+        type: number
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
