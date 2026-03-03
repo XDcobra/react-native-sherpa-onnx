@@ -34,12 +34,18 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      # Restore latest cache (restore-keys matches any asr-models-trees-*). Save uses
+      # job.check_run_id so each run has a unique key and never hits ReserveCacheError.
+      # See https://github.com/gradle/actions/issues/722 and
+      # https://github.com/orgs/community/discussions/8945#discussioncomment-14374985
       - name: Restore tree cache
         id: tree-cache
         uses: actions/cache/restore@v5
         with:
           path: tree-cache
-          key: asr-models-trees-asr-models
+          key: asr-models-trees-${{ job.check_run_id }}
+          restore-keys: |
+            asr-models-trees-
       - name: Log cache restore result
         run: |
           echo "cache-hit: ${{ steps.tree-cache.outputs.cache-hit }}"
@@ -106,14 +112,14 @@ jobs:
           done < asset-list.txt
           rm -rf work
 
-      # Save immediately after processing so the cache is persisted even if a later step
-      # (e.g. commit) fails. The default cache post-step only runs on job success.
+      # Save with key unique to this job to avoid ReserveCacheError (another job may be
+      # creating this cache). Restore uses restore-keys asr-models-trees- to load the latest.
       - name: Save tree cache
         if: always()
         uses: actions/cache/save@v5
         with:
           path: tree-cache
-          key: asr-models-trees-asr-models
+          key: asr-models-trees-${{ job.check_run_id }}
 
       - name: Build aggregated output file
         run: |
