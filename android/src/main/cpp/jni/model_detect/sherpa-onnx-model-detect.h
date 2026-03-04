@@ -125,6 +125,8 @@ struct SttCapabilities {
     bool hasFunAsrNano = false;
     bool hasDolphin = false;
     bool hasFireRedAsr = false;
+    /** True when dir name suggests Fire Red but only a single CTC/paraformer model (no encoder/decoder). Use zipformer_ctc. */
+    bool hasFireRedCtc = false;
     bool hasCanary = false;
     bool hasOmnilingual = false;
     bool hasMedAsr = false;

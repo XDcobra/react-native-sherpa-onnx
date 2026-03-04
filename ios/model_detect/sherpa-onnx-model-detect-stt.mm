@@ -341,7 +341,10 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     c.hasMoonshineV2 = !paths.moonshineMergedDecoder.empty() && !paths.encoderForV2.empty() && paths.joiner.empty();
     c.hasParaformer = !paths.paraformerModel.empty();
     c.hasDolphin = hints.isLikelyDolphin && !paths.ctcModel.empty();
+    // Fire Red ASR: only encoder+decoder (two files). Single-file Fire Red (e.g. fire-red-asr2-ctc) uses CTC path to avoid native crash.
     c.hasFireRedAsr = (c.hasTransducer || (hasWhisperEnc && hasWhisperDec && paths.joiner.empty())) && hints.isLikelyFireRedAsr;
+    c.hasFireRedCtc = hints.isLikelyFireRedAsr && paths.encoder.empty() && paths.decoder.empty() &&
+        (!paths.ctcModel.empty() || !paths.paraformerModel.empty());
     c.hasCanary = hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && hints.isLikelyCanary;
     c.hasOmnilingual = !paths.ctcModel.empty() && hints.isLikelyOmnilingual;
     c.hasMedAsr = !paths.ctcModel.empty() && hints.isLikelyMedAsr;
@@ -484,6 +487,7 @@ static SttModelKind ResolveSttKind(
         return SttModelKind::kSenseVoice;
     }
     if (cap.hasFunAsrNano && hints.isLikelyFunAsrNano) return SttModelKind::kFunAsrNano;
+    if (cap.hasFireRedCtc) return SttModelKind::kZipformerCtc;
     if (!paths.paraformerModel.empty()) return SttModelKind::kParaformer;
     if (cap.hasCanary) return SttModelKind::kCanary;
     if (cap.hasFireRedAsr) return SttModelKind::kFireRedAsr;
@@ -521,6 +525,12 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             resultPaths.whisperEncoder = candidate.encoder;
             resultPaths.whisperDecoder = candidate.decoder;
             break;
+        case SttModelKind::kFireRedAsr: {
+            std::string singleModel = candidate.paraformerModel.empty() ? candidate.ctcModel : candidate.paraformerModel;
+            resultPaths.fireRedEncoder = candidate.encoder.empty() ? singleModel : candidate.encoder;
+            resultPaths.fireRedDecoder = candidate.decoder.empty() ? singleModel : candidate.decoder;
+            break;
+        }
         case SttModelKind::kFunAsrNano:
             resultPaths.funasrEncoderAdaptor = candidate.funasrEncoderAdaptor;
             resultPaths.funasrLLM = candidate.funasrLLM;
@@ -539,10 +549,6 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             break;
         case SttModelKind::kDolphin:
             resultPaths.dolphinModel = candidate.ctcModel.empty() ? candidate.paraformerModel : candidate.ctcModel;
-            break;
-        case SttModelKind::kFireRedAsr:
-            resultPaths.fireRedEncoder = candidate.encoder;
-            resultPaths.fireRedDecoder = candidate.decoder;
             break;
         case SttModelKind::kCanary:
             resultPaths.canaryEncoder = candidate.encoder;
@@ -603,11 +609,15 @@ SttDetectResult DetectSttModel(
          EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder));
     LOGI("DetectSttModel: funasr encoderAdaptor=%s llm=%s embedding=%s tokenizerDir=%s",
          EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
-    LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d",
+    LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d hasDolphin=%d hasFireRedAsr=%d hasFireRedCtc=%d hasCanary=%d hasOmnilingual=%d hasMedAsr=%d hasTeleSpeechCtc=%d hasToneCtc=%d",
          (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
-         (int)cap.hasParaformer, (int)cap.hasFunAsrNano);
-    LOGI("DetectSttModel: isLikelyMoonshine=%d isLikelyNemo=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d",
-         (int)hints.isLikelyMoonshine, (int)hints.isLikelyNemo, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice);
+         (int)cap.hasParaformer, (int)cap.hasFunAsrNano, (int)cap.hasDolphin, (int)cap.hasFireRedAsr, (int)cap.hasFireRedCtc,
+         (int)cap.hasCanary, (int)cap.hasOmnilingual, (int)cap.hasMedAsr, (int)cap.hasTeleSpeechCtc, (int)cap.hasToneCtc);
+    LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d",
+         (int)hints.isLikelyNemo, (int)hints.isLikelyTdt, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice,
+         (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
+         (int)hints.isLikelyFireRedAsr, (int)hints.isLikelyCanary, (int)hints.isLikelyOmnilingual, (int)hints.isLikelyMedAsr,
+         (int)hints.isLikelyTeleSpeech, (int)hints.isLikelyToneCtc, (int)hints.isLikelyParaformer);
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
 
@@ -668,6 +678,10 @@ SttDetectResult DetectSttModel(
         case SttModelKind::kZipformerCtc:
         case SttModelKind::kToneCtc:
             LOGI("DetectSttModel: paths set ctcModel=%s", EmptyOrPath(result.paths.ctcModel));
+            break;
+        case SttModelKind::kFireRedAsr:
+            LOGI("DetectSttModel: paths set fireRedEncoder=%s fireRedDecoder=%s",
+                 EmptyOrPath(result.paths.fireRedEncoder), EmptyOrPath(result.paths.fireRedDecoder));
             break;
         case SttModelKind::kFunAsrNano:
             LOGI("DetectSttModel: paths set funasr adaptor=%s llm=%s embedding=%s tokenizer=%s",
