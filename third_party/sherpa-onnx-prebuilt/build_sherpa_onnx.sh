@@ -220,6 +220,15 @@ build_abi() {
                 cp -n "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session/"*.h "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/" 2>/dev/null || true
             fi
         fi
+        # Sherpa-onnx's Android build scripts (build-android-arm64-v8a.sh etc.) use a hardcoded onnxruntime_version=1.17.1
+        # and only look for libonnxruntime.so under that path. If not found, they download from csukuangfj/onnxruntime-libs
+        # (vanilla ORT without our NNAPI/XNNPACK). So we duplicate our prebuilt into 1.17.1/ so the scripts find it and
+        # install/lib ends up with our libonnxruntime.so instead of the downloaded one.
+        SHERPA_SCRIPT_ORT_VERSION=1.17.1
+        mkdir -p "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/jni/$ABI"
+        mkdir -p "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/headers"
+        cp "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI/libonnxruntime.so" "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/jni/$ABI/"
+        cp -R "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/"* "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/headers/"
     fi
 
     export BUILD_SHARED_LIBS=ON
