@@ -37,6 +37,18 @@ if libarchive_sources.empty?
   abort("[SherpaOnnx] Libarchive sources missing. Ensure third_party/libarchive_prebuilt/libarchive-ios-layout exists (run third_party/libarchive_prebuilt/build_libarchive_ios.sh) or ios/scripts/setup-ios-libarchive.sh has run, and that ios/scripts/patch-libarchive-includes.sh succeeds. Check pod install logs for patch script errors.")
 end
 
+# Run iOS framework setup when podspec is loaded (works for :path pods).
+setup_script = File.join(pod_root, "scripts", "setup-ios-framework.sh")
+if File.exist?(setup_script)
+  prev = ENV["SHERPA_ONNX_PROJECT_ROOT"]
+  ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
+  unless system("bash", setup_script)
+    ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG and network. Run manually: bash #{setup_script}")
+  end
+  ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
+end
+
 Pod::Spec.new do |s|
   s.name         = "SherpaOnnx"
   s.version      = package["version"]
@@ -48,14 +60,10 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
 
-  # Download sherpa-onnx XCFramework from GitHub Releases before pod install (uses IOS_RELEASE_TAG for pinned version).
-  setup_script = File.join(pod_root, "scripts", "setup-ios-framework.sh")
-  s.prepare_command = "bash \"#{setup_script}\""
-
   s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}", *libarchive_sources]
   s.private_header_files = "ios/**/*.h"
 
-  s.frameworks = "Foundation", "Accelerate", "CoreML"
+  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
   s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework"
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")

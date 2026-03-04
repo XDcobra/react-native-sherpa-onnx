@@ -21,6 +21,7 @@ enum class SttModelKind {
     kFunAsrNano,
     kFireRedAsr,
     kMoonshine,
+    kMoonshineV2,
     kDolphin,
     kCanary,
     kOmnilingual,
@@ -48,6 +49,8 @@ struct SttModelPaths {
     std::string whisperEncoder;
     std::string whisperDecoder;
     std::string tokens;
+    /** BPE vocabulary for hotwords tokenization (sentencepiece export bpe.vocab). Optional. */
+    std::string bpeVocab;
     std::string funasrEncoderAdaptor;
     std::string funasrLLM;
     std::string funasrEmbedding;
@@ -56,6 +59,8 @@ struct SttModelPaths {
     std::string moonshineEncoder;
     std::string moonshineUncachedDecoder;
     std::string moonshineCachedDecoder;
+    /** Moonshine v2: encoder + mergedDecoder (reuse moonshineEncoder for encoder path). */
+    std::string moonshineMergedDecoder;
     std::string dolphinModel;
     std::string omnilingualModel;
     std::string medasrModel;
@@ -64,6 +69,69 @@ struct SttModelPaths {
     std::string fireRedDecoder;
     std::string canaryEncoder;
     std::string canaryDecoder;
+};
+
+/** All candidate paths gathered before model kind selection (used by STT detection steps). */
+struct SttCandidatePaths {
+    std::string encoder;
+    std::string decoder;
+    std::string joiner;
+    std::string paraformerModel;
+    std::string ctcModel;
+    std::string tokens;
+    std::string bpeVocab;
+    std::string funasrEncoderAdaptor;
+    std::string funasrLLM;
+    std::string funasrEmbedding;
+    std::string funasrTokenizerDir;
+    std::string moonshinePreprocessor;
+    std::string moonshineEncoder;
+    std::string moonshineUncachedDecoder;
+    std::string moonshineCachedDecoder;
+    std::string moonshineMergedDecoder;
+    std::string encoderForV2;
+};
+
+/** Path hints derived from model directory name (isLikely* flags). */
+struct SttPathHints {
+    bool isLikelyNemo = false;
+    bool isLikelyTdt = false;
+    bool isLikelyWenetCtc = false;
+    bool isLikelySenseVoice = false;
+    bool isLikelyFunAsrNano = false;
+    bool isLikelyZipformer = false;
+    bool isLikelyMoonshine = false;
+    bool isLikelyDolphin = false;
+    bool isLikelyFireRedAsr = false;
+    bool isLikelyCanary = false;
+    bool isLikelyOmnilingual = false;
+    bool isLikelyMedAsr = false;
+    bool isLikelyTeleSpeech = false;
+    bool isLikelyToneCtc = false;
+    bool isLikelyParaformer = false;
+    /** VAD (silero, ten-vad, etc.): not yet supported; when true, detection returns unsupported. */
+    bool isLikelyVad = false;
+    /** TDNN (keyword/yesno): not yet supported; when true, detection returns unsupported. */
+    bool isLikelyTdnn = false;
+};
+
+/** Which model types are possible given paths and hints (has* flags). */
+struct SttCapabilities {
+    bool hasTransducer = false;
+    bool hasWhisper = false;
+    bool hasMoonshine = false;
+    bool hasMoonshineV2 = false;
+    bool hasParaformer = false;
+    bool hasFunAsrNano = false;
+    bool hasDolphin = false;
+    bool hasFireRedAsr = false;
+    /** True when dir name suggests Fire Red but only a single CTC/paraformer model (no encoder/decoder). Use zipformer_ctc. */
+    bool hasFireRedCtc = false;
+    bool hasCanary = false;
+    bool hasOmnilingual = false;
+    bool hasMedAsr = false;
+    bool hasTeleSpeechCtc = false;
+    bool hasToneCtc = false;
 };
 
 struct TtsModelPaths {
@@ -87,6 +155,8 @@ struct TtsModelPaths {
 struct SttDetectResult {
     bool ok = false;
     std::string error;
+    /** True when detection failed because the model is for unsupported hardware (RK35xx, Ascend, CANN, etc.). */
+    bool isHardwareSpecificUnsupported = false;
     std::vector<DetectedModel> detectedModels;
     SttModelKind selectedKind = SttModelKind::kUnknown;
     bool tokensRequired = true;

@@ -22,11 +22,11 @@ std::vector<std::string> ListDirectories(const std::string& path);
 std::vector<FileEntry> ListFiles(const std::string& path);
 std::vector<FileEntry> ListFilesRecursive(const std::string& path, int maxDepth = 2);
 std::string ToLower(std::string value);
-std::string ResolveTokenizerDir(const std::string& modelDir);
 
-std::string FindFileByName(const std::string& baseDir, const std::string& fileName, int maxDepth = 2);
-std::string FindFileEndingWith(const std::string& baseDir, const std::string& suffix, int maxDepth = 2);
-std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth = 2);
+/** Find file in \p files whose name equals \p fileName (case-insensitive). Uses file tree only, no filesystem. */
+std::string FindFileByName(const std::vector<FileEntry>& files, const std::string& fileName);
+/** Find file in \p files whose name equals or ends with \p suffix (e.g. tokens.txt). Case-insensitive. */
+std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::string& suffix);
 
 std::string FindOnnxByToken(
     const std::vector<FileEntry>& files,
@@ -37,6 +37,14 @@ std::string FindOnnxByToken(
 std::string FindOnnxByAnyToken(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& tokens,
+    const std::optional<bool>& preferInt8
+);
+
+/** Like FindOnnxByAnyToken but skips any file whose nameLower contains any of \p excludeInName. */
+std::string FindOnnxByAnyTokenExcluding(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::vector<std::string>& excludeInName,
     const std::optional<bool>& preferInt8
 );
 

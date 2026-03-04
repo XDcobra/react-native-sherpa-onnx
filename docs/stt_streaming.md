@@ -4,6 +4,8 @@ This guide covers the **streaming STT** API for real-time recognition with parti
 
 **Import path:** `react-native-sherpa-onnx/stt` (streaming is not exported from the main package).
 
+For **live microphone capture** with automatic resampling (e.g. 16 kHz for STT), use the [PCM Live Stream API](pcm_live_stream.md) from `react-native-sherpa-onnx/audio` and feed its output into `stream.processAudioChunk()`.
+
 ## Table of contents
 
 - [Quick usage](#quick-usage)

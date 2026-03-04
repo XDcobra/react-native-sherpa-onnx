@@ -132,7 +132,7 @@ export interface SttStream {
    * Reduces bridge round-trips from 5 to 1 per chunk.
    */
   processAudioChunk(
-    samples: number[],
+    samples: number[] | Float32Array,
     sampleRate: number
   ): Promise<{ result: StreamingSttResult; isEndpoint: boolean }>;
 }

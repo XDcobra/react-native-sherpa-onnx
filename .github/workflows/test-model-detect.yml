@@ -1,0 +1,52 @@
+# Test Model Detect: On PR to main, run CSV check (warning only) then ASR and TTS model detection tests.
+# If either the ASR or TTS detection workflow fails, this workflow fails.
+# Runs in parallel with sdk-android, sdk-ios, sdk-sdk on pull_request.
+
+name: Test – Full model detection
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# No concurrency here to avoid deadlock with workflow_call: the called workflow (test-asr-model-detect) has its own group.
+jobs:
+  check-csvs:
+    name: Check CSV vs GitHub assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Check ASR/TTS assets vs expected CSVs
+        run: bash scripts/check-model-csvs.sh
+        # Script always exits 0; outputs warning if new assets are on GitHub but not in CSVs
+        # In case of new assets available on Github, follow this procedure:
+        # 0. Decide if the new assets are for models already supported
+        # If yes:
+        # 1. Run the collect workflows to update the CSVs
+        # 2. Fill out the result column in the CSV with the expectedmodel type
+        # 3. Push and run this workflow again
+        # If no:
+        # 1. Open an issue on github to add support for this new model type
+        # 2. Run the collect workflow to update the CSVs
+        # 3. Fill out the result column in the CSV with "unsupported"
+        # 4. Push and run this workflow again
+
+
+  asr-model-detect:
+    name: ASR model detection
+    needs: [check-csvs]
+    uses: ./.github/workflows/test-asr-model-detect.yml
+    secrets: inherit
+
+  # TTS model detection is disabled for now
+  # TODO: Enable after collect workflow is run
+  #tts-model-detect:
+  #  name: TTS model detection
+  #  needs: [check-csvs]
+  #  uses: ./.github/workflows/test-tts-model-detect.yml
+  #  secrets: inherit

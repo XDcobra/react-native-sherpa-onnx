@@ -38,6 +38,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         case K::kFunAsrNano: return @"funasr_nano";
         case K::kFireRedAsr: return @"fire_red_asr";
         case K::kMoonshine: return @"moonshine";
+        case K::kMoonshineV2: return @"moonshine_v2";
         case K::kDolphin: return @"dolphin";
         case K::kCanary: return @"canary";
         case K::kOmnilingual: return @"omnilingual";
@@ -268,6 +269,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);
+        resultDict[@"isHardwareSpecificUnsupported"] = @(result.isHardwareSpecificUnsupported);
         if (!result.error.empty()) {
             resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
         }

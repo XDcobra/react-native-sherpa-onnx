@@ -175,6 +175,27 @@ jobs:
           echo "Layout contents:"
           find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' -o -name '*.jar' \) | head -50
 
+      - name: Validate libonnxruntime.so in sherpa prebuilt has QNN, NNAPI and XNNPACK symbols
+        run: |
+          PREBUILT=third_party/sherpa-onnx-prebuilt/android
+          SO="$PREBUILT/arm64-v8a/lib/libonnxruntime.so"
+          if [ ! -f "$SO" ]; then
+            echo "::error::libonnxruntime.so not found at $SO"
+            exit 1
+          fi
+          MISSING=""
+          for token in qnn nnapi xnnpack; do
+            if ! strings "$SO" | grep -qi "$token"; then
+              MISSING="$MISSING $token"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::sherpa prebuilt libonnxruntime.so is missing expected provider symbols (strings):$MISSING"
+            echo "Ensure build_sherpa_onnx.sh uses your ORT release (1.17.1 layout) so the bundled .so is your build with NNAPI/XNNPACK."
+            exit 1
+          fi
+          echo "Validated: sherpa prebuilt libonnxruntime.so contains qnn, nnapi and xnnpack (strings)."
+
       - name: Create release zip
         run: |
           cd sherpa-onnx-android-layout
@@ -207,6 +228,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
+          make_latest: false  # do not set this release as GitHub's "latest" (e.g. to keep app/npm release as latest)
           body: |
             Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
             - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so), `c-api/` (C headers), `java/classes.jar` (Kotlin API). Gradle copies to jniLibs, include, and sherpa-onnx-classes.

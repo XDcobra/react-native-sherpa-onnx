@@ -1,0 +1,176 @@
+# Collect TTS model archive structures from k2-fsa/sherpa-onnx tts-models release.
+# For each .tar.bz2 asset: list contents with tar -tjf (no extraction).
+# For each .onnx asset: record single-file entry.
+# Creates or extends test/fixtures/tts-models-expected.csv (new assets get empty model_type).
+# Already-processed assets are read from tts-models-structure.txt; only new assets are downloaded.
+# Aggregated output is written to test/fixtures and committed.
+# Release: https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+
+name: Testdata - Collect TTS model structures
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_limit:
+        description: 'Max number of assets to process (0 or empty = no limit, process all)'
+        required: false
+        default: 0
+        type: number
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Get asset list (filter .tar.bz2 and .onnx, cap from input)
+        id: assets
+        env:
+          ASSET_LIMIT: ${{ inputs.asset_limit }}
+        run: |
+          RESP=$(curl -sL "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/tts-models")
+          if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
+            LIST=$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)"')
+            if [ -z "$ASSET_LIMIT" ] || [ "$ASSET_LIMIT" = "0" ]; then
+              echo "$LIST" > asset-list.txt
+              echo "No limit: processing all matching assets"
+            else
+              echo "$LIST" | head -n "$ASSET_LIMIT" > asset-list.txt
+              echo "Limit: first $ASSET_LIMIT assets"
+            fi
+          else
+            echo "::warning::Release tts-models not found or has no assets"
+            touch asset-list.txt
+          fi
+          echo "count=$(wc -l < asset-list.txt)" >> $GITHUB_OUTPUT
+          echo "Asset list:"
+          cat asset-list.txt || true
+
+      - name: Parse existing tts-models-structure.txt into tree-cache
+        run: |
+          STRUCTURE_FILE="test/fixtures/tts-models-structure.txt"
+          mkdir -p tree-cache
+          if [[ -f "$STRUCTURE_FILE" ]]; then
+            cur=""
+            safe=""
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^#\ Asset:\ (.+)$ ]]; then
+                cur="${BASH_REMATCH[1]}"
+                safe="${cur//\//-}"
+                safe="${safe//\\/-}"
+                : > "tree-cache/${safe}.txt"
+              elif [[ -n "$cur" ]]; then
+                printf '%s\n' "$line" >> "tree-cache/${safe}.txt"
+              fi
+            done < "$STRUCTURE_FILE"
+            count=$(find tree-cache -name '*.txt' 2>/dev/null | wc -l)
+            echo "Parsed $count assets from $STRUCTURE_FILE"
+          else
+            echo "No existing structure file, tree-cache will be populated by downloads only"
+          fi
+
+      - name: Process each asset (download, list, cleanup)
+        run: |
+          mkdir -p tree-cache work
+          while IFS='|' read -r name url; do
+            [ -z "$name" ] && continue
+            safe="${name//\//-}"
+            safe="${safe//\\/-}"
+            cache_file="tree-cache/${safe}.txt"
+            if [ -f "$cache_file" ]; then
+              echo "Skip (already in structure file): $name"
+              continue
+            fi
+            echo "Processing: $name"
+            dl="work/${safe}"
+            if ! curl -sSL -o "$dl" "$url"; then
+              echo "::warning::Download failed for $name, skipping"
+              rm -f "$dl"
+              continue
+            fi
+            if [[ "$name" == *.tar.bz2 ]]; then
+              if ! tar -tjf "$dl" > "$cache_file" 2>/dev/null; then
+                echo "::warning::tar -tjf failed for $name, skipping"
+                rm -f "$cache_file" "$dl"
+                continue
+              fi
+            elif [[ "$name" == *.onnx ]]; then
+              echo "single file: $name" > "$cache_file"
+            else
+              echo "::warning::Unexpected asset $name, skipping"
+              rm -f "$dl"
+              continue
+            fi
+            rm -f "$dl"
+          done < asset-list.txt
+          rm -rf work
+
+      - name: Build aggregated output file
+        run: |
+          mkdir -p test/fixtures
+          out="test/fixtures/tts-models-structure.txt"
+          : > "$out"
+          while IFS='|' read -r name _; do
+            [ -z "$name" ] && continue
+            safe="${name//\//-}"
+            safe="${safe//\\/-}"
+            cache_file="tree-cache/${safe}.txt"
+            [ -f "$cache_file" ] || continue
+            echo "# Asset: $name" >> "$out"
+            cat "$cache_file" >> "$out"
+          done < asset-list.txt
+          echo "Output preview:"
+          head -80 "$out" || true
+
+      - name: Create or extend CSV (add missing assets with empty model_type)
+        run: |
+          CSV="test/fixtures/tts-models-expected.csv"
+          mkdir -p test/fixtures
+          if [ ! -s asset-list.txt ]; then
+            echo "No assets from release, skipping CSV update."
+            exit 0
+          fi
+          if [ ! -f "$CSV" ]; then
+            echo "asset_name,model_type" > "$CSV"
+          fi
+          tmp=$(mktemp)
+          echo "asset_name,model_type" > "$tmp"
+          while IFS='|' read -r asset _; do
+            [ -z "$asset" ] && continue
+            esc="${asset//./\\.}"
+            line=$(grep -E "^(\"${esc}\"|${esc})," "$CSV" 2>/dev/null | head -1)
+            if [ -n "$line" ]; then
+              echo "$line" >> "$tmp"
+            else
+              echo "${asset}," >> "$tmp"
+            fi
+          done < asset-list.txt
+          mv "$tmp" "$CSV"
+          echo "CSV updated (new assets get empty model_type):"
+          wc -l "$CSV"
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test/fixtures/tts-models-structure.txt test/fixtures/tts-models-expected.csv
+          git status --short
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(testdata): update TTS model structures and expected CSV from tts-models release"
+            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
+          else
+            echo "No changes to commit."
+          fi

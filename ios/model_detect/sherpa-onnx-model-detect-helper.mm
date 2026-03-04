@@ -30,12 +30,16 @@ bool ContainsToken(const std::string& value, const std::string& token) {
     return value.find(token) != std::string::npos;
 }
 
+static bool IsOnnxOrOrtFile(const FileEntry& entry) {
+    return EndsWith(entry.nameLower, ".onnx") || EndsWith(entry.nameLower, ".ort");
+}
+
 std::string ChooseLargest(const std::vector<FileEntry>& files,
     const std::vector<std::string>& excludeTokens, bool onlyInt8, bool onlyNonInt8) {
     std::string chosen;
     std::uint64_t bestSize = 0;
     for (const auto& entry : files) {
-        if (!EndsWith(entry.nameLower, ".onnx")) continue;
+        if (!IsOnnxOrOrtFile(entry)) continue;
         bool hasExcluded = false;
         for (const auto& token : excludeTokens) {
             if (ContainsToken(entry.nameLower, token)) { hasExcluded = true; break; }
@@ -115,7 +119,7 @@ std::string FindOnnxByToken(const std::vector<FileEntry>& files,
     std::string tokenLower = ToLower(token);
     std::vector<FileEntry> matches;
     for (const auto& entry : files) {
-        if (!EndsWith(entry.nameLower, ".onnx")) continue;
+        if (!IsOnnxOrOrtFile(entry)) continue;
         if (ContainsToken(entry.nameLower, tokenLower)) matches.push_back(entry);
     }
     if (matches.empty()) return "";
@@ -136,6 +140,37 @@ std::string FindOnnxByAnyToken(const std::vector<FileEntry>& files,
     return "";
 }
 
+std::string FindOnnxByAnyTokenExcluding(const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens, const std::vector<std::string>& excludeInName,
+    const std::optional<bool>& preferInt8) {
+    for (const auto& token : tokens) {
+        std::string tokenLower = ToLower(token);
+        std::vector<FileEntry> matches;
+        for (const auto& entry : files) {
+            if (!IsOnnxOrOrtFile(entry)) continue;
+            if (!ContainsToken(entry.nameLower, tokenLower)) continue;
+            bool excluded = false;
+            for (const auto& ex : excludeInName) {
+                std::string exLower = ToLower(ex);
+                if (ContainsToken(entry.nameLower, exLower)) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) matches.push_back(entry);
+        }
+        if (matches.empty()) continue;
+        std::vector<std::string> emptyTokens;
+        bool wantInt8 = preferInt8.has_value() && preferInt8.value();
+        bool wantNonInt8 = preferInt8.has_value() && !preferInt8.value();
+        std::string chosen = ChooseLargest(matches, emptyTokens, wantInt8, wantNonInt8);
+        if (!chosen.empty()) return chosen;
+        chosen = ChooseLargest(matches, emptyTokens, false, false);
+        if (!chosen.empty()) return chosen;
+    }
+    return "";
+}
+
 std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::string& suffix) {
     std::string targetSuffix = ToLower(suffix);
     for (const auto& entry : files) {
@@ -147,9 +182,8 @@ std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::s
     return "";
 }
 
-std::string FindFileByName(const std::string& baseDir, const std::string& fileName, int maxDepth) {
+std::string FindFileByName(const std::vector<FileEntry>& files, const std::string& fileName) {
     std::string target = ToLower(fileName);
-    auto files = ListFilesRecursive(baseDir, maxDepth);
     for (const auto& entry : files) {
         if (entry.nameLower == target) return entry.path;
     }
@@ -170,56 +204,6 @@ bool ContainsWord(const std::string& haystack, const std::string& word) {
         pos++;
     }
     return false;
-}
-
-std::string FindDirectoryByName(const std::string& baseDir, const std::string& dirName, int maxDepth) {
-    std::string target = ToLower(dirName);
-    std::vector<std::string> toVisit = ListDirectories(baseDir);
-    int depth = 0;
-    while (!toVisit.empty() && depth <= maxDepth) {
-        std::vector<std::string> next;
-        for (const auto& dir : toVisit) {
-            std::string name = fs::path(dir).filename().string();
-            if (ToLower(name) == target) return dir;
-            if (depth < maxDepth) {
-                auto nested = ListDirectories(dir);
-                next.insert(next.end(), nested.begin(), nested.end());
-            }
-        }
-        toVisit.swap(next);
-        depth += 1;
-    }
-    return "";
-}
-
-std::string ResolveTokenizerDir(const std::string& modelDir) {
-    std::string vocabInMain = modelDir + "/vocab.json";
-    if (FileExists(vocabInMain)) {
-        return modelDir;
-    }
-
-    try {
-        for (const auto& entry : fs::directory_iterator(modelDir)) {
-            if (entry.is_directory()) {
-                std::string dirName = entry.path().filename().string();
-                std::string dirNameLower = ToLower(dirName);
-                if (dirNameLower.find("qwen3") != std::string::npos) {
-                    std::string vocabPath = entry.path().string() + "/vocab.json";
-                    if (FileExists(vocabPath)) {
-                        return entry.path().string();
-                    }
-                }
-            }
-        }
-    } catch (const std::exception&) {
-    }
-
-    std::string commonPath = modelDir + "/Qwen3-0.6B";
-    if (FileExists(commonPath + "/vocab.json")) {
-        return commonPath;
-    }
-
-    return "";
 }
 
 } // namespace model_detect

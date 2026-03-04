@@ -37,6 +37,7 @@ This document describes how `react-native-sherpa-onnx` exposes **execution provi
 - [When does `getXnnpackSupport()` return what?](#when-does-getxnnpacksupport-return-what)
 - [When does `getCoreMlSupport()` return what?](#when-does-getcoremlsupport-return-what)
 - [License and compliance (QNN SDK)](#license-and-compliance-qnn-sdk)
+- [Hardware-specific models (RK35xx, Ascend)](#hardware-specific-models-rk35xx-ascend)
 - [Related documentation](#related-documentation)
 
 ## Quick start: adding QNN runtime libs
@@ -258,6 +259,18 @@ The Qualcomm AI Stack License (see `third_party/onnxruntime_prebuilt/license/lic
 3. **Notices:** Do not remove Qualcomm's copyright or proprietary notices. If your app ships with QNN libraries, include the applicable Qualcomm license/notice (e.g. from the SDK) in your app's legal/credits or documentation.
 
 This "you add QNN libs yourself" approach keeps the SDK compliant (no redistribution of QNN by us) while allowing your app to use NPU acceleration under Qualcomm's terms.
+
+## Hardware-specific models (RK35xx, Ascend)
+
+Models built for **hardware-specific** runtimes (e.g. Rockchip RK35xx, Huawei Ascend/CANN, OM-format 910B/310P3) are **not supported** by this React Native SDK. They target NPUs or runtimes that are not available in the mobile React Native context.
+
+When you call `detectSttModel(modelDir)` (or pass such a path to STT init), the native layer detects these by directory/path tokens (e.g. `rk3588`, `ascend`, `cann`, `910b`, `310p3`) and returns:
+
+- `success: false`
+- `isHardwareSpecificUnsupported: true`
+- `error`: a message explaining that the model is for unsupported hardware and suggesting to use an ONNX or QNN-capable model instead.
+
+Use `isHardwareSpecificUnsupported` to show a specific message or block initialization (e.g. “This model requires special hardware and is not supported on this app”). The SDK will not crash; it returns this result so your app can handle it gracefully.
 
 ## Related documentation
 

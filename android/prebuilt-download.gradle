@@ -99,12 +99,20 @@ def readReleaseTag = { File tagFile ->
 project.tasks.register("downloadNativeLibsIfNeeded") {
   doLast {
     def downloadDir = file("${project.buildDir}/prebuilt-downloads")
+    def currentSherpaVersion = project.ext.sherpaOnnxVersion
+    def sherpaVersionFile = new File(downloadDir, "sherpa-onnx-version.txt")
+    def storedSherpaVersion = (sherpaVersionFile.exists() ? sherpaVersionFile.text.trim() : null)
+    def sherpaNeedsUpdate = !hasAllSherpaLibs() || !hasSherpaHeaders() || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
 
-    if (hasAllSherpaLibs() && hasSherpaHeaders()) {
-      println "[sherpa-onnx] Native libs + headers: (1) local third_party (jniLibs + cpp/include already present)"
+    if (hasAllSherpaLibs() && hasSherpaHeaders() && !sherpaNeedsUpdate) {
+      println "[sherpa-onnx] Native libs + headers: (1) already present, version ${currentSherpaVersion}"
+    }
+    if (sherpaNeedsUpdate && storedSherpaVersion != null && storedSherpaVersion != currentSherpaVersion) {
+      println "[sherpa-onnx] Version change detected (${storedSherpaVersion} -> ${currentSherpaVersion}), refreshing libs and headers"
     }
 
-    if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
+    def sherpaUpdatedFromAar = [false]
+    if (sherpaNeedsUpdate) {
       try {
         def aarFiles = project.configurations.sherpaOnnxAar.files
         if (!aarFiles.isEmpty()) {
@@ -127,6 +135,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             copy { from fileTree(aarExtractDir) { include 'c-api/**' }; into includeSherpaDir }
             println "Extracted sherpa-onnx C-API headers from Maven AAR"
           }
+          downloadDir.mkdirs()
+          sherpaVersionFile.text = currentSherpaVersion
+          sherpaUpdatedFromAar[0] = true
           println "[sherpa-onnx] Native libs + headers: (2) Maven AAR (${aar.name})"
         }
       } catch (Exception e) {
@@ -228,7 +239,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     if (!repo) {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())
       def needLibarchive = !sherpaOnnxDisableLibarchive && (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders())
-      if (needFfmpeg || needLibarchive || !hasAllSherpaLibs() || !hasSherpaHeaders()) {
+      if (needFfmpeg || needLibarchive || (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0])) {
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
           "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist. " +
@@ -290,7 +301,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       println "Downloaded and extracted libarchive prebuilts (libs + include) from ${tag}"
     }
 
-    if (!hasAllSherpaLibs() || !hasSherpaHeaders()) {
+    if (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0]) {
       def tagFile = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
@@ -319,6 +330,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         sherpaOnnxClassesDir.mkdirs()
         copy { from sherpaJavaJar; into sherpaOnnxClassesDir }
       }
+      downloadDir.mkdirs()
+      sherpaVersionFile.text = currentSherpaVersion
       println "[sherpa-onnx] Native libs + headers: (3) GitHub release (${tag})"
     } else {
       def sherpaClassesJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")

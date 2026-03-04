@@ -21,7 +21,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance (from createSTT)
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'fire_red_asr', 'moonshine', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
+   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
    * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
@@ -65,7 +65,7 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
    * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally isHardwareSpecificUnsupported (true when the model is for unsupported hardware e.g. RK35xx, Ascend)
    */
   detectSttModel(
     modelDir: string,
@@ -73,6 +73,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** True when detection failed because the model targets unsupported hardware (RK35xx, Ascend, CANN). Use to show a specific message or block init. */
+    isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
   }>;
@@ -210,6 +212,20 @@ export interface Spec extends TurboModule {
     timestamps: number[];
     isEndpoint: boolean;
   }>;
+
+  /**
+   * Start native PCM live capture. Microphone audio is captured and resampled to the requested
+   * sampleRate; chunks are emitted via the "pcmLiveStreamData" event (base64 Int16 PCM).
+   * App must have RECORD_AUDIO (Android) and NSMicrophoneUsageDescription (iOS) and grant permission before calling.
+   */
+  startPcmLiveStream(options: {
+    sampleRate: number;
+    channelCount?: number;
+    bufferSizeFrames?: number;
+  }): Promise<void>;
+
+  /** Stop native PCM live capture. */
+  stopPcmLiveStream(): Promise<void>;
 
   // ==================== TTS Methods ====================
 
