@@ -351,7 +351,7 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     c.hasParaformer = !paths.paraformerModel.empty() ||
         (hints.isLikelyParaformer && hasWhisperEnc && hasWhisperDec && paths.joiner.empty());
     c.hasDolphin = hints.isLikelyDolphin && !paths.ctcModel.empty();
-    c.hasFireRedAsr = c.hasTransducer && hints.isLikelyFireRedAsr;
+    c.hasFireRedAsr = (c.hasTransducer || (hasWhisperEnc && hasWhisperDec && paths.joiner.empty())) && hints.isLikelyFireRedAsr;
     c.hasCanary = hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && hints.isLikelyCanary;
     c.hasOmnilingual = !paths.ctcModel.empty() && hints.isLikelyOmnilingual;
     c.hasMedAsr = !paths.ctcModel.empty() && hints.isLikelyMedAsr;
