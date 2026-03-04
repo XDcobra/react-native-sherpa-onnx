@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig",
-  "exclude": ["example", "lib", "sherpa-onnx/**", "android/**/harmony-os/**", "third_party/**"]
+  "exclude": ["example", "lib", "sherpa-onnx/**", "android/**/harmony-os/**", "third_party/**", "test/cpp/**", "test/fixtures/**"]
 }
