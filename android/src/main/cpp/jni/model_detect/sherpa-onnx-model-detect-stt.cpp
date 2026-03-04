@@ -303,6 +303,7 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     h.isLikelyTeleSpeech = lower.find("telespeech") != std::string::npos;
     h.isLikelyToneCtc = lower.find("t-one") != std::string::npos || lower.find("t_one") != std::string::npos ||
                         ContainsWord(lower, "tone");
+    h.isLikelyParaformer = lower.find("paraformer") != std::string::npos;
     return h;
 }
 
@@ -319,7 +320,9 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     c.hasMoonshine = !paths.moonshinePreprocessor.empty() && !paths.moonshineUncachedDecoder.empty() &&
                      !paths.moonshineCachedDecoder.empty() && !paths.moonshineEncoder.empty();
     c.hasMoonshineV2 = !paths.moonshineMergedDecoder.empty() && !paths.encoderForV2.empty() && paths.joiner.empty();
-    c.hasParaformer = !paths.paraformerModel.empty();
+    // Streaming paraformer uses encoder.onnx + decoder.onnx (no joiner, no single "model.onnx").
+    c.hasParaformer = !paths.paraformerModel.empty() ||
+        (hints.isLikelyParaformer && hasWhisperEnc && hasWhisperDec && paths.joiner.empty());
     c.hasDolphin = hints.isLikelyDolphin && !paths.ctcModel.empty();
     c.hasFireRedAsr = c.hasTransducer && hints.isLikelyFireRedAsr;
     c.hasCanary = hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && hints.isLikelyCanary;
@@ -384,8 +387,8 @@ static SttModelKind ResolveSttKind(
             outError = "NeMo Transducer model requested but encoder/decoder/joiner not found in " + modelDir;
             return SttModelKind::kUnknown;
         }
-        if (selected == SttModelKind::kParaformer && paths.paraformerModel.empty()) {
-            outError = "Paraformer model requested but model file not found in " + modelDir;
+        if (selected == SttModelKind::kParaformer && !cap.hasParaformer) {
+            outError = "Paraformer model requested but model file (or encoder+decoder for streaming) not found in " + modelDir;
             return SttModelKind::kUnknown;
         }
         if ((selected == SttModelKind::kNemoCtc || selected == SttModelKind::kWenetCtc ||
@@ -488,6 +491,11 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             break;
         case SttModelKind::kParaformer:
             resultPaths.paraformerModel = candidate.paraformerModel;
+            // Streaming paraformer: encoder.onnx + decoder.onnx (no single model.onnx).
+            if (resultPaths.paraformerModel.empty() && !candidate.encoder.empty() && !candidate.decoder.empty()) {
+                resultPaths.encoder = candidate.encoder;
+                resultPaths.decoder = candidate.decoder;
+            }
             break;
         case SttModelKind::kNemoCtc:
         case SttModelKind::kWenetCtc:

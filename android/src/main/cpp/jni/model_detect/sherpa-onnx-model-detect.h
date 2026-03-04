@@ -112,6 +112,7 @@ struct SttPathHints {
     bool isLikelyMedAsr = false;
     bool isLikelyTeleSpeech = false;
     bool isLikelyToneCtc = false;
+    bool isLikelyParaformer = false;
 };
 
 /** Which model types are possible given paths and hints (has* flags). */
