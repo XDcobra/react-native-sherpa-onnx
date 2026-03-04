@@ -184,8 +184,10 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
         add(SttModelKind::kWenetCtc);
     if (lower.find("sense") != std::string::npos || lower.find("sensevoice") != std::string::npos)
         add(SttModelKind::kSenseVoice);
-    if (lower.find("zipformer") != std::string::npos)
+    if (lower.find("zipformer") != std::string::npos) {
+        add(SttModelKind::kTransducer);
         add(SttModelKind::kZipformerCtc);
+    }
     if (lower.find("funasr") != std::string::npos)
         add(SttModelKind::kFunAsrNano);
     if (lower.find("canary") != std::string::npos)
@@ -278,6 +280,12 @@ static SttCandidatePaths GatherSttCandidatePaths(
     }
     if (p.ctcModel.empty())
         p.ctcModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
+    if (!p.paraformerModel.empty() &&
+        (p.paraformerModel == p.encoder || p.paraformerModel == p.decoder || p.paraformerModel == p.joiner))
+        p.paraformerModel.clear();
+    if (!p.ctcModel.empty() &&
+        (p.ctcModel == p.encoder || p.ctcModel == p.decoder || p.ctcModel == p.joiner))
+        p.ctcModel.clear();
     p.tokens = FindFileEndingWith(files, "tokens.txt");
     p.bpeVocab = FindFileByName(files, "bpe.vocab");
     p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
