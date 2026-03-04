@@ -113,6 +113,10 @@ struct SttPathHints {
     bool isLikelyTeleSpeech = false;
     bool isLikelyToneCtc = false;
     bool isLikelyParaformer = false;
+    /** VAD (silero, ten-vad, etc.): not yet supported; when true, detection returns unsupported. */
+    bool isLikelyVad = false;
+    /** TDNN (keyword/yesno): not yet supported; when true, detection returns unsupported. */
+    bool isLikelyTdnn = false;
 };
 
 /** Which model types are possible given paths and hints (has* flags). */

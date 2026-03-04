@@ -306,6 +306,10 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     // tone_ctc is for T-One models only (e.g. streaming-t-one-russian). WeNetSpeech CTC (yue, wu, etc.) uses wenet_ctc per sherpa-onnx docs.
     h.isLikelyToneCtc = lower.find("t-one") != std::string::npos || lower.find("t_one") != std::string::npos ||
                         ContainsWord(lower, "tone");
+    h.isLikelyParaformer = lower.find("paraformer") != std::string::npos;
+    h.isLikelyVad = lower.find("vad") != std::string::npos || lower.find("silero") != std::string::npos ||
+                    lower.find("ten-vad") != std::string::npos;
+    h.isLikelyTdnn = lower.find("tdnn") != std::string::npos;
     return h;
 }
 
@@ -393,6 +397,14 @@ static SttModelKind ResolveSttKind(
     std::string& outError
 ) {
     outError.clear();
+    if (hints.isLikelyVad) {
+        outError = "VAD models are not yet supported by the React Native SDK.";
+        return SttModelKind::kUnknown;
+    }
+    if (hints.isLikelyTdnn) {
+        outError = "TDNN (keyword/yesno) models are not yet supported by the React Native SDK.";
+        return SttModelKind::kUnknown;
+    }
     if (modelType.has_value() && modelType.value() != "auto") {
         SttModelKind selected = ParseSttModelType(modelType.value());
         if (selected == SttModelKind::kUnknown) {
@@ -614,11 +626,11 @@ SttDetectResult DetectSttModel(
             (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
             (int)cap.hasParaformer, (int)cap.hasFunAsrNano, (int)cap.hasDolphin, (int)cap.hasFireRedAsr, (int)cap.hasFireRedCtc,
             (int)cap.hasCanary, (int)cap.hasOmnilingual, (int)cap.hasMedAsr, (int)cap.hasTeleSpeechCtc, (int)cap.hasToneCtc);
-        LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d",
-            (int)hints.isLikelyNemo, (int)hints.isLikelyTdt, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice,
-            (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
-            (int)hints.isLikelyFireRedAsr, (int)hints.isLikelyCanary, (int)hints.isLikelyOmnilingual, (int)hints.isLikelyMedAsr,
-            (int)hints.isLikelyTeleSpeech, (int)hints.isLikelyToneCtc, (int)hints.isLikelyParaformer);
+        LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d isLikelyVad=%d isLikelyTdnn=%d",
+             (int)hints.isLikelyNemo, (int)hints.isLikelyTdt, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice,
+             (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
+             (int)hints.isLikelyFireRedAsr, (int)hints.isLikelyCanary, (int)hints.isLikelyOmnilingual, (int)hints.isLikelyMedAsr,
+             (int)hints.isLikelyTeleSpeech, (int)hints.isLikelyToneCtc, (int)hints.isLikelyParaformer, (int)hints.isLikelyVad, (int)hints.isLikelyTdnn);
     }
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
