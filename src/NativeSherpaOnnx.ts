@@ -211,6 +211,20 @@ export interface Spec extends TurboModule {
     isEndpoint: boolean;
   }>;
 
+  /**
+   * Start native PCM live capture. Microphone audio is captured and resampled to the requested
+   * sampleRate; chunks are emitted via the "pcmLiveStreamData" event (base64 Int16 PCM).
+   * App must have RECORD_AUDIO (Android) and NSMicrophoneUsageDescription (iOS) and grant permission before calling.
+   */
+  startPcmLiveStream(options: {
+    sampleRate: number;
+    channelCount?: number;
+    bufferSizeFrames?: number;
+  }): Promise<void>;
+
+  /** Stop native PCM live capture. */
+  stopPcmLiveStream(): Promise<void>;
+
   // ==================== TTS Methods ====================
 
   /**
