@@ -156,6 +156,9 @@
     "turbo": "^2.5.6",
     "typescript": "^5.9.2"
   },
+  "dependencies": {
+    "buffer": "^6.0.3"
+  },
   "peerDependencies": {
     "@dr.pogodin/react-native-fs": "*",
     "react": "*",

@@ -63,7 +63,7 @@ Pod::Spec.new do |s|
   s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}", *libarchive_sources]
   s.private_header_files = "ios/**/*.h"
 
-  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation"
+  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
   s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework"
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")

@@ -10555,13 +10555,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-live-audio-stream@npm:^1.1.1":
-  version: 1.1.1
-  resolution: "react-native-live-audio-stream@npm:1.1.1"
-  checksum: 10c0/10ba7fb69b47316558ffe48988146cc135620c49ed6161c8a7232f94ccab2a731838c0a82745d869562570e148d5f21e315f752e811eb0cefdaba2f91532d755
-  languageName: node
-  linkType: hard
-
 "react-native-monorepo-config@npm:^0.3.1, react-native-monorepo-config@npm:^0.3.3":
   version: 0.3.3
   resolution: "react-native-monorepo-config@npm:0.3.3"
@@ -10616,11 +10609,9 @@ __metadata:
     "@react-navigation/native-stack": "npm:^7.11.0"
     "@shopify/flash-list": "npm:^2.2.2"
     "@types/react": "npm:^19.2.0"
-    buffer: "npm:^6.0.3"
     react: "npm:19.2.0"
     react-native: "npm:0.83.0"
     react-native-builder-bob: "npm:^0.40.13"
-    react-native-live-audio-stream: "npm:^1.1.1"
     react-native-monorepo-config: "npm:^0.3.1"
     react-native-safe-area-context: "npm:^5.6.2"
     react-native-screens: "npm:^4.20.0"
@@ -10643,6 +10634,7 @@ __metadata:
     "@release-it/conventional-changelog": "npm:^10.0.5"
     "@types/jest": "npm:^29.5.14"
     "@types/react": "npm:^19.2.0"
+    buffer: "npm:^6.0.3"
     commitlint: "npm:^19.8.1"
     del-cli: "npm:^6.0.0"
     eslint: "npm:^9.35.0"

@@ -4,14 +4,15 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 
 /**
  * Decode base64-encoded Int16 PCM to float array in [-1, 1].
+ * Uses a preallocated Float32Array to avoid GC pressure on the live-mic hot path.
  */
-function base64PcmToFloatArray(base64: string): number[] {
+function base64PcmToFloatArray(base64: string): Float32Array {
   const bytes = Buffer.from(base64, 'base64');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const len = bytes.byteLength / 2;
-  const out: number[] = [];
+  const out = new Float32Array(len);
   for (let i = 0; i < len; i++) {
-    out.push(view.getInt16(i * 2, true) / 32768);
+    out[i] = view.getInt16(i * 2, true) / 32768;
   }
   return out;
 }
@@ -26,7 +27,7 @@ export type PcmLiveStreamHandle = {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   onData: (
-    callback: (samples: number[], sampleRate: number) => void
+    callback: (samples: Float32Array, sampleRate: number) => void
   ) => () => void;
   onError: (callback: (message: string) => void) => () => void;
 };
@@ -53,7 +54,7 @@ export function createPcmLiveStream(
 
     stop: () => SherpaOnnx.stopPcmLiveStream(),
 
-    onData: (callback: (samples: number[], sampleRate: number) => void) => {
+    onData: (callback: (samples: Float32Array, sampleRate: number) => void) => {
       const sub = DeviceEventEmitter.addListener(
         'pcmLiveStreamData',
         (event: { base64Pcm?: string; sampleRate?: number }) => {
