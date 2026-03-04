@@ -101,14 +101,15 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
             auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
             auto result = sherpaonnx::DetectSttModelFromFileList(
                 files, block.modelDir, std::nullopt, "auto");
-            if (result.selectedKind == sherpaonnx::SttModelKind::kUnknown) {
-                EXPECT_FALSE(result.ok)
-                    << "Asset " << block.assetName
-                    << ": when detection returns unknown, ok must be false so initialization is not attempted and the app does not crash.";
-                if (result.isHardwareSpecificUnsupported) {
-                    EXPECT_FALSE(result.error.empty())
-                        << "Asset " << block.assetName << ": hardware-specific unsupported must return an error message.";
-                }
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName
+                << ": unsupported must not report ok=true so initialization is not attempted.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(sherpaonnx::SttModelKind::kUnknown))
+                << "Asset " << block.assetName
+                << ": unsupported must be detected as unknown kind (got " << model_detect_test::SttKindToString(result.selectedKind) << ").";
+            if (result.isHardwareSpecificUnsupported) {
+                EXPECT_FALSE(result.error.empty())
+                    << "Asset " << block.assetName << ": hardware-specific unsupported must return an error message.";
             }
             continue;
         }
@@ -137,7 +138,7 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
  * and tts-models-expected.csv, builds FileEntry lists per asset block, calls
  * DetectTtsModelFromFileList(files, modelDir, "auto"), and asserts that result.ok is true
  * and result.selectedKind matches the CSV model_type (vits, matcha, kokoro, kitten, pocket,
- * zipvoice). For model_type == "unsupported" only checks that the call does not crash.
+ * zipvoice). For model_type == "unsupported" asserts result.ok == false and selectedKind == kUnknown.
  * Note: Some TTS types (e.g. vits) require espeak-ng-data in the fixture; otherwise
  * detection may return result.ok == false.
  */
@@ -163,8 +164,11 @@ TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
         if (expectedType == "unsupported") {
             auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
             auto result = sherpaonnx::DetectTtsModelFromFileList(files, block.modelDir, "auto");
-            // Goal: ensure the call does not crash. ok=false and selectedKind=kUnknown is valid
-            // ("no compatible model detected"); we only require that detection ran without crashing.
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(sherpaonnx::TtsModelKind::kUnknown))
+                << "Asset " << block.assetName
+                << ": unsupported must be detected as unknown kind (got " << model_detect_test::TtsKindToString(result.selectedKind) << ").";
             continue;
         }
 
