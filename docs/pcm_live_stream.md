@@ -19,7 +19,8 @@ This guide describes the **PCM Live Stream API**: native microphone capture with
 
 - **`createPcmLiveStream(options?)`** creates a handle for a live PCM stream from the device microphone.
 - **Native capture** (Android: `SherpaOnnxPcmCapture`, iOS: Audio Queue API (`AudioQueueNewInput`) + custom linear-interpolation resampler) performs resampling so PCM is always delivered at the requested `sampleRate` (e.g. 16000 for STT).
-- Via **events** (`onData`, `onError`) the app receives base64-encoded Int16 PCM chunks; the module decodes them into float arrays in `[-1, 1]` for further processing (e.g. into `stream.processAudioChunk()`).
+- Via **events** (`onData`, `onError`) the app receives base64-encoded Int16 PCM chunks; the module decodes them into **`Float32Array`** in `[-1, 1]` (preallocated, index-filled) to reduce GC pressure on the live-mic hot path. You can pass these directly into `stream.processAudioChunk(samples, sampleRate)`.
+- The audio module uses the [buffer](https://www.npmjs.com/package/buffer) package for base64 decoding. It is declared as a dependency of `react-native-sherpa-onnx`, so no extra install or polyfill setup is required when using the library.
 
 ---
 
