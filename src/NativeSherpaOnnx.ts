@@ -204,7 +204,7 @@ export interface Spec extends TurboModule {
    */
   processSttAudioChunk(
     streamId: string,
-    samples: number[],
+    samples: number[] | Float32Array,
     sampleRate: number
   ): Promise<{
     text: string;
