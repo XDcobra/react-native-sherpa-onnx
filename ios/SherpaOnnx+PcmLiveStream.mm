@@ -2,18 +2,25 @@
  * SherpaOnnx+PcmLiveStream.mm
  *
  * Native PCM live capture from the microphone via Audio Queue API (AudioQueueNewInput).
- * Delivers Int16 PCM at the requested sample rate; emits pcmLiveStreamData events (base64).
- * Works on both device and Simulator (same approach as react-native-live-audio-stream).
+ * Captures at a supported hardware rate (16000, 44100, 48000), resamples to the requested
+ * target rate, and emits pcmLiveStreamData at target rate (same behavior as Android).
  */
 
 #import "SherpaOnnx.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <React/RCTLog.h>
+#import <stdlib.h>
 
 static const UInt32 kPcmLiveAQNumberBuffers = 3;
+/** Capture sample rates to try in order (match Android CAPTURE_RATES). */
+static const int kPcmLiveCaptureRates[] = { 16000, 44100, 48000 };
+static const size_t kPcmLiveCaptureRatesCount = sizeof(kPcmLiveCaptureRates) / sizeof(kPcmLiveCaptureRates[0]);
+/** Max resampled output frames per chunk (for static buffer). */
+static const size_t kPcmLiveResampleMaxFrames = 4096;
 
 static NSInteger _pcmLiveTargetSampleRate = 16000;
+static NSInteger _pcmLiveCaptureRate = 16000;
 static __weak SherpaOnnx *_pcmLiveModule = nil;
 static AudioQueueRef _pcmLiveAudioQueue = NULL;
 static AudioQueueBufferRef _pcmLiveAQBuffers[kPcmLiveAQNumberBuffers];
@@ -30,6 +37,36 @@ static void emitPcmChunk(SherpaOnnx *module, const int16_t *samples, NSUInteger 
 static void emitPcmError(SherpaOnnx *module, NSString *message) {
   if (module)
     [module sendEventWithName:@"pcmLiveStreamError" body:@{ @"message": message ?: @"" }];
+}
+
+/** Resample Int16 PCM from fromRate to toRate using linear interpolation (match Android resampleInt16). */
+static NSUInteger pcmLiveResampleInt16(const int16_t *input, NSUInteger inputFrames,
+                                      int fromRate, int toRate,
+                                      int16_t *output, size_t outputCapacity) {
+  if (fromRate == toRate) {
+    size_t copy = (inputFrames < outputCapacity) ? inputFrames : outputCapacity;
+    memcpy(output, input, copy * sizeof(int16_t));
+    return copy;
+  }
+  double ratio = (double)fromRate / (double)toRate;
+  NSUInteger outLength = (NSUInteger)((double)inputFrames / ratio);
+  if (outLength > outputCapacity) outLength = outputCapacity;
+  if (outLength == 0) return 0;
+  for (NSUInteger i = 0; i < outLength; i++) {
+    double srcIdx = (double)i * ratio;
+    NSUInteger idx0 = (NSUInteger)srcIdx;
+    if (idx0 >= inputFrames) idx0 = inputFrames - 1;
+    NSUInteger idx1 = idx0 + 1;
+    if (idx1 >= inputFrames) idx1 = inputFrames - 1;
+    float frac = (float)(srcIdx - (double)idx0);
+    int v0 = (int)input[idx0];
+    int v1 = (int)input[idx1];
+    int v = (int)(v0 + (v1 - v0) * frac);
+    if (v < -32768) v = -32768;
+    if (v > 32767) v = 32767;
+    output[i] = (int16_t)v;
+  }
+  return outLength;
 }
 
 static void pcmLiveAQInputCallback(void *inUserData,
@@ -52,7 +89,19 @@ static void pcmLiveAQInputCallback(void *inUserData,
   }
   const int16_t *samples = (const int16_t *)inBuffer->mAudioData;
   NSUInteger count = byteSize / sizeof(int16_t);
-  emitPcmChunk(module, samples, count, (NSInteger)_pcmLiveTargetSampleRate);
+  NSInteger targetRate = _pcmLiveTargetSampleRate;
+  NSInteger captureRate = _pcmLiveCaptureRate;
+
+  if (captureRate == targetRate) {
+    emitPcmChunk(module, samples, count, targetRate);
+  } else {
+    static int16_t s_resampleBuf[kPcmLiveResampleMaxFrames];
+    NSUInteger outFrames = pcmLiveResampleInt16(samples, count,
+                                               (int)captureRate, (int)targetRate,
+                                               s_resampleBuf, kPcmLiveResampleMaxFrames);
+    if (outFrames > 0)
+      emitPcmChunk(module, s_resampleBuf, outFrames, targetRate);
+  }
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 }
 
@@ -77,7 +126,7 @@ static void pcmLiveStopQueue(void) {
                     reject:(RCTPromiseRejectBlock)reject
 {
   (void)optionsArg;
-  [self _startPcmLiveStreamWithTargetRate:16000 resolve:resolve reject:reject];
+  [self _startPcmLiveStreamWithTargetRate:16000 bufferSizeFrames:0 resolve:resolve reject:reject];
 }
 
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
@@ -90,13 +139,19 @@ static void pcmLiveStopQueue(void) {
     targetRate = (int)options.sampleRate();
     if (targetRate <= 0) targetRate = 16000;
   }
-  [self _startPcmLiveStreamWithTargetRate:targetRate resolve:resolve reject:reject];
+  UInt32 bufferSizeFrames = 0;
+  if (options.bufferSizeFrames().has_value()) {
+    double v = options.bufferSizeFrames().value();
+    if (v > 0) bufferSizeFrames = (UInt32)v;
+  }
+  [self _startPcmLiveStreamWithTargetRate:targetRate bufferSizeFrames:bufferSizeFrames resolve:resolve reject:reject];
 }
 #endif
 
 - (void)_startPcmLiveStreamWithTargetRate:(int)targetRate
-                                  resolve:(RCTPromiseResolveBlock)resolve
-                                   reject:(RCTPromiseRejectBlock)reject
+                       bufferSizeFrames:(UInt32)bufferSizeFrames
+                                 resolve:(RCTPromiseResolveBlock)resolve
+                                  reject:(RCTPromiseRejectBlock)reject
 {
   pcmLiveStopQueue();
 
@@ -121,7 +176,6 @@ static void pcmLiveStopQueue(void) {
 
   AudioStreamBasicDescription fmt;
   memset(&fmt, 0, sizeof(fmt));
-  fmt.mSampleRate = (Float64)targetRate;
   fmt.mFormatID = kAudioFormatLinearPCM;
   fmt.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
   fmt.mChannelsPerFrame = 1;
@@ -130,14 +184,29 @@ static void pcmLiveStopQueue(void) {
   fmt.mBytesPerFrame = 2;
   fmt.mFramesPerPacket = 1;
 
-  OSStatus status = AudioQueueNewInput(&fmt, pcmLiveAQInputCallback, NULL, NULL, NULL, 0, &_pcmLiveAudioQueue);
-  if (status != noErr) {
+  OSStatus status = noErr;
+  int chosenCaptureRate = 16000;
+  for (size_t r = 0; r < kPcmLiveCaptureRatesCount; r++) {
+    chosenCaptureRate = kPcmLiveCaptureRates[r];
+    fmt.mSampleRate = (Float64)chosenCaptureRate;
+    status = AudioQueueNewInput(&fmt, pcmLiveAQInputCallback, NULL, NULL, NULL, 0, &_pcmLiveAudioQueue);
+    if (status == noErr) break;
+    _pcmLiveAudioQueue = NULL;
+  }
+  if (status != noErr || _pcmLiveAudioQueue == NULL) {
     [session setActive:NO withOptions:0 error:nil];
-    reject(@"PCM_LIVE_STREAM_ERROR", [NSString stringWithFormat:@"AudioQueueNewInput failed: %d", (int)status], nil);
+    reject(@"PCM_LIVE_STREAM_ERROR", [NSString stringWithFormat:@"AudioQueueNewInput failed for all rates (last: %d)", (int)status], nil);
     return;
   }
+  _pcmLiveCaptureRate = chosenCaptureRate;
 
-  const UInt32 bufferByteSize = 2048;
+  UInt32 bufferByteSize = 2048;
+  if (bufferSizeFrames > 0) {
+    bufferByteSize = bufferSizeFrames * 2;  /* 16-bit mono */
+    if (bufferByteSize < 1024) bufferByteSize = 1024;
+    if (bufferByteSize > 32768) bufferByteSize = 32768;
+  }
+
   for (UInt32 i = 0; i < kPcmLiveAQNumberBuffers; i++) {
     status = AudioQueueAllocateBuffer(_pcmLiveAudioQueue, bufferByteSize, &_pcmLiveAQBuffers[i]);
     if (status != noErr) {
