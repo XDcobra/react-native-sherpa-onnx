@@ -307,6 +307,25 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     return h;
 }
 
+/** Error message when model is for unsupported hardware (RK35xx, Ascend, etc.). */
+static const char* kHardwareSpecificUnsupportedMessage =
+    "This model is built for hardware-specific acceleration (e.g. RK35xx, Ascend, CANN) and is not supported by the React Native SDK. Use an ONNX model for CPU/GPU or a QNN-capable model on supported devices.";
+
+/** True if model dir name indicates a hardware-specific build (e.g. RK3588, Ascend). Not runnable on generic host. QNN is supported by the SDK. */
+static bool IsHardwareSpecificModelDir(const std::string& modelDir) {
+    using namespace model_detect;
+    std::string lower = ToLower(modelDir);
+    const char* tokens[] = {
+        "rk3588", "rk3576", "rk3568", "rk3566", "rk3562", "rknn",
+        "ascend", "cann", "910b", "910b2", "310p3"
+    };
+    for (const char* t : tokens) {
+        if (lower.find(t) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, const SttPathHints& hints) {
     using namespace model_detect;
     SttCapabilities c;
@@ -617,6 +636,13 @@ SttDetectResult DetectSttModel(
 
     result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
     if (result.selectedKind == SttModelKind::kUnknown) {
+        if (IsHardwareSpecificModelDir(modelDir)) {
+            result.ok = false;
+            result.isHardwareSpecificUnsupported = true;
+            result.error = kHardwareSpecificUnsupportedMessage;
+            LOGE("%s", result.error.c_str());
+            return result;
+        }
         if (!result.error.empty()) {
             LOGE("%s", result.error.c_str());
             return result;
@@ -710,6 +736,12 @@ SttDetectResult DetectSttModelFromFileList(
 
     result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
     if (result.selectedKind == SttModelKind::kUnknown) {
+        if (IsHardwareSpecificModelDir(modelDir)) {
+            result.ok = false;
+            result.isHardwareSpecificUnsupported = true;
+            result.error = kHardwareSpecificUnsupportedMessage;
+            return result;
+        }
         if (result.error.empty())
             result.error = "No compatible model type detected in " + modelDir;
         result.ok = false;

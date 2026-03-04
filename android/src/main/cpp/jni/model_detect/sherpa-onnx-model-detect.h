@@ -153,6 +153,8 @@ struct TtsModelPaths {
 struct SttDetectResult {
     bool ok = false;
     std::string error;
+    /** True when detection failed because the model is for unsupported hardware (RK35xx, Ascend, CANN, etc.). */
+    bool isHardwareSpecificUnsupported = false;
     std::vector<DetectedModel> detectedModels;
     SttModelKind selectedKind = SttModelKind::kUnknown;
     bool tokensRequired = true;

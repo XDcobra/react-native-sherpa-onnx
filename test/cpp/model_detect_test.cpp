@@ -64,8 +64,10 @@ TEST(ModelDetectTest, FixturesExist) {
  *    creates a map asset_name -> model_type.
  *
  * 2. For each block for which there is an entry in the CSV:
- *    - If model_type == “unsupported”: Only checks that DetectSttModelFromFileList
- *      does not crash and either ok==true or a meaningful selectedKind is returned.
+ *    - If model_type == “unsupported”: Ensures detection does not crash; requires
+ *      result.ok == false so initialization is never attempted. When the detector
+ *      identifies the model as hardware-specific (RK35xx, Ascend, etc.), also
+ *      asserts result.isHardwareSpecificUnsupported == true and non-empty error.
  *    - For known model_type: A FileEntry list is generated from the pathLines
  *      (only file paths, no directory lines). DetectSttModelFromFileList(files, modelDir,
  *      nullopt, “auto”) is called. The test requires result.ok and that result.selectedKind
@@ -99,8 +101,15 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
             auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
             auto result = sherpaonnx::DetectSttModelFromFileList(
                 files, block.modelDir, std::nullopt, "auto");
-            EXPECT_TRUE(result.ok || result.selectedKind != sherpaonnx::SttModelKind::kUnknown)
-                << "Asset " << block.assetName << ": unsupported should not crash; ok=" << result.ok;
+            if (result.selectedKind == sherpaonnx::SttModelKind::kUnknown) {
+                EXPECT_FALSE(result.ok)
+                    << "Asset " << block.assetName
+                    << ": when detection returns unknown, ok must be false so initialization is not attempted and the app does not crash.";
+                if (result.isHardwareSpecificUnsupported) {
+                    EXPECT_FALSE(result.error.empty())
+                        << "Asset " << block.assetName << ": hardware-specific unsupported must return an error message.";
+                }
+            }
             continue;
         }
 

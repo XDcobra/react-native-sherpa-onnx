@@ -65,7 +65,7 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
    * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally isHardwareSpecificUnsupported (true when the model is for unsupported hardware e.g. RK35xx, Ascend)
    */
   detectSttModel(
     modelDir: string,
@@ -73,6 +73,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** True when detection failed because the model targets unsupported hardware (RK35xx, Ascend, CANN). Use to show a specific message or block init. */
+    isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
   }>;

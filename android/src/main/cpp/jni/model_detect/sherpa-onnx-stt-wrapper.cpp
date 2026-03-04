@@ -53,6 +53,7 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
 
   PutBoolean(env, map, mapPut, "success", result.ok);
   PutString(env, map, mapPut, "error", result.error);
+  PutBoolean(env, map, mapPut, "isHardwareSpecificUnsupported", result.isHardwareSpecificUnsupported);
   PutString(env, map, mapPut, "modelType", SttModelKindToString(result.selectedKind));
 
   jobject detectedList = BuildDetectedModelsList(env, result.detectedModels);
