@@ -76,6 +76,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 | Model Type               | `modelType` Value | Description                                                                              | Download Links                                                                                   |
 | ------------------------ | ----------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | **Zipformer/Transducer** | `'transducer'`    | Encoder–decoder–joiner (e.g. icefall). Good balance of speed and accuracy. Folder name should contain **zipformer** or **transducer** for auto-detection. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-transducer/index.html) |
+| **LSTM Transducer**      | `'transducer'`    | Same layout as Zipformer (encoder–decoder–joiner). LSTM-based streaming ASR; detected as transducer. Folder name may contain **lstm**. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-transducer/lstm-transducer-models.html) |
 | **Paraformer**           | `'paraformer'`    | Single-model non-autoregressive ASR; fast and accurate. Detected by `model.onnx`; no folder token required. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-paraformer/index.html) |
 | **NeMo CTC**             | `'nemo_ctc'`      | NeMo CTC; good for English and streaming. Folder name should contain **nemo** or **parakeet**. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-ctc/nemo/index.html)   |
 | **Whisper**              | `'whisper'`       | Multilingual, encoder–decoder; strong zero-shot. Detected by encoder+decoder (no joiner); folder token optional. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html)            |
@@ -211,6 +212,7 @@ yarn android  # or yarn ios
 <td><img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" width="240" /></td>
 </tr>
 <tr>
+<td><img src="./docs/images/example_streaming.png" alt="Text to speech generation" width="240" /></td>
 <td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
 <td><img src="./docs/images/example_provider.png" alt="Text to speech generation" width="240" /></td>
 </tr>
