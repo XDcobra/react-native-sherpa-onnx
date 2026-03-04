@@ -336,9 +336,13 @@ export async function createStreamingSTT(
             }
             toSend = normalized;
           }
+          // Bridge expects a plain array; Float32Array may not serialize as ReadableArray on all platforms.
+          const samplesArray = Array.isArray(toSend)
+            ? toSend
+            : Array.from(toSend);
           const raw = await SherpaOnnx.processSttAudioChunk(
             streamId,
-            toSend,
+            samplesArray,
             sampleRate
           );
           return {
