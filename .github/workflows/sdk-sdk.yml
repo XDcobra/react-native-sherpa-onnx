@@ -1,6 +1,9 @@
 name: SDK - Pack NPM Package
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main

@@ -1,6 +1,9 @@
 name: SDK - Build Android example app
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
