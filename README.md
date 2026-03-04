@@ -14,6 +14,8 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 [![Android](https://img.shields.io/badge/Android-Supported-green)](https://www.android.com/)
 [![iOS](https://img.shields.io/badge/iOS-Supported-blue)](https://www.apple.com/ios/)
 
+<a href="https://www.buymeacoffee.com/xdcobra" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="150" /></a>
+
 </div>
 
 > **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
