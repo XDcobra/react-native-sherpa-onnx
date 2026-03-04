@@ -553,7 +553,15 @@ export default function STTScreen() {
         setError(message);
       });
       pcmLiveStreamRef.current = { handle: pcmHandle, unsubData, unsubError };
-      await pcmHandle.start();
+      try {
+        await pcmHandle.start();
+      } catch (startErr) {
+        pcmHandle.stop().catch(() => {});
+        unsubData();
+        unsubError();
+        pcmLiveStreamRef.current = null;
+        throw startErr;
+      }
       setIsLiveRecording(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -18,7 +18,7 @@ This guide describes the **PCM Live Stream API**: native microphone capture with
 ## Overview
 
 - **`createPcmLiveStream(options?)`** creates a handle for a live PCM stream from the device microphone.
-- **Native capture** (Android: `SherpaOnnxPcmCapture`, iOS: `AVAudioEngine` + `AVAudioConverter`) performs resampling so PCM is always delivered at the requested `sampleRate` (e.g. 16000 for STT).
+- **Native capture** (Android: `SherpaOnnxPcmCapture`, iOS: Audio Queue API (`AudioQueueNewInput`) + custom linear-interpolation resampler) performs resampling so PCM is always delivered at the requested `sampleRate` (e.g. 16000 for STT).
 - Via **events** (`onData`, `onError`) the app receives base64-encoded Int16 PCM chunks; the module decodes them into float arrays in `[-1, 1]` for further processing (e.g. into `stream.processAudioChunk()`).
 
 ---

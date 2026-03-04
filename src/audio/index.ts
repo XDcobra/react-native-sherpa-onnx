@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 
@@ -5,11 +6,9 @@ import SherpaOnnx from '../NativeSherpaOnnx';
  * Decode base64-encoded Int16 PCM to float array in [-1, 1].
  */
 function base64PcmToFloatArray(base64: string): number[] {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const view = new DataView(bytes.buffer);
-  const len = bytes.length / 2;
+  const bytes = Buffer.from(base64, 'base64');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const len = bytes.byteLength / 2;
   const out: number[] = [];
   for (let i = 0; i < len; i++) {
     out.push(view.getInt16(i * 2, true) / 32768);
