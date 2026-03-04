@@ -40,7 +40,7 @@ std::vector<sherpaonnx::model_detect::FileEntry> BuildFileEntriesFromPathLines(
     const std::string& modelDir,
     const std::vector<std::string>& pathLines);
 
-/** Map CSV model_type string to SttModelKind (for test assertions). Handles "zipformer" -> zipformer_ctc. */
+/** Map CSV model_type string to SttModelKind (for test assertions). "zipformer" -> transducer; "zipformer_ctc" and "ctc" -> zipformer_ctc. */
 sherpaonnx::SttModelKind SttKindFromString(const std::string& modelType);
 
 /** Convert SttModelKind to string (same as production KindToName). */
