@@ -16,3 +16,5 @@ lib/
 .yarn
 _codeql_detected_source_root/
 example/.model-cache/
+test/cpp/
+test/fixtures/
