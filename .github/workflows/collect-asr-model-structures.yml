@@ -172,7 +172,7 @@ jobs:
           git status --short
           # Only commit when our tracked files actually changed (ignore untracked asset-list.txt, tree-cache)
           if ! git diff --staged --quiet; then
-            git commit -m "chore(testdata): update ASR model structures and expected CSV from asr-models release"
+            git commit -m "chore(stt_testdata): update ASR model structures and expected CSV from asr-models release"
             git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
           else
             echo "No changes to commit."
