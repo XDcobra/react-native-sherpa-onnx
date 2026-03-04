@@ -303,6 +303,7 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     h.isLikelyOmnilingual = lower.find("omnilingual") != std::string::npos;
     h.isLikelyMedAsr = lower.find("medasr") != std::string::npos;
     h.isLikelyTeleSpeech = lower.find("telespeech") != std::string::npos;
+    // tone_ctc is for T-One models only (e.g. streaming-t-one-russian). WeNetSpeech CTC (yue, wu, etc.) uses wenet_ctc per sherpa-onnx docs.
     h.isLikelyToneCtc = lower.find("t-one") != std::string::npos || lower.find("t_one") != std::string::npos ||
                         ContainsWord(lower, "tone");
     return h;
@@ -476,7 +477,8 @@ static SttModelKind ResolveSttKind(
     }
     if (hints.isLikelyMoonshine && cap.hasMoonshineV2) return SttModelKind::kMoonshineV2;
     if (hints.isLikelyMoonshine && cap.hasMoonshine) return SttModelKind::kMoonshine;
-    if (!paths.ctcModel.empty() && (hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
+    if (!paths.ctcModel.empty() && (hints.isLikelyToneCtc || hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
+        if (hints.isLikelyToneCtc) return SttModelKind::kToneCtc;
         if (hints.isLikelyNemo) return SttModelKind::kNemoCtc;
         if (hints.isLikelyWenetCtc) return SttModelKind::kWenetCtc;
         return SttModelKind::kSenseVoice;
