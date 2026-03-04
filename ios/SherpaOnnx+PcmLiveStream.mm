@@ -16,8 +16,6 @@ static const UInt32 kPcmLiveAQNumberBuffers = 3;
 /** Capture sample rates to try in order (match Android CAPTURE_RATES). */
 static const int kPcmLiveCaptureRates[] = { 16000, 44100, 48000 };
 static const size_t kPcmLiveCaptureRatesCount = sizeof(kPcmLiveCaptureRates) / sizeof(kPcmLiveCaptureRates[0]);
-/** Max resampled output frames per chunk (for static buffer). */
-static const size_t kPcmLiveResampleMaxFrames = 4096;
 
 static NSInteger _pcmLiveTargetSampleRate = 16000;
 static NSInteger _pcmLiveCaptureRate = 16000;
@@ -28,15 +26,25 @@ static volatile BOOL _pcmLiveAQRunning = NO;
 
 static void emitPcmChunk(SherpaOnnx *module, const int16_t *samples, NSUInteger count, NSInteger sampleRate) {
   if (!module || count == 0) return;
+  // Copy samples into NSData on the AudioQueue callback thread so the data
+  // remains valid after the audio buffer is reused.
   NSData *data = [NSData dataWithBytes:samples length:count * sizeof(int16_t)];
-  NSString *base64 = [data base64EncodedStringWithOptions:0];
-  [module sendEventWithName:@"pcmLiveStreamData"
-                      body:@{ @"base64Pcm": base64, @"sampleRate": @(sampleRate) }];
+  // Dispatch the React Native event emission to the main queue to avoid
+  // bridge thread-safety issues.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSString *base64 = [data base64EncodedStringWithOptions:0];
+    [module sendEventWithName:@"pcmLiveStreamData"
+                        body:@{ @"base64Pcm": base64, @"sampleRate": @(sampleRate) }];
+  });
 }
 
 static void emitPcmError(SherpaOnnx *module, NSString *message) {
-  if (module)
+  if (!module) return;
+  // Dispatch error events to the main queue to match other RN event patterns
+  // and avoid bridge thread-safety issues.
+  dispatch_async(dispatch_get_main_queue(), ^{
     [module sendEventWithName:@"pcmLiveStreamError" body:@{ @"message": message ?: @"" }];
+  });
 }
 
 /** Resample Int16 PCM from fromRate to toRate using linear interpolation (match Android resampleInt16). */
@@ -95,12 +103,26 @@ static void pcmLiveAQInputCallback(void *inUserData,
   if (captureRate == targetRate) {
     emitPcmChunk(module, samples, count, targetRate);
   } else {
-    static int16_t s_resampleBuf[kPcmLiveResampleMaxFrames];
+    // Compute an upper bound on the number of output frames for resampling.
+    NSUInteger maxOutFrames =
+        (count * (NSUInteger)targetRate + (NSUInteger)captureRate - 1) /
+        (NSUInteger)captureRate;
+    if (maxOutFrames == 0) {
+      AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
+      return;
+    }
+    int16_t *resampleBuf = (int16_t *)malloc(maxOutFrames * sizeof(int16_t));
+    if (resampleBuf == NULL) {
+      emitPcmError(module, @"Failed to allocate resample buffer");
+      AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
+      return;
+    }
     NSUInteger outFrames = pcmLiveResampleInt16(samples, count,
                                                (int)captureRate, (int)targetRate,
-                                               s_resampleBuf, kPcmLiveResampleMaxFrames);
+                                               resampleBuf, maxOutFrames);
     if (outFrames > 0)
-      emitPcmChunk(module, s_resampleBuf, outFrames, targetRate);
+      emitPcmChunk(module, resampleBuf, outFrames, targetRate);
+    free(resampleBuf);
   }
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 }
@@ -125,8 +147,27 @@ static void pcmLiveStopQueue(void) {
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
-  (void)optionsArg;
-  [self _startPcmLiveStreamWithTargetRate:16000 bufferSizeFrames:0 resolve:resolve reject:reject];
+  int targetRate = 16000;
+  UInt32 bufferSizeFrames = 0;
+
+  // Parse optionsArg coming from JS (fallback / non-codegen path).
+  if ([optionsArg isKindOfClass:[NSDictionary class]]) {
+    NSDictionary *dict = (NSDictionary *)optionsArg;
+
+    id sampleRateValue = dict[@"sampleRate"];
+    if ([sampleRateValue respondsToSelector:@selector(intValue)]) {
+      int v = (int)[sampleRateValue intValue];
+      if (v > 0) targetRate = v;
+    }
+
+    id bufferSizeValue = dict[@"bufferSizeFrames"];
+    if ([bufferSizeValue respondsToSelector:@selector(doubleValue)]) {
+      double v = [bufferSizeValue doubleValue];
+      if (v > 0) bufferSizeFrames = (UInt32)v;
+    }
+  }
+
+  [self _startPcmLiveStreamWithTargetRate:targetRate bufferSizeFrames:bufferSizeFrames resolve:resolve reject:reject];
 }
 
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)

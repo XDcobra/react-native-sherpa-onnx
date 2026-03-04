@@ -494,17 +494,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val sampleRate = options.getDouble("sampleRate").toInt().takeIf { it > 0 } ?: 16000
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt().coerceIn(1, 2) else 1
       val bufferSizeFrames = if (options.hasKey("bufferSizeFrames")) options.getDouble("bufferSizeFrames").toInt() else 0
+      var startError: String? = null
+      var started = false
       val capture = SherpaOnnxPcmCapture(
         targetSampleRate = sampleRate,
         channelCount = channelCount,
         bufferSizeFrames = bufferSizeFrames,
         onChunk = { base64Pcm, sr -> emitPcmLiveStreamData(base64Pcm, sr) },
-        onError = { msg -> emitPcmLiveStreamError(msg) },
+        onError = { msg ->
+          if (!started) {
+            startError = msg
+          } else {
+            emitPcmLiveStreamError(msg)
+          }
+        },
         logTag = NAME
       )
       pcmCapture = capture
       capture.start()
-      promise.resolve(null)
+      started = true
+      val err = startError
+      if (err != null) {
+        promise.reject("PCM_LIVE_STREAM_ERROR", err)
+      } else {
+        promise.resolve(null)
+      }
     } catch (e: Exception) {
       android.util.Log.e(NAME, "startPcmLiveStream failed", e)
       promise.reject("PCM_LIVE_STREAM_ERROR", e.message ?: "Failed to start PCM capture", e)

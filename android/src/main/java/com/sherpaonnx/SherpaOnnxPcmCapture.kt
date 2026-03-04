@@ -67,9 +67,9 @@ class SherpaOnnxPcmCapture(
       return
     }
     val bufferSizeBytes = if (bufferSizeFrames > 0) {
-      bufferSizeFrames * 2 * channelCount // 2 bytes per sample, mono
+      bufferSizeFrames * 2 // 2 bytes per sample (16-bit mono)
     } else {
-      (0.1 * targetSampleRate).toInt() * 2 * channelCount // 0.1 s default
+      (0.1 * targetSampleRate).toInt() * 2 // 0.1 s default (16-bit mono)
     }
     val captureRate = CAPTURE_RATES.firstOrNull { rate ->
       val size = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -134,6 +134,15 @@ class SherpaOnnxPcmCapture(
   /** Stop capture and release resources. */
   fun stop() {
     running = false
+    // Actively stop AudioRecord to unblock any pending read()
+    val record = audioRecord
+    if (record != null) {
+      try {
+        record.stop()
+      } catch (_: Exception) {
+        // Ignore; the capture thread's finally block also handles stop/release safely
+      }
+    }
     captureThread?.join(2000)
     captureThread = null
     audioRecord = null
