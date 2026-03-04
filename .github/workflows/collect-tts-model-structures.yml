@@ -131,7 +131,6 @@ jobs:
             [ -f "$cache_file" ] || continue
             echo "# Asset: $name" >> "$out"
             cat "$cache_file" >> "$out"
-            echo "" >> "$out"
           done < asset-list.txt
           echo "Output preview:"
           head -80 "$out" || true
