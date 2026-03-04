@@ -180,8 +180,10 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
         add(SttModelKind::kWenetCtc);
     if (lower.find("sense") != std::string::npos || lower.find("sensevoice") != std::string::npos)
         add(SttModelKind::kSenseVoice);
-    if (lower.find("zipformer") != std::string::npos)
+    if (lower.find("zipformer") != std::string::npos) {
+        add(SttModelKind::kTransducer);
         add(SttModelKind::kZipformerCtc);
+    }
     if (lower.find("funasr") != std::string::npos)
         add(SttModelKind::kFunAsrNano);
     if (lower.find("canary") != std::string::npos)
@@ -220,7 +222,28 @@ static SttCandidatePaths GatherSttCandidatePaths(
     p.funasrEncoderAdaptor = FindOnnxByAnyToken(files, {"encoder_adaptor", "encoder-adaptor"}, preferInt8);
     p.funasrLLM = FindOnnxByAnyToken(files, {"llm"}, preferInt8);
     p.funasrEmbedding = FindOnnxByAnyToken(files, {"embedding"}, preferInt8);
-    p.funasrTokenizerDir = ResolveTokenizerDir(modelDir);
+    {
+        std::string vocabInSubdir;
+        const std::string vocabName = "vocab.json";
+        for (const auto& entry : files) {
+            if (entry.nameLower != vocabName) continue;
+            const std::string& path = entry.path;
+            if (path.size() >= modelDir.size() && path.compare(0, modelDir.size(), modelDir) == 0 &&
+                (modelDir.empty() || path[modelDir.size()] == '/')) {
+                if (path.size() == modelDir.size() + 12 && path.compare(modelDir.size(), 12, "/vocab.json") == 0) {
+                    p.funasrTokenizerDir = modelDir;
+                    break;
+                }
+                if (vocabInSubdir.empty())
+                    vocabInSubdir = path;
+            }
+        }
+        if (p.funasrTokenizerDir.empty() && !vocabInSubdir.empty()) {
+            size_t lastSlash = vocabInSubdir.find_last_of("/\\");
+            if (lastSlash != std::string::npos)
+                p.funasrTokenizerDir = vocabInSubdir.substr(0, lastSlash);
+        }
+    }
     p.moonshinePreprocessor = FindOnnxByAnyToken(files, {"preprocess", "preprocessor"}, preferInt8);
     p.moonshineEncoder = FindOnnxByAnyToken(files, {"encode", "encoder_model"}, preferInt8);
     p.moonshineUncachedDecoder = FindOnnxByAnyToken(files, {"uncached_decode", "uncached"}, preferInt8);
@@ -252,8 +275,14 @@ static SttCandidatePaths GatherSttCandidatePaths(
     }
     if (p.ctcModel.empty())
         p.ctcModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
+    if (!p.paraformerModel.empty() &&
+        (p.paraformerModel == p.encoder || p.paraformerModel == p.decoder || p.paraformerModel == p.joiner))
+        p.paraformerModel.clear();
+    if (!p.ctcModel.empty() &&
+        (p.ctcModel == p.encoder || p.ctcModel == p.decoder || p.ctcModel == p.joiner))
+        p.ctcModel.clear();
     p.tokens = FindFileEndingWith(files, "tokens.txt");
-    p.bpeVocab = FindFileByName(modelDir, "bpe.vocab", maxDepth);
+    p.bpeVocab = FindFileByName(files, "bpe.vocab");
     p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
     return p;
 }
@@ -274,9 +303,28 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     h.isLikelyOmnilingual = lower.find("omnilingual") != std::string::npos;
     h.isLikelyMedAsr = lower.find("medasr") != std::string::npos;
     h.isLikelyTeleSpeech = lower.find("telespeech") != std::string::npos;
+    // tone_ctc is for T-One models only (e.g. streaming-t-one-russian). WeNetSpeech CTC (yue, wu, etc.) uses wenet_ctc per sherpa-onnx docs.
     h.isLikelyToneCtc = lower.find("t-one") != std::string::npos || lower.find("t_one") != std::string::npos ||
                         ContainsWord(lower, "tone");
     return h;
+}
+
+/** Error message when model is for unsupported hardware (RK35xx, Ascend, etc.). */
+static const char* kHardwareSpecificUnsupportedMessage =
+    "This model is built for hardware-specific acceleration (e.g. RK35xx, Ascend, CANN) and is not supported by the React Native SDK. Use an ONNX model for CPU/GPU or a QNN-capable model on supported devices.";
+
+/** True if model dir name indicates a hardware-specific build (e.g. RK3588, Ascend). Not runnable on generic host. QNN is supported by the SDK. */
+static bool IsHardwareSpecificModelDir(const std::string& modelDir) {
+    std::string lower = ToLower(modelDir);
+    const char* tokens[] = {
+        "rk3588", "rk3576", "rk3568", "rk3566", "rk3562", "rknn",
+        "ascend", "cann", "910b", "910b2", "310p3"
+    };
+    for (const char* t : tokens) {
+        if (lower.find(t) != std::string::npos)
+            return true;
+    }
+    return false;
 }
 
 static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, const SttPathHints& hints) {
@@ -285,7 +333,7 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     bool hasWhisperEnc = !paths.encoder.empty();
     bool hasWhisperDec = !paths.decoder.empty();
     c.hasWhisper = hasWhisperEnc && hasWhisperDec && paths.joiner.empty();
-    bool hasFunAsrTok = !paths.funasrTokenizerDir.empty() && FileExists(paths.funasrTokenizerDir + "/vocab.json");
+    bool hasFunAsrTok = !paths.funasrTokenizerDir.empty();
     c.hasFunAsrNano = !paths.funasrEncoderAdaptor.empty() && !paths.funasrLLM.empty() &&
                       !paths.funasrEmbedding.empty() && hasFunAsrTok;
     c.hasMoonshine = !paths.moonshinePreprocessor.empty() && !paths.moonshineUncachedDecoder.empty() &&
@@ -293,7 +341,10 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     c.hasMoonshineV2 = !paths.moonshineMergedDecoder.empty() && !paths.encoderForV2.empty() && paths.joiner.empty();
     c.hasParaformer = !paths.paraformerModel.empty();
     c.hasDolphin = hints.isLikelyDolphin && !paths.ctcModel.empty();
-    c.hasFireRedAsr = c.hasTransducer && hints.isLikelyFireRedAsr;
+    // Fire Red ASR: only encoder+decoder (two files). Single-file Fire Red (e.g. fire-red-asr2-ctc) uses CTC path to avoid native crash.
+    c.hasFireRedAsr = (c.hasTransducer || (hasWhisperEnc && hasWhisperDec && paths.joiner.empty())) && hints.isLikelyFireRedAsr;
+    c.hasFireRedCtc = hints.isLikelyFireRedAsr && paths.encoder.empty() && paths.decoder.empty() &&
+        (!paths.ctcModel.empty() || !paths.paraformerModel.empty());
     c.hasCanary = hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && hints.isLikelyCanary;
     c.hasOmnilingual = !paths.ctcModel.empty() && hints.isLikelyOmnilingual;
     c.hasMedAsr = !paths.ctcModel.empty() && hints.isLikelyMedAsr;
@@ -429,12 +480,14 @@ static SttModelKind ResolveSttKind(
     }
     if (hints.isLikelyMoonshine && cap.hasMoonshineV2) return SttModelKind::kMoonshineV2;
     if (hints.isLikelyMoonshine && cap.hasMoonshine) return SttModelKind::kMoonshine;
-    if (!paths.ctcModel.empty() && (hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
+    if (!paths.ctcModel.empty() && (hints.isLikelyToneCtc || hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
+        if (hints.isLikelyToneCtc) return SttModelKind::kToneCtc;
         if (hints.isLikelyNemo) return SttModelKind::kNemoCtc;
         if (hints.isLikelyWenetCtc) return SttModelKind::kWenetCtc;
         return SttModelKind::kSenseVoice;
     }
     if (cap.hasFunAsrNano && hints.isLikelyFunAsrNano) return SttModelKind::kFunAsrNano;
+    if (cap.hasFireRedCtc) return SttModelKind::kZipformerCtc;
     if (!paths.paraformerModel.empty()) return SttModelKind::kParaformer;
     if (cap.hasCanary) return SttModelKind::kCanary;
     if (cap.hasFireRedAsr) return SttModelKind::kFireRedAsr;
@@ -472,6 +525,12 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             resultPaths.whisperEncoder = candidate.encoder;
             resultPaths.whisperDecoder = candidate.decoder;
             break;
+        case SttModelKind::kFireRedAsr: {
+            std::string singleModel = candidate.paraformerModel.empty() ? candidate.ctcModel : candidate.paraformerModel;
+            resultPaths.fireRedEncoder = candidate.encoder.empty() ? singleModel : candidate.encoder;
+            resultPaths.fireRedDecoder = candidate.decoder.empty() ? singleModel : candidate.decoder;
+            break;
+        }
         case SttModelKind::kFunAsrNano:
             resultPaths.funasrEncoderAdaptor = candidate.funasrEncoderAdaptor;
             resultPaths.funasrLLM = candidate.funasrLLM;
@@ -490,10 +549,6 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             break;
         case SttModelKind::kDolphin:
             resultPaths.dolphinModel = candidate.ctcModel.empty() ? candidate.paraformerModel : candidate.ctcModel;
-            break;
-        case SttModelKind::kFireRedAsr:
-            resultPaths.fireRedEncoder = candidate.encoder;
-            resultPaths.fireRedDecoder = candidate.decoder;
             break;
         case SttModelKind::kCanary:
             resultPaths.canaryEncoder = candidate.encoder;
@@ -545,27 +600,37 @@ SttDetectResult DetectSttModel(
     if (debug) {
         LOGI("DetectSttModel: tokens=%s", EmptyOrPath(candidate.tokens));
         LOGI("DetectSttModel: transducer encoder=%s decoder=%s joiner=%s",
-             EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder), EmptyOrPath(candidate.joiner));
+            EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder), EmptyOrPath(candidate.joiner));
         LOGI("DetectSttModel: paraformerModel=%s ctcModel=%s tokens=%s bpeVocab=%s",
-             EmptyOrPath(candidate.paraformerModel), EmptyOrPath(candidate.ctcModel), EmptyOrPath(candidate.tokens), EmptyOrPath(candidate.bpeVocab));
+            EmptyOrPath(candidate.paraformerModel), EmptyOrPath(candidate.ctcModel), EmptyOrPath(candidate.tokens), EmptyOrPath(candidate.bpeVocab));
         LOGI("DetectSttModel: moonshine preprocessor=%s encoder=%s uncachedDecoder=%s cachedDecoder=%s mergedDecoder=%s",
-             EmptyOrPath(candidate.moonshinePreprocessor), EmptyOrPath(candidate.moonshineEncoder), EmptyOrPath(candidate.moonshineUncachedDecoder),
-             EmptyOrPath(candidate.moonshineCachedDecoder), EmptyOrPath(candidate.moonshineMergedDecoder));
+            EmptyOrPath(candidate.moonshinePreprocessor), EmptyOrPath(candidate.moonshineEncoder), EmptyOrPath(candidate.moonshineUncachedDecoder),
+            EmptyOrPath(candidate.moonshineCachedDecoder), EmptyOrPath(candidate.moonshineMergedDecoder));
         LOGI("DetectSttModel: whisper encoder=%s decoder=%s (same as transducer; joiner empty => whisper)",
-             EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder));
+            EmptyOrPath(candidate.encoder), EmptyOrPath(candidate.decoder));
         LOGI("DetectSttModel: funasr encoderAdaptor=%s llm=%s embedding=%s tokenizerDir=%s",
-             EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
-        LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d",
-             (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
-             (int)cap.hasParaformer, (int)cap.hasFunAsrNano);
-        LOGI("DetectSttModel: isLikelyMoonshine=%d isLikelyNemo=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d",
-             (int)hints.isLikelyMoonshine, (int)hints.isLikelyNemo, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice);
+            EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
+        LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d hasDolphin=%d hasFireRedAsr=%d hasFireRedCtc=%d hasCanary=%d hasOmnilingual=%d hasMedAsr=%d hasTeleSpeechCtc=%d hasToneCtc=%d",
+            (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
+            (int)cap.hasParaformer, (int)cap.hasFunAsrNano, (int)cap.hasDolphin, (int)cap.hasFireRedAsr, (int)cap.hasFireRedCtc,
+            (int)cap.hasCanary, (int)cap.hasOmnilingual, (int)cap.hasMedAsr, (int)cap.hasTeleSpeechCtc, (int)cap.hasToneCtc);
+        LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d",
+            (int)hints.isLikelyNemo, (int)hints.isLikelyTdt, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice,
+            (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
+            (int)hints.isLikelyFireRedAsr, (int)hints.isLikelyCanary, (int)hints.isLikelyOmnilingual, (int)hints.isLikelyMedAsr,
+            (int)hints.isLikelyTeleSpeech, (int)hints.isLikelyToneCtc, (int)hints.isLikelyParaformer);
     }
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
 
     result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
     if (result.selectedKind == SttModelKind::kUnknown) {
+        if (IsHardwareSpecificModelDir(modelDir)) {
+            result.ok = false;
+            result.isHardwareSpecificUnsupported = true;
+            result.error = kHardwareSpecificUnsupportedMessage;
+            return result;
+        }
         if (!result.error.empty()) {
             return result;
         }
@@ -615,6 +680,10 @@ SttDetectResult DetectSttModel(
         case SttModelKind::kZipformerCtc:
         case SttModelKind::kToneCtc:
             LOGI("DetectSttModel: paths set ctcModel=%s", EmptyOrPath(result.paths.ctcModel));
+            break;
+        case SttModelKind::kFireRedAsr:
+            LOGI("DetectSttModel: paths set fireRedEncoder=%s fireRedDecoder=%s",
+                 EmptyOrPath(result.paths.fireRedEncoder), EmptyOrPath(result.paths.fireRedDecoder));
             break;
         case SttModelKind::kFunAsrNano:
             LOGI("DetectSttModel: paths set funasr adaptor=%s llm=%s embedding=%s tokenizer=%s",

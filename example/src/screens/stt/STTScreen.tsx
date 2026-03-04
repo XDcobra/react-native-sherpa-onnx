@@ -10,8 +10,6 @@ import {
   Platform,
   Pressable,
   ToastAndroid,
-  Modal,
-  FlatList,
 } from 'react-native';
 import { styles } from './STTScreen.styles';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -35,6 +33,11 @@ import {
   type STTModelType,
   type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
+import type {
+  SttEngine,
+  StreamingSttEngine,
+  SttStream,
+} from 'react-native-sherpa-onnx/stt';
 import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
 import {
   getAssetModelPath,
@@ -43,16 +46,10 @@ import {
 } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import type {
-  SttEngine,
-  StreamingSttEngine,
-  SttStream,
-} from 'react-native-sherpa-onnx/stt';
 import {
-  AudioRecorder,
-  AudioManager,
-  useAudioInput,
-} from 'react-native-audio-api';
+  createPcmLiveStream,
+  type PcmLiveStreamHandle,
+} from 'react-native-sherpa-onnx/audio';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -82,8 +79,6 @@ export default function STTScreen() {
     'example' | 'own' | 'live' | null
   >(null);
   const [isLiveRecording, setIsLiveRecording] = useState(false);
-  const [devicePickerVisible, setDevicePickerVisible] = useState(false);
-  const { availableInputs, currentInput, onSelectInput } = useAudioInput();
   const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
     null
   );
@@ -100,9 +95,14 @@ export default function STTScreen() {
   const sttEngineRef = useRef<SttEngine | null>(null);
   const streamingEngineRef = useRef<StreamingSttEngine | null>(null);
   const liveStreamRef = useRef<SttStream | null>(null);
-  const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const liveProcessPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  const pcmLiveStreamRef = useRef<{
+    handle: PcmLiveStreamHandle;
+    unsubData: () => void;
+    unsubError: () => void;
+  } | null>(null);
   const STT_NUM_THREADS = 2;
+  const LIVE_SAMPLE_RATE = 16000;
 
   const isLiveSupported =
     getOnlineTypeOrNull(selectedModelType ?? undefined) !== null;
@@ -489,7 +489,6 @@ export default function STTScreen() {
 
   const handleLivePressIn = async () => {
     if (!currentModelFolder || !selectedModelType || !isLiveSupported) return;
-    // Tap again while recording = stop (fallback when onPressOut doesn't fire on iOS)
     if (isLiveRecording) {
       handleLivePressOut();
       return;
@@ -499,27 +498,6 @@ export default function STTScreen() {
     setTranscriptionResult(null);
 
     try {
-      let status = await AudioManager.checkRecordingPermissions();
-      if (status !== 'Granted') {
-        status = await AudioManager.requestRecordingPermissions();
-      }
-      if (status !== 'Granted') {
-        setErrorSource('transcribe');
-        setError('Microphone permission is required for live transcription');
-        return;
-      }
-      AudioManager.setAudioSessionOptions({
-        iosCategory: 'playAndRecord',
-        iosMode: 'measurement',
-        iosOptions: [],
-      });
-      const activated = await AudioManager.setAudioSessionActivity(true);
-      if (!activated) {
-        setErrorSource('transcribe');
-        setError('Could not activate audio session');
-        return;
-      }
-
       const useFilePath = padModelIds.includes(currentModelFolder);
       const modelPathConfig = useFilePath
         ? padModelsPath
@@ -543,57 +521,46 @@ export default function STTScreen() {
       const stream = await engine.createStream();
       liveStreamRef.current = stream;
 
-      let recorder = audioRecorderRef.current;
-      if (!recorder) {
-        recorder = new AudioRecorder();
-        audioRecorderRef.current = recorder;
-      }
-      const sampleRate = 16000;
-      recorder.onAudioReady(
-        {
-          sampleRate,
-          bufferLength: Math.round(0.1 * sampleRate),
-          channelCount: 1,
-        },
-        async ({ buffer }) => {
-          const channelData = buffer.getChannelData(0);
-          const samples = Array.from(channelData);
-
-          const streamCurrent = liveStreamRef.current;
-          if (!streamCurrent) return;
-          const prev = liveProcessPromiseRef.current;
-          liveProcessPromiseRef.current = (async () => {
-            await prev;
-            if (!liveStreamRef.current) return;
-            try {
-              const { result } = await streamCurrent.processAudioChunk(
-                samples,
-                buffer.sampleRate
-              );
-              setTranscriptionResult({
-                text: result.text,
-                tokens: result.tokens,
-                timestamps: result.timestamps,
-                lang: '',
-                emotion: '',
-                event: '',
-                durations: [],
-              });
-            } catch {
-              // ignore chunk errors (e.g. after release)
-            }
-          })();
-        }
-      );
-      const startResult = recorder.start();
-      if (startResult.status === 'error') {
+      const pcmHandle = createPcmLiveStream({ sampleRate: LIVE_SAMPLE_RATE });
+      const unsubData = pcmHandle.onData((samples, sampleRate) => {
+        const streamCurrent = liveStreamRef.current;
+        if (!streamCurrent) return;
+        const prev = liveProcessPromiseRef.current;
+        liveProcessPromiseRef.current = (async () => {
+          await prev;
+          if (!liveStreamRef.current) return;
+          try {
+            const { result } = await streamCurrent.processAudioChunk(
+              samples,
+              sampleRate
+            );
+            setTranscriptionResult({
+              text: result.text,
+              tokens: result.tokens,
+              timestamps: result.timestamps,
+              lang: '',
+              emotion: '',
+              event: '',
+              durations: [],
+            });
+          } catch {
+            // ignore chunk errors (e.g. after release)
+          }
+        })();
+      });
+      const unsubError = pcmHandle.onError((message) => {
         setErrorSource('transcribe');
-        setError(startResult.message ?? 'Failed to start recording');
-        await stream.release();
-        await engine.destroy();
-        streamingEngineRef.current = null;
-        liveStreamRef.current = null;
-        return;
+        setError(message);
+      });
+      pcmLiveStreamRef.current = { handle: pcmHandle, unsubData, unsubError };
+      try {
+        await pcmHandle.start();
+      } catch (startErr) {
+        pcmHandle.stop().catch(() => {});
+        unsubData();
+        unsubError();
+        pcmLiveStreamRef.current = null;
+        throw startErr;
       }
       setIsLiveRecording(true);
     } catch (err) {
@@ -605,16 +572,19 @@ export default function STTScreen() {
 
   const handleLivePressOut = async () => {
     if (!isLiveRecording) return;
-    // Update UI immediately so the button turns back from red (don't wait for async cleanup)
     setIsLiveRecording(false);
 
-    const recorder = audioRecorderRef.current;
+    const pcmCur = pcmLiveStreamRef.current;
+    if (pcmCur) {
+      await pcmCur.handle.stop();
+      pcmCur.unsubData();
+      pcmCur.unsubError();
+      pcmLiveStreamRef.current = null;
+    }
+
     const stream = liveStreamRef.current;
     const engine = streamingEngineRef.current;
 
-    recorder?.clearOnAudioReady();
-    const stopResult = recorder?.stop();
-    // Wait for in-flight processAudioChunk calls (with timeout so we don't hang if recorder never settles)
     try {
       await Promise.race([
         liveProcessPromiseRef.current,
@@ -623,11 +593,6 @@ export default function STTScreen() {
     } catch {
       // ignore
     }
-    if (stopResult?.status === 'error') {
-      setErrorSource('transcribe');
-      setError(stopResult.message ?? 'Failed to stop recording');
-    }
-    await AudioManager.setAudioSessionActivity(false);
 
     if (stream && engine) {
       try {
@@ -1114,79 +1079,7 @@ export default function STTScreen() {
             {selectedModelType && audioSourceType === 'live' && (
               <>
                 <Text style={styles.subsectionTitle}>Live Transcription</Text>
-                <View style={styles.audioDeviceRow}>
-                  <Text style={styles.audioDeviceLabel}>Input device:</Text>
-                  <TouchableOpacity
-                    style={styles.audioDevicePicker}
-                    onPress={() => setDevicePickerVisible(true)}
-                    disabled={isLiveRecording}
-                  >
-                    <Text
-                      style={styles.audioDevicePickerText}
-                      numberOfLines={1}
-                    >
-                      {currentInput?.name ?? 'Default'}
-                    </Text>
-                    <Ionicons
-                      name="chevron-down"
-                      size={18}
-                      style={styles.audioDeviceChevron}
-                    />
-                  </TouchableOpacity>
-                </View>
-                <Modal
-                  visible={devicePickerVisible}
-                  transparent
-                  animationType="fade"
-                  onRequestClose={() => setDevicePickerVisible(false)}
-                >
-                  <Pressable
-                    style={styles.deviceModalOverlay}
-                    onPress={() => setDevicePickerVisible(false)}
-                  >
-                    <TouchableOpacity
-                      style={styles.deviceModalContent}
-                      activeOpacity={1}
-                      onPress={() => {}}
-                    >
-                      <Text style={styles.deviceModalTitle}>
-                        Select input device
-                      </Text>
-                      <FlatList
-                        data={availableInputs}
-                        keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => (
-                          <TouchableOpacity
-                            style={[
-                              styles.deviceModalItem,
-                              currentInput?.id === item.id &&
-                                styles.deviceModalItemActive,
-                            ]}
-                            onPress={async () => {
-                              await onSelectInput(item);
-                              setDevicePickerVisible(false);
-                            }}
-                          >
-                            <Text style={styles.deviceModalItemText}>
-                              {item.name}
-                            </Text>
-                            {item.category ? (
-                              <Text style={styles.deviceModalItemCategory}>
-                                {item.category}
-                              </Text>
-                            ) : null}
-                          </TouchableOpacity>
-                        )}
-                      />
-                      <TouchableOpacity
-                        style={styles.deviceModalCancel}
-                        onPress={() => setDevicePickerVisible(false)}
-                      >
-                        <Text style={styles.deviceModalCancelText}>Cancel</Text>
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  </Pressable>
-                </Modal>
+                <Text style={styles.audioDeviceLabel}>Input: Default</Text>
                 <View style={styles.rowCenter}>
                   <Pressable
                     style={[

@@ -159,6 +159,7 @@ The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or l
 
 - [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt_streaming.md) – Real-time recognition, partial results, endpoint detection
+- [PCM Live Stream](./docs/pcm_live_stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
 - [Streaming Text-to-Speech](./docs/tts_streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends

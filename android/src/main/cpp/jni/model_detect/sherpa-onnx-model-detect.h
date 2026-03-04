@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_DETECT_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect-helper.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -111,6 +112,7 @@ struct SttPathHints {
     bool isLikelyMedAsr = false;
     bool isLikelyTeleSpeech = false;
     bool isLikelyToneCtc = false;
+    bool isLikelyParaformer = false;
 };
 
 /** Which model types are possible given paths and hints (has* flags). */
@@ -123,6 +125,8 @@ struct SttCapabilities {
     bool hasFunAsrNano = false;
     bool hasDolphin = false;
     bool hasFireRedAsr = false;
+    /** True when dir name suggests Fire Red but only a single CTC/paraformer model (no encoder/decoder). Use zipformer_ctc. */
+    bool hasFireRedCtc = false;
     bool hasCanary = false;
     bool hasOmnilingual = false;
     bool hasMedAsr = false;
@@ -151,6 +155,8 @@ struct TtsModelPaths {
 struct SttDetectResult {
     bool ok = false;
     std::string error;
+    /** True when detection failed because the model is for unsupported hardware (RK35xx, Ascend, CANN, etc.). */
+    bool isHardwareSpecificUnsupported = false;
     std::vector<DetectedModel> detectedModels;
     SttModelKind selectedKind = SttModelKind::kUnknown;
     bool tokensRequired = true;
@@ -172,9 +178,30 @@ SttDetectResult DetectSttModel(
     bool debug = false
 );
 
+/** Test-only: Like DetectSttModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). Not used in
+ *  production (Android/iOS use DetectSttModel). Does not validate modelDir existence or
+ *  call FileExists on tokens/bpeVocab. */
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::optional<bool>& preferInt8 = std::nullopt,
+    const std::optional<std::string>& modelType = std::nullopt
+);
+
 TtsDetectResult DetectTtsModel(
     const std::string& modelDir,
     const std::string& modelType
+);
+
+/** Test-only: Like DetectTtsModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). Not used in
+ *  production (Android/iOS use DetectTtsModel). Does not validate modelDir existence or
+ *  call FileExists / IsDirectory. */
+TtsDetectResult DetectTtsModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
 );
 
 } // namespace sherpaonnx

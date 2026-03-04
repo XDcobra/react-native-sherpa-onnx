@@ -55,6 +55,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
+  private var pcmCapture: SherpaOnnxPcmCapture? = null
 
   override fun getName(): String {
     return NAME
@@ -62,6 +63,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun onCatalystInstanceDestroy() {
     super.onCatalystInstanceDestroy()
+    pcmCapture?.stop()
+    pcmCapture = null
     onlineSttHelper.shutdown()
     ttsHelper.shutdown()
   }
@@ -319,12 +322,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         return
       }
       val success = result["success"] as? Boolean ?: false
+      val isHardwareSpecificUnsupported = result["isHardwareSpecificUnsupported"] as? Boolean ?: false
       val detectedModels = result["detectedModels"] as? ArrayList<*>
         ?: arrayListOf<HashMap<String, String>>()
       val modelTypeStr = result["modelType"] as? String
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", success)
+      resultMap.putBoolean("isHardwareSpecificUnsupported", isHardwareSpecificUnsupported)
       val modelsArray = Arguments.createArray()
       for (model in detectedModels) {
         val modelMap = model as? HashMap<*, *>
@@ -482,6 +487,71 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun processSttAudioChunk(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
     onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
+  }
+
+  override fun startPcmLiveStream(options: ReadableMap, promise: Promise) {
+    try {
+      pcmCapture?.stop()
+      pcmCapture = null
+      val sampleRate = options.getDouble("sampleRate").toInt().takeIf { it > 0 } ?: 16000
+      val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt().coerceIn(1, 2) else 1
+      val bufferSizeFrames = if (options.hasKey("bufferSizeFrames")) options.getDouble("bufferSizeFrames").toInt() else 0
+      var startError: String? = null
+      var started = false
+      val capture = SherpaOnnxPcmCapture(
+        targetSampleRate = sampleRate,
+        channelCount = channelCount,
+        bufferSizeFrames = bufferSizeFrames,
+        onChunk = { base64Pcm, sr -> emitPcmLiveStreamData(base64Pcm, sr) },
+        onError = { msg ->
+          if (!started) {
+            startError = msg
+          } else {
+            emitPcmLiveStreamError(msg)
+          }
+        },
+        logTag = NAME
+      )
+      pcmCapture = capture
+      capture.start()
+      started = true
+      val err = startError
+      if (err != null) {
+        promise.reject("PCM_LIVE_STREAM_ERROR", err)
+      } else {
+        promise.resolve(null)
+      }
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "startPcmLiveStream failed", e)
+      promise.reject("PCM_LIVE_STREAM_ERROR", e.message ?: "Failed to start PCM capture", e)
+    }
+  }
+
+  override fun stopPcmLiveStream(promise: Promise) {
+    try {
+      pcmCapture?.stop()
+      pcmCapture = null
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("PCM_LIVE_STREAM_ERROR", e.message ?: "Failed to stop PCM capture", e)
+    }
+  }
+
+  private fun emitPcmLiveStreamData(base64Pcm: String, sampleRate: Int) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("base64Pcm", base64Pcm)
+    payload.putInt("sampleRate", sampleRate)
+    eventEmitter.emit("pcmLiveStreamData", payload)
+  }
+
+  private fun emitPcmLiveStreamError(message: String) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("message", message)
+    eventEmitter.emit("pcmLiveStreamError", payload)
   }
 
   // ==================== STT Methods ====================

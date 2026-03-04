@@ -269,6 +269,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);
+        resultDict[@"isHardwareSpecificUnsupported"] = @(result.isHardwareSpecificUnsupported);
         if (!result.error.empty()) {
             resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
         }

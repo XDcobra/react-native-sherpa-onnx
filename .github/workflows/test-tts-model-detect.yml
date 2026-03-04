@@ -1,0 +1,33 @@
+# TTS model detection tests: C++ tests that compare detector output with tts-models-expected.csv.
+# Triggered on PR (via test-model-detect) or manually. Uses test/fixtures (tts-models-structure.txt, tts-models-expected.csv).
+
+name: Test – TTS model detection
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tts-model-detect:
+    name: TTS model detection (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run TTS model detection tests
+        working-directory: ${{ github.workspace }}
+        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected

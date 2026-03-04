@@ -126,10 +126,19 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     const int kMaxSearchDepth = 4;
     const std::vector<FileEntry> files = ListFilesRecursive(modelDir, kMaxSearchDepth);
 
-    std::string tokensFile = FindFileByName(modelDir, "tokens.txt", kMaxSearchDepth);
-    std::string lexiconFile = FindFileByName(modelDir, "lexicon.txt", kMaxSearchDepth);
-    std::string dataDirPath = FindDirectoryByName(modelDir, "espeak-ng-data", kMaxSearchDepth);
-    std::string voicesFile = FindFileByName(modelDir, "voices.bin", kMaxSearchDepth);
+    std::string tokensFile = FindFileByName(files, "tokens.txt");
+    std::string lexiconFile = FindFileByName(files, "lexicon.txt");
+    std::string dataDirPath;
+    {
+        const std::string prefix = modelDir + "/espeak-ng-data/";
+        for (const auto& entry : files) {
+            if (entry.path.size() > prefix.size() && entry.path.compare(0, prefix.size(), prefix) == 0) {
+                dataDirPath = modelDir + "/espeak-ng-data";
+                break;
+            }
+        }
+    }
+    std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
     std::string vocoder = FindOnnxByAnyToken(files, {"vocoder", "vocos"}, std::nullopt);
@@ -138,8 +147,8 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
     std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, std::nullopt);
     std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
-    std::string vocabJsonFile = FindFileByName(modelDir, "vocab.json", kMaxSearchDepth);
-    std::string tokenScoresJsonFile = FindFileByName(modelDir, "token_scores.json", kMaxSearchDepth);
+    std::string vocabJsonFile = FindFileByName(files, "vocab.json");
+    std::string tokenScoresJsonFile = FindFileByName(files, "token_scores.json");
 
     std::vector<std::string> modelExcludes = {"acoustic", "vocoder", "encoder", "decoder", "joiner"};
     std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, std::nullopt);
@@ -149,12 +158,11 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
 
     bool hasVits = !ttsModel.empty();
     bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
-    bool hasVoicesFile = !voicesFile.empty() && FileExists(voicesFile);
+    bool hasVoicesFile = !voicesFile.empty();
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
-                     !textConditioner.empty() && !vocabJsonFile.empty() && FileExists(vocabJsonFile) &&
-                     !tokenScoresJsonFile.empty() && FileExists(tokenScoresJsonFile);
-    bool hasDataDir = !dataDirPath.empty() && IsDirectory(dataDirPath);
+                     !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
+    bool hasDataDir = !dataDirPath.empty();
 
     std::string modelDirLower = ToLower(modelDir);
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
@@ -271,7 +279,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = (!lexiconFile.empty() && FileExists(lexiconFile)) ? lexiconFile : "";
+    result.paths.lexicon = !lexiconFile.empty() ? lexiconFile : "";
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;
@@ -284,7 +292,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.paths.vocabJson = vocabJsonFile;
     result.paths.tokenScoresJson = tokenScoresJsonFile;
 
-    if (selected != TtsModelKind::kPocket && (tokensFile.empty() || !FileExists(tokensFile))) {
+    if (selected != TtsModelKind::kPocket && tokensFile.empty()) {
         result.error = "TTS: tokens.txt not found in " + modelDir;
         return result;
     }
