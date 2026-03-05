@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   workflow_call:
 
-# Only one run per ref at a time; new pushes do not cancel in-progress runs
+# Only one run per ref at a time; new pushes cancel any in-progress runs for the same ref
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-asr-validate
   cancel-in-progress: true
