@@ -258,6 +258,10 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         result.error = "TTS: Matcha model requested but required files not found in " + modelDir;
         return result;
     }
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && ttsModel.empty()) {
+        result.error = "TTS: Kokoro/Kitten model requested but model file not found in " + modelDir;
+        return result;
+    }
     if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasVoicesFile) {
         result.error = "TTS: Kokoro/Kitten model requested but required files not found in " + modelDir;
         return result;
@@ -276,13 +280,12 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         return result;
     }
 
-    std::string lexiconJoined;
-    for (size_t i = 0; i < lexiconCandidates.size(); ++i) {
-        if (i > 0) lexiconJoined += ",";
-        lexiconJoined += lexiconCandidates[i].path;
-    }
+    std::string lexiconPath;
     for (const auto& c : lexiconCandidates) {
         result.lexiconLanguageCandidates.push_back(c.languageId);
+    }
+    if (!lexiconCandidates.empty()) {
+        lexiconPath = lexiconCandidates[0].path;
     }
 
     // Single-file Matcha: no separate vocoder found — use acoustic model path as vocoder.
@@ -296,7 +299,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = lexiconJoined;
+    result.paths.lexicon = lexiconPath;
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;
