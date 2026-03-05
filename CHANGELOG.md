@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.3.3](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.2...v0.3.3) (2026-03-04)
+
+
+### Bug Fixes
+
+* apply all PR review comments ([5754a32](https://github.com/XDcobra/react-native-sherpa-onnx/commit/5754a327398822ab95ec79b357a5f7ce59a72eb0))
+* **audio:** ensure processSttAudioChunk accepts only number[] for compatibility with serialization across platforms ([d4a0abb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d4a0abb008951c0963566964cd8c766765ff203a))
+* **build-scripts:** add support for Android build by duplicating prebuilt onnxruntime library to match hardcoded version requirement ([3e157eb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3e157eb2b39f96b408125a8f1ebf39fdd2a9c190))
+* **detect_paraformer:** enhance paraformer model detection and handling for streaming scenarios ([c14abac](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c14abacf23597a50da432cfd7c0fbf8d6f79860c))
+* **kotlin:** defer recognizer creation to main looper to prevent SIGSEGV during model switching ([3528a36](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3528a36346c061bd7811232d20f9f478089b19dc))
+* **model-detection:** enhance Fire Red ASR and CTC detection logic to support single-file models and improve model resolution ([e0701f9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e0701f9cd50f5aec62c8dc0d84062e1043c65a62))
+* **model-detection:** enhance model detection logic for zipformer and improve handling of paraformer and CTC models ([3946931](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3946931798d356a0466cc49cf325612f34dde215))
+* **model-detection:** refine tone CTC detection logic and enhance model resolution for T-One and other CTC models ([e835d6b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e835d6b5ca51b5f1e1f8b4b8d81c2e2c1a7231e9))
+* **model-detection:** update FireRed ASR detection logic to include conditions for Whisper encoders and decoders ([9cca5d8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9cca5d825a19f3b22efde407cf67717180ff11ea))
+* **podspec:** add iOS framework setup script execution and include AVFoundation framework ([c5fb8c9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c5fb8c955fe6eb0483c30bc8478e037c73c1b645))
+* **review:** apply PR review feedback - debug logging guards, zipformer_ctc collection, version backfill, background init thread, rename IsOnnxFile ([052a1ca](https://github.com/XDcobra/react-native-sherpa-onnx/commit/052a1caa3b346c1a46722525205b5e6976e39ebd))
+* **setup-ios-framework:** improve version checking logic to avoid stale framework downloads ([7ea9e34](https://github.com/XDcobra/react-native-sherpa-onnx/commit/7ea9e341233968589fa9cae55697a37cd9f8be63))
+* **version_extraction:** update paths to tag files for sherpa-onnx, ffmpeg, and libarchive to use module root ([d9a9abc](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d9a9abc965ef1bae61459231f0e44de3d03847d2))
+
+
+### Features
+
+* **js_bridge:** update modelType options to include 'moonshine_v2' ([c146376](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c146376b7513a3ce5265da1b7b1a8e7ce058d0e8))
+* **model_detection:** add android support for Moonshine v2 and exclude files by name in ONNX detection ([a60417a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/a60417a5ee3d93ab5fb7318c271e21455863e7fb))
+* **model_detection:** add ios support for Moonshine v2 and exclude files by name in ONNX detection ([eb8a2a1](https://github.com/XDcobra/react-native-sherpa-onnx/commit/eb8a2a14de6651dcadc3e937adf4f7b526911d9a))
+* **model-detection:** add detection for VAD and TDNN models with appropriate error handling as unsupported models ([eac22fc](https://github.com/XDcobra/react-native-sherpa-onnx/commit/eac22fc51baa07e511ddbe6a938cf833e74725c6))
+* **model-detection:** added guardrails and support for detecting hardware-specific models and return appropriate error messages ([b69db76](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b69db765658525c317f9c7a0b77b962292f95b19))
+* **pcm-live-stream:** add PCM live stream creation and data handling functions, including base64 decoding and event listeners ([4820223](https://github.com/XDcobra/react-native-sherpa-onnx/commit/482022314bba0228de75883d7efe18a13b7e42d7))
+* **pcm-live-stream:** enhance PCM live stream functionality with dynamic capture rate selection and resampling support ([96413bb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/96413bb70321e0121e9c228de3d6dafd7eb4d465))
+* **pcm-live-stream:** implement PCM live stream capture for Android and iOS, including start/stop methods and event emissions ([ebd24b8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ebd24b87838c2b9a7f7a2c4834e7608e8cbe4090))
+* **pcm-live-stream:** updated example app to use own streaming api ([dca367f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/dca367fd41c47373faccf1f9e96355374ef9a923))
+
+
+### Performance Improvements
+
+* **audio:** optimize base64 PCM decoding to use Float32Array for improved performance and reduce GC pressure; update callback types for onData method ([d56832a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d56832aa2847f7450143a598a1f09d3de12a95e0))
+
 ## [0.3.2](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.1...v0.3.2) (2026-03-01)
 
 
