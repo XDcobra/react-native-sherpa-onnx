@@ -15,6 +15,7 @@ This guide covers the STT APIs for offline transcription.
   - [Hotwords (contextual biasing)](./hotwords.md)
 - [Model Setup](#model-setup)
   - [Supported STT model types](#supported-stt-model-types)
+  - [Validation (required files)](#validation-required-files)
   - [Model-specific options (modelOptions)](#model-specific-options-modeloptions)
   - [Model language lists (sttModelLanguages)](#model-language-lists-sttmodellanguages)
 - [Mapping to Native API](#mapping-to-native-api)
@@ -26,7 +27,8 @@ This guide covers the STT APIs for offline transcription.
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
-| Model type detection (no init) | ✅ | Native | `detectSttModel(modelPath, options?)` — see [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization) |
+| Model type detection (no init) | ✅ | Native | `detectSttModel(modelPath, options?)` — includes validation of required files; missing files cause `success: false` with specific error. See [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization). |
+| Required-files validation | ✅ | Native | Automatic after detection; see [Validation (required files)](#validation-required-files). |
 | Model initialization | ✅ | Kotlin API | `createSTT()` --> `SttEngine`; optional hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither |
 | Offline file transcription | ✅ | Kotlin API | `stt.transcribeFile(filePath)` --> full result object |
 | Transcribe from samples | ✅ | Kotlin API | `stt.transcribeSamples(samples, sampleRate)` |
@@ -107,6 +109,7 @@ Create an STT engine instance. Returns `Promise<SttEngine>`. You **must** call `
 Notes and common pitfalls:
 - `modelPath` must point to the model directory containing the expected files for the chosen `modelType` (e.g. `encoder.onnx`/`decoder.onnx`/`joiner.onnx` for transducer, `model.onnx` + `tokens.txt` for paraformer).
 - Auto-detection is file-based. Folder names are no longer required to match model types.
+- If detection succeeds but required files are missing, the SDK rejects creation with a specific error (e.g. `"STT Transducer: missing required files in …: encoder, tokens"`) instead of crashing at init time. See [Validation (required files)](#validation-required-files).
 - If you need a concrete file path (e.g. for audio files), use `resolveModelPath` on a `ModelPathConfig`. Android will return a path inside the APK extraction area; iOS will return the bundle path.
 - `preferInt8: true` will attempt to load quantized models when available — faster and smaller, but may affect accuracy.
 - **Hotwords:** Only transducer models support hotwords. Passing `hotwordsFile` for Whisper, Paraformer, etc. causes the promise to reject with code `HOTWORDS_NOT_SUPPORTED`. Use `sttSupportsHotwords(modelType)` (from `react-native-sherpa-onnx/stt`) to show hotword options only for transducer.
@@ -201,6 +204,26 @@ The following model types are supported for detection and config build. Auto-det
 | `dolphin` | model.onnx, tokens.txt (folder name: dolphin) |
 | `canary` | encoder, decoder (folder name: canary) |
 | `omnilingual`, `medasr`, `telespeech_ctc` | model.onnx, tokens.txt (folder name hints) |
+
+After detecting the model type, the SDK automatically validates that all **required** files for the detected type are present. If any are missing, detection fails with a specific error listing the missing fields. See [Validation (required files)](#validation-required-files) below.
+
+### Validation (required files)
+
+After model detection resolves the type and populates file paths, the SDK runs a validation step that checks all **required** fields for the detected model type are non-empty. This prevents crashes during initialization when a model directory is incomplete.
+
+**When it runs:** Automatically as part of `detectSttModel()` and `createSTT()`. No separate call needed.
+
+**What it checks:** Each model type has a declarative list of required vs. optional path fields. For example, `transducer` requires `encoder`, `decoder`, `joiner`, and `tokens`; `bpeVocab` is optional. `funasr_nano` requires `funasrEncoderAdaptor`, `funasrLLM`, `funasrEmbedding`, and `funasrTokenizer` but does **not** require `tokens`.
+
+**Error format:** When required files are missing, the error follows this pattern:
+
+```
+STT <ModelType>: missing required files in <modelDir>: <field1>, <field2>
+```
+
+Example: `STT Transducer: missing required files in /data/models/zipformer: encoder, tokens`
+
+The caller receives this in `result.error` (from `detectSttModel`) or as a rejected Promise (from `createSTT`). Optional fields that are absent do **not** cause a validation error.
 
 ### Model-specific options (modelOptions)
 
