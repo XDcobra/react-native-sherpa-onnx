@@ -9,8 +9,8 @@ on:
 
 # Only one run per ref at a time; new pushes do not cancel in-progress runs
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}-asr-detect
+  cancel-in-progress: true
 
 jobs:
   asr-model-detect:
