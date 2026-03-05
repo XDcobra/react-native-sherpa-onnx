@@ -162,6 +162,8 @@ Use **`listModelsAtPath(path)`** whenever models are **not** in the main app ass
 
 You can query the **model type** for a given path **without** loading the model. This uses the same file-based detection as `initializeSTT` / `initializeTTS` and is useful to show model-specific options in the UI before the user taps "Initialize".
 
+The detection pipeline includes a **validation step**: after resolving the model type and gathering file paths, the SDK checks that all **required** files for the detected type are present. If any are missing, `success` is `false` and `error` contains a specific message listing the missing fields (e.g. `"TTS Kokoro: missing required files in …: dataDir, voices"`). This lets your app verify a model directory is complete before attempting initialization.
+
 ### `detectSttModel(modelPath, options?)`
 
 ```ts
@@ -222,6 +224,29 @@ if (result.success && result.lexiconLanguageCandidates?.length) {
 }
 ```
 
+### Validation step
+
+Both `detectSttModel` and `detectTtsModel` (and the corresponding `createSTT` / `createTTS` functions) include an automatic validation step after resolving the model type:
+
+1. **Gather files** in the model directory (recursive scan).
+2. **Detect model type** from file patterns and directory name hints.
+3. **Assign paths** for the detected type (e.g. `encoder`, `decoder`, `tokens`).
+4. **Validate:** Check that every **required** path field for the detected type is non-empty. If any required field is missing, the result is `success: false` with a detailed `error` message.
+
+**Error message format:**
+
+```
+<STT|TTS> <ModelType>: missing required files in <modelDir>: <field1>, <field2>
+```
+
+Examples:
+- `STT Transducer: missing required files in /data/models/zipformer: encoder, tokens (Ensure tokens.txt is present in the model directory.)`
+- `TTS Kokoro: missing required files in /data/models/kokoro-v1.0: dataDir (Copy espeak-ng-data into the model directory.), voices`
+
+**Required vs. optional:** Each model type defines which fields are required and which are optional. For example, STT Transducer requires `encoder`, `decoder`, `joiner`, and `tokens` (while `bpeVocab` is optional). TTS Kokoro requires `ttsModel`, `tokens`, `voices`, and `dataDir` (espeak-ng-data), while `lexicon` is optional. Missing optional fields do **not** cause validation failure.
+
+For the full list of required/optional fields per model type, see [STT: Validation (required files)](./stt.md#validation-required-files) and [TTS: Validation (required files)](./tts.md#validation-required-files).
+
 ---
 
 ## Advanced
@@ -275,6 +300,17 @@ For models **downloaded in-app** with the download API (`react-native-sherpa-onn
 - Ensure the folder contains the required files for at least one model type (see [Supported Model Types](../../README.md#supported-model-types) in the README). File names are case-sensitive.
 - Try passing an explicit `modelType` (e.g. `'whisper'`, `'vits'`) if you know the type.
 - Check that no required file is missing (e.g. `tokens.txt`, or all of `encoder.onnx` / `decoder.onnx` / `joiner.onnx` for transducer).
+
+### "Missing required files in …"
+
+If `detectSttModel` or `detectTtsModel` returns `success: false` with an error like `"STT Transducer: missing required files in …: encoder, tokens"` or `"TTS Kokoro: missing required files in …: dataDir"`, the model directory is incomplete for the detected type. The field names in the error tell you what is missing:
+
+- **`dataDir`** — The `espeak-ng-data` directory. Required for Kokoro and Kitten TTS models. Copy or extract `espeak-ng-data` into the model directory.
+- **`tokens`** — `tokens.txt` is missing. Required for most model types.
+- **`encoder`, `decoder`, `joiner`** — One or more ONNX model files are missing for a transducer model.
+- **`voices`** — `voices.bin` is missing. Required for Kokoro and Kitten.
+
+See [STT: Validation (required files)](./stt.md#validation-required-files) and [TTS: Validation (required files)](./tts.md#validation-required-files) for full lists of required vs. optional fields per model type.
 
 ### `getAssetPackPath("sherpa_models")` returns `null`
 

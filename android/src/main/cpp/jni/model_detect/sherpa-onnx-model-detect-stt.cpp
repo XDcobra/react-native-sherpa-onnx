@@ -33,6 +33,7 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-validate-stt.h"
 #include <cstdlib>
 #include <string>
 #include <algorithm>
@@ -699,6 +700,14 @@ SttDetectResult DetectSttModel(
         result.paths.bpeVocab = candidate.bpeVocab;
     }
 
+    auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
+    if (!validation.ok) {
+        result.ok = false;
+        result.error = validation.error;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
     // Log paths actually set for the selected kind (so we can verify nothing is missing).
     switch (result.selectedKind) {
         case SttModelKind::kTransducer:
@@ -790,9 +799,10 @@ SttDetectResult DetectSttModelFromFileList(
     result.paths.tokens = candidate.tokens;
     result.paths.bpeVocab = candidate.bpeVocab;
 
-    if (result.tokensRequired && candidate.tokens.empty()) {
-        result.error = "Tokens file not found in " + modelDir;
+    auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
+    if (!validation.ok) {
         result.ok = false;
+        result.error = validation.error;
         return result;
     }
 

@@ -1,0 +1,34 @@
+# ASR (STT) validation tests: C++ tests for the model validation layer (required-files checks).
+# Triggered on PR (via test-model-detect) or manually.
+
+name: Test – ASR validation
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+# Only one run per ref at a time; new pushes cancel any in-progress runs for the same ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-asr-validate
+  cancel-in-progress: true
+
+jobs:
+  asr-validate:
+    name: ASR validation (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run ASR validation tests
+        working-directory: ${{ github.workspace }}
+        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectValidation.Stt*:ModelDetectValidation.ValidateStt*

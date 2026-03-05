@@ -35,6 +35,7 @@
 #import <Foundation/Foundation.h>
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-validate-stt.h"
 
 #include <algorithm>
 #include <string>
@@ -662,6 +663,13 @@ SttDetectResult DetectSttModel(
     }
     if (!candidate.bpeVocab.empty() && FileExists(candidate.bpeVocab)) {
         result.paths.bpeVocab = candidate.bpeVocab;
+    }
+
+    auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
+    if (!validation.ok) {
+        result.ok = false;
+        result.error = validation.error;
+        return result;
     }
 
     switch (result.selectedKind) {

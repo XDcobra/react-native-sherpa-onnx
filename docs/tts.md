@@ -25,7 +25,8 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 
 | Feature | Status | Source | Notes |
 | --- | --- | --- | --- |
-| Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — returns `success`, `detectedModels`, `modelType`, and for Kokoro/Kitten multi-lang also `lexiconLanguageCandidates` (e.g. `["us-en", "zh"]`). See [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization). |
+| Model type detection (no init) | ✅ | Native | `detectTtsModel(modelPath, options?)` — includes validation of required files; missing files cause `success: false` with specific error (e.g. `"TTS Kokoro: missing required files in …: dataDir"`). Returns `success`, `detectedModels`, `modelType`, and for Kokoro/Kitten multi-lang also `lexiconLanguageCandidates`. See [Model Setup: detectSttModel / detectTtsModel](./MODEL_SETUP.md#model-type-detection-without-initialization). |
+| Required-files validation | ✅ | Native | Automatic after detection; see [Validation (required files)](#validation-required-files). |
 | Model initialization | ✅ | Kotlin API | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | Kotlin API | `tts.generateSpeech()` |
 | Streaming generation | ✅ | Kotlin API | `tts.generateSpeechStream()` |
@@ -339,8 +340,33 @@ See [TTS_MODEL_SETUP.md](./TTS_MODEL_SETUP.md) for model downloads and setup ste
 - [sherpa-onnx PR #2487 – Add Zipvoice](https://github.com/k2-fsa/sherpa-onnx/pull/2487): Integration of Zipvoice (zero-shot TTS, encoder + flow-matching decoder + vocoder), C-API, vocoder selection, and [discussion on running Zipvoice / distill](https://github.com/k2-fsa/sherpa-onnx/pull/2487#issuecomment-3227884498).
 - [k2-fsa/ZipVoice](https://github.com/k2-fsa/ZipVoice): Upstream ZipVoice and ZipVoice-Distill (faster, minimal quality loss). For CPU deployment with ONNX, sherpa-onnx is the recommended C++ runtime; the ONNX export for sherpa-onnx still uses encoder + decoder + vocoder (e.g. `vocos_24khz.onnx`).
 
+### Validation (required files)
+
+After detecting the TTS model type, the SDK automatically validates that all **required** file paths for the detected type are present. If any are missing, detection fails with a specific error listing the missing fields. This prevents app crashes during initialization when a model directory is incomplete (e.g. Kokoro without `espeak-ng-data`).
+
+**When it runs:** Automatically as part of `detectTtsModel()` and `createTTS()`. No separate call needed.
+
+**What it checks per model type:**
+
+| Model type | Required | Optional |
+| --- | --- | --- |
+| **VITS** | `ttsModel`, `tokens` | `dataDir` (espeak-ng-data), `lexicon` |
+| **Matcha** | `acousticModel`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
+| **Kokoro / Kitten** | `ttsModel`, `tokens`, `voices`, `dataDir` (espeak-ng-data) | `lexicon` |
+| **Pocket** | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | — |
+| **Zipvoice** | `encoder`, `decoder`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
+
+**Error format:**
+
+```
+TTS <ModelType>: missing required files in <modelDir>: <field1>, <field2>
+```
+
+Example: `TTS Kokoro: missing required files in /data/models/kokoro-v1.0: dataDir (Copy espeak-ng-data into the model directory.), voices`
+
 ## Troubleshooting & tuning
 
+- **Kokoro/Kitten init fails with "missing required files: dataDir":** The model directory is missing the `espeak-ng-data` folder. Copy or extract `espeak-ng-data` into the model directory. The SDK validates this before initialization and returns a clear error instead of crashing.
 - **Zipvoice init fails or app crashes on low-RAM devices (Android):** The full Zipvoice model needs substantial free memory. If you see "Not enough free memory" or a crash in system graphics threads (e.g. `FenceMonitor` / `libgui.so`), use the **int8 distill** model `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` or close other apps to free RAM.
 - Latency/stuttering: tune native player buffer sizes and write frequency. On Android adjust AudioTrack buffer sizes; on iOS tune AVAudioEngine settings.
 - Memory: avoid retaining large arrays in JS for long sessions. Prefer native-side streaming-to-file if you expect long outputs.

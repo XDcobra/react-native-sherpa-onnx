@@ -18,8 +18,11 @@
 
 #include "model_detect_test_utils.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-stt.h"
+#include "sherpa-onnx-validate-tts.h"
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -186,6 +189,255 @@ TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
             << ") but got " << model_detect_test::TtsKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
+}
+
+// ============================================================
+// Helper: build a synthetic FileEntry from a path string.
+// ============================================================
+
+using FE = sherpaonnx::model_detect::FileEntry;
+
+static FE MakeEntry(const std::string& dir, const std::string& name) {
+    FE e;
+    e.path = dir + "/" + name;
+    e.name = name;
+    e.nameLower = name;
+    std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    e.size = 1024;
+    return e;
+}
+
+// ============================================================
+// STT validation: missing required files
+// ============================================================
+
+TEST(ModelDetectValidation, SttTransducerMissingEncoderRejected) {
+    const std::string dir = "test-models/zipformer";
+    std::vector<FE> files = {
+        MakeEntry(dir, "decoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    EXPECT_FALSE(result.ok) << "Should fail when encoder is missing (capability check)";
+}
+
+TEST(ModelDetectValidation, SttWhisperMissingTokensValidation) {
+    const std::string dir = "test-models/whisper-tiny";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder.onnx"),
+        MakeEntry(dir, "decoder.onnx"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "whisper");
+    EXPECT_FALSE(result.ok) << "Should fail when tokens is missing";
+    EXPECT_NE(result.error.find("tokens"), std::string::npos)
+        << "Validation error should mention 'tokens': " << result.error;
+}
+
+TEST(ModelDetectValidation, SttParaformerMissingTokensValidation) {
+    const std::string dir = "test-models/paraformer";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "paraformer");
+    EXPECT_FALSE(result.ok) << "Should fail when tokens is missing for paraformer";
+    EXPECT_NE(result.error.find("tokens"), std::string::npos)
+        << "Validation error should mention 'tokens': " << result.error;
+}
+
+TEST(ModelDetectValidation, SttFireRedMissingTokensValidation) {
+    const std::string dir = "test-models/fire-red-asr";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder.onnx"),
+        MakeEntry(dir, "decoder.onnx"),
+        MakeEntry(dir, "joiner.onnx"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "fire_red_asr");
+    EXPECT_FALSE(result.ok) << "Should fail when tokens is missing for Fire Red ASR";
+    EXPECT_NE(result.error.find("tokens"), std::string::npos)
+        << "Validation error should mention 'tokens': " << result.error;
+}
+
+TEST(ModelDetectValidation, SttTransducerMissingTokens) {
+    const std::string dir = "test-models/zipformer";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "decoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    EXPECT_FALSE(result.ok) << "Should fail when tokens.txt is missing";
+    EXPECT_NE(result.error.find("tokens"), std::string::npos)
+        << "Error should mention 'tokens': " << result.error;
+}
+
+// ============================================================
+// STT validation: optional fields do NOT cause failure
+// ============================================================
+
+TEST(ModelDetectValidation, SttTransducerOptionalBpeVocab) {
+    const std::string dir = "test-models/zipformer";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "decoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    EXPECT_TRUE(result.ok) << "Should succeed without optional bpeVocab: " << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kTransducer);
+}
+
+// ============================================================
+// TTS validation: missing required files
+// ============================================================
+
+TEST(ModelDetectValidation, TtsKokoroMissingEspeakData) {
+    const std::string dir = "test-models/kokoro-v1.0";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+        MakeEntry(dir, "voices.bin"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "kokoro");
+    EXPECT_FALSE(result.ok) << "Should fail when espeak-ng-data is missing";
+    EXPECT_NE(result.error.find("dataDir"), std::string::npos)
+        << "Error should mention 'dataDir': " << result.error;
+    EXPECT_NE(result.error.find("espeak-ng-data"), std::string::npos)
+        << "Error should include hint about espeak-ng-data: " << result.error;
+}
+
+TEST(ModelDetectValidation, TtsKokoroMissingVoices) {
+    const std::string dir = "test-models/kokoro-v1.0";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+        MakeEntry(dir + "/espeak-ng-data", "phontab"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "kokoro");
+    EXPECT_FALSE(result.ok) << "Should fail when voices.bin is missing";
+    EXPECT_NE(result.error.find("voices"), std::string::npos)
+        << "Error should mention 'voices': " << result.error;
+}
+
+TEST(ModelDetectValidation, TtsVitsMissingModel) {
+    const std::string dir = "test-models/vits-piper";
+    std::vector<FE> files = {
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
+    EXPECT_FALSE(result.ok) << "Should fail when ttsModel is missing";
+    EXPECT_NE(result.error.find("ttsModel"), std::string::npos)
+        << "Error should mention 'ttsModel': " << result.error;
+}
+
+TEST(ModelDetectValidation, TtsPocketMissingTextConditioner) {
+    const std::string dir = "test-models/pocket-tts";
+    std::vector<FE> files = {
+        MakeEntry(dir, "lm_flow.onnx"),
+        MakeEntry(dir, "lm_main.onnx"),
+        MakeEntry(dir, "encoder.onnx"),
+        MakeEntry(dir, "decoder.onnx"),
+        MakeEntry(dir, "vocab.json"),
+        MakeEntry(dir, "token_scores.json"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "pocket");
+    EXPECT_FALSE(result.ok) << "Should fail when textConditioner is missing";
+    EXPECT_NE(result.error.find("textConditioner"), std::string::npos)
+        << "Error should mention 'textConditioner': " << result.error;
+}
+
+// ============================================================
+// TTS validation: optional fields do NOT cause failure
+// ============================================================
+
+TEST(ModelDetectValidation, TtsVitsOptionalDataDir) {
+    const std::string dir = "test-models/vits-piper";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
+    EXPECT_TRUE(result.ok) << "Should succeed without optional dataDir: " << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kVits);
+}
+
+TEST(ModelDetectValidation, TtsMatchaOptionalLexicon) {
+    const std::string dir = "test-models/matcha-tts";
+    std::vector<FE> files = {
+        MakeEntry(dir, "acoustic-model.onnx"),
+        MakeEntry(dir, "vocoder.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "matcha");
+    EXPECT_TRUE(result.ok) << "Should succeed without optional lexicon: " << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kMatcha);
+}
+
+// ============================================================
+// Direct validation function unit tests
+// ============================================================
+
+TEST(ModelDetectValidation, ValidateSttPathsDirectOk) {
+    sherpaonnx::SttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.joiner = "/m/joiner.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kTransducer, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsDirectMissing) {
+    sherpaonnx::SttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kTransducer, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_EQ(v.missingRequired.size(), 2u);
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "joiner"),
+              v.missingRequired.end());
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "tokens"),
+              v.missingRequired.end());
+}
+
+TEST(ModelDetectValidation, ValidateTtsPathsDirectOk) {
+    sherpaonnx::TtsModelPaths paths;
+    paths.ttsModel = "/m/model.onnx";
+    paths.tokens = "/m/tokens.txt";
+    paths.voices = "/m/voices.bin";
+    paths.dataDir = "/m/espeak-ng-data";
+    auto v = sherpaonnx::ValidateTtsPaths(sherpaonnx::TtsModelKind::kKokoro, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateTtsPathsDirectMissing) {
+    sherpaonnx::TtsModelPaths paths;
+    paths.ttsModel = "/m/model.onnx";
+    auto v = sherpaonnx::ValidateTtsPaths(sherpaonnx::TtsModelKind::kKokoro, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_EQ(v.missingRequired.size(), 3u);
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "tokens"),
+              v.missingRequired.end());
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "voices"),
+              v.missingRequired.end());
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "dataDir"),
+              v.missingRequired.end());
+}
+
+TEST(ModelDetectValidation, ValidateTtsPathsUnknownKindPassesThrough) {
+    sherpaonnx::TtsModelPaths paths;
+    auto v = sherpaonnx::ValidateTtsPaths(sherpaonnx::TtsModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsUnknownKindPassesThrough) {
+    sherpaonnx::SttModelPaths paths;
+    auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
 }
 
 }  // namespace
