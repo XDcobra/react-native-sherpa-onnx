@@ -32,6 +32,7 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-validate-tts.h"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -223,35 +224,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
         result.error = "TTS: No compatible model type detected in " + modelDir;
         return result;
     }
-    if (selected == TtsModelKind::kVits && !hasVits) {
-        result.error = "TTS: VITS model requested but model file not found in " + modelDir;
-        return result;
-    }
-    if (selected == TtsModelKind::kMatcha && !hasMatcha) {
-        result.error = "TTS: Matcha model requested but required files not found in " + modelDir;
-        return result;
-    }
-    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && ttsModel.empty()) {
-        result.error = "TTS: Kokoro/Kitten model requested but model file not found in " + modelDir;
-        return result;
-    }
-    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasVoicesFile) {
-        result.error = "TTS: Kokoro/Kitten model requested but required files not found in " + modelDir;
-        return result;
-    }
-    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasDataDir) {
-        result.error = "TTS: espeak-ng-data not found in " + modelDir +
-                       ". Copy espeak-ng-data into the model directory.";
-        return result;
-    }
-    if (selected == TtsModelKind::kPocket && !hasPocket) {
-        result.error = "TTS: Pocket model requested but required files not found in " + modelDir;
-        return result;
-    }
-    if (selected == TtsModelKind::kZipvoice && !hasZipvoice) {
-        result.error = "TTS: Zipvoice model requested but required files not found in " + modelDir;
-        return result;
-    }
 
     std::string lexiconPath;
     for (const auto& c : lexiconCandidates) {
@@ -261,10 +233,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
         lexiconPath = lexiconCandidates[0].path;
     }
 
-    // Single-file Matcha: no separate vocoder found — use acoustic model path as vocoder.
-    // sherpa-onnx requires a vocoder path when model metadata need_vocoder=true; the same
-    // ONNX is often used for both (or need_vocoder is false and the path is ignored).
-    // TODO: add this to validator file once implemented
     if (selected == TtsModelKind::kMatcha && !acousticModel.empty() && vocoder.empty()) {
         vocoder = acousticModel;
     }
@@ -285,8 +253,10 @@ static TtsDetectResult DetectTtsModelFromFiles(
     result.paths.vocabJson = vocabJsonFile;
     result.paths.tokenScoresJson = tokenScoresJsonFile;
 
-    if (selected != TtsModelKind::kPocket && tokensFile.empty()) {
-        result.error = "TTS: tokens.txt not found in " + modelDir;
+    auto validation = ValidateTtsPaths(selected, result.paths, modelDir);
+    if (!validation.ok) {
+        result.ok = false;
+        result.error = validation.error;
         return result;
     }
 
