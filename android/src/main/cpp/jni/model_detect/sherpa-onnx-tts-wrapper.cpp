@@ -49,6 +49,12 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
     env->DeleteLocalRef(detectedList);
   }
 
+  jobject langCandidatesList = BuildStringList(env, result.lexiconLanguageCandidates);
+  if (langCandidatesList) {
+    env->CallObjectMethod(map, mapPut, env->NewStringUTF("lexiconLanguageCandidates"), langCandidatesList);
+    env->DeleteLocalRef(langCandidatesList);
+  }
+
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {
     jobject pathsMap = env->NewObject(hashMapClass, mapInit);

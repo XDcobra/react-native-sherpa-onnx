@@ -712,6 +712,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           resultMap.putString("error", error)
         }
       }
+      val lexiconLanguageCandidates = result["lexiconLanguageCandidates"] as? ArrayList<*>
+      if (!lexiconLanguageCandidates.isNullOrEmpty()) {
+        val candidatesArray = Arguments.createArray()
+        for (c in lexiconLanguageCandidates) {
+          (c as? String)?.let { candidatesArray.pushString(it) }
+        }
+        resultMap.putArray("lexiconLanguageCandidates", candidatesArray)
+      }
       promise.resolve(resultMap)
     } catch (e: Exception) {
       android.util.Log.e(NAME, "DETECT_ERROR: TTS model detection failed: ${e.message}", e)

@@ -83,4 +83,26 @@ jobject BuildDetectedModelsList(JNIEnv* env, const std::vector<DetectedModel>& m
   return list;
 }
 
+jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings) {
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  if (!listClass) return nullptr;
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+  jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  if (!listInit || !listAdd) {
+    env->DeleteLocalRef(listClass);
+    return nullptr;
+  }
+  jobject list = env->NewObject(listClass, listInit);
+  env->DeleteLocalRef(listClass);
+  if (!list) return nullptr;
+  for (const auto& s : strings) {
+    jstring jval = env->NewStringUTF(s.c_str());
+    if (jval) {
+      env->CallBooleanMethod(list, listAdd, jval);
+      env->DeleteLocalRef(jval);
+    }
+  }
+  return list;
+}
+
 }  // namespace sherpaonnx

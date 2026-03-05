@@ -169,6 +169,8 @@ struct TtsDetectResult {
     std::vector<DetectedModel> detectedModels;
     TtsModelKind selectedKind = TtsModelKind::kUnknown;
     TtsModelPaths paths;
+    /** Language ids from detected lexicon files (e.g. "default", "us-en", "zh") for multi-lang Kokoro/Kitten. Empty when not applicable. */
+    std::vector<std::string> lexiconLanguageCandidates;
 };
 
 SttDetectResult DetectSttModel(

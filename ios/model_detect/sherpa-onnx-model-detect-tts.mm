@@ -129,7 +129,7 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     const std::vector<FileEntry> files = ListFilesRecursive(modelDir, kMaxSearchDepth);
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
-    std::string lexiconFile = FindFileByName(files, "lexicon.txt");
+    std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
     std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
@@ -276,10 +276,19 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         return result;
     }
 
+    std::string lexiconJoined;
+    for (size_t i = 0; i < lexiconCandidates.size(); ++i) {
+        if (i > 0) lexiconJoined += ",";
+        lexiconJoined += lexiconCandidates[i].path;
+    }
+    for (const auto& c : lexiconCandidates) {
+        result.lexiconLanguageCandidates.push_back(c.languageId);
+    }
+
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = !lexiconFile.empty() ? lexiconFile : "";
+    result.paths.lexicon = lexiconJoined;
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;

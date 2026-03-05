@@ -64,6 +64,22 @@ std::string FindDirectoryUnderRoot(
     const std::string& dirName
 );
 
+/** Lexicon file with optional language id for multi-lang TTS (e.g. Kokoro). */
+struct LexiconCandidate {
+    std::string path;       /**< Full path to the lexicon file */
+    std::string languageId; /**< From filename: "default" for lexicon.txt, else e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt */
+};
+
+/**
+ * Find all lexicon files under \p rootDir: exact "lexicon.txt" and any "lexicon-*.txt".
+ * Returns a list of LexiconCandidate (path + languageId), ordered: lexicon.txt first (as "default"),
+ * then lexicon-*.txt alphabetically by language id. Used for multi-language Kokoro/Kitten TTS.
+ */
+std::vector<LexiconCandidate> FindLexiconCandidates(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir
+);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 

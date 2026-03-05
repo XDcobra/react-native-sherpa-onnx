@@ -232,6 +232,13 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         }
         resultDict[@"detectedModels"] = detectedModelsArray;
         resultDict[@"modelType"] = ttsModelKindToNSString(result.selectedKind);
+        if (!result.lexiconLanguageCandidates.empty()) {
+            NSMutableArray *langCandidates = [NSMutableArray array];
+            for (const auto& id : result.lexiconLanguageCandidates) {
+                [langCandidates addObject:[NSString stringWithUTF8String:id.c_str()]];
+            }
+            resultDict[@"lexiconLanguageCandidates"] = langCandidates;
+        }
         resolve(resultDict);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"TTS model detection failed: %@", exception.reason];
