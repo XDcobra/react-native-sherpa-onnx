@@ -258,6 +258,14 @@ static TtsDetectResult DetectTtsModelFromFiles(
         result.lexiconLanguageCandidates.push_back(c.languageId);
     }
 
+    // Single-file Matcha: no separate vocoder found — use acoustic model path as vocoder.
+    // sherpa-onnx requires a vocoder path when model metadata need_vocoder=true; the same
+    // ONNX is often used for both (or need_vocoder is false and the path is ignored).
+    // TODO: add this to validator file once implemented
+    if (selected == TtsModelKind::kMatcha && !acousticModel.empty() && vocoder.empty()) {
+        vocoder = acousticModel;
+    }
+
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
