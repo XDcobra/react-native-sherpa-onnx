@@ -206,5 +206,24 @@ bool ContainsWord(const std::string& haystack, const std::string& word) {
     return false;
 }
 
+std::string FindDirectoryUnderRoot(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir,
+    const std::string& dirName
+) {
+    if (dirName.empty()) return "";
+    const std::string needle = "/" + dirName + "/";
+    const size_t dirPathLen = 1 + dirName.size();
+    for (const auto& entry : files) {
+        if (entry.path.size() < rootDir.size() + needle.size()) continue;
+        if (entry.path.compare(0, rootDir.size(), rootDir) != 0) continue;
+        size_t pos = entry.path.find(needle, rootDir.size());
+        if (pos != std::string::npos) {
+            return entry.path.substr(0, pos + dirPathLen);
+        }
+    }
+    return "";
+}
+
 } // namespace model_detect
 } // namespace sherpaonnx

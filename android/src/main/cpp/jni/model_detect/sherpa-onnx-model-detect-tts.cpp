@@ -58,7 +58,9 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
     return TtsModelKind::kUnknown;
 }
 
-/** Returns true if the given kind is supported by the current paths and hints (required files present). */
+/** Returns true if the given kind is supported by the current paths and hints (required files present).
+ *  data_dir (espeak-ng-data) is required only for Kitten and Kokoro (sherpa-onnx config Validate());
+ *  VITS, Matcha, Zipvoice use it optionally; Pocket does not use it. */
 static bool CapabilitySupportsTtsKind(
     TtsModelKind kind,
     bool hasVits,
@@ -70,9 +72,9 @@ static bool CapabilitySupportsTtsKind(
 ) {
     switch (kind) {
         case TtsModelKind::kVits:
-            return hasVits && hasDataDir;
+            return hasVits;
         case TtsModelKind::kMatcha:
-            return hasMatcha && hasDataDir;
+            return hasMatcha;
         case TtsModelKind::kKokoro:
         case TtsModelKind::kKitten:
             return hasVoicesFile && hasDataDir;
@@ -124,16 +126,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::string lexiconFile = FindFileByName(files, "lexicon.txt");
-    std::string dataDirPath;
-    {
-        const std::string prefix = modelDir + "/espeak-ng-data/";
-        for (const auto& entry : files) {
-            if (entry.path.size() > prefix.size() && entry.path.compare(0, prefix.size(), prefix) == 0) {
-                dataDirPath = modelDir + "/espeak-ng-data";
-                break;
-            }
-        }
-    }
+    std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
@@ -228,8 +221,13 @@ static TtsDetectResult DetectTtsModelFromFiles(
         result.error = "TTS: Matcha model requested but required files not found in " + modelDir;
         return result;
     }
-    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && (!hasVoicesFile || !hasDataDir)) {
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasVoicesFile) {
         result.error = "TTS: Kokoro/Kitten model requested but required files not found in " + modelDir;
+        return result;
+    }
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasDataDir) {
+        result.error = "TTS: espeak-ng-data not found in " + modelDir +
+                       ". Copy espeak-ng-data into the model directory.";
         return result;
     }
     if (selected == TtsModelKind::kPocket && !hasPocket) {
@@ -238,13 +236,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
     }
     if (selected == TtsModelKind::kZipvoice && !hasZipvoice) {
         result.error = "TTS: Zipvoice model requested but required files not found in " + modelDir;
-        return result;
-    }
-    if ((selected == TtsModelKind::kVits || selected == TtsModelKind::kMatcha ||
-         selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten ||
-         selected == TtsModelKind::kZipvoice) && !hasDataDir) {
-        result.error = "TTS: espeak-ng-data not found in " + modelDir +
-                       ". Copy espeak-ng-data into the model directory.";
         return result;
     }
 

@@ -52,6 +52,18 @@ std::string FindLargestOnnxExcludingTokens(
 /** Returns true if \p word appears in \p haystack as a standalone token (surrounded by separators: / - _ . space). */
 bool ContainsWord(const std::string& haystack, const std::string& word);
 
+/**
+ * Find a directory with the given name anywhere under \p rootDir in the file tree.
+ * Searches \p files for any path that starts with \p rootDir and contains "/dirName/".
+ * Returns the full path to that directory (e.g. rootDir/inner/dirName) or empty if not found.
+ * Used e.g. to find espeak-ng-data in modelDir or in modelDir/inner-model-dir/.
+ */
+std::string FindDirectoryUnderRoot(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir,
+    const std::string& dirName
+);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 
