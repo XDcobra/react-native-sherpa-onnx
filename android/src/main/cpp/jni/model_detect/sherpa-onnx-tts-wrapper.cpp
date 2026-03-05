@@ -45,8 +45,18 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
 
   jobject detectedList = BuildDetectedModelsList(env, result.detectedModels);
   if (detectedList) {
-    env->CallObjectMethod(map, mapPut, env->NewStringUTF("detectedModels"), detectedList);
+    jstring keyDetected = env->NewStringUTF("detectedModels");
+    env->CallObjectMethod(map, mapPut, keyDetected, detectedList);
+    env->DeleteLocalRef(keyDetected);
     env->DeleteLocalRef(detectedList);
+  }
+
+  jobject langCandidatesList = BuildStringList(env, result.lexiconLanguageCandidates);
+  if (langCandidatesList) {
+    jstring keyLangCandidates = env->NewStringUTF("lexiconLanguageCandidates");
+    env->CallObjectMethod(map, mapPut, keyLangCandidates, langCandidatesList);
+    env->DeleteLocalRef(keyLangCandidates);
+    env->DeleteLocalRef(langCandidatesList);
   }
 
   jclass hashMapClass = env->FindClass("java/util/HashMap");
@@ -68,7 +78,9 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
       PutString(env, pathsMap, mapPut, "textConditioner", result.paths.textConditioner);
       PutString(env, pathsMap, mapPut, "vocabJson", result.paths.vocabJson);
       PutString(env, pathsMap, mapPut, "tokenScoresJson", result.paths.tokenScoresJson);
-      env->CallObjectMethod(map, mapPut, env->NewStringUTF("paths"), pathsMap);
+      jstring keyPaths = env->NewStringUTF("paths");
+      env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
+      env->DeleteLocalRef(keyPaths);
       env->DeleteLocalRef(pathsMap);
     }
   }

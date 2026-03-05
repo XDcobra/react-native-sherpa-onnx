@@ -23,16 +23,57 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
+## Installation
+
+```sh
+npm install react-native-sherpa-onnx
+```
+
+If your project uses Yarn (v3+) or Plug'n'Play, configure Yarn to use the Node Modules linker to avoid postinstall issues:
+
+```yaml
+# .yarnrc.yml
+nodeLinker: node-modules
+```
+
+Alternatively, set the environment variable during install:
+
+```sh
+YARN_NODE_LINKER=node-modules yarn install
+```
+
+### Android
+
+No additional setup required. The library automatically handles native dependencies via Gradle. For execution provider support (CPU, NNAPI, XNNPACK, QNN) and optional QNN setup, see [Execution provider support](./docs/execution-providers.md). For building Android native libs yourself, see [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md).
+
+### iOS
+
+The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework).
+
+#### Setup
+
+```sh
+cd your-app/ios
+bundle install
+bundle exec pod install
+```
+
+The podspec runs `scripts/setup-ios-framework.sh`, which downloads the XCFramework (and, if needed, libarchive sources) so the Pod builds correctly. Libarchive is compiled from source as part of the Pod; its version is pinned in `third_party/libarchive_prebuilt/IOS_RELEASE_TAG`.
+
+#### Building the iOS framework
+
+To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patches), see [third_party/sherpa-onnx-prebuilt/README.md](third_party/sherpa-onnx-prebuilt/README.md) and the [build-sherpa-onnx-ios-framework](.github/workflows/build-sherpa-onnx-ios-framework.yml) workflow.
+
 ## Table of contents
 
+- [Installation](#installation)
+  - [Android](#android)
+  - [iOS](#ios)
 - [Feature Support](#feature-support)
 - [Platform Support Status](#platform-support-status)
 - [Supported Model Types](#supported-model-types)
   - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
   - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
-- [Installation](#installation)
-  - [Android](#android)
-  - [iOS](#ios)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
 - [Breaking changes (upgrading to 0.3.0)](#breaking-changes-upgrading-to-030)
@@ -51,6 +92,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 |---------|--------|-------|
 | Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types) and [STT documentation](./docs/stt.md). |
 | Online (streaming) Speech-to-Text | ✅ **Supported** | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). See [Streaming STT](./docs/stt_streaming.md). |
+| Live capture API | ✅ **Supported** | Native microphone capture with resampling for live transcription (use with streaming STT). See [PCM Live Stream](./docs/pcm_live_stream.md). |
 | Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types) and [TTS documentation](./docs/tts.md). |
 | Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts_streaming.md). |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
@@ -109,54 +151,6 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores; no folder token required. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts_streaming.md).
-
-## Installation
-
-```sh
-npm install react-native-sherpa-onnx
-```
-
-If your project uses Yarn (v3+) or Plug'n'Play, configure Yarn to use the Node Modules linker to avoid postinstall issues:
-
-```yaml
-# .yarnrc.yml
-nodeLinker: node-modules
-```
-
-Alternatively, set the environment variable during install:
-
-```sh
-YARN_NODE_LINKER=node-modules yarn install
-```
-
-### Android
-
-No additional setup required. The library automatically handles native dependencies via Gradle. For execution provider support (CPU, NNAPI, XNNPACK, QNN) and optional QNN setup, see [Execution provider support](./docs/execution-providers.md). For building Android native libs yourself, see [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md).
-
-
-### iOS
-
-The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework).
-
-#### Setup
-
-```sh
-cd your-app/ios
-bundle install
-bundle exec pod install
-```
-
-The podspec runs `scripts/setup-ios-framework.sh`, which downloads the XCFramework (and, if needed, libarchive sources) so the Pod builds correctly. Libarchive is compiled from source as part of the Pod; its version is pinned in `third_party/libarchive_prebuilt/IOS_RELEASE_TAG`.
-
-#### For Advanced Users: Building the Framework Locally
-#### Advanced: Building the iOS framework yourself
-
-If you need a custom sherpa-onnx build (e.g. different version or patches), you can build the XCFramework and place it in `ios/Frameworks/` before running `pod install`. The repo does not include an iOS build script; use one of:
-
-- **This repo's CI:** The [build-sherpa-onnx-ios-framework](.github/workflows/build-sherpa-onnx-ios-framework.yml) workflow produces the XCFramework and publishes it as a GitHub Release. You can run equivalent steps locally or inspect the workflow for the exact build and merge steps (including `libsherpa-onnx-cxx-api.a` and libarchive).
-- **Version and layout:** Pinned version and release layout are documented in [third_party/sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md) (Android focus; for iOS, see `IOS_RELEASE_TAG` and the [iOS framework workflow](.github/workflows/build-sherpa-onnx-ios-framework.yml)).
-
-The XCFramework must include the C++ API (`libsherpa-onnx-cxx-api.a` merged or linked) so that the iOS Obj-C++ code can use `sherpa_onnx::cxx::*`. The workflow's build script ensures this; if you use upstream `build-ios.sh` from sherpa-onnx, you may need to merge the C++ API into the static library yourself.
 
 ## Documentation
 

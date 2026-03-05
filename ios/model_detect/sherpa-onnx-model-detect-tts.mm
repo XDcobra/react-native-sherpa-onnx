@@ -21,9 +21,9 @@
  *
  * 4. selectedKind: from ResolveTtsKind(). If modelType is explicit, use it if capabilities allow.
  *    If modelType == "auto": Priority 1 = folder name (GetKindsFromDirNameTts: tokens like "vits",
- *    "matcha", "kokoro" in dir name → candidate kinds). Priority 2 = among those candidates, pick
- *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha → pocket →
- *    zipvoice → kokoro/kitten → vits).
+ *    "matcha", "kokoro" in dir name --> candidate kinds). Priority 2 = among those candidates, pick
+ *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha --> pocket -->
+ *    zipvoice --> kokoro/kitten --> vits).
  *
  * 5. paths: all gathered paths are written into result.paths; the selected kind determines which
  *    engine is used at runtime.
@@ -53,7 +53,9 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
     return TtsModelKind::kUnknown;
 }
 
-/** Returns true if the given kind is supported by the current paths and hints (required files present). */
+/** Returns true if the given kind is supported by the current paths and hints (required files present).
+ *  data_dir (espeak-ng-data) is required only for Kitten and Kokoro (sherpa-onnx config Validate());
+ *  VITS, Matcha, Zipvoice use it optionally; Pocket does not use it. */
 static bool CapabilitySupportsTtsKind(
     TtsModelKind kind,
     bool hasVits,
@@ -65,9 +67,9 @@ static bool CapabilitySupportsTtsKind(
 ) {
     switch (kind) {
         case TtsModelKind::kVits:
-            return hasVits && hasDataDir;
+            return hasVits;
         case TtsModelKind::kMatcha:
-            return hasMatcha && hasDataDir;
+            return hasMatcha;
         case TtsModelKind::kKokoro:
         case TtsModelKind::kKitten:
             return hasVoicesFile && hasDataDir;
@@ -127,17 +129,8 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     const std::vector<FileEntry> files = ListFilesRecursive(modelDir, kMaxSearchDepth);
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
-    std::string lexiconFile = FindFileByName(files, "lexicon.txt");
-    std::string dataDirPath;
-    {
-        const std::string prefix = modelDir + "/espeak-ng-data/";
-        for (const auto& entry : files) {
-            if (entry.path.size() > prefix.size() && entry.path.compare(0, prefix.size(), prefix) == 0) {
-                dataDirPath = modelDir + "/espeak-ng-data";
-                break;
-            }
-        }
-    }
+    std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
+    std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
@@ -157,14 +150,24 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     }
 
     bool hasVits = !ttsModel.empty();
-    bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
+    std::string modelDirLower = ToLower(modelDir);
+    bool isLikelyMatcha = modelDirLower.find("matcha") != std::string::npos;
+    bool hasMatcha = (!acousticModel.empty() && !vocoder.empty())
+        || (isLikelyMatcha && !ttsModel.empty() && !tokensFile.empty());
+    if (hasMatcha && acousticModel.empty())
+        acousticModel = ttsModel;  // single-file Matcha: model.onnx is the acoustic model
     bool hasVoicesFile = !voicesFile.empty();
+    bool isLikelyZipvoice = modelDirLower.find("zipvoice") != std::string::npos;
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    if (isLikelyZipvoice && !encoder.empty() && !decoder.empty() && vocoder.empty()) {
+        result.ok = false;
+        result.error = "TTS: Zipvoice distill variant (no vocoder) is not supported. Use a full Zipvoice model with vocoder or add vocos_24khz.onnx separately.";
+        return result;
+    }
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
                      !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
     bool hasDataDir = !dataDirPath.empty();
 
-    std::string modelDirLower = ToLower(modelDir);
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
     bool isLikelyKokoro = modelDirLower.find("kokoro") != std::string::npos;
 
@@ -255,8 +258,17 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         result.error = "TTS: Matcha model requested but required files not found in " + modelDir;
         return result;
     }
-    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && (!hasVits || !hasVoicesFile)) {
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && ttsModel.empty()) {
+        result.error = "TTS: Kokoro/Kitten model requested but model file not found in " + modelDir;
+        return result;
+    }
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasVoicesFile) {
         result.error = "TTS: Kokoro/Kitten model requested but required files not found in " + modelDir;
+        return result;
+    }
+    if ((selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten) && !hasDataDir) {
+        result.error = "TTS: espeak-ng-data not found in " + modelDir +
+                       ". Copy espeak-ng-data into the model directory.";
         return result;
     }
     if (selected == TtsModelKind::kPocket && !hasPocket) {
@@ -267,19 +279,27 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
         result.error = "TTS: Zipvoice model requested but required files not found in " + modelDir;
         return result;
     }
-    if ((selected == TtsModelKind::kVits || selected == TtsModelKind::kMatcha ||
-         selected == TtsModelKind::kKokoro || selected == TtsModelKind::kKitten ||
-         selected == TtsModelKind::kZipvoice) &&
-        !hasDataDir) {
-        result.error = "TTS: espeak-ng-data not found in " + modelDir +
-                       ". Copy espeak-ng-data into the model directory.";
-        return result;
+
+    std::string lexiconPath;
+    for (const auto& c : lexiconCandidates) {
+        result.lexiconLanguageCandidates.push_back(c.languageId);
+    }
+    if (!lexiconCandidates.empty()) {
+        lexiconPath = lexiconCandidates[0].path;
+    }
+
+    // Single-file Matcha: no separate vocoder found — use acoustic model path as vocoder.
+    // sherpa-onnx requires a vocoder path when model metadata need_vocoder=true; the same
+    // ONNX is often used for both (or need_vocoder is false and the path is ignored).
+    // TODO: add this to validator file once implemented
+    if (selected == TtsModelKind::kMatcha && !acousticModel.empty() && vocoder.empty()) {
+        vocoder = acousticModel;
     }
 
     result.selectedKind = selected;
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
-    result.paths.lexicon = !lexiconFile.empty() ? lexiconFile : "";
+    result.paths.lexicon = lexiconPath;
     result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;

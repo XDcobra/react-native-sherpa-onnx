@@ -43,10 +43,8 @@ jobs:
     uses: ./.github/workflows/test-asr-model-detect.yml
     secrets: inherit
 
-  # TTS model detection is disabled for now
-  # TODO: Enable after collect workflow is run
-  #tts-model-detect:
-  #  name: TTS model detection
-  #  needs: [check-csvs]
-  #  uses: ./.github/workflows/test-tts-model-detect.yml
-  #  secrets: inherit
+  tts-model-detect:
+    name: TTS model detection
+    needs: [check-csvs]
+    uses: ./.github/workflows/test-tts-model-detect.yml
+    secrets: inherit

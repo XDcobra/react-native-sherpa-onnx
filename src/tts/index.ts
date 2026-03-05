@@ -82,14 +82,18 @@ function flattenTtsModelOptionsForNative(
 /**
  * Detect TTS model type and structure without initializing the engine.
  * Uses the same native file-based detection as createTTS. Stateless; no instance required.
+ * For Kokoro/Kitten multi-language models, the result includes lexiconLanguageCandidates (e.g. ["default"] or ["us-en", "gb-en", "zh"]) derived from lexicon.txt and lexicon-*.txt; use these for a language selection dropdown (language change requires re-initialization).
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional modelType (default: 'auto')
- * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+ * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
  * if (result.success) console.log('Detected type:', result.modelType, result.detectedModels);
+ * if (result.lexiconLanguageCandidates?.length) {
+ *   // Kokoro/Kitten multi-lang: show language dropdown (e.g. "us-en", "zh")
+ * }
  * ```
  */
 export async function detectTtsModel(
@@ -99,6 +103,8 @@ export async function detectTtsModel(
   success: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
+  /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
+  lexiconLanguageCandidates?: string[];
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
   return SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);

@@ -21,10 +21,10 @@
  * 3. selectedKind (which type we actually use): from ResolveSttKind():
  *    - If modelType is explicit (e.g. "whisper"): use it if capabilities allow.
  *    - If modelType == "auto": Priority 1 = folder name (GetKindsFromDirName: tokens like
- *      "moonshine", "whisper" in dir name → candidate kinds). Priority 2 = among those
+ *      "moonshine", "whisper" in dir name --> candidate kinds). Priority 2 = among those
  *      candidates, pick the first that CapabilitySupportsKind(). Fallback = if no name
- *      candidates, use file-only order (transducer → moonshine v2/v1 → CTC → paraformer →
- *      whisper → ...).
+ *      candidates, use file-only order (transducer --> moonshine v2/v1 --> CTC --> paraformer -->
+ *      whisper --> ...).
  *
  * 4. paths: ApplyPathsForSttKind(selectedKind) copies the relevant candidate paths into
  *    SttModelPaths (encoder/decoder, moonshine encoder/mergedDecoder, etc.) for the chosen kind.

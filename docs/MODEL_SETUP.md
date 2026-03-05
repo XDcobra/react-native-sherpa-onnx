@@ -197,12 +197,12 @@ const result = await detectTtsModel(
   { type: 'asset', path: 'models/vits-piper-en_US-lessac-low' },
   { modelType: 'auto' }
 );
-// result: { success, detectedModels: [{ type, modelDir }], modelType? }
+// result: { success, detectedModels: [{ type, modelDir }], modelType?, lexiconLanguageCandidates? }
 ```
 
 - **`modelPath`** — Same as for `initializeTTS` (asset, file, or auto); resolved via `resolveModelPath` before calling native.
 - **`options.modelType`** — Optional; explicit type or `'auto'` (default).
-- **Returns** — `success`, `detectedModels` (array of `{ type, modelDir }`), and `modelType` (primary detected type). On failure, `success` is false and `error` may be set.
+- **Returns** — `success`, `detectedModels` (array of `{ type, modelDir }`), and `modelType` (primary detected type). On failure, `success` is false and `error` may be set. For **Kokoro/Kitten** models, when the directory contains lexicon files, the result also includes **`lexiconLanguageCandidates`** (array of strings), e.g. `["default"]` when only `lexicon.txt` is present, or `["gb-en", "us-en", "zh"]` when `lexicon-gb-en.txt`, `lexicon-us-en.txt`, `lexicon-zh.txt` (and optionally `lexicon.txt`) are found. Use these ids to build a language selection UI; changing language requires re-initializing the TTS engine with the same model path.
 
 Example: show VITS/Matcha-specific options only when the type is detected:
 
@@ -210,6 +210,15 @@ Example: show VITS/Matcha-specific options only when the type is detected:
 const result = await detectTtsModel({ type: 'file', path: fullPathToModel });
 if (result.success && (result.modelType === 'vits' || result.modelType === 'matcha')) {
   // Show noise scale / length scale options
+}
+```
+
+Example: show a language dropdown for Kokoro/Kitten multi-language models:
+
+```ts
+const result = await detectTtsModel({ type: 'file', path: fullPathToKokoro });
+if (result.success && result.lexiconLanguageCandidates?.length) {
+  // e.g. ["default"] or ["gb-en", "us-en", "zh"] — use for dropdown; selection requires re-init with chosen lang
 }
 ```
 

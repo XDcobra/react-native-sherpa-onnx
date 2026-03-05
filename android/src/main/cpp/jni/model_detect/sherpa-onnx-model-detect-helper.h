@@ -60,6 +60,34 @@ std::string FindLargestOnnxExcludingTokens(
 /** Returns true if \p word appears in \p haystack as a standalone token (surrounded by separators: / - _ . space). */
 bool ContainsWord(const std::string& haystack, const std::string& word);
 
+/**
+ * Find a directory with the given name anywhere under \p rootDir in the file tree.
+ * Searches \p files for any path that starts with \p rootDir and contains "/dirName/".
+ * Returns the full path to that directory (e.g. rootDir/inner/dirName) or empty if not found.
+ * Used e.g. to find espeak-ng-data in modelDir or in modelDir/inner-model-dir/.
+ */
+std::string FindDirectoryUnderRoot(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir,
+    const std::string& dirName
+);
+
+/** Lexicon file with optional language id for multi-lang TTS (e.g. Kokoro). */
+struct LexiconCandidate {
+    std::string path;       /**< Full path to the lexicon file */
+    std::string languageId; /**< From filename: "default" for lexicon.txt, else e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt */
+};
+
+/**
+ * Find all lexicon files under \p rootDir: exact "lexicon.txt" and any "lexicon-*.txt".
+ * Returns a list of LexiconCandidate (path + languageId), ordered: lexicon.txt first (as "default"),
+ * then lexicon-*.txt alphabetically by language id. Used for multi-language Kokoro/Kitten TTS.
+ */
+std::vector<LexiconCandidate> FindLexiconCandidates(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir
+);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 

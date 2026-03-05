@@ -200,7 +200,7 @@ if (onlineType !== null) {
 
 ## Advanced examples & tips
 
-### Typical loop: mic → chunks → partial results → endpoint
+### Typical loop: mic --> chunks --> partial results --> endpoint
 
 ```typescript
 const engine = await createStreamingSTT({

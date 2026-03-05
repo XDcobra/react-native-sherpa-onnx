@@ -206,5 +206,56 @@ bool ContainsWord(const std::string& haystack, const std::string& word) {
     return false;
 }
 
+std::string FindDirectoryUnderRoot(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir,
+    const std::string& dirName
+) {
+    if (dirName.empty()) return "";
+    const std::string needle = "/" + dirName + "/";
+    const size_t dirPathLen = 1 + dirName.size();
+    for (const auto& entry : files) {
+        if (entry.path.size() < rootDir.size() + needle.size()) continue;
+        if (entry.path.compare(0, rootDir.size(), rootDir) != 0) continue;
+        size_t pos = entry.path.find(needle, rootDir.size());
+        if (pos != std::string::npos) {
+            return entry.path.substr(0, pos + dirPathLen);
+        }
+    }
+    return "";
+}
+
+std::vector<LexiconCandidate> FindLexiconCandidates(
+    const std::vector<FileEntry>& files,
+    const std::string& rootDir
+) {
+    std::vector<LexiconCandidate> candidates;
+    const size_t rootLen = rootDir.size();
+    for (const auto& entry : files) {
+        if (entry.path.size() <= rootLen) continue;
+        if (rootLen > 0) {
+            if (entry.path.compare(0, rootLen, rootDir) != 0) continue;
+            // Enforce path boundary: if rootDir doesn't end with '/', require '/' after it
+            if (rootDir.back() != '/' && entry.path[rootLen] != '/') continue;
+        }
+        const std::string& baseLower = entry.nameLower;
+        if (baseLower == "lexicon.txt") {
+            candidates.push_back({entry.path, "default"});
+        } else if (baseLower.size() > 12 &&
+                   baseLower.compare(0, 8, "lexicon-") == 0 &&
+                   baseLower.compare(baseLower.size() - 4, 4, ".txt") == 0) {
+            std::string languageId = baseLower.substr(8, baseLower.size() - 12);
+            candidates.push_back({entry.path, languageId});
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const LexiconCandidate& a, const LexiconCandidate& b) {
+        if (a.languageId == b.languageId) return a.path < b.path;
+        if (a.languageId == "default") return true;
+        if (b.languageId == "default") return false;
+        return a.languageId < b.languageId;
+    });
+    return candidates;
+}
+
 } // namespace model_detect
 } // namespace sherpaonnx

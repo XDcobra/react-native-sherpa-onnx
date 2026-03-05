@@ -14,6 +14,8 @@ namespace sherpaonnx {
 bool PutString(JNIEnv* env, jobject map, jmethodID putId, const char* key, const std::string& value);
 bool PutBoolean(JNIEnv* env, jobject map, jmethodID putId, const char* key, bool value);
 jobject BuildDetectedModelsList(JNIEnv* env, const std::vector<DetectedModel>& models);
+/** Build a Java ArrayList<String> from a vector of strings. Returns null on failure. */
+jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings);
 
 }  // namespace sherpaonnx
 
