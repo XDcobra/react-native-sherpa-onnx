@@ -21,9 +21,9 @@
  *
  * 4. selectedKind: from ResolveTtsKind(). If modelType is explicit, use it if capabilities allow.
  *    If modelType == "auto": Priority 1 = folder name (GetKindsFromDirNameTts: tokens like "vits",
- *    "matcha", "kokoro" in dir name → candidate kinds). Priority 2 = among those candidates, pick
- *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha → pocket →
- *    zipvoice → kokoro/kitten → vits).
+ *    "matcha", "kokoro" in dir name --> candidate kinds). Priority 2 = among those candidates, pick
+ *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha --> pocket -->
+ *    zipvoice --> kokoro/kitten --> vits).
  *
  * 5. paths: all gathered paths are written into result.paths; the selected kind determines which
  *    engine is used at runtime.
