@@ -1,0 +1,34 @@
+# TTS validation tests: C++ tests for the model validation layer (required-files checks).
+# Triggered on PR (via test-model-detect) or manually.
+
+name: Test – TTS validation
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+# Only one run per ref at a time; new pushes do not cancel in-progress runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-tts-validate
+  cancel-in-progress: true
+
+jobs:
+  tts-validate:
+    name: TTS validation (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run TTS validation tests
+        working-directory: ${{ github.workspace }}
+        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectValidation.Tts*:ModelDetectValidation.ValidateTts*
