@@ -7,9 +7,10 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Only one run per ref at a time; new pushes do not cancel in-progress runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   tts-model-detect:
