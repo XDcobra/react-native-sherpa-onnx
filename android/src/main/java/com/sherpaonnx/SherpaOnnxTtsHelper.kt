@@ -74,6 +74,7 @@ internal class SherpaOnnxTtsHelper(
 
     fun hasEngine(): Boolean = synchronized(lock) { tts != null || zipvoiceTts != null }
     val isZipvoice: Boolean get() = synchronized(lock) { zipvoiceTts != null }
+    val isPocket: Boolean get() = ttsInitState?.modelType == "pocket"
     fun releaseEngines() {
       synchronized(lock) {
         tts?.release()
@@ -258,7 +259,7 @@ internal class SherpaOnnxTtsHelper(
 
       inst.ttsInitState = TtsInitState(
         modelDir,
-        modelType,
+        modelTypeStr,  // detected model type (e.g. "pocket"), not the requested "auto"
         numThreads.toInt(),
         debug,
         noiseScale?.takeUnless { it.isNaN() },
@@ -416,6 +417,11 @@ internal class SherpaOnnxTtsHelper(
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
+        inst.isPocket && !hasReferenceOptions(options) -> {
+          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
+          promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
+          return
+        }
         else -> dispatchGenerate(inst, text, sid, speed)
           ?: run {
             Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
@@ -469,6 +475,11 @@ internal class SherpaOnnxTtsHelper(
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
+        inst.isPocket && !hasReferenceOptions(options) -> {
+          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
+          promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
+          return
+        }
         else -> dispatchGenerate(inst, text, sid, speed)
           ?: run {
             Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
@@ -515,6 +526,11 @@ internal class SherpaOnnxTtsHelper(
     if (!inst.hasEngine()) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS not initialized")
       promise.reject("TTS_STREAM_ERROR", "TTS not initialized")
+      return
+    }
+    if (inst.isPocket && !hasReferenceOptions(options)) {
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Pocket TTS requires reference audio for voice cloning")
+      promise.reject("TTS_STREAM_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
       return
     }
     if (hasReferenceOptions(options) && inst.isZipvoice) {
