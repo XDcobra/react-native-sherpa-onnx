@@ -12,6 +12,8 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-helper.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-stt.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-tts.cpp"
+  "${MODEL_DETECT_DIR}/sherpa-onnx-validate-stt.cpp"
+  "${MODEL_DETECT_DIR}/sherpa-onnx-validate-tts.cpp"
 )
 
 add_executable(model_detect_test
