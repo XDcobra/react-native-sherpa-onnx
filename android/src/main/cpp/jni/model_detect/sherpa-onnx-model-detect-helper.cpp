@@ -363,7 +363,11 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
     const size_t rootLen = rootDir.size();
     for (const auto& entry : files) {
         if (entry.path.size() <= rootLen) continue;
-        if (rootLen > 0 && entry.path.compare(0, rootLen, rootDir) != 0) continue;
+        if (rootLen > 0) {
+            if (entry.path.compare(0, rootLen, rootDir) != 0) continue;
+            // Enforce path boundary: if rootDir doesn't end with '/', require '/' after it
+            if (rootDir.back() != '/' && entry.path[rootLen] != '/') continue;
+        }
         std::string base = BaseName(entry.path);
         if (base.empty()) continue;
         std::string baseLower = ToLower(base);
@@ -377,6 +381,7 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
         }
     }
     std::sort(candidates.begin(), candidates.end(), [](const LexiconCandidate& a, const LexiconCandidate& b) {
+        if (a.languageId == b.languageId) return a.path < b.path;
         if (a.languageId == "default") return true;
         if (b.languageId == "default") return false;
         return a.languageId < b.languageId;
