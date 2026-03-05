@@ -150,14 +150,24 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     }
 
     bool hasVits = !ttsModel.empty();
-    bool hasMatcha = !acousticModel.empty() && !vocoder.empty();
+    std::string modelDirLower = ToLower(modelDir);
+    bool isLikelyMatcha = modelDirLower.find("matcha") != std::string::npos;
+    bool hasMatcha = (!acousticModel.empty() && !vocoder.empty())
+        || (isLikelyMatcha && !ttsModel.empty() && !tokensFile.empty());
+    if (hasMatcha && acousticModel.empty())
+        acousticModel = ttsModel;  // single-file Matcha: model.onnx is the acoustic model
     bool hasVoicesFile = !voicesFile.empty();
+    bool isLikelyZipvoice = modelDirLower.find("zipvoice") != std::string::npos;
     bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    if (isLikelyZipvoice && !encoder.empty() && !decoder.empty() && vocoder.empty()) {
+        result.ok = false;
+        result.error = "TTS: Zipvoice distill variant (no vocoder) is not supported. Use a full Zipvoice model with vocoder or add vocos_24khz.onnx separately.";
+        return result;
+    }
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
                      !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
     bool hasDataDir = !dataDirPath.empty();
 
-    std::string modelDirLower = ToLower(modelDir);
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
     bool isLikelyKokoro = modelDirLower.find("kokoro") != std::string::npos;
 
