@@ -134,6 +134,7 @@ third_party/shine_prebuilt/*
 !third_party/shine_prebuilt/README.md
 !third_party/shine_prebuilt/build_shine_msys2.sh
 !third_party/shine_prebuilt/build_shine.sh
+!third_party/shine_prebuilt/build_shine_ios.sh
 
 # ONNX Runtime prebuilt build artifacts (when building prebuilts locally)
 third_party/onnxruntime_prebuilt/*
@@ -160,8 +161,10 @@ third_party/ffmpeg_prebuilt/*
 !third_party/ffmpeg_prebuilt/BUILD_MSYS2.md
 !third_party/ffmpeg_prebuilt/build_ffmpeg_msys2.sh
 !third_party/ffmpeg_prebuilt/build_ffmpeg.sh
+!third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh
 !third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh
 !third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG
+!third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG
 # publish-maven: track scripts and config; ignore local env (MAVEN_REPO_PAT etc.)
 !third_party/ffmpeg_prebuilt/publish-maven/
 third_party/ffmpeg_prebuilt/publish-maven/*
