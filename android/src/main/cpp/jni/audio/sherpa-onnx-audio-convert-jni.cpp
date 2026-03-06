@@ -508,9 +508,23 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     if (out_ch2 <= 0) out_ch2 = 1;
     int bytes_per_sample = av_get_bytes_per_sample(encCtx->sample_fmt);
 
-    // Accumulation buffer for resampled samples
+    // Accumulation buffer for resampled samples. Use read offset to avoid O(n²) memmove;
+    // compact only when offset exceeds threshold.
     std::vector<uint8_t> accumBuf;
+    size_t accumReadOffset = 0;  // bytes consumed from start (avoids O(n²) memmove)
+    const int bytesPerFrame = bytes_per_sample * out_ch2;
     int accumSamples = 0;
+
+    const size_t kCompactThreshold = 256 * 1024;  // compact when read offset exceeds 256 KB
+
+    auto maybeCompact = [&]() {
+        if (accumReadOffset == 0) return;
+        if (accumReadOffset < kCompactThreshold && accumReadOffset * 2 < accumBuf.size()) return;
+        size_t valid = accumBuf.size() - accumReadOffset;
+        if (valid > 0) memmove(accumBuf.data(), accumBuf.data() + accumReadOffset, valid);
+        accumBuf.resize(valid);
+        accumReadOffset = 0;
+    };
 
     // Helper lambda: send exactly enc_frame_size samples from accumBuf to encoder
     auto flushAccumFrames = [&](bool sendPartial) {
@@ -526,15 +540,12 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             if (av_channel_layout_copy(&ef->ch_layout, &encCtx->ch_layout) < 0) { av_frame_free(&ef); break; }
             ef->nb_samples = toSend;
             if (av_frame_get_buffer(ef, 0) < 0) { av_channel_layout_uninit(&ef->ch_layout); av_frame_free(&ef); break; }
-            int copyBytes = toSend * bytes_per_sample * out_ch2;
-            memcpy(ef->data[0], accumBuf.data(), copyBytes);
+            int copyBytes = toSend * bytesPerFrame;
+            memcpy(ef->data[0], accumBuf.data() + accumReadOffset, copyBytes);
             ef->pts = encoder_pts;
             encoder_pts += toSend;
 
-            // Remove consumed samples from front of accumBuf
-            int remainBytes = (int)accumBuf.size() - copyBytes;
-            if (remainBytes > 0) memmove(accumBuf.data(), accumBuf.data() + copyBytes, remainBytes);
-            accumBuf.resize(remainBytes > 0 ? remainBytes : 0);
+            accumReadOffset += (size_t)copyBytes;
             accumSamples -= toSend;
 
             // Send to encoder with EAGAIN handling
@@ -596,9 +607,10 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 
 
                     int newBytes = converted * bytes_per_sample * out_ch2;
+                    maybeCompact();
                     size_t oldSize = accumBuf.size();
-                    accumBuf.resize(oldSize + newBytes);
-                    memcpy(accumBuf.data() + oldSize, outData[0], newBytes);
+                    accumBuf.resize(oldSize + (size_t)newBytes);
+                    memcpy(accumBuf.data() + oldSize, outData[0], (size_t)newBytes);
                     accumSamples += converted;
 
                     av_freep(&outData[0]);
@@ -620,9 +632,10 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             int tailConverted = swr_convert(swr, tailData, tailCap, nullptr, 0);
             if (tailConverted > 0) {
                 int tailBytes = tailConverted * bytes_per_sample * out_ch2;
+                maybeCompact();
                 size_t oldSize = accumBuf.size();
-                accumBuf.resize(oldSize + tailBytes);
-                memcpy(accumBuf.data() + oldSize, tailData[0], tailBytes);
+                accumBuf.resize(oldSize + (size_t)tailBytes);
+                memcpy(accumBuf.data() + oldSize, tailData[0], (size_t)tailBytes);
                 accumSamples += tailConverted;
             }
             av_freep(&tailData[0]);
