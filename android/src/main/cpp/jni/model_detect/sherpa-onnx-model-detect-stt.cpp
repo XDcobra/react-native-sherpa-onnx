@@ -290,6 +290,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
     p.tokens = FindFileEndingWith(files, "tokens.txt");
     p.bpeVocab = FindFileByName(files, "bpe.vocab");
     p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
+
     return p;
 }
 
@@ -318,6 +319,65 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
                     lower.find("ten-vad") != std::string::npos;
     h.isLikelyTdnn = lower.find("tdnn") != std::string::npos;
     return h;
+}
+
+/**
+ * QNN (asr-models-qnn-binary): Find model assets and set the correct candidate slot using the
+ * given path hints.
+ * - Single model.bin -> paraformerModel or ctcModel.
+ * - Paraformer with encoder.bin + predictor.bin + decoder.bin (no model.bin): set paraformerModel
+ *   to "encoder.bin path,predictor.bin path,decoder.bin path" (sherpa-onnx OfflineParaformerModelConfig
+ *   accepts this format for QNN; see offline-paraformer-model-config.cc).
+ * Caller must pass hints from GetSttPathHints (no duplicate call).
+ */
+static void ApplyQnnBinaryModel(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const SttPathHints& hints,
+    SttCandidatePaths& candidate
+) {
+    using namespace model_detect;
+    std::string modelbin = FindFileByName(files, "model.bin");
+    if (modelbin.empty()) {
+        for (const auto& entry : files) {
+            if (entry.nameLower.size() >= 9 &&
+                entry.nameLower.find("model") != std::string::npos &&
+                (entry.nameLower.compare(entry.nameLower.size() - 4, 4, ".bin") == 0)) {
+                modelbin = entry.path;
+                break;
+            }
+        }
+    }
+    if (modelbin.empty()) {
+        const std::string prefix = modelDir + "/";
+        for (const auto& entry : files) {
+            if (entry.path.size() > prefix.size() &&
+                entry.path.compare(0, prefix.size(), prefix) == 0 &&
+                entry.path.find('/', prefix.size()) == std::string::npos &&
+                entry.nameLower.size() >= 4 &&
+                entry.nameLower.compare(entry.nameLower.size() - 4, 4, ".bin") == 0) {
+                modelbin = entry.path;
+                break;
+            }
+        }
+    }
+    if (!modelbin.empty()) {
+        if (hints.isLikelyParaformer)
+            candidate.paraformerModel = modelbin;
+        else if (candidate.ctcModel.empty())
+            candidate.ctcModel = modelbin;
+        return;
+    }
+    // Paraformer QNN with encoder.bin + predictor.bin + decoder.bin (sherpa-onnx expects
+    // model="encoder.bin,predictor.bin,decoder.bin" for this case).
+    if (hints.isLikelyParaformer) {
+        std::string enc = FindFileByName(files, "encoder.bin");
+        std::string pred = FindFileByName(files, "predictor.bin");
+        std::string dec = FindFileByName(files, "decoder.bin");
+        if (!enc.empty() && !pred.empty() && !dec.empty()) {
+            candidate.paraformerModel = enc + "," + pred + "," + dec;
+        }
+    }
 }
 
 /** Error message when model is for unsupported hardware (RK35xx, Ascend, etc.). */
@@ -628,18 +688,16 @@ SttDetectResult DetectSttModel(
     // Depth 4 supports layouts like root/data/lang_bpe_500/tokens.txt (icefall, k2)
     const int kMaxSearchDepth = 4;
     const auto files = ListFilesRecursive(modelDir, kMaxSearchDepth);
-    bool verbose = debug;
-    LOGI("DetectSttModel: Found %zu files in %s (verbose=%d)", files.size(), modelDir.c_str(), (int)verbose);
-    if (verbose) {
+    if (debug) {
+        LOGI("DetectSttModel: Found %zu files in %s", files.size(), modelDir.c_str());
         for (const auto& f : files) {
             LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
         }
-    } else {
-        LOGI("(detailed file listing suppressed; enable by passing debug=true to initialize())");
     }
 
     SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, kMaxSearchDepth, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
+    ApplyQnnBinaryModel(files, modelDir, hints, candidate);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
     if (debug) {
         LOGI("DetectSttModel: tokens=%s", EmptyOrPath(candidate.tokens));
@@ -682,6 +740,10 @@ SttDetectResult DetectSttModel(
         }
         result.error = "No compatible model type detected in " + modelDir;
         LOGE("%s", result.error.c_str());
+        if (debug) {
+            for (const auto& f : files)
+                LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+        }
         return result;
     }
 
@@ -775,6 +837,7 @@ SttDetectResult DetectSttModelFromFileList(
 
     SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, kMaxSearchDepth, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
+    ApplyQnnBinaryModel(files, modelDir, hints, candidate);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
