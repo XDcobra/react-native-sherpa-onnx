@@ -32,6 +32,7 @@ This guide covers the offline TTS APIs shipped with this package and practical e
 | Streaming generation | ✅ | Kotlin API | `tts.generateSpeechStream()` |
 | Native PCM playback | ✅ | Kotlin API | `tts.startPcmPlayer()` / `tts.writePcmChunk()` |
 | Save/share WAV | ✅ | Kotlin API | `saveAudioToFile()` / `saveAudioToContentUri()` |
+| Save MP3/FLAC to content URI | ✅ | This package | `saveAudioToFile()` → `convertAudioToFormat()` (from `react-native-sherpa-onnx/audio`) → `copyFileToContentUri()`; see [Saving MP3/FLAC to content URI](#saving-mp3flac-to-content-uri-android). |
 | Timestamps (estimated) | ✅ | Kotlin API | `generateSpeechWithTimestamps()` |
 | Noise/Noise W/Length scale tuning | ✅ | Kotlin API | VITS/Matcha/Kokoro/Kitten (model-dependent) |
 | Runtime param updates | ✅ | Kotlin API | `tts.updateParams()` |
@@ -230,11 +231,21 @@ Important:
 
 Use `saveAudioToFile(audio, filePath)` to write a WAV file to an absolute path (`audio` is `{ samples, sampleRate }`). On Android, prefer `saveAudioToContentUri(audio, directoryContentUri, filename)` when writing to user-selected directories (SAF). After saving to SAF, you can call `copyTtsContentUriToCache` to obtain a local copy for playback or sharing.
 
+**Saving MP3/FLAC to content URI (Android)**  
+`saveAudioToContentUri` only writes WAV. To save MP3 or FLAC into a user-picked folder (content URI):
+
+1. Save WAV to a temp path (e.g. app cache): `saveAudioToFile(audio, tempWavPath)`.
+2. Convert to the target format with `convertAudioToFormat(tempWavPath, targetPath, 'mp3' | 'flac')` from `react-native-sherpa-onnx/audio`.
+3. Copy the converted file into the SAF directory: `copyFileToContentUri(convertedFilePath, directoryUri, filename, mimeType)` from `react-native-sherpa-onnx/tts` (Android only). Use `audio/mpeg` for MP3 and `audio/flac` for FLAC.
+4. Delete the temp WAV and converted files. On conversion failure, fall back to `saveAudioToContentUri(audio, directoryUri, fallbackWavFilename)`.
+
+`copyFileToContentUri(filePath, directoryUri, filename, mimeType)` is format-agnostic: it copies any local file into a document created under the given SAF directory URI and returns the new content URI. On iOS it is not supported (stub rejects).
+
 Android SAF notes:
 - `saveTtsAudioToContentUri` accepts a directory content URI and filename and returns a content URI for the saved file. Use the returned URI to share or present to the user.
 
 iOS notes:
-- On iOS the native implementation writes into the app container. Use share APIs to export if needed.
+- On iOS the native implementation writes into the app container. Use share APIs to export if needed. `copyFileToContentUri` is not available on iOS.
 
 ### Voice cloning (reference audio)
 
@@ -257,11 +268,17 @@ Use `tts.generateSpeech` for Zipvoice with reference audio. Use `tts.generateSpe
 
 ## Detailed Example: streaming -> native playback -> optional save
 
+This example shows streaming generation, native PCM playback, and several save options. Use the one that matches where the user wants the file and which format (WAV vs MP3/FLAC) they need.
+
 ```typescript
 import {
   createTTS,
   saveAudioToFile,
+  saveAudioToContentUri,
+  copyFileToContentUri,
 } from 'react-native-sherpa-onnx/tts';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { CachesDirectoryPath } from '@dr.pogodin/react-native-fs'; // or your FS module
 
 const tts = await createTTS({
   modelPath: {
@@ -278,24 +295,41 @@ const accumulated: number[] = [];
 
 const unsub = await tts.generateSpeechStream('Hello world', { sid: 0, speed: 1.0 }, {
   onChunk: async (chunk) => {
-    // low-latency play
     await tts.writePcmChunk(chunk.samples);
-    // optionally persist to JS buffer (watch memory)
     accumulated.push(...chunk.samples);
   },
   onEnd: async () => {
     await tts.stopPcmPlayer();
-    // optionally save accumulated audio (beware memory for long sessions)
-    await saveAudioToFile({ samples: accumulated, sampleRate }, '/data/user/0/.../tts_out.wav');
+    const audio = { samples: accumulated, sampleRate };
+
+    // --- Save option A: WAV to app-private path (cache/documents) ---
+    // Where: e.g. CachesDirectoryPath or DocumentDirectoryPath (app-only, not user-visible in file picker).
+    // When useful: temporary file, internal playback, or when you later convert and move the file yourself.
+    const wavPath = `${CachesDirectoryPath}/tts_${Date.now()}.wav`;
+    await saveAudioToFile(audio, wavPath);
+
+    // --- Save option B: WAV to user-picked folder (Android SAF) ---
+    // Where: user-selected directory via Storage Access Framework; returns a content:// URI.
+    // When useful: "Save to folder" with WAV format; user explicitly chose the destination.
+    // const directoryUri = 'content://...'; // from DocumentPicker or similar
+    // const uri = await saveAudioToContentUri(audio, directoryUri, `tts_${Date.now()}.wav`);
+
+    // --- Save option C: MP3/FLAC to user-picked folder (Android SAF) ---
+    // Where: same as B, but file is MP3 or FLAC. Requires temp WAV -> convert -> copy to content URI.
+    // When useful: "Save to folder" with MP3 or FLAC; smaller files or compatibility with music players.
+    // const ext = 'mp3';
+    // const tempWav = `${CachesDirectoryPath}/tts_${Date.now()}.wav`;
+    // const tempOut = `${CachesDirectoryPath}/tts_${Date.now()}.${ext}`;
+    // await saveAudioToFile(audio, tempWav);
+    // await convertAudioToFormat(tempWav, tempOut, ext);
+    // const mime = ext === 'mp3' ? 'audio/mpeg' : 'audio/flac';
+    // await copyFileToContentUri(tempOut, directoryUri, `tts_${Date.now()}.${ext}`, mime);
+    // await unlink(tempWav); await unlink(tempOut);
+
     await tts.destroy();
   },
   onError: ({ message }) => console.warn('TTS stream error', message),
 });
-
-// cancel if needed
-// await tts.cancelSpeechStream();
-// unsub();
-// await tts.destroy();
 ```
 
 ## Mapping to Native API
@@ -319,7 +353,8 @@ The JS API in `react-native-sherpa-onnx/tts` resolves model paths and maps optio
 | `tts.getNumSpeakers()` | `getTtsNumSpeakers(instanceId)` | — |
 | `tts.destroy()` | `unloadTts(instanceId)` | Mandatory cleanup. |
 | `saveAudioToFile(audio, filePath)` | `saveTtsAudioToFile(samples, sampleRate, filePath)` | Stateless; no instanceId. |
-| `saveAudioToContentUri(...)` | `saveTtsAudioToContentUri(...)` | Android SAF; returns content URI. |
+| `saveAudioToContentUri(...)` | `saveTtsAudioToContentUri(...)` | Android SAF; WAV only; returns content URI. |
+| `copyFileToContentUri(filePath, directoryUri, filename, mimeType)` | `copyFileToContentUri(...)` | Android only. Copy any local file into SAF directory; use for MP3/FLAC after conversion. |
 | `copyContentUriToCache(fileUri, filename)` | `copyTtsContentUriToCache(fileUri, filename)` | — |
 
 The JS layer converts `TtsGenerationOptions` (e.g. `referenceAudio: { samples, sampleRate }`) into a flat options object for the native bridge. Use the high-level JS helpers in `react-native-sherpa-onnx/tts` where possible — they encapsulate conversions and event wiring.
