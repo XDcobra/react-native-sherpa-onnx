@@ -903,6 +903,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Copy a local file into a document under a SAF directory URI (format-agnostic).
+   */
+  override fun copyFileToContentUri(
+    filePath: String,
+    directoryUri: String,
+    filename: String,
+    mimeType: String,
+    promise: Promise
+  ) {
+    ttsHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
+  }
+
+  /**
    * Save text content to a file via Android SAF content URI.
    */
   override fun saveTtsTextToContentUri(

@@ -316,6 +316,7 @@ internal class SherpaOnnxSttHelper(
   }
 
   fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
+    var tempPath: String? = null
     try {
       val inst = getInstance(instanceId) ?: run {
         promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
@@ -326,7 +327,14 @@ internal class SherpaOnnxSttHelper(
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
-      val wave = WaveReader.readWave(filePath)
+      // Resolve content URIs (e.g. from document picker) to a local cache file so WaveReader can read
+      val pathToRead = if (filePath.startsWith("content://")) {
+        tempPath = resolveContentUriToFile(filePath, "stt_transcribe")
+        tempPath
+      } else {
+        filePath
+      }
+      val wave = WaveReader.readWave(pathToRead)
       val stream: OfflineStream = rec.createStream()
       stream.acceptWaveform(wave.samples, wave.sampleRate)
       rec.decode(stream)
@@ -336,6 +344,12 @@ internal class SherpaOnnxSttHelper(
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
       promise.reject("TRANSCRIBE_ERROR", message, e)
+    } finally {
+      tempPath?.let { path ->
+        try {
+          File(path).takeIf { it.exists() }?.delete()
+        } catch (_: Exception) { }
+      }
     }
   }
 

@@ -16,6 +16,8 @@ export {
   resolveModelPath,
 } from './utils';
 
+export { copyFileToContentUri } from './tts';
+
 // Note: Feature-specific exports are available via subpath imports:
 // - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'

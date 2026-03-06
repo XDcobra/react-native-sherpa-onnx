@@ -456,6 +456,22 @@ export interface Spec extends TurboModule {
    * @param filename - Desired cache filename
    * @returns Absolute file path to the cached copy
    */
+  /**
+   * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
+   */
+  copyFileToContentUri(
+    filePath: string,
+    directoryUri: string,
+    filename: string,
+    mimeType: string
+  ): Promise<string>;
+
+  /**
+   * Copy a SAF content URI to a cache file for local playback.
+   * @param fileUri - Content URI of the saved WAV file
+   * @param filename - Desired cache filename
+   * @returns Absolute file path to the cached copy
+   */
   copyTtsContentUriToCache(fileUri: string, filename: string): Promise<string>;
 
   /**

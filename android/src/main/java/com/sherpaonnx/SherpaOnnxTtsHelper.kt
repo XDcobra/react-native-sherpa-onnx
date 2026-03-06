@@ -31,6 +31,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -795,6 +796,39 @@ internal class SherpaOnnxTtsHelper(
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save text to content URI", e)
       promise.reject("TTS_SAVE_ERROR", "Failed to save text to content URI", e)
+    }
+  }
+
+  /**
+   * Copy a local file into a document under a SAF directory URI.
+   * Format-agnostic: any file (e.g. WAV, MP3, FLAC) can be written.
+   * Resolves with the created content URI string.
+   */
+  fun copyFileToContentUri(
+    filePath: String,
+    directoryUri: String,
+    filename: String,
+    mimeType: String,
+    promise: Promise
+  ) {
+    try {
+      val file = File(filePath)
+      if (!file.isFile || !file.canRead()) {
+        promise.reject("TTS_SAVE_ERROR", "File not found or not readable: $filePath")
+        return
+      }
+      val resolver = context.contentResolver
+      val dirUri = Uri.parse(directoryUri)
+      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
+      FileInputStream(file).use { inputStream ->
+        resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
+          copyStream(inputStream, outputStream)
+        } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
+      }
+      promise.resolve(fileUri.toString())
+    } catch (e: Exception) {
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to copy file to content URI", e)
+      promise.reject("TTS_SAVE_ERROR", "Failed to copy file to content URI", e)
     }
   }
 
