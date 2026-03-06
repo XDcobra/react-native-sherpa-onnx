@@ -349,11 +349,14 @@ internal class SherpaOnnxSttHelper(
         return
       }
       val stream: OfflineStream = rec.createStream()
-      stream.acceptWaveform(samples, wave.sampleRate)
-      rec.decode(stream)
-      val result = rec.getResult(stream)
-      stream.release()
-      promise.resolve(resultToWritableMap(result))
+      try {
+        stream.acceptWaveform(samples, wave.sampleRate)
+        rec.decode(stream)
+        val result = rec.getResult(stream)
+        promise.resolve(resultToWritableMap(result))
+      } finally {
+        stream.release()
+      }
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)

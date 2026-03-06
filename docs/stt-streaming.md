@@ -11,7 +11,7 @@ Real-time speech recognition with partial results and endpoint detection. Feed a
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
-  - [createStreamingSTT()](#createstreamingssttoptions)
+  - [createStreamingSTT()](#createstreamingsttoptions)
   - [StreamingSttEngine](#streamingsttengine)
   - [SttStream](#sttstream)
   - [StreamingSttResult](#streamingsttresult)
