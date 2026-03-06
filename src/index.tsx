@@ -16,6 +16,8 @@ export {
   resolveModelPath,
 } from './utils';
 
+export { copyFileToContentUri } from './tts';
+
 // Note: Feature-specific exports are available via subpath imports:
 // - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'
@@ -39,6 +41,19 @@ export function getQnnSupport(
   modelBase64?: string
 ): Promise<AccelerationSupport> {
   return SherpaOnnx.getQnnSupport(modelBase64);
+}
+
+/**
+ * Device SoC result: soc is always the device SoC string when available (Android 12+); on iOS or when unavailable, soc is null.
+ * isSupported is true when the SoC is SM8xxx (supported for QNN models). Use soc for the label; use isSupported to decide whether to auto-select in the download manager.
+ */
+export type DeviceQnnSocResult = {
+  soc: string | null;
+  isSupported: boolean;
+};
+
+export function getDeviceQnnSoc(): Promise<DeviceQnnSocResult> {
+  return SherpaOnnx.getDeviceQnnSoc();
 }
 
 /**

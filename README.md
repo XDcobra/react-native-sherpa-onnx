@@ -91,13 +91,13 @@ To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patche
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types) and [STT documentation](./docs/stt.md). |
-| Online (streaming) Speech-to-Text | ✅ **Supported** | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). See [Streaming STT](./docs/stt_streaming.md). |
-| Live capture API | ✅ **Supported** | Native microphone capture with resampling for live transcription (use with streaming STT). See [PCM Live Stream](./docs/pcm_live_stream.md). |
+| Online (streaming) Speech-to-Text | ✅ **Supported** | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). See [Streaming STT](./docs/stt-streaming.md). |
+| Live capture API | ✅ **Supported** | Native microphone capture with resampling for live transcription (use with streaming STT). See [PCM Live Stream](./docs/pcm-live-stream.md). |
 | Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types) and [TTS documentation](./docs/tts.md). |
-| Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts_streaming.md). |
+| Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts-streaming.md). |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
-| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/MODEL_SETUP.md). |
-| Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/MODEL_SETUP.md#model-type-detection-without-initialization). |
+| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/model-setup.md). |
+| Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/model-setup.md#model-detection). |
 | Model quantization | ✅ **Supported** | Automatic detection and preference for quantized (int8) models. |
 | Flexible model loading | ✅ **Supported** | Asset models, file system models, or auto-detection. |
 | TypeScript | ✅ **Supported** | Full type definitions included. |
@@ -137,7 +137,7 @@ To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patche
 | **Telespeech CTC**       | `'telespeech_ctc'`| Telespeech CTC. Folder name should contain **telespeech**. | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/telespeech/index.html) |
 | **Tone CTC (t-one)**     | `'tone_ctc'`      | Lightweight streaming CTC (e.g. t-one). Folder name should contain **t-one**, **t_one**, or **tone** (as word). | [Download](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-ctc/index.html) |
 
-For **real-time (streaming) recognition** from a microphone or audio stream, use streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, or `tone_ctc`. See [Streaming (Online) Speech-to-Text](./docs/stt_streaming.md).
+For **real-time (streaming) recognition** from a microphone or audio stream, use streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, or `tone_ctc`. See [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md).
 
 ### Text-to-Speech (TTS) Models
 
@@ -150,26 +150,26 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Zipvoice**     | `'zipvoice'`      | Voice cloning (encoder + decoder + vocoder). Detected by file layout; folder token optional. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores; no folder token required. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
-For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts_streaming.md).
+For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
 
 ## Documentation
 
 - [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
-- [Streaming (Online) Speech-to-Text](./docs/stt_streaming.md) – Real-time recognition, partial results, endpoint detection
-- [PCM Live Stream](./docs/pcm_live_stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
+- [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
+- [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
-- [Streaming Text-to-Speech](./docs/tts_streaming.md) – Incremental TTS (createStreamingTTS)
+- [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Speech Enhancement](./docs/enhancement.md)
 - [Source Separation](./docs/separation.md)
-- [Model Setup](./docs/MODEL_SETUP.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
+- [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
 - [Disable FFMPEG](./docs/disable-ffmpeg.md)
 - [Disable LIBARCHIVE](./docs/disable-libarchive.md)
 
-Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/MODEL_SETUP.md).
+Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/model-setup.md).
 
 ## Requirements
 

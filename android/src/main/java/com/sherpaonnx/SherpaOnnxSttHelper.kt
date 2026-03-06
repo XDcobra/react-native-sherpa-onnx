@@ -316,6 +316,7 @@ internal class SherpaOnnxSttHelper(
   }
 
   fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
+    var tempPath: String? = null
     try {
       val inst = getInstance(instanceId) ?: run {
         promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
@@ -326,16 +327,46 @@ internal class SherpaOnnxSttHelper(
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
-      val wave = WaveReader.readWave(filePath)
+      val pathToRead = if (filePath.startsWith("content://")) {
+        tempPath = resolveContentUriToFile(filePath, "stt_transcribe")
+        tempPath
+      } else {
+        filePath
+      }
+      if (pathToRead == null || pathToRead.isBlank()) {
+        promise.reject("TRANSCRIBE_ERROR", "Could not resolve audio file path")
+        return
+      }
+      val f = File(pathToRead)
+      if (!f.exists() || f.length() == 0L) {
+        promise.reject("TRANSCRIBE_ERROR", "Audio file does not exist or is empty: $pathToRead (size=${f.length()})")
+        return
+      }
+      val wave = WaveReader.readWave(pathToRead)
+      val samples = wave.samples
+      if (samples == null || samples.isEmpty()) {
+        promise.reject("TRANSCRIBE_ERROR", "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
+        return
+      }
       val stream: OfflineStream = rec.createStream()
-      stream.acceptWaveform(wave.samples, wave.sampleRate)
-      rec.decode(stream)
-      val result = rec.getResult(stream)
-      promise.resolve(resultToWritableMap(result))
+      try {
+        stream.acceptWaveform(samples, wave.sampleRate)
+        rec.decode(stream)
+        val result = rec.getResult(stream)
+        promise.resolve(resultToWritableMap(result))
+      } finally {
+        stream.release()
+      }
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
       promise.reject("TRANSCRIBE_ERROR", message, e)
+    } finally {
+      tempPath?.let { path ->
+        try {
+          File(path).takeIf { it.exists() }?.delete()
+        } catch (_: Exception) { }
+      }
     }
   }
 

@@ -25,6 +25,7 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
   [ModelCategory.Separation]: [
     'sherpa-onnx-source-separation-model', // Default separation
   ],
+  [ModelCategory.Qnn]: [],
 };
 
 /**

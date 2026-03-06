@@ -1048,6 +1048,16 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
 }
 
+- (void)copyFileToContentUri:(NSString *)filePath
+              directoryUri:(NSString *)directoryUri
+                  filename:(NSString *)filename
+                  mimeType:(NSString *)mimeType
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+{
+    reject(@"TTS_SAVE_ERROR", @"Copy file to content URI is not supported on iOS (Android SAF only)", nil);
+}
+
 - (void)saveTtsTextToContentUri:(NSString *)text
                  directoryUri:(NSString *)directoryUri
                      filename:(NSString *)filename

@@ -367,6 +367,24 @@ export function saveTextToContentUri(
 }
 
 /**
+ * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
+ * Use for saving converted audio (e.g. MP3, FLAC) to a content URI.
+ */
+export function copyFileToContentUri(
+  filePath: string,
+  directoryUri: string,
+  filename: string,
+  mimeType: string
+): Promise<string> {
+  return SherpaOnnx.copyFileToContentUri(
+    filePath,
+    directoryUri,
+    filename,
+    mimeType
+  );
+}
+
+/**
  * Copy a SAF content URI to a cache file for local playback (Android only).
  */
 export function copyContentUriToCache(

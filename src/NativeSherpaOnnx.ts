@@ -451,6 +451,19 @@ export interface Spec extends TurboModule {
   ): Promise<string>;
 
   /**
+   * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
+   * @param fileUri - Content URI of the saved WAV file
+   * @param filename - Desired cache filename
+   * @returns Absolute file path to the cached copy
+   */
+  copyFileToContentUri(
+    filePath: string,
+    directoryUri: string,
+    filename: string,
+    mimeType: string
+  ): Promise<string>;
+
+  /**
    * Copy a SAF content URI to a cache file for local playback.
    * @param fileUri - Content URI of the saved WAV file
    * @param filename - Desired cache filename
@@ -580,6 +593,8 @@ export interface Spec extends TurboModule {
    * All get*Support methods return this shape. Optional modelBase64: if omitted, SDK uses embedded test model for canInit.
    */
   getQnnSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  /** Device SoC model string (e.g. SM8850 on Android 12+). Null if not available. isSupported: true when SoC is SM8xxx (supported for QNN). */
+  getDeviceQnnSoc(): Promise<{ soc: string | null; isSupported: boolean }>;
   getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
