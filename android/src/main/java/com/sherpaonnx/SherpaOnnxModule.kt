@@ -1,5 +1,6 @@
 package com.sherpaonnx
 
+import android.net.Uri
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
@@ -601,16 +602,33 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * If inputPath is a content:// URI, copies it to a temp file via ContentResolver.openInputStream.
+   * Caller deletes the returned temp file in a finally block.
+   */
+  private fun resolveInputForConvert(inputPath: String): Pair<String, java.io.File?> {
+    if (!inputPath.startsWith("content://")) return Pair(inputPath, null)
+    val uri = Uri.parse(inputPath)
+    val resolver = reactApplicationContext.contentResolver
+    val ext = android.webkit.MimeTypeMap.getSingleton()
+      .getExtensionFromMimeType(resolver.getType(uri)) ?: "tmp"
+    val tmp = java.io.File(reactApplicationContext.cacheDir, "convert_${System.nanoTime()}.$ext")
+    resolver.openInputStream(uri)?.use { input ->
+      tmp.outputStream().use { output -> input.copyTo(output) }
+    } ?: throw IllegalStateException("Content URI not readable: $inputPath")
+    return Pair(tmp.absolutePath, tmp)
+  }
+
+  /**
    * Convert any supported audio file to a requested format using native FFmpeg prebuilts.
-   * For MP3, outputSampleRateHz can be 32000, 44100, or 48000; null/0 = 44100. WAV output is always 16 kHz mono.
-   * Resolves with null on success, rejects with an error message on failure.
+   * Accepts file paths and content:// URIs. Content URIs are transparently copied to a
+   * temp file first (via ContentResolver), converted, then the temp file is deleted.
    */
   override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Double?, promise: Promise) {
+    var tmpFile: java.io.File? = null
     try {
       var rate = outputSampleRateHz?.toInt() ?: 0
 
       if (rate < 0) {
-        android.util.Log.e(NAME, "CONVERT_ERROR: Invalid outputSampleRateHz: must be >= 0")
         promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
         return
       }
@@ -618,15 +636,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (format.equals("mp3", ignoreCase = true)) {
         val allowed = setOf(0, 32000, 44100, 48000)
         if (!allowed.contains(rate)) {
-            android.util.Log.e(NAME, "CONVERT_ERROR: MP3 output sample rate invalid: $rate")
-            promise.reject("CONVERT_ERROR", "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate")
+          promise.reject("CONVERT_ERROR", "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate")
           return
         }
       } else {
         rate = rate.coerceIn(0, 48000)
       }
 
-      val err = Companion.nativeConvertAudioToFormat(inputPath, outputPath, format, rate)
+      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
+      tmpFile = tmp
+      val err = Companion.nativeConvertAudioToFormat(pathToUse, outputPath, format, rate)
+      if (err.isEmpty()) {
+        promise.resolve(null)
+      } else {
+        android.util.Log.e(NAME, "CONVERT_ERROR: $err (inputPath=$inputPath)")
+        promise.reject("CONVERT_ERROR", err)
+      }
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio: ${e.message}", e)
+      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
+    } finally {
+      tmpFile?.delete()
+    }
+  }
+
+  /**
+   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM using native FFmpeg prebuilts.
+   * Accepts file paths and content:// URIs. Content URIs are copied to a temp file first.
+   */
+  override fun convertAudioToWav16k(inputPath: String, outputPath: String, promise: Promise) {
+    var tmpFile: java.io.File? = null
+    try {
+      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
+      tmpFile = tmp
+      val err = Companion.nativeConvertAudioToWav16k(pathToUse, outputPath)
       if (err.isEmpty()) {
         promise.resolve(null)
       } else {
@@ -634,27 +677,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject("CONVERT_ERROR", err)
       }
     } catch (e: Exception) {
-      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio: ${e.message}", e)
-      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
-    }
-  }
-
-  /**
-   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM using native FFmpeg prebuilts.
-   * Resolves with null on success, rejects with an error message on failure.
-   */
-  override fun convertAudioToWav16k(inputPath: String, outputPath: String, promise: Promise) {
-    try {
-      val err = Companion.nativeConvertAudioToWav16k(inputPath, outputPath)
-      if (err.isEmpty()) {
-        promise.resolve(null)
-      } else {
-            android.util.Log.e(NAME, "CONVERT_ERROR: $err")
-            promise.reject("CONVERT_ERROR", err)
-      }
-    } catch (e: Exception) {
       android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio to WAV16k: ${e.message}", e)
       promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
+    } finally {
+      tmpFile?.delete()
     }
   }
 

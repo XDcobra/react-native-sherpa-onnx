@@ -822,7 +822,8 @@ internal class SherpaOnnxTtsHelper(
       val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
       FileInputStream(file).use { inputStream ->
         resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
-          copyStream(inputStream, outputStream)
+          inputStream.copyTo(outputStream)
+          outputStream.flush()
         } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
       }
       promise.resolve(fileUri.toString())
