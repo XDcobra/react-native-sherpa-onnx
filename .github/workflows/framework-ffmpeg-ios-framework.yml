@@ -8,7 +8,6 @@
 name: Framework - FFmpeg (iOS) Release
 
 on:
-  push:
   workflow_dispatch:
 
 concurrency:
@@ -94,7 +93,7 @@ jobs:
       - name: Create version info file
         run: |
           cat > third_party/ffmpeg_prebuilt/FFmpeg.xcframework/VERSION.txt << EOF
-          ffmpeg version: ${{ steps.tag.outputs.version }}
+          ffmpeg version: v${{ steps.tag.outputs.version }}
           Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           GitHub Actions Run: ${{ github.run_id }}
           Commit: ${{ github.sha }}
