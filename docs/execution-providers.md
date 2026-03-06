@@ -84,7 +84,7 @@ This SDK exposes a **unified API** for execution provider and acceleration suppo
 
 **Per-backend notes:**
 
-- **QNN (Android):** ORT/sherpa-onnx are built with QNN; you must add the Qualcomm runtime libs yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). On iOS, QNN is not used.
+- **QNN (Android):** ORT/sherpa-onnx are built with QNN; you must add the Qualcomm runtime libs yourself (see [Quick start](#quick-start-adding-qnn-runtime-libs)). On iOS, QNN is not used. QNN-capable ASR models can be downloaded via the [model download manager](../download-manager.md) using `ModelCategory.Qnn`.
 - **NNAPI (Android):** Uses Android’s Neural Networks API (GPU/DSP/NPU). No extra libs; `hasAccelerator` reflects device enumeration, `canInit` is a session test.
 - **XNNPACK:** CPU-optimized EP; `hasAccelerator` is `true` when the EP is compiled in.
 - **Core ML (iOS):** `providerCompiled` is always `true`; `hasAccelerator` reflects Apple Neural Engine. On Android, Core ML is not used.

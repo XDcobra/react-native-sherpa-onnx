@@ -6,6 +6,8 @@ This guide covers the model download APIs provided by `react-native-sherpa-onnx/
 
 The download manager fetches model assets from official sherpa-onnx GitHub Releases, caches them locally, verifies checksums when available, and exposes progress events. It supports both archive models (`.tar.bz2`) and single-file models (`.onnx`).
 
+Supported categories are `Tts`, `Stt`, `Vad`, `Diarization`, `Enhancement`, `Separation`, and `Qnn`. The **Qnn** category uses the [asr-models-qnn-binary](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary) release. QNN models may use a single `model.bin` plus `tokens.txt`, or (for Paraformer) three binaries: `encoder.bin`, `predictor.bin`, and `decoder.bin` (sherpa-onnx accepts the comma-separated path string for offline Paraformer). It lists ASR models for QNN-capable Android devices; select a build matching your SoC (e.g. SM8850, SM8550). iOS has no QNN support; use other categories on iOS.
+
 ## Quick Start
 
 Typical flow: refresh the registry, download a model, then initialize STT/TTS with the local path.
