@@ -231,23 +231,23 @@
     __block BOOL inputExhausted = NO;
     AVAudioConverterInputBlock inputBlock = ^AVAudioBuffer * _Nullable(AVAudioPacketCount inNumberOfPackets, AVAudioConverterInputStatus *outStatus) {
         if (inputExhausted) {
-            *outStatus = AVAudioConverterInputStatusNoDataNow;
+            *outStatus = AVAudioConverterInputStatus_NoDataNow;
             return nil;
         }
         NSError *readErr = nil;
         [inputFile readIntoBuffer:inputBuffer frameCount:kInputFramesPerBlock error:&readErr];
         if (readErr || inputBuffer.frameLength == 0) {
             inputExhausted = YES;
-            *outStatus = AVAudioConverterInputStatusEndOfStream;
+            *outStatus = AVAudioConverterInputStatus_EndOfStream;
             return nil;
         }
-        *outStatus = AVAudioConverterInputStatusHaveData;
+        *outStatus = AVAudioConverterInputStatus_HaveData;
         return inputBuffer;
     };
     while (YES) {
         AVAudioConverterOutputStatus status = [converter convertToBuffer:outputBuffer error:&error withInputFromBlock:inputBlock];
         if (error) break;
-        if (status == AVAudioConverterOutputStatusError) break;
+        if (status == AVAudioConverterOutputStatus_Error) break;
         if (outputBuffer.frameLength == 0) break;
         [outputFile writeFromBuffer:outputBuffer error:&error];
         if (error) break;
