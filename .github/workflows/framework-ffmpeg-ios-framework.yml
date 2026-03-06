@@ -8,6 +8,7 @@
 name: Framework - FFmpeg (iOS) Release
 
 on:
+  push:
   workflow_dispatch:
 
 concurrency:
