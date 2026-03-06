@@ -580,6 +580,8 @@ export interface Spec extends TurboModule {
    * All get*Support methods return this shape. Optional modelBase64: if omitted, SDK uses embedded test model for canInit.
    */
   getQnnSupport(modelBase64?: string): Promise<AccelerationSupport>;
+  /** Device SoC model string (e.g. SM8850 on Android 12+). Null if not available. isSupported: true when SoC is SM8xxx (supported for QNN). */
+  getDeviceQnnSoc(): Promise<{ soc: string | null; isSupported: boolean }>;
   getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;

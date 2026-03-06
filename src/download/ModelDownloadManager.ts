@@ -33,6 +33,7 @@ export enum ModelCategory {
   Diarization = 'diarization',
   Enhancement = 'enhancement',
   Separation = 'separation',
+  Qnn = 'qnn',
 }
 
 /** TTS model type for meta; 'unknown' when id could not be classified. */
@@ -233,6 +234,11 @@ const CATEGORY_CONFIG: Record<
     cacheFile: 'separation-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/separation`,
   },
+  [ModelCategory.Qnn]: {
+    tag: 'asr-models-qnn-binary',
+    cacheFile: 'qnn-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/qnn`,
+  },
 };
 
 function getCacheDir(): string {
@@ -358,6 +364,11 @@ async function retryWithBackoff<T>(
 async function fetchChecksumsFromRelease(
   category: ModelCategory
 ): Promise<Map<string, string>> {
+  // asr-models-qnn-binary has no checksum.txt; use GitHub API digest only (set in toGenericModelMeta).
+  if (category === ModelCategory.Qnn) {
+    return new Map<string, string>();
+  }
+
   // Return cached if available
   if (checksumCacheByCategory[category]) {
     return checksumCacheByCategory[category]!;
@@ -490,6 +501,14 @@ function isAssetSupportedForCategory(
       return ext === 'onnx';
     case ModelCategory.Separation:
       return ext === 'tar.bz2' || ext === 'onnx';
+    case ModelCategory.Qnn:
+      // asr-models-qnn-binary: e.g. sherpa-onnx-qnn-SM8850-binary-5-seconds-zipformer-ctc-zh-*.tar.bz2
+      return (
+        ext === 'tar.bz2' &&
+        lower.includes('sherpa-onnx-qnn') &&
+        lower.includes('binary') &&
+        lower.includes('seconds')
+      );
     default:
       return false;
   }

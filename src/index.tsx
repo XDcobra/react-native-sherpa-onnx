@@ -42,6 +42,19 @@ export function getQnnSupport(
 }
 
 /**
+ * Device SoC result: soc is always the device SoC string when available (Android 12+); on iOS or when unavailable, soc is null.
+ * isSupported is true when the SoC is SM8xxx (supported for QNN models). Use soc for the label; use isSupported to decide whether to auto-select in the download manager.
+ */
+export type DeviceQnnSocResult = {
+  soc: string | null;
+  isSupported: boolean;
+};
+
+export function getDeviceQnnSoc(): Promise<DeviceQnnSocResult> {
+  return SherpaOnnx.getDeviceQnnSoc();
+}
+
+/**
  * Return the list of available ONNX Runtime execution providers
  * (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
  * Requires the ORT Java bridge from the onnxruntime AAR.
