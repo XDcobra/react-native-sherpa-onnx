@@ -285,6 +285,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
     p.tokens = FindFileEndingWith(files, "tokens.txt");
     p.bpeVocab = FindFileByName(files, "bpe.vocab");
     p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
+
     return p;
 }
 

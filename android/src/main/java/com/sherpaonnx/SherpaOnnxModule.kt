@@ -142,6 +142,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun getDeviceQnnSoc(promise: Promise) {
+    try {
+      var soc: String? = null
+      if (android.os.Build.VERSION.SDK_INT >= 31) {
+        val buildClass = Class.forName("android.os.Build")
+        val field = buildClass.getDeclaredField("SOC_MODEL")
+        val value = field.get(null) as? String
+        soc = value?.trim()?.takeIf { it.isNotEmpty() }
+      }
+      val isSupported = soc != null && soc.matches(Regex("^SM8\\d{3}$", RegexOption.IGNORE_CASE))
+      val map = Arguments.createMap()
+      map.putString("soc", soc)
+      map.putBoolean("isSupported", isSupported)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.w(NAME, "getDeviceQnnSoc: ${e.message}")
+      val map = Arguments.createMap()
+      map.putNull("soc")
+      map.putBoolean("isSupported", false)
+      promise.resolve(map)
+    }
+  }
+
   /** Asset path for embedded NNAPI test model (ORT testdata: nnapi_internal_uint8_support). */
   private val nnapiTestModelAsset = "testModels/nnapi_internal_uint8_support.onnx"
 
