@@ -1,0 +1,131 @@
+# Build FFmpeg (+ libshine) XCFramework for iOS and publish as GitHub Release.
+# Release tag is read from third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG.
+#
+# When to run manually (Actions --> Framework - FFmpeg (iOS) Release --> Run workflow):
+# 1. After updating third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG or FFmpeg/shine submodules.
+# 2. When you want to publish a new FFmpeg iOS XCFramework release.
+#
+name: Framework - FFmpeg (iOS) Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ffmpeg-ios:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ffmpeg-ios-v1)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$RELEASE_TAG" | sed 's/^ffmpeg-ios-v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (version: $VERSION)"
+
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache FFmpeg iOS prebuilts
+        uses: actions/cache@v4
+        id: ffmpeg-cache
+        with:
+          path: |
+            third_party/ffmpeg_prebuilt/ios
+            third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+            third_party/shine_prebuilt/ios
+          key: ffmpeg-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh') }}
+
+      - name: Install FFmpeg build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          brew update
+          brew install pkg-config nasm yasm
+
+      - name: Build libshine (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine_ios.sh
+          ./build_shine_ios.sh
+
+      - name: Build FFmpeg XCFramework (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg_ios.sh
+          ./build_ffmpeg_ios.sh
+
+      - name: Validate output
+        run: |
+          if [ ! -d "third_party/ffmpeg_prebuilt/FFmpeg.xcframework" ]; then
+            echo "::error::FFmpeg.xcframework was not generated"
+            exit 1
+          fi
+          echo "Generated framework:"
+          ls -la third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+
+      - name: Create release zip
+        run: |
+          LAYOUT=ffmpeg-ios-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+
+          cp -R third_party/ffmpeg_prebuilt/FFmpeg.xcframework "$LAYOUT/"
+
+          cd "$LAYOUT"
+          zip -r ../ffmpeg-ios-framework.zip .
+          cd ..
+
+          ls -la ffmpeg-ios-framework.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: FFmpeg iOS ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            Prebuilt FFmpeg and libshine for iOS.
+            - **ffmpeg-ios-framework.zip** – Contains `FFmpeg.xcframework` (device + simulator slices).
+          files: ffmpeg-ios-framework.zip
+          draft: false
+          prerelease: false
+          skip_duplicate: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## FFmpeg iOS release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-ios-framework.zip\` | Contains \`FFmpeg.xcframework\` (iOS device + simulator, built with libshine). |" >> $GITHUB_STEP_SUMMARY
