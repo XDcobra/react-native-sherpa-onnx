@@ -8,6 +8,7 @@
 name: Framework - FFmpeg (iOS) Release
 
 on:
+  push:
   workflow_dispatch:
 
 concurrency:
@@ -89,6 +90,24 @@ jobs:
           fi
           echo "Generated framework:"
           ls -la third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+
+      - name: Create version info file
+        run: |
+          cat > third_party/ffmpeg_prebuilt/FFmpeg.xcframework/VERSION.txt << EOF
+          ffmpeg version: ${{ steps.tag.outputs.version }}
+          Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          GitHub Actions Run: ${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          EOF
+          cat third_party/ffmpeg_prebuilt/FFmpeg.xcframework/VERSION.txt
+
+      - name: Upload XCFramework as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-xcframework-${{ steps.tag.outputs.version }}
+          path: third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+          retention-days: 90
+          compression-level: 6
 
       - name: Create release zip
         run: |
