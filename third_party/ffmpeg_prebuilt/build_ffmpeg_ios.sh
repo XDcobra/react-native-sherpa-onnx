@@ -170,35 +170,38 @@ lipo -create \
 -output "$SIM_LIB/$lib.a"
 done
 
-echo "===== Creating single ffmpeg static lib ====="
+echo "===== Creating single ffmpeg static lib (same name for device and simulator) ====="
 
-mkdir -p "$BUILD_DIR/unified"
+mkdir -p "$BUILD_DIR/unified/device" "$BUILD_DIR/unified/simulator"
 
 libtool -static \
 "$OUTPUT_DIR/iphoneos/arm64/lib/libavcodec.a" \
 "$OUTPUT_DIR/iphoneos/arm64/lib/libavformat.a" \
 "$OUTPUT_DIR/iphoneos/arm64/lib/libavutil.a" \
 "$OUTPUT_DIR/iphoneos/arm64/lib/libswresample.a" \
--o "$BUILD_DIR/unified/libffmpeg_device.a"
+-o "$BUILD_DIR/unified/device/libffmpeg.a"
 
 libtool -static \
 "$SIM_LIB/libavcodec.a" \
 "$SIM_LIB/libavformat.a" \
 "$SIM_LIB/libavutil.a" \
 "$SIM_LIB/libswresample.a" \
--o "$BUILD_DIR/unified/libffmpeg_simulator.a"
+-o "$BUILD_DIR/unified/simulator/libffmpeg.a"
 
 echo "===== Creating XCFramework ====="
 
 rm -rf "$XCFRAMEWORK_OUT"
 
 xcodebuild -create-xcframework \
--library "$BUILD_DIR/unified/libffmpeg_device.a" \
+-library "$BUILD_DIR/unified/device/libffmpeg.a" \
 -headers "$OUTPUT_DIR/iphoneos/arm64/include" \
--library "$BUILD_DIR/unified/libffmpeg_simulator.a" \
+-library "$BUILD_DIR/unified/simulator/libffmpeg.a" \
 -headers "$OUTPUT_DIR/iphonesimulator/arm64/include" \
 -output "$XCFRAMEWORK_OUT"
 
 echo ""
+echo "Cleaning up conflicting headers (time.h) to prevent CocoaPods flattening issues..."
+find "$XCFRAMEWORK_OUT" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
+
 echo "Build complete:"
 echo "$XCFRAMEWORK_OUT"
