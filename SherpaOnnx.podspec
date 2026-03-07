@@ -44,7 +44,7 @@ if File.exist?(setup_script)
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
   unless system("bash", setup_script)
     ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
-    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG and network. Run manually: bash #{setup_script}")
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt) and network. Run manually: bash #{setup_script}")
   end
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
 end
@@ -64,7 +64,7 @@ Pod::Spec.new do |s|
   s.private_header_files = "ios/**/*.h"
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
-  s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework"
+  s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework", "ios/Frameworks/FFmpeg.xcframework"
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
   simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
@@ -77,9 +77,10 @@ Pod::Spec.new do |s|
     "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
+    "OTHER_CPLUSPLUSFLAGS" => "$(inherited)",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
-    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
+    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx -lffmpeg"
   }
 
   s.user_target_xcconfig = {
@@ -87,7 +88,7 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LIBRARY" => "libc++",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
-    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx"
+    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx -lffmpeg"
   }
 
   s.libraries = "c++", "z"
