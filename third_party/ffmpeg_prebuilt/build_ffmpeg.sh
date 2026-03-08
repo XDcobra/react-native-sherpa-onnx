@@ -56,7 +56,7 @@ COMMON_CONFIGURE=(
     --disable-avdevice
     --disable-swscale
     --disable-everything
-    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus,libopus
+    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
     --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
     --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus

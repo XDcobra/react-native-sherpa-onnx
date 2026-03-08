@@ -46,7 +46,7 @@ Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format e
 |---------|---------|-----|
 | Input: file path | Yes | Yes |
 | Input: `content://` URI | Yes (auto-copied to temp) | N/A (picker returns `file://`) |
-| Output: WAV 16 kHz mono | Yes (FFmpeg) | Yes (FFmpeg if available, otherwise AVFoundation) |
+| Output: WAV 16 kHz mono | Yes (FFmpeg) | Yes (FFmpeg; unavailable if FFmpeg is disabled or not linked) |
 | Output: MP3 | Yes (libshine) | Yes (libshine) |
 | Output: FLAC | Yes (FFmpeg) | Yes (FFmpeg) |
 | Output: AAC / M4A | Yes (FFmpeg) | Yes (FFmpeg) |

@@ -50,6 +50,7 @@ jobs:
         run: |
           echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Cache FFmpeg iOS prebuilts
         uses: actions/cache@v4
@@ -59,7 +60,8 @@ jobs:
             third_party/ffmpeg_prebuilt/ios
             third_party/ffmpeg_prebuilt/FFmpeg.xcframework
             third_party/shine_prebuilt/ios
-          key: ffmpeg-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh') }}
+            third_party/opus_prebuilt/ios
+          key: ffmpeg-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh', 'third_party/opus_prebuilt/build_opus_ios.sh') }}
 
       - name: Install FFmpeg build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -73,6 +75,13 @@ jobs:
           cd third_party/shine_prebuilt
           chmod +x build_shine_ios.sh
           ./build_shine_ios.sh
+
+      - name: Build libopus (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/opus_prebuilt
+          chmod +x build_opus_ios.sh
+          ./build_opus_ios.sh
 
       - name: Build FFmpeg XCFramework (iOS)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -129,7 +138,7 @@ jobs:
           name: FFmpeg iOS ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt FFmpeg and libshine for iOS.
+            Prebuilt FFmpeg, libshine, and libopus for iOS.
             - **ffmpeg-ios-framework.zip** – Contains `FFmpeg.xcframework` (device + simulator slices).
           files: ffmpeg-ios-framework.zip
           draft: false
