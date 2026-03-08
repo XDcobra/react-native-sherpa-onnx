@@ -132,10 +132,16 @@ android {
   }
 }
 
+// Resolve com.xdcobra.sherpa only from this repo (never from JitPack or other app repos).
 repositories {
+  exclusiveContent {
+    forRepository { maven { url "https://xdcobra.github.io/maven" } }
+    filter {
+      includeGroup "com.xdcobra.sherpa"
+    }
+  }
   mavenCentral()
   google()
-  maven { url "https://xdcobra.github.io/maven" }
 }
 
 // Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
