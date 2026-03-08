@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build libshine for Android on Linux (e.g. GitHub Actions).
-# Usage: ANDROID_NDK_ROOT=/path/to/ndk ./build_shine_linux.sh
+# Usage: ANDROID_NDK_ROOT=/path/to/ndk ./build_shine.sh
 # Analog to build_shine_msys2.sh but uses NDK Linux host toolchain.
 
 set -e
@@ -27,14 +27,19 @@ NDK_ROOT="${NDK_ROOT//$'\n'/}"
 API="${ANDROID_API:-24}"
 NPROC="${NPROC:-$(nproc 2>/dev/null || echo 4)}"
 
-# NDK host: linux-x86_64 (GitHub Actions ubuntu) or linux-aarch64 (e.g. ARM runners)
-HOST_ARCH="$(uname -m)"
-case "$HOST_ARCH" in
-  x86_64|amd64) NDK_HOST="linux-x86_64" ;;
-  aarch64|arm64) NDK_HOST="linux-aarch64" ;;
+# NDK host: linux-x86_64, linux-aarch64, darwin-x86_64, or windows-x86_64
+case "$(uname -s)" in
+  Darwin*)
+    NDK_HOST="darwin-x86_64"
+    ;;
+  Linux*)
+    case "$(uname -m)" in
+      aarch64|arm64) NDK_HOST="linux-aarch64" ;;
+      *) NDK_HOST="linux-x86_64" ;;
+    esac
+    ;;
   *)
-    echo "Warning: Unknown host $HOST_ARCH, using linux-x86_64"
-    NDK_HOST="linux-x86_64"
+    NDK_HOST="windows-x86_64"
     ;;
 esac
 
