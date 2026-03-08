@@ -142,7 +142,7 @@ get_installed_version() {
     return 0
   fi
   if [ -f "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" ]; then
-    grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 | tr -d '\r\n'
+    grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 | tr -d '\r\n'
     return 0
   fi
   echo ""
@@ -182,7 +182,7 @@ need_download() {
   # Backfill version file from xcframework if missing
   if [ ! -f "$VERSION_FILE" ] && [ -f "$fw_path/VERSION.txt" ]; then
     local ver
-    ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$fw_path/VERSION.txt" | head -n1 || true)
+    ver=$(grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$fw_path/VERSION.txt" | head -n1 || true)
     [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
   fi
   local installed
@@ -283,7 +283,7 @@ get_local_framework_version() {
   fi
   if [ -f "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" ]; then
     local ver
-    ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 || true)
+    ver=$(grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 || true)
     if [ -n "$ver" ]; then
       echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
       echo "$ver"
