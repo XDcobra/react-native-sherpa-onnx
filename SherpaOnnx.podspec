@@ -66,7 +66,12 @@ Pod::Spec.new do |s|
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
 
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
-  has_ffmpeg = File.exist?(ffmpeg_xcframework)
+  
+  has_ffmpeg = false
+  disable_ffmpeg = ENV['SHERPA_ONNX_DISABLE_FFMPEG']
+  if (!disable_ffmpeg || disable_ffmpeg == '0' || disable_ffmpeg == 'false') && File.exist?(ffmpeg_xcframework)
+    has_ffmpeg = true
+  end
 
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg

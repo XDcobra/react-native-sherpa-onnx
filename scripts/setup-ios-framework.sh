@@ -73,7 +73,13 @@ fi
 mkdir -p "$FRAMEWORKS_DIR"
 
 # Framework slugs to manage (order: sherpa-onnx first, then ffmpeg)
-FRAMEWORK_SLUGS=(sherpa-onnx ffmpeg)
+FRAMEWORK_SLUGS=(sherpa-onnx)
+
+if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" = "0" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
+  FRAMEWORK_SLUGS+=(ffmpeg)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_FFMPEG is set. Skipping FFmpeg framework download.${NC}" >&2
+fi
 
 # Set config variables for a given framework slug. Call before using TAG_* XCFRAMEWORK_* etc.
 get_framework_config() {
