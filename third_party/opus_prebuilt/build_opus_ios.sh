@@ -66,8 +66,8 @@ build_opus() {
     make install
 }
 
-build_opus iphoneos arm64 arm-apple-darwin
-build_opus iphonesimulator arm64 arm-apple-darwin
+build_opus iphoneos arm64 aarch64-apple-darwin
+build_opus iphonesimulator arm64 aarch64-apple-darwin
 build_opus iphonesimulator x86_64 x86_64-apple-darwin
 
 echo "===== Creating fat simulator library ====="

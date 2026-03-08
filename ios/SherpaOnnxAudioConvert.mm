@@ -107,6 +107,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             swr_free(&swr);
             avcodec_free_context(&decCtx);
             avformat_close_input(&inFmt);
+            return std::string("libshine encoder not available in this build");
         }
     } else if (codec_id == AV_CODEC_ID_OPUS) {
         encoder = avcodec_find_encoder_by_name("libopus");
@@ -266,7 +267,12 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 
     if (outFmt->oformat->flags & AVFMT_GLOBALHEADER) encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-    if (encCtx->sample_rate > 0) encCtx->time_base = AVRational{1, encCtx->sample_rate};
+    if (encCtx->sample_rate > 0) {
+        encCtx->time_base = AVRational{1, encCtx->sample_rate};
+        if (outStream) {
+            outStream->time_base = encCtx->time_base;
+        }
+    }
 
     AVDictionary *enc_opts = nullptr;
     int nb_ch = encCtx->ch_layout.nb_channels;
@@ -284,10 +290,11 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     }
 
     int ret = avcodec_open2(encCtx, encoder, &enc_opts);
+    av_dict_free(&enc_opts);
+    enc_opts = nullptr;
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        if (enc_opts) { av_dict_free(&enc_opts); enc_opts = nullptr; }
 
         if (codec_id == AV_CODEC_ID_MP3) {
             std::string msg = std::string("Failed to open encoder: ") + errbuf;

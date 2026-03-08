@@ -33,7 +33,14 @@ fi
 # detect host tag
 case "$(uname -s)" in
     Linux*) HOST_TAG="linux-x86_64" ;;
-    Darwin*) HOST_TAG="darwin-x86_64" ;;
+    Darwin*)
+        # Prefer Apple Silicon toolchain on arm64 macOS when available, fallback to x86_64
+        if [ "$(uname -m)" = "arm64" ] && [ -d "$NDK/toolchains/llvm/prebuilt/darwin-arm64" ]; then
+            HOST_TAG="darwin-arm64"
+        else
+            HOST_TAG="darwin-x86_64"
+        fi
+        ;;
     *) HOST_TAG="windows-x86_64" ;;
 esac
 
