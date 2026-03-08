@@ -46,6 +46,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     if (isWav) codec_id = AV_CODEC_ID_PCM_S16LE;
     else if (fmt == "mp3") codec_id = AV_CODEC_ID_MP3;
     else if (fmt == "flac") codec_id = AV_CODEC_ID_FLAC;
+    else if (fmt == "m4a" || fmt == "aac") codec_id = AV_CODEC_ID_AAC;
     else codec_id = AV_CODEC_ID_PCM_S16LE;
 
     // The implementation for generic encoding uses the same decode+resample pipeline
@@ -227,7 +228,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
         if (chosen_fmt == AV_SAMPLE_FMT_NONE && fmt_num > 0) chosen_fmt = fmts[0];
     } else {
-        // libshine only supports S16P; default to S16P for MP3 so open succeeds
+        // libshine only supports S16P; default to S16P for MP3 so open succeeds.
+        // If AAC, it might prefer FLTP, which `chosen_fmt = fmts[0]` captures above if available.
         chosen_fmt = (codec_id == AV_CODEC_ID_MP3) ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
     }
     encCtx->sample_fmt = chosen_fmt;
@@ -342,10 +344,10 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             }
         }
 
-        // Last resort: try S16 then S16P (for FLAC etc.)
+        // Last resort: try S16, S16P, then FLTP (for AAC etc.)
         if (ret < 0) {
-            AVSampleFormat fallbacks[] = { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S16P };
-            for (int fi = 0; fi < 2 && ret < 0; ++fi) {
+            AVSampleFormat fallbacks[] = { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_FLTP };
+            for (int fi = 0; fi < 3 && ret < 0; ++fi) {
                 encCtx->sample_fmt = fallbacks[fi];
                 AVDictionary *try_opts = nullptr;
                 snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->ch_layout.nb_channels > 0 ? encCtx->ch_layout.nb_channels : 1);
