@@ -193,6 +193,24 @@ third_party/libarchive_prebuilt/publish-maven/publish.env
 third_party/libarchive_prebuilt/android/
 third_party/libarchive_prebuilt/build-*/
 
+# opus prebuilt: build output (when building prebuilts locally)
+# ignore everything under opus_prebuilt by default
+third_party/opus_prebuilt/*
+# but allow tracked files
+!third_party/opus_prebuilt/README.md
+!third_party/opus_prebuilt/build_opus.sh
+!third_party/opus_prebuilt/build_opus_ios.sh
+!third_party/opus_prebuilt/IOS_RELEASE_TAG
+!third_party/opus_prebuilt/ANDROID_RELEASE_TAG
+!third_party/opus_prebuilt/publish-maven/
+third_party/opus_prebuilt/publish-maven/*
+!third_party/opus_prebuilt/publish-maven/publish.env.example
+!third_party/opus_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/opus_prebuilt/publish-maven/README.md
+third_party/opus_prebuilt/publish-maven/publish.env
+third_party/opus_prebuilt/android/
+third_party/opus_prebuilt/build-*/
+
 # iOS Frameworks
 # XCFramework files are too large (~80MB+) to store in Git
 # They should be obtained via:
