@@ -82,9 +82,10 @@ export function createPcmLiveStream(
 }
 
 /**
- * Convert any supported audio file to a requested format (e.g. "mp3", "flac", "wav", "m4a").
+ * Convert any supported audio file to a requested format (e.g. "mp3", "flac", "wav", "m4a", "opus", "webm").
  * On Android this requires FFmpeg prebuilts. WAV output is always 16 kHz mono (sherpa-onnx).
  * For MP3, optional outputSampleRateHz: 32000, 44100, or 48000; 0/undefined = 44100.
+ * For Opus, optional outputSampleRateHz: 8000, 12000, 16000, 24000, or 48000.
  * For M4A/AAC, standard bitrates apply.
  * Resolves on success, rejects with an error message on failure.
  */

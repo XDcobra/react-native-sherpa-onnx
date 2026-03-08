@@ -47,6 +47,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     else if (fmt == "mp3") codec_id = AV_CODEC_ID_MP3;
     else if (fmt == "flac") codec_id = AV_CODEC_ID_FLAC;
     else if (fmt == "m4a" || fmt == "aac") codec_id = AV_CODEC_ID_AAC;
+    else if (fmt == "opus" || fmt == "oggm" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") codec_id = AV_CODEC_ID_OPUS;
     else codec_id = AV_CODEC_ID_PCM_S16LE;
 
     // The implementation for generic encoding uses the same decode+resample pipeline
@@ -125,6 +126,15 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             avcodec_free_context(&decCtx);
             avformat_close_input(&inFmt);
             return std::string("libshine encoder not available in this build");
+        }
+    } else if (codec_id == AV_CODEC_ID_OPUS) {
+        encoder = avcodec_find_encoder_by_name("libopus");
+        if (!encoder) {
+            avformat_free_context(outFmt);
+            swr_free(&swr);
+            avcodec_free_context(&decCtx);
+            avformat_close_input(&inFmt);
+            return std::string("libopus encoder not available in this build");
         }
     } else {
         encoder = avcodec_find_encoder(codec_id);
@@ -249,6 +259,10 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         int want = (outputSampleRateHz == 32000 || outputSampleRateHz == 44100 || outputSampleRateHz == 48000) ? outputSampleRateHz : 44100;
         if (encCtx->sample_rate != want) encCtx->sample_rate = want;
     }
+    if (codec_id == AV_CODEC_ID_OPUS) {
+        int want = (outputSampleRateHz == 8000 || outputSampleRateHz == 12000 || outputSampleRateHz == 16000 || outputSampleRateHz == 24000 || outputSampleRateHz == 48000) ? outputSampleRateHz : 48000;
+        if (encCtx->sample_rate != want) encCtx->sample_rate = want;
+    }
 
     // If supported channel layouts given, prefer matching channels else pick first
     if (chl_configs && chl_num > 0) {
@@ -278,7 +292,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     }
 
     // Set a sensible default bitrate for compressed codecs
-    if (codec_id == AV_CODEC_ID_MP3 || codec_id == AV_CODEC_ID_AAC) encCtx->bit_rate = 128000;
+    if (codec_id == AV_CODEC_ID_MP3 || codec_id == AV_CODEC_ID_AAC || codec_id == AV_CODEC_ID_OPUS) encCtx->bit_rate = 128000;
     else encCtx->bit_rate = 0; // lossless or PCM may ignore
 
     if (outFmt->oformat->flags & AVFMT_GLOBALHEADER) encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;

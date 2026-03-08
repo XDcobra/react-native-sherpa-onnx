@@ -639,6 +639,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           promise.reject("CONVERT_ERROR", "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate")
           return
         }
+      } else if (format.equals("opus", ignoreCase = true) || format.equals("oggm", ignoreCase = true) || format.equals("webm", ignoreCase = true) || format.equals("mkv", ignoreCase = true) || format.equals("ogg", ignoreCase = true)) {
+        val allowed = setOf(0, 8000, 12000, 16000, 24000, 48000)
+        if (!allowed.contains(rate)) {
+          promise.reject("CONVERT_ERROR", "Opus output sample rate must be 8000, 12000, 16000, 24000, 48000, or 0 (default). Received: $rate")
+          return
+        }
       } else {
         rate = rate.coerceIn(0, 48000)
       }
