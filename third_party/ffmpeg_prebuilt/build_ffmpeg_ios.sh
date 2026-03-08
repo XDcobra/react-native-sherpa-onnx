@@ -9,6 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 FFMPEG_SRC="$REPO_ROOT/third_party/ffmpeg"
 SHINE_BASE="$REPO_ROOT/third_party/shine_prebuilt/ios"
+OPUS_BASE="$REPO_ROOT/third_party/opus_prebuilt/ios"
 
 BUILD_DIR="$SCRIPT_DIR/build_ios"
 OUTPUT_DIR="$SCRIPT_DIR/ios"
@@ -50,14 +51,15 @@ COMMON_CONFIGURE=(
 --enable-avutil
 --enable-swresample
 
---enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
+--enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
 --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
 --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
 --enable-parser=aac,mpegaudio,vorbis,flac
---enable-encoder=pcm_s16le,flac,aac,alac,libshine
+--enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus
 
 --enable-protocol=file
 --enable-libshine
+--enable-libopus
 )
 
 build_slice() {
@@ -99,6 +101,22 @@ if [ ! -f "$SHINE_PREFIX/include/shine/layer3.h" ]; then
   exit 1
 fi
 
+# Opus prebuilt
+OPUS_PREFIX="$OPUS_BASE/$PLATFORM/$ARCH"
+
+if [ ! -f "$OPUS_PREFIX/lib/libopus.a" ]; then
+  echo "Missing libopus for $PLATFORM/$ARCH"
+  exit 1
+fi
+
+if [ ! -f "$OPUS_PREFIX/lib/pkgconfig/opus.pc" ]; then
+  echo "Missing opus pkgconfig: $OPUS_PREFIX/lib/pkgconfig/opus.pc"
+  exit 1
+fi
+
+OPUS_CFLAGS="-I$OPUS_PREFIX/include"
+OPUS_LDFLAGS="-L$OPUS_PREFIX/lib -lopus"
+
 PKGDIR="$TMP_BUILD/pkgconfig"
 mkdir -p "$PKGDIR"
 cat > "$PKGDIR/shine.pc" <<PC
@@ -113,7 +131,7 @@ Version: 1.0
 Libs: -L\${libdir} -lshine
 Cflags: -I\${includedir}
 PC
-export PKG_CONFIG_PATH="$PKGDIR${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export PKG_CONFIG_PATH="$PKGDIR:$OPUS_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 if ! "$HOST_PKG_CONFIG" --exists shine; then
   echo "pkg-config cannot find shine for $PLATFORM/$ARCH"
@@ -143,8 +161,8 @@ export CXX="$CC"
 --enable-cross-compile \
 --sysroot="$SDK" \
 --pkg-config="$HOST_PKG_CONFIG" \
---extra-cflags="$CFLAGS $SHINE_CFLAGS" \
---extra-ldflags="$LDFLAGS $SHINE_LDFLAGS"
+--extra-cflags="$CFLAGS $SHINE_CFLAGS $OPUS_CFLAGS" \
+--extra-ldflags="$LDFLAGS $SHINE_LDFLAGS $OPUS_LDFLAGS"
 #$DISABLE_ASM \
 
 make -j"$(sysctl -n hw.ncpu)"
