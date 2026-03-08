@@ -85,7 +85,17 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Build FFmpeg (with libshine)
+      - name: Build libopus
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/opus_prebuilt
+          chmod +x build_opus.sh
+          ./build_opus.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (with libshine + libopus)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           cd third_party/ffmpeg_prebuilt
@@ -95,7 +105,7 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Package jniLibs layout (FFmpeg + shine only)
+      - name: Package jniLibs layout (FFmpeg + shine + opus only)
         run: |
           LAYOUT=ffmpeg-android-layout
           rm -rf "$LAYOUT"
@@ -103,6 +113,7 @@ jobs:
           ABIS="arm64-v8a armeabi-v7a x86 x86_64"
           FFMPEG_SO="libavcodec.so libavformat.so libavutil.so libswresample.so libavfilter.so"
           SHINE_SO="libshine.so"
+          OPUS_SO="libopus.so"
           for abi in $ABIS; do
             mkdir -p "$LAYOUT/$abi"
             for so in $FFMPEG_SO; do
@@ -111,6 +122,12 @@ jobs:
             done
             for so in $SHINE_SO; do
               for root in third_party/ffmpeg_prebuilt/android third_party/shine_prebuilt/android; do
+                SRC="$root/$abi/lib/$so"
+                if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; break; fi
+              done
+            done
+            for so in $OPUS_SO; do
+              for root in third_party/ffmpeg_prebuilt/android third_party/opus_prebuilt/android; do
                 SRC="$root/$abi/lib/$so"
                 if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; break; fi
               done
@@ -144,7 +161,7 @@ jobs:
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt FFmpeg and libshine for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
+            Prebuilt FFmpeg, libshine, and libopus for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
             - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
             - **ffmpeg-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg`.
 
