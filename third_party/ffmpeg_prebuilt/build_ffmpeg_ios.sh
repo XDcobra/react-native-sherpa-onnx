@@ -193,6 +193,11 @@ lipo -create \
 "$SHINE_BASE/iphonesimulator/x86_64/lib/libshine.a" \
 -output "$SIM_LIB/libshine.a"
 
+lipo -create \
+"$OPUS_BASE/iphonesimulator/arm64/lib/libopus.a" \
+"$OPUS_BASE/iphonesimulator/x86_64/lib/libopus.a" \
+-output "$SIM_LIB/libopus.a"
+
 echo "===== Creating single ffmpeg static lib (same name for device and simulator) ====="
 
 mkdir -p "$BUILD_DIR/unified/device" "$BUILD_DIR/unified/simulator"
@@ -206,11 +211,29 @@ libtool -static \
 -o "$BUILD_DIR/unified/device/libffmpeg.a"
 
 libtool -static \
+"$OUTPUT_DIR/iphoneos/arm64/lib/libavcodec.a" \
+"$OUTPUT_DIR/iphoneos/arm64/lib/libavformat.a" \
+"$OUTPUT_DIR/iphoneos/arm64/lib/libavutil.a" \
+"$OUTPUT_DIR/iphoneos/arm64/lib/libswresample.a" \
+"$SHINE_BASE/iphoneos/arm64/lib/libshine.a" \
+"$OPUS_BASE/iphoneos/arm64/lib/libopus.a" \
+-o "$BUILD_DIR/unified/device/libffmpeg.a"
+
+libtool -static \
 "$SIM_LIB/libavcodec.a" \
 "$SIM_LIB/libavformat.a" \
 "$SIM_LIB/libavutil.a" \
 "$SIM_LIB/libswresample.a" \
 "$SIM_LIB/libshine.a" \
+-o "$BUILD_DIR/unified/simulator/libffmpeg.a"
+
+libtool -static \
+"$SIM_LIB/libavcodec.a" \
+"$SIM_LIB/libavformat.a" \
+"$SIM_LIB/libavutil.a" \
+"$SIM_LIB/libswresample.a" \
+"$SIM_LIB/libshine.a" \
+"$SIM_LIB/libopus.a" \
 -o "$BUILD_DIR/unified/simulator/libffmpeg.a"
 
 echo "===== Creating XCFramework ====="
