@@ -64,7 +64,13 @@ Pod::Spec.new do |s|
   s.private_header_files = "ios/**/*.h"
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
-  s.vendored_frameworks = "ios/Frameworks/sherpa_onnx.xcframework", "ios/Frameworks/FFmpeg.xcframework"
+
+  ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
+  has_ffmpeg = File.exist?(ffmpeg_xcframework)
+
+  vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
+  vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
+  s.vendored_frameworks = vendored
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
   simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
@@ -72,15 +78,23 @@ Pod::Spec.new do |s|
   simulator_slice = File.join(xcframework_root, "ios-arm64_x86_64-simulator")
   device_slice = File.join(xcframework_root, "ios-arm64")
 
+  gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
+  gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
+
+  ld_flags = '$(inherited) -lsherpa-onnx'
+  if has_ffmpeg
+    ld_flags += ' -lffmpeg -liconv -lbz2'
+  end
+
   s.pod_target_xcconfig = {
     "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{pod_root}/ios/archive\" \"#{pod_root}/ios/model_detect\" \"#{pod_root}/ios/stt\" \"#{pod_root}/ios/tts\" \"#{pod_root}/ios/online_stt\" \"#{libarchive_dir}\" \"#{device_headers}\" \"#{simulator_headers}\"",
-    "GCC_PREPROCESSOR_DEFINITIONS" => '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"',
+    "GCC_PREPROCESSOR_DEFINITIONS" => gcc_defs,
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
     "OTHER_CPLUSPLUSFLAGS" => "$(inherited)",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
-    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx -lffmpeg"
+    "OTHER_LDFLAGS" => ld_flags
   }
 
   s.user_target_xcconfig = {
@@ -88,10 +102,10 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LIBRARY" => "libc++",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
-    "OTHER_LDFLAGS" => "$(inherited) -lsherpa-onnx -lffmpeg"
+    "OTHER_LDFLAGS" => ld_flags
   }
 
-  s.libraries = "c++", "z"
+  s.libraries = "c++", "z", "iconv", "bz2"
 
   install_modules_dependencies(s)
 end
