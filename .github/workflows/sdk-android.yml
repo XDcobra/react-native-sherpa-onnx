@@ -93,6 +93,7 @@ jobs:
           echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "sherpa=$(git -C third_party/sherpa-onnx rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+          echo "opus=$(git -C third_party/opus rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
 
       - name: Read VERSIONS (for QNN SDK)
         id: versions
@@ -109,7 +110,8 @@ jobs:
           path: |
             third_party/ffmpeg_prebuilt/android
             third_party/shine_prebuilt/android
-          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh') }}
+            third_party/opus_prebuilt/android
+          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh', 'third_party/opus_prebuilt/build_opus.sh') }}
 
       - name: Install FFmpeg build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -125,6 +127,16 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
+      - name: Build libopus
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/opus_prebuilt
+          chmod +x build_opus.sh
+          ./build_opus.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
       - name: Build FFmpeg (with libshine)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
@@ -134,9 +146,6 @@ jobs:
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-
-      - name: Copy FFmpeg prebuilts to jniLibs
-        run: node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
 
       # ── Sherpa-onnx prebuilts with QNN (uses ORT from repo GitHub Release; cached) ─
       - name: Cache sherpa-onnx prebuilts
@@ -182,22 +191,10 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           QNN_SDK_ROOT: ${{ steps.qnn.outputs.root }}
 
-      - name: Copy sherpa-onnx prebuilts to jniLibs
-        run: node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js
-
-      - name: Copy sherpa-onnx C API headers to Android include
-        run: |
-          SRC=third_party/sherpa-onnx/sherpa-onnx/c-api
-          DST=android/src/main/cpp/include/sherpa-onnx/c-api
-          mkdir -p "$DST"
-          cp -v "$SRC/c-api.h" "$SRC/cxx-api.h" "$DST/"
-        # When building from release zip, Gradle extracts these from the zip; here we have the submodule so copy directly.
-
       # ── Verification ───────────────────────────────────────────────────
-      - name: Verify required files exist
+      - name: Verify project structure
         run: |
-          echo "Verifying required files..."
-          # Android C API headers are provided by Gradle from the release zip when the build runs (downloadNativeLibsIfNeeded).
+          echo "Verifying required project files..."
 
           if [ ! -f "android/src/main/cpp/CMakeLists.txt" ]; then
             echo "Error: CMakeLists.txt not found at android/src/main/cpp/CMakeLists.txt"
@@ -211,27 +208,6 @@ jobs:
           fi
           echo "[OK] android/build.gradle found"
 
-          # Verify FFmpeg prebuilts and jniLibs
-          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            if [ ! -d "third_party/ffmpeg_prebuilt/android/${abi}/lib" ]; then
-              echo "Error: FFmpeg prebuilt libs missing for ${abi}"
-              exit 1
-            fi
-            if [ ! -f "android/src/main/jniLibs/${abi}/libavcodec.so" ]; then
-              echo "Error: FFmpeg .so missing in jniLibs/${abi}/"
-              exit 1
-            fi
-            if [ ! -f "android/src/main/jniLibs/${abi}/libsherpa-onnx-jni.so" ]; then
-              echo "Error: sherpa-onnx .so missing in jniLibs/${abi}/"
-              exit 1
-            fi
-            if [ ! -f "android/src/main/jniLibs/${abi}/libonnxruntime.so" ]; then
-              echo "Error: libonnxruntime.so missing in jniLibs/${abi}/"
-              exit 1
-            fi
-          done
-          echo "[OK] FFmpeg and sherpa-onnx prebuilts and jniLibs verified"
-
           if [ ! -f "example/android/build.gradle" ]; then
             echo "Error: example/android/build.gradle not found"
             exit 1
@@ -243,10 +219,8 @@ jobs:
             exit 1
           fi
           echo "[OK] example/android/app/build.gradle found"
-
-          echo ""
-          echo "Header file structure:"
-          find android/src/main/cpp/include -name "*.h" -type f | head -10 || echo "No header files found"
+          
+          echo "Note: Native libraries (.so) and headers are downloaded and verified automatically by Gradle (checkJniLibs)."
 
       - name: Make gradlew executable
         run: |
