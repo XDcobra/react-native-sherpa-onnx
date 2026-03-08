@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create an FFmpeg (+ libshine) AAR from the prebuilt layout.
+# Create an FFmpeg (+ libshine + libopus) AAR from the prebuilt layout.
 # Layout: <layout_dir>/arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so) and include/ (headers).
 # AAR contains jni/<abi>/*.so and include/** so Maven consumers get libs + headers.
 # Usage: ./create_ffmpeg_aar.sh <layout_dir> <version> [output_path]
