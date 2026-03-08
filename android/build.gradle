@@ -103,7 +103,7 @@ android {
       jniLibs {
         excludes += [
           "**/libavcodec.so", "**/libavformat.so", "**/libavutil.so",
-          "**/libavfilter.so", "**/libswresample.so", "**/libshine.so"
+          "**/libavfilter.so", "**/libswresample.so", "**/libshine.so", "**/libopus.so"
         ]
       }
     }
