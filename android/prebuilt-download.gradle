@@ -278,7 +278,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "ffmpeg-android.zip")
       def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def ffmpegExtractDir = new File(downloadDir, "ffmpeg-extract")
       if (ffmpegExtractDir.exists()) ffmpegExtractDir.deleteDir()
@@ -304,7 +304,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (!tag) throw new RuntimeException("Missing or empty third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "libarchive-android.zip")
       def url = "${baseUrl}/${tag}/libarchive-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def libarchiveExtractDir = new File(downloadDir, "libarchive-extract")
       if (libarchiveExtractDir.exists()) libarchiveExtractDir.deleteDir()
@@ -331,7 +331,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "sherpa-onnx-android.zip")
       def url = "${baseUrl}/${tag}/sherpa-onnx-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def sherpaExtractDir = new File(downloadDir, "sherpa-onnx-extract")
       if (sherpaExtractDir.exists()) sherpaExtractDir.deleteDir()
