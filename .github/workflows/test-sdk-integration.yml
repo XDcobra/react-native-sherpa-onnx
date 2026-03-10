@@ -1,18 +1,19 @@
 name: Test SDK Integration (Fresh App)
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
-    branches:
-      - main
-    paths-ignore:
-      - 'README.md'
-      - 'readme.md'
-      - '**/README.md'
-      - 'docs/**'
-  workflow_dispatch:
+  #pull_request:
+  #  branches:
+  #    - main
+  #push:
+  #  branches:
+  #    - main
+  #  paths-ignore:
+  #    - 'README.md'
+  #    - 'readme.md'
+  #    - '**/README.md'
+  #    - 'docs/**'
+  #workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-integration
