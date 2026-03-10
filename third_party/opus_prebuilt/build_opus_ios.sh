@@ -25,6 +25,11 @@ build_opus() {
 
     cd "$OPUS_SRC"
 
+    if [ ! -f "configure" ] && [ -f "autogen.sh" ]; then
+        echo "Generating configure script..."
+        ./autogen.sh
+    fi
+
     make distclean >/dev/null 2>&1 || true
     rm -f config.cache
 
