@@ -26,7 +26,7 @@ jobs:
     env:
       JAVA_VERSION: '17'
       VERDACCIO_HTPASSWD: ${{ secrets.VERDACCIO_HTPASSWD }}
-      VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
+      VERDACCIO_AUTH_TOKEN: ${{ secrets.VERDACCIO_AUTH_TOKEN }}
       npm_config_registry: http://localhost:4873
 
     steps:
@@ -83,7 +83,9 @@ jobs:
 
           # Login to NPM
           echo "${VERDACCIO_HTPASSWD}" > .htpasswd
-          echo "//localhost:4873/:_authToken=\"${VERDACCIO_PASSWORD}\"" >> ~/.npmrc
+          echo "//localhost:4873/:_authToken=\"${VERDACCIO_AUTH_TOKEN}\"" >> ~/.npmrc
+          npm config set registry http://localhost:4873/
+          npm set registry http://localhost:4873/ 
           
           # Start Verdaccio in the background
           verdaccio --config verdaccio-config.yaml --listen 4873 &
