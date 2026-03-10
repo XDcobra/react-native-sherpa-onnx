@@ -9,7 +9,7 @@
 name: Framework - libarchive (iOS) Release
 
 on:
-  push:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

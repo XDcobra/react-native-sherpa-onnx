@@ -71,40 +71,6 @@ jobs:
           ruby-version: '4.0'
           bundler: '4.0.3'
 
-      - name: Check ios/Frameworks before any download (no cache used)
-        run: |
-          # This workflow does NOT use actions/cache for ios/Frameworks, so no stale/incomplete cache is restored.
-          echo "=== ios/Frameworks state before download (this workflow does not cache ios/Frameworks) ==="
-          if [ -d "ios/Frameworks" ]; then
-            ls -la ios/Frameworks
-            [ -d "ios/Frameworks/sherpa_onnx.xcframework" ] && find ios/Frameworks/sherpa_onnx.xcframework -maxdepth 3 -type d | head -20
-          else
-            echo "ios/Frameworks does not exist yet"
-          fi
-
-      - name: Download iOS framework (early – same as yarn download-ios-framework)
-        env:
-          SHERPA_ONNX_PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          echo "Running yarn download-ios-framework from repo root..."
-          yarn download-ios-framework
-          echo "Download step finished (exit code: $?)"
-
-      - name: Verify iOS framework and headers after download
-        run: |
-          echo "=== Verifying framework and required header right after download ==="
-          HEADER="${{ github.workspace }}/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h"
-          if [ -f "$HEADER" ]; then
-            echo "[OK] Header present: $HEADER"
-            ls -la "$(dirname "$HEADER")"
-          else
-            echo "ERROR: Header missing after download: $HEADER"
-            echo "--- Contents of ${{ github.workspace }}/ios/Frameworks ---"
-            ls -la "${{ github.workspace }}/ios/Frameworks" 2>/dev/null || true
-            find "${{ github.workspace }}/ios/Frameworks" -maxdepth 4 2>/dev/null | head -60
-            exit 1
-          fi
-
       - name: Build example for iOS
         env:
           # So prepare_command in SherpaOnnx.podspec downloads framework to workspace/ios/Frameworks (not elsewhere)
