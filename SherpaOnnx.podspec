@@ -2,40 +2,6 @@ require "json"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 pod_root = __dir__
-# Prefer libarchive_prebuilt layout (output of third_party/libarchive_prebuilt/build_libarchive_ios.sh).
-# Fallback: download via setup-ios-libarchive.sh to ios/Downloads/libarchive (e.g. when using SDK from npm).
-libarchive_prebuilt = File.join(pod_root, "third_party", "libarchive_prebuilt", "libarchive-ios-layout")
-libarchive_downloads = File.join(pod_root, "ios", "Downloads", "libarchive")
-unless File.directory?(libarchive_prebuilt) && Dir.glob(File.join(libarchive_prebuilt, "*.c")).any?
-  libarchive_script = File.join(pod_root, "ios", "scripts", "setup-ios-libarchive.sh")
-  if File.exist?(libarchive_script)
-    unless system("bash", libarchive_script)
-      abort("[SherpaOnnx] setup-ios-libarchive.sh failed. Check that third_party/libarchive_prebuilt/IOS_RELEASE_TAG exists and the release is available (network). Run the script manually: bash #{libarchive_script}")
-    end
-  end
-end
-libarchive_dir = (File.directory?(libarchive_prebuilt) && Dir.glob(File.join(libarchive_prebuilt, "*.c")).any?) ? libarchive_prebuilt : libarchive_downloads
-# Patch libarchive .c files (copy to ios/patched_libarchive with stdio.h/unistd.h added) so we don't modify the submodule.
-patched_dir = File.join(pod_root, "ios", "patched_libarchive")
-patch_script = File.join(pod_root, "ios", "scripts", "patch-libarchive-includes.sh")
-if File.directory?(libarchive_dir) && File.exist?(patch_script)
-  unless system("bash", patch_script, libarchive_dir)
-    abort("[SherpaOnnx] patch-libarchive-includes.sh failed. Check that #{libarchive_dir} contains libarchive .c/.h files.")
-  end
-end
-# Libarchive C sources: use patched copies (same exclude as before: test, windows, linux, sunos, freebsd).
-libarchive_sources = if File.directory?(patched_dir)
-  Dir.glob(File.join(patched_dir, "*.c")).reject { |f|
-    base = File.basename(f, ".c")
-    File.basename(f) =~ /^test\./ || base.include?("windows") || base.include?("linux") || base.include?("sunos") || base.include?("freebsd")
-  }.map { |f| Pathname.new(f).relative_path_from(Pathname.new(pod_root)).to_s.gsub("\\", "/") }
-else
-  []
-end
-
-if libarchive_sources.empty?
-  abort("[SherpaOnnx] Libarchive sources missing. Ensure third_party/libarchive_prebuilt/libarchive-ios-layout exists (run third_party/libarchive_prebuilt/build_libarchive_ios.sh) or ios/scripts/setup-ios-libarchive.sh has run, and that ios/scripts/patch-libarchive-includes.sh succeeds. Check pod install logs for patch script errors.")
-end
 
 # Run iOS framework setup when podspec is loaded (works for :path pods).
 setup_script = File.join(pod_root, "scripts", "setup-ios-framework.sh")
@@ -44,7 +10,7 @@ if File.exist?(setup_script)
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
   unless system("bash", setup_script)
     ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
-    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt) and network. Run manually: bash #{setup_script}")
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt) and network. Run manually: bash #{setup_script}")
   end
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
 end
@@ -60,12 +26,13 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
 
-  s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}", *libarchive_sources]
+  s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}"]
   s.private_header_files = "ios/**/*.h"
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
 
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
+  libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
   
   has_ffmpeg = false
   disable_ffmpeg = ENV['SHERPA_ONNX_DISABLE_FFMPEG']
@@ -73,8 +40,16 @@ Pod::Spec.new do |s|
     has_ffmpeg = true
   end
 
+  has_libarchive = false
+  disable_libarchive = ENV['SHERPA_ONNX_DISABLE_LIBARCHIVE']
+  if (!disable_libarchive || disable_libarchive == '0' || disable_libarchive == 'false') && File.exist?(libarchive_xcframework)
+    has_libarchive = true
+  end
+
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
+  vendored << "ios/Frameworks/libarchive.xcframework" if has_libarchive
+  
   s.vendored_frameworks = vendored
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
@@ -83,16 +58,47 @@ Pod::Spec.new do |s|
   simulator_slice = File.join(xcframework_root, "ios-arm64_x86_64-simulator")
   device_slice = File.join(xcframework_root, "ios-arm64")
 
+  libarchive_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
+  libarchive_simulator_headers = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  libarchive_device_headers = File.join(libarchive_xcframework_root, "ios-arm64", "Headers")
+
+  ffmpeg_simulator_headers = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator", "Headers")
+  ffmpeg_device_headers = File.join(ffmpeg_xcframework, "ios-arm64", "Headers")
+
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
+  gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
 
   ld_flags = '$(inherited) -lsherpa-onnx'
   if has_ffmpeg
     ld_flags += ' -lffmpeg -liconv -lbz2'
   end
+  if has_libarchive
+    ld_flags += ' -larchive'
+  end
+
+  header_search_paths = [
+    "$(inherited)",
+    "\"#{pod_root}/ios\"",
+    "\"#{pod_root}/ios/archive\"",
+    "\"#{pod_root}/ios/model_detect\"",
+    "\"#{pod_root}/ios/stt\"",
+    "\"#{pod_root}/ios/tts\"",
+    "\"#{pod_root}/ios/online_stt\"",
+    "\"#{device_headers}\"",
+    "\"#{simulator_headers}\""
+  ]
+  if has_libarchive
+    header_search_paths << "\"#{libarchive_device_headers}\""
+    header_search_paths << "\"#{libarchive_simulator_headers}\""
+  end
+  if has_ffmpeg
+    header_search_paths << "\"#{ffmpeg_device_headers}\""
+    header_search_paths << "\"#{ffmpeg_simulator_headers}\""
+  end
 
   s.pod_target_xcconfig = {
-    "HEADER_SEARCH_PATHS" => "$(inherited) \"#{pod_root}/ios\" \"#{pod_root}/ios/archive\" \"#{pod_root}/ios/model_detect\" \"#{pod_root}/ios/stt\" \"#{pod_root}/ios/tts\" \"#{pod_root}/ios/online_stt\" \"#{libarchive_dir}\" \"#{device_headers}\" \"#{simulator_headers}\"",
+    "HEADER_SEARCH_PATHS" => header_search_paths.join(" "),
     "GCC_PREPROCESSOR_DEFINITIONS" => gcc_defs,
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",

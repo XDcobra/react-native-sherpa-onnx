@@ -213,6 +213,7 @@ third_party/opus_prebuilt/build-*/
 # 3. Download from CDN or separate repository
 ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/FFmpeg.xcframework/
+ios/Frameworks/libarchive.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive
 ios/Frameworks/.framework-version

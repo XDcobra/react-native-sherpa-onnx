@@ -6,8 +6,10 @@
  */
 
 #import "sherpa-onnx-archive-helper.h"
+#ifdef HAVE_LIBARCHIVE
 #import <archive.h>
 #import <archive_entry.h>
+#endif
 #import <CommonCrypto/CommonCrypto.h>
 #include <array>
 #include <atomic>
@@ -17,6 +19,7 @@
 static std::atomic_bool g_cancelExtract(false);
 
 namespace {
+#ifdef HAVE_LIBARCHIVE
 struct ArchiveReadContext {
   FILE* file = nullptr;
   std::array<unsigned char, 64 * 1024> buffer{};
@@ -66,6 +69,7 @@ static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
   fclose(ctx->file);
   ctx->file = nullptr;
 }
+#endif
 
 static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
   static const char* kHex = "0123456789abcdef";
@@ -122,7 +126,11 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 
 + (void)cancelExtractTarBz2
 {
+#ifdef HAVE_LIBARCHIVE
   g_cancelExtract.store(true);
+#else
+  // feature disabled
+#endif
 }
 
 - (NSDictionary *)extractTarBz2:(NSString *)sourcePath
@@ -130,6 +138,9 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
            force:(BOOL)force
            progress:(SherpaOnnxArchiveProgressBlock)progress
 {
+#ifndef HAVE_LIBARCHIVE
+  return @{ @"success": @NO, @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1." };
+#else
   g_cancelExtract.store(false);
   NSFileManager *fileManager = [NSFileManager defaultManager];
 
@@ -285,6 +296,7 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   NSString *sha256Hex = HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
 
   return @{ @"success": @YES, @"path": targetPath, @"sha256": sha256Hex ?: @"" };
+#endif
 }
 
 - (NSString *)computeFileSha256:(NSString *)filePath
