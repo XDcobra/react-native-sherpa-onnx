@@ -1,6 +1,10 @@
 # Disabling libarchive (Android & iOS)
 
-If your app uses another native library that ships its own libarchive, or you do not need archive extraction (e.g. `.tar.bz2` model extraction), you can disable libarchive in this SDK. When disabled, no `libarchive.so` (Android) or `libarchive.xcframework` (iOS) is linked or shipped, and archive-dependent APIs return an error at runtime.
+By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt libarchive binaries (`libarchive.xcframework` for iOS and `.so` libs for Android) to provide built-in archive extraction features (e.g. extracting `.tar.bz2` downloaded model bundles).
+
+You can explicitly **disable libarchive** in this SDK if you want to:
+1. **Reduce App Size:** Omit libarchive binaries if you don't use the archive extraction helpers (`extractTarBz2`, `cancelExtractTarBz2`) and only use single-file `.onnx` models.
+2. **Prevent Symbol Clashes:** Avoid duplicate native symbols if another native module or library in your app already ships its own libarchive. Having two copies of libarchive in the same process can cause runtime crashes or undefined behavior.
 
 ## How to disable libarchive
 
@@ -39,7 +43,7 @@ When this is set:
 
 ## Functions that depend on libarchive
 
-When libarchive is disabled, the following APIs are **built but return an error at runtime** when called:
+When libarchive is disabled, the following APIs **in this SDK** are built but return an error at runtime when called (you should use your other library's extraction APIs instead):
 
 | API | Description |
 |-----|-------------|
