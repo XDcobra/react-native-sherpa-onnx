@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Script to download and manage iOS Framework
+# Script to download and manage iOS Frameworks (sherpa-onnx, FFmpeg)
 # Can be called manually or by Podfile during pod install
 # Usage:
-#   ./scripts/setup-ios-framework.sh          # Downloads/updates framework (auto mode, no interactive)
-#   ./scripts/setup-ios-framework.sh 1.12.24  # Downloads specific version
-#   ./scripts/setup-ios-framework.sh --force  # Remove local cache and re-download (same version from IOS_RELEASE_TAG)
-#   ./scripts/setup-ios-framework.sh --interactive  # Interactive mode with prompts
+#   ./scripts/setup-ios-framework.sh                    # Downloads/updates both frameworks (auto mode, no interactive)
+#   ./scripts/setup-ios-framework.sh 1.12.24             # Downloads specific sherpa-onnx version (ffmpeg from its TAG)
+#   ./scripts/setup-ios-framework.sh --force            # Remove local caches and re-download both
+#   ./scripts/setup-ios-framework.sh --interactive       # Interactive mode with prompts
 # To force re-download during pod install: SHERPA_ONNX_IOS_FORCE_DOWNLOAD=1 pod install
 
 set -e
@@ -36,7 +36,6 @@ if [ -z "$PROJECT_ROOT" ]; then
   exit 1
 fi
 FRAMEWORKS_DIR="$PROJECT_ROOT/ios/Frameworks"
-VERSION_FILE="$FRAMEWORKS_DIR/.framework-version"
 
 # Colors for output
 RED='\033[0;31m'
@@ -73,162 +72,256 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
-# Read desired version early so we can skip download only when installed version matches (avoids stale framework after IOS_RELEASE_TAG update).
-if [ -z "$DESIRED_VERSION" ] && [ "$FORCE_DOWNLOAD" != true ]; then
-  IOS_TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
-  if [ -f "$IOS_TAG_FILE" ]; then
-    TAG=$(grep -v '^#' "$IOS_TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
-    if [ -n "$TAG" ] && [ "${TAG#framework-v}" != "$TAG" ]; then
-      DESIRED_VERSION="${TAG#framework-v}"
-    fi
-  fi
+# Framework slugs to manage (order: sherpa-onnx first, then libarchive, then ffmpeg)
+FRAMEWORK_SLUGS=(sherpa-onnx)
+
+if [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-false}" != "true" ]; then
+  FRAMEWORK_SLUGS+=(libarchive)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
-# Helper: check if a framework path is valid for building (has library + required headers for compiler)
+if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
+  FRAMEWORK_SLUGS+=(ffmpeg)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_FFMPEG is set. Skipping FFmpeg framework download.${NC}" >&2
+fi
+
+# Set config variables for a given framework slug. Call before using TAG_* XCFRAMEWORK_* etc.
+get_framework_config() {
+  local slug="$1"
+  case "$slug" in
+    sherpa-onnx)
+      TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="framework-v"
+      XCFRAMEWORK_NAME="sherpa_onnx.xcframework"
+      ZIP_ASSET_NAME="sherpa_onnx.xcframework.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-sherpa-onnx"
+      LIB_DEVICE="libsherpa-onnx.a"
+      LIB_SIMULATOR="libsherpa-onnx.a"
+      HEADER_CHECK="Headers/sherpa-onnx/c-api/cxx-api.h"
+      DISPLAY_NAME="SherpaOnnx"
+      ;;
+    ffmpeg)
+      TAG_FILE="$PROJECT_ROOT/third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="ffmpeg-ios-v"
+      XCFRAMEWORK_NAME="FFmpeg.xcframework"
+      ZIP_ASSET_NAME="ffmpeg-ios-framework.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-ffmpeg"
+      LIB_DEVICE="libffmpeg.a"
+      LIB_SIMULATOR="libffmpeg.a"
+      HEADER_CHECK="Headers/libavcodec/avcodec.h"
+      DISPLAY_NAME="FFmpeg"
+      ;;
+    libarchive)
+      TAG_FILE="$PROJECT_ROOT/third_party/libarchive_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libarchive-ios-v"
+      XCFRAMEWORK_NAME="libarchive.xcframework"
+      ZIP_ASSET_NAME="libarchive-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libarchive"
+      LIB_DEVICE="libarchive.a"
+      LIB_SIMULATOR="libarchive.a"
+      HEADER_CHECK="Headers/archive.h"
+      DISPLAY_NAME="libarchive"
+      ;;
+    *)
+      echo "Unknown framework: $slug" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Helper: check if a framework path is valid for building (has library + required headers)
+# Usage: framework_valid <slug> <fw_root>
 framework_valid() {
-  local fw_root="$1"
-  [ -f "$fw_root/ios-arm64/libsherpa-onnx.a" ] || return 1
-  [ -f "$fw_root/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" ] || return 1
+  local slug="$1"
+  local fw_root="$2"
+  get_framework_config "$slug" || return 1
+  [ -f "$fw_root/ios-arm64/$LIB_DEVICE" ] || return 1
+  [ -f "$fw_root/ios-arm64_x86_64-simulator/$LIB_SIMULATOR" ] || return 1
+  [ -f "$fw_root/ios-arm64_x86_64-simulator/$HEADER_CHECK" ] || return 1
   return 0
 }
 
-# Helper: get installed framework version (from .framework-version or xcframework VERSION.txt)
+# Helper: get installed framework version (from version file or xcframework VERSION.txt)
+# Usage: get_installed_version <slug>
+# Backward compat: for sherpa-onnx, also checks legacy .framework-version
 get_installed_version() {
+  local slug="$1"
+  get_framework_config "$slug" || return 1
+  # Backward compat: sherpa-onnx used to use .framework-version
+  if [ "$slug" = "sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
+    cat "$FRAMEWORKS_DIR/.framework-version" 2>/dev/null | tr -d '\r\n'
+    return 0
+  fi
   if [ -f "$VERSION_FILE" ]; then
     cat "$VERSION_FILE" 2>/dev/null | tr -d '\r\n'
     return 0
   fi
-  for f in "sherpa_onnx.xcframework" "sherpa-onnx.xcframework"; do
-    if [ -f "$FRAMEWORKS_DIR/$f/VERSION.txt" ]; then
-      grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/$f/VERSION.txt" | head -n1 | tr -d '\r\n'
-      return 0
-    fi
-  done
+  if [ -f "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" ]; then
+    grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 | tr -d '\r\n'
+    return 0
+  fi
   echo ""
 }
 
-# When run as Xcode build phase (prepare_command): if framework is already present, valid, AND matches IOS_RELEASE_TAG, exit successfully.
-# Otherwise we re-download so that updating IOS_RELEASE_TAG (e.g. to 1.12.28) triggers an update from an older installed version (e.g. 1.12.24).
-if [ "$FORCE_DOWNLOAD" != true ]; then
-  if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
-    if [ ! -f "$VERSION_FILE" ] && [ -f "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/VERSION.txt" ]; then
-      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/VERSION.txt" | head -n1 || true)
-      [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
-    fi
-    installed=$(get_installed_version)
-    if [ -n "$DESIRED_VERSION" ] && [ -n "$installed" ] && [ "$installed" = "$DESIRED_VERSION" ]; then
-      echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa_onnx.xcframework (v$installed), skipping download." >&2
-      exit 0
-    fi
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Installed framework v${installed} does not match IOS_RELEASE_TAG ($DESIRED_VERSION), will re-download.${NC}" >&2
+# Get desired version from a framework's IOS_RELEASE_TAG file.
+# Usage: get_desired_version_from_tag <slug>
+# Output: version (e.g. 1.12.28 or 8.0.1) or empty if file/tag missing.
+get_desired_version_from_tag() {
+  local slug="$1"
+  get_framework_config "$slug" || return 1
+  if [ ! -f "$TAG_FILE" ]; then
+    echo ""
+    return 0
   fi
-  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && framework_valid "$FRAMEWORKS_DIR/sherpa-onnx.xcframework"; then
-    if [ ! -f "$VERSION_FILE" ] && [ -f "$FRAMEWORKS_DIR/sherpa-onnx.xcframework/VERSION.txt" ]; then
-      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/sherpa-onnx.xcframework/VERSION.txt" | head -n1 || true)
-      [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
-    fi
-    installed=$(get_installed_version)
-    if [ -n "$DESIRED_VERSION" ] && [ -n "$installed" ] && [ "$installed" = "$DESIRED_VERSION" ]; then
-      echo "[SherpaOnnx] Framework already present at $FRAMEWORKS_DIR/sherpa-onnx.xcframework (v$installed), skipping download." >&2
-      exit 0
-    fi
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Installed framework v${installed} does not match IOS_RELEASE_TAG ($DESIRED_VERSION), will re-download.${NC}" >&2
+  local tag
+  tag=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+  if [ -z "$tag" ] || [ "${tag#$TAG_PREFIX}" = "$tag" ]; then
+    echo ""
+    return 0
   fi
-fi
+  echo "${tag#$TAG_PREFIX}"
+}
 
-# Prepare GitHub auth header if GITHUB_TOKEN is provided (helps avoid API rate limits)
+# When run as Xcode build phase: if all frameworks are present, valid, AND match their IOS_RELEASE_TAG, exit successfully.
+need_download() {
+  local slug="$1"
+  local desired="$2"
+  get_framework_config "$slug" || return 1
+  local fw_path="$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
+  if [ ! -d "$fw_path" ]; then
+    return 0
+  fi
+  if ! framework_valid "$slug" "$fw_path"; then
+    return 0
+  fi
+  # Backfill version file from xcframework if missing
+  if [ ! -f "$VERSION_FILE" ] && [ -f "$fw_path/VERSION.txt" ]; then
+    local ver
+    ver=$(grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$fw_path/VERSION.txt" | head -n1 || true)
+    [ -n "$ver" ] && echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
+  fi
+  local installed
+  installed=$(get_installed_version "$slug")
+  if [ -n "$desired" ] && [ -n "$installed" ] && [ "$installed" = "$desired" ]; then
+    return 1
+  fi
+  return 0
+}
+
+# Prepare GitHub auth header if GITHUB_TOKEN is provided
 AUTH_ARGS=()
 if [ -n "$GITHUB_TOKEN" ]; then
   AUTH_ARGS+=("-H" "Authorization: Bearer $GITHUB_TOKEN")
 fi
 
-# If SHERPA_ONNX_VERSION is set, treat it as the desired framework version
-# and do not perform the usual "auto-upgrade to latest" behavior. This helps
-# prevent accidental upgrades during CI or automated installs.
-if [ -n "$SHERPA_ONNX_VERSION" ]; then
-  DESIRED_VERSION="$SHERPA_ONNX_VERSION"
-fi
-# If no env var was provided, use repo-level IOS_RELEASE_TAG (single source of truth for iOS framework version).
-# Format: framework-vX.Y.Z (e.g. framework-v1.12.24). Do not use ANDROID_RELEASE_TAG for iOS.
-if [ -z "$DESIRED_VERSION" ]; then
-  IOS_TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
-  if [ -f "$IOS_TAG_FILE" ]; then
-    TAG=$(grep -v '^#' "$IOS_TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
-    if [ -n "$TAG" ] && [ "${TAG#framework-v}" != "$TAG" ]; then
-      DESIRED_VERSION="${TAG#framework-v}"
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using iOS framework version from IOS_RELEASE_TAG: $DESIRED_VERSION${NC}" >&2
-    fi
-  fi
-  if [ -z "$DESIRED_VERSION" ]; then
-    echo -e "${RED}Error: IOS_RELEASE_TAG not found at $IOS_TAG_FILE. Reinstall the package or run from repo.${NC}" >&2
-    exit 1
-  fi
+# Explicit version on command line overrides sherpa-onnx only (backward compat)
+SHERPA_DESIRED_OVERRIDE=""
+if [ -n "$1" ] && [[ "$1" =~ ^[0-9]+\.([0-9]+\.)*[0-9]+$ ]]; then
+  SHERPA_DESIRED_OVERRIDE="$1"
 fi
 
-# Function to compare semantic versions (e.g., "1.12.23" vs "1.12.24")
-compare_versions() {
-  local v1=$1
-  local v2=$2
-  
-  # Convert to arrays
-  IFS='.' read -ra v1_parts <<< "$v1"
-  IFS='.' read -ra v2_parts <<< "$v2"
-  
-  # Pad arrays to same length
-  local max_len=${#v1_parts[@]}
-  [ ${#v2_parts[@]} -gt $max_len ] && max_len=${#v2_parts[@]}
-  
-  # Compare each part
-  for ((i=0; i<max_len; i++)); do
-    local v1_num=${v1_parts[$i]:-0}
-    local v2_num=${v2_parts[$i]:-0}
-    
-    if [ "$v1_num" -lt "$v2_num" ]; then
-      echo "-1"  # v1 < v2
-      return 0
-    elif [ "$v1_num" -gt "$v2_num" ]; then
-      echo "1"   # v1 > v2
-      return 0
+# Return desired version for a framework slug (from TAG, env, or override). No output = use TAG/env only.
+get_desired_version() {
+  local slug="$1"
+  if [ "$slug" = "sherpa-onnx" ] && [ -n "$SHERPA_DESIRED_OVERRIDE" ]; then
+    echo "$SHERPA_DESIRED_OVERRIDE"
+    return
+  fi
+  if [ "$slug" = "sherpa-onnx" ] && [ -n "$SHERPA_ONNX_VERSION" ]; then
+    echo "$SHERPA_ONNX_VERSION"
+    return
+  fi
+  get_desired_version_from_tag "$slug"
+}
+
+# Check early exit: all frameworks present, valid, and matching their desired version
+SKIP_ALL=true
+for slug in "${FRAMEWORK_SLUGS[@]}"; do
+  desired=$(get_desired_version "$slug")
+  if [ -z "$desired" ] && [ "$slug" = "sherpa-onnx" ]; then
+    SKIP_ALL=false
+    break
+  fi
+  if [ -n "$desired" ] && need_download "$slug" "$desired"; then
+    SKIP_ALL=false
+    break
+  fi
+done
+
+if [ "$FORCE_DOWNLOAD" != true ] && [ "$SKIP_ALL" = true ]; then
+  for slug in "${FRAMEWORK_SLUGS[@]}"; do
+    get_framework_config "$slug" || exit 1
+    desired=$(get_desired_version "$slug")
+    if [ -n "$desired" ]; then
+      installed=$(get_installed_version "$slug")
+      echo "[$DISPLAY_NAME] Framework already present at $FRAMEWORKS_DIR/$XCFRAMEWORK_NAME (v$installed), skipping download." >&2
     fi
   done
   
-  echo "0"  # v1 == v2
-}
+  # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
+  if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
+    find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
+  fi
 
-# Function to get local framework version
+  exit 0
+fi
+
+if [ "$FORCE_DOWNLOAD" != true ]; then
+  for slug in "${FRAMEWORK_SLUGS[@]}"; do
+    get_framework_config "$slug" || exit 1
+    desired=$(get_desired_version "$slug")
+    if [ -n "$desired" ] && need_download "$slug" "$desired"; then
+      installed=$(get_installed_version "$slug")
+      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}[$DISPLAY_NAME] Installed v${installed} does not match TAG ($desired), will re-download.${NC}" >&2
+    fi
+  done
+fi
+
+# Require desired version for sherpa-onnx (main dependency)
+if [ -z "$(get_desired_version sherpa-onnx)" ]; then
+  get_framework_config "sherpa-onnx" || true
+  echo -e "${RED}Error: IOS_RELEASE_TAG not found at $TAG_FILE or invalid format (expected ${TAG_PREFIX}X.Y.Z). Reinstall the package or run from repo.${NC}" >&2
+  exit 1
+fi
+
+# Function to get local framework version (for display / compare)
 get_local_framework_version() {
-  # Prefer explicit version file written by this script
+  local slug="$1"
+  get_framework_config "$slug" || return 1
   if [ -f "$VERSION_FILE" ]; then
     cat "$VERSION_FILE"
     return 0
   fi
-
-  # If .framework-version missing, try to read VERSION.txt from the XCFramework
-  for f in "sherpa_onnx.xcframework" "sherpa-onnx.xcframework"; do
-    if [ -f "$FRAMEWORKS_DIR/$f/VERSION.txt" ]; then
-      # Extract first semantic version-like token (e.g. 1.12.24)
-      ver=$(grep -Eo '([0-9]+\.)+[0-9]+' "$FRAMEWORKS_DIR/$f/VERSION.txt" | head -n1 || true)
-      if [ -n "$ver" ]; then
-        # Cache it for future runs
-        echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
-        echo "$ver"
-        return 0
-      fi
+  if [ "$slug" = "sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
+    cat "$FRAMEWORKS_DIR/.framework-version"
+    return 0
+  fi
+  if [ -f "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" ]; then
+    local ver
+    ver=$(grep -Eo '([0-9]+\.)+[0-9]+([-a-zA-Z0-9.]*)?' "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" | head -n1 || true)
+    if [ -n "$ver" ]; then
+      echo "$ver" > "$VERSION_FILE" 2>/dev/null || true
+      echo "$ver"
+      return 0
     fi
-  done
-
+  fi
   echo ""
 }
 
-# Function to download and extract framework
+# Function to download and extract a framework
+# Usage: download_and_extract_framework <slug> <version>
 download_and_extract_framework() {
-  local version=$1
-  local tag="framework-v$version"
+  local slug="$1"
+  local version="$2"
+  get_framework_config "$slug" || return 1
+  local tag="${TAG_PREFIX}${version}"
 
-  echo -e "${YELLOW}Downloading framework version $version...${NC}" >&2
+  echo -e "${YELLOW}[$DISPLAY_NAME] Downloading framework version $version...${NC}" >&2
 
-  # Get download URL from GitHub API
-  local release_json=$(curl -s "${AUTH_ARGS[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags/$tag" 2>/dev/null || echo "")
+  local release_json
+  release_json=$(curl -s "${AUTH_ARGS[@]}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags/$tag" 2>/dev/null || echo "")
 
   if [ -z "$release_json" ]; then
     echo -e "${RED}Error: Could not fetch release information for tag $tag${NC}" >&2
@@ -242,24 +335,23 @@ download_and_extract_framework() {
     return 1
   fi
 
-  # Extract download URL using jq if available, otherwise grep/sed
   local download_url
   if command -v jq &> /dev/null; then
     if echo "$release_json" | jq -e . > /dev/null 2>&1; then
-      download_url=$(echo "$release_json" | jq -r '.assets[] | select(.name == "sherpa_onnx.xcframework.zip") | .browser_download_url' | head -1)
+      download_url=$(echo "$release_json" | jq -r --arg name "$ZIP_ASSET_NAME" '.assets[] | select(.name == $name) | .browser_download_url' | head -1)
     else
       echo -e "${RED}Error: Release response is not valid JSON${NC}" >&2
       echo "$release_json" | head -5 >&2
       return 1
     fi
   else
-    download_url=$(echo "$release_json" | grep -o '"browser_download_url": "[^"]*' | grep 'xcframework.zip' | head -1 | sed 's/.*: "//' | sed 's/"$//')
+    download_url=$(echo "$release_json" | grep -o '"browser_download_url": "[^"]*' | grep "$ZIP_ASSET_NAME" | head -1 | sed 's/.*: "//' | sed 's/"$//')
   fi
 
   if [ -z "$download_url" ]; then
-    echo -e "${RED}Error: Could not find download URL for version $version${NC}" >&2
-    echo -e "${RED}Available assets:${NC}" >&2
+    echo -e "${RED}Error: Could not find download URL for $DISPLAY_NAME version $version (asset: $ZIP_ASSET_NAME)${NC}" >&2
     if command -v jq &> /dev/null; then
+      echo -e "${RED}Available assets:${NC}" >&2
       echo "$release_json" | jq -r '.assets[].name' | sed 's/^/  - /' >&2 || true
     fi
     return 1
@@ -267,8 +359,7 @@ download_and_extract_framework() {
 
   echo "Downloading from: $download_url" >&2
 
-  # Download the zip file
-  local zip_path="$FRAMEWORKS_DIR/sherpa_onnx.xcframework.zip"
+  local zip_path="$FRAMEWORKS_DIR/$ZIP_ASSET_NAME"
 
   if ! curl -L -f "${AUTH_ARGS[@]}" -o "$zip_path" "$download_url" 2>/dev/null; then
     echo -e "${RED}Error: Failed to download framework from $download_url${NC}" >&2
@@ -276,104 +367,94 @@ download_and_extract_framework() {
     return 1
   fi
 
-  # Check if zip file is valid
   if ! file "$zip_path" 2>/dev/null | grep -q "Zip archive"; then
     echo -e "${RED}Error: Downloaded file is not a valid zip archive${NC}" >&2
-    echo "File type: $(file "$zip_path" 2>/dev/null || echo "unknown")" >&2
     rm -f "$zip_path"
     return 1
   fi
 
-  # Remove old framework if it exists
-  if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-    echo -e "${YELLOW}Removing old framework...${NC}" >&2
-    rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  if [ -d "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" ]; then
+    echo -e "${YELLOW}[$DISPLAY_NAME] Removing old framework...${NC}" >&2
+    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
   fi
 
-  # Extract the zip
-  echo -e "${YELLOW}Extracting framework...${NC}" >&2
+  echo -e "${YELLOW}[$DISPLAY_NAME] Extracting framework...${NC}" >&2
   unzip -q -o "$zip_path" -d "$FRAMEWORKS_DIR"
 
-  # Normalize name: podspec expects sherpa_onnx.xcframework; zip may contain sherpa-onnx.xcframework
-  if [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
+  # Normalize name: sherpa zip may contain sherpa-onnx.xcframework
+  if [ "$slug" = "sherpa-onnx" ] && [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
     mv "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
   fi
 
-  if [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-    echo -e "${RED}Error: Framework extraction failed${NC}" >&2
-    echo "Contents of $FRAMEWORKS_DIR:" >&2
+  if [ ! -d "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" ]; then
+    echo -e "${RED}Error: Framework extraction failed ($XCFRAMEWORK_NAME)${NC}" >&2
     ls -la "$FRAMEWORKS_DIR" 2>/dev/null | head -20 >&2 || true
     rm -f "$zip_path"
     return 1
   fi
 
-  # Verify required headers are present (needed for iOS build: #include "sherpa-onnx/c-api/cxx-api.h")
-  if ! framework_valid "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"; then
-    echo -e "${RED}Error: Downloaded framework is missing required headers for building.${NC}" >&2
-    echo "Expected: $FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h" >&2
-    echo "Simulator Headers directory:" >&2
-    ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" 2>/dev/null || echo "  (missing)" >&2
-    if [ -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers" ]; then
-      echo "sherpa-onnx/c-api under Headers:" >&2
-      ls -la "$FRAMEWORKS_DIR/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api" 2>/dev/null || echo "  (missing)" >&2
-    fi
-    rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  if ! framework_valid "$slug" "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"; then
+    echo -e "${RED}Error: Downloaded $DISPLAY_NAME framework is missing required libraries or headers.${NC}" >&2
+    echo "Expected e.g. $FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/ios-arm64_x86_64-simulator/$HEADER_CHECK" >&2
+    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
     rm -f "$zip_path"
     return 1
   fi
 
-  # Remove zip file
   rm -f "$zip_path"
-
-  # Write version file
   echo "$version" > "$VERSION_FILE"
-
-  echo -e "${GREEN}Framework v$version downloaded and extracted successfully${NC}" >&2
+  echo -e "${GREEN}[$DISPLAY_NAME] Framework v$version downloaded and extracted successfully${NC}" >&2
   return 0
 }
 
-# Force: remove existing framework and version file so we always re-download
+# Force: remove existing frameworks and version files so we always re-download
 if [ "$FORCE_DOWNLOAD" = true ]; then
-  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Force download: removing local framework and version file${NC}" >&2
-  rm -rf "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
-  rm -f "$VERSION_FILE"
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Force download: removing local frameworks and version files${NC}" >&2
+  for slug in "${FRAMEWORK_SLUGS[@]}"; do
+    get_framework_config "$slug" || exit 1
+    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
+    rm -f "$VERSION_FILE"
+  done
+  rm -f "$FRAMEWORKS_DIR/.framework-version"
 fi
 
-# Main logic
-if [ -n "$1" ]; then
-  # User provided a specific version -> explicit, always honor
-  download_and_extract_framework "$1"
-else
-  # If env var was set, enforce that version and do not auto-upgrade to latest
-  if [ -n "$DESIRED_VERSION" ]; then
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using SHERPA_ONNX_VERSION=$DESIRED_VERSION${NC}" >&2
-    local_version=$(get_local_framework_version)
-    if [ "$local_version" != "$DESIRED_VERSION" ] || [ "$FORCE_DOWNLOAD" = true ]; then
-      [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Downloading v$DESIRED_VERSION...${NC}" >&2
-      download_and_extract_framework "$DESIRED_VERSION" || exit 1
-    else
-      [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is already v$local_version${NC}" >&2
-    fi
-  else
-    # DESIRED_VERSION is set above from IOS_RELEASE_TAG (required).
-    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Using pinned version from IOS_RELEASE_TAG.${NC}" >&2
-    local_version=$(get_local_framework_version)
-    if [ "$local_version" != "$DESIRED_VERSION" ] || [ "$FORCE_DOWNLOAD" = true ]; then
-      download_and_extract_framework "$DESIRED_VERSION" || exit 1
-    else
-      [ "$INTERACTIVE" = true ] && echo -e "${GREEN}Framework is already v$local_version${NC}" >&2
-    fi
+# Main: download each framework that needs updating
+for slug in "${FRAMEWORK_SLUGS[@]}"; do
+  get_framework_config "$slug" || exit 1
+  desired=$(get_desired_version "$slug")
+  # Sherpa: always ensure desired version (from TAG or $1). FFmpeg: only if TAG is set.
+  if [ -z "$desired" ]; then
+    [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}[$DISPLAY_NAME] No IOS_RELEASE_TAG version, skipping.${NC}" >&2
+    continue
   fi
-fi
+  local_ver=$(get_local_framework_version "$slug")
+  if [ "$local_ver" = "$desired" ] && [ "$FORCE_DOWNLOAD" != true ]; then
+    [ "$INTERACTIVE" = true ] && echo -e "${GREEN}[$DISPLAY_NAME] Framework is already v$local_ver${NC}" >&2
+    continue
+  fi
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}[$DISPLAY_NAME] Downloading v$desired...${NC}" >&2
+  download_and_extract_framework "$slug" "$desired" || exit 1
+done
 
 if [ "$INTERACTIVE" = true ]; then
   echo "" >&2
   echo -e "${GREEN}Framework setup complete!${NC}" >&2
-  echo "Framework location: $FRAMEWORKS_DIR/sherpa_onnx.xcframework" >&2
+  for slug in "${FRAMEWORK_SLUGS[@]}"; do
+    get_framework_config "$slug" || true
+    if [ -d "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" ]; then
+      echo "  $DISPLAY_NAME: $FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" >&2
+    fi
+  done
   echo "" >&2
   echo "Next steps:" >&2
   echo "  1. cd example" >&2
   echo "  2. pod install" >&2
   echo "  3. Open ios/SherpaOnnxExample.xcworkspace in Xcode" >&2
 fi
+
+# Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
+if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
+  find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
+fi
+
 exit 0

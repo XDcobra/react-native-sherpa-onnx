@@ -2,6 +2,8 @@
 # Build minimal FFmpeg (audio-only) for Android using NDK.
 # Used by: Linux/macOS directly, or from build_ffmpeg.ps1 on Windows via MSYS2 bash.
 # Requires: NDK (ANDROID_NDK_HOME or ANDROID_NDK_ROOT), FFmpeg source in ../../third_party/ffmpeg (submodule).
+# Requires: libshine prebuilts at third_party/shine_prebuilt/android/ABI
+# Requires: libopus prebuilts at third_party/opus_prebuilt/android/ABI
 
 set -e
 
@@ -54,11 +56,11 @@ COMMON_CONFIGURE=(
     --disable-avdevice
     --disable-swscale
     --disable-everything
-    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8
+    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska
     --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
-    --enable-encoder=pcm_s16le,flac,libshine,aac,alac
-    --enable-parser=aac,mpegaudio,vorbis,flac
+    --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus
+    --enable-parser=aac,mpegaudio,vorbis,flac,opus
     --enable-protocol=file
     --enable-swresample
     --enable-avcodec
@@ -187,8 +189,39 @@ PC
 
     COMMON_CONFIGURE+=(--enable-libshine)
 
+    # Libopus integration
+    OPUS_PREFIX="$REPO_ROOT/third_party/opus_prebuilt/android/$ABI"
+    if [ ! -d "$OPUS_PREFIX" ]; then
+        echo "Error: libopus prebuilts not found for ABI $ABI at: $OPUS_PREFIX"
+        echo "Build libopus first using: third_party/opus_prebuilt/build_opus.sh"
+        exit 1
+    fi
+    if [ ! -d "$OPUS_PREFIX/lib" ] || { [ ! -f "$OPUS_PREFIX/lib/libopus.so" ] && [ ! -f "$OPUS_PREFIX/lib/libopus.a" ]; }; then
+        echo "Error: libopus library not found at $OPUS_PREFIX/lib (expected libopus.so or libopus.a)"
+        exit 1
+    fi
+
+    echo "Found libopus prebuilts at $OPUS_PREFIX — enabling libopus"
+    OPUS_CFLAGS="-I$OPUS_PREFIX/include"
+    OPUS_LDFLAGS="-L$OPUS_PREFIX/lib -lopus -lm -Wl,--allow-shlib-undefined"
+
+    PKGDIR_OPUS="$OPUS_PREFIX/lib/pkgconfig"
+    export PKG_CONFIG_PATH="$PKGDIR_OPUS:$PKG_CONFIG_PATH"
+
+    if ! pkg-config --exists opus; then
+        echo "pkg-config: cannot find 'opus'. Listing $PKGDIR_OPUS:"
+        ls -la "$PKGDIR_OPUS" || true
+        exit 1
+    fi
+    echo "pkg-config: found opus -> $(pkg-config --modversion opus 2>/dev/null || echo 'unknown')"
+
+    COMMON_CONFIGURE+=(--enable-libopus)
+
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
+    
+    # Ensure source directory is perfectly clean from previous aborted/other-ABI builds
+    make distclean 2>/dev/null || true
 
     # 32-bit ARM: FFmpeg adds -mfp16-format=ieee which NDK clang does not support. Use a compiler
     # wrapper that strips that flag so we don't have to patch FFmpeg.
@@ -240,8 +273,8 @@ PC
         --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
         --strip="${TOOLCHAIN}/bin/llvm-strip" \
         --sysroot="$TOOLCHAIN/sysroot" \
-        --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-}" \
-        --extra-ldflags="${SHINE_LDFLAGS:-}" \
+        --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-} ${OPUS_CFLAGS:-}" \
+        --extra-ldflags="${SHINE_LDFLAGS:-} ${OPUS_LDFLAGS:-}" \
         2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
         echo "===== FFmpeg configure failed for $ABI — last 200 lines of ffbuild/config.log ====="

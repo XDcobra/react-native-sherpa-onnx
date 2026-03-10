@@ -30,6 +30,7 @@ if (!ffmpegVersion) {
   ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1')
 }
 project.ext.ffmpegVersion = ffmpegVersion
+println "[react-native-sherpa-onnx] ffmpeg version (extracted/used): ${ffmpegVersion}"
 
 // libarchive: 1. LIBARCHIVE_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def libarchiveVersion = System.getenv('LIBARCHIVE_VERSION')
@@ -38,10 +39,13 @@ if (!libarchiveVersion) {
   libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5')
 }
 project.ext.libarchiveVersion = libarchiveVersion
+println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libarchiveVersion}"
 
-// onnxruntime (ORT Java bridge): 1. ORT_VERSION env 2. property 3. default
+// onnxruntime (ORT Java bridge): 1. ORT_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def ortVersion = System.getenv('ORT_VERSION')
 if (!ortVersion) {
-  ortVersion = project.hasProperty('ortVersion') ? project.ortVersion : '1.24.2-qnn2.43.1.260218'
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG'), 'ort-android-qnn-v')
+  ortVersion = v ?: (project.hasProperty('ortVersion') ? project.ortVersion : '1.24.2-qnn2.43.1.260218')
 }
 project.ext.ortVersion = ortVersion
+println "[react-native-sherpa-onnx] onnxruntime version (extracted/used): ${ortVersion}"

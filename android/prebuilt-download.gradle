@@ -104,14 +104,32 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def storedSherpaVersion = (sherpaVersionFile.exists() ? sherpaVersionFile.text.trim() : null)
     def sherpaNeedsUpdate = !hasAllSherpaLibs() || !hasSherpaHeaders() || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
 
+    def currentFfmpegVersion = project.ext.ffmpegVersion
+    def ffmpegVersionFile = new File(downloadDir, "ffmpeg-version.txt")
+    def storedFfmpegVersion = (ffmpegVersionFile.exists() ? ffmpegVersionFile.text.trim() : null)
+    def ffmpegNeedsUpdate = !hasAllFfmpegLibs() || !hasFfmpegHeaders() || storedFfmpegVersion == null || storedFfmpegVersion != currentFfmpegVersion
+
+    def currentLibarchiveVersion = project.ext.libarchiveVersion
+    def libarchiveVersionFile = new File(downloadDir, "libarchive-version.txt")
+    def storedLibarchiveVersion = (libarchiveVersionFile.exists() ? libarchiveVersionFile.text.trim() : null)
+    def libarchiveNeedsUpdate = !hasAllLibarchiveLibs() || !hasLibarchiveHeaders() || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
+
     if (hasAllSherpaLibs() && hasSherpaHeaders() && !sherpaNeedsUpdate) {
       println "[sherpa-onnx] Native libs + headers: (1) already present, version ${currentSherpaVersion}"
     }
     if (sherpaNeedsUpdate && storedSherpaVersion != null && storedSherpaVersion != currentSherpaVersion) {
       println "[sherpa-onnx] Version change detected (${storedSherpaVersion} -> ${currentSherpaVersion}), refreshing libs and headers"
     }
+    if (ffmpegNeedsUpdate && storedFfmpegVersion != null && storedFfmpegVersion != currentFfmpegVersion) {
+      println "[FFmpeg] Version change detected (${storedFfmpegVersion} -> ${currentFfmpegVersion}), refreshing libs and headers"
+    }
+    if (libarchiveNeedsUpdate && storedLibarchiveVersion != null && storedLibarchiveVersion != currentLibarchiveVersion) {
+      println "[libarchive] Version change detected (${storedLibarchiveVersion} -> ${currentLibarchiveVersion}), refreshing libs and headers"
+    }
 
     def sherpaUpdatedFromAar = [false]
+    def ffmpegUpdatedFromAar = [false]
+    def libarchiveUpdatedFromAar = [false]
     if (sherpaNeedsUpdate) {
       try {
         def aarFiles = project.configurations.sherpaOnnxAar.files
@@ -145,7 +163,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     }
 
-    if (!sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())) {
+    if (!sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate) {
       try {
         def aarFiles = project.configurations.ffmpegAar.files
         if (!aarFiles.isEmpty()) {
@@ -168,6 +186,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             copy { from aarIncludeDir; into ffmpegIncludeDir }
             println "Extracted FFmpeg headers from Maven AAR"
           }
+          downloadDir.mkdirs()
+          ffmpegVersionFile.text = currentFfmpegVersion
+          ffmpegUpdatedFromAar[0] = true
           println "[FFmpeg] Native libs + headers: (2) Maven AAR (${aar.name})"
         }
       } catch (Exception e) {
@@ -175,7 +196,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     }
 
-    if (!sherpaOnnxDisableLibarchive && (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders())) {
+    if (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate) {
       try {
         def aarFiles = project.configurations.libarchiveAar.files
         if (!aarFiles.isEmpty()) {
@@ -198,6 +219,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             copy { from aarIncludeDir; into libarchiveIncludeDir }
             println "Extracted libarchive headers from Maven AAR"
           }
+          downloadDir.mkdirs()
+          libarchiveVersionFile.text = currentLibarchiveVersion
+          libarchiveUpdatedFromAar[0] = true
           println "[libarchive] Native libs + headers: (2) Maven AAR (${aar.name})"
         }
       } catch (Exception e) {
@@ -237,14 +261,27 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
 
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
-      def needFfmpeg = !sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())
-      def needLibarchive = !sherpaOnnxDisableLibarchive && (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders())
-      if (needFfmpeg || needLibarchive || (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0])) {
+      def needFfmpeg = !sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate && !ffmpegUpdatedFromAar[0]
+      def needLibarchive = !sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]
+      def needSherpa = sherpaNeedsUpdate && !sherpaUpdatedFromAar[0]
+      if (needFfmpeg || needLibarchive || needSherpa) {
+        def diag = [
+          "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
+          "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
+          "sherpaOnnxDisableFfmpeg=${sherpaOnnxDisableFfmpeg}",
+          "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
+          "sherpaNeedsUpdate=${sherpaNeedsUpdate} sherpaUpdatedFromAar=${sherpaUpdatedFromAar[0]}",
+          "ffmpegNeedsUpdate=${ffmpegNeedsUpdate} ffmpegUpdatedFromAar=${ffmpegUpdatedFromAar[0]}",
+          "libarchiveNeedsUpdate=${libarchiveNeedsUpdate} libarchiveUpdatedFromAar=${libarchiveUpdatedFromAar[0]}",
+          "needFfmpeg=${needFfmpeg} needLibarchive=${needLibarchive} needSherpa=${needSherpa}"
+        ].join(", ")
         throw new RuntimeException(
-          "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
+          "Native libs/headers still missing and GitHub repo unknown. " +
+          "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
           "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
-          (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.)" : "")
+          (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
+          "Diagnostics: [${diag}]"
         )
       }
       return
@@ -252,13 +289,13 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
 
-    if (!sherpaOnnxDisableFfmpeg && (!hasAllFfmpegLibs() || !hasFfmpegHeaders())) {
+    if (!sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate && !ffmpegUpdatedFromAar[0]) {
       def tagFile = file("${project.projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "ffmpeg-android.zip")
       def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def ffmpegExtractDir = new File(downloadDir, "ffmpeg-extract")
       if (ffmpegExtractDir.exists()) ffmpegExtractDir.deleteDir()
@@ -273,16 +310,18 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (ffmpegIncludeInZip.exists()) {
         copy { from fileTree(ffmpegIncludeInZip); into ffmpegIncludeDir }
       }
+      downloadDir.mkdirs()
+      ffmpegVersionFile.text = currentFfmpegVersion
       println "Downloaded and extracted FFmpeg prebuilts (libs + include) from ${tag}"
     }
 
-    if (!sherpaOnnxDisableLibarchive && (!hasAllLibarchiveLibs() || !hasLibarchiveHeaders())) {
+    if (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]) {
       def tagFile = file("${project.projectDir.parent}/third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "libarchive-android.zip")
       def url = "${baseUrl}/${tag}/libarchive-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def libarchiveExtractDir = new File(downloadDir, "libarchive-extract")
       if (libarchiveExtractDir.exists()) libarchiveExtractDir.deleteDir()
@@ -298,6 +337,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         libarchiveIncludeDir.mkdirs()
         copy { from libarchiveIncludeInZip; into libarchiveIncludeDir }
       }
+      downloadDir.mkdirs()
+      libarchiveVersionFile.text = currentLibarchiveVersion
       println "Downloaded and extracted libarchive prebuilts (libs + include) from ${tag}"
     }
 
@@ -307,7 +348,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (!tag) throw new RuntimeException("Missing or empty third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
       def zipFile = new File(downloadDir, "sherpa-onnx-android.zip")
       def url = "${baseUrl}/${tag}/sherpa-onnx-android.zip"
-      exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
       def sherpaExtractDir = new File(downloadDir, "sherpa-onnx-extract")
       if (sherpaExtractDir.exists()) sherpaExtractDir.deleteDir()

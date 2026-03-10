@@ -72,7 +72,7 @@ constexpr int ANEURALNETWORKS_NO_ERROR = 0;
 // UNKNOWN= 0, OTHER = 1, CPU = 2, GPU = 3, ACCELERATOR = 4.
 constexpr int32_t ANEURALNETWORKS_DEVICE_GPU = 3;
 constexpr int32_t ANEURALNETWORKS_DEVICE_ACCELERATOR = 4;
-struct ANeuralNetworksDeviceOpaque {};
+struct ANeuralNetworksDeviceOpaque;
 using ANeuralNetworksDevice = ANeuralNetworksDeviceOpaque*;
 }  // namespace
 #endif

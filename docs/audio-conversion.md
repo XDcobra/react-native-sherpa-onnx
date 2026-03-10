@@ -19,8 +19,8 @@ Converts an audio file to a requested format.
 |-----------|------|-------------|
 | `inputPath` | `string` | Absolute file path, or on Android a `content://` URI. |
 | `outputPath` | `string` | Absolute path for the output file. |
-| `format` | `string` | Target format: `"wav"`, `"mp3"`, or `"flac"`. |
-| `outputSampleRateHz` | `number` (optional) | For MP3: 32000, 44100, or 48000; 0 or omitted = 44100. Ignored for WAV/FLAC. WAV output is always 16 kHz mono. |
+| `format` | `string` | Target format: `"wav"`, `"mp3"`, `"flac"`, `"m4a"`, `"aac"`, `"opus"`, `"oggm"`, `"webm"`, `"mkv"`. |
+| `outputSampleRateHz` | `number` (optional) | For MP3: 32000, 44100, or 48000. For Opus: 8000, 12000, 16000, 24000, or 48000. Ignored for WAV/FLAC. WAV output is always 16 kHz mono. |
 
 **Returns:** `Promise<void>` — resolves on success, rejects with an error message on failure.
 
@@ -46,10 +46,12 @@ Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format e
 |---------|---------|-----|
 | Input: file path | Yes | Yes |
 | Input: `content://` URI | Yes (auto-copied to temp) | N/A (picker returns `file://`) |
-| Output: WAV 16 kHz mono | Yes (FFmpeg) | Yes (AVFoundation) |
-| Output: MP3 | Yes (libshine) | No (rejects) |
-| Output: FLAC | Yes (FFmpeg) | No (rejects) |
-| Disable conversion | Yes, see [disable-ffmpeg.md](disable-ffmpeg.md) | N/A |
+| Output: WAV 16 kHz mono | Yes (FFmpeg) | Yes (FFmpeg; unavailable if FFmpeg is disabled or not linked) |
+| Output: MP3 | Yes (libshine) | Yes (libshine) |
+| Output: FLAC | Yes (FFmpeg) | Yes (FFmpeg) |
+| Output: AAC / M4A | Yes (FFmpeg) | Yes (FFmpeg) |
+| Output: OPUS / WEBM / MKV | Yes (libopus) | Yes (libopus) |
+| Disable conversion | Yes, see [disable-ffmpeg.md](disable-ffmpeg.md) | Yes |
 
 ## Content URI support (Android)
 

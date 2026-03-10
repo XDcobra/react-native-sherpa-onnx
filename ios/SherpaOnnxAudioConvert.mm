@@ -1,19 +1,7 @@
-/**
- * sherpa-onnx-audio-convert-jni.cpp
- *
- * Purpose: JNI for converting arbitrary audio files to WAV 16 kHz mono 16-bit PCM (sherpa-onnx
- * input format). When HAVE_FFMPEG is set, FFmpeg is used; otherwise nativeConvertAudioToWav16k
- * returns an error. Used by the Kotlin audio conversion API.
- */
-#include <android/log.h>
-#include <jni.h>
+#import "SherpaOnnxAudioConvert.h"
+#import <React/RCTLog.h>
 #include <string>
 #include <sys/stat.h>
-
-#define LOG_TAG "AudioConvertJNI"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 #ifdef HAVE_FFMPEG
 extern "C" {
@@ -50,18 +38,15 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     else if (fmt == "opus" || fmt == "oggm" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") codec_id = AV_CODEC_ID_OPUS;
     else codec_id = AV_CODEC_ID_PCM_S16LE;
 
-    // The implementation for generic encoding uses the same decode+resample pipeline
-    // but selects encoder by codec_id and creates an output container based on file extension.
-    // For brevity we reuse much of the WAV path but change encoder selection.
-
     struct stat stIn = {};
     long inputSizeBytes = (stat(inputPath, &stIn) == 0 && S_ISREG(stIn.st_mode)) ? (long)stIn.st_size : -1;
-    LOGI("convertToFormat: inputPath=%s inputSizeBytes=%ld format=%s outputPath=%s", inputPath ? inputPath : "(null)", inputSizeBytes, formatHint ? formatHint : "", outputPath ? outputPath : "(null)");
+    RCTLogInfo(@"[SherpaOnnxAudioConvert] convertToFormat: input=%s size=%ld format=%s output=%s",
+               inputPath ? inputPath : "(null)", inputSizeBytes, formatHint ? formatHint : "", outputPath ? outputPath : "(null)");
 
     // Open input
     AVFormatContext* inFmt = nullptr;
     if (avformat_open_input(&inFmt, inputPath, nullptr, nullptr) < 0) {
-        LOGE("Failed to open input file (generic): inputPath=%s", inputPath ? inputPath : "(null)");
+        RCTLogError(@"[SherpaOnnxAudioConvert] Failed to open input file: inputPath=%s", inputPath ? inputPath : "(null)");
         return std::string("Failed to open input file");
     }
     if (avformat_find_stream_info(inFmt, nullptr) < 0) {
@@ -104,7 +89,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         return std::string("Failed to open decoder");
     }
 
-    // We'll configure resampler later based on encoder requirements.
     SwrContext* swr = nullptr;
 
     AVFormatContext* outFmt = nullptr;
@@ -117,8 +101,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 
     const AVCodec* encoder = nullptr;
     if (codec_id == AV_CODEC_ID_MP3) {
-        // Force using libshine for MP3 encoding. Do NOT fall back to libmp3lame or
-        // internal ffmpeg MP3 encoder to respect licensing choice.
         encoder = avcodec_find_encoder_by_name("libshine");
         if (!encoder) {
             avformat_free_context(outFmt);
@@ -157,7 +139,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     }
 
     AVCodecContext* encCtx = avcodec_alloc_context3(encoder);
-    // Preserve input sample rate / channel layout by default
     if (!encCtx) {
         avformat_free_context(outFmt);
         swr_free(&swr);
@@ -165,6 +146,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         avformat_close_input(&inFmt);
         return std::string("Failed to allocate encoder context");
     }
+
     // Set channel layout: prefer input stream layout, otherwise decoder layout.
     if (inStream->codecpar->ch_layout.nb_channels) {
         if (av_channel_layout_copy(&encCtx->ch_layout, &inStream->codecpar->ch_layout) < 0) {
@@ -186,9 +168,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
     }
 
-    // If using libshine (MP3), ensure channel_layout is explicitly set (old encoders expect it)
     if (codec_id == AV_CODEC_ID_MP3) {
-        // If encCtx->ch_layout appears empty, set default based on input stream channels
         if (encCtx->ch_layout.nb_channels <= 0) {
             int nb_channels = 1;
             if (inStream->codecpar && inStream->codecpar->ch_layout.nb_channels > 0) {
@@ -200,10 +180,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
     }
 
-    // Set sample rate from input/decoder if not already set
     encCtx->sample_rate = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
 
-    // WAV output: force 16 kHz mono S16 (sherpa-onnx STT requirement)
     if (isWav) {
         encCtx->sample_rate = 16000;
         encCtx->sample_fmt = AV_SAMPLE_FMT_S16;
@@ -212,7 +190,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         av_channel_layout_copy(&encCtx->ch_layout, &mono);
     }
 
-    // Probe encoder-supported configurations (sample formats, sample rates, channel layouts)
     AVSampleFormat chosen_fmt = AV_SAMPLE_FMT_NONE;
     const void *fmt_configs = nullptr;
     int fmt_num = 0;
@@ -228,7 +205,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 
     if (fmt_configs && fmt_num > 0) {
         const AVSampleFormat *fmts = (const AVSampleFormat *)fmt_configs;
-        // prefer interleaved S16, then planar S16P, then decoder fmt, then first
         for (int i = 0; i < fmt_num; ++i) if (fmts[i] == AV_SAMPLE_FMT_S16) { chosen_fmt = AV_SAMPLE_FMT_S16; break; }
         if (chosen_fmt == AV_SAMPLE_FMT_NONE && codec_id == AV_CODEC_ID_MP3) {
             for (int i = 0; i < fmt_num; ++i) if (fmts[i] == AV_SAMPLE_FMT_S16P) { chosen_fmt = AV_SAMPLE_FMT_S16P; break; }
@@ -238,13 +214,11 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
         if (chosen_fmt == AV_SAMPLE_FMT_NONE && fmt_num > 0) chosen_fmt = fmts[0];
     } else {
-        // libshine only supports S16P; default to S16P for MP3 so open succeeds.
-        // If AAC, it might prefer FLTP, which `chosen_fmt = fmts[0]` captures above if available.
+        // If not MP3, try to use S16 (standard). If AAC, it might prefer FLTP, which `chosen_fmt = fmts[0]` captures below.
         chosen_fmt = (codec_id == AV_CODEC_ID_MP3) ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
     }
     encCtx->sample_fmt = chosen_fmt;
 
-    // If supported sample rates are provided, pick one matching our target or fall back
     if (sr_configs && sr_num > 0) {
         const int *srs = (const int*)sr_configs;
         int pick_sr = 0;
@@ -254,7 +228,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         if (pick_sr == 0) pick_sr = srs[0];
         encCtx->sample_rate = pick_sr;
     }
-    // libshine only supports 32000, 44100, 48000 Hz. Use outputSampleRateHz if valid (32000/44100/48000), else default 44100.
     if (codec_id == AV_CODEC_ID_MP3) {
         int want = (outputSampleRateHz == 32000 || outputSampleRateHz == 44100 || outputSampleRateHz == 48000) ? outputSampleRateHz : 44100;
         if (encCtx->sample_rate != want) encCtx->sample_rate = want;
@@ -264,7 +237,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         if (encCtx->sample_rate != want) encCtx->sample_rate = want;
     }
 
-    // If supported channel layouts given, prefer matching channels else pick first
     if (chl_configs && chl_num > 0) {
         const AVChannelLayout *layouts = (const AVChannelLayout *)chl_configs;
         int pick_nb = 0;
@@ -276,7 +248,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         if (encCtx->ch_layout.nb_channels != pick_nb) av_channel_layout_default(&encCtx->ch_layout, pick_nb);
     }
 
-    // libshine reads only AVCodecContext (not options). Use a well-known channel layout so nb_channels is always valid.
     if (codec_id == AV_CODEC_ID_MP3) {
         int want_ch = (encCtx->ch_layout.nb_channels == 2) ? 2 : 1;
         av_channel_layout_uninit(&encCtx->ch_layout);
@@ -291,20 +262,22 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
     }
 
-    // Set a sensible default bitrate for compressed codecs
     if (codec_id == AV_CODEC_ID_MP3 || codec_id == AV_CODEC_ID_AAC || codec_id == AV_CODEC_ID_OPUS) encCtx->bit_rate = 128000;
-    else encCtx->bit_rate = 0; // lossless or PCM may ignore
+    else encCtx->bit_rate = 0;
 
     if (outFmt->oformat->flags & AVFMT_GLOBALHEADER) encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-    // Ensure sensible timebase and try opening encoder with options. If it fails, iterate supported sample formats and retry.
-    if (encCtx->sample_rate > 0) encCtx->time_base = AVRational{1, encCtx->sample_rate};
+    if (encCtx->sample_rate > 0) {
+        encCtx->time_base = AVRational{1, encCtx->sample_rate};
+        if (outStream) {
+            outStream->time_base = encCtx->time_base;
+        }
+    }
 
     AVDictionary *enc_opts = nullptr;
     int nb_ch = encCtx->ch_layout.nb_channels;
     if (nb_ch <= 0) nb_ch = 1;
     char tmpbuf[64];
-    // For libshine, do not pass options — it uses only AVCodecContext; options can cause "Invalid argument".
     if (codec_id != AV_CODEC_ID_MP3) {
         snprintf(tmpbuf, sizeof(tmpbuf), "%d", nb_ch);
         av_dict_set(&enc_opts, "channels", tmpbuf, 0);
@@ -317,12 +290,12 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     }
 
     int ret = avcodec_open2(encCtx, encoder, &enc_opts);
+    av_dict_free(&enc_opts);
+    enc_opts = nullptr;
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        if (enc_opts) { av_dict_free(&enc_opts); enc_opts = nullptr; }
 
-        // libshine (MP3): we already set S16P, valid rate, mono/stereo; no useful fallback.
         if (codec_id == AV_CODEC_ID_MP3) {
             std::string msg = std::string("Failed to open encoder: ") + errbuf;
             avcodec_free_context(&encCtx);
@@ -333,9 +306,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             return msg;
         }
 
-        LOGW("avcodec_open2 failed for encoder %s: %s. Trying alternatives.", encoder->name, errbuf);
+        RCTLogWarn(@"[SherpaOnnxAudioConvert] avcodec_open2 failed for encoder %s: %s. Trying alternatives.", encoder->name, errbuf);
 
-        // Try each supported sample format (for non-MP3 encoders that may accept multiple formats)
         const AVSampleFormat *fmts = fmt_configs ? (const AVSampleFormat*)fmt_configs : nullptr;
         if (fmts && fmt_num > 0) {
             for (int i = 0; i < fmt_num && ret < 0; ++i) {
@@ -358,8 +330,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             }
         }
 
-        // Last resort: try S16, S16P, then FLTP (for AAC etc.)
         if (ret < 0) {
+            // AAC encoders typically require FLTP; try that specifically.
             AVSampleFormat fallbacks[] = { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_FLTP };
             for (int fi = 0; fi < 3 && ret < 0; ++fi) {
                 encCtx->sample_fmt = fallbacks[fi];
@@ -426,10 +398,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     AVPacket* pkt = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
     AVFrame* resampled = av_frame_alloc();
-    // Match encoder format/rate
     resampled->format = encCtx->sample_fmt;
     resampled->sample_rate = encCtx->sample_rate;
-    // ensure resampled frame has encoder channel layout
     if (av_channel_layout_copy(&resampled->ch_layout, &encCtx->ch_layout) < 0) {
         av_frame_free(&frame);
         av_frame_free(&resampled);
@@ -441,7 +411,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         return std::string("Failed to set resampled channel layout");
     }
 
-    // Initialize resampler to convert from decoder format -> chosen encoder format
     AVChannelLayout in_ch_layout2{};
     if (inStream->codecpar->ch_layout.nb_channels) {
         if (av_channel_layout_copy(&in_ch_layout2, &inStream->codecpar->ch_layout) < 0) {
@@ -491,7 +460,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         if (initRet < 0) {
             char errbuf[256];
             av_strerror(initRet, errbuf, sizeof(errbuf));
-            LOGE("convertToFormat: swr_init failed: %s", errbuf);
+            RCTLogError(@"[SherpaOnnxAudioConvert] swr_init failed: %s", errbuf);
             av_channel_layout_uninit(&in_ch_layout2);
             swr_free(&swr);
             av_channel_layout_uninit(&resampled->ch_layout);
@@ -513,9 +482,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     int flushPackets = 0;
     int64_t encoder_pts = 0;
 
-    // Many encoders prefer / require a specific frame size (nb_samples) when using send_frame().
-    // MP3 (libshine) requires 1152 samples per frame.
-    // For others (e.g. FLAC), use encCtx->frame_size when available; otherwise use a conservative default.
     const int default_frame_size = 1024;
     const int enc_frame_size =
         (codec_id == AV_CODEC_ID_MP3) ? 1152 :
@@ -524,14 +490,12 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     if (out_ch2 <= 0) out_ch2 = 1;
     int bytes_per_sample = av_get_bytes_per_sample(encCtx->sample_fmt);
 
-    // Accumulation buffer for resampled samples. Use read offset to avoid O(n²) memmove;
-    // compact only when offset exceeds threshold.
     std::vector<uint8_t> accumBuf;
-    size_t accumReadOffset = 0;  // bytes consumed from start (avoids O(n²) memmove)
+    size_t accumReadOffset = 0;
     const int bytesPerFrame = bytes_per_sample * out_ch2;
     int accumSamples = 0;
 
-    const size_t kCompactThreshold = 256 * 1024;  // compact when read offset exceeds 256 KB
+    const size_t kCompactThreshold = 256 * 1024;
 
     auto maybeCompact = [&]() {
         if (accumReadOffset == 0) return;
@@ -542,7 +506,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         accumReadOffset = 0;
     };
 
-    // Helper lambda: send exactly enc_frame_size samples from accumBuf to encoder
     auto flushAccumFrames = [&](bool sendPartial) {
         int needed = enc_frame_size;
         if (needed <= 0) return;
@@ -564,7 +527,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             accumReadOffset += (size_t)copyBytes;
             accumSamples -= toSend;
 
-            // Send to encoder with EAGAIN handling
             for (;;) {
                 int ret = avcodec_send_frame(encCtx, ef);
                 if (ret == 0) break;
@@ -580,10 +542,9 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
                     av_packet_free(&op);
                     continue;
                 }
-                LOGW("convertToFormat: send_frame ret=%d frame=%d pts=%lld nb=%d", ret, totalFramesSent, (long long)ef->pts, toSend);
+                RCTLogWarn(@"[SherpaOnnxAudioConvert] send_frame ret=%d frame=%d pts=%lld nb=%d", ret, totalFramesSent, (long long)ef->pts, toSend);
                 break;
             }
-            // Drain any ready packets
             AVPacket* op = av_packet_alloc();
             while (avcodec_receive_packet(encCtx, op) == 0) {
                 op->stream_index = outStream->index;
@@ -640,7 +601,6 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         av_packet_unref(pkt);
     }
 
-    // Drain any remaining samples in swr (resampler delay)
     {
         uint8_t** tailData = nullptr;
         int tailCap = swr_get_delay(swr, encCtx->sample_rate) + 256;
@@ -658,12 +618,10 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
             av_freep(&tailData);
         }
     }
-    // Send remaining (partial) frames
     flushAccumFrames(true);
 
     (void)totalDecodedFrames; (void)totalPacketsFromEncoder;
 
-    // Flush encoder
     avcodec_send_frame(encCtx, nullptr);
     AVPacket* outPkt2 = av_packet_alloc();
     while (avcodec_receive_packet(encCtx, outPkt2) == 0) {
@@ -681,7 +639,7 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 
     struct stat stOut = {};
     long outputSizeBytes = (stat(outputPath, &stOut) == 0 && S_ISREG(stOut.st_mode)) ? (long)stOut.st_size : -1;
-    LOGI("convertToFormat: done outputPath=%s outputSizeBytes=%ld", outputPath ? outputPath : "(null)", outputSizeBytes);
+    RCTLogInfo(@"[SherpaOnnxAudioConvert] done outputPath=%s size=%ld", outputPath ? outputPath : "(null)", outputSizeBytes);
 
     av_packet_free(&pkt);
     av_frame_free(&frame);
@@ -697,66 +655,44 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
     return std::string("");
 #else
     (void)inputPath; (void)outputPath; (void)formatHint;
-    return std::string("FFmpeg not available. Build prebuilts with third_party/ffmpeg_prebuilt/build_ffmpeg.ps1 or build_ffmpeg.sh.");
+    return std::string("FFmpeg not available. Build prebuilts with third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh.");
 #endif
 }
 
-extern "C" {
+@implementation SherpaOnnxAudioConvert
 
-// Called from Kotlin: SherpaOnnxModule.nativeConvertAudioToWav16k(inputPath, outputPath) -> Boolean
-// or from a dedicated helper that returns an error string. We use a single JNI that returns a boolean
-// and optionally pass back an error message via a separate call or out parameter.
-// For simplicity we expose one method that returns a jstring: empty = success, non-empty = error message.
-JNIEXPORT jstring JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeConvertAudioToWav16k(
-    JNIEnv* env,
-    jobject /* this */,
-    jstring inputPath,
-    jstring outputPath) {
-    if (inputPath == nullptr || outputPath == nullptr) {
-        return env->NewStringUTF("inputPath and outputPath must be non-null");
++ (BOOL)convertAudioToWav16k:(NSString *)inputPath
+                  outputPath:(NSString *)outputPath
+                       error:(NSError **)error
+{
+    std::string err = convertToWav16kMono(inputPath.UTF8String, outputPath.UTF8String);
+    if (!err.empty()) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
+                                         code:-1
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:err.c_str()]}];
+        }
+        return NO;
     }
-    const char* input = env->GetStringUTFChars(inputPath, nullptr);
-    const char* output = env->GetStringUTFChars(outputPath, nullptr);
-    if (input == nullptr || output == nullptr) {
-        if (input) env->ReleaseStringUTFChars(inputPath, input);
-        if (output) env->ReleaseStringUTFChars(outputPath, output);
-        return env->NewStringUTF("Failed to get path strings");
-    }
-    std::string err = convertToWav16kMono(input, output);
-    env->ReleaseStringUTFChars(inputPath, input);
-    env->ReleaseStringUTFChars(outputPath, output);
-    return env->NewStringUTF(err.c_str());
+    return YES;
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_sherpaonnx_SherpaOnnxModule_nativeConvertAudioToFormat(
-    JNIEnv* env,
-    jobject /* this */,
-    jstring inputPath,
-    jstring outputPath,
-    jstring formatHint,
-    jint outputSampleRateHz) {
-    if (inputPath == nullptr || outputPath == nullptr || formatHint == nullptr) {
-        return env->NewStringUTF("inputPath, outputPath and formatHint must be non-null");
++ (BOOL)convertAudioToFormat:(NSString *)inputPath
+                  outputPath:(NSString *)outputPath
+                      format:(NSString *)format
+          outputSampleRateHz:(int)outputSampleRateHz
+                       error:(NSError **)error
+{
+    std::string err = convertToFormat(inputPath.UTF8String, outputPath.UTF8String, format.UTF8String, outputSampleRateHz);
+    if (!err.empty()) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
+                                         code:-1
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:err.c_str()]}];
+        }
+        return NO;
     }
-    const char* input = env->GetStringUTFChars(inputPath, nullptr);
-    const char* output = env->GetStringUTFChars(outputPath, nullptr);
-    const char* fmt = env->GetStringUTFChars(formatHint, nullptr);
-    if (input == nullptr || output == nullptr || fmt == nullptr) {
-        if (input) env->ReleaseStringUTFChars(inputPath, input);
-        if (output) env->ReleaseStringUTFChars(outputPath, output);
-        if (fmt) env->ReleaseStringUTFChars(formatHint, fmt);
-        return env->NewStringUTF("Failed to get path/format strings");
-    }
-
-    std::string err = convertToFormat(input, output, fmt, (int)outputSampleRateHz);
-
-    env->ReleaseStringUTFChars(inputPath, input);
-    env->ReleaseStringUTFChars(outputPath, output);
-    env->ReleaseStringUTFChars(formatHint, fmt);
-
-    return env->NewStringUTF(err.c_str());
+    return YES;
 }
 
-}  // extern "C"
+@end
