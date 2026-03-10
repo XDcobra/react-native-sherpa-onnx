@@ -95,8 +95,15 @@ jobs:
         run: |
           yarn install
           yarn prepare
-          npm publish --registry http://localhost:4873
-          
+          # Bump version and publish to local Verdaccio using release-it.
+          # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
+          npx release-it --ci \
+            --no-git.requireCleanWorkingDir \
+            --no-git.tag \
+            --no-git.push \
+            --no-git.commit \
+            --npm.registry http://localhost:4873
+
           # Verify package is in registry
           npm view react-native-sherpa-onnx name version --registry http://localhost:4873
 
@@ -211,8 +218,15 @@ jobs:
         run: |
           yarn install
           yarn prepare
-          npm publish --registry http://localhost:4873
-          
+          # Bump version and publish to local Verdaccio using release-it.
+          # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
+          npx release-it --ci \
+            --no-git.requireCleanWorkingDir \
+            --no-git.tag \
+            --no-git.push \
+            --no-git.commit \
+            --npm.registry http://localhost:4873
+
           # Verify package is in registry
           npm view react-native-sherpa-onnx name version --registry http://localhost:4873
 
