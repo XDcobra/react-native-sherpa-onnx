@@ -46,19 +46,17 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using release tag: $RELEASE_TAG (version: $VERSION)"
 
-      - name: Package libarchive iOS sources
+      - name: Build libarchive iOS XCFramework
         run: |
           chmod +x third_party/libarchive_prebuilt/build_libarchive_ios.sh
           third_party/libarchive_prebuilt/build_libarchive_ios.sh
-          echo "Layout contents (sample):"
-          ls third_party/libarchive_prebuilt/libarchive-ios-layout/ | head -30
 
       - name: Create release zip
         run: |
-          cd third_party/libarchive_prebuilt/libarchive-ios-layout
-          zip -r ../libarchive-ios-sources.zip .
-          cd ..
-          ls -la libarchive-ios-sources.zip
+          cd third_party/libarchive_prebuilt
+          zip -r ../../libarchive-ios.zip libarchive.xcframework
+          cd ../..
+          ls -la libarchive-ios.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -67,9 +65,9 @@ jobs:
           name: libarchive iOS ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt libarchive sources for iOS (vendored in the SDK pod; no binary in this zip).
-            - **libarchive-ios-sources.zip** – C sources and headers from `third_party/libarchive/libarchive`. Extract to `ios/Downloads/libarchive` for the SherpaOnnx pod when `third_party` is not present (e.g. npm install).
-          files: third_party/libarchive_prebuilt/libarchive-ios-sources.zip
+            Prebuilt libarchive XCFramework for iOS.
+            - **libarchive-ios.zip** – Contains `libarchive.xcframework` (arm64, x86_64).
+          files: libarchive-ios.zip
           draft: false
           prerelease: false
           skip_duplicate: true
@@ -84,4 +82,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`libarchive-ios-sources.zip\` | C sources + headers for iOS. Extract to \`ios/Downloads/libarchive\` when using the SDK from npm (no \`third_party\`). |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`libarchive-ios.zip\` | XCFramework containing libarchive for iOS. |" >> $GITHUB_STEP_SUMMARY
