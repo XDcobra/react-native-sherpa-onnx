@@ -101,16 +101,11 @@ jobs:
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
-          # Ensure registry and safe git directory are set inside this step
-          npm config set registry http://localhost:4873/
-          export NPM_CONFIG_REGISTRY=http://localhost:4873/
-          git config --global --add safe.directory "$(pwd)"
-
           yarn install
           yarn prepare
 
-          # Minor bump (e.g. 0.3.3 -> 0.4.0)
-          yarn version minor
+          # Prerelease bump via npm (works with any Yarn version, no git tag/commit)
+          npm version prerelease --preid ci --no-git-tag-version
 
           # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
           node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
@@ -232,16 +227,11 @@ jobs:
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
-          # Ensure registry and safe git directory are set inside this step
-          npm config set registry http://localhost:4873/
-          export NPM_CONFIG_REGISTRY=http://localhost:4873/
-          git config --global --add safe.directory "$(pwd)"
-
           yarn install
           yarn prepare
 
-          # Minor bump (e.g. 0.3.3 -> 0.4.0)
-          yarn version minor
+          # Prerelease bump via npm (works with any Yarn version, no git tag/commit)
+          npm version prerelease --preid ci --no-git-tag-version
 
           # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
           node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
