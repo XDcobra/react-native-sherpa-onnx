@@ -62,7 +62,7 @@ jobs:
 
       - name: Start Local NPM Registry (Verdaccio)
         run: |
-          npm install -g verdaccio wait-on
+          npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
           
           # Create Verdaccio config
           cat << 'EOF' > verdaccio-config.yaml
@@ -203,7 +203,7 @@ jobs:
 
       - name: Start Local NPM Registry (Verdaccio)
         run: |
-          npm install -g verdaccio wait-on
+          npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
           
           # Create Verdaccio config
           cat << 'EOF' > verdaccio-config.yaml
