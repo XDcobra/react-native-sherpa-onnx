@@ -94,6 +94,7 @@ jobs:
           echo "registry=http://localhost:4873/" > .npmrc
           echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
           echo "//localhost:4873/:email=ci@example.com" >> .npmrc
+          printf "ci-user\npassword\nci@example.com\n" | npm adduser --registry http://localhost:4873 --auth-type=legacy || true
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
@@ -226,6 +227,7 @@ jobs:
           echo "registry=http://localhost:4873/" > .npmrc
           echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
           echo "//localhost:4873/:email=ci@example.com" >> .npmrc
+          printf "ci-user\npassword\nci@example.com\n" | npm adduser --registry http://localhost:4873 --auth-type=legacy || true
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
