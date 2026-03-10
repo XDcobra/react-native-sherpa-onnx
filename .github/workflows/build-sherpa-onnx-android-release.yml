@@ -80,6 +80,7 @@ jobs:
         with:
           ndk-version: r29
           add-to-path: true
+          local-cache: true
 
       - name: Set up Android SDK (for Kotlin API build; needs android.jar)
         uses: android-actions/setup-android@v3

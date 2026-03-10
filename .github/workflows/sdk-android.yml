@@ -85,6 +85,7 @@ jobs:
         with:
           ndk-version: r29
           add-to-path: true
+          local-cache: true
 
       # ── Verification ───────────────────────────────────────────────────
       - name: Verify project structure
