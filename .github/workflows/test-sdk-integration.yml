@@ -93,6 +93,18 @@ jobs:
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
+          # Ensure Yarn Modern/Berry uses local Verdaccio registry and allow HTTP
+          cat > .yarnrc.yml <<'YARNRC'
+          npmRegistryServer: "http://localhost:4873"
+          unsafeHttpWhitelist:
+            - "localhost"
+          YARNRC
+
+          # Provide npm auth token for Verdaccio and force always-auth
+          echo "//localhost:4873/:_authToken=\"dummyToken\"" > .npmrc
+          npm config set always-auth true
+          export NPM_CONFIG_REGISTRY=http://localhost:4873
+
           yarn install
           yarn prepare
           # Bump version and publish to local Verdaccio using release-it.
@@ -216,6 +228,18 @@ jobs:
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
+          # Ensure Yarn Modern/Berry uses local Verdaccio registry and allow HTTP
+          cat > .yarnrc.yml <<'YARNRC'
+          npmRegistryServer: "http://localhost:4873"
+          unsafeHttpWhitelist:
+            - "localhost"
+          YARNRC
+
+          # Provide npm auth token for Verdaccio and force always-auth
+          echo "//localhost:4873/:_authToken=\"dummyToken\"" > .npmrc
+          npm config set always-auth true
+          export NPM_CONFIG_REGISTRY=http://localhost:4873
+
           yarn install
           yarn prepare
           # Bump version and publish to local Verdaccio using release-it.
