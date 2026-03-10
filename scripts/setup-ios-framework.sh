@@ -75,13 +75,13 @@ mkdir -p "$FRAMEWORKS_DIR"
 # Framework slugs to manage (order: sherpa-onnx first, then libarchive, then ffmpeg)
 FRAMEWORK_SLUGS=(sherpa-onnx)
 
-if [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-0}" = "0" ] && [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-false}" != "true" ]; then
+if [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-false}" != "true" ]; then
   FRAMEWORK_SLUGS+=(libarchive)
 else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
-if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" = "0" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
+if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
   FRAMEWORK_SLUGS+=(ffmpeg)
 else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_FFMPEG is set. Skipping FFmpeg framework download.${NC}" >&2

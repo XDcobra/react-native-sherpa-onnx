@@ -1,6 +1,6 @@
 # Builds sherpa-onnx XCFramework for iOS (device + simulator).
 # The framework includes the C++ API (libsherpa-onnx-cxx-api.a) so that Obj-C++ native code can link without undefined symbols.
-name: Framework - Build sherpa-onnx XCFramework
+name: Framework - Sherpa-Onnx (iOS) Release
 
 on:
   workflow_dispatch:
