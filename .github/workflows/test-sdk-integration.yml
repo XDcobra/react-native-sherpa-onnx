@@ -1,19 +1,18 @@
 name: Test SDK Integration (Fresh App)
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
-  #pull_request:
-  #  branches:
-  #    - main
-  #push:
-  #  branches:
-  #    - main
-  #  paths-ignore:
-  #    - 'README.md'
-  #    - 'readme.md'
-  #    - '**/README.md'
-  #    - 'docs/**'
-  #workflow_dispatch:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'readme.md'
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-integration
@@ -63,22 +62,17 @@ jobs:
           # Create Verdaccio config
           cat << 'EOF' > verdaccio-config.yaml
           storage: ./storage
-          auth:
-            htpasswd:
-              file: ./htpasswd
           uplinks:
             npmjs:
               url: https://registry.npmjs.org/
           packages:
             '@*/*':
               access: $all
-              publish: $authenticated
-              unpublish: $authenticated
+              publish: $all
               proxy: npmjs
             '**':
               access: $all
-              publish: $authenticated
-              unpublish: $authenticated
+              publish: $all
               proxy: npmjs
           EOF
           
@@ -92,8 +86,8 @@ jobs:
           npm config set registry http://localhost:4873/
           yarn config set registry http://localhost:4873/
           
-          # Create a dummy user so we can publish
-          npx npm-cli-adduser --username test --password test --email test@test.com -r http://localhost:4873
+          # NPM requires an auth token to publish, even if Verdaccio allows anonymous
+          npm config set //localhost:4873/:_authToken "dummyToken"
 
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
@@ -184,22 +178,17 @@ jobs:
           # Create Verdaccio config
           cat << 'EOF' > verdaccio-config.yaml
           storage: ./storage
-          auth:
-            htpasswd:
-              file: ./htpasswd
           uplinks:
             npmjs:
               url: https://registry.npmjs.org/
           packages:
             '@*/*':
               access: $all
-              publish: $authenticated
-              unpublish: $authenticated
+              publish: $all
               proxy: npmjs
             '**':
               access: $all
-              publish: $authenticated
-              unpublish: $authenticated
+              publish: $all
               proxy: npmjs
           EOF
           
@@ -213,8 +202,8 @@ jobs:
           npm config set registry http://localhost:4873/
           yarn config set registry http://localhost:4873/
           
-          # Create a dummy user so we can publish
-          npx npm-cli-adduser --username test --password test --email test@test.com -r http://localhost:4873
+          # NPM requires an auth token to publish, even if Verdaccio allows anonymous
+          npm config set //localhost:4873/:_authToken "dummyToken"
 
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
