@@ -25,7 +25,8 @@ jobs:
 
     env:
       JAVA_VERSION: '17'
-
+      VERDACCIO_USERNAME: ${{ secrets.VERDACCIO_USERNAME }}
+      VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
     steps:
       - name: Checkout SDK
         uses: actions/checkout@v6
@@ -93,7 +94,7 @@ jobs:
           # Login to NPM
           cat <<EOF > ~/.npmrc
           registry=http://localhost:4873/
-          //localhost:4873/:_auth=$(echo -n "ci-user:password" | base64)
+          //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
           //localhost:4873/:email=ci@example.com
           always-auth=true
           EOF
@@ -110,6 +111,8 @@ jobs:
           # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
           npx release-it --ci \
             --npm.skipChecks \
+            --no-git \
+            --no-git.requireUpstream \
             --no-git.requireCleanWorkingDir \
             --no-git.tag \
             --no-git.push \
@@ -172,6 +175,8 @@ jobs:
 
     env:
       XCODE_VERSION: 15.4
+      VERDACCIO_USERNAME: ${{ secrets.VERDACCIO_USERNAME }}
+      VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
 
     steps:
       - name: Checkout SDK
@@ -228,7 +233,7 @@ jobs:
           # Login to NPM
           cat <<EOF > ~/.npmrc
           registry=http://localhost:4873/
-          //localhost:4873/:_auth=$(echo -n "ci-user:password" | base64)
+          //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
           //localhost:4873/:email=ci@example.com
           always-auth=true
           EOF
@@ -245,6 +250,8 @@ jobs:
           # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
           npx release-it --ci \
             --npm.skipChecks \
+            --no-git \
+            --no-git.requireUpstream \
             --no-git.requireCleanWorkingDir \
             --no-git.tag \
             --no-git.push \
