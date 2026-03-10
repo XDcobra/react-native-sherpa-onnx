@@ -1,4 +1,4 @@
-name: Test SDK Integration (Fresh App)
+name: Test - SDK Integration (Fresh App)
 
 on:
   pull_request:
