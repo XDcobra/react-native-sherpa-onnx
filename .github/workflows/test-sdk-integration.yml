@@ -1,0 +1,267 @@
+name: Test SDK Integration (Fresh App)
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'readme.md'
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-integration
+  cancel-in-progress: true
+
+jobs:
+  test-integration-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      JAVA_VERSION: '17'
+
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v6
+        with:
+          path: react-native-sherpa-onnx
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+
+      - name: Start Local NPM Registry (Verdaccio)
+        run: |
+          npm install -g verdaccio wait-on
+          
+          # Create Verdaccio config
+          cat << 'EOF' > verdaccio-config.yaml
+          storage: ./storage
+          auth:
+            htpasswd:
+              file: ./htpasswd
+          uplinks:
+            npmjs:
+              url: https://registry.npmjs.org/
+          packages:
+            '@*/*':
+              access: $all
+              publish: $authenticated
+              unpublish: $authenticated
+              proxy: npmjs
+            '**':
+              access: $all
+              publish: $authenticated
+              unpublish: $authenticated
+              proxy: npmjs
+          EOF
+          
+          # Start Verdaccio in the background
+          verdaccio --config verdaccio-config.yaml --listen 4873 &
+          
+          # Wait for Verdaccio to be ready
+          wait-on http://localhost:4873/-/ping
+          
+          # Configure NPM to use local registry
+          npm config set registry http://localhost:4873/
+          yarn config set registry http://localhost:4873/
+          
+          # Create a dummy user so we can publish
+          npx npm-cli-adduser --username test --password test --email test@test.com -r http://localhost:4873
+
+      - name: Build and Publish SDK to Local Registry
+        working-directory: react-native-sherpa-onnx
+        run: |
+          yarn install
+          yarn prepare
+          npm publish --registry http://localhost:4873
+          
+          # Verify package is in registry
+          npm view react-native-sherpa-onnx name version --registry http://localhost:4873
+
+      - name: Initialize Fresh React Native App
+        run: |
+          # Initialize new RN project via CLI (using latest React Native)
+          echo "y" | npx @react-native-community/cli@latest init TestProject --skip-install
+          
+      - name: Install Dependencies & SDK in TestProject
+        working-directory: TestProject
+        run: |
+          # Use local registry for this project
+          npm config set registry http://localhost:4873/
+          yarn config set registry http://localhost:4873/
+          
+          # Install basic dependencies created by init
+          yarn install
+          
+          # Install our SDK published to the local Verdaccio instance
+          yarn add react-native-sherpa-onnx
+
+      - name: Build Android App in TestProject
+        working-directory: TestProject/android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testproject-build-android.log
+          GRADLE_EXIT=${PIPESTATUS[0]}
+          if [ "$GRADLE_EXIT" -ne 0 ]; then
+            echo "::error::Android Build Failed"
+            exit "$GRADLE_EXIT"
+          fi
+
+      - name: Upload Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testproject-android-build-logs
+          path: /tmp/testproject-build-android.log
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: testproject-release-apk
+          path: TestProject/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
+          if-no-files-found: error
+
+  test-integration-ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    env:
+      XCODE_VERSION: 15.4
+
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v6
+        with:
+          path: react-native-sherpa-onnx
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Set up Ruby and Bundler
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler: 'default'
+
+      - name: Start Local NPM Registry (Verdaccio)
+        run: |
+          npm install -g verdaccio wait-on
+          
+          # Create Verdaccio config
+          cat << 'EOF' > verdaccio-config.yaml
+          storage: ./storage
+          auth:
+            htpasswd:
+              file: ./htpasswd
+          uplinks:
+            npmjs:
+              url: https://registry.npmjs.org/
+          packages:
+            '@*/*':
+              access: $all
+              publish: $authenticated
+              unpublish: $authenticated
+              proxy: npmjs
+            '**':
+              access: $all
+              publish: $authenticated
+              unpublish: $authenticated
+              proxy: npmjs
+          EOF
+          
+          # Start Verdaccio in the background
+          verdaccio --config verdaccio-config.yaml --listen 4873 &
+          
+          # Wait for Verdaccio to be ready
+          wait-on http://localhost:4873/-/ping
+          
+          # Configure NPM to use local registry
+          npm config set registry http://localhost:4873/
+          yarn config set registry http://localhost:4873/
+          
+          # Create a dummy user so we can publish
+          npx npm-cli-adduser --username test --password test --email test@test.com -r http://localhost:4873
+
+      - name: Build and Publish SDK to Local Registry
+        working-directory: react-native-sherpa-onnx
+        run: |
+          yarn install
+          yarn prepare
+          npm publish --registry http://localhost:4873
+          
+          # Verify package is in registry
+          npm view react-native-sherpa-onnx name version --registry http://localhost:4873
+
+      - name: Initialize Fresh React Native App
+        run: |
+          echo "y" | npx @react-native-community/cli@latest init TestProject --skip-install
+
+      - name: Install Dependencies & SDK in TestProject
+        working-directory: TestProject
+        run: |
+          npm config set registry http://localhost:4873/
+          yarn config set registry http://localhost:4873/
+          yarn install
+          yarn add react-native-sherpa-onnx
+
+      - name: Install iOS Pods
+        working-directory: TestProject/ios
+        run: |
+          bundle install
+          bundle exec pod install
+
+      - name: Build iOS App in TestProject
+        working-directory: TestProject/ios
+        run: |
+          set -o pipefail
+          xcodebuild -workspace TestProject.xcworkspace \
+            -scheme TestProject \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            clean build 2>&1 | tee /tmp/testproject-build-ios.log
+          XCB_EXIT=${PIPESTATUS[0]}
+          if [ "$XCB_EXIT" -ne 0 ]; then
+            echo "::error::iOS Build Failed"
+            exit "$XCB_EXIT"
+          fi
+
+      - name: Upload Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testproject-ios-build-logs
+          path: /tmp/testproject-build-ios.log
