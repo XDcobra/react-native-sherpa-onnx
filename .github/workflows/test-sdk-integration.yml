@@ -91,17 +91,8 @@ jobs:
           npm config set registry http://localhost:4873/
           yarn config set registry http://localhost:4873/
           
-          # NPM requires an auth token to publish, even if Verdaccio allows anonymous
-          npm config set //localhost:4873/:_authToken "dummyToken"
-
-          # Login to NPM
-          cat <<EOF > ~/.npmrc
-          always-auth=true
-          //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
-          //localhost:4873/:email=ci@example.com
-          EOF
-
-          npm config set registry http://localhost:4873/
+          printf "${VERDACCIO_USERNAME}\n${VERDACCIO_PASSWORD}\nci@example.com\n" | \
+          npm adduser --registry http://localhost:4873 --auth-type=legacy
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
