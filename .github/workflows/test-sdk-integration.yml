@@ -27,6 +27,8 @@ jobs:
       JAVA_VERSION: '17'
       VERDACCIO_USERNAME: ${{ secrets.VERDACCIO_USERNAME }}
       VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
+      npm_config_registry: http://localhost:4873
+
     steps:
       - name: Checkout SDK
         uses: actions/checkout@v6
@@ -38,6 +40,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: react-native-sherpa-onnx/.nvmrc
+          registry-url: http://localhost:4873
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -93,11 +96,12 @@ jobs:
 
           # Login to NPM
           cat <<EOF > ~/.npmrc
-          registry=http://localhost:4873/
+          always-auth=true
           //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
           //localhost:4873/:email=ci@example.com
-          always-auth=true
           EOF
+
+          npm config set registry http://localhost:4873/
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
@@ -177,6 +181,7 @@ jobs:
       XCODE_VERSION: 15.4
       VERDACCIO_USERNAME: ${{ secrets.VERDACCIO_USERNAME }}
       VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
+      npm_config_registry: http://localhost:4873
 
     steps:
       - name: Checkout SDK
@@ -232,11 +237,12 @@ jobs:
 
           # Login to NPM
           cat <<EOF > ~/.npmrc
-          registry=http://localhost:4873/
+          always-auth=true
           //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
           //localhost:4873/:email=ci@example.com
-          always-auth=true
           EOF
+
+          npm config set registry http://localhost:4873/
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
