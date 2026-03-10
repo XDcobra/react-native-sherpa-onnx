@@ -111,7 +111,7 @@ jobs:
           yarn prepare
 
           # Minor bump (e.g. 0.3.3 -> 0.4.0)
-          yarn version minor --no-git-tag-version
+          yarn version minor
 
           # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
           node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
@@ -243,7 +243,7 @@ jobs:
           yarn prepare
 
           # Minor bump (e.g. 0.3.3 -> 0.4.0)
-          yarn version minor --no-git-tag-version
+          yarn version minor
 
           # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
           node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
