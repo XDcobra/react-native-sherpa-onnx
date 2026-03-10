@@ -91,10 +91,12 @@ jobs:
           npm config set //localhost:4873/:_authToken "dummyToken"
 
           # Login to NPM
-          echo "registry=http://localhost:4873/" > .npmrc
-          echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
-          echo "//localhost:4873/:email=ci@example.com" >> .npmrc
-          printf "ci-user\npassword\nci@example.com\n" | npm adduser --registry http://localhost:4873 --auth-type=legacy || true
+          cat <<EOF > ~/.npmrc
+          registry=http://localhost:4873/
+          //localhost:4873/:_auth=$(echo -n "ci-user:password" | base64)
+          //localhost:4873/:email=ci@example.com
+          always-auth=true
+          EOF
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
@@ -224,10 +226,12 @@ jobs:
           npm config set //localhost:4873/:_authToken "dummyToken"
 
           # Login to NPM
-          echo "registry=http://localhost:4873/" > .npmrc
-          echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
-          echo "//localhost:4873/:email=ci@example.com" >> .npmrc
-          printf "ci-user\npassword\nci@example.com\n" | npm adduser --registry http://localhost:4873 --auth-type=legacy || true
+          cat <<EOF > ~/.npmrc
+          registry=http://localhost:4873/
+          //localhost:4873/:_auth=$(echo -n "ci-user:password" | base64)
+          //localhost:4873/:email=ci@example.com
+          always-auth=true
+          EOF
 
           # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
