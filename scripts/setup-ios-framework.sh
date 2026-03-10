@@ -72,8 +72,14 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
-# Framework slugs to manage (order: sherpa-onnx first, then ffmpeg)
+# Framework slugs to manage (order: sherpa-onnx first, then libarchive, then ffmpeg)
 FRAMEWORK_SLUGS=(sherpa-onnx)
+
+if [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-0}" = "0" ] && [ "${SHERPA_ONNX_DISABLE_LIBARCHIVE:-false}" != "true" ]; then
+  FRAMEWORK_SLUGS+=(libarchive)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
+fi
 
 if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" = "0" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
   FRAMEWORK_SLUGS+=(ffmpeg)
@@ -106,6 +112,17 @@ get_framework_config() {
       LIB_SIMULATOR="libffmpeg.a"
       HEADER_CHECK="Headers/libavcodec/avcodec.h"
       DISPLAY_NAME="FFmpeg"
+      ;;
+    libarchive)
+      TAG_FILE="$PROJECT_ROOT/third_party/libarchive_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libarchive-ios-v"
+      XCFRAMEWORK_NAME="libarchive.xcframework"
+      ZIP_ASSET_NAME="libarchive-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libarchive"
+      LIB_DEVICE="libarchive.a"
+      LIB_SIMULATOR="libarchive.a"
+      HEADER_CHECK="Headers/archive.h"
+      DISPLAY_NAME="libarchive"
       ;;
     *)
       echo "Unknown framework: $slug" >&2
