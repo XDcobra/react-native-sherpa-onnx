@@ -217,7 +217,6 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
 static SttCandidatePaths GatherSttCandidatePaths(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    int maxDepth,
     const std::optional<bool>& preferInt8
 ) {
     using namespace model_detect;
@@ -695,7 +694,7 @@ SttDetectResult DetectSttModel(
         }
     }
 
-    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, kMaxSearchDepth, preferInt8);
+    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
     ApplyQnnBinaryModel(files, modelDir, hints, candidate);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
@@ -828,14 +827,13 @@ SttDetectResult DetectSttModelFromFileList(
     using namespace model_detect;
 
     SttDetectResult result;
-    const int kMaxSearchDepth = 4;
 
     if (modelDir.empty()) {
         result.error = "Model directory is empty";
         return result;
     }
 
-    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, kMaxSearchDepth, preferInt8);
+    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
     ApplyQnnBinaryModel(files, modelDir, hints, candidate);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
