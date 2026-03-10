@@ -103,29 +103,27 @@ jobs:
         run: |
           yarn install
           yarn prepare
-          # Bump version and publish to local Verdaccio using release-it.
-          # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
+
+          # Prerelease bump so it never conflicts with npmjs.org (e.g. 0.3.3 -> 0.3.4-ci.0)
+          yarn version --prerelease --preid ci --no-git-tag-version
+
+          # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
+          node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
           npm publish --registry http://localhost:4873
 
-          # Verify package is in registry
-          npm view react-native-sherpa-onnx name version --registry http://localhost:4873
+          npm view react-native-sherpa-onnx version --registry http://localhost:4873
 
       - name: Initialize Fresh React Native App
         run: |
-          # Initialize new RN project via CLI (using latest React Native)
           echo "y" | npx @react-native-community/cli@latest init TestProject --skip-install
-          
+
       - name: Install Dependencies & SDK in TestProject
         working-directory: TestProject
         run: |
-          # Use local registry for this project
           npm config set registry http://localhost:4873/
           yarn config set registry http://localhost:4873/
-          
-          # Install basic dependencies created by init
           yarn install
-          
-          # Install our SDK published to the local Verdaccio instance
           yarn add react-native-sherpa-onnx
 
       - name: Build Android App in TestProject
@@ -231,20 +229,16 @@ jobs:
         run: |
           yarn install
           yarn prepare
-          # Bump version and publish to local Verdaccio using release-it.
-          # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
-          npx release-it --ci \
-            --npm.skipChecks \
-            --no-git \
-            --no-git.requireUpstream \
-            --no-git.requireCleanWorkingDir \
-            --no-git.tag \
-            --no-git.push \
-            --no-git.commit \
-            --npm.registry http://localhost:4873
 
-          # Verify package is in registry
-          npm view react-native-sherpa-onnx name version --registry http://localhost:4873
+          # Prerelease bump so it never conflicts with npmjs.org (e.g. 0.3.3 -> 0.3.4-ci.0)
+          yarn version --prerelease --preid ci --no-git-tag-version
+
+          # Override publishConfig.registry so npm publish targets Verdaccio, not npmjs.org
+          node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+          npm publish --registry http://localhost:4873
+
+          npm view react-native-sherpa-onnx version --registry http://localhost:4873
 
       - name: Initialize Fresh React Native App
         run: |
