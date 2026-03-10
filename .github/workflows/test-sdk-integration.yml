@@ -25,8 +25,6 @@ jobs:
 
     env:
       JAVA_VERSION: '17'
-      VERDACCIO_HTPASSWD: ${{ secrets.VERDACCIO_HTPASSWD }}
-      VERDACCIO_AUTH_TOKEN: ${{ secrets.VERDACCIO_AUTH_TOKEN }}
 
     steps:
       - name: Checkout SDK
@@ -61,38 +59,43 @@ jobs:
       - name: Start Local NPM Registry (Verdaccio)
         run: |
           npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
-          
-          # Create Verdaccio config
-          cat << 'EOF' > verdaccio-config.yaml
+
+          # Create htpasswd with ci-user (password: ci-password)
+          PASS_HASH=$(echo -n "ci-password" | openssl dgst -sha1 -binary | openssl base64)
+          echo "ci-user:{SHA}${PASS_HASH}" > ./htpasswd
+
+          cat << 'CONF' > verdaccio-config.yaml
           storage: ./storage
+          auth:
+            htpasswd:
+              file: ./htpasswd
+              max_users: -1
           uplinks:
             npmjs:
               url: https://registry.npmjs.org/
           packages:
             '@*/*':
               access: $all
-              publish: $all
+              publish: $authenticated
               proxy: npmjs
             '**':
               access: $all
-              publish: $all
+              publish: $authenticated
               proxy: npmjs
-          EOF
+          CONF
 
-          # Login to NPM
-          echo "${VERDACCIO_HTPASSWD}" > ./htpasswd
-          echo "registry=http://localhost:4873/" > ~/.npmrc
-          echo "//localhost:4873/:_authToken=\"${VERDACCIO_AUTH_TOKEN}\"" >> ~/.npmrc
-          npm config set registry http://localhost:4873/
-          npm set registry http://localhost:4873/ 
-          
-          # Start Verdaccio in the background
           verdaccio --config verdaccio-config.yaml --listen 4873 &
-          
-          # Wait for Verdaccio to be ready
           wait-on http://localhost:4873/-/ping
-          
-          # Check login
+
+          # Configure npm auth (base64 of ci-user:ci-password)
+          AUTH_BASE64=$(echo -n 'ci-user:ci-password' | base64)
+          cat > ~/.npmrc << NPMRC
+          registry=http://localhost:4873/
+          always-auth=true
+          //localhost:4873/:_auth=${AUTH_BASE64}
+          //localhost:4873/:email=ci@example.com
+          NPMRC
+
           npm whoami --registry http://localhost:4873
 
       - name: Build and Publish SDK to Local Registry
@@ -160,9 +163,6 @@ jobs:
 
     env:
       XCODE_VERSION: 15.4
-      VERDACCIO_USERNAME: ${{ secrets.VERDACCIO_USERNAME }}
-      VERDACCIO_PASSWORD: ${{ secrets.VERDACCIO_PASSWORD }}
-      npm_config_registry: http://localhost:4873
 
     steps:
       - name: Checkout SDK
@@ -185,47 +185,45 @@ jobs:
       - name: Start Local NPM Registry (Verdaccio)
         run: |
           npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
-          
-          # Create Verdaccio config
-          cat << 'EOF' > verdaccio-config.yaml
+
+          # Create htpasswd with ci-user (password: ci-password)
+          PASS_HASH=$(echo -n "ci-password" | openssl dgst -sha1 -binary | openssl base64)
+          echo "ci-user:{SHA}${PASS_HASH}" > ./htpasswd
+
+          cat << 'CONF' > verdaccio-config.yaml
           storage: ./storage
+          auth:
+            htpasswd:
+              file: ./htpasswd
+              max_users: -1
           uplinks:
             npmjs:
               url: https://registry.npmjs.org/
           packages:
             '@*/*':
               access: $all
-              publish: $all
+              publish: $authenticated
               proxy: npmjs
             '**':
               access: $all
-              publish: $all
+              publish: $authenticated
               proxy: npmjs
-          EOF
-          
-          # Start Verdaccio in the background
+          CONF
+
           verdaccio --config verdaccio-config.yaml --listen 4873 &
-          
-          # Wait for Verdaccio to be ready
           wait-on http://localhost:4873/-/ping
-          
-          # Configure NPM to use local registry
-          npm config set registry http://localhost:4873/
-          yarn config set registry http://localhost:4873/
-          
-          # NPM requires an auth token to publish, even if Verdaccio allows anonymous
-          npm config set //localhost:4873/:_authToken "dummyToken"
 
-          # Login to NPM
-          cat <<EOF > ~/.npmrc
+          # Configure npm auth (base64 of ci-user:ci-password)
+          AUTH_BASE64=$(echo -n 'ci-user:ci-password' | base64)
+          cat > ~/.npmrc << NPMRC
+          registry=http://localhost:4873/
           always-auth=true
-          //localhost:4873/:_auth=$(echo -n "${VERDACCIO_USERNAME}:${VERDACCIO_PASSWORD}" | base64)
+          //localhost:4873/:_auth=${AUTH_BASE64}
           //localhost:4873/:email=ci@example.com
-          EOF
+          NPMRC
 
-          npm config set registry http://localhost:4873/
+          yarn config set registry http://localhost:4873/
 
-          # Check login for local registry is possible
           npm whoami --registry http://localhost:4873
 
       - name: Build and Publish SDK to Local Registry
