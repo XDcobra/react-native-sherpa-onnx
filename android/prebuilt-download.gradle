@@ -128,6 +128,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     def sherpaUpdatedFromAar = [false]
+    def ffmpegUpdatedFromAar = [false]
+    def libarchiveUpdatedFromAar = [false]
     if (sherpaNeedsUpdate) {
       try {
         def aarFiles = project.configurations.sherpaOnnxAar.files
@@ -186,6 +188,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           downloadDir.mkdirs()
           ffmpegVersionFile.text = currentFfmpegVersion
+          ffmpegUpdatedFromAar[0] = true
           println "[FFmpeg] Native libs + headers: (2) Maven AAR (${aar.name})"
         }
       } catch (Exception e) {
@@ -218,6 +221,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           downloadDir.mkdirs()
           libarchiveVersionFile.text = currentLibarchiveVersion
+          libarchiveUpdatedFromAar[0] = true
           println "[libarchive] Native libs + headers: (2) Maven AAR (${aar.name})"
         }
       } catch (Exception e) {
@@ -257,14 +261,27 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
 
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
-      def needFfmpeg = !sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate
-      def needLibarchive = !sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate
-      if (needFfmpeg || needLibarchive || (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0])) {
+      def needFfmpeg = !sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate && !ffmpegUpdatedFromAar[0]
+      def needLibarchive = !sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]
+      def needSherpa = sherpaNeedsUpdate && !sherpaUpdatedFromAar[0]
+      if (needFfmpeg || needLibarchive || needSherpa) {
+        def diag = [
+          "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
+          "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
+          "sherpaOnnxDisableFfmpeg=${sherpaOnnxDisableFfmpeg}",
+          "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
+          "sherpaNeedsUpdate=${sherpaNeedsUpdate} sherpaUpdatedFromAar=${sherpaUpdatedFromAar[0]}",
+          "ffmpegNeedsUpdate=${ffmpegNeedsUpdate} ffmpegUpdatedFromAar=${ffmpegUpdatedFromAar[0]}",
+          "libarchiveNeedsUpdate=${libarchiveNeedsUpdate} libarchiveUpdatedFromAar=${libarchiveUpdatedFromAar[0]}",
+          "needFfmpeg=${needFfmpeg} needLibarchive=${needLibarchive} needSherpa=${needSherpa}"
+        ].join(", ")
         throw new RuntimeException(
-          "Native libs/headers still missing and GitHub repo unknown. Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
+          "Native libs/headers still missing and GitHub repo unknown. " +
+          "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
           "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
-          (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.)" : "")
+          (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
+          "Diagnostics: [${diag}]"
         )
       }
       return
@@ -272,7 +289,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
 
-    if (!sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate) {
+    if (!sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate && !ffmpegUpdatedFromAar[0]) {
       def tagFile = file("${project.projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
@@ -298,7 +315,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       println "Downloaded and extracted FFmpeg prebuilts (libs + include) from ${tag}"
     }
 
-    if (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate) {
+    if (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]) {
       def tagFile = file("${project.projectDir.parent}/third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG")
