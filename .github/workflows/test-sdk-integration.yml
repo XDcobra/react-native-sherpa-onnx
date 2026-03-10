@@ -27,7 +27,6 @@ jobs:
       JAVA_VERSION: '17'
       VERDACCIO_HTPASSWD: ${{ secrets.VERDACCIO_HTPASSWD }}
       VERDACCIO_AUTH_TOKEN: ${{ secrets.VERDACCIO_AUTH_TOKEN }}
-      npm_config_registry: http://localhost:4873
 
     steps:
       - name: Checkout SDK
@@ -40,7 +39,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: react-native-sherpa-onnx/.nvmrc
-          registry-url: http://localhost:4873
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -82,7 +80,8 @@ jobs:
           EOF
 
           # Login to NPM
-          echo "${VERDACCIO_HTPASSWD}" > .htpasswd
+          echo "${VERDACCIO_HTPASSWD}" > ./htpasswd
+          echo "registry=http://localhost:4873/" > ~/.npmrc
           echo "//localhost:4873/:_authToken=\"${VERDACCIO_AUTH_TOKEN}\"" >> ~/.npmrc
           npm config set registry http://localhost:4873/
           npm set registry http://localhost:4873/ 
