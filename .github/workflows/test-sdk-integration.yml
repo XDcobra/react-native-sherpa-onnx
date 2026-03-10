@@ -60,62 +60,16 @@ jobs:
           add-to-path: true
           local-cache: true
 
-      - name: Start Local NPM Registry (Verdaccio)
-        run: |
-          npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
-          
-          # Create Verdaccio config
-          cat << 'EOF' > verdaccio-config.yaml
-          storage: ./storage
-          uplinks:
-            npmjs:
-              url: https://registry.npmjs.org/
-          packages:
-            '@*/*':
-              access: $all
-              publish: $all
-              proxy: npmjs
-            '**':
-              access: $all
-              publish: $all
-              proxy: npmjs
-          EOF
-          
-          # Start Verdaccio in the background
-          verdaccio --config verdaccio-config.yaml --listen 4873 &
-          
-          # Wait for Verdaccio to be ready
-          wait-on http://localhost:4873/-/ping
-          
-          # Configure NPM to use local registry
-          npm config set registry http://localhost:4873/
-          yarn config set registry http://localhost:4873/
-          
-          printf "${VERDACCIO_USERNAME}\n${VERDACCIO_PASSWORD}\nci@example.com\n" | \
-          npm adduser --registry http://localhost:4873 --auth-type=legacy
-
-          # Check login for local registry is possible
-          npm whoami --registry http://localhost:4873
-
-      - name: Build and Publish SDK to Local Registry
+      - name: Build SDK
         working-directory: react-native-sherpa-onnx
         run: |
           yarn install
           yarn prepare
-          # Bump version and publish to local Verdaccio using release-it.
-          # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
-          npx release-it --ci \
-            --npm.skipChecks \
-            --no-git \
-            --no-git.requireUpstream \
-            --no-git.requireCleanWorkingDir \
-            --no-git.tag \
-            --no-git.push \
-            --no-git.commit \
-            --npm.registry http://localhost:4873
 
-          # Verify package is in registry
-          npm view react-native-sherpa-onnx name version --registry http://localhost:4873
+      - name: Publish to Verdaccio
+        uses: verdaccio/github-actions/publish@v1
+        with:
+          directory: react-native-sherpa-onnx
 
       - name: Initialize Fresh React Native App
         run: |
