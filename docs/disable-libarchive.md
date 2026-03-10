@@ -1,8 +1,10 @@
-# Disabling libarchive in the Android build
+# Disabling libarchive (Android & iOS)
 
-If your app uses another native library that ships its own libarchive, or you do not need archive extraction (e.g. `.tar.bz2` model extraction), you can disable libarchive in this SDK. When disabled, no `libarchive.so` is linked or shipped, and archive-dependent APIs return an error at runtime.
+If your app uses another native library that ships its own libarchive, or you do not need archive extraction (e.g. `.tar.bz2` model extraction), you can disable libarchive in this SDK. When disabled, no `libarchive.so` (Android) or `libarchive.xcframework` (iOS) is linked or shipped, and archive-dependent APIs return an error at runtime.
 
-## Gradle flag
+## How to disable libarchive
+
+### Android (Gradle)
 
 In your app or the SDK consumer project, set in **`gradle.properties`** (project or root):
 
@@ -21,6 +23,19 @@ When this is set:
 - The Android native build **does not** link or ship libarchive from this SDK (no `libarchive.so`).
 - Prebuilt download and `checkJniLibs` **do not** require libarchive libs or headers.
 - The build completes successfully without libarchive prebuilts or AAR.
+
+### iOS (CocoaPods)
+
+For iOS, you can disable libarchive by setting the `SHERPA_ONNX_DISABLE_LIBARCHIVE` environment variable when running `pod install`.
+
+```bash
+export SHERPA_ONNX_DISABLE_LIBARCHIVE=1
+cd ios && pod install
+```
+
+When this is set:
+- The `setup-ios-framework.sh` script skips downloading `libarchive.xcframework`.
+- `SherpaOnnx.podspec` ignores any existing libarchive frameworks, meaning they won't be linked in Xcode.
 
 ## Functions that depend on libarchive
 
@@ -79,5 +94,5 @@ The [Model Download Manager](download-manager.md) uses native `extractTarBz2` fo
 
 | Setting | Effect |
 |--------|--------|
-| **`sherpaOnnxDisableLibarchive=true`** in `gradle.properties` | No libarchive linked or shipped; build succeeds without libarchive prebuilts; `extractTarBz2` rejects with an error at runtime; `cancelExtractTarBz2` is a no-op; `computeFileSha256` still works. **Download Manager:** only single-file models (`.onnx`) can be downloaded and used; archive models (`.tar.bz2`) fail at extraction. Use when you have another libarchive in the app or do not need archive extraction. |
-| **Default (flag unset or false)** | libarchive is required; prebuilts or AAR must provide libarchive; `extractTarBz2` and `cancelExtractTarBz2` work; Download Manager supports both archive and single-file models. Do not combine with another libarchive in the same process unless you accept the risk of clashes. |
+| **Android:** `sherpaOnnxDisableLibarchive=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_LIBARCHIVE=1 pod install` | No libarchive linked or shipped (`libarchive.so` or `libarchive.xcframework`); build succeeds without libarchive prebuilts; `extractTarBz2` rejects with an error at runtime; `cancelExtractTarBz2` is a no-op; `computeFileSha256` still works. **Download Manager:** only single-file models (`.onnx`) can be downloaded and used; archive models (`.tar.bz2`) fail at extraction. Use when you have another libarchive in the app or do not need archive extraction. |
+| **Default (Flag unset / false)** | libarchive is required; prebuilts, AAR, or XCFramework must provide libarchive; `extractTarBz2` and `cancelExtractTarBz2` work; Download Manager supports both archive and single-file models. Do not combine with another libarchive in the same process unless you accept the risk of clashes. |
