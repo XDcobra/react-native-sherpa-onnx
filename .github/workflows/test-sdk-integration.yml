@@ -90,26 +90,23 @@ jobs:
           # NPM requires an auth token to publish, even if Verdaccio allows anonymous
           npm config set //localhost:4873/:_authToken "dummyToken"
 
+          # Login to NPM
+          echo "registry=http://localhost:4873/" > .npmrc
+          echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
+          echo "//localhost:4873/:email=ci@example.com" >> .npmrc
+
+          # Check login for local registry is possible
+          npm whoami --registry http://localhost:4873
+
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
-          # Ensure Yarn Modern/Berry uses local Verdaccio registry and allow HTTP
-          cat > .yarnrc.yml <<'YARNRC'
-          npmRegistryServer: "http://localhost:4873"
-          unsafeHttpWhitelist:
-            - "localhost"
-          YARNRC
-
-          # Provide npm auth token for Verdaccio and force always-auth
-          echo "//localhost:4873/:_authToken=\"dummyToken\"" > .npmrc
-          npm config set always-auth true
-          export NPM_CONFIG_REGISTRY=http://localhost:4873
-
           yarn install
           yarn prepare
           # Bump version and publish to local Verdaccio using release-it.
           # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
           npx release-it --ci \
+            --npm.skipChecks \
             --no-git.requireCleanWorkingDir \
             --no-git.tag \
             --no-git.push \
@@ -225,26 +222,23 @@ jobs:
           # NPM requires an auth token to publish, even if Verdaccio allows anonymous
           npm config set //localhost:4873/:_authToken "dummyToken"
 
+          # Login to NPM
+          echo "registry=http://localhost:4873/" > .npmrc
+          echo "//localhost:4873/:_auth=Y2ktdXNlcjpwYXNzd29yZA==" >> .npmrc
+          echo "//localhost:4873/:email=ci@example.com" >> .npmrc
+
+          # Check login for local registry is possible
+          npm whoami --registry http://localhost:4873
+
       - name: Build and Publish SDK to Local Registry
         working-directory: react-native-sherpa-onnx
         run: |
-          # Ensure Yarn Modern/Berry uses local Verdaccio registry and allow HTTP
-          cat > .yarnrc.yml <<'YARNRC'
-          npmRegistryServer: "http://localhost:4873"
-          unsafeHttpWhitelist:
-            - "localhost"
-          YARNRC
-
-          # Provide npm auth token for Verdaccio and force always-auth
-          echo "//localhost:4873/:_authToken=\"dummyToken\"" > .npmrc
-          npm config set always-auth true
-          export NPM_CONFIG_REGISTRY=http://localhost:4873
-
           yarn install
           yarn prepare
           # Bump version and publish to local Verdaccio using release-it.
           # Skip git operations (CI checkout is detached) and point npm registry to Verdaccio.
           npx release-it --ci \
+            --npm.skipChecks \
             --no-git.requireCleanWorkingDir \
             --no-git.tag \
             --no-git.push \
