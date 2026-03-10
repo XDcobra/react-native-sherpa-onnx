@@ -67,7 +67,7 @@ jobs:
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           brew update
-          brew install pkg-config nasm yasm
+          brew install pkg-config nasm yasm autoconf automake libtool
 
       - name: Build libshine (iOS)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
