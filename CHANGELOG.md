@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.4...v0.3.5) (2026-03-13)
+
+
+### Bug Fixes
+
+* **podspec:** exclude vendored framework headers and update library search paths for iOS builds ([3d3540b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3d3540b324772b1e0ab1376099816dd16e64fc2d))
+
 ## [0.3.4](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.3...v0.3.4) (2026-03-10)
 
 
