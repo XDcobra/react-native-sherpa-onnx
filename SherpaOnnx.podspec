@@ -27,7 +27,13 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/XDcobra/react-native-sherpa-onnx.git", :tag => "#{s.version}" }
 
   s.source_files = ["ios/**/*.{h,m,mm,swift,cpp}"]
-  s.private_header_files = "ios/**/*.h"
+  # Exclude vendored framework headers from the compile/copy phases to avoid
+  # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
+  s.exclude_files = ["ios/Frameworks/**/*"]
+  private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
+    path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
+  end
+  s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
 
@@ -61,9 +67,13 @@ Pod::Spec.new do |s|
   libarchive_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
   libarchive_simulator_headers = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
   libarchive_device_headers = File.join(libarchive_xcframework_root, "ios-arm64", "Headers")
+  libarchive_simulator_slice = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator")
+  libarchive_device_slice = File.join(libarchive_xcframework_root, "ios-arm64")
 
   ffmpeg_simulator_headers = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator", "Headers")
   ffmpeg_device_headers = File.join(ffmpeg_xcframework, "ios-arm64", "Headers")
+  ffmpeg_simulator_slice = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator")
+  ffmpeg_device_slice = File.join(ffmpeg_xcframework, "ios-arm64")
 
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
@@ -97,22 +107,33 @@ Pod::Spec.new do |s|
     header_search_paths << "\"#{ffmpeg_simulator_headers}\""
   end
 
+  library_search_paths_ios = ["$(inherited)", "\"#{device_slice}\""]
+  library_search_paths_sim = ["$(inherited)", "\"#{simulator_slice}\""]
+  if has_ffmpeg
+    library_search_paths_ios << "\"#{ffmpeg_device_slice}\""
+    library_search_paths_sim << "\"#{ffmpeg_simulator_slice}\""
+  end
+  if has_libarchive
+    library_search_paths_ios << "\"#{libarchive_device_slice}\""
+    library_search_paths_sim << "\"#{libarchive_simulator_slice}\""
+  end
+
   s.pod_target_xcconfig = {
     "HEADER_SEARCH_PATHS" => header_search_paths.join(" "),
     "GCC_PREPROCESSOR_DEFINITIONS" => gcc_defs,
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
     "OTHER_CPLUSPLUSFLAGS" => "$(inherited)",
-    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
-    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
     "OTHER_LDFLAGS" => ld_flags
   }
 
   s.user_target_xcconfig = {
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
     "CLANG_CXX_LIBRARY" => "libc++",
-    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => "$(inherited) \"#{device_slice}\"",
-    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => "$(inherited) \"#{simulator_slice}\"",
+    "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
+    "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
     "OTHER_LDFLAGS" => ld_flags
   }
 

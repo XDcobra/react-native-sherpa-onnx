@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.3.4](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.3...v0.3.4) (2026-03-10)
+
+
+### Bug Fixes
+
+* address PR review comments - JNI ref leaks, Kokoro/Kitten model check, lexicon single path, FindLexiconCandidates correctness ([dd3b3c9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/dd3b3c9a139fd27ba218912b6435ad5eda2f7ab8))
+* address review comments from PR [#33](https://github.com/XDcobra/react-native-sherpa-onnx/issues/33) ([9efadb9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9efadb937be6e09dd9a3537caf3d2033eb4def24))
+* **audio_conversion:** enhance audio conversion API to support content URIs on Android and improve error handling ([6d910fc](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6d910fc3d45921fdf5dd555fd36117e4f63ac3dd))
+* **audio_conversion:** optimize accumulation buffer management to reduce memory overhead during audio conversion ([28ef0ed](https://github.com/XDcobra/react-native-sherpa-onnx/commit/28ef0ed1a5f859fcbe2db2bd5656cfa6c30451b5))
+* **audio_conversion:** update AVAudioConverter input status constants for consistency and clarity ([0d5abd2](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0d5abd20cc7d12c84f280381a8ace9151f8a09d3))
+* **build-opus:** ensure Opus configure script generation and install autotools dependencies for iOS builds ([d4a76ed](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d4a76ed4287183b2c485093b2833b66c0863ee05))
+* **docs:** ensure proper resource release in transcribeFile method and improve error handling ([c25de1d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c25de1d14e08fe3e585ed80488b15b0e349b27f7))
+* **docs:** standardize arrow notation in comments and documentation for consistency ([363abe1](https://github.com/XDcobra/react-native-sherpa-onnx/commit/363abe19b98aa2c42d67ad9df1e4addd410f1d39))
+* **ffmpeg-build:** fixed build script for ffmpeg xcframework to include libshine ([ec398ac](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ec398ac41f32b8e90d519158b4f6e9f613227130))
+* **ffmpeg:** unified library name for ffmpeg ([0fee16c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0fee16c48823136711413317990b0c772f9abb7a))
+* **gradle:** qualify `exec` calls with `project.` in the prebuilt download script ([7521314](https://github.com/XDcobra/react-native-sherpa-onnx/commit/752131422b64fd3c5e69e0fe10c871ccd93f5274))
+* **lib-update:** fixed automatic update for libarchive and ffmpeg ([14223a4](https://github.com/XDcobra/react-native-sherpa-onnx/commit/14223a4cc1b228978db9de4ac5c03193f60a1be1))
+* **libshine:** enable macOS support ([cd60285](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cd602855926dcbde8d6bc00c30751a79a7cb7d5b))
+* **ort:** version management ([8a075d9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8a075d9d4afed63c8faaa1d73a17b6dc31885539))
+
+
+### Features
+
+* **build-number:** add support for ios framework buildnumber ([82f04c3](https://github.com/XDcobra/react-native-sherpa-onnx/commit/82f04c3a3256d136b1ca2a9a083af12c4018cd5c))
+* **build-opus:** added build script for ios xcframework ([4b7b02c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4b7b02c23955d75f0a6f9fc33779c6bc436f89e3))
+* **build-opus:** added build script for opus for android ([32b56cf](https://github.com/XDcobra/react-native-sherpa-onnx/commit/32b56cf108476df2cd23c2896f63b187bb7560d7))
+* **bzip2:** enable BZip2 for libarchive and update iOS framework disable logic ([3ac40b8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3ac40b84ec57ac275caad3d6a76fafb58fc8499e))
+* **ci:** added full workflow simulating a fresh app installation including our sdk ([2b46400](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2b464001b20a6bd53274f4eb82f0a0a6074c06fb))
+* **device_info:** implement getDeviceQnnSoc method for Android and iOS to retrieve SOC model information ([e71964d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e71964da93584d57817642714f733f20dc8cffd1))
+* **disable:** setup disable flag for libarchive ([3127c04](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3127c04367dced8b3b90ed690c70bff46a334de7))
+* **ffmpeg-build:** add libopus to ffmpeg build script ([34fcfa9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/34fcfa9702dffe89eec703874fe2c6b73b4fdad7))
+* **ffmpeg-ios:** added missing support for audio conversion for ios ([2f9d36a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2f9d36a9831dad1e4e74bf1f8907028c72dfb0c0))
+* **ffmpeg:** add build script for minimal FFmpeg iOS framework ([7d833ef](https://github.com/XDcobra/react-native-sherpa-onnx/commit/7d833efe8257cd205a3b5ac5328a10a8d44077b6))
+* **ffmpeg:** add opus support to FFmpeg build for iOS ([bba2d5b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/bba2d5b8f58c755dc7be68676dc245a8cfefff10))
+* **ffmpeg:** analog to android you can now disable ios build with ffmpeg included ([c77d8f9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c77d8f973564319070b6d7018bc63d5710327ce7))
+* **file_management:** add copyFileToContentUri method for Android to facilitate saving local files to SAF URIs ([d1193dd](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d1193dd5ee030f03b980c08afd252a2e4129a00e))
+* **libshine:** create build script ([2e62ee8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2e62ee89aaf13812d57da3f53ac8752c26532c87))
+* **m4a:** add support for m4a bidirectional convertion ([fc30445](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fc30445fa73f9fa8ac6ba7f328af6c64c6073f81))
+* **model_detection:** implement ApplyQnnBinaryModel function to enhance model asset detection for QNN-capable devices ([c387f5c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c387f5ccc60761837cd115135e1a6d9b3ac51afe))
+* **model_management:** add Qnn category support and implement device SOC retrieval for QNN models ([9ce6ce6](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9ce6ce6f331c826850fd0bc73e18bd03583ac5b2))
+* **model-detection:** add support for lexicon file detection and language candidate retrieval in TTS model detection ([cb55e73](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cb55e73b7c290a0ae2cbb24ccdfad92dad5da09b))
+* **model-detection:** enhance TTS model detection logic for Matcha and Zipvoice variants ([227bf07](https://github.com/XDcobra/react-native-sherpa-onnx/commit/227bf07726093eda48e4009a35b1568f5d54f9f2))
+* **model-detection:** implement FindDirectoryUnderRoot function to locate directories under a specified root in the file tree ([cd0af1a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cd0af1affc0ec07c5e5ada6782e2e3ce63f028f6))
+* **model-detection:** implement vocoder fallback for Matcha TTS model detection when no separate vocoder is provided ([b92efac](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b92efac3a09fd2a3f6db461385663c22d69d981b))
+* **opus:** add opus and its audio types to the sdk ([415ee09](https://github.com/XDcobra/react-native-sherpa-onnx/commit/415ee093aa912240eb5755f6c266f3d0c89c6fbd))
+* **pocket-tts:** add support for Pocket TTS model with reference audio requirement and enhance error handling ([fffb180](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fffb180a59b780a17e3bd949997f078caedc2793))
+* **podspec:** added ffmpeg support ([6530814](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6530814400ca47d72908fce834b737012df5da91))
+* **validation_android:** add validation for STT and TTS model paths ([1dfe107](https://github.com/XDcobra/react-native-sherpa-onnx/commit/1dfe107b438fa9aa4701965375a9932f4e0839b0))
+* **validation_ios:** implement validation for STT and TTS model paths to ensure required files are present ([b56e909](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b56e9095f5cb514bf7537f2c8f7218d18af28631))
+
 ## [0.3.3](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.2...v0.3.3) (2026-03-04)
 
 

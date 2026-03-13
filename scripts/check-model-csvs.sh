@@ -46,7 +46,7 @@ TTS_CSV_NAMES=$(csv_asset_names "$TTS_CSV")
 ASR_MISSING=""
 while IFS= read -r asset; do
   [ -z "$asset" ] && continue
-  if ! echo "$ASR_CSV_NAMES" | grep -qFx "$asset"; then
+  if ! grep -qFx -- "$asset" <<< "$ASR_CSV_NAMES"; then
     ASR_MISSING="${ASR_MISSING}  - ${asset}\n"
   fi
 done <<< "$ASR_ASSETS"
@@ -54,7 +54,7 @@ done <<< "$ASR_ASSETS"
 TTS_MISSING=""
 while IFS= read -r asset; do
   [ -z "$asset" ] && continue
-  if ! echo "$TTS_CSV_NAMES" | grep -qFx "$asset"; then
+  if ! grep -qFx -- "$asset" <<< "$TTS_CSV_NAMES"; then
     TTS_MISSING="${TTS_MISSING}  - ${asset}\n"
   fi
 done <<< "$TTS_ASSETS"
