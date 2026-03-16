@@ -133,6 +133,7 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           chmod +x gradlew
+          ./gradlew wrapper --gradle-version 8.13
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testproject-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
           if [ "$GRADLE_EXIT" -ne 0 ]; then
