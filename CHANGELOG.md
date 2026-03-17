@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.6](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.5...v0.3.6) (2026-03-17)
+
+
+### Bug Fixes
+
+* **archive:** resolve Promise on failure, dedicated stream close callback, consistent progress semantics ([22f1df0](https://github.com/XDcobra/react-native-sherpa-onnx/commit/22f1df0adc0821c48f951deff9b7dc00bc9b5c7e))
+* **ci:** resolve NDK root path in Android build workflow to ensure correct toolchain usage ([de9ad6c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/de9ad6ced4abea63cb917c6c31dd3b414a56d45a))
+* **gradle:** pinned and unified gradle version to 8.13 ([0bfbd01](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0bfbd01e4024017eed2c4515cbca0f2345aacf1b))
+
+
+### Features
+
+* **android:** implement extraction and cancellation for .tar.zst files in SherpaOnnxArchiveHelper and SherpaOnnxModule ([fa1b4be](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fa1b4be39d134cdd9164b0b292a15b4c7d3bf402))
+* **archive:** implement stream extraction for tar archives with JNI support ([4e72f77](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4e72f7786c3fc42ec328e06f4cf352e842604c68))
+* **ios:** add extraction and cancellation methods for .tar.zst files in SherpaOnnxModule and update supported events ([68f0f9e](https://github.com/XDcobra/react-native-sherpa-onnx/commit/68f0f9e81374bb3391eb96f9c54428c0103ed070))
+* **ios:** add methods for listing and extracting bundled archive asset paths for .tar.zst and .tar.bz2 formats ([6a39ae7](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6a39ae70d588041fdbcf007cbdcb4d4c0d903302))
+* **jni:** add support for extracting .tar.zst files and enhance extraction documentation ([de60ef8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/de60ef8acc291d42be27cad3f8d781e6c429890b))
+* **js:** add methods for listing and extracting .tar.zst and .tar.bz2 archives from Android assets and filesystem ([e2e9c20](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e2e9c20630bf7be3a7118dcc7fc987fdbd8a882e))
+* **js:** implement extractTarZst function and cancellation method for .tar.zst files in NativeSherpaOnnx ([69e7334](https://github.com/XDcobra/react-native-sherpa-onnx/commit/69e7334447e688162ed1f8cd455728aa2e0ac023))
+* **kotlin:** add methods to extract and list bundled archive asset paths for .tar.zst and .tar.bz2 formats ([8d15d99](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8d15d99dd6a088c326d00c791e5faca7d3c356bb))
+* **libarchive:** enable zstd support in build scripts for iOS and Android ([73ada1c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/73ada1ccd5eab6f027a7c41e7e9fc7ac2765dd7b))
+* **package:** add extraction module to package.json for TypeScript and JavaScript integration ([3aa0949](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3aa094926b5c1f047a1870600d190d997040ab4d))
+* **zstd:** add build scripts for zstd on iOS and Android platforms ([de7ebde](https://github.com/XDcobra/react-native-sherpa-onnx/commit/de7ebdef56127c742a7ef773d83dca5ca4c6088d))
+* **zstd:** add extractTarZst and ExtractZstProgressEvent exports ([01b1bdd](https://github.com/XDcobra/react-native-sherpa-onnx/commit/01b1bddbdcd87130bbd7cd282fd6be3b031fce63))
+* **zstd:** enhance build script for zstd by adding host-tag detection and toolchain validation ([1137835](https://github.com/XDcobra/react-native-sherpa-onnx/commit/11378352d1044da55aa69da79d359c2a5284c749))
+
 ## [0.3.5](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.4...v0.3.5) (2026-03-13)
 
 
