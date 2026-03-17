@@ -54,6 +54,26 @@ jobs:
           add-to-path: true
           local-cache: true
 
+      # nttld/setup-ndk may set ndk-path to a parent dir; resolve to the root that contains the compiler.
+      - name: Resolve NDK root
+        id: ndk-root
+        run: |
+          BASE="${{ steps.setup-ndk.outputs.ndk-path }}"
+          CLANG="$BASE/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          if [ -f "$CLANG" ]; then
+            echo "ndk_root=$BASE" >> $GITHUB_OUTPUT
+          else
+            FOUND=$(find "$BASE" -maxdepth 6 -type f -path "*/toolchains/llvm/prebuilt/*/bin/clang" 2>/dev/null | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "::error::NDK compiler not found under $BASE"
+              exit 1
+            fi
+            # FOUND = .../toolchains/llvm/prebuilt/HOST/bin/clang -> NDK root = ... (5 levels up from file)
+            NDK_ROOT=$(cd "$(dirname "$FOUND")/../../../../.." && pwd)
+            echo "ndk_root=$NDK_ROOT" >> $GITHUB_OUTPUT
+          fi
+          echo "Using NDK root: ${{ steps.ndk-root.outputs.ndk_root }}"
+
       - name: Get submodule versions
         id: submodules
         run: |
@@ -76,8 +96,8 @@ jobs:
           chmod +x build_zstd.sh
           ./build_zstd.sh
         env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk-root.outputs.ndk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk-root.outputs.ndk_root }}
 
       - name: Build libarchive
         if: steps.libarchive-cache.outputs.cache-hit != 'true'
@@ -86,8 +106,8 @@ jobs:
           chmod +x build_libarchive_android.sh
           ./build_libarchive_android.sh
         env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk-root.outputs.ndk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk-root.outputs.ndk_root }}
 
       - name: Package jniLibs layout
         run: |
@@ -151,7 +171,6 @@ jobs:
             libarchive-${{ steps.tag.outputs.maven_version }}.aar
           draft: false
           prerelease: false
-          skip_duplicate: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
