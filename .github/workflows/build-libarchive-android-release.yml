@@ -54,8 +54,8 @@ jobs:
           add-to-path: true
           local-cache: true
 
-      # nttld/setup-ndk may set ndk-path to a parent dir; resolve to the root that contains the compiler.
-      - name: Resolve NDK root
+      # Optional: resolve NDK root for libarchive (toolchain file). Zstd uses compilers from PATH (setup-ndk add-to-path).
+      - name: Resolve NDK root (for libarchive)
         id: ndk-root
         run: |
           BASE="${{ steps.setup-ndk.outputs.ndk-path }}"
@@ -64,13 +64,12 @@ jobs:
             echo "ndk_root=$BASE" >> $GITHUB_OUTPUT
           else
             FOUND=$(find "$BASE" -maxdepth 6 -type f -path "*/toolchains/llvm/prebuilt/*/bin/clang" 2>/dev/null | head -1)
-            if [ -z "$FOUND" ]; then
-              echo "::error::NDK compiler not found under $BASE"
-              exit 1
+            if [ -n "$FOUND" ]; then
+              NDK_ROOT=$(cd "$(dirname "$FOUND")/../../../../.." && pwd)
+              echo "ndk_root=$NDK_ROOT" >> $GITHUB_OUTPUT
+            else
+              echo "ndk_root=$BASE" >> $GITHUB_OUTPUT
             fi
-            # FOUND = .../toolchains/llvm/prebuilt/HOST/bin/clang -> NDK root = ... (5 levels up from file)
-            NDK_ROOT=$(cd "$(dirname "$FOUND")/../../../../.." && pwd)
-            echo "ndk_root=$NDK_ROOT" >> $GITHUB_OUTPUT
           fi
           echo "Using NDK root: ${{ steps.ndk-root.outputs.ndk_root }}"
 
