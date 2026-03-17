@@ -75,6 +75,32 @@ static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
   fclose(ctx->file);
   ctx->file = nullptr;
 }
+
+struct StreamReadContext {
+  std::array<unsigned char, 64 * 1024> buffer{};
+  Sha256Context sha_ctx{};
+  long long bytes_read = 0;
+  ArchiveHelper::StreamReadCallback read_cb = nullptr;
+  void* user_data = nullptr;
+};
+
+static la_ssize_t ArchiveStreamReadCallback(struct archive* archive, void* client_data, const void** buff) {
+  auto* ctx = static_cast<StreamReadContext*>(client_data);
+  if (!ctx || !ctx->read_cb) {
+    archive_set_error(archive, EINVAL, "Invalid stream read context");
+    return -1;
+  }
+  std::ptrdiff_t n = ctx->read_cb(ctx->buffer.data(), ctx->buffer.size(), ctx->user_data);
+  if (n > 0) {
+    sha256_update(&ctx->sha_ctx, ctx->buffer.data(), static_cast<size_t>(n));
+    ctx->bytes_read += static_cast<long long>(n);
+    *buff = ctx->buffer.data();
+    return static_cast<la_ssize_t>(n);
+  }
+  if (n == 0) return 0;
+  archive_set_error(archive, EINVAL, "Stream read error");
+  return -1;
+}
 #endif  // HAVE_LIBARCHIVE
 
 static std::string ToHex(const unsigned char* data, size_t size) {
@@ -122,13 +148,15 @@ bool ArchiveHelper::ExtractTarBz2(
     return false;
   }
 
-  // Check target directory
+  // If target exists and is a directory, extract into it (merge). Otherwise require empty or force-remove.
   if (std::filesystem::exists(target_path)) {
-    if (force) {
+    if (std::filesystem::is_directory(target_path)) {
+      // Merge: extract into existing directory (e.g. multiple archives → same base path)
+    } else if (force) {
       std::error_code ec;
       std::filesystem::remove_all(target_path, ec);
       if (ec) {
-        if (out_error) *out_error = "Failed to remove target directory: " + ec.message();
+        if (out_error) *out_error = "Failed to remove target path: " + ec.message();
         return false;
       }
     } else {
@@ -137,7 +165,6 @@ bool ArchiveHelper::ExtractTarBz2(
     }
   }
 
-  // Create target directory
   std::error_code ec;
   std::filesystem::create_directories(target_path, ec);
   if (ec) {
@@ -355,6 +382,18 @@ bool ArchiveHelper::ExtractTarBz2(
       close_reader();
       return false;
     }
+
+    result = archive_write_finish_entry(disk);
+    if (result != ARCHIVE_OK && result != ARCHIVE_WARN) {
+      const char* err = archive_error_string(disk);
+      if (out_error) {
+        *out_error = err ? std::string("Failed to finish entry: ") + err : "Failed to finish entry";
+      }
+      archive_read_free(archive);
+      archive_write_free(disk);
+      close_reader();
+      return false;
+    }
   }
 
   archive_read_free(archive);
@@ -385,6 +424,252 @@ bool ArchiveHelper::ExtractTarZst(
     std::string* out_error,
     std::string* out_sha256) {
   return ExtractTarBz2(source_path, target_path, force, on_progress, out_error, out_sha256);
+}
+
+bool ArchiveHelper::ExtractFromStream(
+    StreamReadCallback read_cb,
+    void* read_user_data,
+    const std::string& target_path,
+    bool force,
+    std::function<void(long long, long long, double)> on_progress,
+    std::string* out_error,
+    std::string* out_sha256) {
+  cancel_requested_.store(false);
+
+#ifndef HAVE_LIBARCHIVE
+  (void)read_cb;
+  (void)read_user_data;
+  (void)target_path;
+  (void)force;
+  (void)on_progress;
+  (void)out_sha256;
+  if (out_error) *out_error = "libarchive not available. Build with libarchive or set sherpaOnnxDisableLibarchive=false in gradle.properties. See docs/disable-libarchive.md.";
+  return false;
+#else
+  if (!read_cb) {
+    if (out_error) *out_error = "Stream read callback is null";
+    return false;
+  }
+
+  if (std::filesystem::exists(target_path)) {
+    if (std::filesystem::is_directory(target_path)) {
+      // Merge: extract into existing directory (e.g. multiple archives → same base path)
+    } else if (force) {
+      std::error_code ec;
+      std::filesystem::remove_all(target_path, ec);
+      if (ec) {
+        if (out_error) *out_error = "Failed to remove target path: " + ec.message();
+        return false;
+      }
+    } else {
+      if (out_error) *out_error = "Target path already exists";
+      return false;
+    }
+  }
+
+  std::error_code ec;
+  std::filesystem::create_directories(target_path, ec);
+  if (ec) {
+    if (out_error) *out_error = "Failed to create target directory: " + ec.message();
+    return false;
+  }
+
+#ifndef NDEBUG
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx",
+                      "ExtractFromStream target_path=%s", target_path.c_str());
+#endif
+
+  std::string canonical_target = std::filesystem::canonical(target_path).string();
+  if (canonical_target.back() != '/') canonical_target += '/';
+
+  const long long total_bytes = 0;
+
+  struct archive* archive = archive_read_new();
+  if (!archive) {
+    if (out_error) *out_error = "Failed to create archive reader";
+    return false;
+  }
+
+  archive_read_support_format_tar(archive);
+  archive_read_support_filter_bzip2(archive);
+  archive_read_support_filter_gzip(archive);
+  archive_read_support_filter_xz(archive);
+  archive_read_support_filter_zstd(archive);
+
+  StreamReadContext stream_ctx;
+  stream_ctx.read_cb = read_cb;
+  stream_ctx.user_data = read_user_data;
+  sha256_init(&stream_ctx.sha_ctx);
+
+  if (archive_read_open(archive, &stream_ctx, nullptr, ArchiveStreamReadCallback, ArchiveCloseCallback) != ARCHIVE_OK) {
+    const char* err = archive_error_string(archive);
+    if (out_error) *out_error = err ? std::string("Failed to open archive: ") + err : "Failed to open archive";
+    archive_read_free(archive);
+    return false;
+  }
+
+  struct archive* disk = archive_write_disk_new();
+  if (!disk) {
+    if (out_error) *out_error = "Failed to create disk writer";
+    archive_read_free(archive);
+    return false;
+  }
+
+  archive_write_disk_set_options(disk,
+                                  ARCHIVE_EXTRACT_TIME |
+                                  ARCHIVE_EXTRACT_PERM |
+                                  ARCHIVE_EXTRACT_ACL |
+                                  ARCHIVE_EXTRACT_FFLAGS);
+  archive_write_disk_set_standard_lookup(disk);
+
+  struct archive_entry* entry = nullptr;
+  int result = ARCHIVE_OK;
+  long long extracted_bytes = 0;
+  int last_percent = -1;
+  long long last_emit_bytes = 0;
+  int entry_index = 0;
+
+  while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
+    if (cancel_requested_.load()) {
+      if (out_error) *out_error = "Extraction cancelled";
+      archive_read_free(archive);
+      archive_write_free(disk);
+      return false;
+    }
+
+    const char* current_path = archive_entry_pathname(entry);
+    if (!current_path) {
+      archive_read_free(archive);
+      archive_write_free(disk);
+      if (out_error) *out_error = "Invalid entry path";
+      return false;
+    }
+
+    std::string entry_path(current_path);
+    std::string full_path = target_path;
+    if (full_path.back() != '/') full_path += '/';
+    full_path += entry_path;
+
+    std::string canonical_entry;
+    try {
+      std::filesystem::path p(full_path);
+      std::filesystem::path parent = p.parent_path();
+      if (std::filesystem::exists(parent)) {
+        canonical_entry = std::filesystem::canonical(parent).string();
+      } else {
+        while (!std::filesystem::exists(parent) && parent != parent.parent_path()) {
+          parent = parent.parent_path();
+        }
+        if (std::filesystem::exists(parent)) {
+          canonical_entry = std::filesystem::canonical(parent).string();
+        } else {
+          canonical_entry = canonical_target;
+        }
+      }
+      canonical_entry += '/';
+      canonical_entry += p.filename().string();
+    } catch (const std::exception&) {
+      canonical_entry = full_path;
+    }
+
+    if (canonical_entry.find(canonical_target) != 0) {
+      archive_read_free(archive);
+      archive_write_free(disk);
+      if (out_error) *out_error = "Blocked path traversal: " + entry_path;
+      return false;
+    }
+
+    archive_entry_set_pathname(entry, full_path.c_str());
+
+    result = archive_write_header(disk, entry);
+    if (result != ARCHIVE_OK) {
+      const char* err = archive_error_string(disk);
+      if (out_error) *out_error = err ? std::string("Failed to write entry: ") + err : "Failed to write entry";
+      archive_read_free(archive);
+      archive_write_free(disk);
+      return false;
+    }
+
+    const void* buff = nullptr;
+    size_t size = 0;
+    la_int64_t offset = 0;
+
+    while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
+      if (cancel_requested_.load()) {
+        if (out_error) *out_error = "Extraction cancelled";
+        archive_read_free(archive);
+        archive_write_free(disk);
+        return false;
+      }
+
+      result = archive_write_data_block(disk, buff, size, offset);
+      if (result != ARCHIVE_OK) {
+        const char* err = archive_error_string(disk);
+        if (out_error) *out_error = err ? std::string("Failed to write data: ") + err : "Failed to write data";
+        archive_read_free(archive);
+        archive_write_free(disk);
+        return false;
+      }
+
+      extracted_bytes += static_cast<long long>(size);
+
+      if (on_progress) {
+        if (total_bytes > 0) {
+          long long compressed_bytes = archive_filter_bytes(archive, -1);
+          int percent = static_cast<int>(total_bytes > 0 ? (compressed_bytes * 100) / total_bytes : 0);
+          percent = (percent > 100) ? 100 : ((percent < 0) ? 0 : percent);
+          if (percent != last_percent) {
+            last_percent = percent;
+            on_progress(compressed_bytes, total_bytes, static_cast<double>(percent));
+          }
+        } else if (extracted_bytes - last_emit_bytes >= 1024 * 1024) {
+          last_emit_bytes = extracted_bytes;
+          long long compressed_bytes = archive_filter_bytes(archive, -1);
+          on_progress(compressed_bytes, 0, 0.0);
+        }
+      }
+    }
+
+    if (result != ARCHIVE_EOF && result != ARCHIVE_OK) {
+      const char* err = archive_error_string(archive);
+      if (out_error) *out_error = err ? std::string("Failed to read data: ") + err : "Failed to read data";
+      archive_read_free(archive);
+      archive_write_free(disk);
+      return false;
+    }
+
+    result = archive_write_finish_entry(disk);
+    if (result != ARCHIVE_OK && result != ARCHIVE_WARN) {
+      const char* err = archive_error_string(disk);
+      if (out_error) *out_error = err ? std::string("Failed to finish entry: ") + err : "Failed to finish entry";
+      archive_read_free(archive);
+      archive_write_free(disk);
+      return false;
+    }
+    entry_index++;
+  }
+
+#ifndef NDEBUG
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx",
+                      "ExtractFromStream done entries=%d", entry_index);
+#endif
+
+  archive_read_free(archive);
+  archive_write_free(disk);
+
+  if (out_sha256) {
+    unsigned char digest[32];
+    sha256_final(&stream_ctx.sha_ctx, digest);
+    *out_sha256 = ToHex(digest, sizeof(digest));
+  }
+
+  if (on_progress) {
+    long long compressed_bytes = stream_ctx.bytes_read;
+    on_progress(extracted_bytes, compressed_bytes, 100.0);
+  }
+
+  return true;
+#endif
 }
 
 bool ArchiveHelper::ComputeFileSha256(

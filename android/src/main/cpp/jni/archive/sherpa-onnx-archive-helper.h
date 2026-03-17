@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <functional>
 #include <atomic>
@@ -10,6 +11,9 @@
  */
 class ArchiveHelper {
  public:
+  /** Callback to read bytes from a stream (e.g. Java InputStream via JNI). Returns bytes read, 0 on EOF, -1 on error. */
+  using StreamReadCallback = std::ptrdiff_t (*)(void* buf, size_t len, void* user_data);
+
   /**
    * Extract tar.bz2 (or .tar.zst, .tar.gz, .tar.xz) file to target directory.
    *
@@ -34,6 +38,19 @@ class ArchiveHelper {
    */
   static bool ExtractTarZst(
       const std::string& source_path,
+      const std::string& target_path,
+      bool force,
+      std::function<void(long long, long long, double)> on_progress = nullptr,
+      std::string* out_error = nullptr,
+      std::string* out_sha256 = nullptr);
+
+  /**
+   * Extract a tar archive (tar.zst or tar.bz2) from a stream via read_cb.
+   * Used for Android AssetManager streams; total_bytes can be 0 (progress then uses compressed bytes or periodic emit).
+   */
+  static bool ExtractFromStream(
+      StreamReadCallback read_cb,
+      void* read_user_data,
       const std::string& target_path,
       bool force,
       std::function<void(long long, long long, double)> on_progress = nullptr,
