@@ -14,7 +14,7 @@ def requiredFfmpegSoFiles = [
 def requiredSherpaOnnxSoFiles = [
   'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
 ]
-def requiredLibarchiveSoFiles = ['libarchive.so']
+def requiredLibarchiveSoFiles = ['libarchive.so', 'libzstd.so']
 def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
 
 def jniLibsDir = file("${project.projectDir}/src/main/jniLibs")
