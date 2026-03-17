@@ -31,6 +31,11 @@ class SherpaOnnxArchiveHelper {
     nativeCancelExtract()
   }
 
+  fun cancelExtractTarZst() {
+    cancelRequested.set(true)
+    nativeCancelExtract()
+  }
+
   fun extractTarBz2(
     sourcePath: String,
     targetPath: String,
@@ -71,12 +76,55 @@ class SherpaOnnxArchiveHelper {
     }
   }
 
+  fun extractTarZst(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    val promiseSettled = AtomicBoolean(false)
+    fun resolveOnce(success: Boolean, reason: String? = null) {
+      if (!promiseSettled.compareAndSet(false, true)) return
+      val result = Arguments.createMap()
+      result.putBoolean("success", success)
+      if (reason != null) result.putString("reason", reason)
+      promise.resolve(result)
+    }
+
+    try {
+      cancelRequested.set(false)
+      val progressCallback = object : Any() {
+        fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+          onProgress(bytesExtracted, totalBytes, percent)
+        }
+      }
+      extractExecutor.execute {
+        try {
+          nativeExtractTarZst(sourcePath, targetPath, force, progressCallback, promise)
+        } catch (e: Exception) {
+          resolveOnce(false, "Archive extraction error: ${e.message}")
+        }
+      }
+    } catch (e: Exception) {
+      resolveOnce(false, "Archive extraction error: ${e.message}")
+    }
+  }
+
   fun computeFileSha256(filePath: String, promise: Promise) {
     nativeComputeFileSha256(filePath, promise)
   }
 
   // Native JNI methods
   private external fun nativeExtractTarBz2(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    progressCallback: Any?,
+    promise: Promise
+  )
+
+  private external fun nativeExtractTarZst(
     sourcePath: String,
     targetPath: String,
     force: Boolean,

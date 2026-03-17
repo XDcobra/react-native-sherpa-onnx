@@ -303,6 +303,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  override fun extractTarZst(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
+    archiveHelper.extractTarZst(sourcePath, targetPath, force, promise) { bytes, total, percent ->
+      emitExtractTarZstProgress(sourcePath, bytes, total, percent)
+    }
+  }
+
+  override fun cancelExtractTarZst(promise: Promise) {
+    archiveHelper.cancelExtractTarZst()
+    promise.resolve(null)
+  }
+
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
   }
@@ -316,6 +327,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
     eventEmitter.emit("extractTarBz2Progress", payload)
+  }
+
+  private fun emitExtractTarZstProgress(sourcePath: String, bytes: Long, totalBytes: Long, percent: Double) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("sourcePath", sourcePath)
+    payload.putDouble("bytes", bytes.toDouble())
+    payload.putDouble("totalBytes", totalBytes.toDouble())
+    payload.putDouble("percent", percent)
+    eventEmitter.emit("extractTarZstProgress", payload)
   }
 
   /**
