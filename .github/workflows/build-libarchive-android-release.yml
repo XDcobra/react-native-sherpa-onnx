@@ -54,6 +54,36 @@ jobs:
           add-to-path: true
           local-cache: true
 
+      # Resolve NDK root: ndk-path may point at a parent; we need the dir that contains both
+      # build/cmake/android.toolchain.cmake and toolchains/llvm/prebuilt/<host>/bin/clang.
+      - name: Resolve and validate NDK root
+        id: ndk
+        run: |
+          BASE="${{ steps.setup-ndk.outputs.ndk-path }}"
+          TOOLCHAIN_FILE="build/cmake/android.toolchain.cmake"
+          CLANG_REL="toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          check_ndk_root() {
+            local r="$1"
+            [ -f "$r/$TOOLCHAIN_FILE" ] && [ -f "$r/$CLANG_REL" ]
+          }
+          if check_ndk_root "$BASE"; then
+            echo "ndk_root=$BASE" >> $GITHUB_OUTPUT
+            echo "NDK root: $BASE"
+            exit 0
+          fi
+          while IFS= read -r -d '' f; do
+            ROOT="$(cd "$(dirname "$f")/../.." && pwd)"
+            if check_ndk_root "$ROOT"; then
+              echo "ndk_root=$ROOT" >> $GITHUB_OUTPUT
+              echo "NDK root: $ROOT (resolved under ndk-path)"
+              exit 0
+            fi
+          done < <(find "$BASE" -maxdepth 5 -type f -path "*/build/cmake/android.toolchain.cmake" -print0 2>/dev/null)
+          echo "::error::NDK validation failed. Under $BASE no directory has both $TOOLCHAIN_FILE and $CLANG_REL"
+          echo "Contents of $BASE:"
+          ls -laR "$BASE" 2>/dev/null | head -80
+          exit 1
+
       - name: Get submodule versions
         id: submodules
         run: |
@@ -76,8 +106,8 @@ jobs:
           chmod +x build_zstd.sh
           ./build_zstd.sh
         env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_root }}
 
       - name: Build libarchive
         if: steps.libarchive-cache.outputs.cache-hit != 'true'
@@ -86,8 +116,8 @@ jobs:
           chmod +x build_libarchive_android.sh
           ./build_libarchive_android.sh
         env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk_root }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_root }}
 
       - name: Package jniLibs layout
         run: |
