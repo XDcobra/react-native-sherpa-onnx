@@ -1,9 +1,9 @@
 # Disabling libarchive (Android & iOS)
 
-By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt libarchive binaries (`libarchive.xcframework` for iOS and `.so` libs for Android) to provide built-in archive extraction features (e.g. extracting `.tar.bz2` downloaded model bundles).
+By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt libarchive binaries (`libarchive.xcframework` for iOS and `.so` libs for Android) to provide built-in archive extraction features (e.g. extracting `.tar.bz2` or `.tar.zst` downloaded model bundles).
 
 You can explicitly **disable libarchive** in this SDK if you want to:
-1. **Reduce App Size:** Omit libarchive binaries if you don't use the archive extraction helpers (`extractTarBz2`, `cancelExtractTarBz2`) and only use single-file `.onnx` models.
+1. **Reduce App Size:** Omit libarchive binaries if you don't use the archive extraction helpers (`extractTarBz2`, `cancelExtractTarBz2`, `extractTarZst`, `cancelExtractTarZst`) and only use single-file `.onnx` models.
 2. **Prevent Symbol Clashes:** Avoid duplicate native symbols if another native module or library in your app already ships its own libarchive. Having two copies of libarchive in the same process can cause runtime crashes or undefined behavior.
 
 ## How to disable libarchive
@@ -49,8 +49,10 @@ When libarchive is disabled, the following APIs **in this SDK** are built but re
 |-----|-------------|
 | **`extractTarBz2(sourcePath, targetPath, force, promise)`** | Extracts a `.tar.bz2` archive (e.g. a downloaded model bundle) to a target folder. Implemented in native code via libarchive; when disabled, the native implementation is not linked and the promise is rejected with an error message. |
 | **`cancelExtractTarBz2()`** | Cancels an ongoing `extractTarBz2` operation. When libarchive is disabled, there is no extraction implementation to cancel; calling this is a no-op. |
+| **`extractTarZst(sourcePath, targetPath, force, promise)`** | Extracts a `.tar.zst` or `.zst` archive. Implemented in native code via libarchive; when disabled, the native implementation is not linked and the promise is rejected with an error message. |
+| **`cancelExtractTarZst()`** | Cancels an ongoing `extractTarZst` operation. When libarchive is disabled, there is no extraction implementation to cancel; calling this is a no-op. |
 
-Both are exposed on the **`NativeSherpaOnnx`** spec (e.g. from `react-native-sherpa-onnx`). The progress event `extractTarBz2Progress` will not be emitted when extraction is disabled, because extraction never runs.
+All extraction helpers are exposed on the **`NativeSherpaOnnx`** spec (e.g. from `react-native-sherpa-onnx`). Progress events for extraction (for example `extractTarBz2Progress` and `extractTarZstProgress`) will not be emitted when extraction is disabled, because extraction never runs.
 
 ## Functions that still work without libarchive
 
@@ -62,23 +64,23 @@ All other features (STT, TTS, FFmpeg-based audio conversion, model detection, et
 
 ## Download Manager (`react-native-sherpa-onnx/download`)
 
-The [Model Download Manager](download-manager.md) uses native `extractTarBz2` for **archive models** (`.tar.bz2`). When libarchive is disabled, the following behavior applies:
+The [Model Download Manager](download-manager.md) uses native `extractTarBz2` / `extractTarZst` for **archive models** (`.tar.bz2`, `.tar.zst`). When libarchive is disabled, the following behavior applies:
 
 | API | Effect when libarchive is disabled |
 |-----|-------------------------------------|
-| **`downloadModelByCategory(category, id, options?)`** | For **archive models** (`.tar.bz2`): the file download completes, but the extraction step fails (native `extractTarBz2` is stubbed). The returned promise **rejects**; the model is not usable. For **single-file models** (`.onnx`): no extraction is used; download and usage work as normal. |
+| **`downloadModelByCategory(category, id, options?)`** | For **archive models** (`.tar.bz2`, `.tar.zst`): the file download completes, but the extraction step fails (native `extractTarBz2` / `extractTarZst` is stubbed). The returned promise **rejects**; the model is not usable. For **single-file models** (`.onnx`): no extraction is used; download and usage work as normal. |
 | **`getLocalModelPathByCategory(category, id)`** | Archive models are only considered “downloaded” after extraction and manifest write. When extraction never succeeds, they never appear; this returns `null` for archive models that were not previously extracted with libarchive enabled. Single-file models are unaffected. |
 | **`listDownloadedModelsByCategory(category)`** | Only lists models that have a complete manifest (download + extraction done). Archive models whose extraction failed will not appear. Single-file models work as usual. |
 | **`isModelDownloadedByCategory(category, id)`** | Returns `true` only when the model is fully downloaded and (for archives) extracted. Archive models fail extraction when libarchive is disabled, so they will not be reported as downloaded. |
 | **`subscribeDownloadProgress(listener)`** | Progress events for the **extracting** phase come from native extraction. When libarchive is disabled, extraction fails immediately after the download phase; the listener may see download progress, then the overall operation fails. |
 | **`refreshModelsByCategory`**, **`listModelsByCategory`**, **`getModelByIdByCategory`**, **`deleteModelByCategory`**, **`clearModelCacheByCategory`** | Do not depend on extraction; they work regardless of the libarchive flag. |
 
-**Summary:** With libarchive disabled, **archive models** (`.tar.bz2`) cannot be fully downloaded or used via the download manager; only **single-file models** (`.onnx`) can be downloaded and used through it. If you need archive-based models (e.g. from the official sherpa-onnx release list), do not disable libarchive, or provide extraction by other means and do not use `downloadModelByCategory` for those models.
+**Summary:** With libarchive disabled, **archive models** (`.tar.bz2`, `.tar.zst`) cannot be fully downloaded or used via the download manager; only **single-file models** (`.onnx`) can be downloaded and used through it. If you need archive-based models (e.g. from the official sherpa-onnx release list), do not disable libarchive, or provide extraction by other means and do not use `downloadModelByCategory` for those models.
 
 ## Risks and limitations of disabling libarchive
 
-1. **No built-in .tar.bz2 extraction**  
-   You must not call `extractTarBz2` when libarchive is disabled, or handle the rejection (e.g. show a message or use another extraction path). If your app relies on this to unpack model bundles, you need to extract archives by other means (e.g. a JS/native library that provides tar.bz2 extraction) or ship models in a non-archive format.
+1. **No built-in .tar.bz2/.tar.zst extraction**  
+   You must not call `extractTarBz2` or `extractTarZst` when libarchive is disabled, or handle the rejection (e.g. show a message or use another extraction path). If your app relies on this to unpack model bundles, you need to extract archives by other means (e.g. a JS/native library that provides tar.bz2/tar.zst extraction) or ship models in a non-archive format.
 
 2. **No runtime use of another libarchive**  
    Disabling libarchive here means this SDK’s native code is **compiled without** libarchive; the extraction helper is stubbed and always returns an error. The SDK does **not** call into another app-provided libarchive. You avoid shipping a duplicate `libarchive.so`; you do not get “shared” libarchive behavior.
@@ -98,5 +100,5 @@ The [Model Download Manager](download-manager.md) uses native `extractTarBz2` fo
 
 | Setting | Effect |
 |--------|--------|
-| **Android:** `sherpaOnnxDisableLibarchive=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_LIBARCHIVE=1 pod install` | No libarchive linked or shipped (`libarchive.so` or `libarchive.xcframework`); build succeeds without libarchive prebuilts; `extractTarBz2` rejects with an error at runtime; `cancelExtractTarBz2` is a no-op; `computeFileSha256` still works. **Download Manager:** only single-file models (`.onnx`) can be downloaded and used; archive models (`.tar.bz2`) fail at extraction. Use when you have another libarchive in the app or do not need archive extraction. |
+| **Android:** `sherpaOnnxDisableLibarchive=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_LIBARCHIVE=1 pod install` | No libarchive linked or shipped (`libarchive.so` or `libarchive.xcframework`); build succeeds without libarchive prebuilts; `extractTarBz2`/`extractTarZst` reject with an error at runtime; `cancelExtractTarBz2`/`cancelExtractTarZst` are no-ops; `computeFileSha256` still works. **Download Manager:** only single-file models (`.onnx`) can be downloaded and used; archive models (`.tar.bz2`, `.tar.zst`) fail at extraction. Use when you have another libarchive in the app or do not need archive extraction. |
 | **Default (Flag unset / false)** | libarchive is required; prebuilts, AAR, or XCFramework must provide libarchive; `extractTarBz2` and `cancelExtractTarBz2` work; Download Manager supports both archive and single-file models. Do not combine with another libarchive in the same process unless you accept the risk of clashes. |

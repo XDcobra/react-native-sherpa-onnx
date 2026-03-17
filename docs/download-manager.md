@@ -1,6 +1,6 @@
 # Model Download Manager
 
-Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases. Supports archive models (`.tar.bz2`) and single-file models (`.onnx`), with checksum verification and progress events.
+Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases. Supports archive models (`.tar.bz2`, `.tar.zst`) and single-file models (`.onnx`), with checksum verification and progress events.
 
 **Import path:** `react-native-sherpa-onnx/download`
 
@@ -220,6 +220,7 @@ Public helpers from `react-native-sherpa-onnx/download`. Most apps only need the
 | `parseChecksumFile(content)` | Parse a checksum.txt file |
 | `calculateFileChecksum(filePath)` | Calculate SHA-256 of a file |
 | `extractTarBz2(archivePath, destDir, options?)` | Extract a .tar.bz2 archive |
+| `extractTarZst(archivePath, destDir, options?)` | Extract a .tar.zst / .zst archive |
 
 ---
 
