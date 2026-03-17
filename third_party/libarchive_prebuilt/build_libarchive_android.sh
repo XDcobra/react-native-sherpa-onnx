@@ -33,6 +33,8 @@ if [ ! -d "$LIBARCHIVE_SRC" ] || [ ! -f "$LIBARCHIVE_SRC/CMakeLists.txt" ]; then
     exit 1
 fi
 
+ZSTD_PREBUILT="$REPO_ROOT/third_party/zstd_prebuilt/android"
+
 # Disable programs and tests; only build shared library. Disable optional deps not in NDK.
 CMAKE_OPTS=(
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
@@ -49,7 +51,7 @@ CMAKE_OPTS=(
     -DENABLE_LIBXML2=OFF
     -DENABLE_EXPAT=OFF
     -DENABLE_LZMA=OFF
-    -DENABLE_ZSTD=OFF
+    -DENABLE_ZSTD=ON
     -DENABLE_LIBB2=OFF
     -DENABLE_BZip2=OFF
     -DENABLE_LZ4=OFF
@@ -62,6 +64,13 @@ CMAKE_OPTS=(
 ABIS="arm64-v8a armeabi-v7a x86 x86_64"
 
 for ABI in $ABIS; do
+    ZSTD_PREFIX="$ZSTD_PREBUILT/$ABI"
+    if [ ! -f "$ZSTD_PREFIX/lib/libzstd.so" ] || [ ! -f "$ZSTD_PREFIX/include/zstd.h" ]; then
+        echo "Error: zstd prebuilt not found for $ABI at $ZSTD_PREFIX"
+        echo "Run: (cd third_party/zstd_prebuilt && ./build_zstd.sh)"
+        exit 1
+    fi
+
     echo "Building libarchive for $ABI..."
     BUILD_DIR="$WORK_DIR/build-$ABI"
     rm -rf "$BUILD_DIR"
@@ -75,6 +84,8 @@ for ABI in $ABIS; do
             opts+=("$o")
         fi
     done
+    opts+=(-DZSTD_INCLUDE_DIR="$ZSTD_PREFIX/include")
+    opts+=(-DZSTD_LIBRARY="$ZSTD_PREFIX/lib/libzstd.so")
     cmake "${opts[@]}" "$LIBARCHIVE_SRC"
     cmake --build . -j"$(nproc 2>/dev/null || echo 4)"
     cd "$SCRIPT_DIR"
