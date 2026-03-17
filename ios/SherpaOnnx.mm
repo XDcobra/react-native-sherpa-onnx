@@ -211,6 +211,32 @@
     resolve([NSNull null]);
 }
 
+- (void)listBundledArchiveAssetPaths:(NSString *)packName
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
+{
+    // PAD APK_ASSETS listing is Android-only.
+    resolve(@[]);
+}
+
+- (void)extractTarZstFromAsset:(NSString *)assetPath
+                   targetPath:(NSString *)targetPath
+                       force:(NSNumber *)force
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
+}
+
+- (void)extractTarBz2FromAsset:(NSString *)assetPath
+                   targetPath:(NSString *)targetPath
+                        force:(NSNumber *)force
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
+}
+
 - (void)convertAudioToFormat:(NSString *)inputPath
                  outputPath:(NSString *)outputPath
                      format:(NSString *)format
