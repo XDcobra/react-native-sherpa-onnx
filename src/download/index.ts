@@ -1,5 +1,7 @@
 export { extractTarBz2 } from './extractTarBz2';
 export type { ExtractProgressEvent } from './extractTarBz2';
+export { extractTarZst } from './extractTarZst';
+export type { ExtractProgressEvent as ExtractZstProgressEvent } from './extractTarZst';
 export {
   listModelsByCategory,
   refreshModelsByCategory,
