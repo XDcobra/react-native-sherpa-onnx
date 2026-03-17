@@ -167,11 +167,12 @@ bool ArchiveHelper::ExtractTarBz2(
     return false;
   }
 
-  // Configure archive to support tar and bzip2
+  // Configure archive to support tar and common compression (bzip2, gzip, xz, zstd)
   archive_read_support_format_tar(archive);
   archive_read_support_filter_bzip2(archive);
   archive_read_support_filter_gzip(archive);  // Also support gzip for compatibility
-  archive_read_support_filter_xz(archive);    // And xz
+  archive_read_support_filter_xz(archive);   // And xz
+  archive_read_support_filter_zstd(archive); // And zstd (.tar.zst)
 
   ArchiveReadContext read_ctx;
   read_ctx.file = fopen(source_path.c_str(), "rb");
@@ -374,6 +375,16 @@ bool ArchiveHelper::ExtractTarBz2(
 
   return true;
 #endif  // HAVE_LIBARCHIVE
+}
+
+bool ArchiveHelper::ExtractTarZst(
+    const std::string& source_path,
+    const std::string& target_path,
+    bool force,
+    std::function<void(long long, long long, double)> on_progress,
+    std::string* out_error,
+    std::string* out_sha256) {
+  return ExtractTarBz2(source_path, target_path, force, on_progress, out_error, out_sha256);
 }
 
 bool ArchiveHelper::ComputeFileSha256(
