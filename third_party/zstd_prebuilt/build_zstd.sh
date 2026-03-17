@@ -21,6 +21,25 @@ else
     exit 1
 fi
 
+# Same host-tag detection as opus_prebuilt/build_opus.sh (so CI behaves the same)
+case "$(uname -s)" in
+    Linux*)   HOST_TAG="linux-x86_64" ;;
+    Darwin*)
+        if [ "$(uname -m)" = "arm64" ] && [ -d "$NDK/toolchains/llvm/prebuilt/darwin-arm64" ]; then
+            HOST_TAG="darwin-arm64"
+        else
+            HOST_TAG="darwin-x86_64"
+        fi
+        ;;
+    *)        HOST_TAG="windows-x86_64" ;;
+esac
+
+TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
+if [ ! -d "$TOOLCHAIN" ]; then
+    echo "Error: toolchain not found: $TOOLCHAIN"
+    exit 1
+fi
+
 TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
 if [ ! -f "$TOOLCHAIN_FILE" ]; then
     echo "Error: Android CMake toolchain not found: $TOOLCHAIN_FILE"
@@ -34,8 +53,11 @@ if [ ! -d "$ZSTD_SRC" ] || [ ! -f "$ZSTD_SRC/build/cmake/CMakeLists.txt" ]; then
 fi
 
 # Build shared lib only; no programs, tests, or contrib.
+# Pass compiler from TOOLCHAIN (same layout as opus) so CMake uses an existing path.
 CMAKE_OPTS=(
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
+    -DCMAKE_C_COMPILER="$TOOLCHAIN/bin/clang"
+    -DCMAKE_CXX_COMPILER="$TOOLCHAIN/bin/clang++"
     -DANDROID_ABI=ABI_PLACEHOLDER
     -DANDROID_PLATFORM="android-${ANDROID_API}"
     -DCMAKE_BUILD_TYPE=Release
