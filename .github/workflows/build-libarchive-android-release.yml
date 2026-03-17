@@ -54,17 +54,30 @@ jobs:
           add-to-path: true
           local-cache: true
 
-      - name: Get libarchive submodule version
+      - name: Get submodule versions
         id: submodules
         run: |
           echo "libarchive=$(git -C third_party/libarchive rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+          echo "zstd=$(git -C third_party/zstd rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
 
       - name: Cache libarchive prebuilts
         uses: actions/cache@v4
         id: libarchive-cache
         with:
-          path: third_party/libarchive_prebuilt/android
-          key: libarchive-android-prebuilt-${{ steps.submodules.outputs.libarchive }}-${{ hashFiles('third_party/libarchive_prebuilt/build_libarchive_android.sh') }}
+          path: |
+            third_party/libarchive_prebuilt/android
+            third_party/zstd_prebuilt/android
+          key: libarchive-android-prebuilt-${{ steps.submodules.outputs.libarchive }}-${{ steps.submodules.outputs.zstd }}-${{ hashFiles('third_party/libarchive_prebuilt/build_libarchive_android.sh', 'third_party/zstd_prebuilt/build_zstd.sh') }}
+
+      - name: Build zstd
+        if: steps.libarchive-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/zstd_prebuilt
+          chmod +x build_zstd.sh
+          ./build_zstd.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Build libarchive
         if: steps.libarchive-cache.outputs.cache-hit != 'true'
@@ -87,6 +100,10 @@ jobs:
             SRC="third_party/libarchive_prebuilt/android/$abi/lib"
             if [ -d "$SRC" ]; then
               cp "$SRC"/*.so "$LAYOUT/$abi/" 2>/dev/null || true
+            fi
+            ZSTD_SRC="third_party/zstd_prebuilt/android/$abi/lib"
+            if [ -d "$ZSTD_SRC" ]; then
+              cp "$ZSTD_SRC"/*.so "$LAYOUT/$abi/" 2>/dev/null || true
             fi
           done
           if [ -d "third_party/libarchive_prebuilt/android/include" ]; then

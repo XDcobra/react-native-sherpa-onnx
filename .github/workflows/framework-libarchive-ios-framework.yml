@@ -46,7 +46,31 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using release tag: $RELEASE_TAG (version: $VERSION)"
 
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "libarchive=$(git -C third_party/libarchive rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+          echo "zstd=$(git -C third_party/zstd rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libarchive + zstd prebuilts (iOS)
+        uses: actions/cache@v4
+        id: libarchive-ios-cache
+        with:
+          path: |
+            third_party/zstd_prebuilt/ios
+            third_party/libarchive_prebuilt/ios
+            third_party/libarchive_prebuilt/libarchive.xcframework
+          key: libarchive-ios-prebuilt-${{ steps.submodules.outputs.libarchive }}-${{ steps.submodules.outputs.zstd }}-${{ hashFiles('third_party/libarchive_prebuilt/build_libarchive_ios.sh', 'third_party/zstd_prebuilt/build_zstd_ios.sh') }}
+
+      - name: Build zstd (iOS)
+        if: steps.libarchive-ios-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/zstd_prebuilt
+          chmod +x build_zstd_ios.sh
+          ./build_zstd_ios.sh
+
       - name: Build libarchive iOS XCFramework
+        if: steps.libarchive-ios-cache.outputs.cache-hit != 'true'
         run: |
           chmod +x third_party/libarchive_prebuilt/build_libarchive_ios.sh
           third_party/libarchive_prebuilt/build_libarchive_ios.sh
