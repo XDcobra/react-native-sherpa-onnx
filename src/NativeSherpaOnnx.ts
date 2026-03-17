@@ -553,6 +553,62 @@ export interface Spec extends TurboModule {
   cancelExtractTarBz2(): Promise<void>;
 
   /**
+   * Extract a .tar.zst (or .zst) archive to a target folder.
+   * Returns { success, path } or { success, reason }.
+   */
+  extractTarZst(
+    sourcePath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Cancel any in-progress tar.zst extraction.
+   */
+  cancelExtractTarZst(): Promise<void>;
+
+  /**
+   * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
+   * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
+   */
+  listBundledArchiveAssetPaths(packName: string): Promise<string[]>;
+
+  /**
+   * Extract a .tar.zst archive from Android assets (AssetManager) to a target folder. Android only.
+   * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
+   */
+  extractTarZstFromAsset(
+    assetPath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Extract a .tar.bz2 archive from Android assets (AssetManager) to a target folder. Android only.
+   * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
+   */
+  extractTarBz2FromAsset(
+    assetPath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
    * Compute SHA-256 of a file and return the hex digest.
    */
   computeFileSha256(filePath: string): Promise<string>;

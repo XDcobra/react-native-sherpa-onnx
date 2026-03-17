@@ -45,6 +45,11 @@
       "types": "./lib/typescript/src/download/index.d.ts",
       "default": "./lib/module/download/index.js"
     },
+    "./extraction": {
+      "source": "./src/extraction/index.ts",
+      "types": "./lib/typescript/src/extraction/index.d.ts",
+      "default": "./lib/module/extraction/index.js"
+    },
     "./audio": {
       "source": "./src/audio/index.ts",
       "types": "./lib/typescript/src/audio/index.d.ts",

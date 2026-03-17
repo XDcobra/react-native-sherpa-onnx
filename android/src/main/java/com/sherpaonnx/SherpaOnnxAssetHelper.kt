@@ -82,10 +82,12 @@ internal class SherpaOnnxAssetHelper(
     try {
       val baseDir = File(path)
       if (!baseDir.exists()) {
-        throw IllegalArgumentException("Path does not exist: $path")
+        promise.resolve(Arguments.createArray())
+        return
       }
       if (!baseDir.isDirectory) {
-        throw IllegalArgumentException("Path is not a directory: $path")
+        promise.resolve(Arguments.createArray())
+        return
       }
 
       val folders = mutableListOf<String>()
@@ -134,11 +136,18 @@ internal class SherpaOnnxAssetHelper(
     try {
       Log.i(logTag, "getAssetPackPath: packName=$packName")
       val assetPackManager = AssetPackManagerFactory.getInstance(context)
-      val location: AssetPackLocation? = assetPackManager.getPackLocation(packName)
+      var location: AssetPackLocation? = assetPackManager.getPackLocation(packName)
       if (location == null) {
-        Log.i(logTag, "getAssetPackPath: location is null for pack '$packName'")
-        promise.resolve(null)
-        return
+        val allLocations = assetPackManager.getPackLocations()
+        location = allLocations?.get(packName)
+        if (allLocations != null) {
+          Log.i(logTag, "getAssetPackPath: getPackLocation was null, getPackLocations keys=${allLocations.keys}")
+        }
+        if (location == null) {
+          Log.i(logTag, "getAssetPackPath: location is null for pack '$packName'")
+          promise.resolve(null)
+          return
+        }
       }
       Log.i(logTag, "getAssetPackPath: storageMethod=${location.packStorageMethod()}, " +
         "assetsPath=${location.assetsPath()}, path=${location.path()}")
@@ -167,6 +176,42 @@ internal class SherpaOnnxAssetHelper(
     } catch (e: Exception) {
       Log.w(logTag, "getAssetPackPath failed: ${e.message}")
       promise.resolve(null)
+    }
+  }
+
+  /**
+   * Lists asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
+   * Returns empty array when pack is null or STORAGE_FILES (caller uses path + readDir in that case).
+   * APK_ASSETS: pack content is merged into the app asset root; canonical path is "models"
+   * (pack layout src/main/assets/models/). Same for Play Store and bundletool install-time delivery.
+   */
+  fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
+    try {
+      val assetPackManager = AssetPackManagerFactory.getInstance(context)
+      var location: AssetPackLocation? = assetPackManager.getPackLocation(packName)
+      if (location == null) {
+        location = assetPackManager.getPackLocations()?.get(packName)
+      }
+      if (location == null) {
+        promise.resolve(Arguments.createArray())
+        return
+      }
+      if (location.packStorageMethod() != AssetPackStorageMethod.STORAGE_FILES) {
+        val assetPrefix = "models"
+        val names = context.assets.list(assetPrefix) ?: emptyArray()
+        val archives = names.filter { it.endsWith(".tar.zst") || it.endsWith(".tar.bz2") }
+        val result = Arguments.createArray()
+        for (name in archives) {
+          result.pushString("$assetPrefix/$name")
+        }
+        Log.i(logTag, "listBundledArchiveAssetPaths: packName=$packName prefix=$assetPrefix count=${result.size()}")
+        promise.resolve(result)
+      } else {
+        promise.resolve(Arguments.createArray())
+      }
+    } catch (e: Exception) {
+      Log.w(logTag, "listBundledArchiveAssetPaths failed: ${e.message}")
+      promise.resolve(Arguments.createArray())
     }
   }
 

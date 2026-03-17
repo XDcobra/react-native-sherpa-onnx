@@ -22,6 +22,7 @@ export { copyFileToContentUri } from './tts';
 // - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'
 // - import { ... } from 'react-native-sherpa-onnx/download'
+// - import { getBundledArchives, listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction'
 // - import { ... } from 'react-native-sherpa-onnx/vad' (planned)
 // - import { ... } from 'react-native-sherpa-onnx/diarization' (planned)
 // - import { ... } from 'react-native-sherpa-onnx/enhancement' (planned)

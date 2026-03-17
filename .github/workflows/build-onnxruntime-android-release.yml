@@ -74,7 +74,7 @@ jobs:
           echo "Release tag: $RELEASE_TAG"
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -91,7 +91,7 @@ jobs:
           local-cache: true
 
       - name: Cache QNN SDK
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: qnn-cache
         with:
           path: qnn-sdk
@@ -128,7 +128,7 @@ jobs:
           echo "QNN SDK root: $QNN_ROOT"
 
       - name: Cache ONNX Runtime build output (AAR + all ABIs)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: ort-cache
         with:
           path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack
@@ -199,7 +199,6 @@ jobs:
             onnxruntime-android-qnn.zip
           draft: false
           prerelease: false
-          skip_duplicate: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

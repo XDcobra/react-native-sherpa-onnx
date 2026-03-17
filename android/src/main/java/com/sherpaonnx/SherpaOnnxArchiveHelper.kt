@@ -1,5 +1,7 @@
 package com.sherpaonnx
 
+import android.content.Context
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import java.util.concurrent.ExecutorService
@@ -27,6 +29,11 @@ class SherpaOnnxArchiveHelper {
   }
 
   fun cancelExtractTarBz2() {
+    cancelRequested.set(true)
+    nativeCancelExtract()
+  }
+
+  fun cancelExtractTarZst() {
     cancelRequested.set(true)
     nativeCancelExtract()
   }
@@ -71,6 +78,83 @@ class SherpaOnnxArchiveHelper {
     }
   }
 
+  fun extractTarZst(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    val promiseSettled = AtomicBoolean(false)
+    fun resolveOnce(success: Boolean, reason: String? = null) {
+      if (!promiseSettled.compareAndSet(false, true)) return
+      val result = Arguments.createMap()
+      result.putBoolean("success", success)
+      if (reason != null) result.putString("reason", reason)
+      promise.resolve(result)
+    }
+
+    try {
+      cancelRequested.set(false)
+      val progressCallback = object : Any() {
+        fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+          onProgress(bytesExtracted, totalBytes, percent)
+        }
+      }
+      extractExecutor.execute {
+        try {
+          nativeExtractTarZst(sourcePath, targetPath, force, progressCallback, promise)
+        } catch (e: Exception) {
+          resolveOnce(false, "Archive extraction error: ${e.message}")
+        }
+      }
+    } catch (e: Exception) {
+      resolveOnce(false, "Archive extraction error: ${e.message}")
+    }
+  }
+
+  fun extractTarZstFromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    if (BuildConfig.DEBUG) {
+      Log.i("SherpaOnnx", "extractTarZstFromAsset assetPath=$assetPath targetPath=$targetPath")
+    }
+    cancelRequested.set(false)
+    val progressCallback = object : Any() {
+      fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+        onProgress(bytesExtracted, totalBytes, percent)
+      }
+    }
+    extractExecutor.execute {
+      try {
+        context.assets.open(assetPath).use { stream ->
+          nativeExtractTarZstFromStream(stream, targetPath, force, progressCallback, promise)
+        }
+      } catch (e: Exception) {
+        val result = Arguments.createMap()
+        result.putBoolean("success", false)
+        result.putString("reason", e.message ?: "Failed to open asset")
+        promise.resolve(result)
+      }
+    }
+  }
+
+  fun extractTarBz2FromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    extractTarZstFromAsset(context, assetPath, targetPath, force, promise, onProgress)
+  }
+
   fun computeFileSha256(filePath: String, promise: Promise) {
     nativeComputeFileSha256(filePath, promise)
   }
@@ -78,6 +162,22 @@ class SherpaOnnxArchiveHelper {
   // Native JNI methods
   private external fun nativeExtractTarBz2(
     sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    progressCallback: Any?,
+    promise: Promise
+  )
+
+  private external fun nativeExtractTarZst(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    progressCallback: Any?,
+    promise: Promise
+  )
+
+  private external fun nativeExtractTarZstFromStream(
+    inputStream: java.io.InputStream,
     targetPath: String,
     force: Boolean,
     progressCallback: Any?,

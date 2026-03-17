@@ -91,7 +91,7 @@ jobs:
           echo "sherpa=$(git -C third_party/sherpa-onnx rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
 
       - name: Cache QNN SDK
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: qnn-cache
         with:
           path: qnn-sdk
@@ -128,7 +128,7 @@ jobs:
           echo "QNN SDK root: $QNN_ROOT"
 
       - name: Cache sherpa-onnx prebuilts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: sherpa-cache
         with:
           path: third_party/sherpa-onnx-prebuilt/android
@@ -254,7 +254,6 @@ jobs:
             sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar
           draft: false
           prerelease: false
-          skip_duplicate: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

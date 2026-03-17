@@ -133,6 +133,15 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 #endif
 }
 
++ (void)cancelExtractTarZst
+{
+#ifdef HAVE_LIBARCHIVE
+  g_cancelExtract.store(true);
+#else
+  // feature disabled
+#endif
+}
+
 - (NSDictionary *)extractTarBz2:(NSString *)sourcePath
          targetPath:(NSString *)targetPath
            force:(BOOL)force
@@ -174,6 +183,7 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   struct archive *archive = archive_read_new();
   archive_read_support_format_tar(archive);
   archive_read_support_filter_bzip2(archive);
+  archive_read_support_filter_zstd(archive);
 
   ArchiveReadContext read_ctx;
   read_ctx.file = fopen([sourcePath UTF8String], "rb");
@@ -297,6 +307,14 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 
   return @{ @"success": @YES, @"path": targetPath, @"sha256": sha256Hex ?: @"" };
 #endif
+}
+
+- (NSDictionary *)extractTarZst:(NSString *)sourcePath
+                     targetPath:(NSString *)targetPath
+                          force:(BOOL)force
+                       progress:(SherpaOnnxArchiveProgressBlock)progress
+{
+  return [self extractTarBz2:sourcePath targetPath:targetPath force:force progress:progress];
 }
 
 - (NSString *)computeFileSha256:(NSString *)filePath

@@ -36,7 +36,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Cache SherpaOnnx models
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: example/.model-cache
           key: ${{ runner.os }}-sherpa-models-${{ hashFiles('example/scripts/model-download-config.json', 'example/scripts/download-models.js') }}
@@ -70,7 +70,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
@@ -125,7 +125,7 @@ jobs:
           chmod +x gradlew.bat
 
       - name: Cache Gradle dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.gradle/caches
@@ -248,7 +248,7 @@ jobs:
           fi
 
       - name: Upload Android APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-release-apk
           path: example/android/app/build/outputs/apk/release/app-release.apk

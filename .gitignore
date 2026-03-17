@@ -136,6 +136,16 @@ third_party/shine_prebuilt/*
 !third_party/shine_prebuilt/build_shine.sh
 !third_party/shine_prebuilt/build_shine_ios.sh
 
+# ignore everything under zstd_prebuilt by default
+third_party/zstd_prebuilt/*
+!third_party/zstd_prebuilt/README.md
+!third_party/zstd_prebuilt/build_zstd.sh
+!third_party/zstd_prebuilt/build_zstd_ios.sh
+third_party/zstd_prebuilt/android/
+third_party/zstd_prebuilt/ios/
+third_party/zstd_prebuilt/build-*/
+third_party/zstd_prebuilt/build_ios/
+
 # ONNX Runtime prebuilt build artifacts (when building prebuilts locally)
 third_party/onnxruntime_prebuilt/*
 !third_party/onnxruntime_prebuilt/README.md

@@ -12,6 +12,8 @@ if [ ! -d "$LIBARCHIVE_SRC/libarchive" ]; then
     exit 1
 fi
 
+ZSTD_PREBUILT="$REPO_ROOT/third_party/zstd_prebuilt/ios"
+
 export IOS_MIN_VERSION="${IPHONEOS_DEPLOYMENT_TARGET:-12.0}"
 export SIM_MIN_VERSION="${IPHONESIMULATOR_DEPLOYMENT_TARGET:-$IOS_MIN_VERSION}"
 
@@ -26,13 +28,20 @@ build_slice() {
   local platform=$1
   local arch=$2
   local os_type=$3
-  
+
+  local zstd_prefix="$ZSTD_PREBUILT/$platform/$arch"
+  if [ ! -f "$zstd_prefix/lib/libzstd.a" ] || [ ! -f "$zstd_prefix/include/zstd.h" ]; then
+    echo "Error: zstd prebuilt not found at $zstd_prefix"
+    echo "Run: (cd third_party/zstd_prebuilt && ./build_zstd_ios.sh)"
+    exit 1
+  fi
+
   echo "===== Building libarchive ($platform $arch) ====="
-  
+
   local prefix="$OUTPUT_DIR/$platform/$arch"
   local tmp_build="$BUILD_DIR/$platform-$arch"
   mkdir -p "$prefix" "$tmp_build"
-  
+
   local cmake_args=(
     "-DCMAKE_INSTALL_PREFIX=$prefix"
     "-DCMAKE_BUILD_TYPE=Release"
@@ -52,7 +61,9 @@ build_slice() {
     "-DENABLE_EXPAT=OFF"
     "-DENABLE_LZMA=OFF"
     "-DENABLE_LZ4=OFF"
-    "-DENABLE_ZSTD=OFF"
+    "-DENABLE_ZSTD=ON"
+    "-DZSTD_INCLUDE_DIR=$zstd_prefix/include"
+    "-DZSTD_LIBRARY=$zstd_prefix/lib/libzstd.a"
     "-DENABLE_LZO=OFF"
     "-DENABLE_MBEDTLS=OFF"
     "-DENABLE_NETTLE=OFF"
@@ -61,7 +72,7 @@ build_slice() {
     "-DENABLE_MAC_OSX_APPLE_DOUBLE=OFF"
     "-DHAVE_LIBXML_XMLREADER_H=OFF"
   )
-  
+
   if [ "$platform" = "iphoneos" ]; then
     cmake_args+=("-DCMAKE_OSX_SYSROOT=iphoneos")
     cmake_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$IOS_MIN_VERSION")
@@ -74,6 +85,13 @@ build_slice() {
   cmake "$LIBARCHIVE_SRC" "${cmake_args[@]}"
   make -j"$(sysctl -n hw.ncpu)"
   make install
+
+  # Merge libzstd.a into libarchive.a so the XCFramework is self-contained
+  local archive_lib="$prefix/lib/libarchive.a"
+  local merged="$prefix/lib/libarchive_merged.a"
+  libtool -static -o "$merged" "$archive_lib" "$zstd_prefix/lib/libzstd.a"
+  mv "$merged" "$archive_lib"
+  cd "$SCRIPT_DIR"
 }
 
 build_slice iphoneos arm64 iOS

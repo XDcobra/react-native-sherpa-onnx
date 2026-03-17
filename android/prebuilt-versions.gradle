@@ -36,7 +36,7 @@ println "[react-native-sherpa-onnx] ffmpeg version (extracted/used): ${ffmpegVer
 def libarchiveVersion = System.getenv('LIBARCHIVE_VERSION')
 if (!libarchiveVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG'), 'libarchive-android-v')
-  libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5')
+  libarchiveVersion = v ?: (project.hasProperty('libarchiveVersion') ? project.libarchiveVersion : '3.8.5-2')
 }
 project.ext.libarchiveVersion = libarchiveVersion
 println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libarchiveVersion}"

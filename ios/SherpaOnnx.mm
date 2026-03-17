@@ -38,7 +38,7 @@
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress", @"extractTarZstProgress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
@@ -162,6 +162,33 @@
     resolve(nil);
 }
 
+- (void)extractTarZst:(NSString *)sourcePath
+           targetPath:(NSString *)targetPath
+                force:(BOOL)force
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSDictionary *result = [helper extractTarZst:sourcePath
+                                    targetPath:targetPath
+                                         force:force
+                                      progress:^(long long bytes, long long totalBytes, double percent) {
+        [self sendEventWithName:@"extractTarZstProgress"
+                           body:@{ @"sourcePath": sourcePath,
+                                   @"bytes": @(bytes),
+                                   @"totalBytes": @(totalBytes),
+                                   @"percent": @(percent) }];
+    }];
+    resolve(result);
+}
+
+- (void)cancelExtractTarZst:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
+{
+    [SherpaOnnxArchiveHelper cancelExtractTarZst];
+    resolve(nil);
+}
+
 - (void)computeFileSha256:(NSString *)filePath
              resolve:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject
@@ -182,6 +209,32 @@
 {
     // Play Asset Delivery is Android-only; on iOS there is no asset pack path.
     resolve([NSNull null]);
+}
+
+- (void)listBundledArchiveAssetPaths:(NSString *)packName
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
+{
+    // PAD APK_ASSETS listing is Android-only.
+    resolve(@[]);
+}
+
+- (void)extractTarZstFromAsset:(NSString *)assetPath
+                   targetPath:(NSString *)targetPath
+                       force:(NSNumber *)force
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
+}
+
+- (void)extractTarBz2FromAsset:(NSString *)assetPath
+                   targetPath:(NSString *)targetPath
+                        force:(NSNumber *)force
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
+{
+    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
 }
 
 - (void)convertAudioToFormat:(NSString *)inputPath

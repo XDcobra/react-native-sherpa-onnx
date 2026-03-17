@@ -303,6 +303,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  override fun extractTarZst(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
+    archiveHelper.extractTarZst(sourcePath, targetPath, force, promise) { bytes, total, percent ->
+      emitExtractTarZstProgress(sourcePath, bytes, total, percent)
+    }
+  }
+
+  override fun cancelExtractTarZst(promise: Promise) {
+    archiveHelper.cancelExtractTarZst()
+    promise.resolve(null)
+  }
+
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
   }
@@ -316,6 +327,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
     eventEmitter.emit("extractTarBz2Progress", payload)
+  }
+
+  private fun emitExtractTarZstProgress(sourcePath: String, bytes: Long, totalBytes: Long, percent: Double) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("sourcePath", sourcePath)
+    payload.putDouble("bytes", bytes.toDouble())
+    payload.putDouble("totalBytes", totalBytes.toDouble())
+    payload.putDouble("percent", percent)
+    eventEmitter.emit("extractTarZstProgress", payload)
   }
 
   /**
@@ -995,6 +1017,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun getAssetPackPath(packName: String, promise: Promise) {
     assetHelper.getAssetPackPath(packName, promise)
+  }
+
+  override fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
+    assetHelper.listBundledArchiveAssetPaths(packName, promise)
+  }
+
+  override fun extractTarZstFromAsset(
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise
+  ) {
+    archiveHelper.extractTarZstFromAsset(
+      reactApplicationContext,
+      assetPath,
+      targetPath,
+      force,
+      promise
+    ) { bytes, total, percent ->
+      emitExtractTarZstProgress(assetPath, bytes, total, percent)
+    }
+  }
+
+  override fun extractTarBz2FromAsset(
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise
+  ) {
+    archiveHelper.extractTarBz2FromAsset(
+      reactApplicationContext,
+      assetPath,
+      targetPath,
+      force,
+      promise
+    ) { bytes, total, percent ->
+      emitExtractProgress(assetPath, bytes, total, percent)
+    }
   }
 
   companion object {

@@ -35,7 +35,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Cache SherpaOnnx models
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: example/.model-cache
           key: ${{ runner.os }}-sherpa-models-${{ hashFiles('example/scripts/model-download-config.json', 'example/scripts/download-models.js') }}
@@ -100,7 +100,7 @@ jobs:
           echo "artifact_path=artifacts/$TARFILE" >> $GITHUB_OUTPUT
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdk-package
           path: ${{ steps.create_package_tarball.outputs.artifact_path }}

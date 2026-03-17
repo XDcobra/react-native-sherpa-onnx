@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
@@ -47,8 +47,8 @@ jobs:
             VER="v${TAG#framework-v}"
           fi
           [ "${VER#v}" = "$VER" ] && VER="v$VER"
-          echo "SHERPA_ONNX_VERSION=$VER" >> $GITHUB_ENV
           echo "version=${VER#v}" >> $GITHUB_OUTPUT
+          echo "tag=$VER" >> $GITHUB_OUTPUT
           echo "Using sherpa-onnx version: $VER"
 
       - name: Use appropriate Xcode version
@@ -62,10 +62,10 @@ jobs:
 
       - name: Clone sherpa-onnx repository
         run: |
-          git clone --depth 1 --branch ${{ env.SHERPA_ONNX_VERSION }} https://github.com/k2-fsa/sherpa-onnx.git sherpa-onnx-source || \
+          git clone --depth 1 --branch ${{ steps.version.outputs.tag }} https://github.com/k2-fsa/sherpa-onnx.git sherpa-onnx-source || \
           git clone --depth 1 https://github.com/k2-fsa/sherpa-onnx.git sherpa-onnx-source
           cd sherpa-onnx-source
-          git checkout ${{ env.SHERPA_ONNX_VERSION }} || git checkout main
+          git checkout ${{ steps.version.outputs.tag }} || git checkout main
           git log -1 --oneline
 
       - name: Patch build-ios.sh to include C++ API library
@@ -319,7 +319,7 @@ jobs:
       - name: Create version info file
         run: |
           cat > ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt << EOF
-          sherpa-onnx version: ${{ env.SHERPA_ONNX_VERSION }}
+          sherpa-onnx version: ${{ steps.version.outputs.tag }}
           Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           GitHub Actions Run: ${{ github.run_id }}
           Commit: ${{ github.sha }}
@@ -327,9 +327,9 @@ jobs:
           cat ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt
 
       - name: Upload XCFramework as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: sherpa-onnx-xcframework-${{ env.SHERPA_ONNX_VERSION }}
+          name: sherpa-onnx-xcframework-${{ steps.version.outputs.tag }}
           path: ios/Frameworks/sherpa_onnx.xcframework
           retention-days: 90
           compression-level: 6
@@ -342,9 +342,9 @@ jobs:
           ls -lh ios/Frameworks/sherpa_onnx.xcframework.zip
 
       - name: Upload framework archive as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: sherpa-onnx-xcframework-zip-${{ env.SHERPA_ONNX_VERSION }}
+          name: sherpa-onnx-xcframework-zip-${{ steps.version.outputs.tag }}
           path: ios/Frameworks/sherpa_onnx.xcframework.zip
           retention-days: 90
 
@@ -376,7 +376,7 @@ jobs:
 
             ## Framework Details
 
-            - **Version:** ${{ env.SHERPA_ONNX_VERSION }}
+            - **Version:** ${{ steps.version.outputs.tag }}
             - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
             - **iOS Deployment Target:** 13.0+
             - **ONNX Runtime:** Included in this build
@@ -394,7 +394,7 @@ jobs:
         run: |
           echo "## sherpa-onnx XCFramework Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ env.SHERPA_ONNX_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Framework Location:** \`ios/Frameworks/sherpa_onnx.xcframework\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub Release:** [framework-v${{ steps.version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/framework-v${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
