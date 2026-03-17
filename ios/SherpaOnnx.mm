@@ -38,7 +38,7 @@
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress", @"extractTarZstProgress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
@@ -159,6 +159,33 @@
                reject:(RCTPromiseRejectBlock)reject
 {
     [SherpaOnnxArchiveHelper cancelExtractTarBz2];
+    resolve(nil);
+}
+
+- (void)extractTarZst:(NSString *)sourcePath
+           targetPath:(NSString *)targetPath
+                force:(BOOL)force
+             resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
+{
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    NSDictionary *result = [helper extractTarZst:sourcePath
+                                    targetPath:targetPath
+                                         force:force
+                                      progress:^(long long bytes, long long totalBytes, double percent) {
+        [self sendEventWithName:@"extractTarZstProgress"
+                           body:@{ @"sourcePath": sourcePath,
+                                   @"bytes": @(bytes),
+                                   @"totalBytes": @(totalBytes),
+                                   @"percent": @(percent) }];
+    }];
+    resolve(result);
+}
+
+- (void)cancelExtractTarZst:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
+{
+    [SherpaOnnxArchiveHelper cancelExtractTarZst];
     resolve(nil);
 }
 
