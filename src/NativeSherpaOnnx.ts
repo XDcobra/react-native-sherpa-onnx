@@ -553,6 +553,26 @@ export interface Spec extends TurboModule {
   cancelExtractTarBz2(): Promise<void>;
 
   /**
+   * Extract a .tar.zst (or .zst) archive to a target folder.
+   * Returns { success, path } or { success, reason }.
+   */
+  extractTarZst(
+    sourcePath: string,
+    targetPath: string,
+    force: boolean
+  ): Promise<{
+    success: boolean;
+    path?: string;
+    sha256?: string;
+    reason?: string;
+  }>;
+
+  /**
+   * Cancel any in-progress tar.zst extraction.
+   */
+  cancelExtractTarZst(): Promise<void>;
+
+  /**
    * Compute SHA-256 of a file and return the hex digest.
    */
   computeFileSha256(filePath: string): Promise<string>;
