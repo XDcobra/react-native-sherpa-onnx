@@ -49,11 +49,9 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
     j_progress_callback_global = env->NewGlobalRef(j_progress_callback);
   }
 
-  // Get Promise.resolve and reject methods
+  // Get Promise.resolve method
   jclass promise_class = env->GetObjectClass(j_promise);
   jmethodID resolve_method = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
-  jmethodID reject_method = env->GetMethodID(promise_class, "reject", 
-                                              "(Ljava/lang/String;Ljava/lang/String;)V");
 
   // Get WritableMap from Arguments
   jclass arguments_class = env->FindClass("com/facebook/react/bridge/Arguments");
@@ -123,15 +121,12 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarBz2(
       env->CallVoidMethod(result_map, put_string_method,
                           env->NewStringUTF("sha256"), env->NewStringUTF(sha256.c_str()));
     }
-    env->CallVoidMethod(j_promise, resolve_method, result_map);
   } else {
     __android_log_print(ANDROID_LOG_WARN, "SherpaOnnxNative", "[ARCHIVE_ERROR] %s", error_msg.c_str());
     env->CallVoidMethod(result_map, put_string_method,
                         env->NewStringUTF("reason"), env->NewStringUTF(error_msg.c_str()));
-    env->CallVoidMethod(j_promise, reject_method,
-                        env->NewStringUTF("ARCHIVE_ERROR"),
-                        env->NewStringUTF(error_msg.c_str()));
   }
+  env->CallVoidMethod(j_promise, resolve_method, result_map);
 
   // Clean up global reference
   if (j_progress_callback_global != nullptr) {
@@ -171,8 +166,6 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarZst(
 
   jclass promise_class = env->GetObjectClass(j_promise);
   jmethodID resolve_method = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
-  jmethodID reject_method = env->GetMethodID(promise_class, "reject",
-                                              "(Ljava/lang/String;Ljava/lang/String;)V");
 
   jclass arguments_class = env->FindClass("com/facebook/react/bridge/Arguments");
   jmethodID create_map_method = env->GetStaticMethodID(
@@ -230,15 +223,12 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarZst(
       env->CallVoidMethod(result_map, put_string_method,
                           env->NewStringUTF("sha256"), env->NewStringUTF(sha256.c_str()));
     }
-    env->CallVoidMethod(j_promise, resolve_method, result_map);
   } else {
     __android_log_print(ANDROID_LOG_WARN, "SherpaOnnxNative", "[ARCHIVE_ERROR] %s", error_msg.c_str());
     env->CallVoidMethod(result_map, put_string_method,
                         env->NewStringUTF("reason"), env->NewStringUTF(error_msg.c_str()));
-    env->CallVoidMethod(j_promise, reject_method,
-                        env->NewStringUTF("ARCHIVE_ERROR"),
-                        env->NewStringUTF(error_msg.c_str()));
   }
+  env->CallVoidMethod(j_promise, resolve_method, result_map);
 
   if (j_progress_callback_global != nullptr) {
     env->DeleteGlobalRef(j_progress_callback_global);
@@ -327,7 +317,6 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarZstFromStream(
 
   jclass promise_class = env->GetObjectClass(j_promise);
   jmethodID resolve_method = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
-  jmethodID reject_method = env->GetMethodID(promise_class, "reject", "(Ljava/lang/String;Ljava/lang/String;)V");
 
   jclass arguments_class = env->FindClass("com/facebook/react/bridge/Arguments");
   jmethodID create_map_method = env->GetStaticMethodID(arguments_class, "createMap", "()Lcom/facebook/react/bridge/WritableMap;");
@@ -383,15 +372,12 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractTarZstFromStream(
       env->CallVoidMethod(result_map, put_string_method,
                           env->NewStringUTF("sha256"), env->NewStringUTF(sha256.c_str()));
     }
-    env->CallVoidMethod(j_promise, resolve_method, result_map);
   } else {
     __android_log_print(ANDROID_LOG_WARN, "SherpaOnnxNative", "[ARCHIVE_ERROR] %s", error_msg.c_str());
     env->CallVoidMethod(result_map, put_string_method,
                         env->NewStringUTF("reason"), env->NewStringUTF(error_msg.c_str()));
-    env->CallVoidMethod(j_promise, reject_method,
-                        env->NewStringUTF("ARCHIVE_ERROR"),
-                        env->NewStringUTF(error_msg.c_str()));
   }
+  env->CallVoidMethod(j_promise, resolve_method, result_map);
 
   env->DeleteGlobalRef(stream_global);
   env->DeleteLocalRef(byte_array);

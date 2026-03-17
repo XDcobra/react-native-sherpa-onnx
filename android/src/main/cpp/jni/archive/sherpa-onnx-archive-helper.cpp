@@ -101,6 +101,12 @@ static la_ssize_t ArchiveStreamReadCallback(struct archive* archive, void* clien
   archive_set_error(archive, EINVAL, "Stream read error");
   return -1;
 }
+
+// No-op close callback for stream mode: the stream lifetime is managed by the
+// caller (e.g. a JNI InputStream), so libarchive must not close it.
+static int ArchiveStreamCloseCallback(struct archive* /* archive */, void* /* client_data */) {
+  return ARCHIVE_OK;
+}
 #endif  // HAVE_LIBARCHIVE
 
 static std::string ToHex(const unsigned char* data, size_t size) {
@@ -501,7 +507,7 @@ bool ArchiveHelper::ExtractFromStream(
   stream_ctx.user_data = read_user_data;
   sha256_init(&stream_ctx.sha_ctx);
 
-  if (archive_read_open(archive, &stream_ctx, nullptr, ArchiveStreamReadCallback, ArchiveCloseCallback) != ARCHIVE_OK) {
+  if (archive_read_open(archive, &stream_ctx, nullptr, ArchiveStreamReadCallback, ArchiveStreamCloseCallback) != ARCHIVE_OK) {
     const char* err = archive_error_string(archive);
     if (out_error) *out_error = err ? std::string("Failed to open archive: ") + err : "Failed to open archive";
     archive_read_free(archive);
@@ -622,10 +628,9 @@ bool ArchiveHelper::ExtractFromStream(
             last_percent = percent;
             on_progress(compressed_bytes, total_bytes, static_cast<double>(percent));
           }
-        } else if (extracted_bytes - last_emit_bytes >= 1024 * 1024) {
-          last_emit_bytes = extracted_bytes;
-          long long compressed_bytes = archive_filter_bytes(archive, -1);
-          on_progress(compressed_bytes, 0, 0.0);
+        } else if (stream_ctx.bytes_read - last_emit_bytes >= 1024 * 1024) {
+          last_emit_bytes = stream_ctx.bytes_read;
+          on_progress(stream_ctx.bytes_read, 0, 0.0);
         }
       }
     }
@@ -664,8 +669,7 @@ bool ArchiveHelper::ExtractFromStream(
   }
 
   if (on_progress) {
-    long long compressed_bytes = stream_ctx.bytes_read;
-    on_progress(extracted_bytes, compressed_bytes, 100.0);
+    on_progress(stream_ctx.bytes_read, stream_ctx.bytes_read, 100.0);
   }
 
   return true;
