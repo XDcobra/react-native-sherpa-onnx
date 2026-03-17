@@ -1019,6 +1019,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.getAssetPackPath(packName, promise)
   }
 
+  override fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
+    assetHelper.listBundledArchiveAssetPaths(packName, promise)
+  }
+
+  override fun extractTarZstFromAsset(
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise
+  ) {
+    archiveHelper.extractTarZstFromAsset(
+      reactApplicationContext,
+      assetPath,
+      targetPath,
+      force,
+      promise
+    ) { bytes, total, percent ->
+      emitExtractTarZstProgress(assetPath, bytes, total, percent)
+    }
+  }
+
+  override fun extractTarBz2FromAsset(
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise
+  ) {
+    archiveHelper.extractTarBz2FromAsset(
+      reactApplicationContext,
+      assetPath,
+      targetPath,
+      force,
+      promise
+    ) { bytes, total, percent ->
+      emitExtractProgress(assetPath, bytes, total, percent)
+    }
+  }
+
   companion object {
     const val NAME = "SherpaOnnx"
 

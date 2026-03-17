@@ -1,5 +1,7 @@
 package com.sherpaonnx
 
+import android.content.Context
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import java.util.concurrent.ExecutorService
@@ -111,6 +113,48 @@ class SherpaOnnxArchiveHelper {
     }
   }
 
+  fun extractTarZstFromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    if (BuildConfig.DEBUG) {
+      Log.i("SherpaOnnx", "extractTarZstFromAsset assetPath=$assetPath targetPath=$targetPath")
+    }
+    cancelRequested.set(false)
+    val progressCallback = object : Any() {
+      fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+        onProgress(bytesExtracted, totalBytes, percent)
+      }
+    }
+    extractExecutor.execute {
+      try {
+        context.assets.open(assetPath).use { stream ->
+          nativeExtractTarZstFromStream(stream, targetPath, force, progressCallback, promise)
+        }
+      } catch (e: Exception) {
+        val result = Arguments.createMap()
+        result.putBoolean("success", false)
+        result.putString("reason", e.message ?: "Failed to open asset")
+        promise.resolve(result)
+      }
+    }
+  }
+
+  fun extractTarBz2FromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+  ) {
+    extractTarZstFromAsset(context, assetPath, targetPath, force, promise, onProgress)
+  }
+
   fun computeFileSha256(filePath: String, promise: Promise) {
     nativeComputeFileSha256(filePath, promise)
   }
@@ -126,6 +170,14 @@ class SherpaOnnxArchiveHelper {
 
   private external fun nativeExtractTarZst(
     sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    progressCallback: Any?,
+    promise: Promise
+  )
+
+  private external fun nativeExtractTarZstFromStream(
+    inputStream: java.io.InputStream,
     targetPath: String,
     force: Boolean,
     progressCallback: Any?,
