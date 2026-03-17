@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
@@ -327,7 +327,7 @@ jobs:
           cat ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt
 
       - name: Upload XCFramework as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sherpa-onnx-xcframework-${{ env.SHERPA_ONNX_VERSION }}
           path: ios/Frameworks/sherpa_onnx.xcframework
@@ -342,7 +342,7 @@ jobs:
           ls -lh ios/Frameworks/sherpa_onnx.xcframework.zip
 
       - name: Upload framework archive as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sherpa-onnx-xcframework-zip-${{ env.SHERPA_ONNX_VERSION }}
           path: ios/Frameworks/sherpa_onnx.xcframework.zip

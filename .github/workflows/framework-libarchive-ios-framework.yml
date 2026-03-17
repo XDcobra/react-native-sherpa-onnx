@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -53,7 +53,7 @@ jobs:
           echo "zstd=$(git -C third_party/zstd rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
 
       - name: Cache libarchive + zstd prebuilts (iOS)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: libarchive-ios-cache
         with:
           path: |
@@ -94,7 +94,6 @@ jobs:
           files: libarchive-ios.zip
           draft: false
           prerelease: false
-          skip_duplicate: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -81,7 +81,7 @@ jobs:
           echo "zstd=$(git -C third_party/zstd rev-parse HEAD 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
 
       - name: Cache libarchive prebuilts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: libarchive-cache
         with:
           path: |
@@ -134,7 +134,7 @@ jobs:
           find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' \) | head -50
 
       - name: Upload layout as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libarchive-android-layout-${{ steps.tag.outputs.maven_version }}
           path: libarchive-android-layout/
