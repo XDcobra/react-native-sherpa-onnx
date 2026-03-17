@@ -32,7 +32,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 | Path resolution | ✅ | `resolveModelPath()` — returns native-usable absolute path |
 | Asset listing | ✅ | `listAssetModels()` — scans `assets/models/` (Android) / bundle `models/` (iOS) |
 | Filesystem listing | ✅ | `listModelsAtPath()` — scans any directory |
-| PAD support | ✅ | `getAssetPackPath()` — Android only |
+| PAD support | ✅ | See [Extraction API](extraction.md) for more details - Android only |
 | STT model detection | ✅ | `detectSttModel()` — file-based type detection + required-file validation |
 | TTS model detection | ✅ | `detectTtsModel()` — file-based type detection |
 
@@ -227,6 +227,7 @@ function detectTtsModel(
 | --- | --- | --- | --- |
 | Bundled assets | `assetModelPath()` | `listAssetModels()` | Ship models with the app |
 | Play Asset Delivery | `fileModelPath()` | `getAssetPackPath()` + `listModelsAtPath()` | Large models on Android (on-demand packs) |
+| PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `autoModelPath` |
 | Downloaded models | `fileModelPath()` | `listModelsAtPath()` or Download Manager | User-selected models at runtime |
 | Fallback / auto | `autoModelPath()` | — | Try asset first, then file |
 
@@ -333,6 +334,7 @@ if (!detection.success) {
 
 ## See Also
 
+- [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
 - [STT](stt.md) — Speech-to-Text API
 - [TTS](tts.md) — Text-to-Speech API
 - [Download Manager](download-manager.md) — Download models in-app

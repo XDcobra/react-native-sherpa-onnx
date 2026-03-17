@@ -96,7 +96,7 @@ To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patche
 | Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types) and [TTS documentation](./docs/tts.md). |
 | Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts-streaming.md). |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
-| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/model-setup.md). |
+| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/model-setup.md) & [Extraction API](./docs/extraction.md). |
 | Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/model-setup.md#model-detection). |
 | Model quantization | ✅ **Supported** | Automatic detection and preference for quantized (int8) models. |
 | Flexible model loading | ✅ **Supported** | Asset models, file system models, or auto-detection. |
@@ -166,6 +166,7 @@ For **streaming TTS** (incremental generation, low latency), use `createStreamin
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
+- [Extraction API](./docs/extraction.md)
 - [Disable FFMPEG](./docs/disable-ffmpeg.md)
 - [Disable LIBARCHIVE](./docs/disable-libarchive.md)
 
