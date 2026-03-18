@@ -18,6 +18,7 @@ import {
   validateChecksum,
   validateExtractedFiles,
   checkDiskSpace,
+  resolveActualModelDir,
 } from './validation';
 
 const RELEASE_API_BASE =
@@ -784,7 +785,8 @@ export async function getLocalModelPathByCategory(
   // Update lastUsed timestamp when model is accessed
   await updateModelLastUsed(category, id);
 
-  return getModelDir(category, id);
+  const installDir = getModelDir(category, id);
+  return resolveActualModelDir(installDir);
 }
 
 export async function downloadModelByCategory<T extends ModelMetaBase>(
@@ -796,6 +798,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     signal?: AbortSignal;
     maxRetries?: number;
     onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
+    /** When true (default), delete the .tar.bz2 archive after successful extraction to save disk space. Set to false to keep the archive. */
+    deleteArchiveAfterExtract?: boolean;
   }
 ): Promise<DownloadResult> {
   const isAborted = () => Boolean(opts?.signal?.aborted);
@@ -1163,11 +1167,26 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       'utf8'
     );
 
+    // Delete archive after successful extraction to save disk space (default). Skip if opts.deleteArchiveAfterExtract === false.
+    if (isArchive && opts?.deleteArchiveAfterExtract !== false) {
+      try {
+        if (await exists(downloadPath)) {
+          await unlink(downloadPath);
+        }
+      } catch (err) {
+        console.warn(
+          `[Download] Failed to delete archive after extraction for ${category}:${id}:`,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
     // Notify subscribers (e.g. STT/TTS screens) so the model list updates without leaving the screen.
     const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
     emitModelsListUpdated(category, list);
 
-    return { modelId: id, localPath: modelDir };
+    const resolvedPath = await resolveActualModelDir(modelDir);
+    return { modelId: id, localPath: resolvedPath };
   } catch (err) {
     if ((err instanceof Error && err.name === 'AbortError') || isAborted()) {
       await cleanupPartialWithRetry();

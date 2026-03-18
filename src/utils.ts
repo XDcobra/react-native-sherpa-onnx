@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import type { ModelPathConfig } from './types';
 import SherpaOnnx from './NativeSherpaOnnx';
+import { resolveActualModelDir } from './download';
 
 /**
  * Utility functions for model path handling
@@ -73,13 +74,22 @@ export function autoModelPath(path: string): ModelPathConfig {
  * This handles different path types (asset, file, auto) and returns
  * a platform-specific absolute path that can be used by native code.
  *
+ * For type 'file', the path is normalized so that when the given path is an
+ * install directory (e.g. with .ready and manifest.json and one model subdir),
+ * the returned path is the subdirectory that actually contains the .onnx files.
+ * This allows apps that build paths as baseDir/modelId to work without change.
+ *
  * @param config - Model path configuration
  * @returns Promise resolving to absolute path usable by native code
  */
 export async function resolveModelPath(
   config: ModelPathConfig
 ): Promise<string> {
-  return SherpaOnnx.resolveModelPath(config);
+  const path = await SherpaOnnx.resolveModelPath(config);
+  if (config.type === 'file') {
+    return resolveActualModelDir(path);
+  }
+  return path;
 }
 
 /**

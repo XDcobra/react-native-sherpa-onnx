@@ -37,6 +37,7 @@ export {
   validateChecksum,
   validateExtractedFiles,
   checkDiskSpace,
+  resolveActualModelDir,
   setExpectedFilesForCategory,
   getExpectedFilesForCategory,
   parseChecksumFile,

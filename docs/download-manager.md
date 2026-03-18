@@ -112,6 +112,15 @@ Return the last update timestamp for the cached registry.
 
 Download a model by ID. Supports progress callbacks, cancellation, and retries.
 
+**Options:**
+
+- `onProgress?: (progress: DownloadProgress) => void` — Progress callback (percent, phase, speed, eta).
+- `overwrite?: boolean` — If true, replace existing download.
+- `signal?: AbortSignal` — AbortController signal to cancel the download.
+- `maxRetries?: number` — Retry count for failed requests (default: 2).
+- `onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>` — Called on checksum mismatch; return true to keep the file.
+- `deleteArchiveAfterExtract?: boolean` — For archive models (e.g. `.tar.bz2`): if **true** (default), the archive is deleted after successful extraction to save disk space. Set to **false** to keep the archive file.
+
 ```typescript
 await downloadModelByCategory(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny', {
   onProgress: (progress) => {
