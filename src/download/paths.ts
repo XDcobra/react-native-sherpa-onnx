@@ -111,6 +111,14 @@ export function getDownloadStatePath(
   return `${getModelsBaseDir(category)}/.download-state-${modelId}.json`;
 }
 
+/** Path to extraction state file; used to detect and resume incomplete extractions after app restart. */
+export function getExtractionStatePath(
+  category: ModelCategory,
+  modelId: string
+): string {
+  return `${getModelsBaseDir(category)}/.extraction-state-${modelId}.json`;
+}
+
 export function getReleaseUrl(category: ModelCategory): string {
   return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
 }

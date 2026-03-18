@@ -62,6 +62,17 @@ export type DownloadState = {
   totalBytes?: number;
 };
 
+/** State for an in-progress or interrupted model extraction (archive → model dir). */
+export type ExtractionState = {
+  modelId: string;
+  category: ModelCategory;
+  phase: 'extracting';
+  startedAt: string;
+  archivePath: string;
+  modelDir: string;
+  model: ModelMetaBase;
+};
+
 export type DownloadProgressListener = (
   category: ModelCategory,
   modelId: string,

@@ -22,6 +22,11 @@ export {
   getIncompleteDownloads,
   resumeDownload,
   deleteIncompleteDownload,
+  extractModelByCategory,
+  getIncompleteExtractions,
+  resumeExtraction,
+  deleteIncompleteExtraction,
+  ensureModelByCategory,
   ModelCategory,
 } from './ModelDownloadManager';
 export type {
@@ -35,7 +40,9 @@ export type {
   ModelsListUpdatedListener,
   DownloadResult,
   DownloadState,
+  ExtractionState,
   ModelWithMetadata,
+  EnsureModelOptions,
 } from './ModelDownloadManager';
 export {
   validateChecksum,

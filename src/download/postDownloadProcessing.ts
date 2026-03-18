@@ -12,7 +12,11 @@ import type {
   ChecksumIssue,
   DownloadProgress,
 } from './types';
-import { getReadyMarkerPath, getManifestPath } from './paths';
+import {
+  getReadyMarkerPath,
+  getManifestPath,
+  getExtractionStatePath,
+} from './paths';
 import {
   validateChecksum,
   validateExtractedFiles,
@@ -83,6 +87,24 @@ export async function runPostDownloadProcessing(
         throw statErr;
     }
     await mkdir(modelDir);
+    const extractionStatePath = getExtractionStatePath(category, id);
+    try {
+      await writeFile(
+        extractionStatePath,
+        JSON.stringify({
+          modelId: id,
+          category,
+          phase: 'extracting' as const,
+          startedAt: new Date().toISOString(),
+          archivePath: downloadPath,
+          modelDir,
+          model,
+        }),
+        'utf8'
+      );
+    } catch {
+      // non-fatal; resume after crash may not be possible for this run
+    }
     extractResult = await extractTarBz2(
       downloadPath,
       modelDir,
@@ -193,6 +215,19 @@ export async function runPostDownloadProcessing(
     if (await exists(statePath)) await unlink(statePath);
   } catch {
     // non-fatal
+  }
+  if (isArchive) {
+    try {
+      const extractionStatePath = getExtractionStatePath(category, id);
+      if (
+        extractionStatePath !== statePath &&
+        (await exists(extractionStatePath))
+      ) {
+        await unlink(extractionStatePath);
+      }
+    } catch {
+      // non-fatal
+    }
   }
 
   if (isArchive && deleteArchiveAfterExtract !== false) {

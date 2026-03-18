@@ -9,6 +9,7 @@ export {
   type DownloadProgress,
   type DownloadResult,
   type DownloadState,
+  type ExtractionState,
   type DownloadProgressListener,
   type ModelsListUpdatedListener,
   type ModelWithMetadata,
@@ -40,3 +41,11 @@ export {
   resumeDownload,
   deleteIncompleteDownload,
 } from './downloadTask';
+export {
+  extractModelByCategory,
+  getIncompleteExtractions,
+  resumeExtraction,
+  deleteIncompleteExtraction,
+} from './modelExtraction';
+export { ensureModelByCategory } from './ensureModel';
+export type { EnsureModelOptions } from './ensureModel';
