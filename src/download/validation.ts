@@ -242,7 +242,9 @@ async function dirContainsModelFiles(dir: string): Promise<boolean> {
  *   (Ignores our metadata: .ready, manifest.json.)
  * - Otherwise returns installDir unchanged.
  */
-export async function resolveActualModelDir(installDir: string): Promise<string> {
+export async function resolveActualModelDir(
+  installDir: string
+): Promise<string> {
   try {
     const dirExists = await exists(installDir);
     if (!dirExists) return installDir;
@@ -259,7 +261,10 @@ export async function resolveActualModelDir(installDir: string): Promise<string>
 
     if (singleSubdir != null) {
       const candidatePath = singleSubdir.path;
-      if (candidatePath != null && (await dirContainsModelFiles(candidatePath))) {
+      if (
+        candidatePath != null &&
+        (await dirContainsModelFiles(candidatePath))
+      ) {
         return candidatePath;
       }
     }

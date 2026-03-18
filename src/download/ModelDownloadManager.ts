@@ -12,7 +12,7 @@ import {
   stopDownload,
 } from '@dr.pogodin/react-native-fs';
 import type { TTSModelType } from '../tts/types';
-import { extractTarBz2 } from './extractTarBz2';
+import { extractTarBz2 } from '../extraction/extractTarBz2';
 import {
   parseChecksumFile,
   validateChecksum,
@@ -78,6 +78,21 @@ export type DownloadResult = {
   localPath: string;
 };
 
+/**
+ * Persistent download state written to `.download-state.json` inside the model dir.
+ * Survives app crashes so incomplete downloads/extractions can be detected and resumed.
+ */
+export type DownloadState = {
+  modelId: string;
+  category: ModelCategory;
+  phase: 'downloading' | 'extracting';
+  startedAt: string;
+  archivePath: string;
+  model: ModelMetaBase;
+  bytesDownloaded?: number;
+  totalBytes?: number;
+};
+
 export type DownloadProgressListener = (
   category: ModelCategory,
   modelId: string,
@@ -102,6 +117,8 @@ export type ModelWithMetadata<T extends ModelMetaBase = ModelMetaBase> = {
   downloadedAt: string;
   lastUsed: string | null;
   sizeOnDisk?: number;
+  status: 'ready' | 'downloading' | 'extracting' | 'failed';
+  progress?: number; // 0..100
 };
 
 type ChecksumIssue = {
@@ -291,6 +308,13 @@ function getReadyMarkerPath(category: ModelCategory, modelId: string): string {
 
 function getManifestPath(category: ModelCategory, modelId: string): string {
   return `${getModelDir(category, modelId)}/manifest.json`;
+}
+
+function getDownloadStatePath(
+  category: ModelCategory,
+  modelId: string
+): string {
+  return `${getModelsBaseDir(category)}/.download-state-${modelId}.json`;
 }
 
 function getReleaseUrl(category: ModelCategory): string {
@@ -860,6 +884,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     throw new Error(`Insufficient disk space: ${diskSpaceCheck.message}`);
   }
 
+  const statePath = getDownloadStatePath(category, id);
+
   if (opts?.overwrite) {
     if (await exists(modelDir)) {
       await unlink(modelDir);
@@ -867,15 +893,19 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     if (await exists(downloadPath)) {
       await unlink(downloadPath);
     }
+    if (await exists(statePath)) {
+      await unlink(statePath);
+    }
   } else {
-    // Clean up incomplete extractions but preserve partial downloads for resume
+    // Clean up incomplete extractions but preserve partial downloads for resume.
+    // Only clean up if there is no download state file — if state exists, the
+    // model dir may contain a partially extracted archive that we want to re-extract.
     const readyMarkerExists = await exists(getReadyMarkerPath(category, id));
     if (!readyMarkerExists) {
       if (isArchive) {
-        // No ready marker found; only clean up extracted model dir
-        // Keep archive file to support download resume
+        // No ready marker found; clean up extracted model dir only.
+        // Keep archive file to support download resume.
         if (await exists(modelDir)) {
-          // Removing partial model dir
           await unlink(modelDir);
         }
       }
@@ -883,6 +913,19 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   }
 
   try {
+    // Write persistent download state before starting (survives app crashes)
+    const downloadState: DownloadState = {
+      modelId: id,
+      category,
+      phase: 'downloading',
+      startedAt: new Date().toISOString(),
+      archivePath: downloadPath,
+      model,
+      totalBytes: model.bytes,
+    };
+    await mkdir(getModelsBaseDir(category));
+    await writeFile(statePath, JSON.stringify(downloadState), 'utf8');
+
     // Step 2: Download archive or onnx file (with resume support)
     if (!isArchive) {
       await mkdir(modelDir);
@@ -1021,6 +1064,29 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     let extractedTotalBytes = 0;
 
     if (isArchive) {
+      // Verify archive integrity before extraction (size must match expected bytes)
+      try {
+        const archiveStat = await stat(downloadPath);
+        if (model.bytes > 0 && archiveStat.size < model.bytes) {
+          console.warn(
+            `[Download] Archive truncated for ${category}:${id}: ${archiveStat.size}/${model.bytes} bytes. Deleting for re-download.`
+          );
+          await unlink(downloadPath);
+          throw new Error(
+            `Archive file is truncated (${archiveStat.size}/${model.bytes} bytes). Please retry the download.`
+          );
+        }
+      } catch (statErr) {
+        if (statErr instanceof Error && statErr.message.includes('truncated')) {
+          throw statErr;
+        }
+        // stat failure on non-truncation is non-fatal; proceed with extraction
+      }
+
+      // Update state to extracting phase
+      downloadState.phase = 'extracting';
+      await writeFile(statePath, JSON.stringify(downloadState), 'utf8');
+
       await mkdir(modelDir);
       const extractStartTime = Date.now();
       extractResult = await extractTarBz2(
@@ -1167,6 +1233,15 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
       'utf8'
     );
 
+    // Remove download state file — download+extraction is complete
+    try {
+      if (await exists(statePath)) {
+        await unlink(statePath);
+      }
+    } catch {
+      // Non-fatal: the state file is just a helper for crash recovery
+    }
+
     // Delete archive after successful extraction to save disk space (default). Skip if opts.deleteArchiveAfterExtract === false.
     if (isArchive && opts?.deleteArchiveAfterExtract !== false) {
       try {
@@ -1190,8 +1265,147 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   } catch (err) {
     if ((err instanceof Error && err.name === 'AbortError') || isAborted()) {
       await cleanupPartialWithRetry();
+      // Remove state file on intentional abort
+      try {
+        if (await exists(statePath)) {
+          await unlink(statePath);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    // On non-abort errors (e.g. extraction failure on corrupt archive),
+    // check if the archive is truncated and delete it so the next attempt
+    // re-downloads instead of retrying extraction of a corrupt file.
+    if (isArchive && !(err instanceof Error && err.name === 'AbortError')) {
+      try {
+        if (await exists(downloadPath)) {
+          const archiveStat = await stat(downloadPath);
+          if (model.bytes > 0 && archiveStat.size < model.bytes) {
+            console.warn(
+              `[Download] Deleting truncated archive for ${category}:${id} (${archiveStat.size}/${model.bytes})`
+            );
+            await unlink(downloadPath);
+          }
+        }
+      } catch {
+        // ignore cleanup errors
+      }
     }
     throw err;
+  }
+}
+
+/**
+ * Get all incomplete downloads/extractions that were interrupted (e.g. by app crash).
+ * Reads `.download-state-<modelId>.json` files from the models base directory.
+ */
+export async function getIncompleteDownloads(
+  category: ModelCategory
+): Promise<DownloadState[]> {
+  const baseDir = getModelsBaseDir(category);
+  const baseExists = await exists(baseDir);
+  if (!baseExists) return [];
+
+  const entries = await readDir(baseDir);
+  const states: DownloadState[] = [];
+
+  for (const entry of entries) {
+    if (
+      entry.isDirectory() ||
+      !entry.name.startsWith('.download-state-') ||
+      !entry.name.endsWith('.json')
+    ) {
+      continue;
+    }
+    try {
+      const raw = await readFile(entry.path, 'utf8');
+      const state = JSON.parse(raw) as DownloadState;
+      // Only include if the model is NOT already fully downloaded
+      const readyPath = getReadyMarkerPath(state.category, state.modelId);
+      if (!(await exists(readyPath))) {
+        // Enrich bytesDownloaded from archive file size when missing (e.g. after crash before progress was persisted)
+        if (
+          state.archivePath &&
+          (state.bytesDownloaded == null || state.bytesDownloaded === 0)
+        ) {
+          try {
+            const st = await stat(state.archivePath);
+            if (st?.size != null && st.size >= 0) {
+              state.bytesDownloaded = st.size;
+            }
+          } catch {
+            // ignore stat errors
+          }
+        }
+        if (
+          state.totalBytes == null &&
+          state.model?.bytes != null &&
+          state.model.bytes > 0
+        ) {
+          state.totalBytes = state.model.bytes;
+        }
+        states.push(state);
+      } else {
+        // Model is ready — state file is stale, clean it up
+        try {
+          await unlink(entry.path);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore invalid state files
+    }
+  }
+
+  return states;
+}
+
+/**
+ * Resume an interrupted download/extraction.
+ * This re-enters `downloadModelByCategory` which already handles download resume
+ * (checks for existing archive file and skips download if complete).
+ */
+export async function resumeDownload<T extends ModelMetaBase>(
+  category: ModelCategory,
+  id: string,
+  opts?: {
+    onProgress?: (progress: DownloadProgress) => void;
+    signal?: AbortSignal;
+  }
+): Promise<DownloadResult> {
+  return downloadModelByCategory<T>(category, id, {
+    onProgress: opts?.onProgress,
+    signal: opts?.signal,
+  });
+}
+
+/**
+ * Delete an incomplete download — removes partial model dir, archive, and state file.
+ */
+export async function deleteIncompleteDownload(
+  category: ModelCategory,
+  id: string
+): Promise<void> {
+  // Delete model dir (may contain partial extraction)
+  const modelDir = getModelDir(category, id);
+  if (await exists(modelDir)) {
+    await unlink(modelDir);
+  }
+  // Delete archive files
+  const tarPath = getTarArchivePath(category, id);
+  const onnxPath = getOnnxPath(category, id);
+  if (await exists(tarPath)) {
+    await unlink(tarPath);
+  }
+  if (await exists(onnxPath)) {
+    await unlink(onnxPath);
+  }
+  // Delete state file
+  const statePath = getDownloadStatePath(category, id);
+  if (await exists(statePath)) {
+    await unlink(statePath);
   }
 }
 
@@ -1245,6 +1459,7 @@ export async function listDownloadedModelsWithMetadata<T extends ModelMetaBase>(
             downloadedAt: manifest.downloadedAt,
             lastUsed: manifest.lastUsed ?? null,
             sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
+            status: 'ready',
           });
         }
       } catch (error) {
@@ -1343,6 +1558,8 @@ export async function deleteModelByCategory(
   if (await exists(onnxPath)) {
     await unlink(onnxPath);
   }
+  const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
+  emitModelsListUpdated(category, list);
 }
 
 export async function clearModelCacheByCategory(

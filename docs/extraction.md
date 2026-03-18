@@ -34,6 +34,7 @@ Use this API whenever your models are delivered as **compressed archives** (`.ta
 | iOS main-bundle archives | `listBundledArchives` | iOS (and Android) |
 | Archives downloaded to the filesystem | `listBundledArchives` | Both |
 | Extract any of the above | `extractArchive` | Both |
+| Parallel extraction | `extractArchive` (concurrent) | Both |
 
 If your models are already extracted (uncompressed folders) — for example plain PAD packs or bundled assets — you do **not** need this API. Use the path helpers from the [main package](model-setup.md) directly.
 
@@ -130,8 +131,13 @@ Extracts one archive into `targetPath`. Handles both source types transparently:
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `force` | `boolean` | `true` | Overwrite existing files in `targetPath` |
-| `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent }` |
-| `signal` | `AbortSignal` | — | Cancel extraction (throws `AbortError`) |
+| `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent }`. Correctly handles parallel extractions by filtering by source path. |
+| `signal` | `AbortSignal` | — | Cancel extraction (throws `AbortError`). Cancellation is **per-operation**, so cancelling one archive won't affect others. |
+
+**Note on Parallelism:**
+- **Android:** Supports up to **2 concurrent extractions** via a fixed thread pool. Additional requests are queued.
+- **iOS:** Supports multiple concurrent extractions via GCD.
+- **Cancellation:** Aborting a specific `AbortSignal` only cancels that specific extraction.
 
 ### Types
 

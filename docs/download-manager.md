@@ -34,6 +34,8 @@ Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases.
 | Local path for init | ✅ | `getLocalModelPathByCategory()` |
 | Delete model | ✅ | `deleteModelByCategory()` |
 | Progress events | ✅ | `subscribeDownloadProgress()` — speed, ETA, phase |
+| Parallel extraction | ✅ | Support for multiple concurrent model extractions |
+| Crash recovery | ✅ | Persistent state for interrupted downloads/extractions |
 | List update events | ✅ | `subscribeModelsListUpdated()` |
 | LRU cleanup | ✅ | `cleanupLeastRecentlyUsed()` |
 
@@ -159,6 +161,39 @@ Clear the cached registry for a category.
 
 ---
 
+### Crash Recovery & Resumption
+
+The download manager uses a persistent `.download-state-<modelId>.json` file to track the progress of ongoing operations. If the app crashes or is killed during a download or extraction, these APIs allow you to find and resume them.
+
+#### `getIncompleteDownloads(category)`
+
+Find all interrupted downloads or extractions. Returns an array of `DownloadState` objects.
+
+```typescript
+const interrupted = await getIncompleteDownloads(ModelCategory.Stt);
+for (const state of interrupted) {
+  console.log(`Phase: ${state.phase}, started at: ${state.startedAt}`);
+}
+```
+
+#### `resumeDownload(category, id, options?)`
+
+Resume an interrupted operation. This re-enters the download flow; if the archive was already fully downloaded but not yet extracted, it will skip the download and go straight to extraction.
+
+```typescript
+await resumeDownload(ModelCategory.Stt, 'whisper-tiny');
+```
+
+#### `deleteIncompleteDownload(category, id)`
+
+Clean up a partial download/extraction: removes the partial model directory, any partially downloaded archive file, and the persistent state file.
+
+```typescript
+await deleteIncompleteDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+```
+
+---
+
 ### Progress & Events
 
 #### `subscribeDownloadProgress(listener)`
@@ -253,6 +288,9 @@ import {
   updateModelLastUsed,
   listDownloadedModelsWithMetadata,
   cleanupLeastRecentlyUsed,
+  getIncompleteDownloads,
+  resumeDownload,
+  deleteIncompleteDownload,
   getModelsCacheStatusByCategory,
 } from 'react-native-sherpa-onnx/download';
 
@@ -266,6 +304,7 @@ import type {
   DownloadProgressListener,
   ModelsListUpdatedListener,
   DownloadResult,
+  DownloadState,
   ModelWithMetadata,
 } from 'react-native-sherpa-onnx/download';
 ```
@@ -292,6 +331,19 @@ import type {
 | `phase` | `'downloading' \| 'extracting'` | Current phase |
 | `speed` | `number` | Bytes/second |
 | `eta` | `number` | Estimated seconds remaining |
+
+**`DownloadState`:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `modelId` | `string` | ID of the model |
+| `category` | `ModelCategory` | Model category |
+| `phase` | `'downloading' \| 'extracting'` | Current phase when interrupted |
+| `startedAt` | `string` | ISO timestamp of start |
+| `archivePath`| `string` | Local path to the archive file |
+| `model` | `ModelMetaBase` | Original model metadata |
+| `bytesDownloaded` | `number?` | Progress info (if available) |
+| `totalBytes` | `number?` | Total bytes |
 
 ---
 
