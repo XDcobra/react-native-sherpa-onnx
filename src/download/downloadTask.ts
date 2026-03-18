@@ -415,7 +415,7 @@ export async function resumeDownload<T extends ModelMetaBase>(
         activeDownloadTasks.delete(taskId);
       });
     }
-    void existing.resume();
+    existing.resume().catch(() => {});
   });
 }
 

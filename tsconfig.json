@@ -4,6 +4,7 @@
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
+      "@kesha-antonov/react-native-background-downloader": ["./src/download/background-downloader.d.ts"],
       "react-native-sherpa-onnx": ["./src/index.tsx"],
       "react-native-sherpa-onnx/download": ["./src/download/index.ts"],
       "react-native-sherpa-onnx/audio": ["./src/audio/index.ts"],
