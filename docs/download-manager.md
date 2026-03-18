@@ -10,6 +10,7 @@ Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases.
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [Setup (iOS & Android)](#setup-ios--android)
 - [API Reference](#api-reference)
   - [Registry & Listing](#registry--listing)
   - [Download & Delete](#download--delete)
@@ -75,6 +76,45 @@ if (localPath) {
   });
 }
 ```
+
+---
+
+## Setup (iOS & Android)
+
+Model downloads use [@kesha-antonov/react-native-background-downloader](https://github.com/kesha-antonov/react-native-background-downloader), which is included as a dependency of this SDK. No extra package install is required.
+
+**Android:** The SDK declares MMKV (`com.tencent:mmkv-shared:1.3.16`) for the background downloader. Do **not** add MMKV again in your app’s `build.gradle`; a duplicate or different merge order can shift resource package IDs and cause a white screen on startup (“No package ID 6a found for resource ID”). If you see that error after updating, do a full clean: `cd android && ./gradlew clean && rm -rf .gradle app/build && cd ..`, then rebuild.
+
+**iOS:** For downloads to complete reliably when the app is in the background or after it was terminated, you must forward the background URL session completion to the downloader in your AppDelegate. Without this, downloads only work reliably while the app is in the foreground.
+
+1. **React Native 0.77+ (Swift)**  
+   In your bridging header (e.g. `ios/YourApp-Bridging-Header.h`):
+   ```objc
+   #import <RNBackgroundDownloader.h>
+   ```
+   In your `AppDelegate.swift`, add:
+   ```swift
+   func application(
+     _ application: UIApplication,
+     handleEventsForBackgroundURLSession identifier: String,
+     completionHandler: @escaping () -> Void
+   ) {
+     RNBackgroundDownloader.setCompletionHandlerWithIdentifier(identifier, completionHandler: completionHandler)
+   }
+   ```
+
+2. **React Native &lt; 0.77 (Objective-C)**  
+   In your `AppDelegate.m`:
+   ```objc
+   #import <RNBackgroundDownloader.h>
+
+   - (void)application:(UIApplication *)application handleEventsForBackgroundURLSession:(NSString *)identifier completionHandler:(void (^)(void))completionHandler
+   {
+     [RNBackgroundDownloader setCompletionHandlerWithIdentifier:identifier completionHandler:completionHandler];
+   }
+   ```
+
+**Expo:** Use the library’s [Expo config plugin](https://github.com/kesha-antonov/react-native-background-downloader#expo-projects); it adds the AppDelegate code automatically at prebuild.
 
 ---
 
