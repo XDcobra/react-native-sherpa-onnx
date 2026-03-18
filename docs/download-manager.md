@@ -6,6 +6,20 @@ Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases.
 
 ---
 
+## Recommended: one function for everything
+
+**`ensureModelByCategory(category, id, opts?)`** is the main entry point for most apps. You pass category, model id, and optional callbacks; the function takes care of:
+
+- Returning immediately if the model is already downloaded and extracted
+- Resuming an incomplete **extraction** (e.g. after app crash during extract)
+- Resuming an incomplete **download** (e.g. after app close during download)
+- Starting **extraction only** if the archive is already present (e.g. from PAD or a previous run)
+- Starting a **full download** otherwise
+
+So a single call handles download + extraction and all edge cases. Use this when you only need “make this model ready”. The lower-level APIs (`downloadModelByCategory`, `resumeDownload`, `extractModelByCategory`, `getIncompleteExtractions`, `resumeExtraction`, etc.) remain public for advanced flows where you want to control each step yourself.
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -28,15 +42,17 @@ Fetch, cache, and manage model assets from official sherpa-onnx GitHub Releases.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
+| **One-call prepare** | ✅ | **`ensureModelByCategory()`** — download + extract + resume; use this as the main API |
 | Fetch model registry | ✅ | `refreshModelsByCategory()` — from GitHub Releases |
 | List available models | ✅ | `listModelsByCategory()` — cached registry |
 | Download model | ✅ | `downloadModelByCategory()` — with progress, retry, cancellation |
+| Extraction (standalone) | ✅ | `extractModelByCategory()`, `getIncompleteExtractions()`, `resumeExtraction()` |
 | Checksum verification | ✅ | SHA-256 during extraction or after download |
 | Local path for init | ✅ | `getLocalModelPathByCategory()` |
 | Delete model | ✅ | `deleteModelByCategory()` |
 | Progress events | ✅ | `subscribeDownloadProgress()` — speed, ETA, phase |
 | Parallel extraction | ✅ | Support for multiple concurrent model extractions |
-| Crash recovery | ✅ | Persistent state for interrupted downloads/extractions |
+| Crash recovery | ✅ | Persistent state for interrupted downloads/extractions; `ensureModelByCategory` resumes automatically |
 | List update events | ✅ | `subscribeModelsListUpdated()` |
 | LRU cleanup | ✅ | `cleanupLeastRecentlyUsed()` |
 
@@ -52,29 +68,26 @@ The **Qnn** category uses the [asr-models-qnn-binary](https://github.com/k2-fsa/
 import {
   ModelCategory,
   refreshModelsByCategory,
-  downloadModelByCategory,
-  getLocalModelPathByCategory,
+  ensureModelByCategory,
 } from 'react-native-sherpa-onnx/download';
 import { createTTS } from 'react-native-sherpa-onnx/tts';
 
 // 1) Refresh model registry
 await refreshModelsByCategory(ModelCategory.Tts, { forceRefresh: true });
 
-// 2) Download a model
-await downloadModelByCategory(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
-
-// 3) Get local path and initialize
-const localPath = await getLocalModelPathByCategory(
+// 2) Ensure model is available (download + extract if needed; resumes if interrupted)
+const { modelId, localPath } = await ensureModelByCategory(
   ModelCategory.Tts,
-  'vits-piper-en_US-lessac-medium'
+  'vits-piper-en_US-lessac-medium',
+  {
+    onProgress: (p) => console.log(p.percent, p.phase),
+  }
 );
 
-if (localPath) {
-  const tts = await createTTS({
-    modelPath: { type: 'file', path: localPath },
-    modelType: 'auto',
-  });
-}
+const tts = await createTTS({
+  modelPath: { type: 'file', path: localPath },
+  modelType: 'auto',
+});
 ```
 
 ---
@@ -120,6 +133,24 @@ Model downloads use [@kesha-antonov/react-native-background-downloader](https://
 
 ## API Reference
 
+### Main API (recommended)
+
+#### `ensureModelByCategory(category, id, options?)`
+
+Ensures the model is available locally. Handles: already ready, incomplete extraction, incomplete download, archive present (extract only), or full download. Returns `{ modelId, localPath }`. Use this when you only need “make this model ready”; the functions below are for advanced control.
+
+**Options:** `onProgress`, `signal`, `overwrite`, `onChecksumIssue`, `deleteArchiveAfterExtract` (same semantics as download/extraction APIs).
+
+```typescript
+const { localPath } = await ensureModelByCategory(
+  ModelCategory.Stt,
+  'sherpa-onnx-whisper-tiny',
+  { onProgress: (p) => setPercent(p.percent) }
+);
+```
+
+---
+
 ### Registry & Listing
 
 #### `refreshModelsByCategory(category, options?)`
@@ -149,6 +180,8 @@ Return the last update timestamp for the cached registry.
 ---
 
 ### Download & Delete
+
+The main API **`ensureModelByCategory`** uses these internally. Use them directly only if you need fine-grained control (e.g. start download and extraction in separate steps).
 
 #### `downloadModelByCategory(category, id, options?)`
 
@@ -203,11 +236,15 @@ Clear the cached registry for a category.
 
 ### Crash Recovery & Resumption
 
-The download manager uses a persistent `.download-state-<modelId>.json` file to track the progress of ongoing operations. If the app crashes or is killed during a download or extraction, these APIs allow you to find and resume them.
+**`ensureModelByCategory`** automatically resumes incomplete downloads and incomplete extractions when you call it. The APIs below are for advanced use (e.g. showing a list of “in progress” items or letting the user cancel a specific one).
+
+The download manager uses persistent state files (`.download-state-<modelId>.json` for downloads, `.extraction-state-<modelId>.json` for extractions). If the app crashes or is killed, these APIs let you find and resume or delete them.
+
+#### Download resumption
 
 #### `getIncompleteDownloads(category)`
 
-Find all interrupted downloads or extractions. Returns an array of `DownloadState` objects.
+Find all interrupted **downloads** (and post-download extractions that never started). Returns an array of `DownloadState` objects.
 
 ```typescript
 const interrupted = await getIncompleteDownloads(ModelCategory.Stt);
@@ -218,7 +255,7 @@ for (const state of interrupted) {
 
 #### `resumeDownload(category, id, options?)`
 
-Resume an interrupted operation. This re-enters the download flow; if the archive was already fully downloaded but not yet extracted, it will skip the download and go straight to extraction.
+Resume an interrupted download. When the archive is already fully downloaded, this runs extraction.
 
 ```typescript
 await resumeDownload(ModelCategory.Stt, 'whisper-tiny');
@@ -226,11 +263,37 @@ await resumeDownload(ModelCategory.Stt, 'whisper-tiny');
 
 #### `deleteIncompleteDownload(category, id)`
 
-Clean up a partial download/extraction: removes the partial model directory, any partially downloaded archive file, and the persistent state file.
+Clean up a partial download: removes partial model dir, partial archive, and download state file.
 
 ```typescript
 await deleteIncompleteDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
 ```
+
+#### Extraction resumption
+
+#### `getIncompleteExtractions(category)`
+
+Find all interrupted **extractions** (archive was complete but extraction did not finish). Returns an array of `ExtractionState` objects.
+
+```typescript
+const incomplete = await getIncompleteExtractions(ModelCategory.Stt);
+```
+
+#### `resumeExtraction(category, id, options?)`
+
+Resume an incomplete extraction (e.g. after app restart). Re-extracts from the existing archive.
+
+```typescript
+await resumeExtraction(ModelCategory.Stt, 'whisper-tiny');
+```
+
+#### `extractModelByCategory(category, id, options?)`
+
+Start extraction when the archive is already present (e.g. from PAD or a previous download). Fails if the archive is missing or truncated.
+
+#### `deleteIncompleteExtraction(category, id)`
+
+Remove extraction state and partial model dir; keeps the archive so the user can retry.
 
 ---
 
@@ -313,6 +376,7 @@ Public helpers from `react-native-sherpa-onnx/download`. Most apps only need the
 ```ts
 import {
   ModelCategory,
+  ensureModelByCategory,
   refreshModelsByCategory,
   listModelsByCategory,
   downloadModelByCategory,
@@ -331,6 +395,10 @@ import {
   getIncompleteDownloads,
   resumeDownload,
   deleteIncompleteDownload,
+  getIncompleteExtractions,
+  resumeExtraction,
+  extractModelByCategory,
+  deleteIncompleteExtraction,
   getModelsCacheStatusByCategory,
 } from 'react-native-sherpa-onnx/download';
 
@@ -345,7 +413,9 @@ import type {
   ModelsListUpdatedListener,
   DownloadResult,
   DownloadState,
+  ExtractionState,
   ModelWithMetadata,
+  EnsureModelOptions,
 } from 'react-native-sherpa-onnx/download';
 ```
 
@@ -385,11 +455,37 @@ import type {
 | `bytesDownloaded` | `number?` | Progress info (if available) |
 | `totalBytes` | `number?` | Total bytes |
 
+**`ExtractionState`:** Same shape as `DownloadState` for extraction-only state; includes `modelDir`. Used by `getIncompleteExtractions()`.
+
+**`EnsureModelOptions`:** `onProgress`, `signal`, `overwrite`, `onChecksumIssue`, `deleteArchiveAfterExtract`.
+
 ---
 
 ## Detailed Examples
 
-### Download with progress UI
+### Ensure model with progress UI (recommended)
+
+```typescript
+import {
+  ModelCategory,
+  refreshModelsByCategory,
+  ensureModelByCategory,
+} from 'react-native-sherpa-onnx/download';
+
+await refreshModelsByCategory(ModelCategory.Stt);
+const { localPath } = await ensureModelByCategory(
+  ModelCategory.Stt,
+  'sherpa-onnx-whisper-tiny',
+  {
+    onProgress: (p) => {
+      updateProgressBar(p.percent);
+      setPhaseLabel(p.phase === 'downloading' ? 'Downloading…' : 'Extracting…');
+    },
+  }
+);
+```
+
+### Download with progress (lower-level)
 
 ```typescript
 import {
