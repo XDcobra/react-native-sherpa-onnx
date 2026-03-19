@@ -323,6 +323,7 @@ if (!detection.success) {
 | `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
 | Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |
+| TTS init fails with `Error processing file '/usr/share/espeak-ng-data/phontab'` | Path to `espeak-ng-data` is too long; espeak-ng truncates it and falls back to `/usr/share`. See [issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) for workarounds. |
 
 **Tips:**
 
@@ -339,3 +340,4 @@ if (!detection.success) {
 - [TTS](tts.md) — Text-to-Speech API
 - [Download Manager](download-manager.md) — Download models in-app
 - [Execution Providers](execution-providers.md) — QNN, NNAPI, XNNPACK, Core ML
+- [Issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) — When TTS init fails due to long `data_dir` path (phontab /usr/share error)
