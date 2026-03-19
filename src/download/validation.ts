@@ -239,7 +239,9 @@ async function dirContainsModelFiles(dir: string): Promise<boolean> {
  *
  * - If installDir itself contains native model files (.onnx/.bin), returns installDir.
  * - If installDir has exactly one subdirectory that contains native model files, returns that subdirectory path.
- *   (Ignores our metadata: .ready, manifest.json.)
+ *   (Ignores our metadata: .ready, manifest.json.) This can produce paths like
+ *   .../tts/vits-piper-de_DE-thorsten-medium-int8/vits-piper-de_DE-thorsten-medium-int8 when the
+ *   archive extracts a top-level folder with the same name as the model id; that is intentional.
  * - Otherwise returns installDir unchanged.
  */
 export async function resolveActualModelDir(

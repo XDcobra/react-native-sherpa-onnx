@@ -195,8 +195,10 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
 
             resolve(resultDict);
         } else {
-            NSString *errorMsg = @"Failed to initialize TTS";
-            RCTLogError(@"%@", errorMsg);
+            NSString *errorMsg = result.error.empty()
+                ? @"Failed to initialize TTS"
+                : [NSString stringWithUTF8String:result.error.c_str()];
+            RCTLogError(@"TTS init failed: %@", errorMsg);
             reject(@"TTS_INIT_ERROR", errorMsg, nil);
         }
     } @catch (NSException *exception) {

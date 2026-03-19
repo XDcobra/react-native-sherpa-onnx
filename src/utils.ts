@@ -87,7 +87,18 @@ export async function resolveModelPath(
 ): Promise<string> {
   const path = await SherpaOnnx.resolveModelPath(config);
   if (config.type === 'file') {
-    return resolveActualModelDir(path);
+    const resolved = await resolveActualModelDir(path);
+    // Diagnostic: log so we can tell if /usr/share/espeak-ng-data is due to our path or sherpa-onnx fallback.
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx] resolveModelPath(file): native path=',
+        path,
+        resolved !== path
+          ? `resolvedActualModelDir=> ${resolved}`
+          : '(unchanged)'
+      );
+    }
+    return resolved;
   }
   return path;
 }

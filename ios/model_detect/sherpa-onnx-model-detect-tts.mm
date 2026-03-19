@@ -39,6 +39,13 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <Foundation/Foundation.h>
+#define TTS_DETECT_LOGI(fmt, ...) NSLog(@"[TtsModelDetect] " fmt, ##__VA_ARGS__)
+#else
+#define TTS_DETECT_LOGI(fmt, ...) ((void)0)
+#endif
+
 namespace sherpaonnx {
 namespace {
 
@@ -132,6 +139,10 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
     std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
+    TTS_DETECT_LOGI("DetectTtsModel: modelDir=%s espeak-ng dataDir=%s (empty=%d)",
+                    modelDir.c_str(),
+                    dataDirPath.empty() ? "(empty)" : dataDirPath.c_str(),
+                    (int)dataDirPath.empty());
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
