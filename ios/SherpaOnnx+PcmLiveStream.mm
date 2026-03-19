@@ -143,37 +143,10 @@ static void pcmLiveStopQueue(void) {
 
 @implementation SherpaOnnx (PcmLiveStream)
 
-- (void)startPcmLiveStream:(id __unsafe_unretained)optionsArg
+#if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
+- (void)startPcmLiveStream:(JS::NativeSherpaOnnx::SpecStartPcmLiveStreamOptions &)options
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
-{
-  int targetRate = 16000;
-  UInt32 bufferSizeFrames = 0;
-
-  // Parse optionsArg coming from JS (fallback / non-codegen path).
-  if ([optionsArg isKindOfClass:[NSDictionary class]]) {
-    NSDictionary *dict = (NSDictionary *)optionsArg;
-
-    id sampleRateValue = dict[@"sampleRate"];
-    if ([sampleRateValue respondsToSelector:@selector(intValue)]) {
-      int v = (int)[sampleRateValue intValue];
-      if (v > 0) targetRate = v;
-    }
-
-    id bufferSizeValue = dict[@"bufferSizeFrames"];
-    if ([bufferSizeValue respondsToSelector:@selector(doubleValue)]) {
-      double v = [bufferSizeValue doubleValue];
-      if (v > 0) bufferSizeFrames = (UInt32)v;
-    }
-  }
-
-  [self _startPcmLiveStreamWithTargetRate:targetRate bufferSizeFrames:bufferSizeFrames resolve:resolve reject:reject];
-}
-
-#if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
-- (void)startPcmLiveStreamWithOptions:(JS::NativeSherpaOnnx::SpecStartPcmLiveStreamOptions &)options
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
 {
   int targetRate = 16000;
   if (options.sampleRate()) {
