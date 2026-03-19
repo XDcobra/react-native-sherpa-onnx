@@ -93,7 +93,7 @@ get_framework_config() {
   case "$slug" in
     sherpa-onnx)
       TAG_FILE="$PROJECT_ROOT/third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG"
-      TAG_PREFIX="framework-v"
+      TAG_PREFIX="sherpa-onnx-ios-v"
       XCFRAMEWORK_NAME="sherpa_onnx.xcframework"
       ZIP_ASSET_NAME="sherpa_onnx.xcframework.zip"
       VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-sherpa-onnx"
