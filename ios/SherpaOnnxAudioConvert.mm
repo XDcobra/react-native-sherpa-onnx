@@ -2,6 +2,7 @@
 #import <React/RCTLog.h>
 #include <string>
 #include <sys/stat.h>
+#include <vector>
 
 #ifdef HAVE_FFMPEG
 extern "C" {
@@ -12,11 +13,14 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 #include <cstdio>
-#include <vector>
 #endif
 
 // Forward declaration — convertToFormat handles all formats including WAV (16 kHz mono).
 static std::string convertToFormat(const char* inputPath, const char* outputPath, const char* formatHint, int outputSampleRateHz);
+static std::string decodeAudioFileToFloatMono(const char* inputPath,
+                                              int targetSampleRateHz,
+                                              std::vector<float>* outSamples,
+                                              int* outSampleRate);
 
 // Convenience: convert any audio to 16 kHz mono WAV via the main convertToFormat pipeline.
 static std::string convertToWav16kMono(const char* inputPath, const char* outputPath) {
@@ -659,6 +663,202 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 #endif
 }
 
+static std::string decodeAudioFileToFloatMono(const char* inputPath,
+                                              int targetSampleRateHz,
+                                              std::vector<float>* outSamples,
+                                              int* outSampleRate) {
+    outSamples->clear();
+    *outSampleRate = 0;
+#ifndef HAVE_FFMPEG
+    (void)inputPath;
+    (void)targetSampleRateHz;
+    return std::string("FFmpeg not available. Build prebuilts with third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh.");
+#else
+    if (!inputPath) {
+        return std::string("inputPath is null");
+    }
+
+    AVFormatContext* inFmt = nullptr;
+    if (avformat_open_input(&inFmt, inputPath, nullptr, nullptr) < 0) {
+        return std::string("Failed to open input file");
+    }
+    if (avformat_find_stream_info(inFmt, nullptr) < 0) {
+        avformat_close_input(&inFmt);
+        return std::string("Failed to find stream info");
+    }
+
+    int audioStreamIndex = -1;
+    for (unsigned i = 0; i < inFmt->nb_streams; ++i) {
+        if (inFmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioStreamIndex = (int)i;
+            break;
+        }
+    }
+    if (audioStreamIndex < 0) {
+        avformat_close_input(&inFmt);
+        return std::string("No audio stream found in input");
+    }
+
+    AVStream* inStream = inFmt->streams[audioStreamIndex];
+    const AVCodec* decoder = avcodec_find_decoder(inStream->codecpar->codec_id);
+    if (!decoder) {
+        avformat_close_input(&inFmt);
+        return std::string("Unsupported input codec");
+    }
+
+    AVCodecContext* decCtx = avcodec_alloc_context3(decoder);
+    if (!decCtx) {
+        avformat_close_input(&inFmt);
+        return std::string("Failed to allocate decoder context");
+    }
+    if (avcodec_parameters_to_context(decCtx, inStream->codecpar) < 0) {
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Failed to copy codec parameters");
+    }
+    if (avcodec_open2(decCtx, decoder, nullptr) < 0) {
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Failed to open decoder");
+    }
+
+    int in_sr = decCtx->sample_rate;
+    if (inStream->codecpar->sample_rate > 0) {
+        in_sr = inStream->codecpar->sample_rate;
+    }
+    if (in_sr <= 0) {
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Invalid input sample rate");
+    }
+
+    int out_sr = (targetSampleRateHz > 0) ? targetSampleRateHz : in_sr;
+    if (out_sr <= 0) {
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Invalid output sample rate");
+    }
+
+    AVChannelLayout in_layout{};
+    if (inStream->codecpar->ch_layout.nb_channels > 0) {
+        if (av_channel_layout_copy(&in_layout, &inStream->codecpar->ch_layout) < 0) {
+            avcodec_free_context(&decCtx);
+            avformat_close_input(&inFmt);
+            return std::string("Failed to copy input channel layout");
+        }
+    } else {
+        if (av_channel_layout_copy(&in_layout, &decCtx->ch_layout) < 0) {
+            avcodec_free_context(&decCtx);
+            avformat_close_input(&inFmt);
+            return std::string("Failed to get decoder channel layout");
+        }
+    }
+
+    AVChannelLayout out_layout = AV_CHANNEL_LAYOUT_MONO;
+    SwrContext* swr = nullptr;
+    if (swr_alloc_set_opts2(&swr,
+                           &out_layout,
+                           AV_SAMPLE_FMT_FLT,
+                           out_sr,
+                           &in_layout,
+                           decCtx->sample_fmt,
+                           in_sr,
+                           0,
+                           nullptr) < 0 ||
+        !swr) {
+        av_channel_layout_uninit(&in_layout);
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Failed to initialize resampler");
+    }
+    if (swr_init(swr) < 0) {
+        av_channel_layout_uninit(&in_layout);
+        swr_free(&swr);
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Failed to initialize resampler (swr_init)");
+    }
+    av_channel_layout_uninit(&in_layout);
+
+    AVPacket* pkt = av_packet_alloc();
+    AVFrame* frame = av_frame_alloc();
+    if (!pkt || !frame) {
+        if (pkt) av_packet_free(&pkt);
+        if (frame) av_frame_free(&frame);
+        swr_free(&swr);
+        avcodec_free_context(&decCtx);
+        avformat_close_input(&inFmt);
+        return std::string("Out of memory");
+    }
+
+    auto appendConverted = [&](uint8_t* buf, int nbFloats) {
+        if (!buf || nbFloats <= 0) return;
+        const float* f = reinterpret_cast<const float*>(buf);
+        outSamples->insert(outSamples->end(), f, f + nbFloats);
+    };
+
+    auto convertOneFrame = [&](AVFrame* fr) {
+        auto in_data = reinterpret_cast<const uint8_t**>(
+            fr->extended_data ? fr->extended_data : fr->data);
+        int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
+        int64_t max_out =
+            av_rescale_rnd(swr_get_delay(swr, in_sr2) + (int64_t)fr->nb_samples, out_sr, in_sr2, AV_ROUND_UP);
+        if (max_out < 1) max_out = 1;
+        uint8_t* out_buf = nullptr;
+        if (av_samples_alloc(&out_buf, nullptr, 1, (int)max_out, AV_SAMPLE_FMT_FLT, 0) < 0) {
+            return;
+        }
+        int converted = swr_convert(swr, &out_buf, (int)max_out, in_data, fr->nb_samples);
+        if (converted > 0) {
+            appendConverted(out_buf, converted);
+        }
+        av_freep(&out_buf);
+    };
+
+    while (av_read_frame(inFmt, pkt) >= 0) {
+        if (pkt->stream_index == audioStreamIndex) {
+            if (avcodec_send_packet(decCtx, pkt) == 0) {
+                while (avcodec_receive_frame(decCtx, frame) == 0) {
+                    convertOneFrame(frame);
+                    av_frame_unref(frame);
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    if (avcodec_send_packet(decCtx, nullptr) == 0) {
+        while (avcodec_receive_frame(decCtx, frame) == 0) {
+            convertOneFrame(frame);
+            av_frame_unref(frame);
+        }
+    }
+
+    {
+        int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
+        int tailCap = (int)swr_get_delay(swr, in_sr2) + 4096;
+        if (tailCap < 16) tailCap = 16;
+        uint8_t* tailData = nullptr;
+        if (av_samples_alloc(&tailData, nullptr, 1, tailCap, AV_SAMPLE_FMT_FLT, 0) >= 0) {
+            int tailConverted = swr_convert(swr, &tailData, tailCap, nullptr, 0);
+            if (tailConverted > 0) {
+                appendConverted(tailData, tailConverted);
+            }
+            av_freep(&tailData);
+        }
+    }
+
+    av_packet_free(&pkt);
+    av_frame_free(&frame);
+    swr_free(&swr);
+    avcodec_free_context(&decCtx);
+    avformat_close_input(&inFmt);
+
+    *outSampleRate = out_sr;
+    return std::string("");
+#endif
+}
+
 @implementation SherpaOnnxAudioConvert
 
 + (BOOL)convertAudioToWav16k:(NSString *)inputPath
@@ -692,6 +892,42 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
         }
         return NO;
     }
+    return YES;
+}
+
++ (BOOL)decodeAudioFileToFloatSamples:(NSString *)inputPath
+                   targetSampleRateHz:(int)targetSampleRateHz
+                           outSamples:(NSArray<NSNumber *> **)outSamples
+                        outSampleRate:(int *)outSampleRate
+                                error:(NSError **)error
+{
+    if (!outSamples || !outSampleRate) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
+                                         code:-2
+                                     userInfo:@{NSLocalizedDescriptionKey: @"outSamples/outSampleRate required"}];
+        }
+        return NO;
+    }
+    *outSamples = nil;
+    *outSampleRate = 0;
+    std::vector<float> v;
+    int sr = 0;
+    std::string err = decodeAudioFileToFloatMono(inputPath.UTF8String, targetSampleRateHz, &v, &sr);
+    if (!err.empty()) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
+                                         code:-1
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:err.c_str()]}];
+        }
+        return NO;
+    }
+    NSMutableArray<NSNumber *> *arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (size_t i = 0; i < v.size(); ++i) {
+        [arr addObject:@(v[i])];
+    }
+    *outSamples = arr;
+    *outSampleRate = sr;
     return YES;
 }
 

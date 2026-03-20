@@ -23,6 +23,16 @@ NS_ASSUME_NONNULL_BEGIN
           outputSampleRateHz:(int)outputSampleRateHz
                        error:(NSError **)error;
 
+/**
+ * Decode audio to mono float samples (approx. [-1, 1]) and sample rate.
+ * targetSampleRateHz <= 0 keeps the decoded stream rate.
+ */
++ (BOOL)decodeAudioFileToFloatSamples:(NSString *)inputPath
+                   targetSampleRateHz:(int)targetSampleRateHz
+                           outSamples:(NSArray<NSNumber *> **)outSamples
+                        outSampleRate:(int *)outSampleRate
+                                error:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END
