@@ -8,6 +8,9 @@
 # Requires: ANDROID_NDK (or ANDROID_NDK_HOME / ANDROID_NDK_ROOT).
 # For --qnn: QNN_SDK_ROOT must point to the Qualcomm QNN SDK installation.
 # Sherpa-onnx source: third_party/sherpa-onnx (submodule).
+# Patches cmake/espeak-ng-for-piper.cmake so espeak-ng is built with N_PATH_HOME=512 (same as
+# build_sherpa_onnx_ios.sh); avoids truncated data_dir paths on long app storage paths. See
+# issue-tts-espeak-ng-path-length.md in this directory.
 #
 # ONNX Runtime: Resolved in order (1) SHERPA_ONNXRUNTIME_LIB_DIR + INCLUDE_DIR if set,
 # (2) third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/ if present (output of build_onnxruntime_android_aar.sh),
@@ -257,6 +260,32 @@ build_abi() {
     echo "Copied .so files to $DST_LIB"
     echo ""
 }
+
+# espeak-ng (Piper/Vits TTS) uses a fixed path buffer (N_PATH_HOME_DEF 255 on Posix). Long paths get
+# truncated and cause fallback to /usr/share/espeak-ng-data and init failure. Patch sherpa-onnx's CMake
+# so the espeak-ng target is built with N_PATH_HOME=512. See issue-tts-espeak-ng-path-length.md (in this directory).
+echo "===== Patching espeak-ng N_PATH_HOME (CMake) ====="
+CMAKE_FILE="${SHERPA_SRC}/cmake/espeak-ng-for-piper.cmake"
+if [ ! -f "$CMAKE_FILE" ]; then
+    echo "Note: $CMAKE_FILE not found, skipping N_PATH_HOME patch."
+else
+    if grep -q "N_PATH_HOME=512" "$CMAKE_FILE" 2>/dev/null; then
+        echo "N_PATH_HOME=512 already present in $CMAKE_FILE, skipping."
+    else
+        case "$(uname -s)" in
+            Darwin)
+                sed -i.bak '/add_subdirectory.*espeak_ng_SOURCE_DIR.*espeak_ng_BINARY_DIR/a\
+  target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)
+' "$CMAKE_FILE"
+                rm -f "${CMAKE_FILE}.bak"
+                ;;
+            *)
+                sed -i '/add_subdirectory.*espeak_ng_SOURCE_DIR.*espeak_ng_BINARY_DIR/a\  target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)' "$CMAKE_FILE"
+                ;;
+        esac
+        echo "Patched $CMAKE_FILE: added target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)"
+    fi
+fi
 
 cd "$SHERPA_SRC"
 

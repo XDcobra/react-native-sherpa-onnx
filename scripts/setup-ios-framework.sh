@@ -72,6 +72,12 @@ fi
 # Create frameworks directory if it doesn't exist
 mkdir -p "$FRAMEWORKS_DIR"
 
+# Backward compatibility: if slug-specific sherpa-onnx version file exists, remove legacy .framework-version
+# so only one source of truth remains and build numbers (e.g. 1.12.28-1) are not confused with legacy (1.12.28).
+if [ -f "$FRAMEWORKS_DIR/.framework-version-sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
+  rm -f "$FRAMEWORKS_DIR/.framework-version"
+fi
+
 # Framework slugs to manage (order: sherpa-onnx first, then libarchive, then ffmpeg)
 FRAMEWORK_SLUGS=(sherpa-onnx)
 
@@ -145,17 +151,17 @@ framework_valid() {
 
 # Helper: get installed framework version (from version file or xcframework VERSION.txt)
 # Usage: get_installed_version <slug>
-# Backward compat: for sherpa-onnx, also checks legacy .framework-version
+# Prefer slug-specific VERSION_FILE so build numbers (e.g. 1.12.28-1) match; fall back to legacy .framework-version for sherpa-onnx.
 get_installed_version() {
   local slug="$1"
   get_framework_config "$slug" || return 1
-  # Backward compat: sherpa-onnx used to use .framework-version
-  if [ "$slug" = "sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
-    cat "$FRAMEWORKS_DIR/.framework-version" 2>/dev/null | tr -d '\r\n'
-    return 0
-  fi
   if [ -f "$VERSION_FILE" ]; then
     cat "$VERSION_FILE" 2>/dev/null | tr -d '\r\n'
+    return 0
+  fi
+  # Backward compatibility only: sherpa-onnx used to use .framework-version; prefer slug-specific file above.
+  if [ "$slug" = "sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
+    cat "$FRAMEWORKS_DIR/.framework-version" 2>/dev/null | tr -d '\r\n'
     return 0
   fi
   if [ -f "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/VERSION.txt" ]; then
@@ -294,6 +300,7 @@ get_local_framework_version() {
     cat "$VERSION_FILE"
     return 0
   fi
+  # Backward compatibility only: sherpa-onnx used to use .framework-version.
   if [ "$slug" = "sherpa-onnx" ] && [ -f "$FRAMEWORKS_DIR/.framework-version" ]; then
     cat "$FRAMEWORKS_DIR/.framework-version"
     return 0
@@ -446,10 +453,6 @@ if [ "$INTERACTIVE" = true ]; then
     fi
   done
   echo "" >&2
-  echo "Next steps:" >&2
-  echo "  1. cd example" >&2
-  echo "  2. pod install" >&2
-  echo "  3. Open ios/SherpaOnnxExample.xcworkspace in Xcode" >&2
 fi
 
 # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
