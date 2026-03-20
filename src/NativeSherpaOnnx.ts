@@ -640,6 +640,17 @@ export interface Spec extends TurboModule {
    */
   convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
 
+  /**
+   * Decode an audio file to mono float samples in [-1, 1] and the effective sample rate.
+   * Supports the same inputs as convertAudioToFormat (file paths and Android content:// URIs).
+   * On Android, non-WAV formats require FFmpeg prebuilts; WAV may use a fast path via WaveReader.
+   * @param targetSampleRateHz - If > 0, resample to this rate; if 0 or omitted, keep the decoded stream rate.
+   */
+  decodeAudioFileToFloatSamples(
+    inputPath: string,
+    targetSampleRateHz?: number
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
   // ==================== Execution Provider Methods ====================
 
   /**
