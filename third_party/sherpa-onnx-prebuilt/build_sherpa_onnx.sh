@@ -338,4 +338,4 @@ fi
 [ -n "$ORT_PREBUILT_ROOT" ] && [ -d "$ORT_PREBUILT_ROOT" ] && rm -rf "$ORT_PREBUILT_ROOT"
 
 echo "Done. Prebuilts are in $OUTPUT_BASE/<abi>/lib/ and $OUTPUT_BASE/java/ (classes.jar [Kotlin] and/or classes-java.jar [Java])"
-echo "Run: node $SCRIPT_DIR/copy_prebuilts_to_sdk.js to copy into android/src/main/jniLibs/"
+echo "For the RN SDK: copy android/<abi>/lib/*.so into ../../android/src/main/jniLibs/<abi>/ or rely on Gradle/Maven prebuilts."

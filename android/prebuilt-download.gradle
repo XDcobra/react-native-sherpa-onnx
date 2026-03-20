@@ -1,6 +1,9 @@
 // Prebuilt download and check logic. Applied after android {} and configurations.
 // Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, ortVersion (from prebuilt-versions.gradle)
 // and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, onnxruntimeAar (from build.gradle).
+//
+// Logging (downloadNativeLibsIfNeeded): each line is tagged [prebuilt], [sherpa-onnx], [FFmpeg], [libarchive], or [onnxruntime].
+// Sources are labeled (1) LOCAL skip / supplemental copy, (2) MAVEN AAR, (3) GITHUB release zip.
 // When sherpaOnnxDisableFfmpeg=true (gradle.properties), FFmpeg is not required; see docs/disable-ffmpeg.md.
 // When sherpaOnnxDisableLibarchive=true (gradle.properties), libarchive is not required; see docs/disable-libarchive.md.
 
@@ -96,36 +99,141 @@ def readReleaseTag = { File tagFile ->
   }
 }
 
+/** Which .so files are missing under jniLibs for one ABI (for diagnostics). */
+def listMissingSoInAbi = { File abiDir, List<String> required ->
+  if (!abiDir.exists()) return required
+  required.findAll { soName -> !new File(abiDir, soName).exists() }
+}
+
+/** First ABI dir that is incomplete for the given required list, or null if all OK. */
+def firstAbiWithMissingLibs = { List<String> required ->
+  for (abi in requiredAbis) {
+    def abiDir = new File(jniLibsDir, abi)
+    def missing = listMissingSoInAbi(abiDir, required)
+    if (!missing.isEmpty()) return [abi, missing]
+  }
+  return null
+}
+
 project.tasks.register("downloadNativeLibsIfNeeded") {
   doLast {
     def downloadDir = file("${project.buildDir}/prebuilt-downloads")
+    def jniLibsHuman = "${project.projectDir}/src/main/jniLibs"
+    def sherpaHeaderPath = "src/main/cpp/include/sherpa-onnx/c-api/c-api.h"
+    def ffmpegHeaderPath = "src/main/cpp/include/ffmpeg/libavcodec/avcodec.h"
+    def libarchiveHeaderPath = "src/main/cpp/include/libarchive/archive.h"
+
     def currentSherpaVersion = project.ext.sherpaOnnxVersion
     def sherpaVersionFile = new File(downloadDir, "sherpa-onnx-version.txt")
     def storedSherpaVersion = (sherpaVersionFile.exists() ? sherpaVersionFile.text.trim() : null)
-    def sherpaNeedsUpdate = !hasAllSherpaLibs() || !hasSherpaHeaders() || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
+    def sherpaLibsOk = hasAllSherpaLibs()
+    def sherpaHdrsOk = hasSherpaHeaders()
+    def sherpaNeedsUpdate = !sherpaLibsOk || !sherpaHdrsOk || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
 
     def currentFfmpegVersion = project.ext.ffmpegVersion
     def ffmpegVersionFile = new File(downloadDir, "ffmpeg-version.txt")
     def storedFfmpegVersion = (ffmpegVersionFile.exists() ? ffmpegVersionFile.text.trim() : null)
-    def ffmpegNeedsUpdate = !hasAllFfmpegLibs() || !hasFfmpegHeaders() || storedFfmpegVersion == null || storedFfmpegVersion != currentFfmpegVersion
+    def ffmpegLibsOk = hasAllFfmpegLibs()
+    def ffmpegHdrsOk = hasFfmpegHeaders()
+    def ffmpegNeedsUpdate = !ffmpegLibsOk || !ffmpegHdrsOk || storedFfmpegVersion == null || storedFfmpegVersion != currentFfmpegVersion
 
     def currentLibarchiveVersion = project.ext.libarchiveVersion
     def libarchiveVersionFile = new File(downloadDir, "libarchive-version.txt")
     def storedLibarchiveVersion = (libarchiveVersionFile.exists() ? libarchiveVersionFile.text.trim() : null)
-    def libarchiveNeedsUpdate = !hasAllLibarchiveLibs() || !hasLibarchiveHeaders() || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
+    def libarchiveLibsOk = hasAllLibarchiveLibs()
+    def libarchiveHdrsOk = hasLibarchiveHeaders()
+    def libarchiveNeedsUpdate = !libarchiveLibsOk || !libarchiveHdrsOk || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
 
-    if (hasAllSherpaLibs() && hasSherpaHeaders() && !sherpaNeedsUpdate) {
-      println "[sherpa-onnx] Native libs + headers: (1) already present, version ${currentSherpaVersion}"
+    println "[prebuilt] downloadNativeLibsIfNeeded: use local .so/headers/stamps if complete; else Maven AAR; else GitHub."
+
+    // --- sherpa-onnx diagnostics ---
+    if (!sherpaNeedsUpdate) {
+      println "[sherpa-onnx] source: (1) LOCAL — skip fetch. jniLibs + ${sherpaHeaderPath} OK, stamp ${sherpaVersionFile.name}=${currentSherpaVersion}"
+    } else {
+      println "[sherpa-onnx] update needed (would use Maven first, then GitHub if required). Reasons:"
+      if (!sherpaLibsOk) {
+        def gap = firstAbiWithMissingLibs(requiredSherpaOnnxSoFiles)
+        if (gap) {
+          println "[sherpa-onnx]   • jniLibs incomplete: ABI '${gap[0]}' missing: ${gap[1].join(', ')}"
+        } else {
+          println "[sherpa-onnx]   • jniLibs: one or more ABI dirs or required .so missing (${requiredSherpaOnnxSoFiles.join(', ')})"
+        }
+      }
+      if (!sherpaHdrsOk) {
+        println "[sherpa-onnx]   • headers: ${sherpaHeaderPath} missing → often fixed by Maven/GitHub extract"
+      }
+      if (storedSherpaVersion == null) {
+        println "[sherpa-onnx]   • version stamp: ${sherpaVersionFile.name} missing → common after ./gradlew clean"
+      } else if (storedSherpaVersion != currentSherpaVersion) {
+        println "[sherpa-onnx]   • version stamp: stored '${storedSherpaVersion}' != gradle sherpaOnnxVersion '${currentSherpaVersion}'"
+      }
     }
-    if (sherpaNeedsUpdate && storedSherpaVersion != null && storedSherpaVersion != currentSherpaVersion) {
-      println "[sherpa-onnx] Version change detected (${storedSherpaVersion} -> ${currentSherpaVersion}), refreshing libs and headers"
+
+    // --- FFmpeg ---
+    if (sherpaOnnxDisableFfmpeg) {
+      println "[FFmpeg] skipped (sherpaOnnxDisableFfmpeg=true)"
+    } else if (!ffmpegNeedsUpdate) {
+      println "[FFmpeg] source: (1) LOCAL — skip fetch. jniLibs + ${ffmpegHeaderPath} OK, stamp ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
+    } else {
+      println "[FFmpeg] update needed. Reasons:"
+      if (!ffmpegLibsOk) {
+        def gap = firstAbiWithMissingLibs(requiredFfmpegSoFiles)
+        if (gap) {
+          println "[FFmpeg]   • jniLibs incomplete: ABI '${gap[0]}' missing: ${gap[1].join(', ')}"
+        } else {
+          println "[FFmpeg]   • jniLibs: required FFmpeg .so missing for an ABI"
+        }
+      }
+      if (!ffmpegHdrsOk) {
+        println "[FFmpeg]   • headers: ${ffmpegHeaderPath} missing"
+      }
+      if (storedFfmpegVersion == null) {
+        println "[FFmpeg]   • version stamp: ${ffmpegVersionFile.name} missing"
+      } else if (storedFfmpegVersion != currentFfmpegVersion) {
+        println "[FFmpeg]   • version stamp: stored '${storedFfmpegVersion}' != gradle ffmpegVersion '${currentFfmpegVersion}'"
+      }
     }
-    if (ffmpegNeedsUpdate && storedFfmpegVersion != null && storedFfmpegVersion != currentFfmpegVersion) {
-      println "[FFmpeg] Version change detected (${storedFfmpegVersion} -> ${currentFfmpegVersion}), refreshing libs and headers"
+
+    // --- libarchive ---
+    if (sherpaOnnxDisableLibarchive) {
+      println "[libarchive] skipped (sherpaOnnxDisableLibarchive=true)"
+    } else if (!libarchiveNeedsUpdate) {
+      println "[libarchive] source: (1) LOCAL — skip fetch. jniLibs + ${libarchiveHeaderPath} OK, stamp ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
+    } else {
+      println "[libarchive] update needed. Reasons:"
+      if (!libarchiveLibsOk) {
+        def gap = firstAbiWithMissingLibs(requiredLibarchiveSoFiles)
+        if (gap) {
+          println "[libarchive]   • jniLibs incomplete: ABI '${gap[0]}' missing: ${gap[1].join(', ')}"
+        } else {
+          println "[libarchive]   • jniLibs: libarchive/libzstd .so missing for an ABI"
+        }
+      }
+      if (!libarchiveHdrsOk) {
+        println "[libarchive]   • headers: ${libarchiveHeaderPath} missing"
+      }
+      if (storedLibarchiveVersion == null) {
+        println "[libarchive]   • version stamp: ${libarchiveVersionFile.name} missing"
+      } else if (storedLibarchiveVersion != currentLibarchiveVersion) {
+        println "[libarchive]   • version stamp: stored '${storedLibarchiveVersion}' != gradle libarchiveVersion '${currentLibarchiveVersion}'"
+      }
     }
-    if (libarchiveNeedsUpdate && storedLibarchiveVersion != null && storedLibarchiveVersion != currentLibarchiveVersion) {
-      println "[libarchive] Version change detected (${storedLibarchiveVersion} -> ${currentLibarchiveVersion}), refreshing libs and headers"
+
+    // --- onnxruntime JNI (Maven only in this task) ---
+    def ortJniOk = hasAllOnnxruntimeJniLibs()
+    if (!ortJniOk) {
+      def gap = firstAbiWithMissingLibs(requiredOnnxruntimeJniSoFiles)
+      println "[onnxruntime] update needed for JNI bridge only (libonnxruntime.so stays from sherpa prebuilts). Reasons:"
+      if (gap) {
+        println "[onnxruntime]   • jniLibs: ABI '${gap[0]}' missing: ${gap[1].join(', ')}"
+      } else {
+        println "[onnxruntime]   • jniLibs: ${requiredOnnxruntimeJniSoFiles.join(', ')} missing for an ABI"
+      }
+      println "[onnxruntime]   • source will be: (2) MAVEN AAR (onnxruntime) — only libonnxruntime4j_jni.so extracted"
+    } else {
+      println "[onnxruntime] source: (1) LOCAL — libonnxruntime4j_jni.so present for all ABIs; no JNI extract"
     }
+    println ""
 
     def sherpaUpdatedFromAar = [false]
     def ffmpegUpdatedFromAar = [false]
@@ -148,18 +256,25 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           def includeSherpaDir = file("${project.projectDir}/src/main/cpp/include/sherpa-onnx")
           def aarCapiDir = new File(aarExtractDir, "c-api")
+          def copiedHeaders = false
           if (aarCapiDir.exists()) {
             includeSherpaDir.mkdirs()
             copy { from fileTree(aarExtractDir) { include 'c-api/**' }; into includeSherpaDir }
-            println "Extracted sherpa-onnx C-API headers from Maven AAR"
+            copiedHeaders = true
           }
           downloadDir.mkdirs()
           sherpaVersionFile.text = currentSherpaVersion
           sherpaUpdatedFromAar[0] = true
-          println "[sherpa-onnx] Native libs + headers: (2) Maven AAR (${aar.name})"
+          println "[sherpa-onnx] applied: (2) MAVEN AAR — artifact ${aar.name}"
+          println "[sherpa-onnx]   from: configuration sherpaOnnxAar → extracted ${aarExtractDir}"
+          println "[sherpa-onnx]   into jniLibs: AAR jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
+          println "[sherpa-onnx]   into headers: ${copiedHeaders ? 'c-api/** → ' + includeSherpaDir : '(no c-api/ in AAR — headers unchanged)'}"
+          println "[sherpa-onnx]   stamp written: ${sherpaVersionFile.absolutePath} = ${currentSherpaVersion}"
+        } else {
+          println "[sherpa-onnx] (2) MAVEN: sherpaOnnxAar resolved empty — will try (3) GitHub if repo is set"
         }
       } catch (Exception e) {
-        println "Could not resolve sherpa-onnx Maven AAR: ${e.message}"
+        println "[sherpa-onnx] (2) MAVEN failed: ${e.message} — will try (3) GitHub if repo is set"
       }
     }
 
@@ -181,18 +296,25 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           def ffmpegIncludeDir = file("${project.projectDir}/src/main/cpp/include/ffmpeg")
           def aarIncludeDir = new File(aarExtractDir, "include")
+          def copiedHdr = false
           if (aarIncludeDir.exists()) {
             ffmpegIncludeDir.mkdirs()
             copy { from aarIncludeDir; into ffmpegIncludeDir }
-            println "Extracted FFmpeg headers from Maven AAR"
+            copiedHdr = true
           }
           downloadDir.mkdirs()
           ffmpegVersionFile.text = currentFfmpegVersion
           ffmpegUpdatedFromAar[0] = true
-          println "[FFmpeg] Native libs + headers: (2) Maven AAR (${aar.name})"
+          println "[FFmpeg] applied: (2) MAVEN AAR — artifact ${aar.name}"
+          println "[FFmpeg]   from: configuration ffmpegAar → ${aarExtractDir}"
+          println "[FFmpeg]   into jniLibs: jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
+          println "[FFmpeg]   into headers: ${copiedHdr ? 'include/** → ' + ffmpegIncludeDir : '(no include/ in AAR)'}"
+          println "[FFmpeg]   stamp: ${ffmpegVersionFile.absolutePath} = ${currentFfmpegVersion}"
+        } else {
+          println "[FFmpeg] (2) MAVEN: ffmpegAar empty — will try (3) GitHub if repo is set"
         }
       } catch (Exception e) {
-        println "Could not resolve FFmpeg Maven AAR: ${e.message}"
+        println "[FFmpeg] (2) MAVEN failed: ${e.message} — will try (3) GitHub if repo is set"
       }
     }
 
@@ -214,18 +336,25 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           def libarchiveIncludeDir = file("${project.projectDir}/src/main/cpp/include/libarchive")
           def aarIncludeDir = new File(aarExtractDir, "include")
+          def copiedHdr = false
           if (aarIncludeDir.exists()) {
             libarchiveIncludeDir.mkdirs()
             copy { from aarIncludeDir; into libarchiveIncludeDir }
-            println "Extracted libarchive headers from Maven AAR"
+            copiedHdr = true
           }
           downloadDir.mkdirs()
           libarchiveVersionFile.text = currentLibarchiveVersion
           libarchiveUpdatedFromAar[0] = true
-          println "[libarchive] Native libs + headers: (2) Maven AAR (${aar.name})"
+          println "[libarchive] applied: (2) MAVEN AAR — artifact ${aar.name}"
+          println "[libarchive]   from: configuration libarchiveAar → ${aarExtractDir}"
+          println "[libarchive]   into jniLibs: jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
+          println "[libarchive]   into headers: ${copiedHdr ? 'include/** → ' + libarchiveIncludeDir : '(no include/ in AAR)'}"
+          println "[libarchive]   stamp: ${libarchiveVersionFile.absolutePath} = ${currentLibarchiveVersion}"
+        } else {
+          println "[libarchive] (2) MAVEN: libarchiveAar empty — will try (3) GitHub if repo is set"
         }
       } catch (Exception e) {
-        println "Could not resolve libarchive Maven AAR: ${e.message}"
+        println "[libarchive] (2) MAVEN failed: ${e.message} — will try (3) GitHub if repo is set"
       }
     }
 
@@ -252,10 +381,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
               }
             }
           }
-          println "[onnxruntime] JNI bridge: Maven AAR (${aar.name})"
+          println "[onnxruntime] applied: (2) MAVEN AAR — artifact ${aar.name}"
+          println "[onnxruntime]   from: configuration onnxruntimeAar → ${aarExtractDir}"
+          println "[onnxruntime]   into jniLibs: only libonnxruntime4j_jni.so per ABI → ${jniLibsHuman}/<abi>/"
+        } else {
+          println "[onnxruntime] (2) MAVEN: onnxruntimeAar empty — JNI bridge still missing"
         }
       } catch (Exception e) {
-        println "Could not resolve onnxruntime Maven AAR: ${e.message}"
+        println "[onnxruntime] (2) MAVEN failed: ${e.message}"
       }
     }
 
@@ -265,6 +398,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       def needLibarchive = !sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]
       def needSherpa = sherpaNeedsUpdate && !sherpaUpdatedFromAar[0]
       if (needFfmpeg || needLibarchive || needSherpa) {
+        println "[prebuilt] (3) GITHUB skipped: no repo (set -PprebuiltGitHubRepo=owner/repo or use a git remote pointing at github.com)"
+        println "[prebuilt]   still unresolved: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}"
         def diag = [
           "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
           "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
@@ -278,13 +413,19 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. " +
           "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-          "Alternatively run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist. " +
+          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
           "Diagnostics: [${diag}]"
         )
       }
       return
+    }
+    def willUseGithub = (!sherpaOnnxDisableFfmpeg && ffmpegNeedsUpdate && !ffmpegUpdatedFromAar[0]) ||
+        (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]) ||
+        (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0])
+    if (willUseGithub) {
+      println "[prebuilt] (3) GITHUB: will download release zips from https://github.com/${repo}/releases/download/<tag>/…"
     }
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
@@ -312,7 +453,11 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       ffmpegVersionFile.text = currentFfmpegVersion
-      println "Downloaded and extracted FFmpeg prebuilts (libs + include) from ${tag}"
+      println "[FFmpeg] applied: (3) GITHUB RELEASE — tag ${tag}"
+      println "[FFmpeg]   url: ${url}"
+      println "[FFmpeg]   into jniLibs: <abi>/*.so from zip → ${jniLibsHuman}/"
+      println "[FFmpeg]   into headers: include/** → ${ffmpegIncludeDir} (if present in zip)"
+      println "[FFmpeg]   stamp: ${ffmpegVersionFile.absolutePath} = ${currentFfmpegVersion}"
     }
 
     if (!sherpaOnnxDisableLibarchive && libarchiveNeedsUpdate && !libarchiveUpdatedFromAar[0]) {
@@ -339,7 +484,11 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       libarchiveVersionFile.text = currentLibarchiveVersion
-      println "Downloaded and extracted libarchive prebuilts (libs + include) from ${tag}"
+      println "[libarchive] applied: (3) GITHUB RELEASE — tag ${tag}"
+      println "[libarchive]   url: ${url}"
+      println "[libarchive]   into jniLibs: <abi>/*.so from zip → ${jniLibsHuman}/"
+      println "[libarchive]   into headers: include/** → ${libarchiveIncludeDir} (if present)"
+      println "[libarchive]   stamp: ${libarchiveVersionFile.absolutePath} = ${currentLibarchiveVersion}"
     }
 
     if (sherpaNeedsUpdate && !sherpaUpdatedFromAar[0]) {
@@ -373,15 +522,25 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       sherpaVersionFile.text = currentSherpaVersion
-      println "[sherpa-onnx] Native libs + headers: (3) GitHub release (${tag})"
+      println "[sherpa-onnx] applied: (3) GITHUB RELEASE — tag ${tag}"
+      println "[sherpa-onnx]   url: ${url}"
+      println "[sherpa-onnx]   into jniLibs: <abi>/*.so from zip → ${jniLibsHuman}/"
+      println "[sherpa-onnx]   into headers: c-api/** → ${includeSherpaDir}"
+      println "[sherpa-onnx]   classes.jar: ${sherpaJavaJar.exists() ? 'copied to ' + sherpaOnnxClassesDir : 'not in zip'}"
+      println "[sherpa-onnx]   stamp: ${sherpaVersionFile.absolutePath} = ${currentSherpaVersion}"
     } else {
       def sherpaClassesJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
       if (sherpaClassesJar.exists() && !sherpaOnnxClassesDir.listFiles()?.any { it.name.endsWith('.jar') }) {
         sherpaOnnxClassesDir.mkdirs()
         copy { from sherpaClassesJar; into sherpaOnnxClassesDir }
-        println "Copied sherpa-onnx classes.jar from local prebuilts into sherpa-onnx-classes"
+        println "[sherpa-onnx] supplement: (1) LOCAL third_party — classes.jar only"
+        println "[sherpa-onnx]   from: ${sherpaClassesJar.absolutePath}"
+        println "[sherpa-onnx]   into: ${sherpaOnnxClassesDir} (sherpa-onnx native libs/headers were not fetched via GitHub this run)"
       }
     }
+
+    println "========== end downloadNativeLibsIfNeeded =========="
+    println ""
   }
 }
 
@@ -391,27 +550,27 @@ project.tasks.register("checkJniLibs") {
     requiredAbis.each { abi ->
       def dir = file("${project.projectDir}/src/main/jniLibs/${abi}")
       if (!dir.exists()) {
-        throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js, third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js, third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js, or use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), or ensure ANDROID_RELEASE_TAG releases exist.")
+        throw new RuntimeException("Missing native libs for ABI ${abi} in ${dir}. Run a Gradle Android build (downloadNativeLibsIfNeeded), use Maven com.xdcobra.sherpa:{ffmpeg,sherpa-onnx,libarchive}, or ensure ANDROID_RELEASE_TAG GitHub releases exist.")
       }
       if (!sherpaOnnxDisableFfmpeg) {
         requiredFfmpegSoFiles.each { soName ->
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
-            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:ffmpeg is available. Or set sherpaOnnxDisableFfmpeg=true in gradle.properties (see docs/disable-ffmpeg.md).")
+            throw new RuntimeException("Missing required FFmpeg library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:ffmpeg resolves. Or set sherpaOnnxDisableFfmpeg=true in gradle.properties (see docs/disable-ffmpeg.md).")
           }
         }
       }
       requiredSherpaOnnxSoFiles.each { soName ->
         def soFile = new File(dir, soName)
         if (!soFile.exists()) {
-          throw new RuntimeException("Missing required sherpa-onnx library '${soName}' for ABI ${abi}. Run third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js")
+          throw new RuntimeException("Missing required sherpa-onnx library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:sherpa-onnx resolves.")
         }
       }
       if (!sherpaOnnxDisableLibarchive) {
         requiredLibarchiveSoFiles.each { soName ->
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
-            throw new RuntimeException("Missing required libarchive library '${soName}' for ABI ${abi}. Run third_party/libarchive_prebuilt/copy_prebuilts_to_sdk.js or ensure Maven com.xdcobra.sherpa:libarchive is available. Or set sherpaOnnxDisableLibarchive=true in gradle.properties (see docs/disable-libarchive.md).")
+            throw new RuntimeException("Missing required libarchive library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libarchive resolves. Or set sherpaOnnxDisableLibarchive=true in gradle.properties (see docs/disable-libarchive.md).")
           }
         }
       }
@@ -441,7 +600,7 @@ project.tasks.register("extractSherpaOnnxClasses") {
     file(sherpaOnnxClassesDir).listFiles()?.findAll { it.name.endsWith('.jar') }?.each { it.delete() }
     if (sherpaLocalJar.exists()) {
       copy { from sherpaLocalJar; into sherpaOnnxClassesDir }
-      println "[sherpa-onnx] classes.jar: (1) local third_party"
+      println "[sherpa-onnx] extractSherpaOnnxClasses: (1) LOCAL — ${sherpaLocalJar.absolutePath} → ${sherpaOnnxClassesDir}"
       return
     }
     def aarFiles = project.configurations.sherpaOnnxAar.files
@@ -452,12 +611,12 @@ project.tasks.register("extractSherpaOnnxClasses") {
         include 'classes.jar'
         into sherpaOnnxClassesDir
       }
-      println "[sherpa-onnx] classes.jar: (2) Maven AAR Kotlin (${aar.name})"
+      println "[sherpa-onnx] extractSherpaOnnxClasses: (2) MAVEN AAR — ${aar.name} (classes.jar) → ${sherpaOnnxClassesDir}"
       return
     }
     if (sherpaExtractedJar.exists()) {
       copy { from sherpaExtractedJar; into sherpaOnnxClassesDir }
-      println "[sherpa-onnx] classes.jar: (3) GitHub release extract"
+      println "[sherpa-onnx] extractSherpaOnnxClasses: (3) GITHUB — prior extract ${sherpaExtractedJar.absolutePath} → ${sherpaOnnxClassesDir}"
       return
     }
     throw new RuntimeException(
@@ -486,7 +645,7 @@ project.tasks.register("extractOnnxruntimeClasses") {
         def renamed = new File(onnxruntimeClassesDir, "onnxruntime-classes.jar")
         extractedJar.renameTo(renamed)
       }
-      println "[onnxruntime] classes.jar: Maven AAR (${aar.name})"
+      println "[onnxruntime] extractOnnxruntimeClasses: (2) MAVEN AAR — ${aar.name} (classes.jar → onnxruntime-classes.jar) → ${onnxruntimeClassesDir}"
       return
     }
     throw new RuntimeException(

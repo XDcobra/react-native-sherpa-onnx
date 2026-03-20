@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Copies libarchive prebuilt .so and headers into android/src/main/jniLibs/<abi>/ and cpp/include/libarchive/.
-// Usage: node copy_prebuilts_to_sdk.js
+// Copies libarchive prebuilt .so and headers into android/src/main/jniLibs/<abi>/ and cpp/include/libarchive/ (optional manual helper; Gradle uses prebuilt-download.gradle).
 
 const fs = require('fs')
 const path = require('path')

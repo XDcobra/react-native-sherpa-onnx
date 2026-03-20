@@ -27,7 +27,7 @@ Output
 - `third_party/shine_prebuilt/android/<abi>/include/...` (headers copied from the `shine` source tree)
 
 After building
-- Copy the produced `.so` files into your Android project's `jniLibs` (or use the `third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js` pattern) so Gradle can link them when building FFmpeg.
+- Copy the produced `.so` files into your Android project's `jniLibs` (or the same layout Gradle uses for FFmpeg prebuilts) so FFmpeg can link `libshine` when you cross-build it.
 - Then reconfigure and build FFmpeg with `--extra-cflags`/`--extra-ldflags` pointing at the `include`/`lib` from this build so `--enable-libshine` picks up `libshine`.
 
 Notes

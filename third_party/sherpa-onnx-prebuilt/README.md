@@ -38,15 +38,9 @@ cd third_party/sherpa-onnx-prebuilt
 
 If `QNN_SDK_ROOT` is not set or invalid, the script exits with a clear error before running CMake. See [sherpa-onnx QNN build docs](https://k2-fsa.github.io/sherpa/onnx/qnn/build.html) for details.
 
-### Copy prebuilts into the SDK
+### Using built `.so` in the React Native SDK
 
-After building, copy the `.so` files into the Android module’s `jniLibs`:
-
-```sh
-node copy_prebuilts_to_sdk.js
-```
-
-Or run from the repo root: `node third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js` (from repo root so paths resolve).
+Prefer letting **Gradle** resolve prebuilts (`android/prebuilt-download.gradle`: local `jniLibs`, Maven `com.xdcobra.sherpa:sherpa-onnx`, or GitHub `ANDROID_RELEASE_TAG`). If you need a fully local layout after `./build_sherpa_onnx.sh`, copy `android/<abi>/lib/*.so` into `android/src/main/jniLibs/<abi>/` in the RN package (same paths the Gradle task would populate).
 
 ## API variant: Kotlin (default) vs Java
 
@@ -65,4 +59,4 @@ By default the script builds the **Kotlin API** (data classes, `WaveReader.readW
 
 - `android/<abi>/lib/*.so` – built libraries (e.g. `libsherpa-onnx-jni.so`, `libonnxruntime.so`).
 - `android/java/classes.jar` – sherpa-onnx API (default: Kotlin from `sherpa-onnx/kotlin-api`; or Java from `sherpa-onnx/java-api` when using `--java`). With `--both`, `classes-java.jar` is also produced.
-- `copy_prebuilts_to_sdk.js` copies the `.so` files to `android/src/main/jniLibs/<abi>/` for the Gradle build.
+- Built `.so` files under `android/<abi>/lib/` can be copied into the RN module’s `android/src/main/jniLibs/<abi>/` when not using Maven/GitHub fetch.

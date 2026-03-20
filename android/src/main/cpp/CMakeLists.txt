@@ -57,7 +57,7 @@ elseif(EXISTS "${FFMPEG_JNILIBS}/libavcodec.so")
     set(FFMPEG_LIB_DIR "${FFMPEG_JNILIBS}")
     message(STATUS "FFmpeg libs: jniLibs ${FFMPEG_LIB_DIR}")
 else()
-    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
+    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run a Gradle Android build so prebuilts populate jniLibs, or add local .so under jniLibs / ffmpeg prebuilts paths.")
 endif()
 endif(USE_FFMPEG)
 

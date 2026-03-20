@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Copies sherpa-onnx prebuilt .so files into android/src/main/jniLibs/<abi>/
-// Usage: node copy_prebuilts_to_sdk.js
+// Copies sherpa-onnx prebuilt .so files into android/src/main/jniLibs/<abi>/ (optional manual helper; Gradle uses prebuilt-download.gradle).
 
 const fs = require('fs');
 const path = require('path');
