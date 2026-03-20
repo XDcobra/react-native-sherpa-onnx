@@ -55,7 +55,7 @@ import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { readWavToFloatSamples } from '../../utils/readWavToFloatSamples';
+import { decodeAudioFileToFloatSamples } from 'react-native-sherpa-onnx/audio';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -476,7 +476,7 @@ export default function TTSScreen() {
         path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
         tempCopiedPath = path;
       }
-      const { samples, sampleRate } = await readWavToFloatSamples(path);
+      const { samples, sampleRate } = await decodeAudioFileToFloatSamples(path);
       setReferenceAudio({ samples, sampleRate });
       setReferenceFileName(name);
     } catch (err: unknown) {
@@ -488,9 +488,7 @@ export default function TTSScreen() {
         return;
       console.warn('Pick reference audio failed', err);
       setError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to load reference WAV (use 16-bit PCM)'
+        err instanceof Error ? err.message : 'Failed to load reference audio'
       );
     } finally {
       if (tempCopiedPath) {
