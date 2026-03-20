@@ -3,7 +3,7 @@
 By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt FFmpeg binaries (`FFmpeg.xcframework` for iOS and `.so` libs for Android) to provide built-in audio conversion features (e.g. converting M4A, MP3, FLAC to WAV for STT).
 
 You can explicitly **disable FFmpeg** in this SDK if you want to:
-1. **Reduce App Size:** Omit FFmpeg binaries if you don't use the conversion helpers (`convertAudioToWav16k`, `convertAudioToFormat`).
+1. **Reduce App Size:** Omit FFmpeg binaries if you don't use the conversion/decode helpers (`convertAudioToWav16k`, `convertAudioToFormat`, `decodeAudioFileToFloatSamples` for non-WAV on Android).
 2. **Prevent Symbol Clashes:** Avoid duplicate native symbols if another native module or library in your app already ships its own FFmpeg (e.g. `react-native-sound-api` or `ffmpeg-kit-react-native`). Having two copies of FFmpeg in the same process can cause runtime crashes or undefined behavior.
 
 ## How to disable FFmpeg
@@ -47,13 +47,14 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 |-----|-------------|
 | **`convertAudioToWav16k(inputPath, outputPath)`** | Converts an audio file to WAV 16 kHz mono 16-bit PCM (sherpa-onnx input format). Implemented in native code via FFmpeg; when disabled, the native implementation is not linked and the call returns an error string. |
 | **`convertAudioToFormat(inputPath, outputPath, format, outputSampleRateHz?)`** | Converts an audio file to a given format (e.g. `"wav"`, `"mp3"`, `"flac"`, `"m4a"`). When FFmpeg is disabled, the call returns an error. |
+| **`decodeAudioFileToFloatSamples(inputPath, targetSampleRateHz?)`** | Decodes to mono float PCM. **Android:** without FFmpeg, only the WAV `WaveReader` fast path works when no resampling is requested; other formats fail. **iOS:** requires FFmpeg; fails when disabled. |
 
-Both are exposed from the **`react-native-sherpa-onnx/audio`** module. All other features (STT, TTS, archive extraction, model detection, etc.) do **not** depend on FFmpeg and continue to work identically.
+These are exposed from the **`react-native-sherpa-onnx/audio`** module. All other features (STT, TTS, archive extraction, model detection, etc.) do **not** depend on FFmpeg and continue to work identically.
 
 ## Risks and limitations of disabling FFmpeg
 
 1. **No built-in audio conversion**  
-   You must not call `convertAudioToWav16k` or `convertAudioToFormat` when FFmpeg is disabled, or handle the error gracefully. If your app relies on these to produce 16 kHz WAV for sherpa-onnx, you need to provide that input via another library or pass already-decoded PCM paths that don’t require these helpers.
+   You must not call `convertAudioToWav16k`, `convertAudioToFormat`, or `decodeAudioFileToFloatSamples` (except Android WAV-only fast path) when FFmpeg is disabled, or handle the error gracefully. If your app relies on these to produce 16 kHz WAV for sherpa-onnx, you need to provide that input via another library or pass already-decoded PCM paths that don’t require these helpers.
 
 2. **No runtime use of “the other” FFmpeg**  
    Disabling FFmpeg here means this SDK’s native code is **compiled without** FFmpeg; the conversion helpers are stubbed and always return an error. The SDK does **not** call into another app’s FFmpeg. So you avoid symbol clashes by simply not using FFmpeg in this SDK at all; you do not get “shared” FFmpeg behavior.

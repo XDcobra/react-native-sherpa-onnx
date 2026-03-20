@@ -29,7 +29,7 @@ get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOL
 set(USE_FFMPEG ON)
 if(SHERPA_ONNX_DISABLE_FFMPEG)
     set(USE_FFMPEG OFF)
-    message(STATUS "FFmpeg disabled (SHERPA_ONNX_DISABLE_FFMPEG=ON). convertAudioToWav16k/convertAudioToFormat will return an error at runtime.")
+    message(STATUS "FFmpeg disabled (SHERPA_ONNX_DISABLE_FFMPEG=ON). convertAudioToWav16k/convertAudioToFormat and decode (non-WAV) will return an error at runtime.")
 endif()
 
 if(USE_FFMPEG)

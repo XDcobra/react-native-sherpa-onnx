@@ -42,6 +42,7 @@ project.xcworkspace
 local.properties
 android.iml
 app-voicelab-*.json
+android-codegen-out/
 
 # CMake build artifacts
 CMakeCache.txt

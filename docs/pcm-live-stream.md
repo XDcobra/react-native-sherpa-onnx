@@ -159,6 +159,7 @@ Available in the same `react-native-sherpa-onnx/audio` module:
 | Function | Description |
 | --- | --- |
 | `convertAudioToFormat(inputPath, outputPath, format, sampleRateHz?)` | Convert audio file to MP3, FLAC, WAV, etc. Android requires FFmpeg prebuilts |
+| `decodeAudioFileToFloatSamples(inputPath, targetSampleRateHz?)` | Decode file to mono float `{ samples, sampleRate }`; same decode coverage as conversion (see [audio-conversion.md](audio-conversion.md)) |
 | `convertAudioToWav16k(inputPath, outputPath)` | Convert to WAV 16 kHz mono 16-bit PCM (ideal for offline STT) |
 
 See [audio-conversion.md](audio-conversion.md) for details.
