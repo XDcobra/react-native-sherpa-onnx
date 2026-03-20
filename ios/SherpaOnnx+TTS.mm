@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -55,6 +56,7 @@ static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
         case K::kMatcha: return @"matcha";
         case K::kKokoro: return @"kokoro";
         case K::kKitten: return @"kitten";
+        case K::kPocket: return @"pocket";
         case K::kZipvoice: return @"zipvoice";
         default: return @"unknown";
     }
@@ -73,7 +75,56 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     }
     return tokens;
 }
+
+/** Non-null optional when referenceAudio is non-empty array and referenceSampleRate > 0. */
+static std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps) {
+    if (options == nil) return std::nullopt;
+    NSArray *refArr = options[@"referenceAudio"];
+    if (![refArr isKindOfClass:[NSArray class]] || [refArr count] == 0) return std::nullopt;
+    NSNumber *srNum = options[@"referenceSampleRate"];
+    if (srNum == nil || [srNum doubleValue] <= 0) return std::nullopt;
+
+    sherpaonnx::VoiceCloneOptions vo;
+    vo.reference_sample_rate = static_cast<int32_t>([srNum doubleValue]);
+    vo.reference_audio.reserve([refArr count]);
+    for (id elem in refArr) {
+        float v = 0.f;
+        if ([elem isKindOfClass:[NSNumber class]]) {
+            v = static_cast<float>([(NSNumber *)elem doubleValue]);
+        }
+        vo.reference_audio.push_back(v);
+    }
+    NSString *rt = options[@"referenceText"];
+    if (rt != nil && [rt length] > 0) {
+        vo.reference_text = std::string([rt UTF8String]);
+    }
+    if (options[@"numSteps"] != nil) {
+        vo.num_steps = static_cast<int32_t>([options[@"numSteps"] doubleValue]);
+    } else {
+        vo.num_steps = defaultNumSteps;
+    }
+    if (options[@"silenceScale"] != nil) {
+        vo.silence_scale = static_cast<float>([options[@"silenceScale"] doubleValue]);
+    }
+    id extra = options[@"extra"];
+    if ([extra isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *ex = (NSDictionary *)extra;
+        for (NSString *k in ex) {
+            id v = ex[k];
+            if ([v isKindOfClass:[NSString class]]) {
+                vo.extra[std::string([k UTF8String])] = std::string([(NSString *)v UTF8String]);
+            }
+        }
+    }
+    return vo;
 }
+
+static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
+    auto o = VoiceCloneOptionsFromNSDictionary(options, 1);
+    return o.has_value() && !o->reference_audio.empty() && o->reference_sample_rate > 0;
+}
+
+} // namespace
 
 @implementation SherpaOnnx (TTS)
 
@@ -410,10 +461,38 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     @try {
         std::string textStr = [text UTF8String];
 
+        using Kind = sherpaonnx::TtsModelKind;
+        Kind kind = wrapper->getModelKind();
+        bool hasRef = NSDictionaryHasValidReferenceAudio(options);
+
+        if (hasRef && kind != Kind::kZipvoice && kind != Kind::kPocket) {
+            reject(@"TTS_GENERATE_ERROR", @"Reference audio is only supported for Zipvoice and Pocket TTS.", nil);
+            return;
+        }
+        if (kind == Kind::kPocket && !hasRef) {
+            reject(@"TTS_GENERATE_ERROR", @"Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options.", nil);
+            return;
+        }
+        if (hasRef && kind == Kind::kZipvoice) {
+            NSString *rt = options[@"referenceText"];
+            NSString *trimmed = rt != nil ? [rt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+            if ([trimmed length] == 0) {
+                reject(@"TTS_GENERATE_ERROR", @"Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio).", nil);
+                return;
+            }
+        }
+
+        std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
+        if (hasRef) {
+            int32_t defSteps = (kind == Kind::kZipvoice) ? 20 : 5;
+            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, defSteps);
+        }
+
         auto result = wrapper->generate(
             textStr,
             static_cast<int32_t>(sid),
-            static_cast<float>(speed)
+            static_cast<float>(speed),
+            cloneOpt
         );
 
         if (result.samples.empty() || result.sampleRate == 0) {
@@ -471,10 +550,38 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     @try {
         std::string textStr = [text UTF8String];
 
+        using Kind = sherpaonnx::TtsModelKind;
+        Kind kind = wrapper->getModelKind();
+        bool hasRef = NSDictionaryHasValidReferenceAudio(options);
+
+        if (hasRef && kind != Kind::kZipvoice && kind != Kind::kPocket) {
+            reject(@"TTS_GENERATE_ERROR", @"Reference audio is only supported for Zipvoice and Pocket TTS.", nil);
+            return;
+        }
+        if (kind == Kind::kPocket && !hasRef) {
+            reject(@"TTS_GENERATE_ERROR", @"Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options.", nil);
+            return;
+        }
+        if (hasRef && kind == Kind::kZipvoice) {
+            NSString *rt = options[@"referenceText"];
+            NSString *trimmed = rt != nil ? [rt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+            if ([trimmed length] == 0) {
+                reject(@"TTS_GENERATE_ERROR", @"Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio).", nil);
+                return;
+            }
+        }
+
+        std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
+        if (hasRef) {
+            int32_t defSteps = (kind == Kind::kZipvoice) ? 20 : 5;
+            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, defSteps);
+        }
+
         auto result = wrapper->generate(
             textStr,
             static_cast<int32_t>(sid),
-            static_cast<float>(speed)
+            static_cast<float>(speed),
+            cloneOpt
         );
 
         if (result.samples.empty() || result.sampleRate == 0) {
@@ -489,22 +596,32 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
             [samplesArray addObject:@(sample)];
         }
 
-        std::vector<std::string> tokens = SplitTtsTokens(textStr);
         NSMutableArray *subtitlesArray = [NSMutableArray array];
-        if (!tokens.empty()) {
-            double totalSeconds = static_cast<double>(result.samples.size()) /
-                                  static_cast<double>(result.sampleRate);
-            double perToken = totalSeconds / static_cast<double>(tokens.size());
+        if (hasRef && !result.samples.empty() && result.sampleRate > 0) {
+            double durationSec = static_cast<double>(result.samples.size()) / static_cast<double>(result.sampleRate);
+            NSDictionary *subtitleMap = @{
+                @"text": text,
+                @"start": @0.0,
+                @"end": @(durationSec)
+            };
+            [subtitlesArray addObject:subtitleMap];
+        } else {
+            std::vector<std::string> tokens = SplitTtsTokens(textStr);
+            if (!tokens.empty()) {
+                double totalSeconds = static_cast<double>(result.samples.size()) /
+                                      static_cast<double>(result.sampleRate);
+                double perToken = totalSeconds / static_cast<double>(tokens.size());
 
-            for (size_t i = 0; i < tokens.size(); ++i) {
-                double start = perToken * static_cast<double>(i);
-                double end = perToken * static_cast<double>(i + 1);
-                NSDictionary *item = @{
-                    @"text": [NSString stringWithUTF8String:tokens[i].c_str()],
-                    @"start": @(start),
-                    @"end": @(end)
-                };
-                [subtitlesArray addObject:item];
+                for (size_t i = 0; i < tokens.size(); ++i) {
+                    double start = perToken * static_cast<double>(i);
+                    double end = perToken * static_cast<double>(i + 1);
+                    NSDictionary *item = @{
+                        @"text": [NSString stringWithUTF8String:tokens[i].c_str()],
+                        @"start": @(start),
+                        @"end": @(end)
+                    };
+                    [subtitlesArray addObject:item];
+                }
             }
         }
 
@@ -558,6 +675,43 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
         instRef->streamRunning.store(true);
     }
 
+    using Kind = sherpaonnx::TtsModelKind;
+    Kind streamKind = instRef->wrapper->getModelKind();
+    bool streamHasRef = NSDictionaryHasValidReferenceAudio(options);
+
+    if (streamKind == Kind::kPocket && !streamHasRef) {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it2 = g_tts_instances.find([instanceId UTF8String]);
+        if (it2 != g_tts_instances.end()) {
+            it2->second->streamRunning.store(false);
+        }
+        reject(@"TTS_STREAM_ERROR", @"Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options.", nil);
+        return;
+    }
+    if (streamHasRef && streamKind == Kind::kZipvoice) {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it2 = g_tts_instances.find([instanceId UTF8String]);
+        if (it2 != g_tts_instances.end()) {
+            it2->second->streamRunning.store(false);
+        }
+        reject(@"TTS_STREAM_ERROR", @"Streaming with reference audio not supported for Zipvoice", nil);
+        return;
+    }
+    if (streamHasRef && streamKind != Kind::kPocket) {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it2 = g_tts_instances.find([instanceId UTF8String]);
+        if (it2 != g_tts_instances.end()) {
+            it2->second->streamRunning.store(false);
+        }
+        reject(@"TTS_STREAM_ERROR", @"Reference audio streaming is only supported for Pocket TTS.", nil);
+        return;
+    }
+
+    std::optional<sherpaonnx::VoiceCloneOptions> streamCloneOpt;
+    if (streamHasRef) {
+        streamCloneOpt = VoiceCloneOptionsFromNSDictionary(options, 5);
+    }
+
     std::string textStr = [text UTF8String];
     int32_t sampleRate = instRef->wrapper->getSampleRate();
     NSString *instanceIdCopy = [instanceId copy];
@@ -597,7 +751,8 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
                     });
 
                     return instRef->streamCancelled.load() ? 0 : 1;
-                }
+                },
+                streamCloneOpt
             );
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];

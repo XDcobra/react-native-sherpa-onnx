@@ -2,14 +2,26 @@
 #define SHERPA_ONNX_TTS_WRAPPER_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect.h"
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sherpaonnx {
+
+/** Voice cloning / zero-shot options for Zipvoice and Pocket (matches JS referenceAudio + referenceSampleRate + optional fields). */
+struct VoiceCloneOptions {
+    std::vector<float> reference_audio;
+    int32_t reference_sample_rate = 0;
+    std::string reference_text;
+    int32_t num_steps = 20;
+    float silence_scale = 0.2f;
+    std::unordered_map<std::string, std::string> extra;
+};
 
 /**
  * Result of TTS initialization.
@@ -61,11 +73,31 @@ public:
         float speed = 1.0f
     );
 
+    /**
+     * When cloning is set (non-empty reference_audio and reference_sample_rate > 0), calls
+     * OfflineTts::Generate(text, GenerationConfig). Otherwise same as generate(text, sid, speed).
+     */
+    AudioResult generate(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const std::optional<VoiceCloneOptions>& cloning
+    );
+
     bool generateStream(
         const std::string& text,
         int32_t sid,
         float speed,
         const TtsStreamCallback& callback
+    );
+
+    /** Pocket: streaming with reference audio. Zipvoice + cloning is not supported (match Android). */
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback,
+        const std::optional<VoiceCloneOptions>& cloning
     );
 
     static bool saveToWavFile(
@@ -79,6 +111,9 @@ public:
     int32_t getNumSpeakers() const;
 
     bool isInitialized() const;
+
+    /** Model kind from last successful initialize() (for voice-cloning validation). */
+    TtsModelKind getModelKind() const;
 
     void release();
 

@@ -38,6 +38,7 @@ class TtsWrapper::Impl {
 public:
     bool initialized = false;
     std::string modelDir;
+    TtsModelKind modelKind = TtsModelKind::kUnknown;
     std::optional<sherpa_onnx::cxx::OfflineTts> tts;
 };
 
@@ -145,11 +146,21 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.zipvoice.vocoder = detect.paths.vocoder;
                 config.model.zipvoice.tokens = detect.paths.tokens;
                 config.model.zipvoice.data_dir = detect.paths.dataDir;
+                if (!detect.paths.lexicon.empty()) {
+                    config.model.zipvoice.lexicon = detect.paths.lexicon;
+                }
+                // Limit peak RAM (same idea as Android Zipvoice init).
+                config.model.num_threads = 1;
                 break;
             case TtsModelKind::kPocket:
-                result.error = "TTS: Pocket model type is detected but not yet supported on iOS";
-                LOGE("%s", result.error.c_str());
-                return result;
+                config.model.pocket.lm_flow = detect.paths.lmFlow;
+                config.model.pocket.lm_main = detect.paths.lmMain;
+                config.model.pocket.encoder = detect.paths.encoder;
+                config.model.pocket.decoder = detect.paths.decoder;
+                config.model.pocket.text_conditioner = detect.paths.textConditioner;
+                config.model.pocket.vocab_json = detect.paths.vocabJson;
+                config.model.pocket.token_scores_json = detect.paths.tokenScoresJson;
+                break;
             case TtsModelKind::kUnknown:
             default:
                 result.error = "TTS: Unknown model type: " + modelType;
@@ -198,6 +209,7 @@ TtsInitializeResult TtsWrapper::initialize(
 
         pImpl->initialized = true;
         pImpl->modelDir = modelDir;
+        pImpl->modelKind = detect.selectedKind;
 
         LOGI("TTS: Initialization successful");
         LOGI("TTS: Sample rate: %d Hz", pImpl->tts.value().SampleRate());
@@ -257,6 +269,55 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     }
 }
 
+TtsWrapper::AudioResult TtsWrapper::generate(
+    const std::string& text,
+    int32_t sid,
+    float speed,
+    const std::optional<VoiceCloneOptions>& cloning
+) {
+    if (!cloning.has_value() || cloning->reference_audio.empty() ||
+        cloning->reference_sample_rate <= 0) {
+        return generate(text, sid, speed);
+    }
+
+    AudioResult result;
+    result.sampleRate = 0;
+
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return result;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return result;
+    }
+
+    try {
+        sherpa_onnx::cxx::GenerationConfig gc;
+        gc.silence_scale = cloning->silence_scale;
+        gc.speed = speed;
+        gc.sid = sid;
+        gc.reference_audio = cloning->reference_audio;
+        gc.reference_sample_rate = cloning->reference_sample_rate;
+        gc.reference_text = cloning->reference_text;
+        gc.num_steps = cloning->num_steps;
+        gc.extra = cloning->extra;
+
+        auto audio = pImpl->tts.value().Generate(text, gc);
+        result.samples = std::move(audio.samples);
+        result.sampleRate = audio.sample_rate;
+        LOGI("TTS: Generated (voice clone) %zu samples at %d Hz", result.samples.size(), result.sampleRate);
+        return result;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during generation (clone): %s", e.what());
+        return result;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during generation (clone)");
+        return result;
+    }
+}
+
 bool TtsWrapper::generateStream(
     const std::string& text,
     int32_t sid,
@@ -302,6 +363,63 @@ bool TtsWrapper::generateStream(
     }
 }
 
+bool TtsWrapper::generateStream(
+    const std::string& text,
+    int32_t sid,
+    float speed,
+    const TtsStreamCallback& callback,
+    const std::optional<VoiceCloneOptions>& cloning
+) {
+    if (!cloning.has_value() || cloning->reference_audio.empty() ||
+        cloning->reference_sample_rate <= 0) {
+        return generateStream(text, sid, speed, callback);
+    }
+
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return false;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return false;
+    }
+
+    try {
+        auto callbackCopy = callback;
+        auto shim = [](const float *samples, int32_t numSamples, float progress, void *arg) -> int32_t {
+            auto *cb = reinterpret_cast<TtsStreamCallback*>(arg);
+            if (!cb || !(*cb)) return 0;
+            return (*cb)(samples, numSamples, progress);
+        };
+
+        sherpa_onnx::cxx::GenerationConfig gc;
+        gc.silence_scale = cloning->silence_scale;
+        gc.speed = speed;
+        gc.sid = sid;
+        gc.reference_audio = cloning->reference_audio;
+        gc.reference_sample_rate = cloning->reference_sample_rate;
+        gc.reference_text = cloning->reference_text;
+        gc.num_steps = cloning->num_steps;
+        gc.extra = cloning->extra;
+
+        pImpl->tts.value().Generate(
+            text,
+            gc,
+            callbackCopy ? shim : nullptr,
+            callbackCopy ? &callbackCopy : nullptr
+        );
+
+        return true;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during streaming generation (clone): %s", e.what());
+        return false;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during streaming generation (clone)");
+        return false;
+    }
+}
+
 int32_t TtsWrapper::getSampleRate() const {
     if (!pImpl->initialized || !pImpl->tts.has_value()) {
         LOGE("TTS: Not initialized. Call initialize() first.");
@@ -327,8 +445,13 @@ void TtsWrapper::release() {
         pImpl->tts.reset();
         pImpl->initialized = false;
         pImpl->modelDir.clear();
+        pImpl->modelKind = TtsModelKind::kUnknown;
         LOGI("TTS: Resources released");
     }
+}
+
+TtsModelKind TtsWrapper::getModelKind() const {
+    return pImpl->modelKind;
 }
 
 bool TtsWrapper::saveToWavFile(
