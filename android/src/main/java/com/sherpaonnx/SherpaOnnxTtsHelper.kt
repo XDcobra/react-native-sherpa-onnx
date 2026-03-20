@@ -401,26 +401,41 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceOptions(options) && inst.isZipvoice -> {
-          val refAudio = options?.getArray("referenceAudio")
-            ?: run {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
-              promise.reject("TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning")
-              return
-            }
-          val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
-          val promptText = options.getString("referenceText").orEmpty()
-          val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
+        hasReferenceAudio(options) && inst.isZipvoice -> {
+          val opts = options!!
+          val refAudio = opts.getArray("referenceAudio")!!
+          val promptSr = readReferenceSampleRate(opts)
+          val promptText = opts.getString("referenceText")?.trim().orEmpty()
+          if (promptText.isEmpty()) {
+            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
+            promise.reject(
+              "TTS_GENERATE_ERROR",
+              "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
+            )
+            return
+          }
+          val numSteps = if (opts.hasKey("numSteps")) opts.getDouble("numSteps").toInt() else 20
           val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
           inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
-        hasReferenceOptions(options) && inst.tts != null -> {
+        hasReferenceAudio(options) && inst.isPocket -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
-        inst.isPocket && !hasReferenceOptions(options) -> {
+        hasReferenceAudio(options) -> {
+          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
+          promise.reject(
+            "TTS_GENERATE_ERROR",
+            "Reference audio is only supported for Zipvoice and Pocket TTS."
+          )
+          return
+        }
+        inst.isPocket -> {
           Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
-          promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
+          promise.reject(
+            "TTS_GENERATE_ERROR",
+            "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
+          )
           return
         }
         else -> dispatchGenerate(inst, text, sid, speed)
@@ -459,26 +474,41 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceOptions(options) && inst.isZipvoice -> {
-          val refAudio = options?.getArray("referenceAudio")
-            ?: run {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: referenceAudio required for Zipvoice voice cloning")
-              promise.reject("TTS_GENERATE_ERROR", "referenceAudio required for Zipvoice voice cloning")
-              return
-            }
-          val promptSr = if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
-          val promptText = options.getString("referenceText").orEmpty()
-          val numSteps = if (options.hasKey("numSteps")) options.getDouble("numSteps").toInt() else 20
+        hasReferenceAudio(options) && inst.isZipvoice -> {
+          val opts = options!!
+          val refAudio = opts.getArray("referenceAudio")!!
+          val promptSr = readReferenceSampleRate(opts)
+          val promptText = opts.getString("referenceText")?.trim().orEmpty()
+          if (promptText.isEmpty()) {
+            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
+            promise.reject(
+              "TTS_GENERATE_ERROR",
+              "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
+            )
+            return
+          }
+          val numSteps = if (opts.hasKey("numSteps")) opts.getDouble("numSteps").toInt() else 20
           val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
           inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
         }
-        hasReferenceOptions(options) && inst.tts != null -> {
+        hasReferenceAudio(options) && inst.isPocket -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
-        inst.isPocket && !hasReferenceOptions(options) -> {
+        hasReferenceAudio(options) -> {
+          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
+          promise.reject(
+            "TTS_GENERATE_ERROR",
+            "Reference audio is only supported for Zipvoice and Pocket TTS."
+          )
+          return
+        }
+        inst.isPocket -> {
           Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
-          promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
+          promise.reject(
+            "TTS_GENERATE_ERROR",
+            "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
+          )
           return
         }
         else -> dispatchGenerate(inst, text, sid, speed)
@@ -529,14 +559,25 @@ internal class SherpaOnnxTtsHelper(
       promise.reject("TTS_STREAM_ERROR", "TTS not initialized")
       return
     }
-    if (inst.isPocket && !hasReferenceOptions(options)) {
+    if (inst.isPocket && !hasReferenceAudio(options)) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Pocket TTS requires reference audio for voice cloning")
-      promise.reject("TTS_STREAM_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate in options.")
+      promise.reject(
+        "TTS_STREAM_ERROR",
+        "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
+      )
       return
     }
-    if (hasReferenceOptions(options) && inst.isZipvoice) {
+    if (hasReferenceAudio(options) && inst.isZipvoice) {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Streaming with reference audio not supported for Zipvoice")
       promise.reject("TTS_STREAM_ERROR", "Streaming with reference audio not supported for Zipvoice")
+      return
+    }
+    if (hasReferenceAudio(options) && !inst.isPocket) {
+      Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: Reference audio streaming is only supported for Pocket TTS")
+      promise.reject(
+        "TTS_STREAM_ERROR",
+        "Reference audio streaming is only supported for Pocket TTS."
+      )
       return
     }
     val sid = getSid(options)
@@ -547,7 +588,7 @@ internal class SherpaOnnxTtsHelper(
       try {
         val sampleRate = dispatchSampleRate(inst)
         when {
-          hasReferenceOptions(options) && inst.tts != null -> {
+          hasReferenceAudio(options) && inst.isPocket -> {
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
             inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
               if (inst.ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
@@ -885,13 +926,20 @@ internal class SherpaOnnxTtsHelper(
 
   // -- Dual-engine dispatch helpers --
 
-  /** True if options contain reference-audio fields for voice cloning. */
-  private fun hasReferenceOptions(options: ReadableMap?): Boolean {
+  /**
+   * True when voice-cloning reference audio is present and valid for native use:
+   * non-empty [referenceAudio] array and [referenceSampleRate] > 0.
+   * [referenceText] alone does not enable cloning (matches sherpa-onnx behavior).
+   */
+  private fun hasReferenceAudio(options: ReadableMap?): Boolean {
     if (options == null) return false
-    val refAudio = options.getArray("referenceAudio")
-    val refText = options.getString("referenceText")
-    return (refAudio != null && refAudio.size() > 0) || !refText.isNullOrEmpty()
+    val refAudio = options.getArray("referenceAudio") ?: return false
+    if (refAudio.size() == 0) return false
+    return readReferenceSampleRate(options) > 0
   }
+
+  private fun readReferenceSampleRate(options: ReadableMap): Int =
+    if (options.hasKey("referenceSampleRate")) options.getDouble("referenceSampleRate").toInt() else 0
 
   /** Parse sid and speed from options with defaults. */
   private fun getSid(options: ReadableMap?): Int =
