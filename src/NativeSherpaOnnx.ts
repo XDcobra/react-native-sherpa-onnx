@@ -143,6 +143,7 @@ export interface Spec extends TurboModule {
       provider?: string;
       ruleFsts?: string;
       ruleFars?: string;
+      dither?: number;
       blankPenalty?: number;
       debug?: boolean;
       rule1MustContainNonSilence?: boolean;

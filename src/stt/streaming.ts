@@ -82,6 +82,7 @@ function flattenInitOptionsForNative(options: StreamingSttInitOptions): {
   provider?: string;
   ruleFsts?: string;
   ruleFars?: string;
+  dither?: number;
   blankPenalty?: number;
   debug?: boolean;
   rule1MustContainNonSilence?: boolean;
@@ -107,6 +108,7 @@ function flattenInitOptionsForNative(options: StreamingSttInitOptions): {
     provider: options.provider,
     ruleFsts: options.ruleFsts,
     ruleFars: options.ruleFars,
+    dither: options.dither,
     blankPenalty: options.blankPenalty,
     debug: options.debug,
     rule1MustContainNonSilence: ep?.rule1?.mustContainNonSilence,
@@ -200,6 +202,7 @@ export async function createStreamingSTT(
   if (flat.provider !== undefined) nativeOptions.provider = flat.provider;
   if (flat.ruleFsts !== undefined) nativeOptions.ruleFsts = flat.ruleFsts;
   if (flat.ruleFars !== undefined) nativeOptions.ruleFars = flat.ruleFars;
+  if (flat.dither !== undefined) nativeOptions.dither = flat.dither;
   if (flat.blankPenalty !== undefined)
     nativeOptions.blankPenalty = flat.blankPenalty;
   if (flat.debug !== undefined) nativeOptions.debug = flat.debug;

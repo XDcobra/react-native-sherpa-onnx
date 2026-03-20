@@ -75,6 +75,8 @@ export interface StreamingSttInitOptions {
   ruleFsts?: string;
   /** Path(s) to rule FARs for ITN. */
   ruleFars?: string;
+  /** Feature extraction dither. Default: 0.0. */
+  dither?: number;
   /** Blank penalty. */
   blankPenalty?: number;
   /** Enable debug logging. Default: false. */

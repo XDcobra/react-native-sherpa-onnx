@@ -458,6 +458,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val provider = if (options.hasKey("provider")) options.getString("provider") else null
     val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
     val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
+    val dither = if (options.hasKey("dither")) options.getDouble("dither") else null
     val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
     val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
     val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
@@ -482,6 +483,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       provider,
       ruleFsts,
       ruleFars,
+      dither,
       blankPenalty,
       debug,
       rule1MustContainNonSilence,
