@@ -82,7 +82,7 @@ You do not need to copy the file yourself before calling. However, for reliabili
 
 ## STT integration example
 
-Pick file → copy to cache → validate → convert to 16 kHz WAV if non-WAV → transcribe → cleanup.
+Pick file --> copy to cache --> validate --> convert to 16 kHz WAV if non-WAV --> transcribe --> cleanup.
 
 ```ts
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -136,7 +136,7 @@ try {
 
 ## TTS save example
 
-For saving TTS audio as MP3 or FLAC to a content URI on Android: generate WAV → convert to target format → copy to destination. See [TTS documentation](tts.md#saving-mp3flac-to-content-uri-android) for the full save flow and `copyFileToContentUri`.
+For saving TTS audio as MP3 or FLAC to a content URI on Android: generate WAV --> convert to target format --> copy to destination. See [TTS documentation](tts.md#saving-mp3flac-to-content-uri-android) for the full save flow and `copyFileToContentUri`.
 
 ```ts
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';

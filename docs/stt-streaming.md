@@ -29,7 +29,7 @@ Real-time speech recognition with partial results and endpoint detection. Feed a
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Streaming engine creation | ✅ | `createStreamingSTT()` → `StreamingSttEngine` |
+| Streaming engine creation | ✅ | `createStreamingSTT()` --> `StreamingSttEngine` |
 | Stream creation per session | ✅ | `engine.createStream(hotwords?)` |
 | Accept waveform | ✅ | `stream.acceptWaveform(samples, sampleRate)` |
 | Incremental decode | ✅ | `stream.decode()` + `stream.getResult()` |
@@ -212,7 +212,7 @@ import type {
 
 ## Detailed Examples
 
-### Mic → chunks → partial results → endpoint
+### Mic --> chunks --> partial results --> endpoint
 
 ```typescript
 const engine = await createStreamingSTT({

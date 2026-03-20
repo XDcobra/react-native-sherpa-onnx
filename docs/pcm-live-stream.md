@@ -28,7 +28,7 @@ Native microphone capture with resampling. Delivers PCM audio at the requested s
 | --- | --- | --- |
 | Microphone capture | ✅ | Android: `SherpaOnnxPcmCapture`, iOS: Audio Queue API |
 | Native resampling | ✅ | Captures at hardware rate (16k/44.1k/48k), resamples to requested rate |
-| Float PCM delivery | ✅ | Base64 Int16 → `Float32Array` in [-1, 1] with preallocated buffer |
+| Float PCM delivery | ✅ | Base64 Int16 --> `Float32Array` in [-1, 1] with preallocated buffer |
 | Event-based | ✅ | `onData` and `onError` callbacks |
 | GC-friendly | ✅ | Preallocated Float32Array, index-filled to reduce GC pressure |
 
@@ -38,7 +38,7 @@ The audio module uses the [buffer](https://www.npmjs.com/package/buffer) package
 
 ## Quick Start
 
-Live transcription: microphone → PCM → streaming STT → text.
+Live transcription: microphone --> PCM --> streaming STT --> text.
 
 ```typescript
 import { createPcmLiveStream } from 'react-native-sherpa-onnx/audio';

@@ -36,14 +36,14 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Model type detection | ✅ | `detectTtsModel()` — file-based, includes required-files validation |
-| Model initialization | ✅ | `createTTS()` → `TtsEngine` |
+| Model initialization | ✅ | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | `tts.generateSpeech()` |
 | Streaming generation | ✅ | `tts.generateSpeechStream()` with chunk callbacks |
 | Timestamps (estimated) | ✅ | `tts.generateSpeechWithTimestamps()` |
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Save/share WAV | ✅ | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Save MP3/FLAC | ✅ | Via `convertAudioToFormat()` + `copyFileToContentUri()` |
-| Voice cloning | ✅ (Android) | **Zipvoice** / **Pocket** only: non-empty `referenceAudio` + `sampleRate > 0`; Zipvoice cloning also needs non-empty `referenceText`. Other types reject reference options. |
+| Voice cloning | ✅ (iOS & Android) | **Zipvoice** / **Pocket** only: non-empty `referenceAudio` + `sampleRate > 0`; Zipvoice cloning also needs non-empty `referenceText`. Other types reject reference options. |
 | Runtime param updates | ✅ | `tts.updateParams()` |
 | Model downloads | ✅ | Via [Download Manager](download-manager.md) |
 
@@ -160,7 +160,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `sid` | `number` | `0` | Speaker ID for multi-speaker models |
 | `speed` | `number` | `1.0` | Speech speed multiplier |
 | `silenceScale` | `number` | — | Silence scale at generation time |
-| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Android:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten → native error if set. Mono float in [-1, 1]. |
+| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Native:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten --> native error if set. Mono float in [-1, 1]. |
 | `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
 | `numSteps` | `number` | — | Flow-matching steps (model-dependent) |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
@@ -283,7 +283,7 @@ const controller = await tts.generateSpeechStream(text, undefined, {
 
 ## Voice Cloning
 
-Only **Zipvoice** and **Pocket** use reference audio in sherpa-onnx. On **Android**, passing `referenceAudio` for any other model type returns **`TTS_GENERATE_ERROR`** / **`TTS_STREAM_ERROR`** instead of silent empty audio.
+Only **Zipvoice** and **Pocket** use reference audio in sherpa-onnx. Passing `referenceAudio` for any other model type returns **`TTS_GENERATE_ERROR`** / **`TTS_STREAM_ERROR`** instead of silent empty audio.
 
 **Requirements (Android):**
 
@@ -356,7 +356,7 @@ Error format: `TTS <ModelType>: missing required files in <modelDir>: <field1>, 
 
 ## Detailed Examples
 
-### Streaming → native playback → save
+### Streaming --> native playback --> save
 
 ```typescript
 import { createTTS, saveAudioToFile } from 'react-native-sherpa-onnx/tts';

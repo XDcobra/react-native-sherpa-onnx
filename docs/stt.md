@@ -33,7 +33,7 @@ Offline speech recognition: transcribe audio files or float PCM samples using on
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Model type detection | ✅ | `detectSttModel()` — file-based, includes required-files validation |
-| Model initialization | ✅ | `createSTT()` → `SttEngine` |
+| Model initialization | ✅ | `createSTT()` --> `SttEngine` |
 | File transcription | ✅ | `stt.transcribeFile(path)` |
 | Sample transcription | ✅ | `stt.transcribeSamples(samples, sampleRate)` |
 | Full result object | ✅ | text, tokens, timestamps, lang, emotion, event, durations |

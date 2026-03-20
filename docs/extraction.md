@@ -59,11 +59,11 @@ Understanding the distinction helps when reading the API, but **you never need t
 ```
 getBundledArchives("sherpa_models")
   │
-  ├─ getAssetPackPath returns a path?  →  STORAGE_FILES
-  │    └─ scanDirectoryForArchives(path)  →  BundledArchive[] (filesystem)
+  ├─ getAssetPackPath returns a path?  -->  STORAGE_FILES
+  │    └─ scanDirectoryForArchives(path)  -->  BundledArchive[] (filesystem)
   │
-  └─ getAssetPackPath returns null?    →  APK_ASSETS
-       └─ listBundledArchiveAssetPaths  →  BundledArchive[] (fromAsset: true, archivePath: "models/…")
+  └─ getAssetPackPath returns null?    -->  APK_ASSETS
+       └─ listBundledArchiveAssetPaths  -->  BundledArchive[] (fromAsset: true, archivePath: "models/…")
 ```
 
 For **APK_ASSETS**, the pack’s `src/main/assets/models/` content is merged into the app’s asset root, so the canonical path is **`models`** (same for Play Store and bundletool install-time delivery).
@@ -125,8 +125,8 @@ function extractArchive(
 
 Extracts one archive into `targetPath`. Handles both source types transparently:
 
-- **Filesystem archives** → regular path-based extraction via native `extractTarZst` / `extractTarBz2`.
-- **APK asset archives** (`fromAsset: true`) → streams from the APK via `extractTarZstFromAsset` / `extractTarBz2FromAsset` (no temp copy).
+- **Filesystem archives** --> regular path-based extraction via native `extractTarZst` / `extractTarBz2`.
+- **APK asset archives** (`fromAsset: true`) --> streams from the APK via `extractTarZstFromAsset` / `extractTarBz2FromAsset` (no temp copy).
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -219,7 +219,7 @@ if (archives?.length) {
 
 // Discover extracted models
 const models = await listModelsAtPath(targetDir, true);
-// → [{ folder: 'whisper-tiny', hint: 'stt' }, ...]
+// --> [{ folder: 'whisper-tiny', hint: 'stt' }, ...]
 ```
 
 ### 2. iOS main bundle archives
@@ -252,7 +252,7 @@ const downloadsDir = `${DocumentDirectoryPath}/downloads`;
 const modelsDir = `${DocumentDirectoryPath}/models`;
 
 const archives = await listBundledArchives(downloadsDir);
-// → [{ modelId: 'whisper-tiny-en', archivePath: '/.../whisper-tiny-en.tar.zst', format: 'tar.zst', fileSize: 41230000 }]
+// --> [{ modelId: 'whisper-tiny-en', archivePath: '/.../whisper-tiny-en.tar.zst', format: 'tar.zst', fileSize: 41230000 }]
 
 for (const archive of archives) {
   const result = await extractArchive(archive, modelsDir, {
