@@ -86,6 +86,7 @@ TtsInitializeResult TtsWrapper::initialize(
 
         auto detect = DetectTtsModel(modelDir, modelType);
         if (!detect.ok) {
+            result.error = detect.error;
             LOGE("%s", detect.error.c_str());
             return result;
         }
@@ -146,10 +147,12 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.zipvoice.data_dir = detect.paths.dataDir;
                 break;
             case TtsModelKind::kPocket:
-                LOGE("TTS: Pocket model type is detected but not yet supported on iOS");
+                result.error = "TTS: Pocket model type is detected but not yet supported on iOS";
+                LOGE("%s", result.error.c_str());
                 return result;
             case TtsModelKind::kUnknown:
             default:
+                result.error = "TTS: Unknown model type: " + modelType;
                 LOGE("TTS: Unknown model type: %s", modelType.c_str());
                 return result;
         }
@@ -167,11 +170,29 @@ TtsInitializeResult TtsWrapper::initialize(
             config.silence_scale = *silenceScale;
         }
 
+        // Log paths passed to sherpa-onnx C++ API to diagnose /usr/share/espeak-ng-data fallback.
+        LOGI("TTS: modelDir=%s", modelDir.c_str());
+        switch (detect.selectedKind) {
+            case TtsModelKind::kVits:
+                LOGI("TTS: vits data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
+                break;
+            case TtsModelKind::kMatcha:
+                LOGI("TTS: matcha data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
+                break;
+            case TtsModelKind::kKokoro:
+            case TtsModelKind::kKitten:
+            case TtsModelKind::kZipvoice:
+                LOGI("TTS: data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
+                break;
+            default:
+                break;
+        }
         LOGI("TTS: Creating OfflineTts instance...");
         pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
 
         if (!pImpl->tts.has_value()) {
-            LOGE("TTS: Failed to create OfflineTts instance");
+            result.error = "TTS: Failed to create OfflineTts instance (e.g. missing espeak-ng data or invalid model)";
+            LOGE("%s", result.error.c_str());
             return result;
         }
 
@@ -186,9 +207,11 @@ TtsInitializeResult TtsWrapper::initialize(
         result.detectedModels = detect.detectedModels;
         return result;
     } catch (const std::exception& e) {
+        result.error = std::string("TTS init exception: ") + e.what();
         LOGE("TTS: Exception during initialization: %s", e.what());
         return result;
     } catch (...) {
+        result.error = "TTS: Unknown exception during initialization";
         LOGE("TTS: Unknown exception during initialization");
         return result;
     }

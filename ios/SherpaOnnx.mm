@@ -189,6 +189,14 @@
     resolve(nil);
 }
 
+- (void)cancelExtractBySourcePath:(NSString *)sourcePath
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+    [SherpaOnnxArchiveHelper cancelExtractForPath:sourcePath];
+    resolve(nil);
+}
+
 - (void)computeFileSha256:(NSString *)filePath
              resolve:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject

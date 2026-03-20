@@ -162,6 +162,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "buffer": "^6.0.3"
   },
   "peerDependencies": {

@@ -573,6 +573,11 @@ export interface Spec extends TurboModule {
   cancelExtractTarZst(): Promise<void>;
 
   /**
+   * Cancel extraction for a specific source archive path (per-operation cancel for parallel extractions).
+   */
+  cancelExtractBySourcePath(sourcePath: string): Promise<void>;
+
+  /**
    * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
    * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
    */

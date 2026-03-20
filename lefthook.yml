@@ -8,7 +8,7 @@ pre-commit:
 
     types:
       glob: "*.{js,ts,jsx,tsx}"
-      run: npx tsc --noEmit
+      run: npx tsc --noEmit --project tsconfig.json
     types-example:
       glob: "example/**/*.{js,ts,jsx,tsx}"
       run: npx tsc --noEmit --project example/tsconfig.json

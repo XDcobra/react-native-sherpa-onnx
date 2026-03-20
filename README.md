@@ -48,7 +48,7 @@ No additional setup required. The library automatically handles native dependenc
 
 ### iOS
 
-The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=framework).
+The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` (format: `sherpa-onnx-ios-vX.Y.Z` or `sherpa-onnx-ios-vX.Y.Z-N` with optional build number) and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=sherpa-onnx-ios).
 
 #### Setup
 
@@ -62,7 +62,21 @@ The podspec runs `scripts/setup-ios-framework.sh`, which downloads the XCFramewo
 
 #### Building the iOS framework
 
-To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patches), see [third_party/sherpa-onnx-prebuilt/README.md](third_party/sherpa-onnx-prebuilt/README.md) and the [build-sherpa-onnx-ios-framework](.github/workflows/build-sherpa-onnx-ios-framework.yml) workflow.
+To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patches), see [third_party/sherpa-onnx-prebuilt/README.md](third_party/sherpa-onnx-prebuilt/README.md) and the [Framework - Sherpa-Onnx (iOS) Release](.github/workflows/framework-sherpa-onnx-ios-framework.yml) workflow.
+
+#### Model download (optional)
+
+If you use the [download manager](docs/download-manager.md) to fetch models at runtime, add the following to your **AppDelegate** so background downloads can finish when the app is in the background or after it was terminated. Without it, downloads only work reliably while the app is in the foreground.
+
+- **Swift (RN 0.77+):** In your bridging header add `#import <RNBackgroundDownloader.h>`. In `AppDelegate.swift`, implement:
+  ```swift
+  func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+    RNBackgroundDownloader.setCompletionHandlerWithIdentifier(identifier, completionHandler: completionHandler)
+  }
+  ```
+- **Objective-C:** In `AppDelegate.m` add `#import <RNBackgroundDownloader.h>` and the `application:handleEventsForBackgroundURLSession:completionHandler:` implementation that calls `[RNBackgroundDownloader setCompletionHandlerWithIdentifier:identifier completionHandler:completionHandler]`.
+
+Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android). Expo users can use the library’s config plugin to apply this automatically.
 
 ## Table of contents
 

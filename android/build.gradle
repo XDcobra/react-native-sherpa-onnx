@@ -177,6 +177,11 @@ dependencies {
 
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
+
+  // MMKV required by @kesha-antonov/react-native-background-downloader on Android.
+  // Kept in SDK so it is merged into this library AAR instead of adding a new app-level package;
+  // adding it only in the app can shift resource package IDs and cause "No package ID 6a found" / white screen.
+  implementation "com.tencent:mmkv-shared:1.3.16"
 }
 
 // Wire prebuilt tasks: extractSherpaOnnxClasses --> downloadNativeLibsIfNeeded;

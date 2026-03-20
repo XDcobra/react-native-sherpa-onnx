@@ -1,7 +1,7 @@
-export { extractTarBz2 } from './extractTarBz2';
-export type { ExtractProgressEvent } from './extractTarBz2';
-export { extractTarZst } from './extractTarZst';
-export type { ExtractProgressEvent as ExtractZstProgressEvent } from './extractTarZst';
+export { extractTarBz2 } from '../extraction/extractTarBz2';
+export type { ExtractProgressEvent } from '../extraction/extractTarBz2';
+export { extractTarZst } from '../extraction/extractTarZst';
+export type { ExtractProgressEvent as ExtractZstProgressEvent } from '../extraction/extractTarZst';
 export {
   listModelsByCategory,
   refreshModelsByCategory,
@@ -19,6 +19,14 @@ export {
   updateModelLastUsed,
   listDownloadedModelsWithMetadata,
   cleanupLeastRecentlyUsed,
+  getIncompleteDownloads,
+  resumeDownload,
+  deleteIncompleteDownload,
+  extractModelByCategory,
+  getIncompleteExtractions,
+  resumeExtraction,
+  deleteIncompleteExtraction,
+  ensureModelByCategory,
   ModelCategory,
 } from './ModelDownloadManager';
 export type {
@@ -31,12 +39,16 @@ export type {
   DownloadProgressListener,
   ModelsListUpdatedListener,
   DownloadResult,
+  DownloadState,
+  ExtractionState,
   ModelWithMetadata,
+  EnsureModelOptions,
 } from './ModelDownloadManager';
 export {
   validateChecksum,
   validateExtractedFiles,
   checkDiskSpace,
+  resolveActualModelDir,
   setExpectedFilesForCategory,
   getExpectedFilesForCategory,
   parseChecksumFile,

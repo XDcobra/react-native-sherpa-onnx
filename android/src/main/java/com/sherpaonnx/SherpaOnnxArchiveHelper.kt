@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -13,11 +14,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * This class delegates to C++ native implementation via JNI.
  */
 class SherpaOnnxArchiveHelper {
-  private val cancelRequested = AtomicBoolean(false)
-
   companion object {
-    /** Single-thread executor so extractions run off the React Native bridge thread and do not block listDownloadedModelsByCategory / RNFS. */
-    private val extractExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    /** Thread pool for extractions – allows up to 2 concurrent extractions while keeping them off the React Native bridge thread. */
+    private val extractExecutor: ExecutorService = Executors.newFixedThreadPool(2)
+
+    /** Per-source-path cancellation flags. Key = absolute source archive path. */
+    private val cancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
 
     init {
       try {
@@ -29,13 +31,22 @@ class SherpaOnnxArchiveHelper {
   }
 
   fun cancelExtractTarBz2() {
-    cancelRequested.set(true)
+    // Cancel ALL ongoing extractions (legacy global cancel)
+    for (flag in cancelFlags.values) flag.set(true)
     nativeCancelExtract()
   }
 
   fun cancelExtractTarZst() {
-    cancelRequested.set(true)
+    // Cancel ALL ongoing extractions (legacy global cancel)
+    for (flag in cancelFlags.values) flag.set(true)
     nativeCancelExtract()
+  }
+
+  /** Cancel a specific extraction identified by its source archive path. */
+  fun cancelExtractBySourcePath(sourcePath: String) {
+    // Only set the per-path flag; do not call nativeCancelExtract() since that is
+    // a global cancel that would also interrupt unrelated concurrent extractions.
+    cancelFlags[sourcePath]?.set(true)
   }
 
   fun extractTarBz2(
@@ -55,7 +66,9 @@ class SherpaOnnxArchiveHelper {
     }
 
     try {
-      cancelRequested.set(false)
+      // Register per-path cancel flag
+      val cancelFlag = AtomicBoolean(false)
+      cancelFlags[sourcePath] = cancelFlag
 
       // Create a progress callback object that JNI can call
       val progressCallback = object : Any() {
@@ -65,15 +78,23 @@ class SherpaOnnxArchiveHelper {
       }
 
       // Run extraction on a background thread so the React Native bridge thread is not blocked.
-      // Otherwise listDownloadedModelsByCategory (RNFS) and other native calls would wait until extraction finishes.
+      // The thread pool allows multiple extractions in parallel.
       extractExecutor.execute {
         try {
+          // Check per-path cancel flag before starting the native extraction.
+          if (cancelFlag.get()) {
+            resolveOnce(false, "Cancelled")
+            return@execute
+          }
           nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
+        } finally {
+          cancelFlags.remove(sourcePath)
         }
       }
     } catch (e: Exception) {
+      cancelFlags.remove(sourcePath)
       resolveOnce(false, "Archive extraction error: ${e.message}")
     }
   }
@@ -95,7 +116,9 @@ class SherpaOnnxArchiveHelper {
     }
 
     try {
-      cancelRequested.set(false)
+      val cancelFlag = AtomicBoolean(false)
+      cancelFlags[sourcePath] = cancelFlag
+
       val progressCallback = object : Any() {
         fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
           onProgress(bytesExtracted, totalBytes, percent)
@@ -103,12 +126,20 @@ class SherpaOnnxArchiveHelper {
       }
       extractExecutor.execute {
         try {
+          // Check per-path cancel flag before starting the native extraction.
+          if (cancelFlag.get()) {
+            resolveOnce(false, "Cancelled")
+            return@execute
+          }
           nativeExtractTarZst(sourcePath, targetPath, force, progressCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
+        } finally {
+          cancelFlags.remove(sourcePath)
         }
       }
     } catch (e: Exception) {
+      cancelFlags.remove(sourcePath)
       resolveOnce(false, "Archive extraction error: ${e.message}")
     }
   }
@@ -124,7 +155,6 @@ class SherpaOnnxArchiveHelper {
     if (BuildConfig.DEBUG) {
       Log.i("SherpaOnnx", "extractTarZstFromAsset assetPath=$assetPath targetPath=$targetPath")
     }
-    cancelRequested.set(false)
     val progressCallback = object : Any() {
       fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
         onProgress(bytesExtracted, totalBytes, percent)

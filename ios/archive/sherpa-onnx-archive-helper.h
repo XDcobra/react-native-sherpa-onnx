@@ -23,6 +23,9 @@ typedef void (^SherpaOnnxArchiveProgressBlock)(long long bytes, long long totalB
 
 + (void)cancelExtractTarZst;
 
+/** Cancel extraction for a specific source archive path (per-operation cancel for parallel extractions). */
++ (void)cancelExtractForPath:(NSString *)sourcePath;
+
 @end
 
 NS_ASSUME_NONNULL_END

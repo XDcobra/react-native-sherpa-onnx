@@ -14,9 +14,24 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <mutex>
+#include <set>
 #include <string>
 
-static std::atomic_bool g_cancelExtract(false);
+static std::mutex g_cancelMutex;
+static std::set<std::string> g_cancelledPaths;
+
+static bool isPathCancelled(const std::string& path) {
+  std::lock_guard<std::mutex> lock(g_cancelMutex);
+  // If the set contains an empty string, ALL extractions are cancelled (legacy global cancel).
+  return g_cancelledPaths.count("") > 0 || g_cancelledPaths.count(path) > 0;
+}
+
+static void clearCancelForPath(const std::string& path) {
+  std::lock_guard<std::mutex> lock(g_cancelMutex);
+  g_cancelledPaths.erase(path);
+  g_cancelledPaths.erase(""); // Clear the global cancel flag too
+}
 
 namespace {
 #ifdef HAVE_LIBARCHIVE
@@ -127,7 +142,8 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 + (void)cancelExtractTarBz2
 {
 #ifdef HAVE_LIBARCHIVE
-  g_cancelExtract.store(true);
+  std::lock_guard<std::mutex> lock(g_cancelMutex);
+  g_cancelledPaths.insert(""); // Empty string = cancel ALL
 #else
   // feature disabled
 #endif
@@ -136,7 +152,21 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 + (void)cancelExtractTarZst
 {
 #ifdef HAVE_LIBARCHIVE
-  g_cancelExtract.store(true);
+  std::lock_guard<std::mutex> lock(g_cancelMutex);
+  g_cancelledPaths.insert(""); // Empty string = cancel ALL
+#else
+  // feature disabled
+#endif
+}
+
++ (void)cancelExtractForPath:(NSString *)sourcePath
+{
+#ifdef HAVE_LIBARCHIVE
+  std::string path = [sourcePath UTF8String] ?: "";
+  if (!path.empty()) {
+    std::lock_guard<std::mutex> lock(g_cancelMutex);
+    g_cancelledPaths.insert(path);
+  }
 #else
   // feature disabled
 #endif
@@ -150,7 +180,8 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
 #ifndef HAVE_LIBARCHIVE
   return @{ @"success": @NO, @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1." };
 #else
-  g_cancelExtract.store(false);
+  std::string sourcePathStr = [sourcePath UTF8String] ?: "";
+  clearCancelForPath(sourcePathStr);
   NSFileManager *fileManager = [NSFileManager defaultManager];
 
   if (![fileManager fileExistsAtPath:sourcePath]) {
@@ -213,10 +244,11 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   int lastPercent = -1;
   long long lastEmitBytes = 0;
   while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
-    if (g_cancelExtract.load()) {
+    if (isPathCancelled(sourcePathStr)) {
       archive_read_free(archive);
       archive_write_free(disk);
       close_reader();
+      clearCancelForPath(sourcePathStr);
       return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
     }
     const char *currentPath = archive_entry_pathname(entry);
@@ -245,10 +277,11 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
     size_t size = 0;
     la_int64_t offset = 0;
     while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
-      if (g_cancelExtract.load()) {
+      if (isPathCancelled(sourcePathStr)) {
         archive_read_free(archive);
         archive_write_free(disk);
         close_reader();
+        clearCancelForPath(sourcePathStr);
         return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
       }
       la_ssize_t writeResult = archive_write_data_block(disk, buff, size, offset);

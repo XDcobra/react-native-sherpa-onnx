@@ -314,6 +314,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  override fun cancelExtractBySourcePath(sourcePath: String, promise: Promise) {
+    archiveHelper.cancelExtractBySourcePath(sourcePath)
+    promise.resolve(null)
+  }
+
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
   }

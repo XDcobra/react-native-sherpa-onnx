@@ -148,12 +148,15 @@ export async function validateExtractedFiles(
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          const nested = await collectFilesRecursive(
-            entry.path,
-            depth + 1,
-            maxDepth
-          );
-          files.push(...nested);
+          const subPath = entry.path;
+          if (subPath != null) {
+            const nested = await collectFilesRecursive(
+              subPath,
+              depth + 1,
+              maxDepth
+            );
+            files.push(...nested);
+          }
         } else {
           files.push(entry);
         }
@@ -175,13 +178,13 @@ export async function validateExtractedFiles(
     }
 
     let hasModelLikeFiles = actualFiles.some((file) =>
-      isModelLikeFile(file.name)
+      isModelLikeFile(file.name ?? '')
     );
 
     if (!hasModelLikeFiles) {
       const nestedFiles = await collectFilesRecursive(modelDir);
       hasModelLikeFiles = nestedFiles.some((file) =>
-        isModelLikeFile(file.name)
+        isModelLikeFile(file.name ?? '')
       );
     }
 
@@ -200,6 +203,77 @@ export async function validateExtractedFiles(
       'MISSING_FILES',
       `Failed to validate extracted files: ${error}`
     );
+  }
+}
+
+/** True if the file is a native sherpa-onnx model file (e.g. encoder.onnx). Excludes our metadata (.ready, manifest.json). */
+function isNativeModelFileName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.onnx') || lower.endsWith('.bin');
+}
+
+/**
+ * Check if a directory contains native model files (.onnx or .bin) at the top level or one level of subdirectories.
+ * Used to find the actual model dir; ignores our metadata (manifest.json, .ready).
+ */
+async function dirContainsModelFiles(dir: string): Promise<boolean> {
+  const entries = await readDir(dir);
+  const files = entries.filter((e) => !e.isDirectory());
+  if (files.some((f) => isNativeModelFileName(f.name ?? ''))) return true;
+  const subdirs = entries.filter((e) => e.isDirectory());
+  for (const sub of subdirs) {
+    const subPath = sub?.path;
+    if (subPath == null) continue;
+    const subEntries = await readDir(subPath);
+    const subFiles = subEntries.filter((e) => !e.isDirectory());
+    if (subFiles.some((f) => isNativeModelFileName(f.name ?? ''))) return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve the directory that actually contains model files.
+ * After extracting a tarball, model files often end up in a single top-level subdirectory
+ * (e.g. installDir/modelId/encoder.onnx). Native APIs expect the path to the folder
+ * that directly contains encoder.onnx, decoder.onnx, etc.
+ *
+ * - If installDir itself contains native model files (.onnx/.bin), returns installDir.
+ * - If installDir has exactly one subdirectory that contains native model files, returns that subdirectory path.
+ *   (Ignores our metadata: .ready, manifest.json.) This can produce paths like
+ *   .../tts/vits-piper-de_DE-thorsten-medium-int8/vits-piper-de_DE-thorsten-medium-int8 when the
+ *   archive extracts a top-level folder with the same name as the model id; that is intentional.
+ * - Otherwise returns installDir unchanged.
+ */
+export async function resolveActualModelDir(
+  installDir: string
+): Promise<string> {
+  try {
+    const dirExists = await exists(installDir);
+    if (!dirExists) return installDir;
+
+    const entries = await readDir(installDir);
+    const topLevelFiles = entries.filter((e) => !e.isDirectory());
+    if (topLevelFiles.some((f) => isNativeModelFileName(f.name ?? ''))) {
+      return installDir;
+    }
+
+    const subdirs = entries.filter((e) => e.isDirectory());
+    const firstSubdir = subdirs[0];
+    const singleSubdir = subdirs.length === 1 ? firstSubdir : undefined;
+
+    if (singleSubdir != null) {
+      const candidatePath = singleSubdir.path;
+      if (
+        candidatePath != null &&
+        (await dirContainsModelFiles(candidatePath))
+      ) {
+        return candidatePath;
+      }
+    }
+
+    return installDir;
+  } catch {
+    return installDir;
   }
 }
 

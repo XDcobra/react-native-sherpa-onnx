@@ -24,6 +24,14 @@ export default defineConfig([
     },
   },
   {
-    ignores: ['node_modules/', 'lib/', 'third_party/', 'sherpa-onnx/', 'test/cpp/', 'test/fixtures/'],
+    // Ignore node_modules anywhere (staged_files from lefthook can include deps)
+    ignores: [
+      '**/node_modules/**',
+      'lib/',
+      'third_party/',
+      'sherpa-onnx/',
+      'test/cpp/',
+      'test/fixtures/',
+    ],
   },
 ]);

@@ -47,7 +47,9 @@ export async function extractTarBz2(
   if (signal) {
     const onAbort = () => {
       try {
-        SherpaOnnx.cancelExtractTarBz2();
+        // Use per-path cancel so aborting this extraction doesn't affect
+        // other extractions that may be running in parallel.
+        SherpaOnnx.cancelExtractBySourcePath(sourcePath);
       } catch {
         // Ignore cancel errors to avoid crashing on abort.
       }

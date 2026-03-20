@@ -12,8 +12,8 @@
 import { DeviceEventEmitter, Platform } from 'react-native';
 import { readDir, stat, exists } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { extractTarZst } from '../download/extractTarZst';
-import { extractTarBz2 } from '../download/extractTarBz2';
+import { extractTarZst } from './extractTarZst';
+import { extractTarBz2 } from './extractTarBz2';
 import type {
   BundledArchive,
   ExtractArchiveOptions,
@@ -228,13 +228,9 @@ async function extractFromAsset(
   }
 
   if (signal) {
-    const cancel =
-      archive.format === 'tar.zst'
-        ? SherpaOnnx.cancelExtractTarZst
-        : SherpaOnnx.cancelExtractTarBz2;
     const onAbort = () => {
       try {
-        cancel();
+        SherpaOnnx.cancelExtractBySourcePath(archive.archivePath);
       } catch {
         // ignore
       }

@@ -17,6 +17,8 @@ namespace sherpaonnx {
 struct TtsInitializeResult {
     bool success;
     std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+    /** When success is false, optional error message (e.g. from DetectTtsModel or OfflineTts::Create). */
+    std::string error;
 };
 
 /**

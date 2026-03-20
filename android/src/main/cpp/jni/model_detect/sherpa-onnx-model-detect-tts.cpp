@@ -128,6 +128,10 @@ static TtsDetectResult DetectTtsModelFromFiles(
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
     std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
+    LOGI("DetectTtsModel: modelDir=%s espeak-ng dataDir=%s (empty=%d)",
+         modelDir.c_str(),
+         dataDirPath.empty() ? "(empty)" : dataDirPath.c_str(),
+         (int)dataDirPath.empty());
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
