@@ -618,7 +618,8 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
                         av_packet_unref(pkt);
                         continue;
                     }
-                    int converted = swr_convert(swr, outData, (int)out_nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
+                    const uint8_t* const* in_data = frame->extended_data ? frame->extended_data : frame->data;
+                    int converted = swr_convert(swr, outData, (int)out_nb_samples, in_data, frame->nb_samples);
                     if (converted <= 0) {
                         av_freep(&outData[0]);
                         av_freep(&outData);
@@ -842,8 +843,7 @@ static std::string decodeAudioFileToFloatMono(const char* inputPath,
     };
 
     auto convertOneFrame = [&](AVFrame* fr) {
-        auto in_data = reinterpret_cast<const uint8_t**>(
-            fr->extended_data ? fr->extended_data : fr->data);
+        const uint8_t* const* in_data = fr->extended_data ? fr->extended_data : fr->data;
         int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
         int64_t max_out =
             av_rescale_rnd(swr_get_delay(swr, in_sr2) + (int64_t)fr->nb_samples, out_sr, in_sr2, AV_ROUND_UP);
