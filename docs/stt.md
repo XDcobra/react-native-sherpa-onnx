@@ -98,7 +98,7 @@ Create an STT engine instance. You **must** call `stt.destroy()` when done to fr
 | `provider` | `string` | — | `'cpu'`, `'qnn'`, `'nnapi'`, `'xnnpack'`. See [execution-providers.md](execution-providers.md) |
 | `ruleFsts` | `string` | — | Comma-separated rule FST paths for inverse text normalization |
 | `ruleFars` | `string` | — | Comma-separated rule FAR paths for ITN |
-| `dither` | `number` | `0` | Feature extraction dither |
+| `dither` | `number` | `0` | Feature extraction dither (Kaldi-style). **Android:** passed to native `FeatureConfig`. **iOS:** accepted for API parity but **ignored** — bundled sherpa-onnx C/CXX headers do not expose dither; the library default applies |
 | `modelOptions` | `SttModelOptions` | — | Per-model options (see [Model-Specific Options](#model-specific-options)) |
 
 When you pass a non-empty `hotwordsFile`, the SDK auto-switches the decoding method to `modified_beam_search` (and ensures `maxActivePaths ≥ 4`). Use `sttSupportsHotwords(modelType)` to check support before setting hotwords.

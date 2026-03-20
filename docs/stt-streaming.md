@@ -100,6 +100,7 @@ Creates a streaming (online) STT engine backed by sherpa-onnx's `OnlineRecognize
 | `provider` | `string` | — | e.g. `'cpu'`, `'qnn'` |
 | `ruleFsts` | `string` | — | Rule FST paths for ITN |
 | `ruleFars` | `string` | — | Rule FAR paths for ITN |
+| `dither` | `number` | `0` | Feature extraction dither. **Android:** passed to native online recognizer config. **iOS:** accepted for API parity but **ignored** (same limitation as offline STT — see [stt.md](stt.md) `dither` row) |
 | `blankPenalty` | `number` | — | Blank penalty |
 | `debug` | `boolean` | `false` | Debug logging |
 | `enableInputNormalization` | `boolean` | `true` | Adaptive scaling of input audio peak to ~0.8, helping with varying mic levels. Set `false` if audio is already normalized |
