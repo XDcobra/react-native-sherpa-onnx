@@ -342,13 +342,14 @@ After detection, the SDK validates all required files are present.
 | **Matcha** | `acousticModel`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
 | **Kokoro / Kitten** | `ttsModel`, `tokens`, `voices`, `dataDir` (espeak-ng-data) | `lexicon` |
 | **Pocket** | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | — |
-| **Zipvoice** | `encoder`, `decoder`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
+| **Zipvoice** | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir` (espeak-ng-data), `lexicon` (`lexicon.txt` or `lexicon-*.txt`) | — |
 
 Error format: `TTS <ModelType>: missing required files in <modelDir>: <field1>, <field2>`
 
 ### Zipvoice Notes
 
 - **Full Zipvoice** (encoder + decoder + vocoder, e.g. `vocos_24khz.onnx`): supported
+- **Lexicon + espeak:** Zipvoice uses sherpa-onnx’s `MatchaTtsLexicon`, which **requires** a non-empty lexicon path and `espeak-ng-data`. Without `lexicon.txt` (or `lexicon-<lang>.txt`), upstream calls `abort()` — the SDK validates these up front and returns a JS error instead.
 - **Zipvoice distill** (no vocoder): detected but **initialization fails** — sherpa-onnx requires a vocoder
 - **Memory:** Full fp32 model (~605 MB) uses significant RAM. On devices with < 8 GB, prefer the **int8 distill** variant (~104 MB). The SDK rejects with an actionable error if free memory is below ~800 MB
 
