@@ -186,6 +186,13 @@ internal class SherpaOnnxTtsHelper(
           rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
           return@init
         }
+        val lexiconPath = path(paths, "lexicon")
+        if (lexiconPath.isBlank()) {
+          val msg = "Zipvoice requires lexicon.txt (or lexicon-<lang>.txt) in the model directory. The sherpa-onnx engine aborts if it is missing. Copy lexicon from the official k2-fsa sherpa-onnx Zipvoice model package or hr-files release next to tokens.txt."
+          Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
+          rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
+          return@init
+        }
         val am = context.applicationContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         if (am != null) {
           val memInfo = ActivityManager.MemoryInfo()
@@ -212,7 +219,7 @@ internal class SherpaOnnxTtsHelper(
           decoder = path(paths, "decoder"),
           vocoder = vocoderPath,
           dataDir = path(paths, "dataDir"),
-          lexicon = path(paths, "lexicon"),
+          lexicon = lexiconPath,
           numThreads = zipvoiceNumThreads,
           debug = debug,
           ruleFsts = ruleFsts?.takeIf { it.isNotBlank() } ?: "",
