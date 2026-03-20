@@ -202,15 +202,16 @@ export interface TtsGenerationOptions {
   silenceScale?: number;
 
   /**
-   * Reference audio for voice cloning (Kotlin GenerationConfig).
-   * In the Kotlin/RN stack, only Pocket TTS uses this; other model types (vits, matcha, kokoro, kitten) ignore it.
-   * Mono float samples in [-1, 1] and sample rate in Hz.
+   * Reference audio for voice cloning (native GenerationConfig / Zipvoice prompt).
+   * **Android:** Requires non-empty samples and `sampleRate > 0`. Used for **Zipvoice** (cloning) and **Pocket** (Mimi encoder).
+   * Other model types (vits, matcha, kokoro, kitten) are **rejected** on Android if reference audio is passed.
+   * Mono float samples in [-1, 1].
    */
   referenceAudio?: { samples: number[]; sampleRate: number };
 
   /**
-   * Transcript text of the reference audio (Kotlin GenerationConfig.referenceText).
-   * Required for Pocket TTS when referenceAudio is provided; ignored by other model types.
+   * Transcript of the reference utterance for **Zipvoice** voice cloning (prompt text); **required** when cloning with Zipvoice (non-empty after trim).
+   * **Pocket:** not read by sherpa-onnx native code; optional, e.g. for app metadata only.
    */
   referenceText?: string;
 

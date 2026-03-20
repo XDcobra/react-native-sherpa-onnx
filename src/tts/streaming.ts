@@ -90,6 +90,16 @@ function toNativeTtsOptions(
   if (options.silenceScale !== undefined)
     out.silenceScale = options.silenceScale;
   if (options.referenceAudio != null) {
+    const sr = options.referenceAudio.sampleRate;
+    if (
+      typeof __DEV__ !== 'undefined' &&
+      __DEV__ &&
+      (!Number.isFinite(sr) || sr <= 0)
+    ) {
+      console.warn(
+        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning on Android.'
+      );
+    }
     out.referenceAudio = options.referenceAudio.samples;
     out.referenceSampleRate = options.referenceAudio.sampleRate;
   }
