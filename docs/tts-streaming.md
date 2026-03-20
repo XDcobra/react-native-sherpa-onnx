@@ -34,7 +34,7 @@ Incremental speech generation with chunk callbacks. Use for lower time-to-first-
 | Cancel mid-stream | ✅ | `controller.cancel()` |
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Per-instance routing | ✅ | Events tagged with `instanceId` and `requestId` |
-| Voice cloning (streaming) | ✅ | Kotlin engines (e.g. Pocket) only; **not** Zipvoice |
+| Voice cloning (streaming) | ✅ (Android) | **Pocket** only with valid `referenceAudio` + `sampleRate > 0`. **Not** Zipvoice (use batch `generateSpeech`). Other model types → error if reference is set. |
 
 `createStreamingTTS()` creates a streaming-only engine. Use `createTTS()` for batch one-shot synthesis (`generateSpeech`, `generateSpeechWithTimestamps`). Both share the same underlying native helper — one active stream per engine at a time.
 
@@ -117,7 +117,7 @@ Start streaming TTS. Only one stream per engine at a time — starting another w
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `text` | `string` | Text to synthesize |
-| `options` | `TtsGenerationOptions \| undefined` | Same options as `generateSpeech()`: `sid`, `speed`, `silenceScale`, `referenceAudio`, `referenceText`, `numSteps`, `extra` |
+| `options` | `TtsGenerationOptions \| undefined` | Same keys as batch TTS. Reference streaming: **Pocket** only (`referenceAudio` non-empty, `sampleRate > 0`). `referenceText` optional for Pocket (not used natively). **Android** rejects reference options for VITS/Matcha/Kokoro/Kitten/Zipvoice. |
 | `handlers` | `TtsStreamHandlers` | Callbacks: `onChunk`, `onEnd`, `onError` |
 
 ---
@@ -273,7 +273,7 @@ const ttsB = await createStreamingTTS({ ... });
 | No `onChunk` calls | Check that handlers are passed correctly; ensure text is non-empty |
 | Memory grows for long sessions | Avoid accumulating all chunks in JS; write to file incrementally or use native playback |
 | Listener leak warnings | Call `unsubscribe()` on unmount if `onEnd`/`onError` hasn't fired yet |
-| Streaming with reference audio | Not supported for Zipvoice; use `generateSpeech()` instead |
+| Streaming with reference audio | **Zipvoice:** use batch `generateSpeech()` with reference. **Pocket:** supported. **Other types:** rejected on Android. |
 
 **Tips:**
 

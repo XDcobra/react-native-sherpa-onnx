@@ -43,7 +43,7 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Save/share WAV | ✅ | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Save MP3/FLAC | ✅ | Via `convertAudioToFormat()` + `copyFileToContentUri()` |
-| Voice cloning | ✅ | Reference audio via `TtsGenerationOptions` (Zipvoice, Pocket) |
+| Voice cloning | ✅ (Android) | **Zipvoice** / **Pocket** only: non-empty `referenceAudio` + `sampleRate > 0`; Zipvoice cloning also needs non-empty `referenceText`. Other types reject reference options. |
 | Runtime param updates | ✅ | `tts.updateParams()` |
 | Model downloads | ✅ | Via [Download Manager](download-manager.md) |
 
@@ -160,8 +160,8 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `sid` | `number` | `0` | Speaker ID for multi-speaker models |
 | `speed` | `number` | `1.0` | Speech speed multiplier |
 | `silenceScale` | `number` | — | Silence scale at generation time |
-| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | For voice cloning. Mono float samples in [-1, 1] |
-| `referenceText` | `string` | — | Transcript of reference audio (required with `referenceAudio`) |
+| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Android:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten → native error if set. Mono float in [-1, 1]. |
+| `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
 | `numSteps` | `number` | — | Flow-matching steps (model-dependent) |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
 
@@ -283,9 +283,18 @@ const controller = await tts.generateSpeechStream(text, undefined, {
 
 ## Voice Cloning
 
-For models that support it (Zipvoice, Pocket with GenerationConfig), pass reference audio:
+Only **Zipvoice** and **Pocket** use reference audio in sherpa-onnx. On **Android**, passing `referenceAudio` for any other model type returns **`TTS_GENERATE_ERROR`** / **`TTS_STREAM_ERROR`** instead of silent empty audio.
+
+**Requirements (Android):**
+
+- Non-empty `referenceAudio.samples` and **`referenceAudio.sampleRate > 0`** (setting `referenceText` alone does nothing).
+- **Zipvoice** cloning: also **non-empty `referenceText`** (prompt transcript). Use **`generateSpeech()`** / **`generateSpeechWithTimestamps()`** only — not streaming with reference.
+- **Pocket:** reference drives the Mimi encoder; **`referenceText` is optional** (native stack ignores it). **`generateSpeech()`**, **`generateSpeechWithTimestamps()`**, and **`generateSpeechStream()`** support reference audio.
+
+**Zipvoice** without reference audio uses normal TTS with **`sid`** (built-in voices), same as other engines.
 
 ```typescript
+// Zipvoice zero-shot (batch only)
 const audio = await tts.generateSpeech('Text in the reference voice', {
   referenceAudio: { samples: refSamples, sampleRate: 22050 },
   referenceText: 'Transcript of the reference recording',
@@ -294,9 +303,7 @@ const audio = await tts.generateSpeech('Text in the reference voice', {
 });
 ```
 
-- **Zipvoice:** Use `generateSpeech()` only (streaming with reference audio is not supported)
-- **Pocket/Kotlin engines:** Both `generateSpeech()` and `generateSpeechStream()` support reference audio
-- Pocket-specific: `extra: { temperature: '0.7', chunk_size: '15' }`
+- Pocket-specific: `extra: { temperature: '0.7', chunk_size: '15' }` (see sherpa-onnx Pocket docs for more `extra` keys).
 
 ---
 
