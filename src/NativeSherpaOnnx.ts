@@ -29,7 +29,7 @@ export interface Spec extends TurboModule {
    * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
    * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
-   * @param dither - Optional: dither for feature extraction (default 0)
+   * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
    * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
    * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
    * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
@@ -127,7 +127,8 @@ export interface Spec extends TurboModule {
   /**
    * Initialize OnlineRecognizer for streaming STT (single options object to avoid iOS TurboModule marshalling crash with many args).
    * @param instanceId - Unique ID for this engine instance (from createStreamingSTT)
-   * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params)
+   * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params).
+   *   `options.dither`: **Android** only; **iOS** ignores it (native `FeatureConfig` has no dither field).
    */
   initializeOnlineSttWithOptions(
     instanceId: string,
@@ -143,6 +144,7 @@ export interface Spec extends TurboModule {
       provider?: string;
       ruleFsts?: string;
       ruleFars?: string;
+      /** Feature dither. Android: applied. iOS: ignored. */
       dither?: number;
       blankPenalty?: number;
       debug?: boolean;

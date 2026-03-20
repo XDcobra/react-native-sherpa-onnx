@@ -798,8 +798,28 @@ static std::string decodeAudioFileToFloatMono(const char* inputPath,
     };
 
     auto convertOneFrame = [&](AVFrame* fr) {
-        auto in_data = reinterpret_cast<const uint8_t**>(
-            fr->extended_data ? fr->extended_data : fr->data);
+        // Copy plane pointers so we can pass const uint8_t** to swr_convert without
+        // reinterpret_cast(uint8_t** -> const uint8_t**), which triggers -Wcast-qual.
+        uint8_t** src = fr->extended_data ? fr->extended_data : fr->data;
+        int nplanes = fr->ch_layout.nb_channels;
+        if (nplanes <= 0) nplanes = AV_NUM_DATA_POINTERS;
+
+        const uint8_t* in_stack[AV_NUM_DATA_POINTERS] = {};
+        std::vector<const uint8_t*> in_heap;
+        const uint8_t** in_arg;
+        if (nplanes > AV_NUM_DATA_POINTERS) {
+            in_heap.resize(static_cast<size_t>(nplanes));
+            for (int i = 0; i < nplanes; ++i) {
+                in_heap[static_cast<size_t>(i)] = src[i];
+            }
+            in_arg = in_heap.data();
+        } else {
+            for (int i = 0; i < nplanes; ++i) {
+                in_stack[i] = src[i];
+            }
+            in_arg = in_stack;
+        }
+
         int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
         int64_t max_out =
             av_rescale_rnd(swr_get_delay(swr, in_sr2) + (int64_t)fr->nb_samples, out_sr, in_sr2, AV_ROUND_UP);
@@ -808,7 +828,7 @@ static std::string decodeAudioFileToFloatMono(const char* inputPath,
         if (av_samples_alloc(&out_buf, nullptr, 1, (int)max_out, AV_SAMPLE_FMT_FLT, 0) < 0) {
             return;
         }
-        int converted = swr_convert(swr, &out_buf, (int)max_out, in_data, fr->nb_samples);
+        int converted = swr_convert(swr, &out_buf, (int)max_out, in_arg, fr->nb_samples);
         if (converted > 0) {
             appendConverted(out_buf, converted);
         }
