@@ -131,7 +131,7 @@ function toNativeTtsOptions(
       (!Number.isFinite(sr) || sr <= 0)
     ) {
       console.warn(
-        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning on Android.'
+        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
       );
     }
     out.referenceAudio = options.referenceAudio.samples;

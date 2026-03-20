@@ -311,7 +311,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
-   *   Voice cloning (Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
+   *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
    * @returns Object with { samples: number[], sampleRate: number }
    */
   generateTts(
@@ -327,7 +327,7 @@ export interface Spec extends TurboModule {
    * Generate speech with subtitle/timestamp metadata.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
-   * @param options - Same as {@link generateTts} options (cloning: Zipvoice/Pocket on Android; Zipvoice needs `referenceText`).
+   * @param options - Same as {@link generateTts} options (cloning: Zipvoice/Pocket; Zipvoice needs `referenceText`).
    * @returns Object with samples, sampleRate, subtitles, and estimated flag
    */
   generateTtsWithTimestamps(
@@ -348,7 +348,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance
    * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
    * @param text - Text to convert to speech
-   * @param options - Same shape as batch TTS; reference streaming is **Pocket-only** on Android (Zipvoice cloning uses non-streaming generate).
+   * @param options - Same shape as batch TTS; reference streaming is **Pocket-only** (Zipvoice cloning uses non-streaming generate).
    */
   generateTtsStream(
     instanceId: string,

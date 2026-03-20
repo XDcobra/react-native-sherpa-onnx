@@ -203,8 +203,8 @@ export interface TtsGenerationOptions {
 
   /**
    * Reference audio for voice cloning (native GenerationConfig / Zipvoice prompt).
-   * **Android:** Requires non-empty samples and `sampleRate > 0`. Used for **Zipvoice** (cloning) and **Pocket** (Mimi encoder).
-   * Other model types (vits, matcha, kokoro, kitten) are **rejected** on Android if reference audio is passed.
+   * **Native (iOS & Android):** Requires non-empty samples and `sampleRate > 0`. Used for **Zipvoice** (cloning) and **Pocket** (Mimi encoder).
+   * Other model types (vits, matcha, kokoro, kitten) are **rejected** if reference audio is passed.
    * Mono float samples in [-1, 1].
    */
   referenceAudio?: { samples: number[]; sampleRate: number };
