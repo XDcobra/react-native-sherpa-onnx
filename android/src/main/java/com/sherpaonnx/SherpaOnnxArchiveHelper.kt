@@ -44,9 +44,9 @@ class SherpaOnnxArchiveHelper {
 
   /** Cancel a specific extraction identified by its source archive path. */
   fun cancelExtractBySourcePath(sourcePath: String) {
+    // Only set the per-path flag; do not call nativeCancelExtract() since that is
+    // a global cancel that would also interrupt unrelated concurrent extractions.
     cancelFlags[sourcePath]?.set(true)
-    // Also signal native layer in case extraction is blocked in C++
-    nativeCancelExtract()
   }
 
   fun extractTarBz2(
@@ -81,6 +81,11 @@ class SherpaOnnxArchiveHelper {
       // The thread pool allows multiple extractions in parallel.
       extractExecutor.execute {
         try {
+          // Check per-path cancel flag before starting the native extraction.
+          if (cancelFlag.get()) {
+            resolveOnce(false, "Cancelled")
+            return@execute
+          }
           nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
@@ -121,6 +126,11 @@ class SherpaOnnxArchiveHelper {
       }
       extractExecutor.execute {
         try {
+          // Check per-path cancel flag before starting the native extraction.
+          if (cancelFlag.get()) {
+            resolveOnce(false, "Cancelled")
+            return@execute
+          }
           nativeExtractTarZst(sourcePath, targetPath, force, progressCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
