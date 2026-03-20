@@ -8,6 +8,7 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.k2fsa.sherpa.onnx.WaveReader
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -717,6 +718,72 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /**
+   * Decode audio to mono float samples (approx. [-1, 1]) and effective sample rate.
+   * Same path/URI handling as [convertAudioToFormat]. WAV may use [WaveReader] when no resample is requested.
+   */
+  override fun decodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Double?, promise: Promise) {
+    var tmpFile: java.io.File? = null
+    try {
+      val targetHz = (targetSampleRateHz ?: 0.0).toInt()
+      if (targetHz < 0) {
+        promise.reject("DECODE_ERROR", "targetSampleRateHz must be >= 0")
+        return
+      }
+      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
+      tmpFile = tmp
+
+      if (pathToUse.endsWith(".wav", ignoreCase = true)) {
+        try {
+          val wave = WaveReader.readWave(pathToUse)
+          val s = wave.samples
+          if (s != null && s.isNotEmpty() && wave.sampleRate > 0 && (targetHz == 0 || targetHz == wave.sampleRate)) {
+            val map = Arguments.createMap()
+            val arr = Arguments.createArray()
+            for (i in s.indices) {
+              arr.pushDouble(s[i].toDouble())
+            }
+            map.putArray("samples", arr)
+            map.putInt("sampleRate", wave.sampleRate)
+            promise.resolve(map)
+            return
+          }
+        } catch (_: Throwable) {
+          // Fall through to FFmpeg/native path (e.g. odd WAV or resample requested).
+        }
+      }
+
+      val result = Companion.nativeDecodeAudioFileToFloatSamples(pathToUse, targetHz)
+      if (result.size == 1 && result[0] is String) {
+        promise.reject("DECODE_ERROR", result[0] as String)
+        return
+      }
+      if (result.size != 2 || result[0] !is FloatArray) {
+        promise.reject("DECODE_ERROR", "Unexpected native decode result")
+        return
+      }
+      val floats = result[0] as FloatArray
+      val rateObj = result.getOrNull(1) as? Number ?: run {
+        promise.reject("DECODE_ERROR", "Unexpected sample rate in native decode result")
+        return
+      }
+      val sr = rateObj.toInt()
+      val map = Arguments.createMap()
+      val arr = Arguments.createArray()
+      for (i in floats.indices) {
+        arr.pushDouble(floats[i].toDouble())
+      }
+      map.putArray("samples", arr)
+      map.putInt("sampleRate", sr)
+      promise.resolve(map)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "DECODE_EXCEPTION: ${e.message}", e)
+      promise.reject("DECODE_EXCEPTION", e.message ?: "Failed to decode audio", e)
+    } finally {
+      tmpFile?.delete()
+    }
+  }
+
   // ==================== TTS Methods ====================
 
   /**
@@ -1104,5 +1171,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
     @JvmStatic
     private external fun nativeConvertAudioToWav16k(inputPath: String, outputPath: String): String
+
+    /**
+     * On success: [FloatArray samples, Integer sampleRate]. On error: [String message].
+     */
+    @JvmStatic
+    private external fun nativeDecodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Int): Array<Any>
   }
 }
