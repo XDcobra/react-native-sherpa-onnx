@@ -77,6 +77,13 @@ else
         ;;
     esac
     echo "Patched $CMAKE_FILE: added target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)"
+    # Verify the patch was applied successfully
+    if ! grep -q "N_PATH_HOME=512" "$CMAKE_FILE" 2>/dev/null; then
+      echo "Error: Failed to apply N_PATH_HOME=512 patch to $CMAKE_FILE." >&2
+      echo "The upstream CMake file may have changed. Without this patch, espeak-ng may fail to" >&2
+      echo "initialize on long paths (N_PATH_HOME_DEF 255 truncation). Aborting build." >&2
+      exit 1
+    fi
   fi
 fi
 
