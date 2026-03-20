@@ -85,6 +85,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
   - [iOS](#ios)
 - [Feature Support](#feature-support)
 - [Platform Support Status](#platform-support-status)
+- [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
   - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
   - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
@@ -127,6 +128,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 | **iOS** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 
+## Known issues
+
+- **[Pocket TTS (voice cloning)](docs/KNOWN_ISSUES.md)** — heuristic EOS and **iOS vs Android drift** (length/quality); not a React Native–only issue. Full notes: [investigation doc](docs/github-issue-pocket-tts-eos-frame-zero.md).
+
 ## Supported Model Types
 
 ### Speech-to-Text (STT) Models
@@ -168,6 +173,7 @@ For **streaming TTS** (incremental generation, low latency), use `createStreamin
 
 ## Documentation
 
+- [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
 - [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)

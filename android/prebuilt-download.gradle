@@ -538,8 +538,6 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         println "[sherpa-onnx]   into: ${sherpaOnnxClassesDir} (sherpa-onnx native libs/headers were not fetched via GitHub this run)"
       }
     }
-
-    println "========== end downloadNativeLibsIfNeeded =========="
     println ""
   }
 }

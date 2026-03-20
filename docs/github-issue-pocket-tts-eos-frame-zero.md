@@ -2,6 +2,8 @@
 
 This document is the **single source of truth** for the Pocket TTS / EOS / cross-platform work in **react-native-sherpa-onnx** and VoiceLab: what went wrong, what we verified, what we learned, and what we do next.
 
+**SDK-facing summary (English):** [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — short note focused on **heuristic EOS + cross-platform drift** (not the small upstream guard detail in Appendix A).
+
 ---
 
 ## TL;DR
