@@ -85,7 +85,7 @@ jobs:
         with:
           ndk-version: r29
           add-to-path: true
-          local-cache: true
+          local-cache: false  # disable local cache to avoid linking errors: https://github.com/nttld/setup-ndk/issues/518#event-16541651206
 
       # ── Verification ───────────────────────────────────────────────────
       - name: Verify project structure
