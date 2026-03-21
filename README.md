@@ -276,6 +276,35 @@ This app showcases how to integrate `react-native-sherpa-onnx` into a real-world
 
 MIT
 
+## Third-Party Libraries
+
+This project includes the following open source components:
+
+- [sherpa-onnx (Apache License 2.0)]
+  https://github.com/k2-fsa/sherpa-onnx
+
+- [ONNX Runtime (MIT License)]
+  https://github.com/microsoft/onnxruntime
+
+- [FFmpeg (LGPL v2.1)]
+  This project uses FFmpeg and Shine under the LGPL license.
+  Users must comply with LGPL requirements when distributing applications using this SDK.
+  FFmpeg source code can be obtained at: https://ffmpeg.org
+
+- [Shine MP3 Encoder (LGPL)]
+  https://github.com/toots/shine
+
+- [Opus Codec (BSD License)]
+  https://opus-codec.org
+
+- [zstd (BSD License)]
+  https://github.com/facebook/zstd
+
+- [libarchive (BSD License)]
+  https://github.com/libarchive/libarchive
+
+See the [THIRD_PARTY_LICENSES](/THIRD_PARTY_LICENSES/) directory for full license texts.
+
 ---
 
 Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
