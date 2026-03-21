@@ -7,13 +7,17 @@
 # Behavior:
 # - Reads existing CSV if present; preserves rows and manual edits.
 # - Merges in all assets from asset-list.txt (release); adds missing rows.
-# - Auto-fills license_type (and related columns) only when license_type is empty/whitespace.
+# - Auto-fills license_type (and related columns) when license_type is empty/whitespace, missing, or unknown.
 # - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
 # - .onnx-only assets: license_type=missing (no archive to scan).
-# - No license-like path in listing: license_type=missing.
+# - No license-like path in listing: license_type=missing (then HF fallback for vits-piper-*.tar.bz2).
 # - License file present but unreadable: license_type=unknown, detection_source=archive_extract_failed.
+# - vits-piper-*.tar.bz2: if outcome is missing or unknown, fetch MODEL_CARD from Hugging Face
+#   (https://huggingface.co/${HF_MODEL_OWNER}/<asset_basename_without_suffix>/raw/main/MODEL_CARD),
+#   parse "* License: …", set license_file to the repo URL, detection_source=huggingface_model_card.
+#   HF_MODEL_OWNER defaults to csukuangfj (same layout as sherpa-onnx release asset names).
 #
 # Note: With `set -u`, ${#empty_assoc[@]} and ${!empty_assoc[@]} can error on some Bash builds;
 # we avoid that below.
@@ -45,6 +49,8 @@ fi
 
 # Authenticated GitHub downloads (CI: GITHUB_TOKEN; local: GITHUB_TOKEN or GH_TOKEN).
 _GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+# Hugging Face repo slug matches release asset name without .tar.bz2 (e.g. vits-piper-pl_PL-darkman-medium).
+HF_MODEL_OWNER="${HF_MODEL_OWNER:-csukuangfj}"
 
 declare -A LICENSE_LIKE_BASENAMES=(
   ["license"]=1 ["license.txt"]=1 ["licence"]=1 ["licence.txt"]=1
@@ -182,11 +188,77 @@ set_detected() {
   existing_license_file["$name"]="$file"
 }
 
+set_hf_model_card() {
+  local name="$1"
+  local l_type="$2"
+  local c_use="$3"
+  local conf="$4"
+  local page_url="$5"
+  existing_license_type["$name"]="$l_type"
+  existing_commercial_use["$name"]="$c_use"
+  existing_confidence["$name"]="$conf"
+  existing_detection_source["$name"]="huggingface_model_card"
+  existing_license_file["$name"]="$page_url"
+}
+
+# Returns 0 and prints MODEL_CARD body to stdout if the request succeeds.
+fetch_hf_model_card() {
+  local slug="$1"
+  local url="https://huggingface.co/${HF_MODEL_OWNER}/${slug}/raw/main/MODEL_CARD"
+  curl -sfSL "$url"
+}
+
+# Extracts the first "* License: value" line (case-insensitive on the label).
+parse_model_card_license_field() {
+  local card="$1"
+  local line lic
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ ^[*][[:space:]]*[Ll]icense:[[:space:]]*(.*) ]]; then
+      lic="${BASH_REMATCH[1]}"
+      lic="$(echo -n "$lic" | xargs)"
+      if [[ -n "$lic" ]]; then
+        echo -n "$lic"
+        return 0
+      fi
+    fi
+  done <<< "$card"
+  return 1
+}
+
+# vits-piper-*.tar.bz2 only: fill license from HF MODEL_CARD when archive path gave missing/unknown.
+try_hf_model_card_fallback() {
+  local asset_name="$1"
+  local slug page_url card raw_lic det l_res c_res conf_res
+
+  [[ "$asset_name" == vits-piper-*.tar.bz2 ]] || return 1
+
+  slug="${asset_name%.tar.bz2}"
+  page_url="https://huggingface.co/${HF_MODEL_OWNER}/${slug}"
+
+  card="$(fetch_hf_model_card "$slug")" || return 1
+  raw_lic="$(parse_model_card_license_field "$card")" || return 1
+
+  det="$(detect_license "$raw_lic")"
+  l_res="$(echo "$det" | cut -d'|' -f1)"
+  c_res="$(echo "$det" | cut -d'|' -f2)"
+  conf_res="$(echo "$det" | cut -d'|' -f3)"
+
+  if [[ "$l_res" == "unknown" ]]; then
+    set_hf_model_card "$asset_name" "$raw_lic" "unknown" "medium" "$page_url"
+  else
+    set_hf_model_card "$asset_name" "$l_res" "$c_res" "$conf_res" "$page_url"
+  fi
+  return 0
+}
+
 detect_license() {
   local t="$1"
   t="$(echo "$t" | tr '[:upper:]' '[:lower:]' | tr -s ' \r\n\t' ' ')"
 
-  if [[ "$t" == *"apache license"* && "$t" == *"version 2.0"* ]]; then echo "apache-2.0|yes|high"
+  if [[ "$t" == *"cc0"* || "$t" == *"cc-0"* || "$t" == *"creative commons zero"* || "$t" == *"public domain dedication"* ]]; then echo "cc0|yes|high"
+  elif [[ "$t" == *"apache-2.0"* || "$t" == *"apache 2.0"* ]]; then echo "apache-2.0|yes|high"
+  elif [[ "$t" == *"apache license"* && "$t" == *"version 2.0"* ]]; then echo "apache-2.0|yes|high"
   elif [[ "$t" == *"mit license"* ]]; then echo "mit|yes|high"
   elif [[ "$t" == *"bsd 3-clause"* || ( "$t" == *"redistribution and use in source and binary forms"* && "$t" == *"neither the name"* ) ]]; then echo "bsd-3-clause|yes|medium"
   elif [[ "$t" == *"bsd 2-clause"* ]]; then echo "bsd-2-clause|yes|medium"
@@ -218,7 +290,8 @@ for asset_name in "${release_assets[@]}"; do
   
   l_type="${existing_license_type["$asset_name"]:-}"
   l_type="$(echo -n "$l_type" | xargs)"
-  if [[ -n "$l_type" ]]; then
+  l_type_lc="$(echo -n "$l_type" | tr '[:upper:]' '[:lower:]')"
+  if [[ -n "$l_type" && "$l_type_lc" != "missing" && "$l_type_lc" != "unknown" ]]; then
     echo "  $asset_name — skip (license_type already set: '$l_type')"
     continue
   fi
@@ -259,6 +332,10 @@ for asset_name in "${release_assets[@]}"; do
   fi
 
   if [[ ${#license_paths[@]} -eq 0 ]]; then
+    if try_hf_model_card_fallback "$asset_name"; then
+      echo "  $asset_name — no license in tree → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
     set_missing "$asset_name"
     echo "  $asset_name — no license-like path in tree listing → license_type=missing"
     continue
@@ -273,9 +350,13 @@ for asset_name in "${release_assets[@]}"; do
     _curl_dl+=(-H "Authorization: Bearer ${_GH_TOKEN}" -H "Accept: application/octet-stream")
   fi
   if ! curl "${_curl_dl[@]}" -o "$archive_path" "$url"; then
+    rm -rf "$td"
+    if try_hf_model_card_fallback "$asset_name"; then
+      echo "  $asset_name — download failed → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
     set_extract_failed "$asset_name" "${license_paths[0]}"
     echo "  $asset_name — download failed → detection_source=archive_extract_failed"
-    rm -rf "$td"
     continue
   fi
 
@@ -293,7 +374,10 @@ for asset_name in "${release_assets[@]}"; do
     
     for c in "$c1" "$c2" "$c3"; do
       if [[ -z "$c" ]]; then continue; fi
-      out="$(tar -xOf "$archive_path" "$c" 2>/dev/null || true)"
+      # Avoid bash "ignored null byte" from $(...) and cap size (wrong member / binary).
+      out="$(
+        tar -xOf "$archive_path" "$c" 2>/dev/null | head -c 524288 | tr -d '\000' || true
+      )"
       if [[ -n "$out" ]]; then
         extracted_text="$out"
         used_file="$p"
@@ -303,9 +387,13 @@ for asset_name in "${release_assets[@]}"; do
   done
 
   if [[ -z "$extracted_text" ]]; then
+    rm -rf "$td"
+    if try_hf_model_card_fallback "$asset_name"; then
+      echo "  $asset_name — could not extract license file → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
     set_extract_failed "$asset_name" "$used_file"
     echo "  $asset_name — could not extract text from '$used_file' inside archive"
-    rm -rf "$td"
     continue
   fi
 
@@ -313,11 +401,18 @@ for asset_name in "${release_assets[@]}"; do
   l_res="$(echo "$det" | cut -d'|' -f1)"
   c_res="$(echo "$det" | cut -d'|' -f2)"
   conf_res="$(echo "$det" | cut -d'|' -f3)"
-  
-  set_detected "$asset_name" "$l_res" "$c_res" "$conf_res" "$used_file"
-  echo "  $asset_name — detected license_type=$l_res commercial_use=$c_res confidence=$conf_res file=$used_file"
 
   rm -rf "$td"
+
+  if [[ "$l_res" == "unknown" ]]; then
+    if try_hf_model_card_fallback "$asset_name"; then
+      echo "  $asset_name — archive license text unknown → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
+  fi
+
+  set_detected "$asset_name" "$l_res" "$c_res" "$conf_res" "$used_file"
+  echo "  $asset_name — detected license_type=$l_res commercial_use=$c_res confidence=$conf_res file=$used_file"
 done
 
 echo "--- writing CSV ---"
