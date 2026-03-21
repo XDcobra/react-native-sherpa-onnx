@@ -18,7 +18,7 @@ def moduleRoot = project.projectDir.parentFile
 def sherpaOnnxVersion = System.getenv('SHERPA_ONNX_VERSION')
 if (!sherpaOnnxVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG'), 'sherpa-onnx-android-v')
-  sherpaOnnxVersion = v ?: (project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.28')
+  sherpaOnnxVersion = v ?: (project.hasProperty('sherpaOnnxVersion') ? project.sherpaOnnxVersion : '1.12.31')
 }
 project.ext.sherpaOnnxVersion = sherpaOnnxVersion
 println "[react-native-sherpa-onnx] sherpa-onnx version (extracted/used): ${sherpaOnnxVersion}"
