@@ -40,7 +40,7 @@ function normalizeSttResult(raw: {
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional preferInt8 and modelType (default: auto)
- * @returns Object with success, detectedModels (array of { type, modelDir }), and modelType (primary detected type)
+ * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional error when success is false, and optionally isHardwareSpecificUnsupported
  * @example
  * ```typescript
  * const path = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
@@ -55,15 +55,33 @@ export async function detectSttModel(
   options?: { preferInt8?: boolean; modelType?: STTModelType }
 ): Promise<{
   success: boolean;
+  /** Native validation/detect failure. */
+  error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
+  isHardwareSpecificUnsupported?: boolean;
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.detectSttModel(
+  const raw = await SherpaOnnx.detectSttModel(
     resolvedPath,
     options?.preferInt8,
     options?.modelType
   );
+  const err =
+    typeof (raw as { error?: unknown }).error === 'string'
+      ? String((raw as { error: string }).error).trim()
+      : '';
+  return {
+    success: raw.success,
+    ...(err.length > 0 ? { error: err } : {}),
+    ...(raw.isHardwareSpecificUnsupported === true
+      ? { isHardwareSpecificUnsupported: true }
+      : {}),
+    detectedModels: raw.detectedModels ?? [],
+    ...(raw.modelType != null && raw.modelType !== ''
+      ? { modelType: raw.modelType }
+      : {}),
+  };
 }
 
 /**

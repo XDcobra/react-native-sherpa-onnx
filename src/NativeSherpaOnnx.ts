@@ -73,6 +73,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (or native included a message). */
+    error?: string;
     /** True when detection failed because the model targets unsupported hardware (RK35xx, Ascend, CANN). Use to show a specific message or block init. */
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -283,6 +285,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (or native included a message). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */

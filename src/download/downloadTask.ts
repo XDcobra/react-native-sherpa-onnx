@@ -11,7 +11,7 @@ import {
   stat,
   unlink,
 } from '@dr.pogodin/react-native-fs';
-import { checkDiskSpace } from './validation';
+import { checkDiskSpace, removeDirectoryRecursive } from './validation';
 import {
   ModelCategory,
   type ModelMetaBase,
@@ -26,6 +26,7 @@ import {
   getArchivePath,
   getReadyMarkerPath,
   getDownloadStatePath,
+  getNativeAssetExtractedModelDir,
   getTarArchivePath,
   getOnnxPath,
 } from './paths';
@@ -447,4 +448,5 @@ export async function deleteIncompleteDownload(
   if (await exists(statePath)) {
     await unlink(statePath);
   }
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 }

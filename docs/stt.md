@@ -113,12 +113,18 @@ function detectSttModel(
   options?: { preferInt8?: boolean; modelType?: STTModelType }
 ): Promise<{
   success: boolean;
+  /** When `success` is `false`, native validation/detect message (e.g. missing required files). Omitted if native sent an empty string. */
+  error?: string;
+  /** True when the model targets unsupported hardware (e.g. RK35xx, Ascend); from native when applicable. */
+  isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
 }>;
 ```
 
-Detect model type without loading. Includes required-files validation — returns `success: false` with a specific `error` message when required files are missing.
+Detect model type without loading. Includes required-files validation.
+
+When `success` is `false`, check **`error`** for the native explanation (show it in your UI); if `error` is absent, treat as an unknown detect/validation failure. **`isHardwareSpecificUnsupported`** is set when native reports hardware-specific models the runtime cannot use.
 
 ```typescript
 const result = await detectSttModel(
@@ -127,6 +133,9 @@ const result = await detectSttModel(
 );
 if (result.success && result.modelType === 'whisper') {
   // Show Whisper-specific options (language, task, etc.)
+}
+if (!result.success) {
+  console.warn(result.error ?? 'STT detection failed');
 }
 ```
 

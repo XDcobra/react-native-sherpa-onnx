@@ -18,11 +18,12 @@ import {
   getModelsBaseDir,
   getModelDir,
   getManifestPath,
+  getNativeAssetExtractedModelDir,
   getReadyMarkerPath,
   getTarArchivePath,
   getOnnxPath,
 } from './paths';
-import { resolveActualModelDir } from './validation';
+import { resolveActualModelDir, removeDirectoryRecursive } from './validation';
 import { emitModelsListUpdated } from './downloadEvents';
 import { clearMemoryCacheForCategory } from './registry';
 
@@ -210,6 +211,7 @@ export async function deleteModelByCategory(
   if (await exists(onnxPath)) {
     await unlink(onnxPath);
   }
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
   const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
   emitModelsListUpdated(category, list);
 }

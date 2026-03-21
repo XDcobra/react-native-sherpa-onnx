@@ -113,6 +113,8 @@ function detectTtsModel(
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
+  /** When `success` is `false`, native validation/detect message (e.g. missing required files, invalid Zipvoice lexicon). Omitted if native sent an empty string. */
+  error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
   lexiconLanguageCandidates?: string[];
@@ -121,10 +123,15 @@ function detectTtsModel(
 
 Detect model type without loading. Includes required-files validation. For **Kokoro/Kitten** models with multiple lexicon files, returns `lexiconLanguageCandidates` (e.g. `["gb-en", "us-en", "zh"]`).
 
+When `success` is `false`, check **`error`** for the native explanation (show it in your UI); if `error` is absent, treat as an unknown detect/validation failure.
+
 ```typescript
 const result = await detectTtsModel({ type: 'file', path: fullPathToKokoro });
 if (result.success && result.lexiconLanguageCandidates?.length) {
   // Show language dropdown for Kokoro/Kitten
+}
+if (!result.success) {
+  console.warn(result.error ?? 'TTS detection failed');
 }
 ```
 
@@ -406,6 +413,8 @@ const result = await detectTtsModel({ type: 'file', path: fullPath });
 if (result.success && result.modelType === 'kokoro') {
   // Show kokoro-specific options
   // result.lexiconLanguageCandidates — use for language dropdown
+} else if (!result.success) {
+  // result.error — native message (missing files, lexicon, etc.)
 }
 ```
 

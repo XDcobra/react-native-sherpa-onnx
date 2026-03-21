@@ -37,13 +37,12 @@ data class OfflineTtsConfig(
 
 | Funktion | Grund |
 |----------|--------|
-| **Stream-Progress (0..1)** | Die Kotlin-API liefert im Streaming-Callback nur `(chunk) -> Int`, keinen Progress-Wert. Die C-API hat `SherpaOnnxGeneratedAudioProgressCallback(samples, n, p)`. Für echten Progress müsste Android eine JNI-Schicht auf die C-API nutzen (analog ZipvoiceTtsWrapper). |
-| **Zipvoice** | Bereits über C-API gelöst (ZipvoiceTtsWrapper); Kotlin-API enthält kein OfflineTtsZipvoiceModelConfig. |
+| **Stream-Progress (0..1)** | Die Kotlin-API liefert im Streaming-Callback nur `(chunk) -> Int`, keinen Progress-Wert. Die C-API hat `SherpaOnnxGeneratedAudioProgressCallback(samples, n, p)`. Für echten Progress müsste Android eine eigene JNI-Schicht auf die C-API nutzen. |
 
 **Implementierung:**  
 Die vier Init-Optionen sind umgesetzt: `src/tts/types.ts` (`TTSInitializeOptions`), `src/tts/index.ts` (Durchreichung an `initializeTts`), `NativeSherpaOnnx.ts` (TurboModule-Spec), Android `SherpaOnnxTtsHelper` (TtsInitState, buildTtsConfig, initializeTts, updateTtsParams) und `SherpaOnnxModule`, iOS `sherpa-onnx-tts-wrapper` (initialize mit rule_fsts/rule_fars/max_num_sentences/silence_scale) und `SherpaOnnx+TTS.mm` (Parameter + Globals für updateTtsParams).
 
-**Kernaussage:** **Init: ruleFsts, ruleFars, maxNumSentences, silenceScale** sind in der Kotlin-API (`Tts.kt` --> `OfflineTtsConfig`) vorhanden und in der RN-Bridge (Android + iOS) angeboten. **Stream-Progress** und **Zipvoice** erfordern weiterhin die C-API.
+**Kernaussage:** **Init: ruleFsts, ruleFars, maxNumSentences, silenceScale** sind in der Kotlin-API (`Tts.kt` --> `OfflineTtsConfig`) vorhanden und in der RN-Bridge (Android + iOS) angeboten. **Zipvoice** auf Android nutzt dieselbe Kotlin-API (`OfflineTtsZipVoiceModelConfig`, `generateWithConfig` für Cloning). **Stream-Progress** (numerisches `p` im Callback) ist weiterhin nur über die C-API bzw. eigene JNI erreichbar.
 
 ---
 
@@ -59,7 +58,7 @@ Quelle: Android-Implementierung (`SherpaOnnxTtsHelper.kt`), Kotlin-API-Definitio
 |                             | Kokoro                                                | ✅ `OfflineTtsKokoroModelConfig` | model, voices, tokens, dataDir, lexicon, lengthScale                                                            |
 |                             | Kitten                                                | ✅ `OfflineTtsKittenModelConfig` | model, voices, tokens, dataDir, lengthScale                                                                     |
 |                             | Pocket                                                | ✅ `OfflineTtsPocketModelConfig` | lmFlow, lmMain, encoder, decoder, textConditioner, vocabJson, tokenScoresJson                                   |
-|                             | Zipvoice                                              | ❌ nicht in Kotlin-API           | In diesem Projekt über C-API (`ZipvoiceTtsWrapper`) abgedeckt                                                   |
+|                             | Zipvoice                                              | ✅ `OfflineTtsZipVoiceModelConfig` | Android: `buildTtsConfig` + `OfflineTts`; Voice Cloning via `GenerationConfig` / `generateWithConfig` (wie Pocket) |
 | **Init-Optionen**           | numThreads                                            | ✅                               | In allen Modellconfigs (OfflineTtsModelConfig)                                                                  |
 |                             | debug                                                 | ✅                               | In allen Modellconfigs                                                                                          |
 |                             | noiseScale                                            | ✅                               | VITS, Matcha                                                                                                    |
@@ -126,7 +125,7 @@ Welche Offline-TTS-Funktionen in der C-API (c-api.h / cxx-api.h) existieren, in 
 | **GenerateWithProgressCallback**            | ✅ `SherpaOnnxOfflineTtsGenerateWithProgressCallback` – Callback `(samples, n, p)` mit Progress `p`                                                                                 | ❌                                                                   | Kotlin-Callbacks liefern keinen Fortschrittswert.                               |
 | GenerateWithProgressCallbackWithArg         | ✅ mit `void* arg`                                                                                                                                                                  | ❌                                                                   | Wie oben.                                                                       |
 | GenerateWithCallbackWithArg                 | ✅ mit `void* arg`                                                                                                                                                                  | ❌                                                                   | Nur „arg“-Variante fehlt in Kotlin.                                             |
-| GenerateWithZipvoice (Voice-Cloning)        | ✅                                                                                                                                                                                  | ❌ (Zipvoice in diesem Projekt per C-API `ZipvoiceTtsWrapper`)       | Kotlin-API hat kein OfflineTtsZipvoiceModelConfig; wir nutzen C-API direkt.     |
+| GenerateWithZipvoice (Voice-Cloning)        | ✅                                                                                                                                                                                  | ✅ `generateWithConfig` + `GenerationConfig` (referenceAudio, referenceText, …) | Android: wie Pocket über `SherpaOnnxTtsHelper` / upstream JNI.                |
 | **GenerateWithConfig**                      | ✅ `SherpaOnnxOfflineTtsGenerateWithConfig` + `SherpaOnnxGenerationConfig` (silence_scale, speed, sid, reference_audio, reference_text, num_steps, extra) mit **Progress-Callback** | ✅ GenerationConfig + generateWithConfig (ohne Progress im Callback) | C-API erlaubt Progress beim GenerateWithConfig; Kotlin nur Chunk ohne `p`.      |
 | **OfflineTtsConfig**                        | rule_fsts, max_num_sentences, rule_fars, silence_scale                                                                                                                             | ✅ Kotlin `OfflineTtsConfig` (Tts.kt): ruleFsts, ruleFars, maxNumSentences, silenceScale | In unserem RN-Bridge nicht durchgereicht; Kotlin-API hat alle Felder.             |
 | SherpaOnnxWriteWave / WriteWaveToBuffer     | ✅                                                                                                                                                                                  | ✅ GeneratedAudio.save (Kotlin) / Helper                             |                                                                                 |
@@ -134,7 +133,7 @@ Welche Offline-TTS-Funktionen in der C-API (c-api.h / cxx-api.h) existieren, in 
 | SherpaOnnxDestroyOfflineTtsGeneratedAudio   | ✅                                                                                                                                                                                  | N/A (Kotlin Managed)                                                | Speicherfreigabe auf C-Ebene.                                                   |
 
 
-Kurzfassung: Die C-API bietet **Progress im Streaming-Callback** (`SherpaOnnxGeneratedAudioProgressCallback` mit `p`) und optionale **Callback-WithArg**-Varianten; die Kotlin-API deckt das nicht ab. Zipvoice ist in der offiziellen Kotlin-API nicht als Modelltyp enthalten und wird bei uns über die C-API (ZipvoiceTtsWrapper) genutzt.
+Kurzfassung: Die C-API bietet **Progress im Streaming-Callback** (`SherpaOnnxGeneratedAudioProgressCallback` mit `p`) und optionale **Callback-WithArg**-Varianten; die Kotlin-API deckt das nicht ab. Zipvoice ist in der sherpa-onnx Kotlin-API als `OfflineTtsZipVoiceModelConfig` verfügbar; dieses Projekt nutzt das auf Android ohne eigenes ZipVoice-JNI.
 
 ---
 
@@ -144,7 +143,7 @@ Kurzfassung: Die C-API bietet **Progress im Streaming-Callback** (`SherpaOnnxGen
 | Feature                                                       | C-API                 | Kotlin-API                   | RN Bridge (JS)       | Hinweis                                    |
 | ------------------------------------------------------------- | --------------------- | ---------------------------- | -------------------- | ------------------------------------------ |
 | Modelltypen VITS, Matcha, Kokoro, Kitten, Pocket              | ✅                     | ✅                            | ✅ (modelType)        |                                            |
-| Zipvoice                                                      | ✅                     | ❌ (C-API-Wrapper im Projekt) | ✅                    | Über ZipvoiceTtsWrapper (JNI/C-API).       |
+| Zipvoice                                                      | ✅                     | ✅ `OfflineTts` + ZipVoice-Config | ✅                    | Android: upstream Kotlin/JNI; kein `ZipvoiceTtsWrapper` mehr. |
 | Init: numThreads, debug, noiseScale, noiseScaleW, lengthScale | ✅                     | ✅                            | ✅                    |                                            |
 | Init: ruleFsts, ruleFars, maxNumSentences, silenceScale       | ✅                     | ✅ (Tts.kt OfflineTtsConfig) | ❌                    | In RN-Init nicht durchgereicht; rein über Kotlin ergänzbar. |
 | generate(text, sid, speed)                                    | ✅                     | ✅                            | ✅ generateTts        |                                            |
@@ -164,7 +163,7 @@ Kurzfassung: Die C-API bietet **Progress im Streaming-Callback** (`SherpaOnnxGen
 - **TurboModule-Spec:** `src/NativeSherpaOnnx.ts`
 - **TTS-JS-API und Typen:** `src/tts/index.ts`, `src/tts/types.ts`
 - **Kotlin-API (OfflineTtsConfig-Definition):** `sherpa-onnx/sherpa-onnx/kotlin-api/Tts.kt`
-- **Android Kotlin TTS:** `android/src/main/java/com/sherpaonnx/SherpaOnnxTtsHelper.kt`, `ZipvoiceTtsWrapper.kt`
+- **Android Kotlin TTS:** `android/src/main/java/com/sherpaonnx/SherpaOnnxTtsHelper.kt`
 - **iOS TTS (C++-Wrapper):** `ios/sherpa-onnx-tts-wrapper.mm`, `ios/SherpaOnnx+TTS.mm`
 - **C-API-Header:** `ios/include/sherpa-onnx/c-api/c-api.h`, `cxx-api.h` (TTS: OfflineTts, OfflineTtsConfig, GenerationConfig, GeneratedAudio, Progress-Callbacks)
 

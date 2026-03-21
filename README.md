@@ -80,6 +80,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Table of contents
 
+- [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
 - [Installation](#installation)
   - [Android](#android)
   - [iOS](#ios)
@@ -100,6 +101,13 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
   - [Video to Text Comparison App](#video-to-text-comparison-app)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Bundled sherpa-onnx version
+
+| Platform | Version |
+|----------|---------|
+| Android | 1.12.31 |
+| iOS | 1.12.31 |
 
 ## Feature Support
 
@@ -166,7 +174,7 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Matcha**       | `'matcha'`        | High-quality acoustic model + vocoder. Detected by acoustic_model + vocoder; no folder token required. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html) |
 | **Kokoro**       | `'kokoro'`        | Multi-speaker, multi-language. Folder name should contain **kokoro** (not kitten) for auto-detection. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Folder name should contain **kitten** (not kokoro) for auto-detection. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
-| **Zipvoice**     | `'zipvoice'`      | Standard TTS with **`sid`**. **Voice cloning** (reference audio + `referenceText`): only **`generateSpeech`** (batch)—streaming TTS does not support reference audio for Zipvoice. Cloning is **supported on Android & IOS**. Encoder + decoder + vocoder. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
+| **Zipvoice**     | `'zipvoice'`      | Standard TTS with **`sid`**. **Voice cloning** (reference audio + `referenceText`): batch via **`generateSpeech`** only—streaming TTS does not support reference audio for Zipvoice. On **Android**, init and cloning use the upstream **Kotlin** `OfflineTts` API (`generateWithConfig`); default **`numSteps`** when omitted matches sherpa-onnx `GenerationConfig` (**5**). Cloning is **supported on Android & iOS**. Encoder + decoder + vocoder. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. **Voice cloning** on **Android:** batch and streaming TTS. **iOS:** cloning is experimental. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
