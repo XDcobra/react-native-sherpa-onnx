@@ -80,6 +80,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Table of contents
 
+- [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
 - [Installation](#installation)
   - [Android](#android)
   - [iOS](#ios)
@@ -100,6 +101,13 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
   - [Video to Text Comparison App](#video-to-text-comparison-app)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Bundled sherpa-onnx version
+
+| Platform | Version |
+|----------|---------|
+| Android | 1.12.31 |
+| iOS | 1.12.31 |
 
 ## Feature Support
 
