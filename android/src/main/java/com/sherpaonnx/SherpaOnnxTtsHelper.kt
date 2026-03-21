@@ -65,7 +65,7 @@ internal class SherpaOnnxTtsHelper(
 
   private data class TtsEngineInstance(
     @Volatile var tts: OfflineTts? = null,
-    var ttsInitState: TtsInitState? = null,
+    @Volatile var ttsInitState: TtsInitState? = null,
     val ttsStreamRunning: AtomicBoolean = AtomicBoolean(false),
     val ttsStreamCancelled: AtomicBoolean = AtomicBoolean(false),
     var ttsStreamThread: Thread? = null,
