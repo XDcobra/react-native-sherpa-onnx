@@ -84,6 +84,10 @@ read_csv() {
 }
 
 read_csv "$CSV_FILE"
+existing_csv_rows=$((${#existing_asset_name[@]}))
+echo "=== update_model_license_csv.sh ==="
+echo "CSV path: $CSV_FILE"
+echo "Existing rows in CSV (by asset name): $existing_csv_rows"
 
 declare -a release_assets=()
 declare -A asset_urls=()
@@ -109,6 +113,14 @@ if [[ -f "$ASSET_LIST" ]]; then
     fi
   done < "$ASSET_LIST"
 fi
+
+echo "Asset list file: ${ASSET_LIST:-<none>}"
+echo "Tree cache dir: $TREE_CACHE_DIR"
+echo "Release assets to consider: ${#release_assets[@]}"
+if [[ ${#release_assets[@]} -eq 0 ]]; then
+  echo "Note: empty asset list — output CSV will only contain header plus any assets already in CSV but not on release (sorted)."
+fi
+echo "--- per-asset license pass ---"
 
 get_safe_name() {
   local name="$1"
@@ -186,11 +198,13 @@ for asset_name in "${release_assets[@]}"; do
   l_type="${existing_license_type["$asset_name"]:-}"
   l_type="$(echo -n "$l_type" | xargs)"
   if [[ -n "$l_type" ]]; then
+    echo "  $asset_name — skip (license_type already set: '$l_type')"
     continue
   fi
 
   if [[ "$asset_name" == *.onnx ]]; then
     set_missing "$asset_name"
+    echo "  $asset_name — .onnx bundle → license_type=missing (no archive)"
     continue
   fi
 
@@ -225,14 +239,17 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ ${#license_paths[@]} -eq 0 ]]; then
     set_missing "$asset_name"
+    echo "  $asset_name — no license-like path in tree listing → license_type=missing"
     continue
   fi
 
+  echo "  $asset_name — found ${#license_paths[@]} license-like path(s), downloading archive…"
   td="$(mktemp -d -t model-license-XXXXXX)"
   archive_path="${td}/${safe_name}"
 
   if ! curl -sSL -o "$archive_path" "$url"; then
     set_extract_failed "$asset_name" "${license_paths[0]}"
+    echo "  $asset_name — download failed → detection_source=archive_extract_failed"
     rm -rf "$td"
     continue
   fi
@@ -262,6 +279,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ -z "$extracted_text" ]]; then
     set_extract_failed "$asset_name" "$used_file"
+    echo "  $asset_name — could not extract text from '$used_file' inside archive"
     rm -rf "$td"
     continue
   fi
@@ -272,10 +290,12 @@ for asset_name in "${release_assets[@]}"; do
   conf_res="$(echo "$det" | cut -d'|' -f3)"
   
   set_detected "$asset_name" "$l_res" "$c_res" "$conf_res" "$used_file"
+  echo "  $asset_name — detected license_type=$l_res commercial_use=$c_res confidence=$conf_res file=$used_file"
 
   rm -rf "$td"
 done
 
+echo "--- writing CSV ---"
 mkdir -p "$(dirname "$CSV_FILE")"
 echo "asset_name,license_type,commercial_use,confidence,detection_source,license_file" > "$CSV_FILE"
 
@@ -295,8 +315,12 @@ for name in "${!existing_asset_name[@]}"; do
 done
 
 if [[ ${#remaining[@]} -gt 0 ]]; then
+  echo "Appending ${#remaining[@]} asset(s) present in CSV but not in current release asset list."
   mapfile -t remaining_sorted < <(printf "%s\n" "${remaining[@]}" | sort)
   for name in "${remaining_sorted[@]}"; do
     echo "${name},${existing_license_type["$name"]},${existing_commercial_use["$name"]},${existing_confidence["$name"]},${existing_detection_source["$name"]},${existing_license_file["$name"]}" >> "$CSV_FILE"
   done
 fi
+
+out_lines=$(wc -l < "$CSV_FILE" | tr -d ' ')
+echo "Done. Wrote $CSV_FILE ($out_lines lines including header)."

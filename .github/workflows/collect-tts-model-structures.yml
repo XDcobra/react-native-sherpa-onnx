@@ -168,13 +168,18 @@ jobs:
 
       - name: Create or extend TTS license status CSV
         run: |
+          set -euo pipefail
           CSV="THIRD_PARTY_LICENSES/tts-models-license-status.csv"
+          echo "Updating license status CSV (verbose script output follows)…"
+          echo "  asset-list.txt lines: $(wc -l < asset-list.txt | tr -d ' ')"
+          echo "  tree-cache files: $(find tree-cache -name '*.txt' 2>/dev/null | wc -l | tr -d ' ')"
           bash scripts/update_model_license_csv.sh \
             --asset-list asset-list.txt \
             --tree-cache-dir tree-cache \
             --csv "$CSV"
-          echo "License CSV updated:"
+          echo "--- result ---"
           wc -l "$CSV"
+          head -20 "$CSV"
 
       - name: Commit and push if changed
         run: |
