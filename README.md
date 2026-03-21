@@ -278,32 +278,43 @@ MIT
 
 ## Third-Party Libraries
 
-This project includes the following open source components:
+This SDK includes the following open source components:
 
-- [sherpa-onnx (Apache License 2.0)]
-  https://github.com/k2-fsa/sherpa-onnx
+- [sherpa-onnx (Apache License 2.0)](/THIRD_PARTY_LICENSES/sherpa-onnx.txt): https://github.com/k2-fsa/sherpa-onnx
 
-- [ONNX Runtime (MIT License)]
-  https://github.com/microsoft/onnxruntime
+- [ONNX Runtime (MIT License)](/THIRD_PARTY_LICENSES/onnxruntime.txt): https://github.com/microsoft/onnxruntime
 
-- [FFmpeg (LGPL v2.1)]
-  This project uses FFmpeg and Shine under the LGPL license.
-  Users must comply with LGPL requirements when distributing applications using this SDK.
-  FFmpeg source code can be obtained at: https://ffmpeg.org
+- [FFmpeg (LGPL v2.1)](/THIRD_PARTY_LICENSES/ffmpeg.txt): https://ffmpeg.org
 
-- [Shine MP3 Encoder (LGPL)]
-  https://github.com/toots/shine
+- [Shine MP3 Encoder (LGPL)](/THIRD_PARTY_LICENSES/shine.txt): https://github.com/toots/shine
 
-- [Opus Codec (BSD License)]
-  https://opus-codec.org
+- [Opus Codec (BSD License)](/THIRD_PARTY_LICENSES/opus.txt): https://opus-codec.org
 
-- [zstd (BSD License)]
-  https://github.com/facebook/zstd
+- [Zstandard (zstd) (BSD License)](/THIRD_PARTY_LICENSES/zstd.txt): https://github.com/facebook/zstd
 
-- [libarchive (BSD License)]
-  https://github.com/libarchive/libarchive
+- [libarchive (BSD License)](/THIRD_PARTY_LICENSES/libarchive.txt): https://github.com/libarchive/libarchive
 
-See the [THIRD_PARTY_LICENSES](/THIRD_PARTY_LICENSES/) directory for full license texts.
+Full license texts are available in the [THIRD_PARTY_LICENSES](/THIRD_PARTY_LICENSES/) directory.
+
+### LGPL Notice
+
+This SDK includes LGPL-licensed components such as FFmpeg and Shine.  
+Applications using this SDK must ensure compliance with LGPL requirements when distributing binaries.
+
+FFmpeg source code can be obtained at: https://ffmpeg.org
+
+### Qualcomm QNN Support
+
+This SDK supports optional integration with Qualcomm AI Runtime (QNN).
+
+QNN is proprietary software provided by Qualcomm and is not included in this SDK.  
+To use QNN acceleration, users must obtain and include the required QNN libraries separately and comply with Qualcomm's license terms:
+
+https://softwarecenter.qualcomm.com/
+
+### Responsibility
+
+By using this SDK, you are responsible for complying with all third-party licenses included in this project.
 
 ---
 
