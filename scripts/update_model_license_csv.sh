@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Update model-license CSV from release asset list and pre-collected tree-cache.
 #
+# Goal: map each release asset (same names as *-models-expected.csv) to license_type and
+# commercial_use hints for app distribution (ads, IAP). Not legal advice.
+#
 # Behavior:
-# - Keeps existing rows and manual edits.
-# - Adds missing asset rows.
-# - Auto-fills only when license_type is empty.
-# - Uses tree-cache to detect whether an archive likely contains a license file.
-# - Downloads/extracts only assets that need license-type detection.
+# - Reads existing CSV if present; preserves rows and manual edits.
+# - Merges in all assets from asset-list.txt (release); adds missing rows.
+# - Auto-fills license_type (and related columns) only when license_type is empty/whitespace.
+# - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
+#   path exists — no full extract unless we need file contents for detection.
+# - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
+# - .onnx-only assets: license_type=missing (no archive to scan).
+# - No license-like path in listing: license_type=missing.
+# - License file present but unreadable: license_type=unknown, detection_source=archive_extract_failed.
+#
+# Note: With `set -u`, ${#empty_assoc[@]} and ${!empty_assoc[@]} can error on some Bash builds;
+# we avoid that below.
 
 set -euo pipefail
 
@@ -32,6 +42,9 @@ if [[ -z "$ASSET_LIST" || -z "$TREE_CACHE_DIR" || -z "$CSV_FILE" ]]; then
   echo "Usage: $0 --asset-list <path> --tree-cache-dir <dir> --csv <path>"
   exit 1
 fi
+
+# Authenticated GitHub downloads (CI: GITHUB_TOKEN; local: GITHUB_TOKEN or GH_TOKEN).
+_GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 declare -A LICENSE_LIKE_BASENAMES=(
   ["license"]=1 ["license.txt"]=1 ["licence"]=1 ["licence.txt"]=1
@@ -84,10 +97,18 @@ read_csv() {
 }
 
 read_csv "$CSV_FILE"
-existing_csv_rows=$((${#existing_asset_name[@]}))
+
+# Row count for logging (avoid ${#assoc[@]} on empty assoc under set -u on some Bash versions).
+existing_csv_rows=0
+if [[ -f "$CSV_FILE" ]]; then
+  existing_csv_rows=$(($(grep -cve '^[[:space:]]*$' "$CSV_FILE" 2>/dev/null || echo 0)))
+  ((existing_csv_rows > 0)) && ((existing_csv_rows--)) # minus header
+  ((existing_csv_rows < 0)) && existing_csv_rows=0
+fi
+
 echo "=== update_model_license_csv.sh ==="
 echo "CSV path: $CSV_FILE"
-echo "Existing rows in CSV (by asset name): $existing_csv_rows"
+echo "Existing data rows in CSV (excl. header, by line count): $existing_csv_rows"
 
 declare -a release_assets=()
 declare -A asset_urls=()
@@ -247,7 +268,11 @@ for asset_name in "${release_assets[@]}"; do
   td="$(mktemp -d -t model-license-XXXXXX)"
   archive_path="${td}/${safe_name}"
 
-  if ! curl -sSL -o "$archive_path" "$url"; then
+  _curl_dl=(-sSL)
+  if [[ -n "$_GH_TOKEN" && "$url" == *"github.com"* ]]; then
+    _curl_dl+=(-H "Authorization: Bearer ${_GH_TOKEN}" -H "Accept: application/octet-stream")
+  fi
+  if ! curl "${_curl_dl[@]}" -o "$archive_path" "$url"; then
     set_extract_failed "$asset_name" "${license_paths[0]}"
     echo "  $asset_name — download failed → detection_source=archive_extract_failed"
     rm -rf "$td"
@@ -302,13 +327,18 @@ echo "asset_name,license_type,commercial_use,confidence,detection_source,license
 declare -A out_seen=()
 for name in "${release_assets[@]}"; do
   if [[ -z "${out_seen["$name"]:-}" ]]; then
-    echo "${name},${existing_license_type["$name"]},${existing_commercial_use["$name"]},${existing_confidence["$name"]},${existing_detection_source["$name"]},${existing_license_file["$name"]}" >> "$CSV_FILE"
+    echo "${name},${existing_license_type["$name"]:-},${existing_commercial_use["$name"]:-},${existing_confidence["$name"]:-},${existing_detection_source["$name"]:-},${existing_license_file["$name"]:-}" >> "$CSV_FILE"
     out_seen["$name"]=1
   fi
 done
 
 declare -a remaining=()
-for name in "${!existing_asset_name[@]}"; do
+# Empty assoc: ${!existing_asset_name[@]} can trip `set -u` on some Bash builds.
+declare -a existing_asset_keys=()
+set +u
+existing_asset_keys=("${!existing_asset_name[@]}")
+set -u
+for name in "${existing_asset_keys[@]}"; do
   if [[ -z "${out_seen["$name"]:-}" ]]; then
     remaining+=("$name")
   fi
@@ -318,7 +348,7 @@ if [[ ${#remaining[@]} -gt 0 ]]; then
   echo "Appending ${#remaining[@]} asset(s) present in CSV but not in current release asset list."
   mapfile -t remaining_sorted < <(printf "%s\n" "${remaining[@]}" | sort)
   for name in "${remaining_sorted[@]}"; do
-    echo "${name},${existing_license_type["$name"]},${existing_commercial_use["$name"]},${existing_confidence["$name"]},${existing_detection_source["$name"]},${existing_license_file["$name"]}" >> "$CSV_FILE"
+    echo "${name},${existing_license_type["$name"]:-},${existing_commercial_use["$name"]:-},${existing_confidence["$name"]:-},${existing_detection_source["$name"]:-},${existing_license_file["$name"]:-}" >> "$CSV_FILE"
   done
 fi
 

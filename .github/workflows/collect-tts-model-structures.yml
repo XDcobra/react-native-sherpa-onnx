@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -45,7 +47,11 @@ jobs:
         env:
           ASSET_LIMIT: ${{ inputs.asset_limit }}
         run: |
-          RESP=$(curl -sL "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/tts-models")
+          API_AUTH=()
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            API_AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json")
+          fi
+          RESP=$(curl -sSL "${API_AUTH[@]}" "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/tts-models")
           if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
             LIST=$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)"')
             if [ -z "$ASSET_LIMIT" ] || [ "$ASSET_LIMIT" = "0" ]; then
@@ -100,7 +106,11 @@ jobs:
             fi
             echo "Processing: $name"
             dl="work/${safe}"
-            if ! curl -sSL -o "$dl" "$url"; then
+            DL_ARGS=(-sSL)
+            if [ -n "${GITHUB_TOKEN:-}" ] && [[ "$url" == *"github.com"* ]]; then
+              DL_ARGS+=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/octet-stream")
+            fi
+            if ! curl "${DL_ARGS[@]}" -o "$dl" "$url"; then
               echo "::warning::Download failed for $name, skipping"
               rm -f "$dl"
               continue
