@@ -177,6 +177,9 @@ jobs:
           wc -l "$CSV"
 
       - name: Create or extend ASR license status CSV
+        env:
+          # Optional: avoids HTTP 401 on huggingface.co from GitHub Actions runners (public repos: read token).
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           set -euo pipefail
           CSV="THIRD_PARTY_LICENSES/asr-models-license-status.csv"

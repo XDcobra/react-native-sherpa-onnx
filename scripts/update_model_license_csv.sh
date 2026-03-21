@@ -20,6 +20,8 @@
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
 #   (---\nlicense: …). license_file column = https://huggingface.co/<owner>/<slug>
 #   detection_source=huggingface_model_card. Release tarball names must match HF repo names or fetch 404s.
+# - Hugging Face: set HF_TOKEN or HUGGINGFACE_HUB_TOKEN (read token is enough for public repos). Anonymous
+#   requests from CI often get HTTP 401; without a token README/MODEL_CARD cannot be fetched.
 #
 # Note: With `set -u`, ${#empty_assoc[@]} and ${!empty_assoc[@]} can error on some Bash builds;
 # we avoid that below.
@@ -51,6 +53,8 @@ fi
 
 # Authenticated GitHub downloads (CI: GITHUB_TOKEN; local: GITHUB_TOKEN or GH_TOKEN).
 _GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+# Hugging Face raw file fetches (CI: often required to avoid 401 on huggingface.co).
+_HF_TOKEN="${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-}}"
 # Hugging Face repo slug matches release asset name without .tar.bz2 (e.g. vits-piper-pl_PL-darkman-medium).
 HF_MODEL_OWNER="${HF_MODEL_OWNER:-csukuangfj}"
 
@@ -203,11 +207,16 @@ set_hf_model_card() {
   existing_license_file["$name"]="$page_url"
 }
 
-# Prints file body to stdout; returns 0 on HTTP success.
+# Prints file body to stdout; returns 0 on HTTP success. Suppresses curl stderr (expected 404 on MODEL_CARD).
 fetch_hf_repo_file() {
   local slug="$1"
   local filename="$2"
-  curl -sfSL "https://huggingface.co/${HF_MODEL_OWNER}/${slug}/raw/main/${filename}"
+  local -a _hf_curl=(-sfSL)
+  if [[ -n "$_HF_TOKEN" ]]; then
+    _hf_curl+=(-H "Authorization: Bearer ${_HF_TOKEN}")
+  fi
+  _hf_curl+=("https://huggingface.co/${HF_MODEL_OWNER}/${slug}/raw/main/${filename}")
+  curl "${_hf_curl[@]}" 2>/dev/null
 }
 
 # Extracts the first "* License: value" line (case-insensitive on the label).

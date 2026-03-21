@@ -177,6 +177,8 @@ jobs:
           wc -l "$CSV"
 
       - name: Create or extend TTS license status CSV
+        env:
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           set -euo pipefail
           CSV="THIRD_PARTY_LICENSES/tts-models-license-status.csv"
