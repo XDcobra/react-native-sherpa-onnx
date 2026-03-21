@@ -2,13 +2,13 @@ asset_name,license_type,commercial_use,confidence,detection_source,license_file
 sherpa-onnx-zipformer-en-2023-06-26.tar.bz2,apache-2.0,yes,high,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-en-2023-06-26
 sherpa-onnx-streaming-zipformer-en-20M-2023-02-17.tar.bz2,apache-2.0,yes,high,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17
 sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23.tar.bz2,apache-2.0,yes,high,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23
-sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2,missing,unknown,high,structure_scan,
-sherpa-onnx-paraformer-en-2024-03-09.tar.bz2,missing,unknown,high,structure_scan,
+sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2,apache-2.0,yes,high,modelscope_detail_json,https://www.modelscope.cn/models/dengcunqin/speech_seaco_paraformer_large_asr_nat-zh-cantonese-en-16k-common-vocab11666-pytorch/summary
+sherpa-onnx-paraformer-en-2024-03-09.tar.bz2,apache-2.0,yes,high,modelscope_detail_json,https://www.modelscope.cn/models/iic/speech_paraformer_asr-en-16k-vocab4199-pytorch/summary
 sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2,missing,unknown,high,structure_scan,
 sherpa-onnx-paraformer-zh-2023-03-28.tar.bz2,mit,unknown,medium,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2023-03-28
-sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2,missing,unknown,high,structure_scan,
+sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2,apache-2.0,yes,high,modelscope_detail_json,https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8358-tensorflow1/summary
 sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2,apache-2.0,yes,high,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en
-sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en.tar.bz2,missing,unknown,high,structure_scan,
+sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en.tar.bz2,apache-2.0,yes,high,modelscope_detail_json,https://modelscope.cn/models/dengcunqin/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/summary
 sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2,apache-2.0,yes,high,huggingface_model_card,https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2023-09-14
 sherpa-onnx-zipformer-cantonese-2024-03-13.tar.bz2,missing,unknown,high,structure_scan,
 sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2,missing,unknown,high,structure_scan,
