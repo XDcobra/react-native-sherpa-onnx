@@ -55,8 +55,8 @@ static const TtsFieldRequirement kZipvoiceReqs[] = {
     {"decoder",  &TtsModelPaths::decoder,  true},
     {"vocoder",  &TtsModelPaths::vocoder,  true},
     {"tokens",   &TtsModelPaths::tokens,   true},
-    {"dataDir",  &TtsModelPaths::dataDir,  false},
-    {"lexicon",  &TtsModelPaths::lexicon,  false},
+    {"dataDir",  &TtsModelPaths::dataDir,  true},
+    {"lexicon",  &TtsModelPaths::lexicon,  true},
 };
 
 // ============================================================
@@ -102,6 +102,8 @@ static const char* GetFieldHint(const char* fieldName) {
         return "Copy espeak-ng-data into the model directory.";
     if (std::strcmp(fieldName, "tokens") == 0)
         return "Ensure tokens.txt is present in the model directory.";
+    if (std::strcmp(fieldName, "lexicon") == 0)
+        return "Add lexicon.txt (or lexicon-<lang>.txt) from the official sherpa-onnx Zipvoice/Matcha release; without it the native engine aborts.";
     return nullptr;
 }
 

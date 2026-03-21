@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Text,
   View,
@@ -22,6 +22,7 @@ import {
   shareAudioFile,
   type TTSModelType,
   type TtsGenerationOptions,
+  type TtsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
 import type {
   TtsEngine,
@@ -54,6 +55,7 @@ import Sound from 'react-native-sound';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
+import { decodeAudioFileToFloatSamples } from 'react-native-sherpa-onnx/audio';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -110,6 +112,23 @@ export default function TTSScreen() {
     string | null
   >(null);
 
+  const [speakerId, setSpeakerId] = useState('0');
+  const [speed, setSpeed] = useState('1.0');
+  const [silenceScale, setSilenceScale] = useState('');
+  const [noiseScale, setNoiseScale] = useState('');
+  const [noiseScaleW, setNoiseScaleW] = useState('');
+  const [lengthScale, setLengthScale] = useState('');
+  const [numSteps, setNumSteps] = useState('');
+  const [extraOptions, setExtraOptions] = useState('');
+  const [referenceText, setReferenceText] = useState('');
+  const [referenceAudio, setReferenceAudio] = useState<{
+    samples: number[];
+    sampleRate: number;
+  } | null>(null);
+  const [referenceFileName, setReferenceFileName] = useState<string | null>(
+    null
+  );
+
   const TTS_NUM_THREADS = 2;
 
   const getDisplayPath = (path: string) => {
@@ -144,6 +163,37 @@ export default function TTSScreen() {
   const streamInitialScheduleRef = useRef(false);
   const streamProcessSchedulePendingRef = useRef(false);
   const streamProcessCallSourceRef = useRef<string>('');
+  const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showNoiseScale = useMemo(
+    () => selectedModelType === 'vits' || selectedModelType === 'matcha',
+    [selectedModelType]
+  );
+  const showNoiseScaleW = useMemo(
+    () => selectedModelType === 'vits',
+    [selectedModelType]
+  );
+  const showLengthScale = useMemo(
+    () =>
+      selectedModelType === 'vits' ||
+      selectedModelType === 'matcha' ||
+      selectedModelType === 'kokoro' ||
+      selectedModelType === 'kitten',
+    [selectedModelType]
+  );
+  const showVoiceCloning = useMemo(
+    () => selectedModelType === 'pocket' || selectedModelType === 'zipvoice',
+    [selectedModelType]
+  );
+  const showNumSteps = useMemo(
+    () => selectedModelType === 'pocket' || selectedModelType === 'zipvoice',
+    [selectedModelType]
+  );
+  const showExtraOptions = useMemo(
+    () => selectedModelType === 'pocket',
+    [selectedModelType]
+  );
+
   useEffect(() => {
     soundInstanceRef.current = soundInstance;
   }, [soundInstance]);
@@ -156,6 +206,97 @@ export default function TTSScreen() {
   useEffect(() => {
     currentModelFolderRef.current = currentModelFolder;
   }, [currentModelFolder]);
+
+  useEffect(() => {
+    if (!currentModelFolder) {
+      return;
+    }
+    if (paramsDebounceRef.current) {
+      clearTimeout(paramsDebounceRef.current);
+    }
+    paramsDebounceRef.current = setTimeout(() => {
+      const engine = ttsEngineRef.current;
+      if (!engine) return;
+      const noiseValue = noiseScale.trim();
+      const noiseWValue = noiseScaleW.trim();
+      const lengthValue = lengthScale.trim();
+      const nextNoise = noiseValue.length > 0 ? parseFloat(noiseValue) : null;
+      if (
+        noiseValue.length > 0 &&
+        (isNaN(nextNoise as number) || (nextNoise as number) <= 0)
+      ) {
+        setError('Invalid noise scale value');
+        return;
+      }
+      const nextNoiseW =
+        noiseWValue.length > 0 ? parseFloat(noiseWValue) : null;
+      if (
+        noiseWValue.length > 0 &&
+        (isNaN(nextNoiseW as number) || (nextNoiseW as number) <= 0)
+      ) {
+        setError('Invalid noise scale W value');
+        return;
+      }
+      const nextLength =
+        lengthValue.length > 0 ? parseFloat(lengthValue) : null;
+      if (
+        lengthValue.length > 0 &&
+        (isNaN(nextLength as number) || (nextLength as number) <= 0)
+      ) {
+        setError('Invalid length scale value');
+        return;
+      }
+      if (nextNoise === null && nextNoiseW === null && nextLength === null) {
+        return;
+      }
+      const modelType = selectedModelType ?? undefined;
+      if (
+        !modelType ||
+        modelType === 'auto' ||
+        modelType === 'zipvoice' ||
+        modelType === 'pocket'
+      ) {
+        return;
+      }
+      const modelOptions: TtsModelOptions = {};
+      if (modelType === 'vits') {
+        modelOptions.vits = {};
+        if (nextNoise != null) modelOptions.vits.noiseScale = nextNoise;
+        if (nextNoiseW != null) modelOptions.vits.noiseScaleW = nextNoiseW;
+        if (nextLength != null) modelOptions.vits.lengthScale = nextLength;
+      } else if (modelType === 'matcha') {
+        modelOptions.matcha = {};
+        if (nextNoise != null) modelOptions.matcha.noiseScale = nextNoise;
+        if (nextLength != null) modelOptions.matcha.lengthScale = nextLength;
+      } else if (modelType === 'kokoro' && nextLength != null) {
+        modelOptions.kokoro = { lengthScale: nextLength };
+      } else if (modelType === 'kitten' && nextLength != null) {
+        modelOptions.kitten = { lengthScale: nextLength };
+      }
+      engine
+        .updateParams({
+          modelType,
+          modelOptions,
+        })
+        .catch((err) => {
+          const message =
+            err instanceof Error ? err.message : 'Failed to update TTS params';
+          setError(message);
+        });
+    }, 500);
+    return () => {
+      if (paramsDebounceRef.current) {
+        clearTimeout(paramsDebounceRef.current);
+        paramsDebounceRef.current = null;
+      }
+    };
+  }, [
+    currentModelFolder,
+    lengthScale,
+    noiseScale,
+    noiseScaleW,
+    selectedModelType,
+  ]);
 
   // Restore persisted TTS instance when entering the screen (do not release on unmount)
   useEffect(() => {
@@ -251,7 +392,113 @@ export default function TTSScreen() {
   }, [modelInfo?.sampleRate]);
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
-    return { sid: 0, speed: 1.0 };
+    const sid = parseInt(speakerId, 10);
+    const speedValue = parseFloat(speed);
+    if (isNaN(sid) || sid < 0) {
+      throw new Error('Invalid speaker ID (must be ≥ 0)');
+    }
+    const numSpeakers = modelInfo?.numSpeakers ?? 0;
+    if (numSpeakers > 0 && sid >= numSpeakers) {
+      throw new Error(
+        `Speaker ID must be between 0 and ${
+          numSpeakers - 1
+        } (model has ${numSpeakers} speaker${numSpeakers === 1 ? '' : 's'})`
+      );
+    }
+    if (isNaN(speedValue) || speedValue <= 0) {
+      throw new Error('Invalid speed value');
+    }
+    const options: TtsGenerationOptions = { sid, speed: speedValue };
+    const silenceScaleVal = silenceScale.trim();
+    if (silenceScaleVal.length > 0) {
+      const v = parseFloat(silenceScaleVal);
+      if (!isNaN(v) && v > 0) options.silenceScale = v;
+    }
+    const numStepsVal = numSteps.trim();
+    if (numStepsVal.length > 0) {
+      const v = parseInt(numStepsVal, 10);
+      if (!isNaN(v) && v > 0) options.numSteps = v;
+    }
+    const hasValidRefAudio =
+      referenceAudio != null &&
+      referenceAudio.samples.length > 0 &&
+      referenceAudio.sampleRate > 0;
+    if (hasValidRefAudio) {
+      options.referenceAudio = referenceAudio;
+      if (referenceText.trim().length > 0) {
+        options.referenceText = referenceText.trim();
+      }
+    }
+    if (extraOptions.trim().length > 0) {
+      const extra: Record<string, string> = {};
+      extraOptions
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((pair) => {
+          const idx = pair.indexOf(':');
+          if (idx > 0) {
+            const k = pair.slice(0, idx).trim();
+            const v = pair.slice(idx + 1).trim();
+            if (k && v) extra[k] = v;
+          }
+        });
+      if (Object.keys(extra).length > 0) options.extra = extra;
+    }
+    return options;
+  }, [
+    speakerId,
+    speed,
+    silenceScale,
+    numSteps,
+    referenceText,
+    referenceAudio,
+    extraOptions,
+    modelInfo?.numSpeakers,
+  ]);
+
+  const handlePickReferenceWav = useCallback(async () => {
+    setError(null);
+    let tempCopiedPath: string | null = null;
+    try {
+      const picked = await DocumentPicker.pick({
+        type: [DocumentPicker.types.audio],
+      });
+      const file = Array.isArray(picked) ? picked[0] : picked;
+      const uri = file?.uri ?? (file as { fileUri?: string })?.fileUri ?? '';
+      const name = file?.name ?? uri?.split('/')?.pop() ?? 'reference.wav';
+      if (!uri) {
+        setError('Could not get file URI from picker');
+        return;
+      }
+      let path = uri.replace(/^file:\/\//, '');
+      if (uri.startsWith('content://')) {
+        path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
+        tempCopiedPath = path;
+      }
+      const { samples, sampleRate } = await decodeAudioFileToFloatSamples(path);
+      setReferenceAudio({ samples, sampleRate });
+      setReferenceFileName(name);
+    } catch (err: unknown) {
+      if (
+        (DocumentPicker as { isCancel?: (e: unknown) => boolean }).isCancel?.(
+          err
+        )
+      )
+        return;
+      console.warn('Pick reference audio failed', err);
+      setError(
+        err instanceof Error ? err.message : 'Failed to load reference audio'
+      );
+    } finally {
+      if (tempCopiedPath) {
+        try {
+          await unlink(tempCopiedPath);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }, []);
 
   const processStreamQueue = useCallback(async () => {
@@ -441,6 +688,17 @@ export default function TTSScreen() {
     setSavedSubtitlePath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
+    setSpeakerId('0');
+    setSpeed('1.0');
+    setSilenceScale('');
+    setNoiseScale('');
+    setNoiseScaleW('');
+    setLengthScale('');
+    setNumSteps('');
+    setExtraOptions('');
+    setReferenceText('');
+    setReferenceAudio(null);
+    setReferenceFileName(null);
     if (streaming) {
       resetStreamingState(true);
     }
@@ -597,6 +855,21 @@ export default function TTSScreen() {
       return;
     }
 
+    const hasValidRefAudioForClone =
+      referenceAudio != null &&
+      referenceAudio.samples.length > 0 &&
+      referenceAudio.sampleRate > 0;
+    if (
+      selectedModelType === 'zipvoice' &&
+      hasValidRefAudioForClone &&
+      !referenceText.trim()
+    ) {
+      setError(
+        'Zipvoice cloning needs a non-empty reference transcript (what the WAV says).'
+      );
+      return;
+    }
+
     setGenerating(true);
     setError(null);
     setGeneratedAudio(null);
@@ -668,6 +941,21 @@ export default function TTSScreen() {
 
     if (!inputText.trim()) {
       setError('Please enter text to synthesize');
+      return;
+    }
+
+    const hasValidRefAudioForCloneTs =
+      referenceAudio != null &&
+      referenceAudio.samples.length > 0 &&
+      referenceAudio.sampleRate > 0;
+    if (
+      selectedModelType === 'zipvoice' &&
+      hasValidRefAudioForCloneTs &&
+      !referenceText.trim()
+    ) {
+      setError(
+        'Zipvoice cloning needs a non-empty reference transcript (what the WAV says).'
+      );
       return;
     }
 
@@ -750,10 +1038,37 @@ export default function TTSScreen() {
       return;
     }
 
+    if (!selectedModelType) {
+      setError('Please select a model type first');
+      streamInitialScheduleRef.current = false;
+      return;
+    }
+
     if (!inputText.trim()) {
       setError('Please enter text to synthesize');
       streamInitialScheduleRef.current = false;
       return;
+    }
+
+    if (Platform.OS === 'android') {
+      const hasValidRef =
+        referenceAudio != null &&
+        referenceAudio.samples.length > 0 &&
+        referenceAudio.sampleRate > 0;
+      if (selectedModelType === 'zipvoice' && hasValidRef) {
+        setError(
+          'Android: Zipvoice voice cloning is not supported in streaming mode. Use batch Generate.'
+        );
+        streamInitialScheduleRef.current = false;
+        return;
+      }
+      if (selectedModelType === 'pocket' && !hasValidRef) {
+        setError(
+          'Android: Pocket streaming requires a reference WAV (16-bit PCM, mono recommended).'
+        );
+        streamInitialScheduleRef.current = false;
+        return;
+      }
     }
 
     if (streaming) {
@@ -1338,6 +1653,17 @@ export default function TTSScreen() {
       setSubtitleEstimated(true);
       setSavedAudioPath(null);
       setSavedSubtitlePath(null);
+      setSpeakerId('0');
+      setSpeed('1.0');
+      setSilenceScale('');
+      setNoiseScale('');
+      setNoiseScaleW('');
+      setLengthScale('');
+      setNumSteps('');
+      setExtraOptions('');
+      setReferenceText('');
+      setReferenceAudio(null);
+      setReferenceFileName(null);
       setError(null);
       Alert.alert('Success', 'TTS model released');
     } catch (err) {
@@ -1536,6 +1862,162 @@ export default function TTSScreen() {
                   Speakers: {modelInfo?.numSpeakers ?? 0}
                 </Text>
               </View>
+            </View>
+          )}
+
+          {currentModelFolder != null && selectedModelType != null && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Synthesis options</Text>
+              <Text style={styles.sectionDescription}>
+                Speaker / speed apply to all models. Noise &amp; length scales
+                use updateParams (VITS, Matcha, Kokoro, Kitten). On Android,
+                streaming with reference audio is Pocket-only; Zipvoice cloning
+                uses batch Generate.
+              </Text>
+
+              <Text style={styles.inputLabel}>Speaker ID:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={speakerId}
+                onChangeText={setSpeakerId}
+                keyboardType="number-pad"
+                placeholder="0"
+              />
+              <Text style={styles.inputLabel}>Speed:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={speed}
+                onChangeText={setSpeed}
+                keyboardType="decimal-pad"
+                placeholder="1.0"
+              />
+
+              {showNoiseScale && (
+                <>
+                  <Text style={styles.inputLabel}>Noise scale (optional):</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={noiseScale}
+                    onChangeText={setNoiseScale}
+                    keyboardType="decimal-pad"
+                    placeholder="default"
+                  />
+                </>
+              )}
+              {showNoiseScaleW && (
+                <>
+                  <Text style={styles.inputLabel}>
+                    Noise scale W / duration (optional):
+                  </Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={noiseScaleW}
+                    onChangeText={setNoiseScaleW}
+                    keyboardType="decimal-pad"
+                    placeholder="default"
+                  />
+                </>
+              )}
+              {showLengthScale && (
+                <>
+                  <Text style={styles.inputLabel}>
+                    Length scale (optional):
+                  </Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={lengthScale}
+                    onChangeText={setLengthScale}
+                    keyboardType="decimal-pad"
+                    placeholder="1.0"
+                  />
+                </>
+              )}
+
+              <Text style={styles.inputLabel}>Silence scale (optional):</Text>
+              <TextInput
+                style={styles.textInput}
+                value={silenceScale}
+                onChangeText={setSilenceScale}
+                keyboardType="decimal-pad"
+                placeholder="—"
+              />
+
+              {showNumSteps && (
+                <>
+                  <Text style={styles.inputLabel}>Num steps (optional):</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={numSteps}
+                    onChangeText={setNumSteps}
+                    keyboardType="number-pad"
+                    placeholder="—"
+                  />
+                </>
+              )}
+
+              {showExtraOptions && (
+                <>
+                  <Text style={styles.inputLabel}>
+                    Extra (Pocket): key:value pairs, comma-separated
+                  </Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={extraOptions}
+                    onChangeText={setExtraOptions}
+                    placeholder="temperature:0.8, chunk_size:64"
+                  />
+                </>
+              )}
+
+              {showVoiceCloning && (
+                <>
+                  <Text style={styles.sectionDescription}>
+                    {selectedModelType === 'zipvoice'
+                      ? 'Zipvoice: 16-bit mono WAV + exact transcript required for cloning on Android.'
+                      : 'Pocket: reference WAV (mono preferred). Transcript optional.'}
+                  </Text>
+                  <Text style={styles.inputLabel}>Reference transcript:</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={referenceText}
+                    onChangeText={setReferenceText}
+                    placeholder={
+                      selectedModelType === 'zipvoice'
+                        ? 'Required if using reference WAV…'
+                        : 'Optional…'
+                    }
+                    multiline
+                  />
+                  <Text style={styles.inputLabel}>Reference WAV:</Text>
+                  {referenceAudio == null ? (
+                    <TouchableOpacity
+                      style={styles.streamButton}
+                      onPress={handlePickReferenceWav}
+                    >
+                      <Text style={styles.generateButtonText}>Pick WAV…</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.resultContainer}>
+                      <Text style={styles.resultText} numberOfLines={2}>
+                        Loaded: {referenceFileName ?? 'reference.wav'} (
+                        {referenceAudio.sampleRate} Hz,{' '}
+                        {referenceAudio.samples.length} samples)
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.cancelStreamButton}
+                        onPress={() => {
+                          setReferenceAudio(null);
+                          setReferenceFileName(null);
+                        }}
+                      >
+                        <Text style={styles.generateButtonText}>
+                          Clear reference
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              )}
             </View>
           )}
 

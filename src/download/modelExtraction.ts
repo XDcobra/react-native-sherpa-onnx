@@ -20,6 +20,7 @@ import {
   getArchivePath,
   getReadyMarkerPath,
   getExtractionStatePath,
+  getNativeAssetExtractedModelDir,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
 import { getModelByIdByCategory } from './registry';
@@ -27,7 +28,7 @@ import {
   listDownloadedModelsByCategory,
   getLocalModelPathByCategory,
 } from './localModels';
-import { resolveActualModelDir } from './validation';
+import { resolveActualModelDir, removeDirectoryRecursive } from './validation';
 
 const EXTRACTION_STATE_PREFIX = '.extraction-state-';
 const EXTRACTION_STATE_SUFFIX = '.json';
@@ -239,4 +240,5 @@ export async function deleteIncompleteExtraction(
   } catch {
     // non-fatal
   }
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 }

@@ -62,8 +62,8 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
 }
 
 /** Returns true if the given kind is supported by the current paths and hints (required files present).
- *  data_dir (espeak-ng-data) is required only for Kitten and Kokoro (sherpa-onnx config Validate());
- *  VITS, Matcha, Zipvoice use it optionally; Pocket does not use it. */
+ *  data_dir (espeak-ng-data) is required for Kitten, Kokoro, and Zipvoice (Zipvoice uses MatchaTtsLexicon + espeak).
+ *  VITS and Matcha use dataDir optionally in this detector; Pocket does not use it. */
 static bool CapabilitySupportsTtsKind(
     TtsModelKind kind,
     bool hasVits,

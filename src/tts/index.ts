@@ -86,7 +86,7 @@ function flattenTtsModelOptionsForNative(
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional modelType (default: 'auto')
- * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
+ * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional error when success is false, and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
@@ -101,13 +101,31 @@ export async function detectTtsModel(
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
+  /** Native validation/detect failure (e.g. missing lexicon for Zipvoice). */
+  error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
-  return SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
+  const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
+  const err =
+    typeof (raw as { error?: unknown }).error === 'string'
+      ? String((raw as { error: string }).error).trim()
+      : '';
+  return {
+    success: raw.success,
+    ...(err.length > 0 ? { error: err } : {}),
+    detectedModels: raw.detectedModels ?? [],
+    ...(raw.modelType != null && raw.modelType !== ''
+      ? { modelType: raw.modelType }
+      : {}),
+    ...(raw.lexiconLanguageCandidates != null &&
+    raw.lexiconLanguageCandidates.length > 0
+      ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
+      : {}),
+  };
 }
 
 /**
@@ -124,6 +142,16 @@ function toNativeTtsOptions(
   if (options.silenceScale !== undefined)
     out.silenceScale = options.silenceScale;
   if (options.referenceAudio != null) {
+    const sr = options.referenceAudio.sampleRate;
+    if (
+      typeof __DEV__ !== 'undefined' &&
+      __DEV__ &&
+      (!Number.isFinite(sr) || sr <= 0)
+    ) {
+      console.warn(
+        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
+      );
+    }
     out.referenceAudio = options.referenceAudio.samples;
     out.referenceSampleRate = options.referenceAudio.sampleRate;
   }

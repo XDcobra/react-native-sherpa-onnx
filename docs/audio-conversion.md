@@ -6,8 +6,8 @@ This document describes the SDK's audio conversion helpers used to produce WAV (
 
 The conversion API is exposed from the **`react-native-sherpa-onnx/audio`** module:
 
-- **Android**: Implemented with FFmpeg (prebuilts or AAR). All formats (WAV, MP3, FLAC) share a single conversion pipeline with proper resampling, accumulator-buffered encoding, and monotonic PTS handling. Input can be a file path or a `content://` URI; content URIs are transparently copied to a temporary file.
-- **iOS**: Implemented with AVFoundation. Supports common input formats (MP3, AAC, FLAC, WAV, AIFF, etc.) and **WAV output only** (16 kHz mono). MP3/FLAC encoding is not available on iOS; use WAV or convert server-side.
+- **Android**: Implemented with FFmpeg (prebuilts or AAR). All formats (WAV, MP3, FLAC) share a single conversion pipeline with proper resampling, accumulator-buffered encoding, and monotonic PTS handling. Input can be a file path or a `content://` URI; content URIs are transparently copied to a temporary file. Decoding to float PCM (`decodeAudioFileToFloatSamples`) uses the same FFmpeg decode path; WAV files may use a fast path via sherpa-onnx `WaveReader` when no resampling is requested.
+- **iOS**: Implemented with FFmpeg when linked (same family as conversion). Supports common input formats (MP3, AAC, FLAC, WAV, WebM, etc.). When FFmpeg is disabled, decode/conversion helpers fail at runtime; see [disable-ffmpeg.md](disable-ffmpeg.md).
 
 ## API reference
 
@@ -40,6 +40,22 @@ Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format e
 
 **Returns:** `Promise<void>` — resolves on success, rejects with an error message on failure.
 
+### `decodeAudioFileToFloatSamples(inputPath, targetSampleRateHz?)`
+
+Decodes an audio file to **mono float samples** (approximately in `[-1, 1]`) and the **effective sample rate** of those samples. Same input coverage as `convertAudioToFormat` (FFmpeg-backed where applicable).
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `inputPath` | `string` | Absolute file path, or on Android a `content://` URI. |
+| `targetSampleRateHz` | `number` (optional) | If `> 0`, resample to this rate after decode (mono). If `0` or omitted, keep the stream’s native decoded rate. |
+
+**Returns:** `Promise<{ samples: number[]; sampleRate: number }>` — rejects with an error message on failure.
+
+**Platform notes:**
+
+- **Android**: Non-WAV formats require FFmpeg. WAV may use `WaveReader` when `targetSampleRateHz` is `0` or matches the file rate; otherwise FFmpeg is used (e.g. resampling or unsupported WAV features).
+- **iOS**: Requires FFmpeg in the build. Returns an error if FFmpeg is not linked.
+
 ## Platform support matrix
 
 | Feature | Android | iOS |
@@ -51,6 +67,7 @@ Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format e
 | Output: FLAC | Yes (FFmpeg) | Yes (FFmpeg) |
 | Output: AAC / M4A | Yes (FFmpeg) | Yes (FFmpeg) |
 | Output: OPUS / WEBM / MKV | Yes (libopus) | Yes (libopus) |
+| Decode to float PCM (`decodeAudioFileToFloatSamples`) | Yes (FFmpeg; WAV fast path when applicable) | Yes (FFmpeg) |
 | Disable conversion | Yes, see [disable-ffmpeg.md](disable-ffmpeg.md) | Yes |
 
 ## Content URI support (Android)
@@ -65,7 +82,7 @@ You do not need to copy the file yourself before calling. However, for reliabili
 
 ## STT integration example
 
-Pick file → copy to cache → validate → convert to 16 kHz WAV if non-WAV → transcribe → cleanup.
+Pick file --> copy to cache --> validate --> convert to 16 kHz WAV if non-WAV --> transcribe --> cleanup.
 
 ```ts
 import * as DocumentPicker from '@react-native-documents/picker';
@@ -119,7 +136,7 @@ try {
 
 ## TTS save example
 
-For saving TTS audio as MP3 or FLAC to a content URI on Android: generate WAV → convert to target format → copy to destination. See [TTS documentation](tts.md#saving-mp3flac-to-content-uri-android) for the full save flow and `copyFileToContentUri`.
+For saving TTS audio as MP3 or FLAC to a content URI on Android: generate WAV --> convert to target format --> copy to destination. See [TTS documentation](tts.md#saving-mp3flac-to-content-uri-android) for the full save flow and `copyFileToContentUri`.
 
 ```ts
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';

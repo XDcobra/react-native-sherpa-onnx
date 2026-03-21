@@ -80,11 +80,13 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Table of contents
 
+- [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
 - [Installation](#installation)
   - [Android](#android)
   - [iOS](#ios)
 - [Feature Support](#feature-support)
 - [Platform Support Status](#platform-support-status)
+- [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
   - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
   - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
@@ -99,6 +101,13 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
   - [Video to Text Comparison App](#video-to-text-comparison-app)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Bundled sherpa-onnx version
+
+| Platform | Version |
+|----------|---------|
+| Android | 1.12.31 |
+| iOS | 1.12.31 |
 
 ## Feature Support
 
@@ -126,6 +135,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 |----------|--------|-------|
 | **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 | **iOS** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
+
+## Known issues
+
+- **[Pocket TTS (voice cloning)](docs/KNOWN_ISSUES.md)** — voice cloning: **Android** supported; **iOS** experimental. Heuristic EOS and **iOS vs Android drift** (length/quality); not a React Native–only issue. Full notes: [investigation doc](docs/github-issue-pocket-tts-eos-frame-zero.md).
 
 ## Supported Model Types
 
@@ -161,13 +174,14 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Matcha**       | `'matcha'`        | High-quality acoustic model + vocoder. Detected by acoustic_model + vocoder; no folder token required. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html) |
 | **Kokoro**       | `'kokoro'`        | Multi-speaker, multi-language. Folder name should contain **kokoro** (not kitten) for auto-detection. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
 | **KittenTTS**    | `'kitten'`        | Lightweight, multi-speaker. Folder name should contain **kitten** (not kokoro) for auto-detection. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)          |
-| **Zipvoice**     | `'zipvoice'`      | Voice cloning (encoder + decoder + vocoder). Detected by file layout; folder token optional. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
-| **Pocket**       | `'pocket'`        | Flow-matching TTS. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores; no folder token required. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
+| **Zipvoice**     | `'zipvoice'`      | Standard TTS with **`sid`**. **Voice cloning** (reference audio + `referenceText`): batch via **`generateSpeech`** only—streaming TTS does not support reference audio for Zipvoice. Default **`numSteps`** when omitted is **5** on **Android and iOS** (matches sherpa-onnx `GenerationConfig` / Kotlin helper). Cloning is **supported on Android & iOS**. Encoder + decoder + vocoder. | [Download](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/zipvoice.html) |
+| **Pocket**       | `'pocket'`        | Flow-matching TTS. **Voice cloning** on **Android:** batch and streaming TTS. **iOS:** cloning is experimental. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
 
 ## Documentation
 
+- [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
 - [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)

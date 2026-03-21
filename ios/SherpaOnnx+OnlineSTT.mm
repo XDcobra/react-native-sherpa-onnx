@@ -70,6 +70,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     NSString *provider = options.provider();
     NSString *ruleFsts = options.ruleFsts();
     NSString *ruleFars = options.ruleFars();
+    auto dither = options.dither();
     auto blankPenalty = options.blankPenalty();
     auto debug = options.debug();
     auto rule1MustContainNonSilence = options.rule1MustContainNonSilence();
@@ -102,6 +103,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
             provider != nil ? [provider UTF8String] : "cpu",
             ruleFsts != nil ? [ruleFsts UTF8String] : "",
             ruleFars != nil ? [ruleFars UTF8String] : "",
+            dither.has_value() ? (float)dither.value() : 0.f,
             blankPenalty.has_value() ? (float)blankPenalty.value() : 0.f,
             debug.has_value() && debug.value(),
             rule1MustContainNonSilence.has_value() && rule1MustContainNonSilence.value(),

@@ -45,11 +45,7 @@ android/
      ./build_ffmpeg.sh
      ```
 
-    IMPORTANT: After a successful build you must copy the produced `.so` files into the Android project's `jniLibs` or Gradle may fail to find them during the app build. From the repository root run:
-    ```bash
-    node third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js
-    ```
-    This script copies `android/<abi>/lib/*.so` into `android/src/main/jniLibs/<abi>/` so the Android build system can package them.
+    IMPORTANT: For the React Native sherpa-onnx Android module, **Gradle** normally fetches or unpacks FFmpeg (`prebuilt-download.gradle`: Maven, GitHub release, or existing `jniLibs`). If you built FFmpeg locally, copy `android/<abi>/lib/*.so` into `android/src/main/jniLibs/<abi>/` in the RN package so the app build can package them.
 
 4. **Commit the `android/` output** (include + per-ABI `lib/*.so`) so that the npm package and CI can link against FFmpeg without building it.
 

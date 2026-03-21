@@ -242,7 +242,7 @@ async function selectBestProvider(): Promise<string> {
     return cml.canInit ? 'coreml' : 'cpu';
   }
 
-  // Android: try QNN → NNAPI → XNNPACK → CPU
+  // Android: try QNN --> NNAPI --> XNNPACK --> CPU
   const qnn = await getQnnSupport();
   if (qnn.canInit) return 'qnn';
 

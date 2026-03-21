@@ -193,8 +193,8 @@ kokoro-int8-en-v0_19.tar.bz2,kokoro
 kokoro-en-v0_19.tar.bz2,kokoro
 kitten-nano-en-v0_2-fp16.tar.bz2,kitten
 kitten-nano-en-v0_1-fp16.tar.bz2,kitten
-sherpa-onnx-zipvoice-distill-zh-en-emilia.tar.bz2,zipvoice
-sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2,zipvoice
+sherpa-onnx-zipvoice-distill-zh-en-emilia.tar.bz2,zipvoice_rejected
+sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2,zipvoice_rejected
 vits-piper-pl_PL-jarvis_wg_glos-medium.tar.bz2,vits
 vits-piper-pl_PL-jarvis_wg_glos-medium-int8.tar.bz2,vits
 vits-piper-pl_PL-zenski_wg_glos-medium.tar.bz2,vits

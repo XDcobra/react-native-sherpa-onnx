@@ -228,7 +228,9 @@ export interface STTInitializeOptions {
   ruleFars?: string;
 
   /**
-   * Dither for feature extraction (Kotlin FeatureConfig.dither). Default 0.
+   * Dither for feature extraction (Kotlin `FeatureConfig.dither`). Default: no dither.
+   * **Android:** applied natively. **iOS:** ignored — the bundled sherpa-onnx C/CXX API does not
+   * expose this field; the native default is used.
    */
   dither?: number;
 

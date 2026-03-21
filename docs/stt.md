@@ -33,7 +33,7 @@ Offline speech recognition: transcribe audio files or float PCM samples using on
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Model type detection | ✅ | `detectSttModel()` — file-based, includes required-files validation |
-| Model initialization | ✅ | `createSTT()` → `SttEngine` |
+| Model initialization | ✅ | `createSTT()` --> `SttEngine` |
 | File transcription | ✅ | `stt.transcribeFile(path)` |
 | Sample transcription | ✅ | `stt.transcribeSamples(samples, sampleRate)` |
 | Full result object | ✅ | text, tokens, timestamps, lang, emotion, event, durations |
@@ -98,7 +98,7 @@ Create an STT engine instance. You **must** call `stt.destroy()` when done to fr
 | `provider` | `string` | — | `'cpu'`, `'qnn'`, `'nnapi'`, `'xnnpack'`. See [execution-providers.md](execution-providers.md) |
 | `ruleFsts` | `string` | — | Comma-separated rule FST paths for inverse text normalization |
 | `ruleFars` | `string` | — | Comma-separated rule FAR paths for ITN |
-| `dither` | `number` | `0` | Feature extraction dither |
+| `dither` | `number` | `0` | Feature extraction dither (Kaldi-style). **Android:** passed to native `FeatureConfig`. **iOS:** accepted for API parity but **ignored** — bundled sherpa-onnx C/CXX headers do not expose dither; the library default applies |
 | `modelOptions` | `SttModelOptions` | — | Per-model options (see [Model-Specific Options](#model-specific-options)) |
 
 When you pass a non-empty `hotwordsFile`, the SDK auto-switches the decoding method to `modified_beam_search` (and ensures `maxActivePaths ≥ 4`). Use `sttSupportsHotwords(modelType)` to check support before setting hotwords.
@@ -113,12 +113,18 @@ function detectSttModel(
   options?: { preferInt8?: boolean; modelType?: STTModelType }
 ): Promise<{
   success: boolean;
+  /** When `success` is `false`, native validation/detect message (e.g. missing required files). Omitted if native sent an empty string. */
+  error?: string;
+  /** True when the model targets unsupported hardware (e.g. RK35xx, Ascend); from native when applicable. */
+  isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
 }>;
 ```
 
-Detect model type without loading. Includes required-files validation — returns `success: false` with a specific `error` message when required files are missing.
+Detect model type without loading. Includes required-files validation.
+
+When `success` is `false`, check **`error`** for the native explanation (show it in your UI); if `error` is absent, treat as an unknown detect/validation failure. **`isHardwareSpecificUnsupported`** is set when native reports hardware-specific models the runtime cannot use.
 
 ```typescript
 const result = await detectSttModel(
@@ -127,6 +133,9 @@ const result = await detectSttModel(
 );
 if (result.success && result.modelType === 'whisper') {
   // Show Whisper-specific options (language, task, etc.)
+}
+if (!result.success) {
+  console.warn(result.error ?? 'STT detection failed');
 }
 ```
 

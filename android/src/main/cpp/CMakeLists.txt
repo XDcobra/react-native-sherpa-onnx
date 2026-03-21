@@ -29,7 +29,7 @@ get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOL
 set(USE_FFMPEG ON)
 if(SHERPA_ONNX_DISABLE_FFMPEG)
     set(USE_FFMPEG OFF)
-    message(STATUS "FFmpeg disabled (SHERPA_ONNX_DISABLE_FFMPEG=ON). convertAudioToWav16k/convertAudioToFormat will return an error at runtime.")
+    message(STATUS "FFmpeg disabled (SHERPA_ONNX_DISABLE_FFMPEG=ON). convertAudioToWav16k/convertAudioToFormat and decode (non-WAV) will return an error at runtime.")
 endif()
 
 if(USE_FFMPEG)
@@ -39,25 +39,32 @@ set(FFMPEG_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/ffmpeg_prebuilt/android
 set(FFMPEG_PREBUILT_LIB "${FFMPEG_PREBUILT_BASE}/${ANDROID_ABI}/lib")
 set(FFMPEG_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
 set(FFMPEG_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/ffmpeg")
-if(EXISTS "${FFMPEG_PREBUILT_BASE}/include")
+# Require a real header — an empty third_party/.../include/ dir must not win over Gradle-populated cpp/include/ffmpeg.
+if(EXISTS "${FFMPEG_PREBUILT_BASE}/include/libavcodec/avcodec.h")
     set(FFMPEG_INCLUDE_DIR "${FFMPEG_PREBUILT_BASE}/include")
     message(STATUS "FFmpeg headers: prebuilts ${FFMPEG_INCLUDE_DIR}")
-elseif(EXISTS "${FFMPEG_INCLUDE_CPP}")
+elseif(EXISTS "${FFMPEG_INCLUDE_CPP}/libavcodec/avcodec.h")
     set(FFMPEG_INCLUDE_DIR "${FFMPEG_INCLUDE_CPP}")
-    message(STATUS "FFmpeg headers: jniLibs/release ${FFMPEG_INCLUDE_DIR}")
+    message(STATUS "FFmpeg headers: module tree ${FFMPEG_INCLUDE_DIR}")
 else()
     message(FATAL_ERROR "FFmpeg headers missing. Either:\n"
                         "  - Build: cd third_party/ffmpeg_prebuilt && ./build_ffmpeg.sh (creates android/include)\n"
                         "  - Or use a release that includes include/ (Gradle extracts to ${FFMPEG_INCLUDE_CPP})")
 endif()
+# Prebuilts may be either legacy layout android/<abi>/lib/ (build_ffmpeg.sh) or
+# android/jni/<abi>/ (same as Gradle THIRD_PARTY in docs/PREBUILT_RESOLUTION.md).
+set(FFMPEG_PREBUILT_JNI_ABI "${FFMPEG_PREBUILT_BASE}/jni/${ANDROID_ABI}")
 if(EXISTS "${FFMPEG_PREBUILT_LIB}/libavcodec.so")
     set(FFMPEG_LIB_DIR "${FFMPEG_PREBUILT_LIB}")
     message(STATUS "FFmpeg libs: prebuilts ${FFMPEG_LIB_DIR}")
+elseif(EXISTS "${FFMPEG_PREBUILT_JNI_ABI}/libavcodec.so")
+    set(FFMPEG_LIB_DIR "${FFMPEG_PREBUILT_JNI_ABI}")
+    message(STATUS "FFmpeg libs: prebuilts (jni/<abi>) ${FFMPEG_LIB_DIR}")
 elseif(EXISTS "${FFMPEG_JNILIBS}/libavcodec.so")
     set(FFMPEG_LIB_DIR "${FFMPEG_JNILIBS}")
     message(STATUS "FFmpeg libs: jniLibs ${FFMPEG_LIB_DIR}")
 else()
-    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run third_party/ffmpeg_prebuilt/copy_prebuilts_to_sdk.js or ensure ANDROID_RELEASE_TAG release is downloaded.")
+    message(FATAL_ERROR "FFmpeg libs missing for ABI ${ANDROID_ABI}. Run a Gradle Android build so prebuilts populate jniLibs, or add local .so under jniLibs / ffmpeg prebuilts paths.")
 endif()
 endif(USE_FFMPEG)
 
@@ -82,7 +89,6 @@ set(SOURCES
     jni/model_detect/sherpa-onnx-stt-wrapper.cpp
     jni/model_detect/sherpa-onnx-tts-wrapper.cpp
     jni/audio/sherpa-onnx-audio-convert-jni.cpp
-    jni/tts/sherpa-onnx-tts-zipvoice-jni.cpp
     crypto/sha256.cpp
 )
 
@@ -93,10 +99,19 @@ set(LIBARCHIVE_PREBUILT_LIB "${LIBARCHIVE_PREBUILT_BASE}/${ANDROID_ABI}/lib")
 set(LIBARCHIVE_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
 set(LIBARCHIVE_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/libarchive")
 set(USE_LIBARCHIVE_PREBUILT OFF)
+set(LIBARCHIVE_PREBUILT_JNI_ABI "${LIBARCHIVE_PREBUILT_BASE}/jni/${ANDROID_ABI}")
 if(EXISTS "${LIBARCHIVE_PREBUILT_LIB}/libarchive.so")
     set(USE_LIBARCHIVE_PREBUILT ON)
     set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_PREBUILT_LIB}")
-    if(EXISTS "${LIBARCHIVE_PREBUILT_BASE}/include")
+    if(EXISTS "${LIBARCHIVE_PREBUILT_BASE}/include/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_PREBUILT_BASE}/include")
+    elseif(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
+        set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
+    endif()
+elseif(EXISTS "${LIBARCHIVE_PREBUILT_JNI_ABI}/libarchive.so")
+    set(USE_LIBARCHIVE_PREBUILT ON)
+    set(LIBARCHIVE_LIB_DIR "${LIBARCHIVE_PREBUILT_JNI_ABI}")
+    if(EXISTS "${LIBARCHIVE_PREBUILT_BASE}/include/archive.h")
         set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_PREBUILT_BASE}/include")
     elseif(EXISTS "${LIBARCHIVE_INCLUDE_CPP}/archive.h")
         set(LIBARCHIVE_INCLUDE_DIR "${LIBARCHIVE_INCLUDE_CPP}")
@@ -128,15 +143,19 @@ add_library(sherpaonnx SHARED
 # If we used IMPORTED here, AGP would also copy .so from CMake --> duplicate in mergeNativeLibs.
 set(SHERPA_ONNX_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/sherpa-onnx-prebuilt/android")
 set(SHERPA_ONNX_ABI_LIB "${SHERPA_ONNX_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(SHERPA_ONNX_JNI_ABI "${SHERPA_ONNX_PREBUILT_BASE}/jni/${ANDROID_ABI}")
 set(SHERPA_C_API_LIB_DIR "")
 if(EXISTS "${SHERPA_ONNX_ABI_LIB}/libsherpa-onnx-c-api.so")
     set(SHERPA_C_API_LIB_DIR "${SHERPA_ONNX_ABI_LIB}")
     message(STATUS "sherpa-onnx C-API (link only): ${SHERPA_C_API_LIB_DIR}")
+elseif(EXISTS "${SHERPA_ONNX_JNI_ABI}/libsherpa-onnx-c-api.so")
+    set(SHERPA_C_API_LIB_DIR "${SHERPA_ONNX_JNI_ABI}")
+    message(STATUS "sherpa-onnx C-API (link only, third_party jni/<abi>): ${SHERPA_C_API_LIB_DIR}")
 elseif(EXISTS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-api.so")
     set(SHERPA_C_API_LIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
     message(STATUS "sherpa-onnx C-API (link only, jniLibs): ${SHERPA_C_API_LIB_DIR}")
 else()
-    message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
+    message(WARNING "sherpa-onnx C-API not found. Prebuilt sherpa native libs may be incomplete. "
                     "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
@@ -148,7 +167,6 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
-    ${CMAKE_CURRENT_SOURCE_DIR}/jni/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -167,7 +185,7 @@ if(USE_LIBARCHIVE)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBARCHIVE=1)
 endif()
 
-# Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
+# Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
     target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
 endif()

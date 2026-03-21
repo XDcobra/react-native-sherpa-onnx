@@ -62,7 +62,7 @@ export type DownloadState = {
   totalBytes?: number;
 };
 
-/** State for an in-progress or interrupted model extraction (archive → model dir). */
+/** State for an in-progress or interrupted model extraction (archive --> model dir). */
 export type ExtractionState = {
   modelId: string;
   category: ModelCategory;

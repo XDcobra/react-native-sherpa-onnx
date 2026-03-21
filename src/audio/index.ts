@@ -113,3 +113,23 @@ export function convertAudioToWav16k(
 ): Promise<void> {
   return SherpaOnnx.convertAudioToWav16k(inputPath, outputPath);
 }
+
+export type DecodedAudioFloatSamples = {
+  samples: number[];
+  sampleRate: number;
+};
+
+/**
+ * Decode a supported audio file to mono float PCM in [-1, 1] plus sample rate.
+ * Same decode coverage as {@link convertAudioToFormat} (FFmpeg-backed on Android when not WAV).
+ * @param targetSampleRateHz - Resample to this rate when > 0; use native decoded rate when 0 or omitted.
+ */
+export function decodeAudioFileToFloatSamples(
+  inputPath: string,
+  targetSampleRateHz?: number
+): Promise<DecodedAudioFloatSamples> {
+  return SherpaOnnx.decodeAudioFileToFloatSamples(
+    inputPath,
+    targetSampleRateHz ?? 0
+  );
+}

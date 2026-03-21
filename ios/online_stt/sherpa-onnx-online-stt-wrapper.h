@@ -49,6 +49,7 @@ public:
         const std::string& provider,
         const std::string& ruleFsts,
         const std::string& ruleFars,
+        float dither,
         float blankPenalty,
         bool debug,
         bool rule1MustContainNonSilence,

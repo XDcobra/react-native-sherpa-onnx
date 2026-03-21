@@ -132,6 +132,7 @@ internal class SherpaOnnxOnlineSttHelper(
     provider: String?,
     ruleFsts: String?,
     ruleFars: String?,
+    dither: Float?,
     blankPenalty: Float?,
     debug: Boolean?,
     rule1MustContainNonSilence: Boolean?,
@@ -233,7 +234,7 @@ internal class SherpaOnnxOnlineSttHelper(
     }
 
     return OnlineRecognizerConfig(
-      featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = 0f),
+      featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = dither ?: 0f),
       modelConfig = modelConfig,
       endpointConfig = endpointConfig,
       enableEndpoint = enableEndpoint,
@@ -260,6 +261,7 @@ internal class SherpaOnnxOnlineSttHelper(
     provider: String?,
     ruleFsts: String?,
     ruleFars: String?,
+    dither: Double?,
     blankPenalty: Double?,
     debug: Boolean?,
     rule1MustContainNonSilence: Boolean?,
@@ -286,6 +288,7 @@ internal class SherpaOnnxOnlineSttHelper(
         provider = provider,
         ruleFsts = ruleFsts,
         ruleFars = ruleFars,
+        dither = dither?.toFloat(),
         blankPenalty = blankPenalty?.toFloat(),
         debug = debug,
         rule1MustContainNonSilence = rule1MustContainNonSilence,

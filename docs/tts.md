@@ -36,14 +36,14 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Model type detection | ✅ | `detectTtsModel()` — file-based, includes required-files validation |
-| Model initialization | ✅ | `createTTS()` → `TtsEngine` |
+| Model initialization | ✅ | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | `tts.generateSpeech()` |
 | Streaming generation | ✅ | `tts.generateSpeechStream()` with chunk callbacks |
 | Timestamps (estimated) | ✅ | `tts.generateSpeechWithTimestamps()` |
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Save/share WAV | ✅ | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Save MP3/FLAC | ✅ | Via `convertAudioToFormat()` + `copyFileToContentUri()` |
-| Voice cloning | ✅ | Reference audio via `TtsGenerationOptions` (Zipvoice, Pocket) |
+| Voice cloning | ✅ (iOS & Android) | **Zipvoice** / **Pocket** only: non-empty `referenceAudio` + `sampleRate > 0`; Zipvoice cloning also needs non-empty `referenceText`. Other types reject reference options. |
 | Runtime param updates | ✅ | `tts.updateParams()` |
 | Model downloads | ✅ | Via [Download Manager](download-manager.md) |
 
@@ -113,6 +113,8 @@ function detectTtsModel(
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
+  /** When `success` is `false`, native validation/detect message (e.g. missing required files, invalid Zipvoice lexicon). Omitted if native sent an empty string. */
+  error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
   lexiconLanguageCandidates?: string[];
@@ -121,10 +123,15 @@ function detectTtsModel(
 
 Detect model type without loading. Includes required-files validation. For **Kokoro/Kitten** models with multiple lexicon files, returns `lexiconLanguageCandidates` (e.g. `["gb-en", "us-en", "zh"]`).
 
+When `success` is `false`, check **`error`** for the native explanation (show it in your UI); if `error` is absent, treat as an unknown detect/validation failure.
+
 ```typescript
 const result = await detectTtsModel({ type: 'file', path: fullPathToKokoro });
 if (result.success && result.lexiconLanguageCandidates?.length) {
   // Show language dropdown for Kokoro/Kitten
+}
+if (!result.success) {
+  console.warn(result.error ?? 'TTS detection failed');
 }
 ```
 
@@ -160,9 +167,9 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `sid` | `number` | `0` | Speaker ID for multi-speaker models |
 | `speed` | `number` | `1.0` | Speech speed multiplier |
 | `silenceScale` | `number` | — | Silence scale at generation time |
-| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | For voice cloning. Mono float samples in [-1, 1] |
-| `referenceText` | `string` | — | Transcript of reference audio (required with `referenceAudio`) |
-| `numSteps` | `number` | — | Flow-matching steps (model-dependent) |
+| `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Native:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten --> native error if set. Mono float in [-1, 1]. |
+| `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
+| `numSteps` | `number` | `5` | Flow-matching steps when cloning (Zipvoice / Pocket); native default **5** on Android and iOS if omitted |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
 
 ---
@@ -283,20 +290,27 @@ const controller = await tts.generateSpeechStream(text, undefined, {
 
 ## Voice Cloning
 
-For models that support it (Zipvoice, Pocket with GenerationConfig), pass reference audio:
+Only **Zipvoice** and **Pocket** use reference audio in sherpa-onnx. Passing `referenceAudio` for any other model type returns **`TTS_GENERATE_ERROR`** / **`TTS_STREAM_ERROR`** instead of silent empty audio.
+
+**Requirements (Android):**
+
+- Non-empty `referenceAudio.samples` and **`referenceAudio.sampleRate > 0`** (setting `referenceText` alone does nothing).
+- **Zipvoice** cloning: also **non-empty `referenceText`** (prompt transcript). Use **`generateSpeech()`** / **`generateSpeechWithTimestamps()`** only — not streaming with reference.
+- **Pocket:** reference drives the Mimi encoder; **`referenceText` is optional** (native stack ignores it). **`generateSpeech()`**, **`generateSpeechWithTimestamps()`**, and **`generateSpeechStream()`** support reference audio.
+
+**Zipvoice** without reference audio uses normal TTS with **`sid`** (built-in voices), same as other engines.
 
 ```typescript
+// Zipvoice zero-shot (batch only)
 const audio = await tts.generateSpeech('Text in the reference voice', {
   referenceAudio: { samples: refSamples, sampleRate: 22050 },
   referenceText: 'Transcript of the reference recording',
-  numSteps: 20,
+  // numSteps defaults to 5 on native; increase for higher quality / cost
   speed: 1.0,
 });
 ```
 
-- **Zipvoice:** Use `generateSpeech()` only (streaming with reference audio is not supported)
-- **Pocket/Kotlin engines:** Both `generateSpeech()` and `generateSpeechStream()` support reference audio
-- Pocket-specific: `extra: { temperature: '0.7', chunk_size: '15' }`
+- Pocket-specific: `extra: { temperature: '0.7', chunk_size: '15' }` (see sherpa-onnx Pocket docs for more `extra` keys).
 
 ---
 
@@ -335,13 +349,14 @@ After detection, the SDK validates all required files are present.
 | **Matcha** | `acousticModel`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
 | **Kokoro / Kitten** | `ttsModel`, `tokens`, `voices`, `dataDir` (espeak-ng-data) | `lexicon` |
 | **Pocket** | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | — |
-| **Zipvoice** | `encoder`, `decoder`, `vocoder`, `tokens` | `dataDir`, `lexicon` |
+| **Zipvoice** | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir` (espeak-ng-data), `lexicon` (`lexicon.txt` or `lexicon-*.txt`) | — |
 
 Error format: `TTS <ModelType>: missing required files in <modelDir>: <field1>, <field2>`
 
 ### Zipvoice Notes
 
 - **Full Zipvoice** (encoder + decoder + vocoder, e.g. `vocos_24khz.onnx`): supported
+- **Lexicon + espeak:** Zipvoice uses sherpa-onnx’s `MatchaTtsLexicon`, which **requires** a non-empty lexicon path and `espeak-ng-data`. Without `lexicon.txt` (or `lexicon-<lang>.txt`), upstream calls `abort()` — the SDK validates these up front and returns a JS error instead.
 - **Zipvoice distill** (no vocoder): detected but **initialization fails** — sherpa-onnx requires a vocoder
 - **Memory:** Full fp32 model (~605 MB) uses significant RAM. On devices with < 8 GB, prefer the **int8 distill** variant (~104 MB). The SDK rejects with an actionable error if free memory is below ~800 MB
 
@@ -349,7 +364,7 @@ Error format: `TTS <ModelType>: missing required files in <modelDir>: <field1>, 
 
 ## Detailed Examples
 
-### Streaming → native playback → save
+### Streaming --> native playback --> save
 
 ```typescript
 import { createTTS, saveAudioToFile } from 'react-native-sherpa-onnx/tts';
@@ -398,6 +413,8 @@ const result = await detectTtsModel({ type: 'file', path: fullPath });
 if (result.success && result.modelType === 'kokoro') {
   // Show kokoro-specific options
   // result.lexiconLanguageCandidates — use for language dropdown
+} else if (!result.success) {
+  // result.error — native message (missing files, lexicon, etc.)
 }
 ```
 

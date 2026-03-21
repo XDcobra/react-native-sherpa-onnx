@@ -75,6 +75,11 @@ export interface StreamingSttInitOptions {
   ruleFsts?: string;
   /** Path(s) to rule FARs for ITN. */
   ruleFars?: string;
+  /**
+   * Feature extraction dither. **Android:** applied natively. **iOS:** ignored (C/CXX API has no
+   * `dither` on `FeatureConfig`); library default applies.
+   */
+  dither?: number;
   /** Blank penalty. */
   blankPenalty?: number;
   /** Enable debug logging. Default: false. */

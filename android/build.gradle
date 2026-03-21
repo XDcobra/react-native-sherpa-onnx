@@ -46,10 +46,9 @@ android {
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 
-  // Native .so and headers: filled by prebuilt-download.gradle (local jniLibs, Maven AAR, or GitHub release).
-  // Alternatively by third_party/*/copy_prebuilts_to_sdk.js or shipped in npm package.
+  // Native .so and headers: prebuilt-download.gradle (local jniLibs, Maven AAR, or GitHub release); npm package may ship jniLibs.
 
-  // When true, FFmpeg is not linked; convertAudioToWav16k/convertAudioToFormat will fail at runtime. See docs/disable-ffmpeg.md.
+  // When true, FFmpeg is not linked; convertAudioToWav16k/convertAudioToFormat/decode (non-WAV) will fail at runtime. See docs/disable-ffmpeg.md.
   def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, libarchive is not linked; extractTarBz2/cancelExtractTarBz2 will fail at runtime. See docs/disable-libarchive.md.
   def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]

@@ -157,7 +157,7 @@ bool ArchiveHelper::ExtractTarBz2(
   // If target exists and is a directory, extract into it (merge). Otherwise require empty or force-remove.
   if (std::filesystem::exists(target_path)) {
     if (std::filesystem::is_directory(target_path)) {
-      // Merge: extract into existing directory (e.g. multiple archives → same base path)
+      // Merge: extract into existing directory (e.g. multiple archives --> same base path)
     } else if (force) {
       std::error_code ec;
       std::filesystem::remove_all(target_path, ec);
@@ -459,7 +459,7 @@ bool ArchiveHelper::ExtractFromStream(
 
   if (std::filesystem::exists(target_path)) {
     if (std::filesystem::is_directory(target_path)) {
-      // Merge: extract into existing directory (e.g. multiple archives → same base path)
+      // Merge: extract into existing directory (e.g. multiple archives --> same base path)
     } else if (force) {
       std::error_code ec;
       std::filesystem::remove_all(target_path, ec);

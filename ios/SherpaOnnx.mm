@@ -279,6 +279,26 @@
     resolve(nil);
 }
 
+- (void)decodeAudioFileToFloatSamples:(NSString *)inputPath
+                   targetSampleRateHz:(NSNumber *)targetSampleRateHz
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+    NSArray<NSNumber *> *samples = nil;
+    int sr = 0;
+    NSError *error = nil;
+    int rate = targetSampleRateHz != nil ? targetSampleRateHz.intValue : 0;
+    if (![SherpaOnnxAudioConvert decodeAudioFileToFloatSamples:inputPath
+                                            targetSampleRateHz:rate
+                                                    outSamples:&samples
+                                                 outSampleRate:&sr
+                                                         error:&error]) {
+        reject(@"DECODE_ERROR", error ? error.localizedDescription : @"Failed to decode audio", error);
+        return;
+    }
+    resolve(@{ @"samples": samples ?: @[], @"sampleRate": @(sr) });
+}
+
 - (void)getAvailableProviders:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {

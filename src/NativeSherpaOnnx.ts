@@ -29,7 +29,7 @@ export interface Spec extends TurboModule {
    * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
    * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
-   * @param dither - Optional: dither for feature extraction (default 0)
+   * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
    * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
    * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
    * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
@@ -73,6 +73,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (or native included a message). */
+    error?: string;
     /** True when detection failed because the model targets unsupported hardware (RK35xx, Ascend, CANN). Use to show a specific message or block init. */
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
@@ -127,7 +129,8 @@ export interface Spec extends TurboModule {
   /**
    * Initialize OnlineRecognizer for streaming STT (single options object to avoid iOS TurboModule marshalling crash with many args).
    * @param instanceId - Unique ID for this engine instance (from createStreamingSTT)
-   * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params)
+   * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params).
+   *   `options.dither`: **Android** only; **iOS** ignores it (native `FeatureConfig` has no dither field).
    */
   initializeOnlineSttWithOptions(
     instanceId: string,
@@ -143,6 +146,8 @@ export interface Spec extends TurboModule {
       provider?: string;
       ruleFsts?: string;
       ruleFars?: string;
+      /** Feature dither. Android: applied. iOS: ignored. */
+      dither?: number;
       blankPenalty?: number;
       debug?: boolean;
       rule1MustContainNonSilence?: boolean;
@@ -280,6 +285,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (or native included a message). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
@@ -310,7 +317,8 @@ export interface Spec extends TurboModule {
    * Generate speech from text.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
-   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
+   * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
+   *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
    * @returns Object with { samples: number[], sampleRate: number }
    */
   generateTts(
@@ -326,7 +334,7 @@ export interface Spec extends TurboModule {
    * Generate speech with subtitle/timestamp metadata.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
-   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
+   * @param options - Same as {@link generateTts} options (cloning: Zipvoice/Pocket; Zipvoice needs `referenceText`).
    * @returns Object with samples, sampleRate, subtitles, and estimated flag
    */
   generateTtsWithTimestamps(
@@ -347,7 +355,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance
    * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
    * @param text - Text to convert to speech
-   * @param options - Generation options (sid, speed, referenceAudio, referenceText, numSteps, silenceScale, extra)
+   * @param options - Same shape as batch TTS; reference streaming is **Pocket-only** (Zipvoice cloning uses non-streaming generate).
    */
   generateTtsStream(
     instanceId: string,
@@ -638,6 +646,17 @@ export interface Spec extends TurboModule {
    * Requires FFmpeg prebuilts when called on Android.
    */
   convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
+
+  /**
+   * Decode an audio file to mono float samples in [-1, 1] and the effective sample rate.
+   * Supports the same inputs as convertAudioToFormat (file paths and Android content:// URIs).
+   * On Android, non-WAV formats require FFmpeg prebuilts; WAV may use a fast path via WaveReader.
+   * @param targetSampleRateHz - If > 0, resample to this rate; if 0 or omitted, keep the decoded stream rate.
+   */
+  decodeAudioFileToFloatSamples(
+    inputPath: string,
+    targetSampleRateHz?: number
+  ): Promise<{ samples: number[]; sampleRate: number }>;
 
   // ==================== Execution Provider Methods ====================
 

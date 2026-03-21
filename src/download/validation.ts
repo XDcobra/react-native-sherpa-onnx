@@ -3,6 +3,7 @@ import {
   stat,
   exists,
   readDir,
+  unlink,
   type ReadDirResItemT,
 } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
@@ -22,6 +23,37 @@ export class ValidationResult {
     this.success = success;
     this.error = error;
     this.message = message;
+  }
+}
+
+/**
+ * Delete a directory and all contents. No-op if the path is missing.
+ * Best-effort: continues on per-entry errors (permissions, race).
+ */
+export async function removeDirectoryRecursive(dirPath: string): Promise<void> {
+  if (!(await exists(dirPath))) return;
+  let entries: ReadDirResItemT[];
+  try {
+    entries = await readDir(dirPath);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const childPath = `${dirPath}/${entry.name}`.replace(/\/+/g, '/');
+    try {
+      if (entry.isDirectory()) {
+        await removeDirectoryRecursive(childPath);
+      } else {
+        await unlink(childPath);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    await unlink(dirPath);
+  } catch {
+    // ignore
   }
 }
 

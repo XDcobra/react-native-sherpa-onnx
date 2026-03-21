@@ -103,6 +103,7 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     const std::string& provider,
     const std::string& ruleFsts,
     const std::string& ruleFars,
+    float dither,
     float blankPenalty,
     bool debug,
     // NOTE: rule*MustContainNonSilence, rule1/2MinUtteranceLength, and
@@ -138,6 +139,9 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     sherpa_onnx::cxx::OnlineRecognizerConfig config;
     config.feat_config.sample_rate = 16000;
     config.feat_config.feature_dim = 80;
+    // Dither is not exposed on cxx::FeatureConfig in the bundled sherpa-onnx headers;
+    // Android applies it via JNI. iOS uses the library default (no dither from JS).
+    (void)dither;
     config.decoding_method = decodingMethod.empty() ? "greedy_search" : decodingMethod;
     config.max_active_paths = maxActivePaths;
     config.enable_endpoint = enableEndpoint;
