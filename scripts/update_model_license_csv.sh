@@ -18,8 +18,10 @@
 #   for that row (archive pass already failed to produce a known license_type).
 # - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
-#   (---\nlicense: …). license_file column = https://huggingface.co/<owner>/<slug>
-#   detection_source=huggingface_model_card. Release tarball names must match HF repo names or fetch 404s.
+#   (---\nlicense: …). If still empty, first modelscope.cn/models/… URL in README.md → fetch /summary HTML
+#   and read License from embedded window.__detail_data__ JSON (\"License\":\"…\").
+#   license_file = HF repo URL or ModelScope summary URL; detection_source = huggingface_model_card or
+#   modelscope_detail_json. Release tarball names must match HF repo names or fetch 404s.
 # - Hugging Face: set HF_TOKEN or HUGGINGFACE_HUB_TOKEN (read token is enough for public repos). Anonymous
 #   requests from CI often get HTTP 401; without a token README/MODEL_CARD cannot be fetched.
 #
@@ -200,10 +202,11 @@ set_hf_model_card() {
   local c_use="$3"
   local conf="$4"
   local page_url="$5"
+  local detection_src="${6:-huggingface_model_card}"
   existing_license_type["$name"]="$l_type"
   existing_commercial_use["$name"]="$c_use"
   existing_confidence["$name"]="$conf"
-  existing_detection_source["$name"]="huggingface_model_card"
+  existing_detection_source["$name"]="$detection_src"
   existing_license_file["$name"]="$page_url"
 }
 
@@ -280,21 +283,77 @@ parse_readme_yaml_license_field() {
   return 1
 }
 
+# First https://modelscope.cn/models/… URL in text (HF README often links here without YAML license).
+extract_first_modelscope_models_url() {
+  local readme="$1"
+  local url
+  url="$(printf '%s\n' "$readme" | grep -oE 'https?://(www\.)?modelscope\.cn/models/[A-Za-z0-9_./%-]+' | head -1)"
+  if [[ -z "$url" ]]; then
+    url="$(printf '%s\n' "$readme" | grep -oE '(www\.)?modelscope\.cn/models/[A-Za-z0-9_./%-]+' | head -1)"
+    if [[ -n "$url" && "$url" != http://* && "$url" != https://* ]]; then
+      url="https://${url}"
+    fi
+  fi
+  [[ -n "$url" ]] || return 1
+  echo -n "$url"
+}
+
+# ModelScope model pages embed JSON in HTML; License field uses escaped quotes: \"License\":\"Apache License 2.0\"
+normalize_modelscope_summary_url() {
+  local u="$1"
+  u="${u%%\?*}"
+  u="${u%/}"
+  if [[ "$u" != */summary ]]; then
+    u="${u}/summary"
+  fi
+  echo -n "$u"
+}
+
+fetch_modelscope_summary_html() {
+  local url="$1"
+  url="$(normalize_modelscope_summary_url "$url")"
+  local -a _ms_curl=(-sfSL -A "Mozilla/5.0 (compatible; react-native-sherpa-onnx-license-update/1.0)")
+  _ms_curl+=("$url")
+  curl "${_ms_curl[@]}" 2>/dev/null
+}
+
+parse_modelscope_license_from_html() {
+  local html="$1"
+  local lic
+  lic="$(printf '%s' "$html" | sed -n 's/.*License\\":\\"\([^\\]*\)\\".*/\1/p' | head -1)"
+  lic="$(echo -n "$lic" | xargs)"
+  if [[ -n "$lic" ]]; then
+    echo -n "$lic"
+    return 0
+  fi
+  lic="$(printf '%s' "$html" | sed -n 's/.*"License":"\([^"]*\)".*/\1/p' | head -1)"
+  lic="$(echo -n "$lic" | xargs)"
+  if [[ -n "$lic" ]]; then
+    echo -n "$lic"
+    return 0
+  fi
+  return 1
+}
+
 asset_eligible_for_hf_license_fallback() {
   local asset_name="$1"
   [[ "$asset_name" == vits-piper-*.tar.bz2 || "$asset_name" == sherpa-onnx-*.tar.bz2 ]]
 }
 
-# Try MODEL_CARD then README.md on Hugging Face when archive path gave missing/unknown.
+# Try MODEL_CARD, README.md YAML, then ModelScope link from README when archive path gave missing/unknown.
 try_hf_model_card_fallback() {
   local asset_name="$1"
   local slug page_url card readme raw_lic det l_res c_res conf_res
+  local license_ref_url license_ref_src ms_url ms_html
 
   asset_eligible_for_hf_license_fallback "$asset_name" || return 1
 
   slug="${asset_name%.tar.bz2}"
   page_url="https://huggingface.co/${HF_MODEL_OWNER}/${slug}"
+  license_ref_url="$page_url"
+  license_ref_src="huggingface_model_card"
 
+  readme=""
   raw_lic=""
   if card="$(fetch_hf_repo_file "$slug" "MODEL_CARD")"; then
     raw_lic="$(parse_model_card_license_field "$card")" || raw_lic=""
@@ -302,6 +361,19 @@ try_hf_model_card_fallback() {
   if [[ -z "$raw_lic" ]]; then
     if readme="$(fetch_hf_repo_file "$slug" "README.md")"; then
       raw_lic="$(parse_readme_yaml_license_field "$readme")" || raw_lic=""
+    fi
+  fi
+  if [[ -z "$raw_lic" && -n "$readme" ]]; then
+    if ms_url="$(extract_first_modelscope_models_url "$readme")"; then
+      ms_html="$(fetch_modelscope_summary_html "$ms_url")" || ms_html=""
+      if [[ -n "$ms_html" ]]; then
+        if raw_lic="$(parse_modelscope_license_from_html "$ms_html")"; then
+          license_ref_url="$(normalize_modelscope_summary_url "$ms_url")"
+          license_ref_src="modelscope_detail_json"
+        else
+          raw_lic=""
+        fi
+      fi
     fi
   fi
   [[ -n "$raw_lic" ]] || return 1
@@ -312,9 +384,9 @@ try_hf_model_card_fallback() {
   conf_res="$(echo "$det" | cut -d'|' -f3)"
 
   if [[ "$l_res" == "unknown" ]]; then
-    set_hf_model_card "$asset_name" "$raw_lic" "unknown" "medium" "$page_url"
+    set_hf_model_card "$asset_name" "$raw_lic" "unknown" "medium" "$license_ref_url" "$license_ref_src"
   else
-    set_hf_model_card "$asset_name" "$l_res" "$c_res" "$conf_res" "$page_url"
+    set_hf_model_card "$asset_name" "$l_res" "$c_res" "$conf_res" "$license_ref_url" "$license_ref_src"
   fi
   return 0
 }
@@ -325,6 +397,7 @@ detect_license() {
 
   if [[ "$t" == *"cc0"* || "$t" == *"cc-0"* || "$t" == *"creative commons zero"* || "$t" == *"public domain dedication"* ]]; then echo "cc0|yes|high"
   elif [[ "$t" == *"apache-2.0"* || "$t" == *"apache 2.0"* ]]; then echo "apache-2.0|yes|high"
+  elif [[ "$t" == *"apache license 2.0"* ]]; then echo "apache-2.0|yes|high"
   elif [[ "$t" == *"apache license"* && "$t" == *"version 2.0"* ]]; then echo "apache-2.0|yes|high"
   elif [[ "$t" == "mit" || "$t" == *"mit license"* ]]; then echo "mit|yes|high"
   elif [[ "$t" == *"bsd 3-clause"* || ( "$t" == *"redistribution and use in source and binary forms"* && "$t" == *"neither the name"* ) ]]; then echo "bsd-3-clause|yes|medium"
