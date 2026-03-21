@@ -283,6 +283,8 @@ export interface Spec extends TurboModule {
     modelType?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (or native included a message). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */

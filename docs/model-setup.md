@@ -211,11 +211,15 @@ function detectTtsModel(
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
+  /** When `success` is `false`: native validation/detect message. Omitted if the native layer returned an empty string. */
+  error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
   lexiconLanguageCandidates?: string[];
 }>;
 ```
+
+Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
 
 `lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
 
