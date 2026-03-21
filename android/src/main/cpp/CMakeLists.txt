@@ -82,7 +82,6 @@ set(SOURCES
     jni/model_detect/sherpa-onnx-stt-wrapper.cpp
     jni/model_detect/sherpa-onnx-tts-wrapper.cpp
     jni/audio/sherpa-onnx-audio-convert-jni.cpp
-    jni/tts/sherpa-onnx-tts-zipvoice-jni.cpp
     crypto/sha256.cpp
 )
 
@@ -136,7 +135,7 @@ elseif(EXISTS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}/libsherpa-onnx-c-
     set(SHERPA_C_API_LIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
     message(STATUS "sherpa-onnx C-API (link only, jniLibs): ${SHERPA_C_API_LIB_DIR}")
 else()
-    message(WARNING "sherpa-onnx C-API not found. Zipvoice TTS will not be available. "
+    message(WARNING "sherpa-onnx C-API not found. Prebuilt sherpa native libs may be incomplete. "
                     "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
@@ -148,7 +147,6 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
-    ${CMAKE_CURRENT_SOURCE_DIR}/jni/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -167,7 +165,7 @@ if(USE_LIBARCHIVE)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBARCHIVE=1)
 endif()
 
-# Link libraries (Kotlin API from AAR handles STT/TTS; C-API only for Zipvoice)
+# Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
     target_link_directories(sherpaonnx PRIVATE ${FFMPEG_LIB_DIR})
 endif()

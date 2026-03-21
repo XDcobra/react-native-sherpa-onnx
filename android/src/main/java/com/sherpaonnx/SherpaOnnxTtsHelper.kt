@@ -30,6 +30,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsZipVoiceModelConfig
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -64,7 +65,6 @@ internal class SherpaOnnxTtsHelper(
 
   private data class TtsEngineInstance(
     @Volatile var tts: OfflineTts? = null,
-    @Volatile var zipvoiceTts: ZipvoiceTtsWrapper? = null,
     var ttsInitState: TtsInitState? = null,
     val ttsStreamRunning: AtomicBoolean = AtomicBoolean(false),
     val ttsStreamCancelled: AtomicBoolean = AtomicBoolean(false),
@@ -73,15 +73,13 @@ internal class SherpaOnnxTtsHelper(
   ) {
     private val lock = Any()
 
-    fun hasEngine(): Boolean = synchronized(lock) { tts != null || zipvoiceTts != null }
-    val isZipvoice: Boolean get() = synchronized(lock) { zipvoiceTts != null }
+    fun hasEngine(): Boolean = synchronized(lock) { tts != null }
+    val isZipvoice: Boolean get() = ttsInitState?.modelType == "zipvoice"
     val isPocket: Boolean get() = ttsInitState?.modelType == "pocket"
     fun releaseEngines() {
       synchronized(lock) {
         tts?.release()
         tts = null
-        zipvoiceTts?.release()
-        zipvoiceTts = null
         ttsInitState = null
       }
     }
@@ -213,34 +211,26 @@ internal class SherpaOnnxTtsHelper(
           Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfoBefore.availMem / (1024 * 1024)} MB (before load)")
         }
         val zipvoiceNumThreads = 1
-        val wrapper = ZipvoiceTtsWrapper.create(
-          tokens = path(paths, "tokens"),
-          encoder = path(paths, "encoder"),
-          decoder = path(paths, "decoder"),
-          vocoder = vocoderPath,
-          dataDir = path(paths, "dataDir"),
-          lexicon = lexiconPath,
-          numThreads = zipvoiceNumThreads,
-          debug = debug,
-          ruleFsts = ruleFsts?.takeIf { it.isNotBlank() } ?: "",
-          ruleFars = ruleFars?.takeIf { it.isNotBlank() } ?: "",
-          maxNumSentences = maxNumSentences?.toInt()?.coerceAtLeast(1) ?: 1,
-          silenceScale = silenceScale?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f,
-          provider = provider?.takeIf { it.isNotBlank() } ?: "cpu"
+        val config = buildTtsConfig(
+          paths, "zipvoice", zipvoiceNumThreads, debug,
+          noiseScale, noiseScaleW, lengthScale,
+          ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale,
+          provider
         )
         if (am != null) {
           val memInfo = ActivityManager.MemoryInfo()
           am.getMemoryInfo(memInfo)
           Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfo.availMem / (1024 * 1024)} MB (after load)")
         }
-        if (wrapper == null) {
-          Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
-          rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine via C-API. Check logcat for details.")
+        try {
+          inst.tts = OfflineTts(config = config)
+        } catch (e: Exception) {
+          Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice OfflineTts: ${e.message}", e)
+          rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine: ${e.message}", e)
           return@init
         }
-        inst.zipvoiceTts = wrapper
-        sampleRate = wrapper.sampleRate()
-        numSpeakers = wrapper.numSpeakers()
+        sampleRate = inst.tts!!.sampleRate()
+        numSpeakers = inst.tts!!.numSpeakers()
       } else {
         val config = buildTtsConfig(
           paths, modelTypeStr, numThreads.toInt(), debug,
@@ -252,8 +242,6 @@ internal class SherpaOnnxTtsHelper(
         sampleRate = inst.tts!!.sampleRate()
         numSpeakers = inst.tts!!.numSpeakers()
       }
-
-      Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=${if (inst.isZipvoice) "zipvoice-c-api" else "kotlin-api"}, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
 
       val modelsArray = Arguments.createArray()
       detectedModels?.forEach { modelObj ->
@@ -279,6 +267,8 @@ internal class SherpaOnnxTtsHelper(
         silenceScale?.takeUnless { it.isNaN() },
         provider?.takeIf { it.isNotBlank() }
       )
+
+      Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=kotlin-api modelType=$modelTypeStr, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
@@ -313,18 +303,6 @@ internal class SherpaOnnxTtsHelper(
     val state = inst.ttsInitState ?: run {
       Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: TTS not initialized")
       promise.reject("TTS_UPDATE_ERROR", "TTS not initialized")
-      return
-    }
-
-    if (inst.isZipvoice) {
-      initializeTts(
-        instanceId,
-        state.modelDir, state.modelType, state.numThreads.toDouble(), state.debug,
-        noiseScale, noiseScaleW, lengthScale,
-        state.ruleFsts, state.ruleFars, state.maxNumSentences?.toDouble(), state.silenceScale,
-        state.provider,
-        promise
-      )
       return
     }
 
@@ -408,24 +386,18 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceAudio(options) && inst.isZipvoice -> {
-          val opts = options!!
-          val refAudio = opts.getArray("referenceAudio")!!
-          val promptSr = readReferenceSampleRate(opts)
-          val promptText = opts.getString("referenceText")?.trim().orEmpty()
-          if (promptText.isEmpty()) {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
-            promise.reject(
-              "TTS_GENERATE_ERROR",
-              "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
-            )
-            return
+        hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
+          if (inst.isZipvoice) {
+            val promptText = options!!.getString("referenceText")?.trim().orEmpty()
+            if (promptText.isEmpty()) {
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
+              promise.reject(
+                "TTS_GENERATE_ERROR",
+                "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
+              )
+              return
+            }
           }
-          val numSteps = if (opts.hasKey("numSteps")) opts.getDouble("numSteps").toInt() else 20
-          val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
-          inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
-        }
-        hasReferenceAudio(options) && inst.isPocket -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
@@ -481,24 +453,18 @@ internal class SherpaOnnxTtsHelper(
       val sid = getSid(options)
       val speed = getSpeed(options)
       val audio = when {
-        hasReferenceAudio(options) && inst.isZipvoice -> {
-          val opts = options!!
-          val refAudio = opts.getArray("referenceAudio")!!
-          val promptSr = readReferenceSampleRate(opts)
-          val promptText = opts.getString("referenceText")?.trim().orEmpty()
-          if (promptText.isEmpty()) {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
-            promise.reject(
-              "TTS_GENERATE_ERROR",
-              "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
-            )
-            return
+        hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
+          if (inst.isZipvoice) {
+            val promptText = options!!.getString("referenceText")?.trim().orEmpty()
+            if (promptText.isEmpty()) {
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
+              promise.reject(
+                "TTS_GENERATE_ERROR",
+                "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
+              )
+              return
+            }
           }
-          val numSteps = if (opts.hasKey("numSteps")) opts.getDouble("numSteps").toInt() else 20
-          val samples = FloatArray(refAudio.size()) { i -> refAudio.getDouble(i).toFloat() }
-          inst.zipvoiceTts!!.generateWithZipvoice(text, promptText, samples, promptSr, speed, numSteps)
-        }
-        hasReferenceAudio(options) && inst.isPocket -> {
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
           inst.tts!!.generateWithConfig(text, config)
         }
@@ -599,13 +565,6 @@ internal class SherpaOnnxTtsHelper(
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
             inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
               if (inst.ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
-              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
-              chunk.size
-            }
-          }
-          inst.zipvoiceTts != null -> {
-            inst.zipvoiceTts!!.generateWithCallback(text, sid, speed) { chunk ->
-              if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
               emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
               chunk.size
             }
@@ -991,18 +950,14 @@ internal class SherpaOnnxTtsHelper(
 
   /** Dispatch generate to whichever engine is active on the instance. Returns null if none loaded. */
   private fun dispatchGenerate(inst: TtsEngineInstance, text: String, sid: Int, speed: Float): GeneratedAudio? {
-    inst.zipvoiceTts?.let { return it.generate(text, sid, speed) }
-    inst.tts?.let { return it.generate(text, sid, speed) }
-    return null
+    return inst.tts?.generate(text, sid, speed)
   }
 
   private fun dispatchSampleRate(inst: TtsEngineInstance): Int {
-    inst.zipvoiceTts?.let { return it.sampleRate() }
     return inst.tts?.sampleRate() ?: 0
   }
 
   private fun dispatchNumSpeakers(inst: TtsEngineInstance): Int {
-    inst.zipvoiceTts?.let { return it.numSpeakers() }
     return inst.tts?.numSpeakers() ?: 0
   }
 
@@ -1094,14 +1049,19 @@ internal class SherpaOnnxTtsHelper(
         debug = debug,
         provider = prov
       )
-      "zipvoice" -> {
-        // Zipvoice is handled by ZipvoiceTtsWrapper (C-API), not OfflineTts (Kotlin API).
-        // This branch should not be reached because initializeTts/updateTtsParams handle
-        // the "zipvoice" case before calling buildTtsConfig.
-        throw IllegalStateException(
-          "buildTtsConfig should not be called for zipvoice models. Use ZipvoiceTtsWrapper instead."
-        )
-      }
+      "zipvoice" -> OfflineTtsModelConfig(
+        zipvoice = OfflineTtsZipVoiceModelConfig(
+          tokens = path(paths, "tokens"),
+          encoder = path(paths, "encoder"),
+          decoder = path(paths, "decoder"),
+          vocoder = path(paths, "vocoder"),
+          dataDir = path(paths, "dataDir"),
+          lexicon = path(paths, "lexicon")
+        ),
+        numThreads = numThreads,
+        debug = debug,
+        provider = prov
+      )
       else -> {
         if (path(paths, "acousticModel").isNotEmpty()) {
           OfflineTtsModelConfig(
