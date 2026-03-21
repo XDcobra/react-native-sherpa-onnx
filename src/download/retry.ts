@@ -55,8 +55,20 @@ export async function retryWithBackoff<T>(
         lastError.message
       );
 
-      // Wait before retrying
-      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      // Wait before retrying (abort-aware: cancel the delay if signal fires)
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delayMs);
+        if (options.signal) {
+          const onAbort = () => {
+            clearTimeout(timer);
+            options.signal!.removeEventListener('abort', onAbort);
+            const abortErr = new Error('Operation aborted');
+            abortErr.name = 'AbortError';
+            reject(abortErr);
+          };
+          options.signal.addEventListener('abort', onAbort);
+        }
+      });
     }
   }
 
