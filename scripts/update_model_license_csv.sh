@@ -12,12 +12,13 @@
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
 # - .onnx-only assets: license_type=missing (no archive to scan).
-# - No license-like path in listing: license_type=missing (then HF fallback for vits-piper-*.tar.bz2).
+# - No license-like path in listing: license_type=missing (then HF fallback for eligible assets).
 # - License file present but unreadable: license_type=unknown, detection_source=archive_extract_failed.
-# - vits-piper-*.tar.bz2: if outcome is missing or unknown, fetch MODEL_CARD from Hugging Face
-#   (https://huggingface.co/${HF_MODEL_OWNER}/<asset_basename_without_suffix>/raw/main/MODEL_CARD),
-#   parse "* License: …", set license_file to the repo URL, detection_source=huggingface_model_card.
-#   HF_MODEL_OWNER defaults to csukuangfj (same layout as sherpa-onnx release asset names).
+# - CSV row with license_type=unknown and non-empty license_file: try HF before re-downloading the archive.
+# - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
+#   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
+#   (---\nlicense: …). license_file column = https://huggingface.co/<owner>/<slug>
+#   detection_source=huggingface_model_card. Release tarball names must match HF repo names or fetch 404s.
 #
 # Note: With `set -u`, ${#empty_assoc[@]} and ${!empty_assoc[@]} can error on some Bash builds;
 # we avoid that below.
@@ -201,11 +202,11 @@ set_hf_model_card() {
   existing_license_file["$name"]="$page_url"
 }
 
-# Returns 0 and prints MODEL_CARD body to stdout if the request succeeds.
-fetch_hf_model_card() {
+# Prints file body to stdout; returns 0 on HTTP success.
+fetch_hf_repo_file() {
   local slug="$1"
-  local url="https://huggingface.co/${HF_MODEL_OWNER}/${slug}/raw/main/MODEL_CARD"
-  curl -sfSL "$url"
+  local filename="$2"
+  curl -sfSL "https://huggingface.co/${HF_MODEL_OWNER}/${slug}/raw/main/${filename}"
 }
 
 # Extracts the first "* License: value" line (case-insensitive on the label).
@@ -226,18 +227,74 @@ parse_model_card_license_field() {
   return 1
 }
 
-# vits-piper-*.tar.bz2 only: fill license from HF MODEL_CARD when archive path gave missing/unknown.
+# Hugging Face model cards often use YAML front matter: ---\nlicense: apache-2.0\n---
+parse_readme_yaml_license_field() {
+  local readme="$1"
+  local line val in_fm=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" == "---" ]]; then
+      if [[ "$in_fm" -eq 0 ]]; then
+        in_fm=1
+      elif [[ "$in_fm" -eq 1 ]]; then
+        break
+      fi
+      continue
+    fi
+    if [[ "$in_fm" -eq 1 ]] && [[ "$line" =~ ^[Ll]icense:[[:space:]]*(.*) ]]; then
+      val="${BASH_REMATCH[1]}"
+      val="$(echo -n "$val" | xargs)"
+      val="${val#\"}"; val="${val%\"}"
+      val="${val#\'}"; val="${val%\'}"
+      if [[ -n "$val" ]]; then
+        echo -n "$val"
+        return 0
+      fi
+    fi
+  done <<< "$readme"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ ^[Ll]icense:[[:space:]]*(.*) ]]; then
+      val="${BASH_REMATCH[1]}"
+      val="$(echo -n "$val" | xargs)"
+      val="${val#\"}"; val="${val%\"}"
+      val="${val#\'}"; val="${val%\'}"
+      if [[ -n "$val" ]]; then
+        echo -n "$val"
+        return 0
+      fi
+    fi
+  done <<< "$readme"
+  return 1
+}
+
+asset_eligible_for_hf_license_fallback() {
+  local asset_name="$1"
+  [[ "$asset_name" == vits-piper-*.tar.bz2 || "$asset_name" == sherpa-onnx-*.tar.bz2 ]]
+}
+
+# Try MODEL_CARD then README.md on Hugging Face when archive path gave missing/unknown.
 try_hf_model_card_fallback() {
   local asset_name="$1"
-  local slug page_url card raw_lic det l_res c_res conf_res
+  local slug page_url card readme raw_lic det l_res c_res conf_res
 
-  [[ "$asset_name" == vits-piper-*.tar.bz2 ]] || return 1
+  asset_eligible_for_hf_license_fallback "$asset_name" || return 1
 
   slug="${asset_name%.tar.bz2}"
   page_url="https://huggingface.co/${HF_MODEL_OWNER}/${slug}"
 
-  card="$(fetch_hf_model_card "$slug")" || return 1
-  raw_lic="$(parse_model_card_license_field "$card")" || return 1
+  raw_lic=""
+  if card="$(fetch_hf_repo_file "$slug" "MODEL_CARD")"; then
+    raw_lic="$(parse_model_card_license_field "$card")" || raw_lic=""
+  fi
+  if [[ -z "$raw_lic" ]]; then
+    if readme="$(fetch_hf_repo_file "$slug" "README.md")"; then
+      raw_lic="$(parse_readme_yaml_license_field "$readme")" || raw_lic=""
+    fi
+  fi
+  [[ -n "$raw_lic" ]] || return 1
 
   det="$(detect_license "$raw_lic")"
   l_res="$(echo "$det" | cut -d'|' -f1)"
@@ -259,7 +316,7 @@ detect_license() {
   if [[ "$t" == *"cc0"* || "$t" == *"cc-0"* || "$t" == *"creative commons zero"* || "$t" == *"public domain dedication"* ]]; then echo "cc0|yes|high"
   elif [[ "$t" == *"apache-2.0"* || "$t" == *"apache 2.0"* ]]; then echo "apache-2.0|yes|high"
   elif [[ "$t" == *"apache license"* && "$t" == *"version 2.0"* ]]; then echo "apache-2.0|yes|high"
-  elif [[ "$t" == *"mit license"* ]]; then echo "mit|yes|high"
+  elif [[ "$t" == "mit" || "$t" == *"mit license"* ]]; then echo "mit|yes|high"
   elif [[ "$t" == *"bsd 3-clause"* || ( "$t" == *"redistribution and use in source and binary forms"* && "$t" == *"neither the name"* ) ]]; then echo "bsd-3-clause|yes|medium"
   elif [[ "$t" == *"bsd 2-clause"* ]]; then echo "bsd-2-clause|yes|medium"
   elif [[ "$t" == *"mozilla public license"* && "$t" == *"2.0"* ]]; then echo "mpl-2.0|yes|high"
@@ -302,6 +359,15 @@ for asset_name in "${release_assets[@]}"; do
     continue
   fi
 
+  prev_lf="${existing_license_file["$asset_name"]:-}"
+  prev_lf="$(echo -n "$prev_lf" | xargs)"
+  if [[ "$l_type_lc" == "unknown" && -n "$prev_lf" ]]; then
+    if try_hf_model_card_fallback "$asset_name"; then
+      echo "  $asset_name — CSV unknown + license_file → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
+  fi
+
   safe_name="$(get_safe_name "$asset_name")"
   tree_path="${TREE_CACHE_DIR}/${safe_name}.txt"
   
@@ -333,7 +399,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ ${#license_paths[@]} -eq 0 ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — no license in tree → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — no license in tree → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_missing "$asset_name"
@@ -352,7 +418,7 @@ for asset_name in "${release_assets[@]}"; do
   if ! curl "${_curl_dl[@]}" -o "$archive_path" "$url"; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — download failed → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — download failed → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_extract_failed "$asset_name" "${license_paths[0]}"
@@ -389,7 +455,7 @@ for asset_name in "${release_assets[@]}"; do
   if [[ -z "$extracted_text" ]]; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — could not extract license file → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — could not extract license file → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_extract_failed "$asset_name" "$used_file"
@@ -406,7 +472,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ "$l_res" == "unknown" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — archive license text unknown → filled from Hugging Face MODEL_CARD (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — archive license text unknown → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
   fi
