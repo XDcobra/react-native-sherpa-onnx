@@ -2,6 +2,8 @@
 # For each .tar.bz2 asset: list contents with tar -tjf (no extraction).
 # For each .onnx asset: record single-file entry.
 # Creates or extends test/fixtures/tts-models-expected.csv (new assets get empty model_type).
+# Creates or extends THIRD_PARTY_LICENSES/tts-models-license-status.csv and auto-detects license_type
+# only for rows where license_type is empty.
 # CSV model_type values include zipvoice_rejected (Zipvoice selected but ValidateTtsPaths fails on the
 # release tarball, e.g. missing lexicon) and unsupported (see model_detect_test.cpp).
 # Already-processed assets are read from tts-models-structure.txt; only new assets are downloaded.
@@ -164,11 +166,21 @@ jobs:
           echo "CSV updated (new assets get empty model_type):"
           wc -l "$CSV"
 
+      - name: Create or extend TTS license status CSV
+        run: |
+          CSV="THIRD_PARTY_LICENSES/tts-models-license-status.csv"
+          bash scripts/update_model_license_csv.sh \
+            --asset-list asset-list.txt \
+            --tree-cache-dir tree-cache \
+            --csv "$CSV"
+          echo "License CSV updated:"
+          wc -l "$CSV"
+
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add test/fixtures/tts-models-structure.txt test/fixtures/tts-models-expected.csv
+          git add test/fixtures/tts-models-structure.txt test/fixtures/tts-models-expected.csv THIRD_PARTY_LICENSES/tts-models-license-status.csv
           git status --short
           if ! git diff --staged --quiet; then
             git commit -m "chore(testdata): update TTS model structures and expected CSV from tts-models release"
