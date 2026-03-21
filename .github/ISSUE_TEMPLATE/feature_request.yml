@@ -8,6 +8,18 @@ body:
       value: |
         Thank you for suggesting a feature!
 
+  - type: dropdown
+    id: request_category
+    attributes:
+      label: Request Category
+      description: What type of request is this?
+      options:
+        - New Feature
+        - Performance Improvement
+        - API/Developer Experience Improvement
+    validations:
+      required: true
+
   - type: textarea
     id: problem
     attributes:
