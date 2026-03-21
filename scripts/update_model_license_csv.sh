@@ -14,7 +14,8 @@
 # - .onnx-only assets: license_type=missing (no archive to scan).
 # - No license-like path in listing: license_type=missing (then HF fallback for eligible assets).
 # - License file present but unreadable: license_type=unknown, detection_source=archive_extract_failed.
-# - CSV row with license_type=unknown and non-empty license_file: try HF before re-downloading the archive.
+# - CSV row with license_type=unknown and non-empty license_file: try HF; never re-download the archive
+#   for that row (archive pass already failed to produce a known license_type).
 # - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
 #   (---\nlicense: …). license_file column = https://huggingface.co/<owner>/<slug>
@@ -364,8 +365,10 @@ for asset_name in "${release_assets[@]}"; do
   if [[ "$l_type_lc" == "unknown" && -n "$prev_lf" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
       echo "  $asset_name — CSV unknown + license_file → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
-      continue
+    else
+      echo "  $asset_name — CSV unknown + license_file → Hugging Face had no usable license; skip archive re-download (row unchanged)"
     fi
+    continue
   fi
 
   safe_name="$(get_safe_name "$asset_name")"
