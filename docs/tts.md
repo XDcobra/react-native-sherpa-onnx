@@ -169,7 +169,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `silenceScale` | `number` | — | Silence scale at generation time |
 | `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Native:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten --> native error if set. Mono float in [-1, 1]. |
 | `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
-| `numSteps` | `number` | — | Flow-matching steps (model-dependent) |
+| `numSteps` | `number` | `5` | Flow-matching steps when cloning (Zipvoice / Pocket); native default **5** on Android and iOS if omitted |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
 
 ---
@@ -305,7 +305,7 @@ Only **Zipvoice** and **Pocket** use reference audio in sherpa-onnx. Passing `re
 const audio = await tts.generateSpeech('Text in the reference voice', {
   referenceAudio: { samples: refSamples, sampleRate: 22050 },
   referenceText: 'Transcript of the reference recording',
-  numSteps: 20,
+  // numSteps defaults to 5 on native; increase for higher quality / cost
   speed: 1.0,
 });
 ```

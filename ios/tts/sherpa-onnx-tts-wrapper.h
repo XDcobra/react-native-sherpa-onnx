@@ -18,7 +18,7 @@ struct VoiceCloneOptions {
     std::vector<float> reference_audio;
     int32_t reference_sample_rate = 0;
     std::string reference_text;
-    int32_t num_steps = 20;
+    int32_t num_steps = 5;
     float silence_scale = 0.2f;
     std::unordered_map<std::string, std::string> extra;
 };

@@ -76,6 +76,9 @@ std::vector<std::string> SplitTtsTokens(const std::string &text) {
     return tokens;
 }
 
+/** When options omit numSteps, matches Android SherpaOnnxTtsHelper / upstream GenerationConfig default. */
+constexpr int32_t kDefaultVoiceCloneNumSteps = 5;
+
 /** Non-null optional when referenceAudio is non-empty array and referenceSampleRate > 0. */
 static std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps) {
     if (options == nil) return std::nullopt;
@@ -484,8 +487,7 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
 
         std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
         if (hasRef) {
-            int32_t defSteps = (kind == Kind::kZipvoice) ? 20 : 5;
-            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, defSteps);
+            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
         }
 
         auto result = wrapper->generate(
@@ -573,8 +575,7 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
 
         std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
         if (hasRef) {
-            int32_t defSteps = (kind == Kind::kZipvoice) ? 20 : 5;
-            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, defSteps);
+            cloneOpt = VoiceCloneOptionsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
         }
 
         auto result = wrapper->generate(
@@ -709,7 +710,7 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
 
     std::optional<sherpaonnx::VoiceCloneOptions> streamCloneOpt;
     if (streamHasRef) {
-        streamCloneOpt = VoiceCloneOptionsFromNSDictionary(options, 5);
+        streamCloneOpt = VoiceCloneOptionsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
     }
 
     std::string textStr = [text UTF8String];
