@@ -134,10 +134,18 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
     }
 
     const taskId = makeDownloadTaskId(category, id);
-    const abortError = new Error('Download aborted');
-    abortError.name = 'AbortError';
 
     return new Promise<DownloadResult>((resolve, reject) => {
+      let abortHandler: (() => void) | undefined;
+
+      const cleanup = () => {
+        if (abortHandler && opts?.signal) {
+          opts.signal.removeEventListener('abort', abortHandler);
+          abortHandler = undefined;
+        }
+        activeDownloadTasks.delete(taskId);
+      };
+
       const task = createDownloadTask({
         id: taskId,
         url: model.downloadUrl,
@@ -166,7 +174,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
           }
         )
         .done(async () => {
-          activeDownloadTasks.delete(taskId);
+          cleanup();
           try {
             const result = await runPostDownloadProcessing({
               category,
@@ -192,7 +200,7 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
         })
         .error(
           ({ error, errorCode }: { error?: string; errorCode?: number }) => {
-            activeDownloadTasks.delete(taskId);
+            cleanup();
             completeHandler(taskId);
             (async () => {
               try {
@@ -211,10 +219,21 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
 
       activeDownloadTasks.set(taskId, task);
       if (opts?.signal) {
-        opts.signal.addEventListener('abort', () => {
+        abortHandler = () => {
           task.stop();
-          activeDownloadTasks.delete(taskId);
-        });
+          cleanup();
+          (async () => {
+            try {
+              if (await exists(statePath)) await unlink(statePath);
+            } catch {
+              // ignore
+            }
+          })();
+          const err = new Error('Download aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        opts.signal.addEventListener('abort', abortHandler);
       }
       task.start();
     });
@@ -263,6 +282,7 @@ export async function getIncompleteDownloads(
     let model: ModelMetaBase | undefined;
     let totalBytes: number | undefined;
     let archivePath: string | undefined;
+    let startedAt: string | undefined;
 
     if (await exists(statePath)) {
       try {
@@ -271,6 +291,7 @@ export async function getIncompleteDownloads(
         model = fromFile.model;
         totalBytes = fromFile.totalBytes ?? fromFile.model?.bytes;
         archivePath = fromFile.archivePath;
+        startedAt = fromFile.startedAt;
       } catch {
         // ignore
       }
@@ -297,7 +318,7 @@ export async function getIncompleteDownloads(
       modelId,
       category,
       phase: 'downloading',
-      startedAt: new Date().toISOString(),
+      startedAt: startedAt ?? new Date().toISOString(),
       archivePath: archivePath ?? '',
       model,
       bytesDownloaded,
@@ -336,11 +357,19 @@ export async function resumeDownload<T extends ModelMetaBase>(
   const modelDir = getModelDir(category, id);
   const isArchive = model.archiveExt === 'tar.bz2';
   const statePath = getDownloadStatePath(category, id);
-  const abortError = new Error('Download aborted');
-  abortError.name = 'AbortError';
   const isAborted = () => Boolean(opts?.signal?.aborted);
 
   return new Promise<DownloadResult>((resolve, reject) => {
+    let abortHandler: (() => void) | undefined;
+
+    const cleanup = () => {
+      if (abortHandler && opts?.signal) {
+        opts.signal.removeEventListener('abort', abortHandler);
+        abortHandler = undefined;
+      }
+      activeDownloadTasks.delete(taskId);
+    };
+
     existing
       .progress(
         ({
@@ -368,7 +397,7 @@ export async function resumeDownload<T extends ModelMetaBase>(
         }
       )
       .done(async () => {
-        activeDownloadTasks.delete(taskId);
+        cleanup();
         try {
           const result = await runPostDownloadProcessing({
             category,
@@ -393,7 +422,7 @@ export async function resumeDownload<T extends ModelMetaBase>(
         }
       })
       .error(({ error, errorCode }: { error?: string; errorCode?: number }) => {
-        activeDownloadTasks.delete(taskId);
+        cleanup();
         completeHandler(taskId);
         (async () => {
           try {
@@ -411,10 +440,21 @@ export async function resumeDownload<T extends ModelMetaBase>(
 
     activeDownloadTasks.set(taskId, existing);
     if (opts?.signal) {
-      opts.signal.addEventListener('abort', () => {
+      abortHandler = () => {
         existing.stop();
-        activeDownloadTasks.delete(taskId);
-      });
+        cleanup();
+        (async () => {
+          try {
+            if (await exists(statePath)) await unlink(statePath);
+          } catch {
+            // ignore
+          }
+        })();
+        const err = new Error('Download aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      opts.signal.addEventListener('abort', abortHandler);
     }
     existing.resume().catch(() => {});
   });
