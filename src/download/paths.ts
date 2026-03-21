@@ -119,6 +119,16 @@ export function getExtractionStatePath(
   return `${getModelsBaseDir(category)}/.extraction-state-${modelId}.json`;
 }
 
+/**
+ * Directory where native `resolveAssetPath` materializes a bundled model folder
+ * (`DocumentDirectoryPath/models/{modelId}` — Android internal `files/models/...`).
+ * Separate from {@link getModelDir}. Remove on delete so empty dirs do not break detection.
+ */
+export function getNativeAssetExtractedModelDir(modelId: string): string {
+  const safeId = modelId.replace(/[/\\]/g, '');
+  return `${DocumentDirectoryPath}/models/${safeId}`.replace(/\/+/g, '/');
+}
+
 export function getReleaseUrl(category: ModelCategory): string {
   return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
 }
