@@ -11,9 +11,9 @@
  *   - tts-models-structure.txt, tts-models-expected.csv (see collect-tts-model-structures workflow).
  *
  * The tests build a FileEntry list from each structure file, call DetectSttModelFromFileList
- * or DetectTtsModelFromFileList (test-only APIs, no filesystem), and assert that the
- * selected model kind matches the expected value from the CSV. Run from repo root so
- * "test/fixtures" resolves, or set TEST_FIXTURES_DIR.
+ * or DetectTtsModelFromFileList (test-only APIs, no filesystem), and assert outcomes per CSV
+ * (including full detect+validate for TTS: see DetectTtsFromFileListMatchesExpected). Run from
+ * repo root so "test/fixtures" resolves, or set TEST_FIXTURES_DIR.
  */
 
 #include "model_detect_test_utils.h"
@@ -139,9 +139,17 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
  *
  * TTS counterpart of DetectSttFromFileListMatchesExpected. Loads tts-models-structure.txt
  * and tts-models-expected.csv, builds FileEntry lists per asset block, calls
- * DetectTtsModelFromFileList(files, modelDir, "auto"), and asserts that result.ok is true
- * and result.selectedKind matches the CSV model_type (vits, matcha, kokoro, kitten, pocket,
- * zipvoice). For model_type == "unsupported" asserts result.ok == false and selectedKind == kUnknown.
+ * DetectTtsModelFromFileList(files, modelDir, "auto"), and asserts the outcome matches the CSV:
+ *
+ * - Known types (vits, matcha, kokoro, kitten, pocket, zipvoice): result.ok == true and
+ *   selectedKind matches. This is the full pipeline (detect + ValidateTtsPaths): ok means the
+ *   layout is sufficient for native init, not merely “looks like” a type.
+ * - model_type == "unsupported": not init-ready / unknown kind; result.ok == false and
+ *   selectedKind == kUnknown (e.g. hardware-specific or non-model assets).
+ * - model_type == "zipvoice_rejected": classified as Zipvoice but ValidateTtsPaths fails on the
+ *   real release file list (e.g. missing lexicon.txt, or distill-only layout without vocoder).
+ *   Expects ok == false, non-empty error, selectedKind still kZipvoice.
+ *
  * Note: Some TTS types (e.g. vits) require espeak-ng-data in the fixture; otherwise
  * detection may return result.ok == false.
  */
@@ -172,6 +180,28 @@ TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
             EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(sherpaonnx::TtsModelKind::kUnknown))
                 << "Asset " << block.assetName
                 << ": unsupported must be detected as unknown kind (got " << model_detect_test::TtsKindToString(result.selectedKind) << ").";
+            continue;
+        }
+
+        if (expectedType == "zipvoice_rejected") {
+            auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectTtsModelFromFileList(files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName
+                << ": Zipvoice layout from release must be rejected when required files are missing: "
+                << result.error;
+            EXPECT_FALSE(result.error.empty())
+                << "Asset " << block.assetName << ": rejection must include an error message.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::TtsModelKind::kZipvoice))
+                << "Asset " << block.assetName
+                << ": expected kZipvoice before validation failure (got "
+                << model_detect_test::TtsKindToString(result.selectedKind) << ").";
+            std::string errLower = result.error;
+            std::transform(errLower.begin(), errLower.end(), errLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            EXPECT_NE(errLower.find("zipvoice"), std::string::npos)
+                << "Asset " << block.assetName << ": expected Zipvoice context in error, got: " << result.error;
             continue;
         }
 

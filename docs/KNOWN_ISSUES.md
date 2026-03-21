@@ -4,6 +4,27 @@ Short, SDK-facing notes so we do not lose track and others can find them quickly
 
 ---
 
+## Zipvoice: `lexicon.txt` must be present (upstream aborts if empty)
+
+**Symptom:** App **crashes** (native `abort`, sometimes followed by libc FORTIFY mutex errors in unrelated threads) when initializing Zipvoice — e.g. after “Please provide lexicon.txt for this model” in logcat.
+
+**Cause:** The sherpa-onnx Zipvoice implementation builds a **`MatchaTtsLexicon`**, which calls **`SHERPA_ONNX_EXIT(-1)`** when the lexicon path is empty. The **full** GitHub release tarball **`sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2`** (`tts-models`) often **does not** ship `lexicon.txt` inside the extracted folder (only ONNX, `tokens.txt`, `pinyin.raw`, `espeak-ng-data`, etc.). That is why it looks “missing” — it was never in that package.
+
+**Where k2-fsa actually gets `lexicon.txt` for zh-en Zipvoice**
+
+1. **Generate it (canonical upstream method)** — In [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), run from the repo root:
+   - `pip install pypinyin`
+   - `python3 scripts/zipvoice/zh-en/generate_lexicon.py`  
+   This writes **`lexicon.txt`** in the current working directory (Chinese coverage from `pypinyin` + phrase/user entries in that script). Copy that file next to your model’s `tokens.txt`. The same script is what CI uses when building the **distill** release bundles (see `.github/workflows/upload-zipvoice-models.yaml`).
+
+2. **Copy from another k2-fsa bundle that includes it** — The **`sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2`** and **`sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia.tar.bz2`** assets on the **`tts-models`** release are assembled with `lexicon.txt` in the inner folder. You can extract **`…/lexicon.txt`** from one of those archives. Prefer this only if your **`tokens.txt`** matches the ZipVoice line those bundles use (when in doubt, regenerate with the script above).
+
+3. **Not the same thing:** `https://github.com/k2-fsa/sherpa-onnx/releases/download/hr-files/lexicon.txt` is used in **nodejs HR-TTS examples**, not documented as the zh-en Zipvoice lexicon — do not assume it matches Emilia Zipvoice without verification.
+
+**SDK:** Detection and validation **require** `lexicon` and `dataDir` for Zipvoice so initialization fails with a **clear error** instead of calling native code that aborts.
+
+---
+
 ## Pocket TTS (voice cloning): fragile EOS and cross-platform drift
 
 **What matters:** Pocket TTS relies on a **heuristic end-of-speech signal** (scalar threshold on LM logits in upstream sherpa-onnx). That makes **output length and quality sensitive** to small numeric differences: you can get **very short** chunks (early EOS) or **very long** ones (no EOS before `max_frames`).
