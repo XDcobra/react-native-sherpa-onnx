@@ -58,6 +58,8 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "THIRD_PARTY_LICENSES",
+    "THIRD_PARTY_LICENSES/**",
     "src",
     "lib",
     "android",
