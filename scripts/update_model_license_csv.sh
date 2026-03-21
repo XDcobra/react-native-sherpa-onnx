@@ -18,8 +18,9 @@
 #   for that row (archive pass already failed to produce a known license_type).
 # - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
-#   (---\nlicense: …). If still empty, first modelscope.cn/models/… URL in README.md → fetch /summary HTML
-#   and read License from embedded window.__detail_data__ JSON (\"License\":\"…\").
+#   (---\nlicense: …). First successful source wins (HF before ModelScope). Only if HF has no license but
+#   README.md links to modelscope.cn/models/…, fetch that /summary HTML and read License from
+#   window.__detail_data__ JSON (\"License\":\"…\").
 #   license_file = HF repo URL or ModelScope summary URL; detection_source = huggingface_model_card or
 #   modelscope_detail_json. Release tarball names must match HF repo names or fetch 404s.
 # - Hugging Face: set HF_TOKEN or HUGGINGFACE_HUB_TOKEN (read token is enough for public repos). Anonymous
@@ -340,11 +341,27 @@ asset_eligible_for_hf_license_fallback() {
   [[ "$asset_name" == vits-piper-*.tar.bz2 || "$asset_name" == sherpa-onnx-*.tar.bz2 ]]
 }
 
-# Try MODEL_CARD, README.md YAML, then ModelScope link from README when archive path gave missing/unknown.
+# After try_hf_model_card_fallback succeeds, existing_detection_source is set — map to log label.
+log_license_fallback_source() {
+  local name="$1"
+  case "${existing_detection_source["$name"]:-}" in
+    modelscope_detail_json)
+      echo "ModelScope (via link in Hugging Face README)"
+      ;;
+    huggingface_model_card)
+      echo "Hugging Face (MODEL_CARD or README)"
+      ;;
+    *)
+      echo "online metadata"
+      ;;
+  esac
+}
+
+# Try MODEL_CARD, then README.md YAML; only if still no license, follow modelscope.cn link from README.
 try_hf_model_card_fallback() {
   local asset_name="$1"
   local slug page_url card readme raw_lic det l_res c_res conf_res
-  local license_ref_url license_ref_src ms_url ms_html
+  local license_ref_url license_ref_src ms_url ms_html ms_raw
 
   asset_eligible_for_hf_license_fallback "$asset_name" || return 1
 
@@ -363,19 +380,17 @@ try_hf_model_card_fallback() {
       raw_lic="$(parse_readme_yaml_license_field "$readme")" || raw_lic=""
     fi
   fi
-  if [[ -z "$raw_lic" && -n "$readme" ]]; then
-    if ms_url="$(extract_first_modelscope_models_url "$readme")"; then
-      ms_html="$(fetch_modelscope_summary_html "$ms_url")" || ms_html=""
-      if [[ -n "$ms_html" ]]; then
-        if raw_lic="$(parse_modelscope_license_from_html "$ms_html")"; then
-          license_ref_url="$(normalize_modelscope_summary_url "$ms_url")"
-          license_ref_src="modelscope_detail_json"
-        else
-          raw_lic=""
-        fi
-      fi
+
+  # ModelScope only when HF did not yield a license (README must have been fetched and link MS).
+  if [[ -z "$raw_lic" && -n "$readme" ]] && ms_url="$(extract_first_modelscope_models_url "$readme")"; then
+    ms_html="$(fetch_modelscope_summary_html "$ms_url")" || ms_html=""
+    if [[ -n "$ms_html" ]] && ms_raw="$(parse_modelscope_license_from_html "$ms_html")"; then
+      raw_lic="$ms_raw"
+      license_ref_url="$(normalize_modelscope_summary_url "$ms_url")"
+      license_ref_src="modelscope_detail_json"
     fi
   fi
+
   [[ -n "$raw_lic" ]] || return 1
 
   det="$(detect_license "$raw_lic")"
@@ -446,9 +461,9 @@ for asset_name in "${release_assets[@]}"; do
   prev_lf="$(echo -n "$prev_lf" | xargs)"
   if [[ "$l_type_lc" == "unknown" && -n "$prev_lf" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — CSV unknown + license_file → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — CSV unknown + license_file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
     else
-      echo "  $asset_name — CSV unknown + license_file → Hugging Face had no usable license; skip archive re-download (row unchanged)"
+      echo "  $asset_name — CSV unknown + license_file → Hugging Face / ModelScope fallback had no usable license; skip archive re-download (row unchanged)"
     fi
     continue
   fi
@@ -484,7 +499,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ ${#license_paths[@]} -eq 0 ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — no license in tree → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — no license in tree → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_missing "$asset_name"
@@ -503,7 +518,7 @@ for asset_name in "${release_assets[@]}"; do
   if ! curl "${_curl_dl[@]}" -o "$archive_path" "$url"; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — download failed → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — download failed → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_extract_failed "$asset_name" "${license_paths[0]}"
@@ -540,7 +555,7 @@ for asset_name in "${release_assets[@]}"; do
   if [[ -z "$extracted_text" ]]; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — could not extract license file → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — could not extract license file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_extract_failed "$asset_name" "$used_file"
@@ -557,7 +572,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ "$l_res" == "unknown" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — archive license text unknown → filled from Hugging Face (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — archive license text unknown → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
   fi
