@@ -7,15 +7,15 @@
 # Behavior:
 # - Reads existing CSV if present; preserves rows and manual edits.
 # - Merges in all assets from asset-list.txt (release); adds missing rows.
-# - Auto-fills license_type (and related columns) when license_type is empty/whitespace, missing, or unknown.
+# - Auto-fills license_type when empty/whitespace, missing, or unknown (legacy rows still reprocessed).
 # - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
-# - .onnx-only assets: license_type=missing (no archive to scan).
-# - No license-like path in listing: license_type=missing (then HF fallback for eligible assets).
-# - License file present but unreadable: license_type=unknown, detection_source=archive_extract_failed.
-# - CSV row with license_type=unknown and non-empty license_file: try HF; never re-download the archive
-#   for that row (archive pass already failed to produce a known license_type).
+# - Pipeline: try archive (if applicable) → HF/ModelScope fallbacks for eligible assets. If no license
+#   is found after all attempts, license_type is set to exhausted (default keyword; override with
+#   LICENSE_EXHAUSTED env). Next runs skip exhausted rows; you can set exhausted manually after review.
+# - .onnx-only: exhausted (no archive to scan).
+# - CSV row unknown + non-empty license_file: try HF/MS only (no archive re-download); on failure → exhausted.
 # - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
 #   (---\nlicense: …). First successful source wins (HF before ModelScope). Only if HF has no license but
@@ -60,6 +60,8 @@ _GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 _HF_TOKEN="${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-}}"
 # Hugging Face repo slug matches release asset name without .tar.bz2 (e.g. vits-piper-pl_PL-darkman-medium).
 HF_MODEL_OWNER="${HF_MODEL_OWNER:-csukuangfj}"
+# license_type when all automated sources were tried and none yielded a license (skip on future runs).
+LICENSE_EXHAUSTED="${LICENSE_EXHAUSTED:-exhausted}"
 
 declare -A LICENSE_LIKE_BASENAMES=(
   ["license"]=1 ["license.txt"]=1 ["licence"]=1 ["licence.txt"]=1
@@ -165,23 +167,13 @@ get_safe_name() {
   echo "$name"
 }
 
-set_missing() {
+set_exhausted() {
   local name="$1"
-  existing_license_type["$name"]="missing"
+  existing_license_type["$name"]="$LICENSE_EXHAUSTED"
   existing_commercial_use["$name"]="unknown"
   existing_confidence["$name"]="high"
-  existing_detection_source["$name"]="structure_scan"
+  existing_detection_source["$name"]="scan_exhausted"
   existing_license_file["$name"]=""
-}
-
-set_extract_failed() {
-  local name="$1"
-  local file="$2"
-  existing_license_type["$name"]="unknown"
-  existing_commercial_use["$name"]="unknown"
-  existing_confidence["$name"]="low"
-  existing_detection_source["$name"]="archive_extract_failed"
-  existing_license_file["$name"]="$file"
 }
 
 set_detected() {
@@ -452,8 +444,8 @@ for asset_name in "${release_assets[@]}"; do
   fi
 
   if [[ "$asset_name" == *.onnx ]]; then
-    set_missing "$asset_name"
-    echo "  $asset_name — .onnx bundle → license_type=missing (no archive)"
+    set_exhausted "$asset_name"
+    echo "  $asset_name — .onnx bundle → license_type=$LICENSE_EXHAUSTED (no archive; skipped next run)"
     continue
   fi
 
@@ -463,7 +455,8 @@ for asset_name in "${release_assets[@]}"; do
     if try_hf_model_card_fallback "$asset_name"; then
       echo "  $asset_name — CSV unknown + license_file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
     else
-      echo "  $asset_name — CSV unknown + license_file → Hugging Face / ModelScope fallback had no usable license; skip archive re-download (row unchanged)"
+      set_exhausted "$asset_name"
+      echo "  $asset_name — CSV unknown + license_file → fallbacks found no license → license_type=$LICENSE_EXHAUSTED (skipped next run)"
     fi
     continue
   fi
@@ -502,8 +495,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — no license in tree → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    set_missing "$asset_name"
-    echo "  $asset_name — no license-like path in tree listing → license_type=missing"
+    set_exhausted "$asset_name"
+    echo "  $asset_name — no license in tree + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -521,8 +514,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — download failed → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    set_extract_failed "$asset_name" "${license_paths[0]}"
-    echo "  $asset_name — download failed → detection_source=archive_extract_failed"
+    set_exhausted "$asset_name"
+    echo "  $asset_name — download failed + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -558,8 +551,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — could not extract license file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    set_extract_failed "$asset_name" "$used_file"
-    echo "  $asset_name — could not extract text from '$used_file' inside archive"
+    set_exhausted "$asset_name"
+    echo "  $asset_name — could not extract license file + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -575,6 +568,9 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — archive license text unknown → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
+    set_exhausted "$asset_name"
+    echo "  $asset_name — archive text unclassified + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
+    continue
   fi
 
   set_detected "$asset_name" "$l_res" "$c_res" "$conf_res" "$used_file"
