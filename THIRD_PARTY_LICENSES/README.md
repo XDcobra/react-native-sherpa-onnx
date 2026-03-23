@@ -20,9 +20,9 @@ Files:
 
 Columns: `asset_name`, `license_type`, `commercial_use`, `confidence`, `detection_source`, `license_file`.
 
-Set `detection_source` to `manual` for rows you maintain by hand; `scripts/update_model_license_csv.sh` **never** re-scans or overwrites those assets (clear `manual` if you want automation to run again).
+Set `detection_source` to `manual` for rows you maintain by hand; `scripts/ci/update_model_license_csv.sh` **never** re-scans or overwrites those assets (clear `manual` if you want automation to run again).
 
-CI updates these CSVs via `scripts/update_model_license_csv.sh`, which writes the primary file passed with `--csv` and **syncs the same content** to both Android and iOS paths above.
+CI updates these CSVs via `scripts/ci/update_model_license_csv.sh`, which writes the primary file passed with `--csv` and **syncs the same content** to both Android and iOS paths above.
 
 **Not legal advice** — consumers should verify licenses for their use case.
 

@@ -251,3 +251,6 @@ verdaccio.config.yaml
 htpasswd
 storage/
 plugins/
+
+# Model structure collection (scripts/ci/collect_*; CI uses ephemeral dirs)
+tree-cache/

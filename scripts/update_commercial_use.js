@@ -28,6 +28,7 @@ const commercialMapping = {
 
 const files = [
   'android/src/main/assets/model_licenses/asr-models-license-status.csv',
+  'android/src/main/assets/model_licenses/qnn-asr-models-license-status.csv',
   'android/src/main/assets/model_licenses/tts-models-license-status.csv',
 ];
 

@@ -1,0 +1,13 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "tts-models",
+      "release_tag": "tts-models",
+      "tree_cache_dir": "tree-cache/tts-models",
+      "structure_file": "test/fixtures/tts-models-structure.txt",
+      "expected_csv": "test/fixtures/tts-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/tts-models-license-status.csv"
+    }
+  ]
+}

@@ -8,7 +8,9 @@
 # - Reads existing CSV if present; preserves rows and manual edits.
 # - Merges in all assets from asset-list.txt (release); adds new rows with empty license_type.
 # - Skips any asset with detection_source `manual` (hand-maintained row; never overwritten).
-# - Skips any asset that already has a non-empty license_type (clear license_type and detection_source to force re-scan).
+# - Skips any asset whose license_type and commercial_use are both set and neither is `unknown`
+#   (case-insensitive). Rows with empty or `unknown` license_type and/or empty or `unknown`
+#   commercial_use are (re)processed. license_type `exhausted` is never auto-overwritten.
 # - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
@@ -437,6 +439,10 @@ for asset_name in "${release_assets[@]}"; do
   
   l_type="${existing_license_type["$asset_name"]:-}"
   l_type="$(echo -n "$l_type" | xargs)"
+  l_type_lc="$(echo -n "$l_type" | tr '[:upper:]' '[:lower:]')"
+  c_use="${existing_commercial_use["$asset_name"]:-}"
+  c_use="$(echo -n "$c_use" | xargs)"
+  c_use_lc="$(echo -n "$c_use" | tr '[:upper:]' '[:lower:]')"
   det_src="${existing_detection_source["$asset_name"]:-}"
   det_src="$(echo -n "$det_src" | xargs)"
   det_src_lc="$(echo -n "$det_src" | tr '[:upper:]' '[:lower:]')"
@@ -444,8 +450,13 @@ for asset_name in "${release_assets[@]}"; do
     echo "  $asset_name — skip (detection_source=manual)"
     continue
   fi
-  if [[ -n "$l_type" ]]; then
-    echo "  $asset_name — skip (license_type already set: '$l_type')"
+  if [[ "$l_type_lc" == "exhausted" ]]; then
+    echo "  $asset_name — skip (license_type=exhausted; clear to re-run automation)"
+    continue
+  fi
+  # Only (re)fill when license_type or commercial_use is empty or explicitly unknown.
+  if [[ -n "$l_type" && "$l_type_lc" != "unknown" && -n "$c_use" && "$c_use_lc" != "unknown" ]]; then
+    echo "  $asset_name — skip (license_type and commercial_use already set)"
     continue
   fi
 
@@ -608,7 +619,7 @@ echo "Done. Wrote $CSV_FILE ($out_lines lines including header)."
 
 # Keep Android and iOS bundled copies identical (paths relative to repo root).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 if [[ -d "$REPO_ROOT/android" && -d "$REPO_ROOT/ios" && -f "$CSV_FILE" ]]; then
   _bn="$(basename "$CSV_FILE")"
   _android_dir="$REPO_ROOT/android/src/main/assets/model_licenses"
