@@ -10,9 +10,9 @@
       "license_csv": "android/src/main/assets/model_licenses/asr-models-license-status.csv"
     },
     {
-      "id": "asr-models-qnn",
-      "release_tag": "asr-models-qnn",
-      "tree_cache_dir": "tree-cache/asr-models-qnn",
+      "id": "asr-models-qnn-binary",
+      "release_tag": "asr-models-qnn-binary",
+      "tree_cache_dir": "tree-cache/asr-models-qnn-binary",
       "structure_file": "test/fixtures/qnn-asr-models-structure.txt",
       "expected_csv": "test/fixtures/qnn-asr-models-expected.csv",
       "license_csv": "android/src/main/assets/model_licenses/qnn-asr-models-license-status.csv"

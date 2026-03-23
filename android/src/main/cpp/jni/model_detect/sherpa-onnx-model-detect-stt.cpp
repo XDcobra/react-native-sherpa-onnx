@@ -321,7 +321,7 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
 }
 
 /**
- * QNN (asr-models-qnn): Find model assets and set the correct candidate slot using the
+ * QNN (asr-models-qnn-binary): Find model assets and set the correct candidate slot using the
  * given path hints.
  * - Single model.bin -> paraformerModel or ctcModel.
  * - Paraformer with encoder.bin + predictor.bin + decoder.bin (no model.bin): set paraformerModel

@@ -58,7 +58,7 @@ So a single call handles download + extraction and all edge cases. Use this when
 
 **Supported categories:** `Tts`, `Stt`, `Vad`, `Diarization`, `Enhancement`, `Separation`, `Qnn`.
 
-The **Qnn** category uses the [asr-models-qnn](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn) release for QNN-capable Android devices (e.g. SM8850, SM8550). iOS has no QNN support.
+The **Qnn** category uses the [asr-models-qnn-binary](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary) release for QNN-capable Android devices (e.g. SM8850, SM8550). iOS has no QNN support.
 
 ---
 
