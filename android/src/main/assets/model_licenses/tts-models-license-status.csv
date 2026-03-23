@@ -594,4 +594,3 @@ vits-icefall-en_US-ljspeech-medium.tar.bz2,public-domain,yes,high,manual,https:/
 vits-icefall-en_US-ljspeech-low.tar.bz2,public-domain,yes,high,manual,https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/vits.html#ljspeech-english-single-speaker
 matcha-icefall-en_US-ljspeech.tar.bz2,public-domain,yes,high,manual,https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/matcha.html#matcha-icefall-en-us-ljspeech-american-english-1-female-speaker
 sherpa-onnx-supertonic-tts-int8-2026-03-06.tar.bz2,mit,yes,high,archive_license_file,sherpa-onnx-supertonic-tts-int8-2026-03-06/LICENSE
-
