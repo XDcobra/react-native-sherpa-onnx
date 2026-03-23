@@ -15,6 +15,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
   - [Asset Discovery](#asset-discovery)
   - [Play Asset Delivery (PAD)](#play-asset-delivery-pad)
   - [Model Detection](#model-detection)
+  - [Model detection internals](#model-detection-internals)
 - [Model Sources at a Glance](#model-sources-at-a-glance)
 - [Detailed Examples](#detailed-examples)
 - [Troubleshooting & Tuning](#troubleshooting--tuning)
@@ -226,6 +227,68 @@ function detectTtsModel(
 Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
 
 `lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
+
+### Model detection internals
+
+Native code scans the **resolved** model directory (recursive), maps filenames to engine roles, then (a) lists **every** engine kind that *could* fit → `detectedModels`, and (b) picks based on the highest probability **one** kind for validation → `modelType` (same rules as `createSTT` / `createTTS` with `modelType: 'auto'`). Full pipeline: comments at the top of `sherpa-onnx-model-detect-stt.cpp` / `sherpa-onnx-model-detect-tts.cpp`.
+
+**Why `detectSttModel` / `detectTtsModel` if `createSTT` / `createTTS` already support `modelType: 'auto'`?**  
+Detection is a **cheap preflight**: no recognizer / TTS engine allocation, faster when probing many folders, and you get **`success` / `error` / `isHardwareSpecificUnsupported`** (STT) before paying for full init. Use it for validation UI, model pickers, and diagnostics; skip it if you only need to load one known-good pack.
+
+**STT — return shape, options, and matching `createSTT`:**
+
+```typescript
+import { assetModelPath } from 'react-native-sherpa-onnx';
+import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
+
+const modelPath = assetModelPath('models/my-pack');
+// detectSttModel → resolveModelPath → absolute dir on disk, then native file scan (no recognizer init).
+
+const det = await detectSttModel(modelPath, {
+  // preferInt8 omitted: do not filter by int8 in filenames (native picks among matches by its own rule).
+  // preferInt8: true  → use int8-named ONNX where applicable (e.g. *-int8.onnx).
+  // preferInt8: false → skip int8-named ONNX files (float / full-precision variants).
+  preferInt8: true,
+
+  // modelType omitted or 'auto': choose kind from folder-name hints, else fixed fallback order.
+  // modelType: 'whisper' | 'nemo_transducer' | … → use only if that engine is supported by the files.
+  modelType: 'auto',
+});
+
+// Array = all engine types this folder might represent (often length 1). Same modelDir per entry;
+// multiple entries = ambiguous pack — e.g. build a picker from det.detectedModels.map(m => m.type).
+const candidates = det.detectedModels;
+
+// Kind native used for validation (informative). Usually you do NOT pass this into createSTT — see below.
+const chosen = det.modelType;
+
+if (!det.success) {
+  console.error(det.error, det.isHardwareSpecificUnsupported); // wrong/missing files or unsupported HW pack
+} else {
+  // Same preferInt8 as detectSttModel so the same ONNX files are chosen for init.
+  //
+  // Prefer modelType: 'auto' here (not det.modelType): createSTT re-runs the same native auto-selection
+  // on this path + preferInt8, so behavior stays one code path and matches future heuristic changes.
+  // Pass an explicit modelType only when the user overrides auto, e.g. picked from det.detectedModels.
+  await createSTT({ modelPath, modelType: 'auto', preferInt8: true });
+}
+```
+
+**TTS — same split (`detectedModels` vs `modelType`) plus lexicon languages:**
+
+```typescript
+import { detectTtsModel, createTTS } from 'react-native-sherpa-onnx/tts';
+
+const det = await detectTtsModel(modelPath, {
+  // 'auto' vs 'vits' | 'matcha' | 'kokoro' | 'kitten' | 'pocket' | 'zipvoice' — same idea as STT.
+  modelType: 'auto',
+});
+
+// Same pattern as STT: use modelType: 'auto' on createTTS unless the user picked a candidate from
+// det.detectedModels. detectTtsModel is still useful for cheap checks + lexiconLanguageCandidates.
+// Kokoro/Kitten: optional language ids from lexicon files for a dropdown (e.g. "us-en", "zh", "default").
+const langs = det.lexiconLanguageCandidates;
+```
 
 ---
 
