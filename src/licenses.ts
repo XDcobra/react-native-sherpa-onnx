@@ -11,18 +11,21 @@ export interface ModelLicense {
 
 export async function getModelLicenses(): Promise<ModelLicense[]> {
   const asrPath = 'model_licenses/asr-models-license-status.csv';
+  const qnnPath = 'model_licenses/qnn-asr-models-license-status.csv';
   const ttsPath = 'model_licenses/tts-models-license-status.csv';
 
   try {
-    const [asrCsvContent, ttsCsvContent] = await Promise.all([
+    const [asrCsvContent, qnnCsvContent, ttsCsvContent] = await Promise.all([
       SherpaOnnx.readAssetFileAsUtf8(asrPath),
+      SherpaOnnx.readAssetFileAsUtf8(qnnPath),
       SherpaOnnx.readAssetFileAsUtf8(ttsPath),
     ]);
 
     const asrLicenses = parseCsv(asrCsvContent);
+    const qnnLicenses = parseCsv(qnnCsvContent);
     const ttsLicenses = parseCsv(ttsCsvContent);
 
-    return [...asrLicenses, ...ttsLicenses];
+    return [...asrLicenses, ...qnnLicenses, ...ttsLicenses];
   } catch (error) {
     console.warn(`[SherpaOnnx] Failed to load merged model licenses: ${error}`);
     return [];
