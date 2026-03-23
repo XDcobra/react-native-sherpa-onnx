@@ -18,6 +18,7 @@ export {
 
 export { copyFileToContentUri } from './tts';
 
+export { getModelLicenses, type ModelLicense } from './licenses';
 // Note: Feature-specific exports are available via subpath imports:
 // - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'

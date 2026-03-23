@@ -1131,6 +1131,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun readAssetFileAsUtf8(assetPath: String, promise: Promise) {
+    try {
+      val content = reactApplicationContext.assets.open(assetPath).bufferedReader().use { it.readText() }
+      promise.resolve(content)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "Failed to read asset $assetPath: ${e.message}", e)
+      promise.reject("ASSET_READ_ERROR", "Failed to read asset $assetPath: ${e.message}", e)
+    }
+  }
+
   companion object {
     const val NAME = "SherpaOnnx"
 

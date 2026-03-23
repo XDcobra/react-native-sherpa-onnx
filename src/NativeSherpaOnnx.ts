@@ -538,6 +538,13 @@ export interface Spec extends TurboModule {
    */
   getAssetPackPath(packName: string): Promise<string | null>;
 
+  /**
+   * Read the contents of a text file from the bundled assets (Android) or main bundle (iOS).
+   * @param assetPath The relative path to the asset file (e.g., 'model_licenses/asr-models-license-status.csv')
+   * @returns Resolves with the string content of the file or rejects if the file cannot be read.
+   */
+  readAssetFileAsUtf8(assetPath: string): Promise<string>;
+
   // ==================== Helper - Extraction ====================
 
   /**
