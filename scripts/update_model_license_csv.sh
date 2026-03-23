@@ -6,16 +6,16 @@
 #
 # Behavior:
 # - Reads existing CSV if present; preserves rows and manual edits.
-# - Merges in all assets from asset-list.txt (release); adds missing rows.
-# - Auto-fills license_type when empty/whitespace, missing, or unknown (legacy rows still reprocessed).
+# - Merges in all assets from asset-list.txt (release); adds new rows with empty license_type.
+# - Skips any asset with detection_source `manual` (hand-maintained row; never overwritten).
+# - Skips any asset that already has a non-empty license_type (clear license_type and detection_source to force re-scan).
 # - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
 # - Pipeline: try archive (if applicable) → HF/ModelScope fallbacks for eligible assets. If no license
 #   is found after all attempts, license_type is set to exhausted (default keyword; override with
-#   LICENSE_EXHAUSTED env). Next runs skip exhausted rows; you can set exhausted manually after review.
+#   LICENSE_EXHAUSTED env). You can set exhausted manually after review.
 # - .onnx-only: exhausted (no archive to scan).
-# - CSV row unknown + non-empty license_file: try HF/MS only (no archive re-download); on failure → exhausted.
 # - HF fallback (vits-piper-*.tar.bz2, sherpa-onnx-*.tar.bz2): repo slug = asset basename without .tar.bz2
 #   under HF_MODEL_OWNER (default csukuangfj). Try MODEL_CARD (* License: …) then README.md YAML
 #   (---\nlicense: …). First successful source wins (HF before ModelScope). Only if HF has no license but
@@ -437,8 +437,14 @@ for asset_name in "${release_assets[@]}"; do
   
   l_type="${existing_license_type["$asset_name"]:-}"
   l_type="$(echo -n "$l_type" | xargs)"
-  l_type_lc="$(echo -n "$l_type" | tr '[:upper:]' '[:lower:]')"
-  if [[ -n "$l_type" && "$l_type_lc" != "missing" && "$l_type_lc" != "unknown" ]]; then
+  det_src="${existing_detection_source["$asset_name"]:-}"
+  det_src="$(echo -n "$det_src" | xargs)"
+  det_src_lc="$(echo -n "$det_src" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$det_src_lc" == "manual" ]]; then
+    echo "  $asset_name — skip (detection_source=manual)"
+    continue
+  fi
+  if [[ -n "$l_type" ]]; then
     echo "  $asset_name — skip (license_type already set: '$l_type')"
     continue
   fi
@@ -446,18 +452,6 @@ for asset_name in "${release_assets[@]}"; do
   if [[ "$asset_name" == *.onnx ]]; then
     set_exhausted "$asset_name"
     echo "  $asset_name — .onnx bundle → license_type=$LICENSE_EXHAUSTED (no archive; skipped next run)"
-    continue
-  fi
-
-  prev_lf="${existing_license_file["$asset_name"]:-}"
-  prev_lf="$(echo -n "$prev_lf" | xargs)"
-  if [[ "$l_type_lc" == "unknown" && -n "$prev_lf" ]]; then
-    if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — CSV unknown + license_file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
-    else
-      set_exhausted "$asset_name"
-      echo "  $asset_name — CSV unknown + license_file → fallbacks found no license → license_type=$LICENSE_EXHAUSTED (skipped next run)"
-    fi
     continue
   fi
 
@@ -611,3 +605,16 @@ fi
 
 out_lines=$(wc -l < "$CSV_FILE" | tr -d ' ')
 echo "Done. Wrote $CSV_FILE ($out_lines lines including header)."
+
+# Keep Android and iOS bundled copies identical (paths relative to repo root).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -d "$REPO_ROOT/android" && -d "$REPO_ROOT/ios" && -f "$CSV_FILE" ]]; then
+  _bn="$(basename "$CSV_FILE")"
+  _android_dir="$REPO_ROOT/android/src/main/assets/model_licenses"
+  _ios_dir="$REPO_ROOT/ios/Resources/model_licenses"
+  mkdir -p "$_android_dir" "$_ios_dir"
+  cp "$CSV_FILE" "$_android_dir/$_bn"
+  cp "$CSV_FILE" "$_ios_dir/$_bn"
+  echo "Synced $_bn → android/src/main/assets/model_licenses/ and ios/Resources/model_licenses/"
+fi
