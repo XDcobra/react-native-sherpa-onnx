@@ -38,7 +38,7 @@ export const CATEGORY_CONFIG: Record<
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/separation`,
   },
   [ModelCategory.Qnn]: {
-    tag: 'asr-models-qnn-binary',
+    tag: 'asr-models-qnn',
     cacheFile: 'qnn-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/qnn`,
   },
