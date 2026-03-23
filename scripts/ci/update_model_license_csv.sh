@@ -618,14 +618,28 @@ out_lines=$(wc -l < "$CSV_FILE" | tr -d ' ')
 echo "Done. Wrote $CSV_FILE ($out_lines lines including header)."
 
 # Keep Android and iOS bundled copies identical (paths relative to repo root).
+# When --csv already points at the Android path, skip copying onto itself (cp errors on same file).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 if [[ -d "$REPO_ROOT/android" && -d "$REPO_ROOT/ios" && -f "$CSV_FILE" ]]; then
   _bn="$(basename "$CSV_FILE")"
   _android_dir="$REPO_ROOT/android/src/main/assets/model_licenses"
   _ios_dir="$REPO_ROOT/ios/Resources/model_licenses"
+  _android_target="$_android_dir/$_bn"
+  _ios_target="$_ios_dir/$_bn"
   mkdir -p "$_android_dir" "$_ios_dir"
-  cp "$CSV_FILE" "$_android_dir/$_bn"
-  cp "$CSV_FILE" "$_ios_dir/$_bn"
+  same_canonical_path() {
+    local a="$1" b="$2"
+    local ca cb
+    ca="$(cd "$(dirname "$a")" && pwd)/$(basename "$a")"
+    cb="$(cd "$(dirname "$b")" && pwd)/$(basename "$b")"
+    [[ "$ca" == "$cb" ]]
+  }
+  if ! same_canonical_path "$CSV_FILE" "$_android_target"; then
+    cp "$CSV_FILE" "$_android_target"
+  fi
+  if ! same_canonical_path "$CSV_FILE" "$_ios_target"; then
+    cp "$CSV_FILE" "$_ios_target"
+  fi
   echo "Synced $_bn → android/src/main/assets/model_licenses/ and ios/Resources/model_licenses/"
 fi
