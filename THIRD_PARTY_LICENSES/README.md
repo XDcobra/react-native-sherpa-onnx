@@ -1,6 +1,6 @@
 # Third-party license texts
 
-This directory contains **full license texts** for libraries shipped with this module (e.g. sherpa-onnx, ONNX Runtime, FFmpeg). See the repository [README](../README.md#third-party-licenses) for links.
+This directory contains **full license texts** for libraries shipped with this module (e.g. sherpa-onnx, ONNX Runtime, FFmpeg). See the repository [README](../README.md#third-party-libraries) for links.
 
 ## Prebuilt model release assets (per-model metadata)
 
@@ -49,8 +49,8 @@ The following table explains the `license_type` and `commercial_use` values used
 | **mit** | `yes` | Highly permissive; allows commercial use with simple attribution. | [MIT](https://opensource.org/license/mit/) |
 | **ngc-terms-of-use** | `restricted` | NVIDIA NGC Terms; often restricts redistribution or specific commercial weight use. | [Terms](https://ngc.nvidia.com/legal/terms) |
 | **no-license** | `no` | No explicit permission granted; all rights reserved by the author. | N/A |
-| **nvidia-open-model** | `yes` | Allows commercial use under specific conditions (e.g. no benchmarking). | [License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) |
-| **proprietary-re.** | `no` | Closed or custom license with significant restrictions. | N/A |
+| **nvidia-open-model-license** | `yes` | Allows commercial use under specific conditions (e.g. no benchmarking). | [License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) |
+| **proprietary-restricted** | `no` | Closed or custom license with significant restrictions. | N/A |
 | **public-domain** | `yes` | Free for any use; no copyright protection. | N/A |
 | **research-only** | `no` | Limited strictly to non-commercial research and evaluation. | N/A |
 | **unlicense** | `yes` | Public domain equivalent; no restrictions. | [Unlicense](https://unlicense.org/) |
