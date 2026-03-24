@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.3.7](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.6...v0.3.7) (2026-03-24)
+
+
+### Bug Fixes
+
+* address all review feedback - AbortSignal leaks, startedAt preservation, retry abort, per-path cancel, patch verification ([4f2b8c9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4f2b8c940f9bb7b77b385a5ca6b2e2543c640d91))
+* address PR review comments - path validation, CSV parsing, concurrent safety, doc anchors ([0faddc4](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0faddc45101a6b9e419100b74fe1c9bf59a37bb5))
+* **audio:** enhance swr_convert input handling in decodeAudioFileToFloatMono for improved audio conversion accuracy ([5203d6c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/5203d6cebe60245593996be9b4571e0de13d9f30))
+* **audio:** update swr_convert input handling to use extended_data for improved audio conversion accuracy ([e1ab02b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e1ab02b710fe7ab17a73e345628a801bdb3ffa41))
+* **ci:** prevent overwriting model license CSVs when syncing between Android and iOS directories ([380bb46](https://github.com/XDcobra/react-native-sherpa-onnx/commit/380bb465bd2781e838a931e468f12acf624bf5d8))
+* **download:** handle promise rejection in resumeDownload to prevent unhandled errors ([a8a344f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/a8a344ffd1f711ff0fd24b8156569b673cfc52b3))
+* **download:** implement recursive directory removal for native asset extraction and model deletion ([53a2797](https://github.com/XDcobra/react-native-sherpa-onnx/commit/53a2797df48e7edebc5bcc1b57dfaf286f9db1f4))
+* **licenses:** prevent re-downloading archives for CSV rows with unknown license types when a license file is present but not usable from Hugging Face ([cbb313e](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cbb313e414d9aa59ee104453cfdca7041e8e2f6e))
+* **numSteps:** clarify default numSteps for Zipvoice and Pocket in README and documentation, ensuring consistency across platforms ([c5a5ccb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c5a5ccb762cbacc3621c936d0a50f36f843ce6b5))
+* **options:** set model specific options for voice cloning models ([2ad7c3e](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2ad7c3e02f784f6e91c0c09a9ef05865e66ad565))
+* **test:** update Zipvoice handling in KNOWN_ISSUES and model detection tests to clarify lexicon requirements and error handling ([412b960](https://github.com/XDcobra/react-native-sherpa-onnx/commit/412b960cadf1f2b053121a197eb241335d01e6fc))
+* **tts:** improve error handling for reference audio in Zipvoice and Pocket TTS, ensuring non-empty referenceText and clarifying requirements for voice cloning ([b1d0255](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b1d0255575e7d7ed8afe06b8a9a341ab44ac7b13))
+* **tts:** mark ttsInitState as volatile in TtsEngineInstance for thread safety ([5306411](https://github.com/XDcobra/react-native-sherpa-onnx/commit/53064118da99b9113b349fe6354118a1207d7273))
+* **tts:** update Zipvoice requirements to enforce lexicon presence and clarify dataDir usage in TTS model validation ([9e0a961](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9e0a961b56c7ab49bde941128c09b3a46764f963))
+
+
+### Features
+
+* **assets:** add readAssetFileAsUtf8 method for reading asset files in Android and iOS ([fe33084](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fe3308471bd2b9850ff98f51277d3b63e08f6921))
+* **decode_audio:** add decodeAudioFileToFloatSamples function to decode audio files to mono float samples with optional resampling ([f0bdbf7](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f0bdbf7bdff585e3d095c807956ef735bbb3cacf))
+* **decode_audio:** add method to decode audio files to float samples with target sample rate in SherpaOnnx ([ec834b3](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ec834b371e673d94d7a6e9548124f5931bd25a53))
+* **decode_audio:** implement decodeAudioFileToFloatSamples method in SherpaOnnxModule for audio decoding to float samples with target sample rate ([c3b25c8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c3b25c8e78087086cdfe573048d45490cfe2b272))
+* **dither:** add dither parameter to STT configuration for improved audio processing ([87c4f57](https://github.com/XDcobra/react-native-sherpa-onnx/commit/87c4f57b9834829af2422d3aaff081075b87866e))
+* **download:** add highlevel ensureModelByCategory function for streamlined model management, including download, extraction, and state handling ([747ad98](https://github.com/XDcobra/react-native-sherpa-onnx/commit/747ad98d61b39cef1960ac9143ea0f5547914889))
+* **download:** enhance model download options and improve path resolution ([cc270f2](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cc270f2ba5a401a9124455e2a1c49c42111ab657))
+* **download:** implement bulk purge functionality and active model operations ([91fa977](https://github.com/XDcobra/react-native-sherpa-onnx/commit/91fa977fc99841e89772cd994585a74193dd6f48))
+* **example:** enhance TTSScreen with new state variables and debounced parameter updates for TTS model options ([3b46b2b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3b46b2be7916ac26f7ba1ac171923f22c0941a96))
+* **extraction:** implement per-source-path cancellation for concurrent extractions and enhance documentation ([43adc19](https://github.com/XDcobra/react-native-sherpa-onnx/commit/43adc1921c0bc8f139acc0c67026611455abf54f))
+* **ios:** implement voice cloning support for Zipvoice and Pocket models, including validation for reference audio and text requirements ([fba5650](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fba56503418da7f85fe68a9cf37a5a9a31f09743))
+* **licenses:** add automated license status CSV generation for ASR and TTS models ([a97badb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/a97badb4cb70c2c546b75c49cde2be49639ad620))
+* **licenses:** add script to update commercial use status in model license CSVs based on predefined mappings ([6d79c19](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6d79c19d6e14b6c3c3722c73979e6879c97bacf7))
+* **licenses:** add third-party license files for FFmpeg, libarchive, ONNX Runtime, Opus, Sherpa ONNX, Shine, and Zstandard ([3117c98](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3117c98600f30ae1f5e57cd16c2ac6faa6409759))
+* **licenses:** enhance CSV generation scripts with detailed logging and error handling for ASR and TTS models ([5d16a57](https://github.com/XDcobra/react-native-sherpa-onnx/commit/5d16a5718fe184cc0de5137e4b1cd43f0fdd575d))
+* **licenses:** enhance model license CSV script to fetch license information from Hugging Face MODEL_CARD for vits-piper assets ([f093c5e](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f093c5eaaf54f1a26f1dd1209197d8c27febacac))
+* **licenses:** improve model license CSV script with enhanced logging and handling of empty values ([b5745f9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b5745f99c248a78cb94a387bb87669483f1feaa6))
+* **licenses:** update model license CSV script to support fetching license information from README.md in addition to MODEL_CARD for eligible assets ([089201a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/089201a5b25ebf7b263d9cddfc17a8a5b1c3e22f))
+* **qnn:** include QNN model licenses in the license retrieval process and add expected CSV structure ([67dd38b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/67dd38b7149d9daefd05bd0db7d1ee5ac0604107))
+* **sherpa-onnx:** add iOS build script and update framework tagging for sherpa-onnx integration ([0f5ae25](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0f5ae25e489cf8f10b841404150aacc3995be147))
+* **stt:** enhance detectSttModel with error handling and hardware-specific checks for improved validation feedback ([183821a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/183821ad30f7d726c0f628dc2e895b01f68c7c45))
+* **tts:** add error handling to detectTtsModel for improved validation feedback ([60843b2](https://github.com/XDcobra/react-native-sherpa-onnx/commit/60843b223123a2f64fe92de49398796842a88d72))
+* **tts:** enhance TTS initialization logging and error handling, including detailed error messages for model detection and instance creation failures ([923cd8a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/923cd8af7c56b47b606de1655d9d488751ce59f7))
+
 ## [0.3.6](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.5...v0.3.6) (2026-03-17)
 
 
