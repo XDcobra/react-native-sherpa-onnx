@@ -27,19 +27,25 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   if (asrResult.status === 'fulfilled') {
     licenses.push(...parseCsv(asrResult.value));
   } else {
-    console.warn(`[SherpaOnnx] Failed to load ASR model licenses: ${asrResult.reason}`);
+    console.warn(
+      `[SherpaOnnx] Failed to load ASR model licenses: ${asrResult.reason}`
+    );
   }
 
   if (qnnResult.status === 'fulfilled') {
     licenses.push(...parseCsv(qnnResult.value));
   } else {
-    console.warn(`[SherpaOnnx] Failed to load QNN model licenses: ${qnnResult.reason}`);
+    console.warn(
+      `[SherpaOnnx] Failed to load QNN model licenses: ${qnnResult.reason}`
+    );
   }
 
   if (ttsResult.status === 'fulfilled') {
     licenses.push(...parseCsv(ttsResult.value));
   } else {
-    console.warn(`[SherpaOnnx] Failed to load TTS model licenses: ${ttsResult.reason}`);
+    console.warn(
+      `[SherpaOnnx] Failed to load TTS model licenses: ${ttsResult.reason}`
+    );
   }
 
   return licenses;
