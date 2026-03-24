@@ -470,11 +470,15 @@ apply_asr_license_line_to_qnn_asset() {
   existing_license_file["$qnn_asset"]="$license_file"
 }
 
+# Set on successful try_qnn_asr_license_fallback (do not capture that function in $(…): subshell drops assoc-array updates).
+_QNN_ASR_MIRROR_MATCHED=""
+
 try_qnn_asr_license_fallback() {
   local asset_name="$1"
   local derived cand row matched_asr=""
   local -a cands=()
   local -A tried=()
+  _QNN_ASR_MIRROR_MATCHED=""
   qnn_license_fallback_context "$asset_name" || return 1
   derived="$(strip_qnn_binary_asset_prefix "$asset_name")" || return 1
   cands+=("$derived")
@@ -496,7 +500,7 @@ try_qnn_asr_license_fallback() {
   done
   [[ -n "$row" ]] || return 1
   apply_asr_license_line_to_qnn_asset "$asset_name" "$row"
-  echo -n "$matched_asr"
+  _QNN_ASR_MIRROR_MATCHED="$matched_asr"
   return 0
 }
 
@@ -600,8 +604,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — no license in tree → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
-      echo "  $asset_name — no license in tree + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+    if try_qnn_asr_license_fallback "$asset_name"; then
+      echo "  $asset_name — no license in tree + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
@@ -623,8 +627,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — download failed → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
-      echo "  $asset_name — download failed + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+    if try_qnn_asr_license_fallback "$asset_name"; then
+      echo "  $asset_name — download failed + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
@@ -664,8 +668,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — could not extract license file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
-      echo "  $asset_name — could not extract license + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+    if try_qnn_asr_license_fallback "$asset_name"; then
+      echo "  $asset_name — could not extract license + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
@@ -685,8 +689,8 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — archive license text unknown → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
-    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
-      echo "  $asset_name — archive text unknown + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+    if try_qnn_asr_license_fallback "$asset_name"; then
+      echo "  $asset_name — archive text unknown + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
