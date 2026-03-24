@@ -28,6 +28,8 @@ export {
   deleteIncompleteExtraction,
   ensureModelByCategory,
   ModelCategory,
+  getProtectedModelKeysForBulkDelete,
+  purgeDownloadedModelArtifacts,
 } from './ModelDownloadManager';
 export type {
   ModelMetaBase,
@@ -43,6 +45,7 @@ export type {
   ExtractionState,
   ModelWithMetadata,
   EnsureModelOptions,
+  PurgeDownloadedModelArtifactsResult,
 } from './ModelDownloadManager';
 export {
   validateChecksum,

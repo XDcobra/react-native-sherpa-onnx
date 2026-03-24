@@ -26,6 +26,10 @@ import { extractTarBz2 } from '../extraction/extractTarBz2';
 import { promptChecksumFallback } from './checksumPrompt';
 import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
 import type { DownloadResult } from './types';
+import {
+  registerActivePostProcess,
+  unregisterActivePostProcess,
+} from './activeModelOperations';
 
 export type RunPostDownloadProcessingOptions = {
   category: ModelCategory;
@@ -44,6 +48,45 @@ export type RunPostDownloadProcessingOptions = {
 };
 
 export async function runPostDownloadProcessing(
+  options: RunPostDownloadProcessingOptions
+): Promise<DownloadResult> {
+  const {
+    category,
+    id,
+    model,
+    downloadPath,
+    modelDir,
+    isArchive,
+    statePath,
+    signal,
+    onChecksumIssue,
+    deleteArchiveAfterExtract,
+    onProgress,
+    getDownloadedList,
+  } = options;
+
+  registerActivePostProcess(category, id);
+  try {
+    return await runPostDownloadProcessingBody({
+      category,
+      id,
+      model,
+      downloadPath,
+      modelDir,
+      isArchive,
+      statePath,
+      signal,
+      onChecksumIssue,
+      deleteArchiveAfterExtract,
+      onProgress,
+      getDownloadedList,
+    });
+  } finally {
+    unregisterActivePostProcess(category, id);
+  }
+}
+
+async function runPostDownloadProcessingBody(
   options: RunPostDownloadProcessingOptions
 ): Promise<DownloadResult> {
   const {

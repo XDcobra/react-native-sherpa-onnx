@@ -49,3 +49,8 @@ export {
 } from './modelExtraction';
 export { ensureModelByCategory } from './ensureModel';
 export type { EnsureModelOptions } from './ensureModel';
+export { getProtectedModelKeysForBulkDelete } from './protectedModelKeys';
+export {
+  purgeDownloadedModelArtifacts,
+  type PurgeDownloadedModelArtifactsResult,
+} from './bulkPurge';

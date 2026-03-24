@@ -111,23 +111,23 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Feature Support
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Offline Speech-to-Text | ✅ **Supported** | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types) and [STT documentation](./docs/stt.md). |
-| Online (streaming) Speech-to-Text | ✅ **Supported** | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). See [Streaming STT](./docs/stt-streaming.md). |
-| Live capture API | ✅ **Supported** | Native microphone capture with resampling for live transcription (use with streaming STT). See [PCM Live Stream](./docs/pcm-live-stream.md). |
-| Text-to-Speech | ✅ **Supported** | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types) and [TTS documentation](./docs/tts.md). |
-| Streaming Text-to-Speech | ✅ **Supported** | Incremental speech generation for low time-to-first-byte and playback while generating. See [Streaming TTS](./docs/tts-streaming.md). |
-| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | See [Execution provider support](./docs/execution-providers.md). |
-| Play Asset Delivery (PAD) | ✅ **Supported** | Android only. See [Model Setup](./docs/model-setup.md) & [Extraction API](./docs/extraction.md). |
-| Automatic Model type detection | ✅ **Supported** | `detectSttModel()` and `detectTtsModel()` for a path. See [Model Setup: Model type detection](./docs/model-setup.md#model-detection). |
-| Model quantization | ✅ **Supported** | Automatic detection and preference for quantized (int8) models. |
-| Flexible model loading | ✅ **Supported** | Asset models, file system models, or auto-detection. |
-| TypeScript | ✅ **Supported** | Full type definitions included. |
-| Speaker Diarization | ❌ Not yet supported | Scheduled for release 0.4.0 |
-| Speech Enhancement | ❌ Not yet supported | Scheduled for release 0.5.0 |
-| Source Separation | ❌ Not yet supported | Scheduled for release 0.6.0 |
-| VAD (Voice Activity Detection) | ❌ Not yet supported | Scheduled for release 0.7.0 |
+| Feature | Status | Docs | Notes |
+|---------|--------|------|-------|
+| Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, etc.). See [Supported Model Types](#supported-model-types). |
+| Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
+| Live capture API | ✅ **Supported** | [PCM live stream](./docs/pcm-live-stream.md) | Native microphone capture with resampling for live transcription (use with streaming STT). |
+| Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
+| Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
+| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
+| Play Asset Delivery (PAD) | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Android only. Archives: [Extraction API](./docs/extraction.md). |
+| Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
+| Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
+| Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
+| TypeScript | ✅ **Supported** | — | Full type definitions included. |
+| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 0.4.0 |
+| Speech Enhancement | ❌ Not yet supported | [Enhancement](./docs/enhancement.md) | Scheduled for release 0.5.0 |
+| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 0.6.0 |
+| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 0.7.0 |
 
 ## Platform Support Status
 
