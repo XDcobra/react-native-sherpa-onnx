@@ -139,5 +139,8 @@ Pod::Spec.new do |s|
 
   s.libraries = "c++", "z", "iconv", "bz2"
 
+  # Per-release-model license metadata (synced from CI; same CSV as android/src/main/assets/model_licenses/).
+  s.resources = ["ios/Resources/model_licenses/*.csv"]
+
   install_modules_dependencies(s)
 end

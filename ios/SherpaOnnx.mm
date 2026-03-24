@@ -314,4 +314,30 @@
     }
 }
 
+- (void)readAssetFileAsUtf8:(NSString *)assetPath
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
+{
+    // Validate assetPath to prevent path traversal: reject any path that
+    // contains "..", is absolute, or uses backslashes.
+    if ([assetPath containsString:@".."] ||
+        [assetPath hasPrefix:@"/"] ||
+        [assetPath hasPrefix:@"\\"] ||
+        [assetPath containsString:@"\\"]) {
+        reject(@"ASSET_READ_ERROR",
+               [NSString stringWithFormat:@"Invalid asset path: %@", assetPath],
+               nil);
+        return;
+    }
+    NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
+    NSString *fullPath = [resourcePath stringByAppendingPathComponent:assetPath];
+    NSError *error = nil;
+    NSString *content = [NSString stringWithContentsOfFile:fullPath encoding:NSUTF8StringEncoding error:&error];
+    if (error) {
+        reject(@"ASSET_READ_ERROR", [NSString stringWithFormat:@"Failed to read asset %@: %@", assetPath, error.localizedDescription], error);
+    } else {
+        resolve(content);
+    }
+}
+
 @end

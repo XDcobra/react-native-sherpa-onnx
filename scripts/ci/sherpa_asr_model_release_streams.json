@@ -1,0 +1,21 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "asr-models",
+      "release_tag": "asr-models",
+      "tree_cache_dir": "tree-cache/asr-models",
+      "structure_file": "test/fixtures/asr-models-structure.txt",
+      "expected_csv": "test/fixtures/asr-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/asr-models-license-status.csv"
+    },
+    {
+      "id": "asr-models-qnn-binary",
+      "release_tag": "asr-models-qnn-binary",
+      "tree_cache_dir": "tree-cache/asr-models-qnn-binary",
+      "structure_file": "test/fixtures/qnn-asr-models-structure.txt",
+      "expected_csv": "test/fixtures/qnn-asr-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/qnn-asr-models-license-status.csv"
+    }
+  ]
+}

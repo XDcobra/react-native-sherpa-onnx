@@ -22,7 +22,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Check ASR/TTS assets vs expected CSVs
-        run: bash scripts/check-model-csvs.sh
+        run: bash scripts/ci/check-model-csvs.sh
         # Script always exits 0; outputs warning if new assets are on GitHub but not in CSVs
         # In case of new assets available on Github, follow this procedure:
         # 0. Decide if the new assets are for models already supported

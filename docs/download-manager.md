@@ -28,6 +28,7 @@ So a single call handles download + extraction and all edge cases. Use this when
 - [API Reference](#api-reference)
   - [Registry & Listing](#registry--listing)
   - [Download & Delete](#download--delete)
+  - [Bulk purge (all categories)](#bulk-purge-all-categories)
   - [Progress & Events](#progress--events)
   - [Metadata & Housekeeping](#metadata--housekeeping)
   - [Validation Helpers](#validation-helpers)
@@ -55,6 +56,7 @@ So a single call handles download + extraction and all edge cases. Use this when
 | Crash recovery | ✅ | Persistent state for interrupted downloads/extractions; `ensureModelByCategory` resumes automatically |
 | List update events | ✅ | `subscribeModelsListUpdated()` |
 | LRU cleanup | ✅ | `cleanupLeastRecentlyUsed()` |
+| Bulk purge (disk) | ✅ | `purgeDownloadedModelArtifacts()` — all categories; respects active downloads & extraction |
 
 **Supported categories:** `Tts`, `Stt`, `Vad`, `Diarization`, `Enhancement`, `Separation`, `Qnn`.
 
@@ -234,6 +236,93 @@ Clear the cached registry for a category.
 
 ---
 
+### Bulk purge (all categories)
+
+Use this when you want a **single operation** to free as much Sherpa download disk space as possible—for example a **“Delete all downloaded models”** button in settings, a **developer reset**, or **preparing storage** before the user signs out. Unlike `deleteModelByCategory`, this walks **every** `ModelCategory` (TTS, STT, VAD, QNN, …) and removes completed installs, stuck partial downloads, and stuck partial extractions.
+
+#### `getProtectedModelKeysForBulkDelete()`
+
+Returns a `Promise<ReadonlySet<string>>` of model keys that **must not** be deleted while work is in flight. Each key is `category:modelId` (same shape as internally for download tasks).
+
+The set is the union of:
+
+- In-process **JavaScript** download tasks tracked by the manager
+- Models currently in **post-download processing** (extraction, checksum, validation)—so a purge in the middle of `ensureModelByCategory` does not rip the folder out from under the pipeline
+- Tasks reported by the **native background downloader** (`getExistingDownloadTasks`), when available
+
+If that native query throws, the function still returns JS/post-process protection.
+
+You rarely need to call this alone; it is the default guard inside `purgeDownloadedModelArtifacts`. It is exposed so you can **merge** it with your own rules (see example below).
+
+#### `purgeDownloadedModelArtifacts(options?)`
+
+Deletes, across **all** categories:
+
+1. **Completed** downloads (same effect as `deleteModelByCategory` per model)
+2. **Incomplete downloads** (`deleteIncompleteDownload`)
+3. **Incomplete extractions** (`deleteIncompleteExtraction`), and attempts to remove a leftover **archive** file for that model when present
+
+**Options**
+
+- `protectKeys?: ReadonlySet<string>` — Keys (`category:modelId`) to **never** delete. If omitted, defaults to `await getProtectedModelKeysForBulkDelete()`.
+
+**Return value** (`PurgeDownloadedModelArtifactsResult`):
+
+| Field | Meaning |
+| --- | --- |
+| `deletedComplete` | Fully downloaded models removed |
+| `deletedIncompleteDownloads` | Partial download states cleaned |
+| `deletedIncompleteExtractions` | Partial extraction states cleaned |
+| `skippedProtected` | Rows skipped because the key was in the protected set |
+
+#### Example: settings — clear everything safe
+
+The default protected set avoids corrupting an active download or extraction:
+
+```typescript
+import { purgeDownloadedModelArtifacts } from 'react-native-sherpa-onnx/download';
+
+async function onClearAllDownloadedModels() {
+  const result = await purgeDownloadedModelArtifacts();
+  console.log(
+    'Removed complete:',
+    result.deletedComplete,
+    'skipped (in progress):',
+    result.skippedProtected
+  );
+}
+```
+
+#### Example: also keep the model the user pinned as “favorite”
+
+Build the protect set = automatic in-flight protection **plus** your own keys:
+
+```typescript
+import {
+  ModelCategory,
+  getProtectedModelKeysForBulkDelete,
+  purgeDownloadedModelArtifacts,
+} from 'react-native-sherpa-onnx/download';
+
+async function purgeExceptPinned(pinnedModelIds: { category: ModelCategory; id: string }[]) {
+  const protect = new Set(await getProtectedModelKeysForBulkDelete());
+  for (const { category, id } of pinnedModelIds) {
+    protect.add(`${category}:${id}`);
+  }
+  return purgeDownloadedModelArtifacts({ protectKeys: protect });
+}
+```
+
+#### Example: force wipe (use with care)
+
+Pass an **empty** set only if you are sure no download or extraction should survive (e.g. isolated test build); active operations may still fail unpredictably:
+
+```typescript
+await purgeDownloadedModelArtifacts({ protectKeys: new Set() });
+```
+
+---
+
 ### Crash Recovery & Resumption
 
 **`ensureModelByCategory`** automatically resumes incomplete downloads and incomplete extractions when you call it. The APIs below are for advanced use (e.g. showing a list of “in progress” items or letting the user cancel a specific one).
@@ -400,6 +489,8 @@ import {
   extractModelByCategory,
   deleteIncompleteExtraction,
   getModelsCacheStatusByCategory,
+  getProtectedModelKeysForBulkDelete,
+  purgeDownloadedModelArtifacts,
 } from 'react-native-sherpa-onnx/download';
 
 import type {
@@ -416,6 +507,7 @@ import type {
   ExtractionState,
   ModelWithMetadata,
   EnsureModelOptions,
+  PurgeDownloadedModelArtifactsResult,
 } from 'react-native-sherpa-onnx/download';
 ```
 

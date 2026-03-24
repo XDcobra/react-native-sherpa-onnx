@@ -10,6 +10,13 @@ REPO="${SHERPA_ONNX_REPO:-k2-fsa/sherpa-onnx}"
 ASR_CSV="${ASR_CSV:-test/fixtures/asr-models-expected.csv}"
 TTS_CSV="${TTS_CSV:-test/fixtures/tts-models-expected.csv}"
 
+# Optional: GITHUB_TOKEN or GH_TOKEN for api.github.com rate limits / private forks
+CURL_GH_API=(-sL)
+if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+  _t="${GITHUB_TOKEN:-$GH_TOKEN}"
+  CURL_GH_API+=(-H "Authorization: Bearer ${_t}" -H "Accept: application/vnd.github+json")
+fi
+
 if [ ! -f "$ASR_CSV" ]; then
   echo "::warning::Missing $ASR_CSV (run from repo root or set ASR_CSV)"
   exit 0
@@ -21,7 +28,7 @@ fi
 
 # Fetch ASR release assets (.tar.bz2, .onnx)
 ASR_ASSETS=""
-ASR_RESP="${ASR_RESP:-$(curl -sL "https://api.github.com/repos/${REPO}/releases/tags/asr-models")}"
+ASR_RESP="${ASR_RESP:-$(curl "${CURL_GH_API[@]}" "https://api.github.com/repos/${REPO}/releases/tags/asr-models")}"
 if echo "$ASR_RESP" | jq -e '.assets' >/dev/null 2>&1; then
   ASR_ASSETS=$(echo "$ASR_RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name')
 else
@@ -30,7 +37,7 @@ fi
 
 # Fetch TTS release assets
 TTS_ASSETS=""
-TTS_RESP="${TTS_RESP:-$(curl -sL "https://api.github.com/repos/${REPO}/releases/tags/tts-models")}"
+TTS_RESP="${TTS_RESP:-$(curl "${CURL_GH_API[@]}" "https://api.github.com/repos/${REPO}/releases/tags/tts-models")}"
 if echo "$TTS_RESP" | jq -e '.assets' >/dev/null 2>&1; then
   TTS_ASSETS=$(echo "$TTS_RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name')
 else

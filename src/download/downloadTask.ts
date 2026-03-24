@@ -490,3 +490,8 @@ export async function deleteIncompleteDownload(
   }
   await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 }
+
+/** Task ids in the form `category:modelId` for downloads currently tracked in JS (before post-processing). */
+export function getActiveDownloadTaskKeys(): string[] {
+  return [...activeDownloadTasks.keys()];
+}
