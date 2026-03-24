@@ -1132,6 +1132,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun readAssetFileAsUtf8(assetPath: String, promise: Promise) {
+    // Validate assetPath to prevent path traversal: reject paths containing
+    // "..", starting with "/" or "\", or containing backslashes.
+    if (assetPath.contains("..") ||
+        assetPath.startsWith("/") ||
+        assetPath.startsWith("\\") ||
+        assetPath.contains("\\")) {
+      promise.reject("ASSET_READ_ERROR", "Invalid asset path: $assetPath")
+      return
+    }
     try {
       val content = reactApplicationContext.assets.open(assetPath).bufferedReader().use { it.readText() }
       promise.resolve(content)

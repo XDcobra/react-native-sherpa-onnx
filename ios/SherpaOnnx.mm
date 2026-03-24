@@ -318,6 +318,17 @@
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject
 {
+    // Validate assetPath to prevent path traversal: reject any path that
+    // contains "..", is absolute, or uses backslashes.
+    if ([assetPath containsString:@".."] ||
+        [assetPath hasPrefix:@"/"] ||
+        [assetPath hasPrefix:@"\\"] ||
+        [assetPath containsString:@"\\"]) {
+        reject(@"ASSET_READ_ERROR",
+               [NSString stringWithFormat:@"Invalid asset path: %@", assetPath],
+               nil);
+        return;
+    }
     NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
     NSString *fullPath = [resourcePath stringByAppendingPathComponent:assetPath];
     NSError *error = nil;
