@@ -78,6 +78,7 @@ for ((i = 0; i < n; i++)); do
   struct="$(echo "$row" | jq -r '.structure_file')"
   expected="$(echo "$row" | jq -r '.expected_csv')"
   lic="$(echo "$row" | jq -r '.license_csv | strings')"
+  sid="$(echo "$row" | jq -r '.id // empty')"
 
   args=(
     "$SCRIPT_DIR/collect_one_sherpa_release_stream.sh"
@@ -90,6 +91,9 @@ for ((i = 0; i < n; i++)); do
   )
   if [[ -n "$lic" ]]; then
     args+=(--license-csv "$lic")
+  fi
+  if [[ -n "$sid" ]]; then
+    args+=(--stream-id "$sid")
   fi
   bash "${args[@]}"
 done

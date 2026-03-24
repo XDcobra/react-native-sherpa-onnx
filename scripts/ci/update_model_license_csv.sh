@@ -25,6 +25,12 @@
 #   window.__detail_data__ JSON (\"License\":\"…\").
 #   license_file = HF repo URL or ModelScope summary URL; detection_source = huggingface_model_card or
 #   modelscope_detail_json. Release tarball names must match HF repo names or fetch 404s.
+# - QNN binary stream (see --stream-id asr-models-qnn-binary, or QNN in asset name, or qnn-*-license-status.csv):
+#   after archive scan + HF fallback still yield nothing, last resort looks up a matching row in
+#   asr-models-license-status.csv (default: same directory as --csv). Strip prefix
+#   sherpa-onnx-qnn-<soc>-binary-<n>-seconds- from the QNN asset name, then try a few derived filenames
+#   (exact, sherpa-onnx-…, and sherpa-onnx-<stem>.tar.bz2 when …-int8.tar.bz2). On match, copy the ASR row’s
+#   license fields (not asset_name) onto the QNN asset; on no match → exhausted like other dead ends.
 # - Hugging Face: set HF_TOKEN or HUGGINGFACE_HUB_TOKEN (read token is enough for public repos). Anonymous
 #   requests from CI often get HTTP 401; without a token README/MODEL_CARD cannot be fetched.
 #
@@ -41,19 +47,27 @@ fi
 ASSET_LIST=""
 TREE_CACHE_DIR=""
 CSV_FILE=""
+STREAM_ID=""
+ASR_LICENSE_CSV=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --asset-list) ASSET_LIST="$2"; shift 2 ;;
     --tree-cache-dir) TREE_CACHE_DIR="$2"; shift 2 ;;
     --csv) CSV_FILE="$2"; shift 2 ;;
+    --stream-id) STREAM_ID="$2"; shift 2 ;;
+    --asr-license-csv) ASR_LICENSE_CSV="$2"; shift 2 ;;
     *) echo "Unknown parameter $1"; exit 1 ;;
   esac
 done
 
 if [[ -z "$ASSET_LIST" || -z "$TREE_CACHE_DIR" || -z "$CSV_FILE" ]]; then
-  echo "Usage: $0 --asset-list <path> --tree-cache-dir <dir> --csv <path>"
+  echo "Usage: $0 --asset-list <path> --tree-cache-dir <dir> --csv <path> [--stream-id <id>] [--asr-license-csv <path>]"
   exit 1
+fi
+
+if [[ -z "$ASR_LICENSE_CSV" ]]; then
+  ASR_LICENSE_CSV="$(cd "$(dirname "$CSV_FILE")" && pwd)/asr-models-license-status.csv"
 fi
 
 # Authenticated GitHub downloads (CI: GITHUB_TOKEN; local: GITHUB_TOKEN or GH_TOKEN).
@@ -127,6 +141,8 @@ fi
 
 echo "=== update_model_license_csv.sh ==="
 echo "CSV path: $CSV_FILE"
+[[ -n "$STREAM_ID" ]] && echo "Stream id: $STREAM_ID"
+echo "ASR license lookup (QNN fallback): $ASR_LICENSE_CSV"
 echo "Existing data rows in CSV (excl. header, by line count): $existing_csv_rows"
 
 declare -a release_assets=()
@@ -400,6 +416,90 @@ try_hf_model_card_fallback() {
   return 0
 }
 
+# QNN binary assets: mirror license row from asr-models-license-status.csv (last resort).
+qnn_license_fallback_context() {
+  [[ "${STREAM_ID:-}" == "asr-models-qnn-binary" ]] && return 0
+  [[ "$(basename "$CSV_FILE")" == "qnn-asr-models-license-status.csv" ]] && return 0
+  [[ "$1" == *[Qq][Nn][Nn]* ]] && return 0
+  return 1
+}
+
+strip_qnn_binary_asset_prefix() {
+  local n="$1"
+  if [[ "$n" =~ ^sherpa-onnx-qnn-[^-]+-binary-[0-9]+-seconds-(.+)$ ]]; then
+    echo -n "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+# First CSV data row whose first field equals want (after stripping CR); empty if none.
+asr_license_csv_row_for_asset_name() {
+  local csv="$1"
+  local want="$2"
+  [[ -f "$csv" ]] || return 1
+  awk -F',' -v n="$want" '
+    NR == 1 { next }
+    {
+      key = $1
+      sub(/\r$/, "", key)
+      if (key == n) { print; exit }
+    }
+  ' "$csv"
+}
+
+# Apply ASR CSV line to QNN asset (same 6 columns as our CSV; keeps QNN asset_name as row key).
+apply_asr_license_line_to_qnn_asset() {
+  local qnn_asset="$1"
+  local line="$2"
+  line="${line%$'\r'}"
+  local asr_asset license_type commercial_use confidence detection_source license_file remainder
+  IFS=',' read -r asr_asset license_type commercial_use confidence detection_source license_file remainder <<< "$line"
+  if [[ -n "${remainder:-}" ]]; then
+    license_file="${license_file},${remainder}"
+  fi
+  license_type="${license_type%\"}"; license_type="${license_type#\"}"
+  commercial_use="${commercial_use%\"}"; commercial_use="${commercial_use#\"}"
+  confidence="${confidence%\"}"; confidence="${confidence#\"}"
+  detection_source="${detection_source%\"}"; detection_source="${detection_source#\"}"
+  license_file="${license_file%\"}"; license_file="${license_file#\"}"
+  existing_license_type["$qnn_asset"]="$license_type"
+  existing_commercial_use["$qnn_asset"]="$commercial_use"
+  existing_confidence["$qnn_asset"]="$confidence"
+  existing_detection_source["$qnn_asset"]="$detection_source"
+  existing_license_file["$qnn_asset"]="$license_file"
+}
+
+try_qnn_asr_license_fallback() {
+  local asset_name="$1"
+  local derived cand row matched_asr=""
+  local -a cands=()
+  local -A tried=()
+  qnn_license_fallback_context "$asset_name" || return 1
+  derived="$(strip_qnn_binary_asset_prefix "$asset_name")" || return 1
+  cands+=("$derived")
+  if [[ "$derived" != sherpa-onnx-* ]]; then
+    cands+=("sherpa-onnx-${derived}")
+  fi
+  if [[ "$derived" == *-int8.tar.bz2 ]]; then
+    cands+=("sherpa-onnx-${derived%-int8.tar.bz2}.tar.bz2")
+  fi
+  row=""
+  for cand in "${cands[@]}"; do
+    [[ -z "$cand" || -n "${tried["$cand"]:-}" ]] && continue
+    tried["$cand"]=1
+    row="$(asr_license_csv_row_for_asset_name "$ASR_LICENSE_CSV" "$cand")"
+    if [[ -n "$row" ]]; then
+      matched_asr="$cand"
+      break
+    fi
+  done
+  [[ -n "$row" ]] || return 1
+  apply_asr_license_line_to_qnn_asset "$asset_name" "$row"
+  echo -n "$matched_asr"
+  return 0
+}
+
 detect_license() {
   local t="$1"
   t="$(echo "$t" | tr '[:upper:]' '[:lower:]' | tr -s ' \r\n\t' ' ')"
@@ -500,6 +600,10 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — no license in tree → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
+    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
+      echo "  $asset_name — no license in tree + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
     set_exhausted "$asset_name"
     echo "  $asset_name — no license in tree + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
     continue
@@ -517,6 +621,10 @@ for asset_name in "${release_assets[@]}"; do
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
       echo "  $asset_name — download failed → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
+    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
+      echo "  $asset_name — download failed + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
@@ -556,6 +664,10 @@ for asset_name in "${release_assets[@]}"; do
       echo "  $asset_name — could not extract license file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
+    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
+      echo "  $asset_name — could not extract license + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
     set_exhausted "$asset_name"
     echo "  $asset_name — could not extract license file + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
     continue
@@ -571,6 +683,10 @@ for asset_name in "${release_assets[@]}"; do
   if [[ "$l_res" == "unknown" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
       echo "  $asset_name — archive license text unknown → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      continue
+    fi
+    if _qnn_mir="$(try_qnn_asr_license_fallback "$asset_name")"; then
+      echo "  $asset_name — archive text unknown + HF exhausted → QNN mirror from asr row (${_qnn_mir}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"

@@ -11,10 +11,11 @@ STRUCTURE_FILE=""
 EXPECTED_CSV=""
 TREE_CACHE_DIR=""
 LICENSE_CSV=""
+STREAM_ID=""
 
 usage() {
   echo "Usage: $0 --repo-root <dir> --release-tag <tag> --structure-file <rel> --expected-csv <rel> \\"
-  echo "         --tree-cache-dir <rel> [--github-repo owner/name] [--license-csv <rel>]"
+  echo "         --tree-cache-dir <rel> [--github-repo owner/name] [--license-csv <rel>] [--stream-id <id>]"
   exit 1
 }
 
@@ -27,6 +28,7 @@ while [[ $# -gt 0 ]]; do
     --expected-csv) EXPECTED_CSV="$2"; shift 2 ;;
     --tree-cache-dir) TREE_CACHE_DIR="$2"; shift 2 ;;
     --license-csv) LICENSE_CSV="$2"; shift 2 ;;
+    --stream-id) STREAM_ID="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; usage ;;
   esac
 done
@@ -173,10 +175,15 @@ echo "  Expected CSV rows: $(($(wc -l < "$_abs_expected" | tr -d ' ') - 1)) data
 if [[ -n "$LICENSE_CSV" ]]; then
   _abs_license="$REPO_ROOT/$LICENSE_CSV"
   echo "  License CSV: $LICENSE_CSV"
-  bash "$CI_DIR/update_model_license_csv.sh" \
-    --asset-list "$ASSET_LIST" \
-    --tree-cache-dir "$_abs_tree" \
+  _lic_args=(
+    --asset-list "$ASSET_LIST"
+    --tree-cache-dir "$_abs_tree"
     --csv "$_abs_license"
+  )
+  if [[ -n "$STREAM_ID" ]]; then
+    _lic_args+=(--stream-id "$STREAM_ID")
+  fi
+  bash "$CI_DIR/update_model_license_csv.sh" "${_lic_args[@]}"
 fi
 
 echo "=== done: $RELEASE_TAG ==="
