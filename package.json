@@ -79,6 +79,8 @@
     "!ios/build",
     "!android/build",
     "!android/gradle",
+    "!android/**/build",
+    "!android/**/build/**",
     "!android/gradlew",
     "!android/gradlew.bat",
     "!android/local.properties",
