@@ -20,6 +20,7 @@ const char* TtsModelKindToString(TtsModelKind k) {
     case TtsModelKind::kKitten: return "kitten";
     case TtsModelKind::kPocket: return "pocket";
     case TtsModelKind::kZipvoice: return "zipvoice";
+    case TtsModelKind::kSupertonic: return "supertonic";
     default: return "unknown";
   }
 }
@@ -78,6 +79,12 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
       PutString(env, pathsMap, mapPut, "textConditioner", result.paths.textConditioner);
       PutString(env, pathsMap, mapPut, "vocabJson", result.paths.vocabJson);
       PutString(env, pathsMap, mapPut, "tokenScoresJson", result.paths.tokenScoresJson);
+      PutString(env, pathsMap, mapPut, "durationPredictor", result.paths.durationPredictor);
+      PutString(env, pathsMap, mapPut, "textEncoder", result.paths.textEncoder);
+      PutString(env, pathsMap, mapPut, "vectorEstimator", result.paths.vectorEstimator);
+      PutString(env, pathsMap, mapPut, "ttsJson", result.paths.ttsJson);
+      PutString(env, pathsMap, mapPut, "unicodeIndexer", result.paths.unicodeIndexer);
+      PutString(env, pathsMap, mapPut, "voiceStyle", result.paths.voiceStyle);
       jstring keyPaths = env->NewStringUTF("paths");
       env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
       env->DeleteLocalRef(keyPaths);

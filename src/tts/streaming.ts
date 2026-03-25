@@ -52,6 +52,8 @@ function flattenTtsModelOptionsForNative(
       ? modelOptions.kitten
       : modelType === 'pocket'
       ? modelOptions.pocket
+      : modelType === 'supertonic'
+      ? modelOptions.supertonic
       : undefined;
   if (!block)
     return {

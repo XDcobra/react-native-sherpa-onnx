@@ -238,7 +238,7 @@ export interface Spec extends TurboModule {
    * Initialize Text-to-Speech (TTS) with model directory.
    * @param instanceId - Unique ID for this engine instance (from createTTS)
    * @param modelDir - Absolute path to model directory
-   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'auto')
+   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'supertonic', 'auto')
    * @param numThreads - Number of threads for inference (default: 2)
    * @param debug - Enable debug logging (default: false)
    * @param noiseScale - Optional noise scale (VITS/Matcha)

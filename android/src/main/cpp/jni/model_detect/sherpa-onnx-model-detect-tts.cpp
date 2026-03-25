@@ -2,7 +2,7 @@
  * sherpa-onnx-model-detect-tts.cpp
  *
  * Purpose: Detects TTS model type and fills TtsModelPaths from a model directory. Used by
- * nativeDetectTtsModel (module-jni). Supports Vits, Matcha, Kokoro, Kitten, Pocket, Zipvoice.
+ * nativeDetectTtsModel (module-jni). Supports Vits, Matcha, Kokoro, Kitten, Pocket, Zipvoice, Supertonic.
  *
  * --- Detection pipeline (overview) ---
  *
@@ -56,6 +56,7 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
     if (modelType == "kitten") return TtsModelKind::kKitten;
     if (modelType == "pocket") return TtsModelKind::kPocket;
     if (modelType == "zipvoice") return TtsModelKind::kZipvoice;
+    if (modelType == "supertonic") return TtsModelKind::kSupertonic;
     return TtsModelKind::kUnknown;
 }
 
@@ -68,6 +69,7 @@ static bool CapabilitySupportsTtsKind(
     bool hasMatcha,
     bool hasPocket,
     bool hasZipvoice,
+    bool hasSupertonic,
     bool hasVoicesFile,
     bool hasDataDir
 ) {
@@ -83,6 +85,8 @@ static bool CapabilitySupportsTtsKind(
             return hasPocket;
         case TtsModelKind::kZipvoice:
             return hasZipvoice;
+        case TtsModelKind::kSupertonic:
+            return hasSupertonic;
         default:
             return false;
     }
@@ -108,6 +112,7 @@ static std::vector<TtsModelKind> GetKindsFromDirNameTts(const std::string& model
     if (lower.find("matcha") != std::string::npos) add(TtsModelKind::kMatcha);
     if (lower.find("pocket") != std::string::npos) add(TtsModelKind::kPocket);
     if (lower.find("zipvoice") != std::string::npos) add(TtsModelKind::kZipvoice);
+    if (lower.find("supertonic") != std::string::npos) add(TtsModelKind::kSupertonic);
     if (lower.find("kokoro") != std::string::npos) add(TtsModelKind::kKokoro);
     if (lower.find("kitten") != std::string::npos) add(TtsModelKind::kKitten);
     if (lower.find("vits") != std::string::npos) add(TtsModelKind::kVits);
@@ -143,16 +148,27 @@ static TtsDetectResult DetectTtsModelFromFiles(
     std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
     std::string vocabJsonFile = FindFileByName(files, "vocab.json");
     std::string tokenScoresJsonFile = FindFileByName(files, "token_scores.json");
+    std::string durationPredictor = FindOnnxByAnyToken(files, {"duration_predictor", "duration-predictor"}, std::nullopt);
+    std::string textEncoderSupertonic = FindOnnxByAnyToken(files, {"text_encoder", "text-encoder"}, std::nullopt);
+    std::string vectorEstimator = FindOnnxByAnyToken(files, {"vector_estimator", "vector-estimator"}, std::nullopt);
+    std::string ttsJsonFile = FindFileByName(files, "tts.json");
+    std::string unicodeIndexerFile = FindFileByName(files, "unicode_indexer.bin");
+    std::string voiceStyleFile = FindFileByName(files, "voice.bin");
 
     std::vector<std::string> modelExcludes = {
-        "acoustic", "vocoder", "encoder", "decoder", "joiner"
+        "acoustic", "vocoder", "encoder", "decoder", "joiner",
+        // Supertonic component models are not VITS monolithic model.onnx files.
+        "duration_predictor", "duration-predictor",
+        "text_encoder", "text-encoder",
+        "vector_estimator", "vector-estimator"
     };
     std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, std::nullopt);
     if (ttsModel.empty()) {
         ttsModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
     }
 
-    bool hasVits = !ttsModel.empty();
+    // VITS requires both model.onnx-like file and tokens.txt
+    bool hasVits = !ttsModel.empty() && !tokensFile.empty();
     std::string modelDirLower = ToLower(modelDir);
     bool isLikelyMatcha = modelDirLower.find("matcha") != std::string::npos;
     bool hasMatcha = (!acousticModel.empty() && !vocoder.empty())
@@ -169,6 +185,9 @@ static TtsDetectResult DetectTtsModelFromFiles(
     }
     bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
                      !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
+    bool hasSupertonic = !durationPredictor.empty() && !textEncoderSupertonic.empty() &&
+                         !vectorEstimator.empty() && !vocoder.empty() && !ttsJsonFile.empty() &&
+                         !unicodeIndexerFile.empty() && !voiceStyleFile.empty();
     bool hasDataDir = !dataDirPath.empty();
 
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
@@ -177,6 +196,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
     if (hasMatcha) result.detectedModels.push_back({"matcha", modelDir});
     if (hasPocket) result.detectedModels.push_back({"pocket", modelDir});
     if (hasZipvoice && !hasMatcha) result.detectedModels.push_back({"zipvoice", modelDir});
+    if (hasSupertonic) result.detectedModels.push_back({"supertonic", modelDir});
     if (hasVoicesFile) {
         if (isLikelyKitten && !isLikelyKokoro) {
             result.detectedModels.push_back({"kitten", modelDir});
@@ -205,7 +225,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
         std::vector<TtsModelKind> nameCandidates = GetKindsFromDirNameTts(modelDir);
         if (!nameCandidates.empty()) {
             for (TtsModelKind k : nameCandidates) {
-                if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice,
+                if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice, hasSupertonic,
                                               hasVoicesFile, hasDataDir)) {
                     selected = k;
                     break;
@@ -216,6 +236,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
             if (hasMatcha) selected = TtsModelKind::kMatcha;
             else if (hasPocket) selected = TtsModelKind::kPocket;
             else if (hasZipvoice) selected = TtsModelKind::kZipvoice;
+            else if (hasSupertonic) selected = TtsModelKind::kSupertonic;
             else if (hasVoicesFile) {
                 if (isLikelyKitten && !isLikelyKokoro) selected = TtsModelKind::kKitten;
                 else if (isLikelyKokoro && !isLikelyKitten) selected = TtsModelKind::kKokoro;
@@ -256,6 +277,12 @@ static TtsDetectResult DetectTtsModelFromFiles(
     result.paths.textConditioner = textConditioner;
     result.paths.vocabJson = vocabJsonFile;
     result.paths.tokenScoresJson = tokenScoresJsonFile;
+    result.paths.durationPredictor = durationPredictor;
+    result.paths.textEncoder = textEncoderSupertonic;
+    result.paths.vectorEstimator = vectorEstimator;
+    result.paths.ttsJson = ttsJsonFile;
+    result.paths.unicodeIndexer = unicodeIndexerFile;
+    result.paths.voiceStyle = voiceStyleFile;
 
     auto validation = ValidateTtsPaths(selected, result.paths, modelDir);
     if (!validation.ok) {

@@ -31,6 +31,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsZipVoiceModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -1057,6 +1058,20 @@ internal class SherpaOnnxTtsHelper(
           vocoder = path(paths, "vocoder"),
           dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon")
+        ),
+        numThreads = numThreads,
+        debug = debug,
+        provider = prov
+      )
+      "supertonic" -> OfflineTtsModelConfig(
+        supertonic = OfflineTtsSupertonicModelConfig(
+          durationPredictor = path(paths, "durationPredictor"),
+          textEncoder = path(paths, "textEncoder"),
+          vectorEstimator = path(paths, "vectorEstimator"),
+          vocoder = path(paths, "vocoder"),
+          ttsJson = path(paths, "ttsJson"),
+          unicodeIndexer = path(paths, "unicodeIndexer"),
+          voiceStyle = path(paths, "voiceStyle")
         ),
         numThreads = numThreads,
         debug = debug,
