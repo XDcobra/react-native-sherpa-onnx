@@ -166,13 +166,20 @@ TtsDetectResult DetectTtsModel(const std::string& modelDir, const std::string& m
     std::string unicodeIndexerFile = FindFileByName(files, "unicode_indexer.bin");
     std::string voiceStyleFile = FindFileByName(files, "voice.bin");
 
-    std::vector<std::string> modelExcludes = {"acoustic", "vocoder", "encoder", "decoder", "joiner"};
+    std::vector<std::string> modelExcludes = {
+        "acoustic", "vocoder", "encoder", "decoder", "joiner",
+        // Supertonic component models are not VITS monolithic model.onnx files.
+        "duration_predictor", "duration-predictor",
+        "text_encoder", "text-encoder",
+        "vector_estimator", "vector-estimator"
+    };
     std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, std::nullopt);
     if (ttsModel.empty()) {
         ttsModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
     }
 
-    bool hasVits = !ttsModel.empty();
+    // VITS requires both model.onnx-like file and tokens.txt
+    bool hasVits = !ttsModel.empty() && !tokensFile.empty();
     std::string modelDirLower = ToLower(modelDir);
     bool isLikelyMatcha = modelDirLower.find("matcha") != std::string::npos;
     bool hasMatcha = (!acousticModel.empty() && !vocoder.empty())
