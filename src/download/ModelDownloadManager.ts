@@ -36,11 +36,13 @@ export {
   getDownloadStorageBase,
 } from './localModels';
 export {
+  configureModelDownloadBackgroundDownloader,
   downloadModelByCategory,
   getIncompleteDownloads,
   resumeDownload,
   deleteIncompleteDownload,
 } from './downloadTask';
+export type { BackgroundDownloaderSetConfigOptions } from './downloadTask';
 export {
   extractModelByCategory,
   getIncompleteExtractions,
