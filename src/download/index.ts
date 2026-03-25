@@ -30,8 +30,10 @@ export {
   ModelCategory,
   getProtectedModelKeysForBulkDelete,
   purgeDownloadedModelArtifacts,
+  configureModelDownloadBackgroundDownloader,
 } from './ModelDownloadManager';
 export type {
+  BackgroundDownloaderSetConfigOptions,
   ModelMetaBase,
   TtsModelMeta,
   TtsModelType,

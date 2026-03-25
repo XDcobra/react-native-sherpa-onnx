@@ -1,7 +1,10 @@
+import { Platform } from 'react-native';
+import type { BackgroundDownloaderSetConfigOptions } from './background-downloader-types';
 import {
   createDownloadTask,
   completeHandler,
   getExistingDownloadTasks,
+  setConfig,
 } from '@kesha-antonov/react-native-background-downloader';
 import {
   exists,
@@ -40,6 +43,68 @@ function makeDownloadTaskId(category: ModelCategory, id: string): string {
 }
 
 const activeDownloadTasks = new Map<string, { stop: () => void }>();
+
+let androidDownloaderNotificationConfigApplied = false;
+let didWarnConfigFailure = false;
+
+function warnBackgroundDownloaderConfigFailure(
+  context: string,
+  error: unknown
+) {
+  if (didWarnConfigFailure) return;
+  didWarnConfigFailure = true;
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `[Download] Background downloader config failed (${context}): ${reason}`
+  );
+}
+
+export type { BackgroundDownloaderSetConfigOptions };
+
+/**
+ * Apply your own `@kesha-antonov/react-native-background-downloader` `setConfig` **before** the first
+ * model download. When called, the SDK will **not** overwrite it with built-in defaults on first download.
+ *
+ * Safe to call at app startup (e.g. `App.tsx`). Other `setConfig` options (e.g. headers) are forwarded
+ * where the native module supports them on each platform.
+ */
+export function configureModelDownloadBackgroundDownloader(
+  options: BackgroundDownloaderSetConfigOptions
+): void {
+  try {
+    setConfig(options);
+    androidDownloaderNotificationConfigApplied = true;
+  } catch (error) {
+    // Keep fallback default config enabled if custom config fails.
+    warnBackgroundDownloaderConfigFailure('custom', error);
+  }
+}
+
+/**
+ * Library default is showNotificationsEnabled: false (silent empty FGS notification).
+ * Enable visible notifications unless the host app already called `configureModelDownloadBackgroundDownloader`.
+ */
+function ensureAndroidBackgroundDownloaderNotifications() {
+  if (androidDownloaderNotificationConfigApplied) return;
+  if (Platform.OS !== 'android') return;
+  try {
+    setConfig({
+      showNotificationsEnabled: true,
+      notificationsGrouping: {
+        enabled: false,
+        mode: 'individual',
+        texts: {
+          downloadTitle: 'Model download',
+          downloadStarting: 'Starting download…',
+          downloadProgress: 'Downloading… {progress}%',
+        },
+      },
+    });
+    androidDownloaderNotificationConfigApplied = true;
+  } catch (error) {
+    warnBackgroundDownloaderConfigFailure('default', error);
+  }
+}
 
 export async function downloadModelByCategory<T extends ModelMetaBase>(
   category: ModelCategory,
@@ -102,6 +167,8 @@ export async function downloadModelByCategory<T extends ModelMetaBase>(
   if (!diskSpaceCheck.success) {
     throw new Error(`Insufficient disk space: ${diskSpaceCheck.message}`);
   }
+
+  ensureAndroidBackgroundDownloaderNotifications();
 
   const statePath = getDownloadStatePath(category, id);
 
@@ -339,6 +406,7 @@ export async function resumeDownload<T extends ModelMetaBase>(
     deleteArchiveAfterExtract?: boolean;
   }
 ): Promise<DownloadResult> {
+  ensureAndroidBackgroundDownloaderNotifications();
   const taskId = makeDownloadTaskId(category, id);
   const existingTasks = await getExistingDownloadTasks();
   const existing = existingTasks.find((t) => t.id === taskId);

@@ -25,7 +25,9 @@ So a single call handles download + extraction and all edge cases. Use this when
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Setup (iOS & Android)](#setup-ios--android)
+  - [Android: foreground service & notifications](#android-foreground-service--notifications)
 - [API Reference](#api-reference)
+  - [Configure background downloader (optional)](#configure-model-download-background-downloader-optional)
   - [Registry & Listing](#registry--listing)
   - [Download & Delete](#download--delete)
   - [Bulk purge (all categories)](#bulk-purge-all-categories)
@@ -100,6 +102,32 @@ Model downloads use [@kesha-antonov/react-native-background-downloader](https://
 
 **Android:** The SDK declares MMKV (`com.tencent:mmkv-shared:1.3.16`) for the background downloader. Do **not** add MMKV again in your app’s `build.gradle`; a duplicate or different merge order can shift resource package IDs and cause a white screen on startup (“No package ID 6a found for resource ID”). If you see that error after updating, do a full clean: `cd android && ./gradlew clean && rm -rf .gradle app/build && cd ..`, then rebuild.
 
+#### Android: foreground service & notifications
+
+The dependency [@kesha-antonov/react-native-background-downloader](https://github.com/kesha-antonov/react-native-background-downloader) merges **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** into your **merged manifest** (needed for downloads while the app is backgrounded). On **Google Play**, complete the **foreground service permissions** declaration under **Policy → App content** when the console asks for it (and provide any required demo video).
+
+**Visible download notifications**
+
+The upstream library defaults to **minimal / effectively hidden** notifications (`showNotificationsEnabled: false`). If you do **not** call [`configureModelDownloadBackgroundDownloader()`](#configure-model-download-background-downloader-optional) yourself, this SDK turns **visible** notifications on automatically the **first** time a download runs in the process (`downloadModelByCategory` or `resumeDownload`), via `setConfig({ showNotificationsEnabled: true, … })` with generic English copy (“Model download”, progress text). Users should then see an ongoing notification while a model file is downloading.
+
+**Android 13+ (API 33) — `POST_NOTIFICATIONS`**
+
+Posting a normal ongoing notification requires:
+
+1. In `AndroidManifest.xml`:
+   ```xml
+   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+   ```
+2. At **runtime**, request the permission (e.g. `PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS, …)`) before or when the user starts a download.
+
+Without this, the foreground download work may still run, but the **notification may not appear** in the shade—poor UX and difficult to record for Play policy.
+
+**Customizing downloader config (titles, grouping, headers, …)**
+
+Call **`configureModelDownloadBackgroundDownloader(options)`** from `react-native-sherpa-onnx/download` **once at app startup** (e.g. in `App.tsx`) **before** any model download. It forwards to the underlying `setConfig` and tells the SDK **not** to apply its built-in default notification settings on first download. The `options` shape is the same as `@kesha-antonov/react-native-background-downloader`’s `setConfig` (type **`BackgroundDownloaderSetConfigOptions`**).
+
+Avoid calling `setConfig` **directly** on that package before the first download unless you also use this SDK helper: a bare `setConfig` is **overwritten** when the first download runs, because the SDK cannot detect that you already configured it.
+
 **iOS:** For downloads to complete reliably when the app is in the background or after it was terminated, you must forward the background URL session completion to the downloader in your AppDelegate. Without this, downloads only work reliably while the app is in the foreground.
 
 1. **React Native 0.77+ (Swift)**  
@@ -149,6 +177,31 @@ const { localPath } = await ensureModelByCategory(
   'sherpa-onnx-whisper-tiny',
   { onProgress: (p) => setPercent(p.percent) }
 );
+```
+
+---
+
+### Configure model download background downloader (optional)
+
+#### `configureModelDownloadBackgroundDownloader(options)`
+
+Forwards to `@kesha-antonov/react-native-background-downloader` **`setConfig`**. Call **before the first** `downloadModelByCategory` / `resumeDownload` / `ensureModelByCategory` that starts a network download so your notification copy, grouping, or other settings are kept. If you never call it, the SDK applies [visible default notifications](#android-foreground-service--notifications) on first download instead.
+
+```typescript
+import { configureModelDownloadBackgroundDownloader } from 'react-native-sherpa-onnx/download';
+
+configureModelDownloadBackgroundDownloader({
+  showNotificationsEnabled: true,
+  notificationsGrouping: {
+    enabled: false,
+    mode: 'individual',
+    texts: {
+      downloadTitle: 'My App',
+      downloadStarting: 'Fetching speech model…',
+      downloadProgress: 'Downloading… {progress}%',
+    },
+  },
+});
 ```
 
 ---
@@ -491,9 +544,11 @@ import {
   getModelsCacheStatusByCategory,
   getProtectedModelKeysForBulkDelete,
   purgeDownloadedModelArtifacts,
+  configureModelDownloadBackgroundDownloader,
 } from 'react-native-sherpa-onnx/download';
 
 import type {
+  BackgroundDownloaderSetConfigOptions,
   ModelMetaBase,
   TtsModelMeta,
   TtsModelType,
@@ -632,6 +687,8 @@ await cleanupLeastRecentlyUsed(ModelCategory.Stt);
 | Disk space error | Use `checkDiskSpace()` before downloading; or `cleanupLeastRecentlyUsed()` |
 | QNN models on iOS | QNN category is Android-only; use `Stt`/`Tts` categories on iOS |
 | Path is null after download | Ensure download completed successfully; check with `isModelDownloadedByCategory()` |
+| No Android download notification | Ensure **Android 13+**: `POST_NOTIFICATIONS` in the manifest **and** runtime grant; pull the shade during an active download. See [Android: foreground service & notifications](#android-foreground-service--notifications). |
+| Play upload: foreground service declaration | Complete **App content** declarations in Play Console for merged `FOREGROUND_SERVICE*` permissions; see section above. |
 
 **Checksums:**
 - Archives: validated using native hashing during extraction

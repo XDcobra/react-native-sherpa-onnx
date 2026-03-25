@@ -78,6 +78,8 @@ If you use the [download manager](docs/download-manager.md) to fetch models at r
 
 Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android). Expo users can use the library’s config plugin to apply this automatically.
 
+**Android:** Foreground service permissions (Play Console), visible download notifications, and **`POST_NOTIFICATIONS` (API 33+)** are covered in [Download manager – Android: foreground service & notifications](docs/download-manager.md#android-foreground-service--notifications).
+
 ## Table of contents
 
 - [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
