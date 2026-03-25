@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.8](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.7...v0.3.8) (2026-03-25)
+
+
+### Bug Fixes
+
+* **auto-detect:** enhance model detection logic for Supertonic TTS by excluding additional components and ensuring VITS requirements ([f107cd1](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f107cd1b61578ed23d5b6f1957fc3af8161e425a))
+* **download:** improve error handling for background downloader configuration failures ([2bc1b7b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2bc1b7bbcc8321c4978dabe0601c74c7f143ce32))
+
+
+### Features
+
+* **auto-detect:** add support for Supertonic TTS model detection and paths ([6918ca0](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6918ca0cdc7e5f26929e671aed740697da2c3c05))
+* **download:** add configuration for background downloader notifications and enhance download task management ([5c49864](https://github.com/XDcobra/react-native-sherpa-onnx/commit/5c49864892ccde365014117bf845ae6fd2865b14))
+* **supertonic:** implement support for Supertonic TTS model in Android and iOS ([dc87a9f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/dc87a9feee61d073fae231a81e804f14c45eea03))
+* **supertonic:** update TypeScript definitions and interfaces to fully support Supertonic TTS model ([c9e6cfe](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c9e6cfe8d1f30d1d79ab5f178788a22a1c188d16))
+
 ## [0.3.7](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.6...v0.3.7) (2026-03-24)
 
 
