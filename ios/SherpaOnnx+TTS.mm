@@ -58,6 +58,7 @@ static NSString *ttsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
         case K::kKitten: return @"kitten";
         case K::kPocket: return @"pocket";
         case K::kZipvoice: return @"zipvoice";
+        case K::kSupertonic: return @"supertonic";
         default: return @"unknown";
     }
 }
