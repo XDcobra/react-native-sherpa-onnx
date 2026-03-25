@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { BackgroundDownloaderSetConfigOptions } from '@kesha-antonov/react-native-background-downloader';
+import type { BackgroundDownloaderSetConfigOptions } from './background-downloader-types';
 import {
   createDownloadTask,
   completeHandler,
@@ -45,6 +45,19 @@ function makeDownloadTaskId(category: ModelCategory, id: string): string {
 const activeDownloadTasks = new Map<string, { stop: () => void }>();
 
 let androidDownloaderNotificationConfigApplied = false;
+let didWarnConfigFailure = false;
+
+function warnBackgroundDownloaderConfigFailure(
+  context: string,
+  error: unknown
+) {
+  if (didWarnConfigFailure) return;
+  didWarnConfigFailure = true;
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `[Download] Background downloader config failed (${context}): ${reason}`
+  );
+}
 
 export type { BackgroundDownloaderSetConfigOptions };
 
@@ -58,11 +71,12 @@ export type { BackgroundDownloaderSetConfigOptions };
 export function configureModelDownloadBackgroundDownloader(
   options: BackgroundDownloaderSetConfigOptions
 ): void {
-  androidDownloaderNotificationConfigApplied = true;
   try {
     setConfig(options);
-  } catch {
-    // Native module may be unavailable in some test environments.
+    androidDownloaderNotificationConfigApplied = true;
+  } catch (error) {
+    // Keep fallback default config enabled if custom config fails.
+    warnBackgroundDownloaderConfigFailure('custom', error);
   }
 }
 
@@ -72,7 +86,6 @@ export function configureModelDownloadBackgroundDownloader(
  */
 function ensureAndroidBackgroundDownloaderNotifications() {
   if (androidDownloaderNotificationConfigApplied) return;
-  androidDownloaderNotificationConfigApplied = true;
   if (Platform.OS !== 'android') return;
   try {
     setConfig({
@@ -87,8 +100,9 @@ function ensureAndroidBackgroundDownloaderNotifications() {
         },
       },
     });
-  } catch {
-    // Native module may be unavailable in some test environments.
+    androidDownloaderNotificationConfigApplied = true;
+  } catch (error) {
+    warnBackgroundDownloaderConfigFailure('default', error);
   }
 }
 
