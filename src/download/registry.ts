@@ -96,6 +96,7 @@ function deriveType(id: string): TtsModelType {
   if (lower.includes('kitten')) return 'kitten';
   if (lower.includes('pocket')) return 'pocket';
   if (lower.includes('zipvoice')) return 'zipvoice';
+  if (lower.includes('supertonic')) return 'supertonic';
   return 'unknown';
 }
 

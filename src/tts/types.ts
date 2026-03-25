@@ -9,6 +9,7 @@ import type { ModelPathConfig } from '../types';
  * - 'kitten': KittenTTS models (lightweight, multi-speaker)
  * - 'pocket': Pocket TTS models
  * - 'zipvoice': Zipvoice models (voice cloning capable)
+ * - 'supertonic': Supertonic models
  * - 'auto': Auto-detect model type based on files present (default)
  */
 export type TTSModelType =
@@ -18,6 +19,7 @@ export type TTSModelType =
   | 'kitten'
   | 'pocket'
   | 'zipvoice'
+  | 'supertonic'
   | 'auto';
 
 /** Runtime list of supported TTS model types. */
@@ -28,6 +30,7 @@ export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'kitten',
   'pocket',
   'zipvoice',
+  'supertonic',
   'auto',
 ] as const;
 
@@ -68,6 +71,11 @@ export interface TtsPocketModelOptions {
   // No init-time options in Kotlin OfflineTtsPocketModelConfig; voice cloning is via GenerationConfig at generate time.
 }
 
+/** Options for Supertonic models. Applied only when modelType is 'supertonic'. */
+export interface TtsSupertonicModelOptions {
+  // No init-time model options exposed by sherpa-onnx currently.
+}
+
 /**
  * Model-specific TTS options. Only the block for the actually loaded model type is applied;
  * others are ignored (e.g. vits options have no effect when a kokoro model is loaded).
@@ -78,6 +86,7 @@ export interface TtsModelOptions {
   kokoro?: TtsKokoroModelOptions;
   kitten?: TtsKittenModelOptions;
   pocket?: TtsPocketModelOptions;
+  supertonic?: TtsSupertonicModelOptions;
 }
 
 /**
