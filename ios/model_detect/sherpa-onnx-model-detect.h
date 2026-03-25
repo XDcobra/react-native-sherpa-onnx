@@ -37,7 +37,8 @@ enum class TtsModelKind {
     kKokoro,
     kKitten,
     kPocket,
-    kZipvoice
+    kZipvoice,
+    kSupertonic
 };
 
 struct SttModelPaths {
@@ -150,6 +151,13 @@ struct TtsModelPaths {
     std::string textConditioner;
     std::string vocabJson;
     std::string tokenScoresJson;
+    // Supertonic TTS
+    std::string durationPredictor;
+    std::string textEncoder;
+    std::string vectorEstimator;
+    std::string ttsJson;
+    std::string unicodeIndexer;
+    std::string voiceStyle;
 };
 
 struct SttDetectResult {

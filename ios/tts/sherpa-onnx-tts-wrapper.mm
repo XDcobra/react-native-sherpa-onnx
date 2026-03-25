@@ -161,6 +161,15 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.pocket.vocab_json = detect.paths.vocabJson;
                 config.model.pocket.token_scores_json = detect.paths.tokenScoresJson;
                 break;
+            case TtsModelKind::kSupertonic:
+                config.model.supertonic.duration_predictor = detect.paths.durationPredictor;
+                config.model.supertonic.text_encoder = detect.paths.textEncoder;
+                config.model.supertonic.vector_estimator = detect.paths.vectorEstimator;
+                config.model.supertonic.vocoder = detect.paths.vocoder;
+                config.model.supertonic.tts_json = detect.paths.ttsJson;
+                config.model.supertonic.unicode_indexer = detect.paths.unicodeIndexer;
+                config.model.supertonic.voice_style = detect.paths.voiceStyle;
+                break;
             case TtsModelKind::kUnknown:
             default:
                 result.error = "TTS: Unknown model type: " + modelType;

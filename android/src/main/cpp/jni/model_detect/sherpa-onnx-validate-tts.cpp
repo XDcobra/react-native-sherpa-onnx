@@ -59,6 +59,16 @@ static const TtsFieldRequirement kZipvoiceReqs[] = {
     {"lexicon",  &TtsModelPaths::lexicon,  true},
 };
 
+static const TtsFieldRequirement kSupertonicReqs[] = {
+    {"durationPredictor", &TtsModelPaths::durationPredictor, true},
+    {"textEncoder",       &TtsModelPaths::textEncoder,       true},
+    {"vectorEstimator",   &TtsModelPaths::vectorEstimator,   true},
+    {"vocoder",           &TtsModelPaths::vocoder,           true},
+    {"ttsJson",           &TtsModelPaths::ttsJson,           true},
+    {"unicodeIndexer",    &TtsModelPaths::unicodeIndexer,    true},
+    {"voiceStyle",        &TtsModelPaths::voiceStyle,        true},
+};
+
 // ============================================================
 
 static const TtsFieldRequirement* GetRequirements(TtsModelKind kind, size_t& count) {
@@ -79,6 +89,9 @@ static const TtsFieldRequirement* GetRequirements(TtsModelKind kind, size_t& cou
         case TtsModelKind::kZipvoice:
             count = std::size(kZipvoiceReqs);
             return kZipvoiceReqs;
+        case TtsModelKind::kSupertonic:
+            count = std::size(kSupertonicReqs);
+            return kSupertonicReqs;
         default:
             count = 0;
             return nullptr;
@@ -93,6 +106,7 @@ static const char* TtsKindToName(TtsModelKind k) {
         case TtsModelKind::kKitten:   return "Kitten";
         case TtsModelKind::kPocket:   return "Pocket";
         case TtsModelKind::kZipvoice: return "Zipvoice";
+        case TtsModelKind::kSupertonic: return "Supertonic";
         default:                      return "Unknown";
     }
 }
