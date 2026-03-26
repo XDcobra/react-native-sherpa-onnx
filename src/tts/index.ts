@@ -243,10 +243,16 @@ export async function createTTS(
   );
 
   if (!result.success) {
+    const resultWithOptionalError = result as unknown as { error?: unknown };
+    const nativeError =
+      typeof resultWithOptionalError.error === 'string'
+        ? resultWithOptionalError.error.trim()
+        : '';
+    const detected = JSON.stringify(result.detectedModels ?? []);
     throw new Error(
-      `TTS initialization failed: ${JSON.stringify(
-        result.detectedModels ?? []
-      )}`
+      nativeError.length > 0
+        ? `TTS initialization failed: ${nativeError}`
+        : `TTS initialization failed: ${detected}`
     );
   }
 
