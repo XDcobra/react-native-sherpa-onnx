@@ -22,6 +22,7 @@ import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.OfflineZipformerCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWenetCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineFunAsrNanoModelConfig
+import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineDolphinModelConfig
 import com.k2fsa.sherpa.onnx.OfflineFireRedAsrModelConfig
@@ -541,6 +542,10 @@ internal class SherpaOnnxSttHelper(
       val hasHotwords = fn.hasKey("hotwords") && fn.getString("hotwords")?.isNotBlank() == true
       parts.add("funasrNano:lang=$lang,hotwords=$hasHotwords")
     }
+    modelOptions.getMap("qwen3Asr")?.let { q ->
+      val mnt = if (q.hasKey("maxNewTokens")) q.getInt("maxNewTokens") else null
+      parts.add("qwen3Asr:maxNewTokens=$mnt")
+    }
     return parts.joinToString(";").take(200)
   }
 
@@ -695,6 +700,23 @@ internal class SherpaOnnxSttHelper(
             language = fn?.getString("language") ?: "",
             itn = if (fn?.hasKey("itn") == true) fn.getBoolean("itn") else true,
             hotwords = fn?.getString("hotwords") ?: ""
+          ),
+          tokens = ""
+        )
+      }
+      "qwen3_asr" -> {
+        val q3 = modelOptions?.getMap("qwen3Asr")
+        OfflineModelConfig(
+          qwen3Asr = OfflineQwen3AsrModelConfig(
+            convFrontend = path(paths, "qwen3ConvFrontend"),
+            encoder = path(paths, "qwen3Encoder"),
+            decoder = path(paths, "qwen3Decoder"),
+            tokenizer = path(paths, "qwen3Tokenizer"),
+            maxTotalLen = if (q3?.hasKey("maxTotalLen") == true) q3.getInt("maxTotalLen") else 512,
+            maxNewTokens = if (q3?.hasKey("maxNewTokens") == true) q3.getInt("maxNewTokens") else 128,
+            temperature = if (q3?.hasKey("temperature") == true) q3.getDouble("temperature").toFloat() else 1e-6f,
+            topP = if (q3?.hasKey("topP") == true) q3.getDouble("topP").toFloat() else 0.8f,
+            seed = if (q3?.hasKey("seed") == true) q3.getInt("seed") else 42
           ),
           tokens = ""
         )
