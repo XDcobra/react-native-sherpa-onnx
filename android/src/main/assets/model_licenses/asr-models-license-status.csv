@@ -397,7 +397,7 @@ sherpa-onnx-rk3576-streaming-zipformer-en-2023-06-26.tar.bz2,apache-2.0,yes,high
 sherpa-onnx-rk3568-streaming-zipformer-en-2023-06-26.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
 sherpa-onnx-rk3566-streaming-zipformer-en-2023-06-26.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2,exhausted,unknown,high,scan_exhausted,
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/Qwen/Qwen3-ASR-0.6B
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
 sherpa-onnx-rk3588-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
 sherpa-onnx-rk3576-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
