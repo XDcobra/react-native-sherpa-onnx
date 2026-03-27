@@ -259,6 +259,7 @@ export type {
   STTInitializeOptions,
   STTModelType,
   SttModelOptions,
+  SttQwen3AsrModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
   SttEngine,
