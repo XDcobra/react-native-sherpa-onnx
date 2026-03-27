@@ -52,6 +52,13 @@ static const SttFieldRequirement kFunAsrNanoReqs[] = {
     {"funasrTokenizer",      &SttModelPaths::funasrTokenizer,      true},
 };
 
+static const SttFieldRequirement kQwen3AsrReqs[] = {
+    {"qwen3ConvFrontend", &SttModelPaths::qwen3ConvFrontend, true},
+    {"qwen3Encoder",      &SttModelPaths::qwen3Encoder,      true},
+    {"qwen3Decoder",      &SttModelPaths::qwen3Decoder,      true},
+    {"qwen3Tokenizer",    &SttModelPaths::qwen3Tokenizer,    true},
+};
+
 static const SttFieldRequirement kMoonshineReqs[] = {
     {"moonshinePreprocessor",    &SttModelPaths::moonshinePreprocessor,    true},
     {"moonshineEncoder",         &SttModelPaths::moonshineEncoder,         true},
@@ -120,6 +127,9 @@ static const SttFieldRequirement* GetRequirements(SttModelKind kind, size_t& cou
         case SttModelKind::kFunAsrNano:
             count = std::size(kFunAsrNanoReqs);
             return kFunAsrNanoReqs;
+        case SttModelKind::kQwen3Asr:
+            count = std::size(kQwen3AsrReqs);
+            return kQwen3AsrReqs;
         case SttModelKind::kMoonshine:
             count = std::size(kMoonshineReqs);
             return kMoonshineReqs;
@@ -161,6 +171,7 @@ static const char* SttKindToName(SttModelKind k) {
         case SttModelKind::kZipformerCtc:  return "Zipformer CTC";
         case SttModelKind::kWhisper:       return "Whisper";
         case SttModelKind::kFunAsrNano:    return "FunASR Nano";
+        case SttModelKind::kQwen3Asr:      return "Qwen3 ASR";
         case SttModelKind::kFireRedAsr:    return "Fire Red ASR";
         case SttModelKind::kMoonshine:     return "Moonshine";
         case SttModelKind::kMoonshineV2:   return "Moonshine v2";

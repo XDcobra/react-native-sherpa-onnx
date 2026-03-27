@@ -80,6 +80,11 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
     const std::string& rootDir
 );
 
+bool Qwen3TokenizerDirHasVocabAndMerges(
+    const std::vector<FileEntry>& files,
+    const std::string& dir
+);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 
