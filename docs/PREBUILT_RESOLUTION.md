@@ -16,27 +16,27 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 
 ## Artifact matrix
 
-For each row, resolution tries **1 → 2 → 3 → 4** in order; **5** applies if nothing satisfied the requirement.
+For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies if nothing satisfied the requirement.
 
 | Package | Part | Contents / notes | `third_party` layout (stage 1) | Stage 2 (module) | Stage 3 (Maven) | Stage 4 (GitHub asset) |
 |---------|------|------------------|-------------------------------|------------------|-----------------|-------------------------|
-| **sherpa-onnx** | JNI | `libsherpa-onnx-jni.so`, `libsherpa-onnx-c-api.so`, `libsherpa-onnx-cxx-api.so`, `libonnxruntime.so` per ABI | `third_party/sherpa-onnx-prebuilt/android/jni/<abi>/*.so` | `src/main/jniLibs/<abi>/` | `sherpaOnnxAar` → `jni/<abi>/` | `sherpa-onnx-android.zip` → `<abi>/**` |
+| **sherpa-onnx** | JNI | `libsherpa-onnx-jni.so`, `libsherpa-onnx-c-api.so`, `libsherpa-onnx-cxx-api.so`, `libonnxruntime.so` per ABI | `third_party/sherpa-onnx-prebuilt/android/jni/<abi>/*.so` | `src/main/jniLibs/<abi>/` | `sherpaOnnxAar` --> `jni/<abi>/` | `sherpa-onnx-android.zip` --> `<abi>/**` |
 | **sherpa-onnx** | C headers | `c-api/**` (e.g. `c-api.h`) | `third_party/sherpa-onnx-prebuilt/android/include/sherpa-onnx/c-api/**` | `src/main/cpp/include/sherpa-onnx/` | AAR `c-api/**` | ZIP `c-api/**` |
-| **sherpa-onnx** | Java/Kotlin API | `classes.jar` | `third_party/sherpa-onnx-prebuilt/android/java/classes.jar` | (build dir from previous run) | `sherpaOnnxAar` → `classes.jar` | ZIP `java/classes.jar` or extract cache |
+| **sherpa-onnx** | Java/Kotlin API | `classes.jar` | `third_party/sherpa-onnx-prebuilt/android/java/classes.jar` | (build dir from previous run) | `sherpaOnnxAar` --> `classes.jar` | ZIP `java/classes.jar` or extract cache |
 | **FFmpeg** | JNI | `libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so` | `third_party/ffmpeg_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `ffmpegAar` | `ffmpeg-android.zip` |
 | **FFmpeg** | C headers | `libavcodec/avcodec.h` etc. | `third_party/ffmpeg_prebuilt/android/include/**` | `src/main/cpp/include/ffmpeg/` | AAR `include/**` | ZIP `include/**` |
 | **libarchive** | JNI | `libarchive.so`, `libzstd.so` | `third_party/libarchive_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `libarchiveAar` | `libarchive-android.zip` |
 | **libarchive** | C headers | `archive.h` | `third_party/libarchive_prebuilt/android/include/**` | `src/main/cpp/include/libarchive/` | AAR `include/**` | ZIP `include/**` |
 | **ONNX Runtime** | JNI bridge | Only `libonnxruntime4j_jni.so` (main `libonnxruntime.so` comes from sherpa prebuilts) | `third_party/onnxruntime_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `onnxruntimeAar` | — |
-| **ONNX Runtime** | Java API | `classes.jar` → `onnxruntime-classes.jar` in build dir | — | — | `onnxruntimeAar` | — |
+| **ONNX Runtime** | Java API | `classes.jar` --> `onnxruntime-classes.jar` in build dir | — | — | `onnxruntimeAar` | — |
 
 ## Gradle tasks
 
 | Task | Responsibility |
 |------|---------------|
-| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all four packages. Runs stages 1→2→3→4 per package. |
+| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all four packages. Runs stages 1-->2-->3-->4 per package. |
 | `checkJniLibs` | Hard-fails if any required `.so` is missing after `downloadNativeLibsIfNeeded`. Depends on it. |
-| `extractSherpaOnnxClasses` | Sherpa `classes.jar` into `build/sherpa-onnx-classes`. Resolution: THIRD_PARTY → MAVEN_AAR → GITHUB_EXTRACT. |
+| `extractSherpaOnnxClasses` | Sherpa `classes.jar` into `build/sherpa-onnx-classes`. Resolution: THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT. |
 | `extractOnnxruntimeClasses` | ORT `classes.jar` into `build/onnxruntime-classes`. Currently Maven only. |
 
 **Versions** are defined in `android/prebuilt-versions.gradle`; AAR configurations in `android/build.gradle`.

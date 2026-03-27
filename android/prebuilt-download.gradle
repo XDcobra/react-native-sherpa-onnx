@@ -222,14 +222,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             sherpaVersionFile.text = currentSherpaVersion
             sherpaResolved = true
             println "[sherpa-onnx] jniLibs (*.so per ABI) .............. MAVEN_AAR  ${aar.name}"
-            println "[sherpa-onnx]   install: jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
-            println "[sherpa-onnx] C headers (sherpa-onnx) ............. ${copiedHeaders ? 'MAVEN_AAR  c-api/** → ' + includeSherpaDir : 'unchanged (no c-api/ in AAR; existing tree kept)'}"
+            println "[sherpa-onnx]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
+            println "[sherpa-onnx] C headers (sherpa-onnx) ............. ${copiedHeaders ? 'MAVEN_AAR  c-api/** --> ' + includeSherpaDir : 'unchanged (no c-api/ in AAR; existing tree kept)'}"
             println "[sherpa-onnx] version stamp ...................... written  ${sherpaVersionFile.name}=${currentSherpaVersion}"
           } else {
-            println "[sherpa-onnx] MAVEN_AAR: sherpaOnnxAar empty → trying GITHUB_RELEASE"
+            println "[sherpa-onnx] MAVEN_AAR: sherpaOnnxAar empty --> trying GITHUB_RELEASE"
           }
         } catch (Exception e) {
-          println "[sherpa-onnx] MAVEN_AAR failed: ${e.message} → trying GITHUB_RELEASE"
+          println "[sherpa-onnx] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
         }
       }
     } else {
@@ -290,14 +290,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             ffmpegVersionFile.text = currentFfmpegVersion
             ffmpegResolved = true
             println "[FFmpeg] jniLibs .................................. MAVEN_AAR  ${aar.name}"
-            println "[FFmpeg]   install: jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
-            println "[FFmpeg] C headers ................................ ${copiedHdr ? 'MAVEN_AAR  include/** → ' + ffmpegIncludeDir : 'unchanged (no include/ in AAR)'}"
+            println "[FFmpeg]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
+            println "[FFmpeg] C headers ................................ ${copiedHdr ? 'MAVEN_AAR  include/** --> ' + ffmpegIncludeDir : 'unchanged (no include/ in AAR)'}"
             println "[FFmpeg] version stamp ............................ written  ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
           } else {
-            println "[FFmpeg] MAVEN_AAR: ffmpegAar empty → trying GITHUB_RELEASE"
+            println "[FFmpeg] MAVEN_AAR: ffmpegAar empty --> trying GITHUB_RELEASE"
           }
         } catch (Exception e) {
-          println "[FFmpeg] MAVEN_AAR failed: ${e.message} → trying GITHUB_RELEASE"
+          println "[FFmpeg] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
         }
       }
     } else {
@@ -358,14 +358,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             libarchiveVersionFile.text = currentLibarchiveVersion
             libarchiveResolved = true
             println "[libarchive] jniLibs .............................. MAVEN_AAR  ${aar.name}"
-            println "[libarchive]   install: jni/<abi>/*.so → ${jniLibsHuman}/<abi>/"
-            println "[libarchive] C headers ............................ ${copiedHdr ? 'MAVEN_AAR  include/** → ' + libarchiveIncludeDir : 'unchanged (no include/ in AAR)'}"
+            println "[libarchive]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
+            println "[libarchive] C headers ............................ ${copiedHdr ? 'MAVEN_AAR  include/** --> ' + libarchiveIncludeDir : 'unchanged (no include/ in AAR)'}"
             println "[libarchive] version stamp ........................ written  ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
           } else {
-            println "[libarchive] MAVEN_AAR: libarchiveAar empty → trying GITHUB_RELEASE"
+            println "[libarchive] MAVEN_AAR: libarchiveAar empty --> trying GITHUB_RELEASE"
           }
         } catch (Exception e) {
-          println "[libarchive] MAVEN_AAR failed: ${e.message} → trying GITHUB_RELEASE"
+          println "[libarchive] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
         }
       }
     } else {
@@ -415,7 +415,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             }
             ortJniResolved = true
             println "[onnxruntime] libonnxruntime4j_jni.so .......... MAVEN_AAR  ${aar.name}"
-            println "[onnxruntime]   install: per ABI → ${jniLibsHuman}/<abi>/ (only JNI bridge; libonnxruntime.so from sherpa prebuilts)"
+            println "[onnxruntime]   install: per ABI --> ${jniLibsHuman}/<abi>/ (only JNI bridge; libonnxruntime.so from sherpa prebuilts)"
           } else {
             println "[onnxruntime] MAVEN_AAR: onnxruntimeAar empty — libonnxruntime4j_jni.so still missing"
           }
@@ -436,7 +436,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
       def needSherpa = !sherpaResolved
       if (needFfmpeg || needLibarchive || needSherpa) {
-        println "[prebuilt] GITHUB_RELEASE: skipped (no repo). Set -PprebuiltGitHubRepo=owner/repo or git remote origin → github.com"
+        println "[prebuilt] GITHUB_RELEASE: skipped (no repo). Set -PprebuiltGitHubRepo=owner/repo or git remote origin --> github.com"
         println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}"
         def diag = [
           "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
@@ -492,7 +492,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       ffmpegVersionFile.text = currentFfmpegVersion
       println "[FFmpeg] jniLibs + C headers ...................... GITHUB_RELEASE  tag=${tag}"
       println "[FFmpeg]   url: ${url}"
-      println "[FFmpeg]   install: <abi>/*.so → ${jniLibsHuman}/"
+      println "[FFmpeg]   install: <abi>/*.so --> ${jniLibsHuman}/"
       println "[FFmpeg] version stamp .......................... written  ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
     }
 
@@ -522,7 +522,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       libarchiveVersionFile.text = currentLibarchiveVersion
       println "[libarchive] jniLibs + C headers .................. GITHUB_RELEASE  tag=${tag}"
       println "[libarchive]   url: ${url}"
-      println "[libarchive]   install: <abi>/*.so → ${jniLibsHuman}/"
+      println "[libarchive]   install: <abi>/*.so --> ${jniLibsHuman}/"
       println "[libarchive] version stamp ........................ written  ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
     }
 
@@ -560,8 +560,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       sherpaVersionFile.text = currentSherpaVersion
       println "[sherpa-onnx] jniLibs + C headers ................. GITHUB_RELEASE  tag=${tag}"
       println "[sherpa-onnx]   url: ${url}"
-      println "[sherpa-onnx]   install: <abi>/*.so → ${jniLibsHuman}/"
-      println "[sherpa-onnx] classes.jar ......................... ${sherpaJavaJar.exists() ? 'GITHUB_RELEASE  → ' + sherpaOnnxClassesDir : 'not in zip (use extractSherpaOnnxClasses)'}"
+      println "[sherpa-onnx]   install: <abi>/*.so --> ${jniLibsHuman}/"
+      println "[sherpa-onnx] classes.jar ......................... ${sherpaJavaJar.exists() ? 'GITHUB_RELEASE  --> ' + sherpaOnnxClassesDir : 'not in zip (use extractSherpaOnnxClasses)'}"
       println "[sherpa-onnx] version stamp ...................... written  ${sherpaVersionFile.name}=${currentSherpaVersion}"
     }
     println ""
@@ -612,7 +612,7 @@ project.afterEvaluate {
   project.tasks.findByName('preBuild')?.dependsOn(project.tasks.findByName('checkJniLibs'))
 }
 
-// sherpa-onnx classes.jar: resolution order THIRD_PARTY → MAVEN_AAR → GITHUB_EXTRACT
+// sherpa-onnx classes.jar: resolution order THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT
 def sherpaLocalJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
 def sherpaExtractedJar = file("${project.buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
 
@@ -627,7 +627,7 @@ project.tasks.register("extractSherpaOnnxClasses") {
       copy { from sherpaLocalJar; into sherpaOnnxClassesDir }
       println "[prebuilt] extractSherpaOnnxClasses"
       println "[sherpa-onnx] classes.jar (Kotlin API) .......... THIRD_PARTY"
-      println "[sherpa-onnx]   ${sherpaLocalJar.absolutePath} → ${sherpaOnnxClassesDir}"
+      println "[sherpa-onnx]   ${sherpaLocalJar.absolutePath} --> ${sherpaOnnxClassesDir}"
       return
     }
     def aarFiles = project.configurations.sherpaOnnxAar.files
@@ -640,14 +640,14 @@ project.tasks.register("extractSherpaOnnxClasses") {
       }
       println "[prebuilt] extractSherpaOnnxClasses"
       println "[sherpa-onnx] classes.jar (Kotlin API) .......... MAVEN_AAR  ${aar.name}"
-      println "[sherpa-onnx]   classes.jar → ${sherpaOnnxClassesDir}"
+      println "[sherpa-onnx]   classes.jar --> ${sherpaOnnxClassesDir}"
       return
     }
     if (sherpaExtractedJar.exists()) {
       copy { from sherpaExtractedJar; into sherpaOnnxClassesDir }
       println "[prebuilt] extractSherpaOnnxClasses"
       println "[sherpa-onnx] classes.jar (Kotlin API) .......... GITHUB_EXTRACT"
-      println "[sherpa-onnx]   ${sherpaExtractedJar.absolutePath} → ${sherpaOnnxClassesDir}"
+      println "[sherpa-onnx]   ${sherpaExtractedJar.absolutePath} --> ${sherpaOnnxClassesDir}"
       return
     }
     throw new RuntimeException(
@@ -678,7 +678,7 @@ project.tasks.register("extractOnnxruntimeClasses") {
       }
       println "[prebuilt] extractOnnxruntimeClasses"
       println "[onnxruntime] classes.jar (Java API) ........... MAVEN_AAR  ${aar.name}"
-      println "[onnxruntime]   renamed to onnxruntime-classes.jar → ${onnxruntimeClassesDir}"
+      println "[onnxruntime]   renamed to onnxruntime-classes.jar --> ${onnxruntimeClassesDir}"
       return
     }
     throw new RuntimeException(
