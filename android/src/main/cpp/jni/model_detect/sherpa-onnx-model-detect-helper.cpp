@@ -389,5 +389,28 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
     return candidates;
 }
 
+bool Qwen3TokenizerDirHasVocabAndMerges(
+    const std::vector<FileEntry>& files,
+    const std::string& dirRaw
+) {
+    std::string dir = dirRaw;
+    while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\'))
+        dir.pop_back();
+    if (dir.empty()) return false;
+    bool hasVocab = false;
+    bool hasMerges = false;
+    const std::string prefix = dir + "/";
+    for (const auto& e : files) {
+        if (e.path.size() <= prefix.size()) continue;
+        if (e.path.compare(0, prefix.size(), prefix) != 0) continue;
+        std::string rest = e.path.substr(prefix.size());
+        if (rest.find('/') != std::string::npos || rest.find('\\') != std::string::npos) continue;
+        if (e.nameLower == "vocab.json") hasVocab = true;
+        if (e.nameLower == "merges.txt") hasMerges = true;
+    }
+    if (hasVocab && hasMerges) return true;
+    return FileExists(dir + "/vocab.json") && FileExists(dir + "/merges.txt");
+}
+
 } // namespace model_detect
 } // namespace sherpaonnx
