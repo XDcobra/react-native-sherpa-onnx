@@ -397,7 +397,7 @@ sherpa-onnx-rk3576-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported
 sherpa-onnx-rk3568-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported
 sherpa-onnx-rk3566-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2,
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2,qwen3_asr
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2,unsupported
 sherpa-onnx-rk3588-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2,unsupported
 sherpa-onnx-rk3576-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2,unsupported
