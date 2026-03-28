@@ -21,7 +21,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance (from createSTT)
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
+   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'qwen3_asr', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
    * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
@@ -30,10 +30,10 @@ export interface Spec extends TurboModule {
    * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
    * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
-   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano). Only the block for the loaded model type is applied.
+   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano, qwen3Asr). Only the block for the loaded model type is applied.
    * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
    * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
-   * @returns Object with success boolean and array of detected models (each with type and modelDir)
+   * @returns Object with success boolean, array of detected models (each with type and modelDir), and optional error when success is false.
    */
   initializeStt(
     instanceId: string,
@@ -53,6 +53,8 @@ export interface Spec extends TurboModule {
     bpeVocab?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (native structured failure). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
     decodingMethod?: string;
@@ -131,6 +133,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance (from createStreamingSTT)
    * @param options - All init options (modelDir, modelType, enableEndpoint, decodingMethod, maxActivePaths, and optional endpoint/rule params).
    *   `options.dither`: **Android** only; **iOS** ignores it (native `FeatureConfig` has no dither field).
+   * @returns `{ success: true }` on success, or `{ success: false, error?: string }` on structured native failure.
    */
   initializeOnlineSttWithOptions(
     instanceId: string,
@@ -160,7 +163,7 @@ export interface Spec extends TurboModule {
       rule3MinTrailingSilence?: number;
       rule3MinUtteranceLength?: number;
     }
-  ): Promise<{ success: boolean }>;
+  ): Promise<{ success: boolean; error?: string }>;
 
   /** Create a new stream for the given OnlineRecognizer instance. */
   createSttStream(
@@ -249,7 +252,7 @@ export interface Spec extends TurboModule {
    * @param maxNumSentences - Optional max sentences per callback (default: 1)
    * @param silenceScale - Optional silence scale on config (default: 0.2)
    * @param provider - Optional execution provider (e.g. 'cpu', 'coreml', 'xnnpack'; default: 'cpu')
-   * @returns Object with success boolean and array of detected models (each with type and modelDir)
+   * @returns Object with success boolean, array of detected models (each with type and modelDir), sampleRate/numSpeakers on success, and optional error when success is false.
    */
   initializeTts(
     instanceId: string,
@@ -267,6 +270,8 @@ export interface Spec extends TurboModule {
     provider?: string
   ): Promise<{
     success: boolean;
+    /** Present when success is false (native structured failure). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     sampleRate: number;
     numSpeakers: number;
@@ -299,7 +304,7 @@ export interface Spec extends TurboModule {
    * @param noiseScale - Optional noise scale override
    * @param noiseScaleW - Optional noise scale W override
    * @param lengthScale - Optional length scale override
-   * @returns Object with success boolean and array of detected models
+   * @returns Object with success, detectedModels, sampleRate, numSpeakers on success, and optional error when success is false.
    */
   updateTtsParams(
     instanceId: string,
@@ -308,6 +313,8 @@ export interface Spec extends TurboModule {
     lengthScale?: number | null
   ): Promise<{
     success: boolean;
+    /** Present when success is false (native structured failure). */
+    error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     sampleRate: number;
     numSpeakers: number;

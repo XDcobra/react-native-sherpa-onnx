@@ -36,6 +36,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         case K::kZipformerCtc: return @"zipformer_ctc";
         case K::kWhisper: return @"whisper";
         case K::kFunAsrNano: return @"funasr_nano";
+        case K::kQwen3Asr: return @"qwen3_asr";
         case K::kFireRedAsr: return @"fire_red_asr";
         case K::kMoonshine: return @"moonshine";
         case K::kMoonshineV2: return @"moonshine_v2";
@@ -164,10 +165,12 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         sherpaonnx::SttSenseVoiceOptions senseVoiceOpts;
         sherpaonnx::SttCanaryOptions canaryOpts;
         sherpaonnx::SttFunAsrNanoOptions funasrNanoOpts;
+        sherpaonnx::SttQwen3AsrOptions qwen3AsrOpts;
         const sherpaonnx::SttWhisperOptions *whisperOptsPtr = nullptr;
         const sherpaonnx::SttSenseVoiceOptions *senseVoiceOptsPtr = nullptr;
         const sherpaonnx::SttCanaryOptions *canaryOptsPtr = nullptr;
         const sherpaonnx::SttFunAsrNanoOptions *funasrNanoOptsPtr = nullptr;
+        const sherpaonnx::SttQwen3AsrOptions *qwen3AsrOptsPtr = nullptr;
         if (modelOptions != nil && [modelOptions isKindOfClass:[NSDictionary class]]) {
             NSDictionary *w = modelOptions[@"whisper"];
             if ([w isKindOfClass:[NSDictionary class]]) {
@@ -202,12 +205,21 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
                 if (fn[@"hotwords"] != nil) funasrNanoOpts.hotwords = std::string([(NSString *)fn[@"hotwords"] UTF8String]);
                 funasrNanoOptsPtr = &funasrNanoOpts;
             }
+            NSDictionary *q3 = modelOptions[@"qwen3Asr"];
+            if ([q3 isKindOfClass:[NSDictionary class]]) {
+                if (q3[@"maxTotalLen"] != nil) qwen3AsrOpts.max_total_len = [(NSNumber *)q3[@"maxTotalLen"] intValue];
+                if (q3[@"maxNewTokens"] != nil) qwen3AsrOpts.max_new_tokens = [(NSNumber *)q3[@"maxNewTokens"] intValue];
+                if (q3[@"temperature"] != nil) qwen3AsrOpts.temperature = [(NSNumber *)q3[@"temperature"] floatValue];
+                if (q3[@"topP"] != nil) qwen3AsrOpts.top_p = [(NSNumber *)q3[@"topP"] floatValue];
+                if (q3[@"seed"] != nil) qwen3AsrOpts.seed = [(NSNumber *)q3[@"seed"] intValue];
+                qwen3AsrOptsPtr = &qwen3AsrOpts;
+            }
         }
 
         sherpaonnx::SttInitializeResult result = inst->wrapper->initialize(
             modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
             numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
-            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr);
+            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr);
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");

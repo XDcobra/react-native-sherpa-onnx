@@ -97,6 +97,9 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.vits.model = detect.paths.ttsModel;
                 config.model.vits.tokens = detect.paths.tokens;
                 config.model.vits.data_dir = detect.paths.dataDir;
+                if (!detect.paths.lexicon.empty()) {
+                    config.model.vits.lexicon = detect.paths.lexicon;
+                }
                 if (noiseScale.has_value()) {
                     config.model.vits.noise_scale = *noiseScale;
                 }
@@ -175,6 +178,19 @@ TtsInitializeResult TtsWrapper::initialize(
                 result.error = "TTS: Unknown model type: " + modelType;
                 LOGE("TTS: Unknown model type: %s", modelType.c_str());
                 return result;
+        }
+
+        // Prevent hard native aborts from sherpa-onnx when phonemization data is missing.
+        // Some VITS models require either espeak-ng-data or a lexicon. If both are missing,
+        // fail gracefully so JS/UI can display a recoverable error instead of crashing.
+        if (detect.selectedKind == TtsModelKind::kVits &&
+            detect.paths.dataDir.empty() &&
+            detect.paths.lexicon.empty()) {
+            result.error =
+                "TTS VITS init blocked: missing both espeak-ng-data and lexicon. "
+                "Please add espeak-ng-data to the model folder or provide a lexicon.";
+            LOGE("%s", result.error.c_str());
+            return result;
         }
 
         if (ruleFsts.has_value() && !ruleFsts->empty()) {

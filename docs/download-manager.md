@@ -104,7 +104,7 @@ Model downloads use [@kesha-antonov/react-native-background-downloader](https://
 
 #### Android: foreground service & notifications
 
-The dependency [@kesha-antonov/react-native-background-downloader](https://github.com/kesha-antonov/react-native-background-downloader) merges **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** into your **merged manifest** (needed for downloads while the app is backgrounded). On **Google Play**, complete the **foreground service permissions** declaration under **Policy → App content** when the console asks for it (and provide any required demo video).
+The dependency [@kesha-antonov/react-native-background-downloader](https://github.com/kesha-antonov/react-native-background-downloader) merges **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** into your **merged manifest** (needed for downloads while the app is backgrounded). On **Google Play**, complete the **foreground service permissions** declaration under **Policy --> App content** when the console asks for it (and provide any required demo video).
 
 **Visible download notifications**
 

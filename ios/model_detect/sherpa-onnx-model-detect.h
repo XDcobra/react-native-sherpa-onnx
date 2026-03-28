@@ -19,6 +19,7 @@ enum class SttModelKind {
     kZipformerCtc,
     kWhisper,
     kFunAsrNano,
+    kQwen3Asr,
     kFireRedAsr,
     kMoonshine,
     kMoonshineV2,
@@ -56,6 +57,11 @@ struct SttModelPaths {
     std::string funasrLLM;
     std::string funasrEmbedding;
     std::string funasrTokenizer;
+    /** Qwen3-ASR: conv_frontend.onnx + encoder + decoder + tokenizer dir (vocab.json, merges.txt, tokenizer_config.json). */
+    std::string qwen3ConvFrontend;
+    std::string qwen3Encoder;
+    std::string qwen3Decoder;
+    std::string qwen3Tokenizer;
     std::string moonshinePreprocessor;
     std::string moonshineEncoder;
     std::string moonshineUncachedDecoder;
@@ -85,6 +91,8 @@ struct SttCandidatePaths {
     std::string funasrLLM;
     std::string funasrEmbedding;
     std::string funasrTokenizerDir;
+    std::string qwen3ConvFrontend;
+    std::string qwen3TokenizerDir;
     std::string moonshinePreprocessor;
     std::string moonshineEncoder;
     std::string moonshineUncachedDecoder;
@@ -100,6 +108,7 @@ struct SttPathHints {
     bool isLikelyWenetCtc = false;
     bool isLikelySenseVoice = false;
     bool isLikelyFunAsrNano = false;
+    bool isLikelyQwen3Asr = false;
     bool isLikelyZipformer = false;
     bool isLikelyMoonshine = false;
     bool isLikelyDolphin = false;
@@ -124,6 +133,7 @@ struct SttCapabilities {
     bool hasMoonshineV2 = false;
     bool hasParaformer = false;
     bool hasFunAsrNano = false;
+    bool hasQwen3Asr = false;
     bool hasDolphin = false;
     bool hasFireRedAsr = false;
     /** True when dir name suggests Fire Red but only a single CTC/paraformer model (no encoder/decoder). Use zipformer_ctc. */

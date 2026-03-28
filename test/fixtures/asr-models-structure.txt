@@ -6708,6 +6708,34 @@ sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/decoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/encoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/tokens.txt
 
+# Asset: sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise1-en.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/README.md
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/f1_noise.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/raokouling.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ru1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise2.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ar1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fast1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/transcript.txt
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/qiqiu1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ja1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/de.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/es1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/cantonese.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/codeswitch.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fr1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/rap1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/README.md
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/encoder.int8.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/decoder.int8.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/conv_frontend.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/vocab.json
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/merges.txt
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/tokenizer_config.json
 # Asset: sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16/
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16/test_wavs/

@@ -8,9 +8,9 @@ This document is the **single source of truth** for the Pocket TTS / EOS / cross
 
 ## TL;DR
 
-1. **Upstream logic bug (real):** If EOS is detected at LM step `0`, the original guard `eos_step > 0` prevents the early-exit branch → loop runs until `max_frames` (default 500) → **~40 s @ 24 kHz** (~960k samples). **Fix:** use `eos_step >= 0` (see [Appendix A](#appendix-a-upstream-logic-bug-eos_step--0)).
+1. **Upstream logic bug (real):** If EOS is detected at LM step `0`, the original guard `eos_step > 0` prevents the early-exit branch --> loop runs until `max_frames` (default 500) --> **~40 s @ 24 kHz** (~960k samples). **Fix:** use `eos_step >= 0` (see [Appendix A](#appendix-a-upstream-logic-bug-eos_step--0)).
 
-2. **Separate issue (cross-platform):** Even with identical JS-visible ref audio (samples, SR, min/max/rms) and identical Pocket config, **iOS Simulator vs Android Emulator** can produce **different EOS logits** and different **`voice_ref_hash`** after resample → **very different output length** for the same text (e.g. first sentence hits `max_frames` on iOS but exits early on Android). This is **not** explained by CoreML when `provider=cpu` (confirmed in logs).
+2. **Separate issue (cross-platform):** Even with identical JS-visible ref audio (samples, SR, min/max/rms) and identical Pocket config, **iOS Simulator vs Android Emulator** can produce **different EOS logits** and different **`voice_ref_hash`** after resample --> **very different output length** for the same text (e.g. first sentence hits `max_frames` on iOS but exits early on Android). This is **not** explained by CoreML when `provider=cpu` (confirmed in logs).
 
 3. **Product decision (path B):** Ship with **voice cloning on iOS only via Zipvoice**; on **Android**, **Zipvoice + Pocket** remain available. **Pocket voice cloning on iOS** is deferred until we can revisit with a dedicated test harness.
 
@@ -28,15 +28,15 @@ In `GenerateSingleSentence`, early stop used `eos_step > 0`. When `eos_step == 0
 
 EOS is inferred with a **scalar threshold** on the LM output, e.g. `p_logit[0] > -4` (see upstream `offline-tts-pocket-impl.h`). That is **fragile**:
 
-- **Early** EOS (e.g. step 0) → very few frames → **short** output (sometimes “bad” audio).
-- **No** EOS before `max_frames` → **long** output (up to ~40 s per sentence chunk at 24 kHz).
+- **Early** EOS (e.g. step 0) --> very few frames --> **short** output (sometimes “bad” audio).
+- **No** EOS before `max_frames` --> **long** output (up to ~40 s per sentence chunk at 24 kHz).
 
 ### C) Cross-platform drift (VoiceLab observation)
 
 Under “same” conditions (same model bundle names `lm_flow.onnx` / `lm_main.onnx`, `cpu`, same `GenerationConfig` extras, same text chunking, same ref file length and **same printed** min/max/rms):
 
-- **`voice_ref_hash`** (hash of **float** samples used after resample + trim) **differed** between iOS Simulator and Android Emulator → buffers are **not bit-identical**; voice embedding can diverge.
-- **Sentence 1/3:** iOS hit **`hit_max_frames`** (500 LM steps) → **40 s** audio for that chunk; Android detected EOS around **step 73** → **~6.8 s** for the same chunk.
+- **`voice_ref_hash`** (hash of **float** samples used after resample + trim) **differed** between iOS Simulator and Android Emulator --> buffers are **not bit-identical**; voice embedding can diverge.
+- **Sentence 1/3:** iOS hit **`hit_max_frames`** (500 LM steps) --> **40 s** audio for that chunk; Android detected EOS around **step 73** --> **~6.8 s** for the same chunk.
 
 So: **parity of WAV + config ≠ parity of LM trajectory** across ABIs / ORT builds / float order.
 
@@ -55,7 +55,7 @@ VoiceLab logs showed **`requested provider='cpu'`** and **`effective config.mode
 | **Diagnostics** | Added **`PocketTTS diag`** logs (init, `generate`, chunk metadata, `voice_ref` stats + hash, embedding cache hit/miss, per-sentence EOS, `chunk_audio`, `generate_done`). iOS: **`[PocketTTS diag] ios_clone`** before generate; Android: **`android_init`** / **`android_pre_gen`**. |
 | **Same ref file** | Reused the same reference WAV (349523 samples @ 16 kHz); JS min/max/rms matched across platforms. |
 | **Same model bundle** | `sherpa-onnx-pocket-tts-2026-01-26` with `lm_flow.onnx`, `lm_main.onnx`, etc. |
-| **Same generation params** | e.g. `frames_after_eos=12`, `max_frames=500`, `num_steps=5`, same 322-char text → **3 chunks** with **identical `chunk_meta` previews** on iOS and Android. |
+| **Same generation params** | e.g. `frames_after_eos=12`, `max_frames=500`, `num_steps=5`, same 322-char text --> **3 chunks** with **identical `chunk_meta` previews** on iOS and Android. |
 | **C++ desktop** | `pocket-tts-en-cxx-api` on Mac; default static ORT build did not expose CoreML EP the same way — not a substitute for VoiceLab iOS vs Android. |
 
 ---
@@ -68,7 +68,7 @@ VoiceLab logs showed **`requested provider='cpu'`** and **`effective config.mode
 
 3. **40 s / ~960k samples** per chunk is a **fingerprint** of **`hit_max_frames`** (500 frames × decoder frame size at 24 kHz), not necessarily the only bug.
 
-4. **Cross-platform:** aggregate stats (min/max/rms) can match while **hashes of the resampled reference** differ → expect **non-deterministic parity** across iOS Simulator vs Android Emulator for Pocket cloning until investigated further.
+4. **Cross-platform:** aggregate stats (min/max/rms) can match while **hashes of the resampled reference** differ --> expect **non-deterministic parity** across iOS Simulator vs Android Emulator for Pocket cloning until investigated further.
 
 5. **Pocket on iOS** in VoiceLab is **high risk for v1** from a QA/support perspective (length and quality swings); **Zipvoice** is the safer cloning path on iOS.
 
@@ -94,7 +94,7 @@ Document this in app copy / settings if users can choose engines.
 
 ### Medium term (post–v1)
 
-- [ ] **Mini test app or CLI fixture:** fixed WAV + fixed text → capture `PocketTTS diag` + output WAV + duration; run on **same physical device class** or document ABI explicitly.
+- [ ] **Mini test app or CLI fixture:** fixed WAV + fixed text --> capture `PocketTTS diag` + output WAV + duration; run on **same physical device class** or document ABI explicitly.
 - [ ] Optional: log **ORT version** and **embedding tensor hash** (first N floats) to separate “ref drift” vs “LM drift”.
 - [ ] Consider upstream discussion: **configurable EOS threshold**, multi-step confirmation, or safer defaults — separate from the `eos_step` off-by-one.
 

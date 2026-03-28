@@ -329,15 +329,59 @@
                nil);
         return;
     }
-    NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
-    NSString *fullPath = [resourcePath stringByAppendingPathComponent:assetPath];
-    NSError *error = nil;
-    NSString *content = [NSString stringWithContentsOfFile:fullPath encoding:NSUTF8StringEncoding error:&error];
-    if (error) {
-        reject(@"ASSET_READ_ERROR", [NSString stringWithFormat:@"Failed to read asset %@: %@", assetPath, error.localizedDescription], error);
-    } else {
-        resolve(content);
+    NSString *fullPath = nil;
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSString *assetDir = [assetPath stringByDeletingLastPathComponent];
+    NSString *assetNameWithExt = [assetPath lastPathComponent];
+    NSString *assetName = [assetNameWithExt stringByDeletingPathExtension];
+    NSString *assetExt = [assetNameWithExt pathExtension];
+
+    // 1) App bundle: regular nested path (keeps generic asset support)
+    NSString *mainPath = [mainBundle pathForResource:assetName
+                                              ofType:assetExt.length > 0 ? assetExt : nil
+                                         inDirectory:assetDir.length > 0 ? assetDir : nil];
+    if (mainPath.length > 0) {
+        fullPath = mainPath;
     }
+
+    // 2) CocoaPods resource bundle: files are flattened into bundle root
+    if (!fullPath) {
+        NSString *resBundlePath = [mainBundle pathForResource:@"SherpaOnnxResources"
+                                                       ofType:@"bundle"];
+        if (resBundlePath.length > 0) {
+            NSBundle *resBundle = [NSBundle bundleWithPath:resBundlePath];
+            if (resBundle) {
+                NSString *bundleRootPath = [resBundle pathForResource:assetName
+                                                                ofType:assetExt.length > 0 ? assetExt : nil];
+                if (bundleRootPath.length > 0) {
+                    fullPath = bundleRootPath;
+                }
+            }
+        }
+    }
+
+    if (!fullPath) {
+        reject(@"ASSET_READ_ERROR",
+               [NSString stringWithFormat:@"Failed to locate asset %@", assetPath],
+               nil);
+        return;
+    }
+
+    NSError *error = nil;
+    NSString *content = [NSString stringWithContentsOfFile:fullPath
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&error];
+    if (error || content == nil) {
+        reject(@"ASSET_READ_ERROR",
+               [NSString stringWithFormat:@"Failed to read asset %@ at %@: %@",
+                assetPath,
+                fullPath,
+                error.localizedDescription ?: @"Unknown error"],
+               error);
+        return;
+    }
+
+    resolve(content);
 }
 
 @end

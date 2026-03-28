@@ -192,10 +192,13 @@ export async function createStreamingTTS(
   );
 
   if (!result.success) {
+    const nativeError =
+      typeof result.error === 'string' ? result.error.trim() : '';
+    const detected = JSON.stringify(result.detectedModels ?? []);
     throw new Error(
-      `TTS initialization failed: ${JSON.stringify(
-        result.detectedModels ?? []
-      )}`
+      nativeError.length > 0
+        ? `Streaming TTS initialization failed: ${nativeError}`
+        : `Streaming TTS initialization failed: ${detected}`
     );
   }
 

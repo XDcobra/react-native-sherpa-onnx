@@ -83,6 +83,15 @@ struct SttFunAsrNanoOptions {
     std::optional<std::string> hotwords;
 };
 
+/** Model-specific options: Qwen3 ASR (sherpa-onnx OfflineQwen3ASRModelConfig). */
+struct SttQwen3AsrOptions {
+    std::optional<int32_t> max_total_len;
+    std::optional<int32_t> max_new_tokens;
+    std::optional<float> temperature;
+    std::optional<float> top_p;
+    std::optional<int32_t> seed;
+};
+
 /**
  * Wrapper class for sherpa-onnx OfflineRecognizer (STT).
  */
@@ -106,7 +115,8 @@ public:
         const SttWhisperOptions* whisperOpts = nullptr,
         const SttSenseVoiceOptions* senseVoiceOpts = nullptr,
         const SttCanaryOptions* canaryOpts = nullptr,
-        const SttFunAsrNanoOptions* funasrNanoOpts = nullptr
+        const SttFunAsrNanoOptions* funasrNanoOpts = nullptr,
+        const SttQwen3AsrOptions* qwen3AsrOpts = nullptr
     );
 
     SttRecognitionResult transcribeFile(const std::string& filePath);

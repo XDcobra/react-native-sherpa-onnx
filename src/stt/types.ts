@@ -15,6 +15,7 @@ export type STTModelType =
   | 'ctc'
   | 'whisper'
   | 'funasr_nano'
+  | 'qwen3_asr'
   | 'fire_red_asr'
   | 'moonshine'
   | 'dolphin'
@@ -50,6 +51,7 @@ export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'ctc',
   'whisper',
   'funasr_nano',
+  'qwen3_asr',
   'fire_red_asr',
   'moonshine',
   'dolphin',
@@ -124,6 +126,20 @@ export interface SttFunAsrNanoModelOptions {
   hotwords?: string;
 }
 
+/** Options for Qwen3 ASR models. Applied only when modelType is 'qwen3_asr'. */
+export interface SttQwen3AsrModelOptions {
+  /** Max total sequence length. Default: 512. */
+  maxTotalLen?: number;
+  /** Max new tokens to generate. Default: 128. */
+  maxNewTokens?: number;
+  /** Sampling temperature. Default: 1e-6. */
+  temperature?: number;
+  /** Top-p sampling. Default: 0.8. */
+  topP?: number;
+  /** Random seed. Default: 42. */
+  seed?: number;
+}
+
 /**
  * Model-specific STT options. Only the block for the actually loaded model type is applied;
  * others are ignored (e.g. whisper options have no effect when a paraformer model is loaded).
@@ -133,6 +149,7 @@ export interface SttModelOptions {
   senseVoice?: SttSenseVoiceModelOptions;
   canary?: SttCanaryModelOptions;
   funasrNano?: SttFunAsrNanoModelOptions;
+  qwen3Asr?: SttQwen3AsrModelOptions;
 }
 
 /**
@@ -162,6 +179,7 @@ export interface STTInitializeOptions {
    * - 'wenet_ctc': Force detection as WeNet CTC model
    * - 'sense_voice': Force detection as SenseVoice model
    * - 'funasr_nano': Force detection as FunASR Nano model
+   * - 'qwen3_asr': Force detection as Qwen3 ASR
    * - 'fire_red_asr': FireRed ASR (encoder/decoder)
    * - 'moonshine': Moonshine (preprocess, encode, uncached_decode, cached_decode)
    * - 'dolphin': Dolphin (single model)

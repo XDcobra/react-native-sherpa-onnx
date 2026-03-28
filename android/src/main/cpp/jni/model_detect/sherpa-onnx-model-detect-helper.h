@@ -88,6 +88,15 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
     const std::string& rootDir
 );
 
+/**
+ * True if `dir` contains vocab.json and merges.txt: listed in `files` (fixture / synthetic trees)
+ * or present on disk. Used for Qwen3-ASR tokenizer directory detection.
+ */
+bool Qwen3TokenizerDirHasVocabAndMerges(
+    const std::vector<FileEntry>& files,
+    const std::string& dir
+);
+
 } // namespace model_detect
 } // namespace sherpaonnx
 

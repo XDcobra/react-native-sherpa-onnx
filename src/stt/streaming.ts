@@ -231,7 +231,13 @@ export async function createStreamingSTT(
   );
 
   if (!result.success) {
-    throw new Error(`Streaming STT initialization failed for ${instanceId}`);
+    const nativeError =
+      typeof result.error === 'string' ? result.error.trim() : '';
+    throw new Error(
+      nativeError.length > 0
+        ? `Streaming STT initialization failed: ${nativeError}`
+        : `Streaming STT initialization failed for ${instanceId}`
+    );
   }
 
   const enableInputNormalization = options.enableInputNormalization !== false;

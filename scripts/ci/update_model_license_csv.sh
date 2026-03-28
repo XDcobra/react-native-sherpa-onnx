@@ -14,7 +14,7 @@
 # - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
-# - Pipeline: try archive (if applicable) → HF/ModelScope fallbacks for eligible assets. If no license
+# - Pipeline: try archive (if applicable) --> HF/ModelScope fallbacks for eligible assets. If no license
 #   is found after all attempts, license_type is set to exhausted (default keyword; override with
 #   LICENSE_EXHAUSTED env). You can set exhausted manually after review.
 # - .onnx-only: exhausted (no archive to scan).
@@ -30,7 +30,7 @@
 #   asr-models-license-status.csv (default: same directory as --csv). Strip prefix
 #   sherpa-onnx-qnn-<soc>-binary-<n>-seconds- from the QNN asset name, then try a few derived filenames
 #   (exact, sherpa-onnx-…, and sherpa-onnx-<stem>.tar.bz2 when …-int8.tar.bz2). On match, copy the ASR row’s
-#   license fields (not asset_name) onto the QNN asset; on no match → exhausted like other dead ends.
+#   license fields (not asset_name) onto the QNN asset; on no match --> exhausted like other dead ends.
 # - Hugging Face: set HF_TOKEN or HUGGINGFACE_HUB_TOKEN (read token is enough for public repos). Anonymous
 #   requests from CI often get HTTP 401; without a token README/MODEL_CARD cannot be fetched.
 #
@@ -566,7 +566,7 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ "$asset_name" == *.onnx ]]; then
     set_exhausted "$asset_name"
-    echo "  $asset_name — .onnx bundle → license_type=$LICENSE_EXHAUSTED (no archive; skipped next run)"
+    echo "  $asset_name — .onnx bundle --> license_type=$LICENSE_EXHAUSTED (no archive; skipped next run)"
     continue
   fi
 
@@ -601,15 +601,15 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ ${#license_paths[@]} -eq 0 ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — no license in tree → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — no license in tree --> filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     if try_qnn_asr_license_fallback "$asset_name"; then
-      echo "  $asset_name — no license in tree + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — no license in tree + HF exhausted --> QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
-    echo "  $asset_name — no license in tree + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
+    echo "  $asset_name — no license in tree + fallbacks exhausted --> license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -624,15 +624,15 @@ for asset_name in "${release_assets[@]}"; do
   if ! curl "${_curl_dl[@]}" -o "$archive_path" "$url"; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — download failed → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — download failed --> filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     if try_qnn_asr_license_fallback "$asset_name"; then
-      echo "  $asset_name — download failed + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — download failed + HF exhausted --> QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
-    echo "  $asset_name — download failed + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
+    echo "  $asset_name — download failed + fallbacks exhausted --> license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -665,15 +665,15 @@ for asset_name in "${release_assets[@]}"; do
   if [[ -z "$extracted_text" ]]; then
     rm -rf "$td"
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — could not extract license file → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — could not extract license file --> filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     if try_qnn_asr_license_fallback "$asset_name"; then
-      echo "  $asset_name — could not extract license + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — could not extract license + HF exhausted --> QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
-    echo "  $asset_name — could not extract license file + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
+    echo "  $asset_name — could not extract license file + fallbacks exhausted --> license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -686,15 +686,15 @@ for asset_name in "${release_assets[@]}"; do
 
   if [[ "$l_res" == "unknown" ]]; then
     if try_hf_model_card_fallback "$asset_name"; then
-      echo "  $asset_name — archive license text unknown → filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — archive license text unknown --> filled from $(log_license_fallback_source "$asset_name") (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     if try_qnn_asr_license_fallback "$asset_name"; then
-      echo "  $asset_name — archive text unknown + HF exhausted → QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
+      echo "  $asset_name — archive text unknown + HF exhausted --> QNN mirror from asr row (${_QNN_ASR_MIRROR_MATCHED}) (license_type=${existing_license_type["$asset_name"]})"
       continue
     fi
     set_exhausted "$asset_name"
-    echo "  $asset_name — archive text unclassified + fallbacks exhausted → license_type=$LICENSE_EXHAUSTED"
+    echo "  $asset_name — archive text unclassified + fallbacks exhausted --> license_type=$LICENSE_EXHAUSTED"
     continue
   fi
 
@@ -761,5 +761,5 @@ if [[ -d "$REPO_ROOT/android" && -d "$REPO_ROOT/ios" && -f "$CSV_FILE" ]]; then
   if ! same_canonical_path "$CSV_FILE" "$_ios_target"; then
     cp "$CSV_FILE" "$_ios_target"
   fi
-  echo "Synced $_bn → android/src/main/assets/model_licenses/ and ios/Resources/model_licenses/"
+  echo "Synced $_bn --> android/src/main/assets/model_licenses/ and ios/Resources/model_licenses/"
 fi

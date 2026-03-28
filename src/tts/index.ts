@@ -112,10 +112,7 @@ export async function detectTtsModel(
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
   const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
-  const err =
-    typeof (raw as { error?: unknown }).error === 'string'
-      ? String((raw as { error: string }).error).trim()
-      : '';
+  const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
@@ -243,10 +240,13 @@ export async function createTTS(
   );
 
   if (!result.success) {
+    const nativeError =
+      typeof result.error === 'string' ? result.error.trim() : '';
+    const detected = JSON.stringify(result.detectedModels ?? []);
     throw new Error(
-      `TTS initialization failed: ${JSON.stringify(
-        result.detectedModels ?? []
-      )}`
+      nativeError.length > 0
+        ? `TTS initialization failed: ${nativeError}`
+        : `TTS initialization failed: ${detected}`
     );
   }
 

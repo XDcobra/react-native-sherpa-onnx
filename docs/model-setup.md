@@ -230,7 +230,7 @@ Returns `success: false` when required files are missing or validation fails; us
 
 ### Model detection internals
 
-Native code scans the **resolved** model directory (recursive), maps filenames to engine roles, then (a) lists **every** engine kind that *could* fit → `detectedModels`, and (b) picks based on the highest probability **one** kind for validation → `modelType` (same rules as `createSTT` / `createTTS` with `modelType: 'auto'`). Full pipeline: comments at the top of `sherpa-onnx-model-detect-stt.cpp` / `sherpa-onnx-model-detect-tts.cpp`.
+Native code scans the **resolved** model directory (recursive), maps filenames to engine roles, then (a) lists **every** engine kind that *could* fit --> `detectedModels`, and (b) picks based on the highest probability **one** kind for validation --> `modelType` (same rules as `createSTT` / `createTTS` with `modelType: 'auto'`). Full pipeline: comments at the top of `sherpa-onnx-model-detect-stt.cpp` / `sherpa-onnx-model-detect-tts.cpp`.
 
 **Why `detectSttModel` / `detectTtsModel` if `createSTT` / `createTTS` already support `modelType: 'auto'`?**  
 Detection is a **cheap preflight**: no recognizer / TTS engine allocation, faster when probing many folders, and you get **`success` / `error` / `isHardwareSpecificUnsupported`** (STT) before paying for full init. Use it for validation UI, model pickers, and diagnostics; skip it if you only need to load one known-good pack.
@@ -242,16 +242,16 @@ import { assetModelPath } from 'react-native-sherpa-onnx';
 import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 const modelPath = assetModelPath('models/my-pack');
-// detectSttModel → resolveModelPath → absolute dir on disk, then native file scan (no recognizer init).
+// detectSttModel --> resolveModelPath --> absolute dir on disk, then native file scan (no recognizer init).
 
 const det = await detectSttModel(modelPath, {
   // preferInt8 omitted: do not filter by int8 in filenames (native picks among matches by its own rule).
-  // preferInt8: true  → use int8-named ONNX where applicable (e.g. *-int8.onnx).
-  // preferInt8: false → skip int8-named ONNX files (float / full-precision variants).
+  // preferInt8: true  --> use int8-named ONNX where applicable (e.g. *-int8.onnx).
+  // preferInt8: false --> skip int8-named ONNX files (float / full-precision variants).
   preferInt8: true,
 
   // modelType omitted or 'auto': choose kind from folder-name hints, else fixed fallback order.
-  // modelType: 'whisper' | 'nemo_transducer' | … → use only if that engine is supported by the files.
+  // modelType: 'whisper' | 'nemo_transducer' | … --> use only if that engine is supported by the files.
   modelType: 'auto',
 });
 

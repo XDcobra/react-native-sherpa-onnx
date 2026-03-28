@@ -67,10 +67,7 @@ export async function detectSttModel(
     options?.preferInt8,
     options?.modelType
   );
-  const err =
-    typeof (raw as { error?: unknown }).error === 'string'
-      ? String((raw as { error: string }).error).trim()
-      : '';
+  const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
@@ -170,10 +167,13 @@ export async function createSTT(
   );
 
   if (!result.success) {
+    const nativeError =
+      typeof result.error === 'string' ? result.error.trim() : '';
+    const detected = JSON.stringify(result.detectedModels ?? []);
     throw new Error(
-      `STT initialization failed: ${JSON.stringify(
-        result.detectedModels ?? []
-      )}`
+      nativeError.length > 0
+        ? `STT initialization failed: ${nativeError}`
+        : `STT initialization failed: ${detected}`
     );
   }
 
@@ -259,6 +259,7 @@ export type {
   STTInitializeOptions,
   STTModelType,
   SttModelOptions,
+  SttQwen3AsrModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
   SttEngine,

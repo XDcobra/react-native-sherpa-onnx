@@ -138,7 +138,8 @@ SttInitializeResult SttWrapper::initialize(
     const SttWhisperOptions* whisperOpts,
     const SttSenseVoiceOptions* senseVoiceOpts,
     const SttCanaryOptions* canaryOpts,
-    const SttFunAsrNanoOptions* funasrNanoOpts
+    const SttFunAsrNanoOptions* funasrNanoOpts,
+    const SttQwen3AsrOptions* qwen3AsrOpts
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -196,6 +197,12 @@ SttInitializeResult SttWrapper::initialize(
                 config.model_config.funasr_nano.llm = detect.paths.funasrLLM;
                 config.model_config.funasr_nano.embedding = detect.paths.funasrEmbedding;
                 config.model_config.funasr_nano.tokenizer = detect.paths.funasrTokenizer;
+                break;
+            case SttModelKind::kQwen3Asr:
+                config.model_config.qwen3_asr.conv_frontend = detect.paths.qwen3ConvFrontend;
+                config.model_config.qwen3_asr.encoder = detect.paths.qwen3Encoder;
+                config.model_config.qwen3_asr.decoder = detect.paths.qwen3Decoder;
+                config.model_config.qwen3_asr.tokenizer = detect.paths.qwen3Tokenizer;
                 break;
             case SttModelKind::kFireRedAsr:
                 config.model_config.fire_red_asr.encoder = detect.paths.fireRedEncoder;
@@ -290,6 +297,20 @@ SttInitializeResult SttWrapper::initialize(
                         config.model_config.funasr_nano.hotwords = *funasrNanoOpts->hotwords;
                 }
                 break;
+            case SttModelKind::kQwen3Asr:
+                if (qwen3AsrOpts) {
+                    if (qwen3AsrOpts->max_total_len.has_value())
+                        config.model_config.qwen3_asr.max_total_len = *qwen3AsrOpts->max_total_len;
+                    if (qwen3AsrOpts->max_new_tokens.has_value())
+                        config.model_config.qwen3_asr.max_new_tokens = *qwen3AsrOpts->max_new_tokens;
+                    if (qwen3AsrOpts->temperature.has_value())
+                        config.model_config.qwen3_asr.temperature = *qwen3AsrOpts->temperature;
+                    if (qwen3AsrOpts->top_p.has_value())
+                        config.model_config.qwen3_asr.top_p = *qwen3AsrOpts->top_p;
+                    if (qwen3AsrOpts->seed.has_value())
+                        config.model_config.qwen3_asr.seed = *qwen3AsrOpts->seed;
+                }
+                break;
             default:
                 break;
         }
@@ -329,9 +350,16 @@ SttInitializeResult SttWrapper::initialize(
         }
         (void)dither;  // FeatureConfig in bundled cxx-api.h has no dither; reserve for future use
 
-        bool isWhisperModel = !config.model_config.whisper.encoder.empty() && !config.model_config.whisper.decoder.empty();
+        bool isWhisperModel = detect.selectedKind == SttModelKind::kWhisper &&
+            !config.model_config.whisper.encoder.empty() && !config.model_config.whisper.decoder.empty();
         if (isWhisperModel) {
             LOGI("Initializing Whisper model with encoder: %s, decoder: %s", config.model_config.whisper.encoder.c_str(), config.model_config.whisper.decoder.c_str());
+        } else if (detect.selectedKind == SttModelKind::kQwen3Asr) {
+            LOGI("Initializing Qwen3 ASR: conv=%s encoder=%s decoder=%s tokenizer=%s",
+                 config.model_config.qwen3_asr.conv_frontend.c_str(),
+                 config.model_config.qwen3_asr.encoder.c_str(),
+                 config.model_config.qwen3_asr.decoder.c_str(),
+                 config.model_config.qwen3_asr.tokenizer.c_str());
         } else {
             LOGI("Initializing non-Whisper model");
         }
