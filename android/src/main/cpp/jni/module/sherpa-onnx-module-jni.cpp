@@ -20,6 +20,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 
 extern "C" {
 
@@ -185,6 +186,26 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
 
   sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, model_type);
   return sherpaonnx::TtsDetectResultToJava(env, result);
+}
+
+// Detect enhancement model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_model_type) {
+  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
+  const char* model_type_c =
+      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
+  std::string model_dir(model_dir_c ? model_dir_c : "");
+  std::string model_type(model_type_c ? model_type_c : "auto");
+  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
+  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
+
+  sherpaonnx::EnhancementDetectResult result =
+      sherpaonnx::DetectEnhancementModel(model_dir, model_type);
+  return sherpaonnx::EnhancementDetectResultToJava(env, result);
 }
 
 }  // extern "C"

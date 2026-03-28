@@ -43,6 +43,12 @@ enum class TtsModelKind {
     kSupertonic
 };
 
+enum class EnhancementModelKind {
+    kUnknown,
+    kGtcrn,
+    kDpdfNet
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -174,6 +180,10 @@ struct TtsModelPaths {
     std::string voiceStyle;
 };
 
+struct EnhancementModelPaths {
+    std::string model;
+};
+
 struct SttDetectResult {
     bool ok = false;
     std::string error;
@@ -193,6 +203,14 @@ struct TtsDetectResult {
     TtsModelPaths paths;
     /** Language ids from detected lexicon files (e.g. "default", "us-en", "zh") for multi-lang Kokoro/Kitten. Empty when not applicable. */
     std::vector<std::string> lexiconLanguageCandidates;
+};
+
+struct EnhancementDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    EnhancementModelKind selectedKind = EnhancementModelKind::kUnknown;
+    EnhancementModelPaths paths;
 };
 
 SttDetectResult DetectSttModel(
@@ -226,6 +244,11 @@ TtsDetectResult DetectTtsModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"
+);
+
+EnhancementDetectResult DetectEnhancementModel(
+    const std::string& modelDir,
+    const std::string& modelType
 );
 
 } // namespace sherpaonnx
