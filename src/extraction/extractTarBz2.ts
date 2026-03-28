@@ -1,6 +1,6 @@
 import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { ExtractArchiveOptions } from './types';
+import type { ExtractNotificationArgs } from './types';
 
 export type ExtractProgressEvent = {
   bytes: number;
@@ -14,11 +14,6 @@ type ExtractResult = {
   sha256?: string;
   reason?: string;
 };
-
-type ExtractNotificationArgs = Pick<
-  ExtractArchiveOptions,
-  'showNotificationsEnabled' | 'notificationTitle' | 'notificationText'
->;
 
 export async function extractTarBz2(
   sourcePath: string,

@@ -17,6 +17,7 @@ import { extractTarBz2 } from './extractTarBz2';
 import type {
   BundledArchive,
   ExtractArchiveOptions,
+  ExtractNotificationArgs,
   ExtractResult,
   ExtractProgressEvent,
 } from './types';
@@ -24,6 +25,7 @@ import type {
 export type {
   BundledArchive,
   ExtractArchiveOptions,
+  ExtractNotificationArgs,
   ExtractResult,
   ExtractProgressEvent,
 } from './types';
@@ -216,11 +218,7 @@ async function extractFromAsset(
   force: boolean,
   onProgress?: (event: ExtractProgressEvent) => void,
   signal?: AbortSignal,
-  notification?: {
-    showNotificationsEnabled?: boolean;
-    notificationTitle?: string;
-    notificationText?: string;
-  }
+  notification?: ExtractNotificationArgs
 ): Promise<ExtractResult> {
   const eventName =
     archive.format === 'tar.zst'

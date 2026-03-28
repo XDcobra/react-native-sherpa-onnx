@@ -71,3 +71,9 @@ export type ExtractArchiveOptions = {
   /** **Android:** Notification body (progress text is appended). Default: generic. Ignored on iOS. */
   notificationText?: string;
 };
+
+/** Subset of `ExtractArchiveOptions` passed through to path- and asset-stream extractors. */
+export type ExtractNotificationArgs = Pick<
+  ExtractArchiveOptions,
+  'showNotificationsEnabled' | 'notificationTitle' | 'notificationText'
+>;

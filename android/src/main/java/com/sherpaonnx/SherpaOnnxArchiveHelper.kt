@@ -152,6 +152,19 @@ class SherpaOnnxArchiveHelper {
     }
   }
 
+  /**
+   * Which JNI stream entry to use for APK asset extraction.
+   *
+   * Both paths invoke libarchive’s `ExtractFromStream`, which **auto-detects** compression
+   * (`.tar.zst` vs `.tar.bz2`, etc.); `nativeExtractTarBz2FromStream` forwards to the same
+   * native implementation as zst. Keeping distinct JNI symbols preserves a clear API and avoids
+   * the impression that bz2 assets are mistakenly wired only to a “zst” method.
+   */
+  private enum class AssetTarStreamKind {
+    ZST,
+    BZ2,
+  }
+
   fun extractTarZstFromAsset(
     context: Context,
     assetPath: String,
@@ -161,8 +174,54 @@ class SherpaOnnxArchiveHelper {
     onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
     extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
+    extractTarArchiveFromAsset(
+      context,
+      assetPath,
+      targetPath,
+      force,
+      promise,
+      onProgress,
+      extractionNotification,
+      AssetTarStreamKind.ZST,
+    )
+  }
+
+  fun extractTarBz2FromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
+  ) {
+    extractTarArchiveFromAsset(
+      context,
+      assetPath,
+      targetPath,
+      force,
+      promise,
+      onProgress,
+      extractionNotification,
+      AssetTarStreamKind.BZ2,
+    )
+  }
+
+  private fun extractTarArchiveFromAsset(
+    context: Context,
+    assetPath: String,
+    targetPath: String,
+    force: Boolean,
+    promise: Promise,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
+    kind: AssetTarStreamKind,
+  ) {
     if (BuildConfig.DEBUG) {
-      Log.i("SherpaOnnx", "extractTarZstFromAsset assetPath=$assetPath targetPath=$targetPath")
+      Log.i(
+        "SherpaOnnx",
+        "extractTar${if (kind == AssetTarStreamKind.ZST) "Zst" else "Bz2"}FromAsset assetPath=$assetPath targetPath=$targetPath",
+      )
     }
     extractExecutor.execute {
       val notif = extractionNotification
@@ -175,7 +234,12 @@ class SherpaOnnxArchiveHelper {
           }
         }
         context.assets.open(assetPath).use { stream ->
-          nativeExtractTarZstFromStream(stream, targetPath, force, progressCallback, promise)
+          when (kind) {
+            AssetTarStreamKind.ZST ->
+              nativeExtractTarZstFromStream(stream, targetPath, force, progressCallback, promise)
+            AssetTarStreamKind.BZ2 ->
+              nativeExtractTarBz2FromStream(stream, targetPath, force, progressCallback, promise)
+          }
         }
       } catch (e: Exception) {
         val result = Arguments.createMap()
@@ -186,26 +250,6 @@ class SherpaOnnxArchiveHelper {
         notif?.finish()
       }
     }
-  }
-
-  fun extractTarBz2FromAsset(
-    context: Context,
-    assetPath: String,
-    targetPath: String,
-    force: Boolean,
-    promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
-    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
-  ) {
-    extractTarZstFromAsset(
-      context,
-      assetPath,
-      targetPath,
-      force,
-      promise,
-      onProgress,
-      extractionNotification,
-    )
   }
 
   fun computeFileSha256(filePath: String, promise: Promise) {
@@ -230,6 +274,14 @@ class SherpaOnnxArchiveHelper {
   )
 
   private external fun nativeExtractTarZstFromStream(
+    inputStream: java.io.InputStream,
+    targetPath: String,
+    force: Boolean,
+    progressCallback: Any?,
+    promise: Promise
+  )
+
+  private external fun nativeExtractTarBz2FromStream(
     inputStream: java.io.InputStream,
     targetPath: String,
     force: Boolean,
