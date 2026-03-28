@@ -56,6 +56,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
     { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
   )
+  private val enhancementHelper = SherpaOnnxEnhancementHelper(
+    reactApplicationContext,
+    { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
+  )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var pcmCapture: SherpaOnnxPcmCapture? = null
 
@@ -69,6 +73,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pcmCapture = null
     onlineSttHelper.shutdown()
     ttsHelper.shutdown()
+    enhancementHelper.shutdown()
   }
 
   /**
@@ -1059,6 +1064,103 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ttsHelper.unloadTts(instanceId, promise)
   }
 
+  // ==================== Speech Enhancement Methods ====================
+
+  override fun detectEnhancementModel(
+    modelDir: String,
+    modelType: String?,
+    promise: Promise
+  ) {
+    enhancementHelper.detectEnhancementModel(modelDir, modelType, promise)
+  }
+
+  override fun initializeEnhancement(
+    instanceId: String,
+    modelDir: String,
+    modelType: String?,
+    numThreads: Double?,
+    provider: String?,
+    debug: Boolean?,
+    promise: Promise
+  ) {
+    enhancementHelper.initializeEnhancement(
+      instanceId,
+      modelDir,
+      modelType,
+      numThreads,
+      provider,
+      debug,
+      promise
+    )
+  }
+
+  override fun enhanceFile(
+    instanceId: String,
+    inputPath: String,
+    outputPath: String?,
+    promise: Promise
+  ) {
+    enhancementHelper.enhanceFile(instanceId, inputPath, outputPath, promise)
+  }
+
+  override fun enhanceSamples(
+    instanceId: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    promise: Promise
+  ) {
+    enhancementHelper.enhanceSamples(instanceId, samples, sampleRate, promise)
+  }
+
+  override fun getEnhancementSampleRate(instanceId: String, promise: Promise) {
+    enhancementHelper.getSampleRate(instanceId, promise)
+  }
+
+  override fun unloadEnhancement(instanceId: String, promise: Promise) {
+    enhancementHelper.unloadEnhancement(instanceId, promise)
+  }
+
+  override fun initializeOnlineEnhancement(
+    instanceId: String,
+    modelDir: String,
+    modelType: String?,
+    numThreads: Double?,
+    provider: String?,
+    debug: Boolean?,
+    promise: Promise
+  ) {
+    enhancementHelper.initializeOnlineEnhancement(
+      instanceId,
+      modelDir,
+      modelType,
+      numThreads,
+      provider,
+      debug,
+      promise
+    )
+  }
+
+  override fun feedEnhancementSamples(
+    instanceId: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    promise: Promise
+  ) {
+    enhancementHelper.feedSamples(instanceId, samples, sampleRate, promise)
+  }
+
+  override fun flushOnlineEnhancement(instanceId: String, promise: Promise) {
+    enhancementHelper.flushOnline(instanceId, promise)
+  }
+
+  override fun resetOnlineEnhancement(instanceId: String, promise: Promise) {
+    enhancementHelper.resetOnline(instanceId, promise)
+  }
+
+  override fun unloadOnlineEnhancement(instanceId: String, promise: Promise) {
+    enhancementHelper.unloadOnline(instanceId, promise)
+  }
+
   /**
    * Save TTS audio samples to a WAV file.
    */
@@ -1255,6 +1357,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
     private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
+    @JvmStatic
+    private external fun nativeDetectEnhancementModel(modelDir: String, modelType: String): HashMap<String, Any>?
 
     /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
      * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.
