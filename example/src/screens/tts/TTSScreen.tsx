@@ -51,13 +51,20 @@ import {
   writeFile,
   exists,
 } from '@dr.pogodin/react-native-fs';
-import Sound from 'react-native-sound';
+import { AudioContext } from 'react-native-audio-api';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
 import { decodeAudioFileToFloatSamples } from 'react-native-sherpa-onnx/audio';
+import {
+  loadAudioAsArrayBuffer,
+  stopWebAudioPlayback,
+  type ActiveWebAudioPlayback,
+} from '../../utils/audioFileWebPlayback';
 
 const PAD_PACK_NAME = 'sherpa_models';
+
+type TtsSavedAudioPlayback = ActiveWebAudioPlayback & { resolvedPath: string };
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -102,7 +109,6 @@ export default function TTSScreen() {
     null
   );
   const [saving, setSaving] = useState(false);
-  const [soundInstance, setSoundInstance] = useState<Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loadingSound, setLoadingSound] = useState(false);
   const [cachedPlaybackPath, setCachedPlaybackPath] = useState<string | null>(
@@ -151,7 +157,7 @@ export default function TTSScreen() {
   };
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
-  const soundInstanceRef = useRef<Sound | null>(null);
+  const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
   const streamChunksRef = useRef<number[][]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
   const streamControllerRef = useRef<TtsStreamController | null>(null);
@@ -193,10 +199,6 @@ export default function TTSScreen() {
     () => selectedModelType === 'pocket',
     [selectedModelType]
   );
-
-  useEffect(() => {
-    soundInstanceRef.current = soundInstance;
-  }, [soundInstance]);
 
   // Load available models on mount
   useEffect(() => {
@@ -317,11 +319,20 @@ export default function TTSScreen() {
     }
   }, []);
 
-  // On unmount: release sound and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
+  const stopTtsSavedAudioPlayback = useCallback(() => {
+    if (ttsSavedAudioPlaybackRef.current) {
+      stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
+      ttsSavedAudioPlaybackRef.current = null;
+    }
+    setIsPlaying(false);
+  }, []);
+
+  // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
-      if (soundInstanceRef.current) {
-        soundInstanceRef.current.release();
+      if (ttsSavedAudioPlaybackRef.current) {
+        stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
+        ttsSavedAudioPlaybackRef.current = null;
       }
       const controller = streamControllerRef.current;
       if (controller) {
@@ -702,11 +713,7 @@ export default function TTSScreen() {
     if (streaming) {
       resetStreamingState(true);
     }
-    if (soundInstance) {
-      soundInstance.release();
-      setSoundInstance(null);
-      setIsPlaying(false);
-    }
+    stopTtsSavedAudioPlayback();
 
     try {
       const previous = ttsEngineRef.current;
@@ -882,11 +889,7 @@ export default function TTSScreen() {
     if (streaming) {
       resetStreamingState(true);
     }
-    if (soundInstance) {
-      soundInstance.release();
-      setSoundInstance(null);
-      setIsPlaying(false);
-    }
+    stopTtsSavedAudioPlayback();
 
     const engine = ttsEngineRef.current;
     if (!engine) {
@@ -971,11 +974,7 @@ export default function TTSScreen() {
     if (streaming) {
       resetStreamingState(true);
     }
-    if (soundInstance) {
-      soundInstance.release();
-      setSoundInstance(null);
-      setIsPlaying(false);
-    }
+    stopTtsSavedAudioPlayback();
 
     const engine = ttsEngineRef.current;
     if (!engine) {
@@ -1088,11 +1087,7 @@ export default function TTSScreen() {
     // Do NOT set streaming=true here: the useEffect would start a 400ms debounce and
     // enqueueStreamingText(inputText) could run before we set streamLastTextRef below,
     // causing a duplicate processStreamQueue. Set streaming only after queue + ref are set.
-    if (soundInstance) {
-      soundInstance.release();
-      setSoundInstance(null);
-      setIsPlaying(false);
-    }
+    stopTtsSavedAudioPlayback();
 
     const useFilePath = padModelIds.includes(currentModelFolder);
     const modelPath = useFilePath
@@ -1515,25 +1510,6 @@ export default function TTSScreen() {
     }
 
     try {
-      if (soundInstance && isPlaying) {
-        soundInstance.pause(() => setIsPlaying(false));
-        return;
-      }
-
-      if (soundInstance && !isPlaying) {
-        soundInstance.play((success) => {
-          setIsPlaying(false);
-          if (!success) {
-            Alert.alert('Error', 'Playback failed');
-          }
-        });
-        setIsPlaying(true);
-        return;
-      }
-
-      setLoadingSound(true);
-      Sound.setCategory('Playback');
-
       let playbackPath = savedAudioPath;
       if (savedAudioPath.startsWith('content://')) {
         const cacheName = `tts_playback_${Date.now()}.wav`;
@@ -1554,39 +1530,56 @@ export default function TTSScreen() {
         }
       }
 
-      const sound = new Sound(playbackPath, '', (loadError) => {
-        setLoadingSound(false);
-        if (loadError) {
-          console.error('Failed to load sound:', loadError);
-          Alert.alert('Error', 'Failed to load audio file');
+      const cur = ttsSavedAudioPlaybackRef.current;
+      if (cur && cur.resolvedPath === playbackPath) {
+        if (cur.context.state === 'running') {
+          await cur.context.suspend();
+          setIsPlaying(false);
           return;
         }
+        if (cur.context.state === 'suspended') {
+          await cur.context.resume();
+          setIsPlaying(true);
+          return;
+        }
+      }
 
-        setSoundInstance(sound);
-        sound.play((success) => {
+      stopTtsSavedAudioPlayback();
+
+      setLoadingSound(true);
+      try {
+        const arrayBuffer = await loadAudioAsArrayBuffer(playbackPath);
+        const context = new AudioContext();
+        const audioBuffer = await context.decodeAudioData(arrayBuffer);
+        const source = context.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(context.destination);
+        source.onEnded = () => {
+          ttsSavedAudioPlaybackRef.current = null;
           setIsPlaying(false);
-          if (!success) {
-            Alert.alert('Error', 'Playback failed');
-          }
-          sound.release();
-          setSoundInstance(null);
-        });
+          context.close().catch(() => {});
+        };
+        source.start();
+        ttsSavedAudioPlaybackRef.current = {
+          context,
+          source,
+          resolvedPath: playbackPath,
+        };
         setIsPlaying(true);
-      });
+      } finally {
+        setLoadingSound(false);
+      }
     } catch (err) {
       console.error('Play audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       Alert.alert('Error', `Failed to play audio: ${errorMessage}`);
+      setLoadingSound(false);
     }
   };
 
-  const handleStopAudio = async () => {
+  const handleStopAudio = () => {
     try {
-      if (soundInstance) {
-        soundInstance.stop(() => {
-          setIsPlaying(false);
-        });
-      }
+      stopTtsSavedAudioPlayback();
     } catch (err) {
       console.error('Stop audio error:', err);
     }
@@ -1632,11 +1625,7 @@ export default function TTSScreen() {
       if (streaming) {
         resetStreamingState(true);
       }
-      if (soundInstance) {
-        soundInstance.release();
-        setSoundInstance(null);
-        setIsPlaying(false);
-      }
+      stopTtsSavedAudioPlayback();
       const engine = ttsEngineRef.current;
       if (engine) {
         await engine.destroy();

@@ -48,10 +48,10 @@ const FEATURES: Feature[] = [
   {
     id: 'enhancement',
     title: 'Speech Enhancement',
-    description: 'Remove noise and improve audio quality',
+    description: 'Remove noise and improve audio quality (offline)',
     icon: 'options',
     screen: 'Enhancement',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'separation',
