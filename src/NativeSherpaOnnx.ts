@@ -422,6 +422,77 @@ export interface Spec extends TurboModule {
    */
   unloadTts(instanceId: string): Promise<void>;
 
+  // ==================== Speech Enhancement Methods ====================
+
+  detectEnhancementModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  initializeEnhancement(
+    instanceId: string,
+    modelDir: string,
+    modelType?: string,
+    numThreads?: number,
+    provider?: string,
+    debug?: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    sampleRate?: number;
+  }>;
+
+  enhanceFile(
+    instanceId: string,
+    inputPath: string,
+    outputPath?: string
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
+  enhanceSamples(
+    instanceId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
+  getEnhancementSampleRate(instanceId: string): Promise<number>;
+
+  unloadEnhancement(instanceId: string): Promise<void>;
+
+  initializeOnlineEnhancement(
+    instanceId: string,
+    modelDir: string,
+    modelType?: string,
+    numThreads?: number,
+    provider?: string,
+    debug?: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    sampleRate?: number;
+    frameShiftInSamples?: number;
+  }>;
+
+  feedEnhancementSamples(
+    instanceId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
+  flushOnlineEnhancement(
+    instanceId: string
+  ): Promise<{ samples: number[]; sampleRate: number }>;
+
+  resetOnlineEnhancement(instanceId: string): Promise<void>;
+
+  unloadOnlineEnhancement(instanceId: string): Promise<void>;
+
   /**
    * Save TTS audio samples to a WAV file.
    * @param samples - Audio samples array
