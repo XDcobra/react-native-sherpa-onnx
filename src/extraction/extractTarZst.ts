@@ -1,5 +1,6 @@
 import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import type { ExtractNotificationArgs } from './types';
 
 export type ExtractProgressEvent = {
   bytes: number;
@@ -19,7 +20,8 @@ export async function extractTarZst(
   targetPath: string,
   force = true,
   onProgress?: (event: ExtractProgressEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  notification?: ExtractNotificationArgs
 ): Promise<ExtractResult> {
   let subscription: { remove: () => void } | null = null;
   let removeAbortListener: (() => void) | null = null;
@@ -61,7 +63,10 @@ export async function extractTarZst(
     const result = await SherpaOnnx.extractTarZst(
       sourcePath,
       targetPath,
-      force
+      force,
+      notification?.showNotificationsEnabled,
+      notification?.notificationTitle,
+      notification?.notificationText
     );
     if (!result.success) {
       const message = result.reason || 'Extraction failed';

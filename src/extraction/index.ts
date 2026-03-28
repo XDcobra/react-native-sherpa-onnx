@@ -17,6 +17,7 @@ import { extractTarBz2 } from './extractTarBz2';
 import type {
   BundledArchive,
   ExtractArchiveOptions,
+  ExtractNotificationArgs,
   ExtractResult,
   ExtractProgressEvent,
 } from './types';
@@ -24,6 +25,7 @@ import type {
 export type {
   BundledArchive,
   ExtractArchiveOptions,
+  ExtractNotificationArgs,
   ExtractResult,
   ExtractProgressEvent,
 } from './types';
@@ -160,6 +162,11 @@ export async function extractArchive(
   const force = options?.force !== false;
   const onProgress = options?.onProgress;
   const signal = options?.signal;
+  const notification = {
+    showNotificationsEnabled: options?.showNotificationsEnabled,
+    notificationTitle: options?.notificationTitle,
+    notificationText: options?.notificationText,
+  };
 
   if (signal?.aborted) {
     const err = new Error('Extraction aborted');
@@ -173,7 +180,14 @@ export async function extractArchive(
       archive.archivePath.startsWith('asset_packs/'));
 
   if (useAssetStream) {
-    return extractFromAsset(archive, targetPath, force, onProgress, signal);
+    return extractFromAsset(
+      archive,
+      targetPath,
+      force,
+      onProgress,
+      signal,
+      notification
+    );
   }
 
   if (archive.format === 'tar.zst') {
@@ -182,7 +196,8 @@ export async function extractArchive(
       targetPath,
       force,
       onProgress,
-      signal
+      signal,
+      notification
     );
   }
   return extractTarBz2(
@@ -190,7 +205,8 @@ export async function extractArchive(
     targetPath,
     force,
     onProgress,
-    signal
+    signal,
+    notification
   );
 }
 
@@ -201,7 +217,8 @@ async function extractFromAsset(
   targetPath: string,
   force: boolean,
   onProgress?: (event: ExtractProgressEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  notification?: ExtractNotificationArgs
 ): Promise<ExtractResult> {
   const eventName =
     archive.format === 'tar.zst'
@@ -245,12 +262,18 @@ async function extractFromAsset(
         ? await SherpaOnnx.extractTarZstFromAsset(
             archive.archivePath,
             targetPath,
-            force
+            force,
+            notification?.showNotificationsEnabled,
+            notification?.notificationTitle,
+            notification?.notificationText
           )
         : await SherpaOnnx.extractTarBz2FromAsset(
             archive.archivePath,
             targetPath,
-            force
+            force,
+            notification?.showNotificationsEnabled,
+            notification?.notificationTitle,
+            notification?.notificationText
           );
 
     if (!result.success) {

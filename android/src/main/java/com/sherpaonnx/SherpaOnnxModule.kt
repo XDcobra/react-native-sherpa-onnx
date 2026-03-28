@@ -293,10 +293,30 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.resolveModelPath(config, promise)
   }
 
-  override fun extractTarBz2(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
-    archiveHelper.extractTarBz2(sourcePath, targetPath, force, promise) { bytes, total, percent ->
-      emitExtractProgress(sourcePath, bytes, total, percent)
-    }
+  override fun extractTarBz2(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    showNotificationsEnabled: Boolean?,
+    notificationTitle: String?,
+    notificationText: String?,
+    promise: Promise,
+  ) {
+    val notif = extractionNotificationOrNull(
+      showNotificationsEnabled,
+      notificationTitle,
+      notificationText,
+    )
+    archiveHelper.extractTarBz2(
+      sourcePath,
+      targetPath,
+      force,
+      promise,
+      { bytes, total, percent ->
+        emitExtractProgress(sourcePath, bytes, total, percent)
+      },
+      notif,
+    )
   }
 
   override fun cancelExtractTarBz2(promise: Promise) {
@@ -304,10 +324,30 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
-  override fun extractTarZst(sourcePath: String, targetPath: String, force: Boolean, promise: Promise) {
-    archiveHelper.extractTarZst(sourcePath, targetPath, force, promise) { bytes, total, percent ->
-      emitExtractTarZstProgress(sourcePath, bytes, total, percent)
-    }
+  override fun extractTarZst(
+    sourcePath: String,
+    targetPath: String,
+    force: Boolean,
+    showNotificationsEnabled: Boolean?,
+    notificationTitle: String?,
+    notificationText: String?,
+    promise: Promise,
+  ) {
+    val notif = extractionNotificationOrNull(
+      showNotificationsEnabled,
+      notificationTitle,
+      notificationText,
+    )
+    archiveHelper.extractTarZst(
+      sourcePath,
+      targetPath,
+      force,
+      promise,
+      { bytes, total, percent ->
+        emitExtractTarZstProgress(sourcePath, bytes, total, percent)
+      },
+      notif,
+    )
   }
 
   override fun cancelExtractTarZst(promise: Promise) {
@@ -344,6 +384,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
     eventEmitter.emit("extractTarZstProgress", payload)
+  }
+
+  /** Null when extraction notifications are disabled (`showNotificationsEnabled == false`). */
+  private fun extractionNotificationOrNull(
+    showNotificationsEnabled: Boolean?,
+    notificationTitle: String?,
+    notificationText: String?,
+  ): SherpaOnnxExtractionNotificationHelper? {
+    return SherpaOnnxExtractionNotificationHelper.maybeCreate(
+      reactApplicationContext,
+      showNotificationsEnabled,
+      notificationTitle,
+      notificationText,
+    )
   }
 
   /**
@@ -1101,34 +1155,54 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetPath: String,
     targetPath: String,
     force: Boolean,
-    promise: Promise
+    showNotificationsEnabled: Boolean?,
+    notificationTitle: String?,
+    notificationText: String?,
+    promise: Promise,
   ) {
+    val notif = extractionNotificationOrNull(
+      showNotificationsEnabled,
+      notificationTitle,
+      notificationText,
+    )
     archiveHelper.extractTarZstFromAsset(
       reactApplicationContext,
       assetPath,
       targetPath,
       force,
-      promise
-    ) { bytes, total, percent ->
-      emitExtractTarZstProgress(assetPath, bytes, total, percent)
-    }
+      promise,
+      { bytes, total, percent ->
+        emitExtractTarZstProgress(assetPath, bytes, total, percent)
+      },
+      notif,
+    )
   }
 
   override fun extractTarBz2FromAsset(
     assetPath: String,
     targetPath: String,
     force: Boolean,
-    promise: Promise
+    showNotificationsEnabled: Boolean?,
+    notificationTitle: String?,
+    notificationText: String?,
+    promise: Promise,
   ) {
+    val notif = extractionNotificationOrNull(
+      showNotificationsEnabled,
+      notificationTitle,
+      notificationText,
+    )
     archiveHelper.extractTarBz2FromAsset(
       reactApplicationContext,
       assetPath,
       targetPath,
       force,
-      promise
-    ) { bytes, total, percent ->
-      emitExtractProgress(assetPath, bytes, total, percent)
-    }
+      promise,
+      { bytes, total, percent ->
+        emitExtractProgress(assetPath, bytes, total, percent)
+      },
+      notif,
+    )
   }
 
   override fun readAssetFileAsUtf8(assetPath: String, promise: Promise) {

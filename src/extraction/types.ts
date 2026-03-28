@@ -60,4 +60,20 @@ export type ExtractArchiveOptions = {
   onProgress?: (event: ExtractProgressEvent) => void;
   /** AbortSignal to cancel the extraction. */
   signal?: AbortSignal;
+  /**
+   * **Android:** When true (default), the native layer posts a system notification with extraction
+   * progress. Set to false to disable (e.g. first-run bundled-model prep with in-app UI only).
+   * **iOS:** Accepted for API parity; no notification is shown.
+   */
+  showNotificationsEnabled?: boolean;
+  /** **Android:** Notification title. Default: generic “unpacking” title. Ignored on iOS. */
+  notificationTitle?: string;
+  /** **Android:** Notification body (progress text is appended). Default: generic. Ignored on iOS. */
+  notificationText?: string;
 };
+
+/** Subset of `ExtractArchiveOptions` passed through to path- and asset-stream extractors. */
+export type ExtractNotificationArgs = Pick<
+  ExtractArchiveOptions,
+  'showNotificationsEnabled' | 'notificationTitle' | 'notificationText'
+>;

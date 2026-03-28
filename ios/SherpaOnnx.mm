@@ -138,9 +138,15 @@
 - (void)extractTarBz2:(NSString *)sourcePath
            targetPath:(NSString *)targetPath
                 force:(BOOL)force
-         resolve:(RCTPromiseResolveBlock)resolve
-         reject:(RCTPromiseRejectBlock)reject
+showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
+    notificationTitle:(NSString *)notificationTitle
+     notificationText:(NSString *)notificationText
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
 {
+    (void)showNotificationsEnabled;
+    (void)notificationTitle;
+    (void)notificationText;
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
     NSDictionary *result = [helper extractTarBz2:sourcePath
                                      targetPath:targetPath
@@ -165,9 +171,15 @@
 - (void)extractTarZst:(NSString *)sourcePath
            targetPath:(NSString *)targetPath
                 force:(BOOL)force
-             resolve:(RCTPromiseResolveBlock)resolve
-             reject:(RCTPromiseRejectBlock)reject
+showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
+    notificationTitle:(NSString *)notificationTitle
+     notificationText:(NSString *)notificationText
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
 {
+    (void)showNotificationsEnabled;
+    (void)notificationTitle;
+    (void)notificationText;
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
     NSDictionary *result = [helper extractTarZst:sourcePath
                                     targetPath:targetPath
@@ -229,19 +241,33 @@
 
 - (void)extractTarZstFromAsset:(NSString *)assetPath
                    targetPath:(NSString *)targetPath
-                       force:(NSNumber *)force
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject
+                        force:(BOOL)force
+      showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
+             notificationTitle:(NSString *)notificationTitle
+              notificationText:(NSString *)notificationText
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
 {
+    (void)force;
+    (void)showNotificationsEnabled;
+    (void)notificationTitle;
+    (void)notificationText;
     resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
 }
 
 - (void)extractTarBz2FromAsset:(NSString *)assetPath
                    targetPath:(NSString *)targetPath
-                        force:(NSNumber *)force
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
+                        force:(BOOL)force
+      showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
+             notificationTitle:(NSString *)notificationTitle
+              notificationText:(NSString *)notificationText
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
 {
+    (void)force;
+    (void)showNotificationsEnabled;
+    (void)notificationTitle;
+    (void)notificationText;
     resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
 }
 
