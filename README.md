@@ -126,7 +126,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Speech Enhancement | ❌ Not yet supported | [Enhancement](./docs/enhancement.md) | Scheduled for release 0.4.0 |
+| Speech Enhancement | ❌ Not yet supported | [Enhancement](./docs/speech-enhancement.md) | Scheduled for release 0.4.0 |
 | Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 0.5.0 |
 | Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 0.6.0 |
 | VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 0.7.0 |
@@ -195,7 +195,7 @@ For **streaming TTS** (incremental generation, low latency), use `createStreamin
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
-- [Speech Enhancement](./docs/enhancement.md)
+- [Speech Enhancement](./docs/speech-enhancement.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
