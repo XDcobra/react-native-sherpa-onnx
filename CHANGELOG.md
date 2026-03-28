@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.9](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.8...v0.3.9) (2026-03-28)
+
+
+### Bug Fixes
+
+* **resources:** switch to resource bundles for reliable asset packaging; enhance asset path resolution in iOS implementation ([57b1753](https://github.com/XDcobra/react-native-sherpa-onnx/commit/57b1753b0263a3104e812791df67c3337232dbfa))
+* **tts:** enhance VITS initialization to handle missing phonemization data gracefully and add lexicon support ([bed7762](https://github.com/XDcobra/react-native-sherpa-onnx/commit/bed77622b912d3007680c4910fddbee16ec6fe7c))
+
+
+### Features
+
+* **error-handling:** enhance error handling and return structure in STT and TTS initialization methods ([87f56cb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/87f56cb72e6eb18ca91cb018cee2c926306d4e97))
+* **extraction-notification:** add extraction progress notifications for archive extraction in Android ([e7fac4f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e7fac4f31ffc8db47ff75272c24bb4720040ef9c))
+* **extraction-notification:** enhance extraction methods with notification options for user feedback on Android ([914bb2b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/914bb2b2413aa2fbabfd8905267dec3739393c67))
+* **extraction-notification:** implement distinct extraction methods for tar.bz2 and tar.zst with improved notification handling ([7d9fbae](https://github.com/XDcobra/react-native-sherpa-onnx/commit/7d9fbaef76307cdeb4ad6017804f0d15fc031d9b))
+* **extraction-notification:** update extraction methods to include notification parameters for user feedback ([07cffb8](https://github.com/XDcobra/react-native-sherpa-onnx/commit/07cffb8897c36c5deaa97e8882402de0118126f2))
+* **ios:** add Qwen3-ASR model options to STT initialization and configuration ([6defc32](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6defc3273f31634473add9329fb34d187d167259))
+* **jni:** add Qwen3-ASR model support with tokenizer and capability checks ([05979d1](https://github.com/XDcobra/react-native-sherpa-onnx/commit/05979d10e86f1228759dcbb6b892b7dbd35c03cb))
+* **js:** integrate Qwen3-ASR model type and options into STT configuration ([bf3cbb3](https://github.com/XDcobra/react-native-sherpa-onnx/commit/bf3cbb36da45bfe02ec2282e7f1212f02426603e))
+* **kotlin:** extend Qwen3-ASR model configuration with maxNewTokens and additional parameters ([7e7fb3d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/7e7fb3d1f7e0459243284d5d60c8d9badbf9a0ea))
+* **licenses:** update Qwen3-ASR model license status to Apache 2.0 in Android and iOS CSV files ([81e1a21](https://github.com/XDcobra/react-native-sherpa-onnx/commit/81e1a21f4f090be8609aaef6978fbe4b9c1b72f3))
+* **mm:** implement Qwen3-ASR model support with tokenizer options and validation requirements ([345ae8a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/345ae8a8cb818c3021c7109d12312b6f48232eec))
+
 ## [0.3.8](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.7...v0.3.8) (2026-03-25)
 
 
