@@ -54,7 +54,8 @@ class SherpaOnnxArchiveHelper {
     targetPath: String,
     force: Boolean,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
     val promiseSettled = AtomicBoolean(false)
     fun resolveOnce(success: Boolean, reason: String? = null) {
@@ -70,26 +71,28 @@ class SherpaOnnxArchiveHelper {
       val cancelFlag = AtomicBoolean(false)
       cancelFlags[sourcePath] = cancelFlag
 
-      // Create a progress callback object that JNI can call
-      val progressCallback = object : Any() {
-        fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
-          onProgress(bytesExtracted, totalBytes, percent)
-        }
-      }
-
       // Run extraction on a background thread so the React Native bridge thread is not blocked.
       // The thread pool allows multiple extractions in parallel.
       extractExecutor.execute {
+        val notif = extractionNotification
         try {
           // Check per-path cancel flag before starting the native extraction.
           if (cancelFlag.get()) {
             resolveOnce(false, "Cancelled")
             return@execute
           }
-          nativeExtractTarBz2(sourcePath, targetPath, force, progressCallback, promise)
+          notif?.start()
+          val wrappedCallback = object : Any() {
+            fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+              onProgress(bytesExtracted, totalBytes, percent)
+              notif?.updateProgress(percent)
+            }
+          }
+          nativeExtractTarBz2(sourcePath, targetPath, force, wrappedCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
         } finally {
+          notif?.finish()
           cancelFlags.remove(sourcePath)
         }
       }
@@ -104,7 +107,8 @@ class SherpaOnnxArchiveHelper {
     targetPath: String,
     force: Boolean,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
     val promiseSettled = AtomicBoolean(false)
     fun resolveOnce(success: Boolean, reason: String? = null) {
@@ -119,22 +123,26 @@ class SherpaOnnxArchiveHelper {
       val cancelFlag = AtomicBoolean(false)
       cancelFlags[sourcePath] = cancelFlag
 
-      val progressCallback = object : Any() {
-        fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
-          onProgress(bytesExtracted, totalBytes, percent)
-        }
-      }
       extractExecutor.execute {
+        val notif = extractionNotification
         try {
           // Check per-path cancel flag before starting the native extraction.
           if (cancelFlag.get()) {
             resolveOnce(false, "Cancelled")
             return@execute
           }
-          nativeExtractTarZst(sourcePath, targetPath, force, progressCallback, promise)
+          notif?.start()
+          val wrappedCallback = object : Any() {
+            fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+              onProgress(bytesExtracted, totalBytes, percent)
+              notif?.updateProgress(percent)
+            }
+          }
+          nativeExtractTarZst(sourcePath, targetPath, force, wrappedCallback, promise)
         } catch (e: Exception) {
           resolveOnce(false, "Archive extraction error: ${e.message}")
         } finally {
+          notif?.finish()
           cancelFlags.remove(sourcePath)
         }
       }
@@ -150,18 +158,22 @@ class SherpaOnnxArchiveHelper {
     targetPath: String,
     force: Boolean,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
     if (BuildConfig.DEBUG) {
       Log.i("SherpaOnnx", "extractTarZstFromAsset assetPath=$assetPath targetPath=$targetPath")
     }
-    val progressCallback = object : Any() {
-      fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
-        onProgress(bytesExtracted, totalBytes, percent)
-      }
-    }
     extractExecutor.execute {
+      val notif = extractionNotification
       try {
+        notif?.start()
+        val progressCallback = object : Any() {
+          fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
+            onProgress(bytesExtracted, totalBytes, percent)
+            notif?.updateProgress(percent)
+          }
+        }
         context.assets.open(assetPath).use { stream ->
           nativeExtractTarZstFromStream(stream, targetPath, force, progressCallback, promise)
         }
@@ -170,6 +182,8 @@ class SherpaOnnxArchiveHelper {
         result.putBoolean("success", false)
         result.putString("reason", e.message ?: "Failed to open asset")
         promise.resolve(result)
+      } finally {
+        notif?.finish()
       }
     }
   }
@@ -180,9 +194,18 @@ class SherpaOnnxArchiveHelper {
     targetPath: String,
     force: Boolean,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
-    extractTarZstFromAsset(context, assetPath, targetPath, force, promise, onProgress)
+    extractTarZstFromAsset(
+      context,
+      assetPath,
+      targetPath,
+      force,
+      promise,
+      onProgress,
+      extractionNotification,
+    )
   }
 
   fun computeFileSha256(filePath: String, promise: Promise) {
