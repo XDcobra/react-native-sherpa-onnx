@@ -1,5 +1,6 @@
 import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import type { ExtractArchiveOptions } from './types';
 
 export type ExtractProgressEvent = {
   bytes: number;
@@ -14,12 +15,18 @@ type ExtractResult = {
   reason?: string;
 };
 
+type ExtractNotificationArgs = Pick<
+  ExtractArchiveOptions,
+  'showNotificationsEnabled' | 'notificationTitle' | 'notificationText'
+>;
+
 export async function extractTarBz2(
   sourcePath: string,
   targetPath: string,
   force = true,
   onProgress?: (event: ExtractProgressEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  notification?: ExtractNotificationArgs
 ): Promise<ExtractResult> {
   let subscription: { remove: () => void } | null = null;
   let removeAbortListener: (() => void) | null = null;
@@ -62,7 +69,10 @@ export async function extractTarBz2(
     const result = await SherpaOnnx.extractTarBz2(
       sourcePath,
       targetPath,
-      force
+      force,
+      notification?.showNotificationsEnabled,
+      notification?.notificationTitle,
+      notification?.notificationText
     );
     if (!result.success) {
       const message = result.reason || 'Extraction failed';

@@ -557,11 +557,18 @@ export interface Spec extends TurboModule {
   /**
    * Extract a .tar.bz2 archive to a target folder.
    * Returns { success, path } or { success, reason }.
+   *
+   * **Android:** When `showNotificationsEnabled` is true (default), a system notification shows
+   * extraction progress. Optional `notificationTitle` / `notificationText` customize the copy.
+   * **iOS:** Notification parameters are accepted but have no effect (no extraction progress notification).
    */
   extractTarBz2(
     sourcePath: string,
     targetPath: string,
-    force: boolean
+    force: boolean,
+    showNotificationsEnabled?: boolean,
+    notificationTitle?: string,
+    notificationText?: string
   ): Promise<{
     success: boolean;
     path?: string;
@@ -577,11 +584,16 @@ export interface Spec extends TurboModule {
   /**
    * Extract a .tar.zst (or .zst) archive to a target folder.
    * Returns { success, path } or { success, reason }.
+   *
+   * **Android:** Same notification behavior as `extractTarBz2`. **iOS:** No effect.
    */
   extractTarZst(
     sourcePath: string,
     targetPath: string,
-    force: boolean
+    force: boolean,
+    showNotificationsEnabled?: boolean,
+    notificationTitle?: string,
+    notificationText?: string
   ): Promise<{
     success: boolean;
     path?: string;
@@ -608,11 +620,15 @@ export interface Spec extends TurboModule {
   /**
    * Extract a .tar.zst archive from Android assets (AssetManager) to a target folder. Android only.
    * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
+   * Notification options match `extractTarZst` (Android only).
    */
   extractTarZstFromAsset(
     assetPath: string,
     targetPath: string,
-    force: boolean
+    force: boolean,
+    showNotificationsEnabled?: boolean,
+    notificationTitle?: string,
+    notificationText?: string
   ): Promise<{
     success: boolean;
     path?: string;
@@ -623,11 +639,15 @@ export interface Spec extends TurboModule {
   /**
    * Extract a .tar.bz2 archive from Android assets (AssetManager) to a target folder. Android only.
    * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
+   * Notification options match `extractTarBz2` (Android only).
    */
   extractTarBz2FromAsset(
     assetPath: string,
     targetPath: string,
-    force: boolean
+    force: boolean,
+    showNotificationsEnabled?: boolean,
+    notificationTitle?: string,
+    notificationText?: string
   ): Promise<{
     success: boolean;
     path?: string;

@@ -43,6 +43,15 @@ export type RunPostDownloadProcessingOptions = {
   onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
   onProgress?: (progress: DownloadProgress) => void;
+  /**
+   * **Android:** Native extraction progress notification (default true), aligned with the download-manager flow.
+   * **iOS:** No effect.
+   */
+  showExtractionNotifications?: boolean;
+  /** **Android:** Optional notification title (default: SDK/native default title). */
+  extractionNotificationTitle?: string;
+  /** **Android:** Optional notification body prefix (progress percent is appended natively). */
+  extractionNotificationText?: string;
   /** Called to get current list of downloaded models for emitModelsListUpdated. */
   getDownloadedList: () => Promise<ModelMetaBase[]>;
 };
@@ -63,6 +72,9 @@ export async function runPostDownloadProcessing(
     deleteArchiveAfterExtract,
     onProgress,
     getDownloadedList,
+    showExtractionNotifications,
+    extractionNotificationTitle,
+    extractionNotificationText,
   } = options;
 
   registerActivePostProcess(category, id);
@@ -80,6 +92,9 @@ export async function runPostDownloadProcessing(
       deleteArchiveAfterExtract,
       onProgress,
       getDownloadedList,
+      showExtractionNotifications,
+      extractionNotificationTitle,
+      extractionNotificationText,
     });
   } finally {
     unregisterActivePostProcess(category, id);
@@ -102,6 +117,9 @@ async function runPostDownloadProcessingBody(
     deleteArchiveAfterExtract,
     onProgress,
     getDownloadedList,
+    showExtractionNotifications,
+    extractionNotificationTitle,
+    extractionNotificationText,
   } = options;
 
   const isAborted = () => Boolean(signal?.aborted);
@@ -164,7 +182,12 @@ async function runPostDownloadProcessingBody(
         onProgress?.(progress);
         emitDownloadProgress(category, id, progress);
       },
-      signal
+      signal,
+      {
+        showNotificationsEnabled: showExtractionNotifications !== false,
+        notificationTitle: extractionNotificationTitle,
+        notificationText: extractionNotificationText,
+      }
     );
   }
 
