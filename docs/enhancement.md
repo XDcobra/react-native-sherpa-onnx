@@ -1,14 +1,9 @@
 # Speech Enhancement
 
-This feature is not yet supported in the React Native SDK.
+Speech enhancement is now available in the SDK.
 
-## Quick Usage
+See `docs/speech-enhancement.md` for:
 
-There is no enhancement API available yet. This page will be updated once enhancement support ships.
-
-## Status
-
-- Planned for a future release
-- API and configuration are not available yet
-
-Follow the project roadmap or open an issue to track progress.
+- offline enhancement API
+- online/streaming enhancement API
+- model detection and supported model types
