@@ -319,6 +319,11 @@ static void collectModelFolderNames(NSFileManager *fileManager, NSString *path, 
         return @"tts";
     }
 
+    BOOL isEnhancement = [name containsString:@"gtcrn"] || [name containsString:@"dpdfnet"];
+    if (isEnhancement) {
+        return @"enhancement";
+    }
+
     return @"unknown";
 }
 
