@@ -382,13 +382,19 @@ internal class SherpaOnnxAssetHelper(
       "mms",
       "tts"
     )
+    val enhancementHints = listOf(
+      "gtcrn",
+      "dpdfnet"
+    )
 
     val isStt = sttHints.any { name.contains(it) }
     val isTts = ttsHints.any { name.contains(it) }
+    val isEnhancement = enhancementHints.any { name.contains(it) }
 
     return when {
       isStt && !isTts -> "stt"
       isTts && !isStt -> "tts"
+      isEnhancement && !isStt && !isTts -> "enhancement"
       else -> "unknown"
     }
   }
