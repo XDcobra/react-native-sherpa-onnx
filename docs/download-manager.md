@@ -122,6 +122,10 @@ Posting a normal ongoing notification requires:
 
 Without this, the foreground download work may still run, but the **notification may not appear** in the shade—poor UX and difficult to record for Play policy.
 
+**Extraction progress notifications (Android)**
+
+After a download completes, **`runPostDownloadProcessing`** (used by `downloadModelByCategory`, `resumeDownload`, `extractModelByCategory`, etc.) runs native archive extraction. On **Android**, a separate **low-priority** ongoing notification (channel `sherpa_onnx_extraction`) shows unpack progress and is **cancelled when extraction finishes** (success or failure). This mirrors download visibility for long unpacks. **iOS** does not show a system extraction notification (same policy as NSURLSession download UX). Advanced apps can pass `showExtractionNotifications: false` (and optional title/text) via **`RunPostDownloadProcessingOptions`** when calling the post-download pipeline directly; the public **`extractArchive`** API also supports `showNotificationsEnabled` / `notificationTitle` / `notificationText` (see [extraction.md](extraction.md)).
+
 **Customizing downloader config (titles, grouping, headers, …)**
 
 Call **`configureModelDownloadBackgroundDownloader(options)`** from `react-native-sherpa-onnx/download` **once at app startup** (e.g. in `App.tsx`) **before** any model download. It forwards to the underlying `setConfig` and tells the SDK **not** to apply its built-in default notification settings on first download. The `options` shape is the same as `@kesha-antonov/react-native-background-downloader`’s `setConfig` (type **`BackgroundDownloaderSetConfigOptions`**).

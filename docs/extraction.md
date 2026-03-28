@@ -133,6 +133,9 @@ Extracts one archive into `targetPath`. Handles both source types transparently:
 | `force` | `boolean` | `true` | Overwrite existing files in `targetPath` |
 | `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent }`. Correctly handles parallel extractions by filtering by source path. |
 | `signal` | `AbortSignal` | — | Cancel extraction (throws `AbortError`). Cancellation is **per-operation**, so cancelling one archive won't affect others. |
+| `showNotificationsEnabled` | `boolean` | `true` | **Android:** Native `NotificationManager` progress notification during extraction (updated on the native thread). Set `false` to disable (e.g. first-run prep with in-app UI only). **iOS:** Ignored; no extraction progress notification is shown. |
+| `notificationTitle` | `string` | generic | **Android:** Notification title. **iOS:** Ignored. |
+| `notificationText` | `string` | generic | **Android:** Base notification text; progress percent is appended. **iOS:** Ignored. |
 
 **Note on Parallelism:**
 - **Android:** Supports up to **2 concurrent extractions** via a fixed thread pool. Additional requests are queued.
@@ -154,6 +157,9 @@ type ExtractArchiveOptions = {
   force?: boolean;
   onProgress?: (event: ExtractProgressEvent) => void;
   signal?: AbortSignal;
+  showNotificationsEnabled?: boolean;
+  notificationTitle?: string;
+  notificationText?: string;
 };
 
 type ExtractResult = {
