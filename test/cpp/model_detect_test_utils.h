@@ -18,6 +18,7 @@
 namespace sherpaonnx {
 enum class SttModelKind;
 enum class TtsModelKind;
+enum class EnhancementModelKind;
 }
 
 namespace model_detect_test {
@@ -51,6 +52,11 @@ sherpaonnx::TtsModelKind TtsKindFromString(const std::string& modelType);
 
 /** Convert TtsModelKind to string (same as production). */
 std::string TtsKindToString(sherpaonnx::TtsModelKind kind);
+
+/** Map CSV model_type string to EnhancementModelKind. */
+sherpaonnx::EnhancementModelKind EnhancementKindFromString(const std::string& modelType);
+
+std::string EnhancementKindToString(sherpaonnx::EnhancementModelKind kind);
 
 }  // namespace model_detect_test
 

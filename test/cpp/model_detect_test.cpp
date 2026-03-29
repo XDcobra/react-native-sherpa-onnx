@@ -9,6 +9,9 @@
  *   - asr-models-structure.txt, asr-models-expected.csv (see collect-asr-model-structures workflow).
  * Fixtures (TTS):
  *   - tts-models-structure.txt, tts-models-expected.csv (see collect-tts-model-structures workflow).
+ * Fixtures (speech enhancement):
+ *   - speech-enhancement-models-structure.txt, speech-enhancement-models-expected.csv
+ *     (see collect-speech-enhancement-model-structures workflow).
  *
  * The tests build a FileEntry list from each structure file, call DetectSttModelFromFileList
  * or DetectTtsModelFromFileList (test-only APIs, no filesystem), and assert outcomes per CSV
@@ -20,6 +23,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-tts.h"
+#include "sherpa-onnx-validate-enhancement.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -51,10 +55,14 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream asrCsv(dir + "/asr-models-expected.csv");
     std::ifstream ttsStruct(dir + "/tts-models-structure.txt");
     std::ifstream ttsCsv(dir + "/tts-models-expected.csv");
+    std::ifstream enhStruct(dir + "/speech-enhancement-models-structure.txt");
+    std::ifstream enhCsv(dir + "/speech-enhancement-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
     ASSERT_TRUE(ttsCsv.is_open()) << "Missing: " << dir << "/tts-models-expected.csv";
+    ASSERT_TRUE(enhStruct.is_open()) << "Missing: " << dir << "/speech-enhancement-models-structure.txt";
+    ASSERT_TRUE(enhCsv.is_open()) << "Missing: " << dir << "/speech-enhancement-models-expected.csv";
 }
 
 /**
@@ -217,6 +225,59 @@ TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
             << ") but got " << model_detect_test::TtsKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
+/**
+ * DetectEnhancementFromFileListMatchesExpected
+ *
+ * Loads speech-enhancement-models-structure.txt and speech-enhancement-models-expected.csv
+ * (k2-fsa/sherpa-onnx speech-enhancement-models release). Each asset is typically a single .onnx;
+ * fixtures use model dir "." and path ./<basename>.onnx.
+ */
+TEST(ModelDetectTest, DetectEnhancementFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/speech-enhancement-models-structure.txt";
+    std::string csvPath = dir + "/speech-enhancement-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::EnhancementModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::EnhancementModelKind expectedKind = model_detect_test::EnhancementKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::EnhancementModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got " << model_detect_test::EnhancementKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
 }
@@ -468,6 +529,39 @@ TEST(ModelDetectValidation, ValidateSttPathsUnknownKindPassesThrough) {
     sherpaonnx::SttModelPaths paths;
     auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kUnknown, paths, "/m");
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, ValidateEnhancementPathsDirectOk) {
+    sherpaonnx::EnhancementModelPaths paths;
+    paths.model = "/m/gtcrn_simple.onnx";
+    auto v = sherpaonnx::ValidateEnhancementPaths(
+        sherpaonnx::EnhancementModelKind::kGtcrn, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateEnhancementPathsDirectMissingModel) {
+    sherpaonnx::EnhancementModelPaths paths;
+    auto v = sherpaonnx::ValidateEnhancementPaths(
+        sherpaonnx::EnhancementModelKind::kDpdfNet, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateEnhancementPathsUnknownKindPassesThrough) {
+    sherpaonnx::EnhancementModelPaths paths;
+    auto v = sherpaonnx::ValidateEnhancementPaths(
+        sherpaonnx::EnhancementModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, EnhancementMissingOnnxRejected) {
+    const std::string dir = "test-models/enhancement-empty";
+    std::vector<FE> files = {
+        MakeEntry(dir, "readme.txt"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+    EXPECT_FALSE(result.ok) << "Should fail when no gtcrn/dpdfnet onnx is present";
 }
 
 }  // namespace
