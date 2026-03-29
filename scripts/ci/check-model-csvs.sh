@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compare GitHub release assets (asr-models, tts-models) with local CSV fixtures.
+# Compare GitHub release assets (asr-models, tts-models, speech-enhancement-models) with local CSV fixtures.
 # If any asset exists on GitHub but is not listed in the corresponding CSV,
 # print a warning (non-fatal) with the list and a hint to run the collect workflows.
 # Exit code is always 0 so this can be used as an informational step.
@@ -9,6 +9,7 @@ set -e
 REPO="${SHERPA_ONNX_REPO:-k2-fsa/sherpa-onnx}"
 ASR_CSV="${ASR_CSV:-test/fixtures/asr-models-expected.csv}"
 TTS_CSV="${TTS_CSV:-test/fixtures/tts-models-expected.csv}"
+SPEECH_ENH_CSV="${SPEECH_ENH_CSV:-test/fixtures/speech-enhancement-models-expected.csv}"
 
 # Optional: GITHUB_TOKEN or GH_TOKEN for api.github.com rate limits / private forks
 CURL_GH_API=(-sL)
@@ -23,6 +24,10 @@ if [ ! -f "$ASR_CSV" ]; then
 fi
 if [ ! -f "$TTS_CSV" ]; then
   echo "::warning::Missing $TTS_CSV (run from repo root or set TTS_CSV)"
+  exit 0
+fi
+if [ ! -f "$SPEECH_ENH_CSV" ]; then
+  echo "::warning::Missing $SPEECH_ENH_CSV (run from repo root or set SPEECH_ENH_CSV)"
   exit 0
 fi
 
@@ -44,11 +49,21 @@ else
   echo "::warning::Could not fetch tts-models release or it has no assets"
 fi
 
+# Fetch speech-enhancement-models release assets (.tar.bz2, .onnx)
+SPEECH_ASSETS=""
+SPEECH_RESP="${SPEECH_RESP:-$(curl "${CURL_GH_API[@]}" "https://api.github.com/repos/${REPO}/releases/tags/speech-enhancement-models")}"
+if echo "$SPEECH_RESP" | jq -e '.assets' >/dev/null 2>&1; then
+  SPEECH_ASSETS=$(echo "$SPEECH_RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name')
+else
+  echo "::warning::Could not fetch speech-enhancement-models release or it has no assets"
+fi
+
 # First column of CSV (asset_name); strip optional quotes and whitespace; skip header
 csv_asset_names() { awk -F',' '{ gsub(/^ *"|" *$/, "", $1); gsub(/^ | $/, "", $1); if (NR>1 && $1 != "") print $1 }' "$1"; }
 
 ASR_CSV_NAMES=$(csv_asset_names "$ASR_CSV")
 TTS_CSV_NAMES=$(csv_asset_names "$TTS_CSV")
+SPEECH_CSV_NAMES=$(csv_asset_names "$SPEECH_ENH_CSV")
 
 ASR_MISSING=""
 while IFS= read -r asset; do
@@ -66,13 +81,23 @@ while IFS= read -r asset; do
   fi
 done <<< "$TTS_ASSETS"
 
-if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ]; then
+SPEECH_MISSING=""
+while IFS= read -r asset; do
+  [ -z "$asset" ] && continue
+  if ! grep -qFx -- "$asset" <<< "$SPEECH_CSV_NAMES"; then
+    SPEECH_MISSING="${SPEECH_MISSING}  - ${asset}\n"
+  fi
+done <<< "$SPEECH_ASSETS"
+
+if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ]; then
   echo "::warning::New assets are available on GitHub but not yet listed in the expected CSV files."
   [ -n "$ASR_MISSING" ] && echo -e "ASR (asr-models) assets missing from $ASR_CSV:\n$ASR_MISSING"
   [ -n "$TTS_MISSING" ] && echo -e "TTS (tts-models) assets missing from $TTS_CSV:\n$TTS_MISSING"
+  [ -n "$SPEECH_MISSING" ] && echo -e "Speech enhancement (speech-enhancement-models) assets missing from $SPEECH_ENH_CSV:\n$SPEECH_MISSING"
   echo "Please run the collect workflows to update fixtures:"
   echo "  - Testdata - Collect ASR model structures (workflow_dispatch)"
   echo "  - Testdata - Collect TTS model structures (workflow_dispatch)"
+  echo "  - Testdata - Collect speech enhancement model structures (workflow_dispatch)"
   exit 0
 fi
 

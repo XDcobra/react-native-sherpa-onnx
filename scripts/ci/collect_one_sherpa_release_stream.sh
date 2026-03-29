@@ -124,7 +124,9 @@ while IFS='|' read -r name url; do
       continue
     fi
   elif [[ "$name" == *.onnx ]]; then
-    echo "single file: $name" > "$cache_file"
+    # Two lines so structure fixtures match tarball layout: model dir "." and the file (see model_detect_test).
+    base="${name##*/}"
+    printf '%s\n' "./" "./${base}" > "$cache_file"
   else
     echo "::warning::Unexpected asset $name" >&2
     rm -f "$dl"
