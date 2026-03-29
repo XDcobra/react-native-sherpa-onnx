@@ -92,6 +92,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Supported Model Types](#supported-model-types)
   - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
   - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
+  - [Speech Enhancement Models](#speech-enhancement-models)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
 - [Breaking changes (upgrading to 0.3.0)](#breaking-changes-upgrading-to-030)
@@ -183,6 +184,18 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Supertonic**    | `'supertonic'`        | Lightning-fast, on-device text-to-speech system designed for extreme performance with minimal computational overhead. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
+
+### Speech Enhancement Models
+
+Speech enhancement improves noisy or degraded speech using ONNX models from the sherpa-onnx **speech-enhancement-models** release. Detection looks for **`.onnx`** filenames containing **`gtcrn`** or **`dpdfnet`** (case-insensitive). With **`'auto'`**, **GTCRN** is preferred when both are present in the same folder.
+
+| Model Type   | `modelType` Value | Description                                                                 | Download Links                                                                 |
+| ------------ | ----------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Auto Detect** | `'auto'`       | Picks **GTCRN** if a matching `.onnx` exists, otherwise **DPDFNet** if found. | n/a                                                                              |
+| **GTCRN**    | `'gtcrn'`         | Lightweight speech enhancement (e.g. `gtcrn_simple.onnx`).                  | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
+| **DPDFNet**  | `'dpdfnet'`       | Deep speech enhancement variants (e.g. `dpdfnet2.onnx`, `dpdfnet4.onnx`, `dpdfnet8.onnx`, `dpdfnet_baseline.onnx`, `dpdfnet2_48khz_hr.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
+
+APIs, batch vs online processing, and initialization are covered in [Speech Enhancement](./docs/speech-enhancement.md).
 
 ## Documentation
 
