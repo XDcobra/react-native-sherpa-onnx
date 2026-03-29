@@ -1,0 +1,18 @@
+# Asset: dpdfnet2.onnx
+./
+./dpdfnet2.onnx
+# Asset: dpdfnet2_48khz_hr.onnx
+./
+./dpdfnet2_48khz_hr.onnx
+# Asset: dpdfnet4.onnx
+./
+./dpdfnet4.onnx
+# Asset: dpdfnet8.onnx
+./
+./dpdfnet8.onnx
+# Asset: dpdfnet_baseline.onnx
+./
+./dpdfnet_baseline.onnx
+# Asset: gtcrn_simple.onnx
+./
+./gtcrn_simple.onnx
