@@ -19,10 +19,12 @@ def requiredFfmpegSoFiles = [
   'libavcodec.so', 'libavformat.so', 'libavutil.so', 'libswresample.so', 'libavfilter.so', 'libshine.so'
 ]
 def requiredSherpaOnnxSoFiles = [
-  'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so', 'libonnxruntime.so'
+  'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so'
 ]
 def requiredLibarchiveSoFiles = ['libarchive.so', 'libzstd.so']
 def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
+/** Both from the same onnxruntime release (AAR or third_party); required for Java ORT + symbol consistency. */
+def requiredOnnxruntimeBundleSoFiles = ['libonnxruntime4j_jni.so', 'libonnxruntime.so']
 
 def jniLibsDir = file("${project.projectDir}/src/main/jniLibs")
 def sherpaOnnxClassesDir = file("${project.buildDir}/sherpa-onnx-classes")
@@ -79,11 +81,12 @@ def hasLibarchiveHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
 }
 
-def hasAllOnnxruntimeJniLibs = {
+/** Both ORT .so present per ABI (sherpa-onnx AAR no longer ships libonnxruntime.so). */
+def hasAllOnnxruntimeBundleLibs = {
   for (abi in requiredAbis) {
     def dir = new File(jniLibsDir, abi)
     if (!dir.exists()) return false
-    for (soName in requiredOnnxruntimeJniSoFiles) {
+    for (soName in requiredOnnxruntimeBundleSoFiles) {
       if (!new File(dir, soName).exists()) return false
     }
   }
@@ -163,14 +166,11 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def libarchiveHdrsOk = hasLibarchiveHeaders()
     def libarchiveNeedsUpdate = !libarchiveLibsOk || !libarchiveHdrsOk || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
 
-    def ortJniOk = hasAllOnnxruntimeJniLibs()
-
     println "[prebuilt] Resolution order: (1) THIRD_PARTY  (2) LOCAL_SDK  (3) MAVEN_AAR  (4) GITHUB_RELEASE — see docs/PREBUILT_RESOLUTION.md"
 
     def sherpaResolved = false
     def ffmpegResolved = false
     def libarchiveResolved = false
-    def ortJniResolved = ortJniOk
 
     // =====================================================================
     // sherpa-onnx: JNI (.so) + C headers
@@ -374,13 +374,55 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
-    // onnxruntime: JNI bridge only (libonnxruntime4j_jni.so)
-    // libonnxruntime.so comes from sherpa-onnx prebuilts; not extracted here.
+    // onnxruntime: libonnxruntime.so + libonnxruntime4j_jni.so (same ORT build)
+    //
+    // Java OrtEnvironment loads libonnxruntime4j_jni.so, which dlopen's libonnxruntime.so.
+    // Sherpa-onnx AAR does not ship libonnxruntime.so; both come from the onnxruntime AAR
+    // or a full third_party/onnxruntime_prebuilt/android bundle.
     // =====================================================================
-    if (!ortJniOk) {
-      // Stage 1: THIRD_PARTY
-      def tpJni = hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeJniSoFiles)
-      if (tpJni) {
+    def ortMatchedPairCopied = false
+    if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
+      requiredAbis.each { abi ->
+        copy {
+          from new File(thirdPartyOrtDir, "jni/${abi}")
+          include 'libonnxruntime4j_jni.so', 'libonnxruntime.so'
+          into new File(jniLibsDir, abi)
+        }
+      }
+      ortMatchedPairCopied = true
+      println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... THIRD_PARTY  ${thirdPartyOrtDir}"
+    }
+    if (!ortMatchedPairCopied) {
+      try {
+        def aarFiles = project.configurations.onnxruntimeAar.files
+        if (!aarFiles.isEmpty()) {
+          downloadDir.mkdirs()
+          def aar = aarFiles.iterator().next()
+          def aarExtractDir = new File(downloadDir, "onnxruntime-aar-extract")
+          if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+          aarExtractDir.mkdirs()
+          copy { from zipTree(aar); into aarExtractDir }
+          requiredAbis.each { abi ->
+            def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+            if (aarJniDir.exists()) {
+              copy {
+                from aarJniDir
+                include 'libonnxruntime4j_jni.so', 'libonnxruntime.so'
+                into new File(jniLibsDir, abi)
+              }
+            }
+          }
+          ortMatchedPairCopied = true
+          println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... MAVEN_AAR  ${aar.name}"
+        }
+      } catch (Exception e) {
+        println "[onnxruntime] MAVEN_AAR matched-pair copy failed: ${e.message}"
+      }
+    }
+    if (!ortMatchedPairCopied && !hasAllOnnxruntimeBundleLibs()) {
+      // Legacy: third_party with JNI only (incomplete bundle)
+      def tpJniOnly = hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeJniSoFiles)
+      if (tpJniOnly) {
         requiredAbis.each { abi ->
           copy {
             from new File(thirdPartyOrtDir, "jni/${abi}")
@@ -388,18 +430,16 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             into new File(jniLibsDir, abi)
           }
         }
-        ortJniResolved = true
-        println "[onnxruntime] libonnxruntime4j_jni.so .......... THIRD_PARTY  ${thirdPartyOrtDir}"
+        println "[onnxruntime] libonnxruntime4j_jni.so only .... THIRD_PARTY  ${thirdPartyOrtDir}"
+        println "[onnxruntime]   WARN: no libonnxruntime.so in ort third_party — add full bundle or resolve onnxruntime AAR."
       }
-
-      // Stage 3: MAVEN_AAR
-      if (!ortJniResolved) {
+      if (!hasAllOnnxruntimeBundleLibs()) {
         try {
           def aarFiles = project.configurations.onnxruntimeAar.files
           if (!aarFiles.isEmpty()) {
             downloadDir.mkdirs()
             def aar = aarFiles.iterator().next()
-            def aarExtractDir = new File(downloadDir, "onnxruntime-aar-extract")
+            def aarExtractDir = new File(downloadDir, "onnxruntime-aar-extract-jni-only")
             if (aarExtractDir.exists()) aarExtractDir.deleteDir()
             aarExtractDir.mkdirs()
             copy { from zipTree(aar); into aarExtractDir }
@@ -413,18 +453,18 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
                 }
               }
             }
-            ortJniResolved = true
-            println "[onnxruntime] libonnxruntime4j_jni.so .......... MAVEN_AAR  ${aar.name}"
-            println "[onnxruntime]   install: per ABI --> ${jniLibsHuman}/<abi>/ (only JNI bridge; libonnxruntime.so from sherpa prebuilts)"
+            println "[onnxruntime] libonnxruntime4j_jni.so only .... MAVEN_AAR  ${aar.name}"
+            println "[onnxruntime]   WARN: AAR jni/<abi> missing libonnxruntime.so — use a complete onnxruntime AAR."
           } else {
-            println "[onnxruntime] MAVEN_AAR: onnxruntimeAar empty — libonnxruntime4j_jni.so still missing"
+            println "[onnxruntime] MAVEN_AAR: onnxruntimeAar empty — ORT native libs still missing"
           }
         } catch (Exception e) {
-          println "[onnxruntime] MAVEN_AAR failed: ${e.message}"
+          println "[onnxruntime] MAVEN_AAR jni-only failed: ${e.message}"
         }
       }
-    } else {
-      println "[onnxruntime] libonnxruntime4j_jni.so (per ABI) .... LOCAL_SDK"
+    }
+    if (!hasAllOnnxruntimeBundleLibs()) {
+      println "[onnxruntime] WARN: libonnxruntime.so and/or libonnxruntime4j_jni.so missing after resolution. checkJniLibs will fail; use com.xdcobra.sherpa:onnxruntime or full third_party bundle."
     }
 
     // =====================================================================
@@ -598,10 +638,10 @@ project.tasks.register("checkJniLibs") {
           }
         }
       }
-      requiredOnnxruntimeJniSoFiles.each { soName ->
+      requiredOnnxruntimeBundleSoFiles.each { soName ->
         def soFile = new File(dir, soName)
         if (!soFile.exists()) {
-          throw new RuntimeException("Missing onnxruntime JNI bridge '${soName}' for ABI ${abi}. Ensure Maven com.xdcobra.sherpa:onnxruntime is available.")
+          throw new RuntimeException("Missing onnxruntime native library '${soName}' for ABI ${abi}. Ensure Maven com.xdcobra.sherpa:onnxruntime (libonnxruntime.so + libonnxruntime4j_jni.so) resolves.")
         }
       }
     }

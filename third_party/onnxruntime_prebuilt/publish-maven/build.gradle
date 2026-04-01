@@ -12,7 +12,7 @@ def mavenRepoPat = project.findProperty('mavenRepoPat') ?: System.getenv('MAVEN_
 def gitMavenRepoUrl = 'https://github.com/XDcobra/maven.git'
 
 if (!aarPath || !new File(aarPath).exists()) {
-    throw new GradleException("Missing or invalid aarPath. Pass -PaarPath=/path/to/onnxruntime-release.aar -PmavenVersion=1.24.2-qnn2.43.1.260218")
+    throw new GradleException("Missing or invalid aarPath. Pass -PaarPath=/path/to/onnxruntime-release.aar -PmavenVersion=1.24.2-qnn2.43.1.260218-1")
 }
 
 def repoDir = layout.buildDirectory.dir('repo').get().asFile

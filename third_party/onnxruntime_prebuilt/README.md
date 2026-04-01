@@ -5,7 +5,7 @@ Build ONNX Runtime for Android (all ABIs) for use with sherpa-onnx. Optional **Q
 ## Version pinning and GitHub Release
 
 - **`VERSIONS`** – Pins `ONNXRUNTIME_VERSION` and `QNN_SDK_VERSION`. Used by:
-  - **`.github/workflows/build-onnxruntime-qnn.yml`** – Builds ORT for all ABIs with QNN, NNAPI, XNNPACK, Java; publishes a **GitHub Release** with tag `ort-android-qnn-v<ORT>-qnn<QNN>` and assets `onnxruntime-android-qnn.aar` and `onnxruntime-android-qnn.zip`.
+  - **`ANDROID_RELEASE_TAG`** – e.g. `ort-android-qnn-v1.24.2-qnn2.43.1.260218-1` (optional trailing `-N` = ORT build number for rebuilds). **`.github/workflows/build-onnxruntime-android-release.yml`** publishes a **GitHub Release** with that tag and assets `onnxruntime-android-qnn.aar` (includes `include/` ORT headers) and `onnxruntime-android-qnn.zip`.
   - **`third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh`** – When building sherpa-onnx for Android, tries to download this release and use the zip; or uses local output of `build_onnxruntime_android_aar.sh` if present.
 
 No changes to the sherpa-onnx submodule are required (Variant B).

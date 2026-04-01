@@ -155,7 +155,8 @@ if [ -z "$ORT_PREBUILT_ANDROID_BASE" ] && [ -z "$ORT_PREBUILT_ROOT" ]; then
         RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
     fi
     if [ -z "$RELEASE_TAG" ] && [ -f "$VERSIONS_FILE" ]; then
-        RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
+        ORT_BN="${ORT_BUILD_NUMBER:-1}"
+        RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}-${ORT_BN}"
     fi
     if [ -n "$RELEASE_TAG" ]; then
         REPO_SLUG="${GITHUB_REPOSITORY:-}"
@@ -252,7 +253,7 @@ build_abi() {
     local INSTALL_LIB="$SHERPA_SRC/$BUILD_DIR/install/lib"
     local DST_LIB="$OUTPUT_BASE/$ABI/lib"
     mkdir -p "$DST_LIB"
-    for so in libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libonnxruntime.so; do
+    for so in libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
         if [ -f "$INSTALL_LIB/$so" ]; then
             cp -v "$INSTALL_LIB/$so" "$DST_LIB/"
         fi

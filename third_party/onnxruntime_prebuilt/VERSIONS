@@ -9,7 +9,9 @@
 #
 # The release tag is read from ANDROID_RELEASE_TAG (same pattern as FFmpeg/sherpa-onnx).
 # When bumping ONNXRUNTIME_VERSION or QNN_SDK_VERSION, update ANDROID_RELEASE_TAG to
-# e.g. ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>.
+# ort-android-qnn-v<ONNXRUNTIME_VERSION>-qnn<QNN_SDK_VERSION>-<ORT_BUILD_NUMBER>.
+# Increment ORT_BUILD_NUMBER for a rebuild at the same ORT+QNN pin (packaging, AAR layout, etc.).
 
 ONNXRUNTIME_VERSION=1.24.2
 QNN_SDK_VERSION=2.43.1.260218
+ORT_BUILD_NUMBER=1
