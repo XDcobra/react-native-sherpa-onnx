@@ -31,7 +31,7 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 | **ONNX Runtime** | Java API | `classes.jar` → `onnxruntime-classes.jar` in build dir | — | — | `onnxruntimeAar` | — |
 | **ONNX Runtime** | C/C++ headers | `include/**` inside the published AAR (for native consumers) | — | — | `onnxruntimeAar` (optional extract) | — |
 
-**ORT release tag / Maven version:** `third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG` uses `ort-android-qnn-v<version>` where `<version>` is the Maven coordinate suffix, e.g. `1.24.2-qnn2.43.1.260218-1` (trailing `-N` is an **ORT build number** for rebuilds at the same ORT+QNN pin). `android/prebuilt-versions.gradle` strips the prefix and uses the remainder as `ortVersion`.
+**ORT release tag / Maven version:** `third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG` uses `ort-android-qnn-v<version>` where `<version>` is the Maven coordinate suffix, e.g. `1.24.4-qnn2.43.1.260218-1` (trailing `-N` is an **ORT build number** for rebuilds at the same ORT+QNN pin). `android/prebuilt-versions.gradle` strips the prefix and uses the remainder as `ortVersion`.
 
 ## Gradle tasks
 
