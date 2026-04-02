@@ -168,6 +168,80 @@ export const styles = StyleSheet.create({
   generateButton: {
     marginTop: 8,
   },
+  modelCard: {
+    marginTop: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F9F9FB',
+    padding: 12,
+  },
+  modelStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  modelStatusLabel: {
+    fontSize: 13,
+    color: '#4A4A4A',
+  },
+  modelStatusValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#B71C1C',
+  },
+  modelStatusValueReady: {
+    color: '#1B5E20',
+  },
+  progressContainer: {
+    marginBottom: 10,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#E5E5EA',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 999,
+  },
+  progressText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#6D6D72',
+  },
+  modelButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modelButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+  },
+  modelButtonSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+  },
+  modelButtonDisabled: {
+    opacity: 0.6,
+  },
+  modelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  modelButtonTextSecondary: {
+    color: '#1C1C1E',
+  },
   resultCard: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
