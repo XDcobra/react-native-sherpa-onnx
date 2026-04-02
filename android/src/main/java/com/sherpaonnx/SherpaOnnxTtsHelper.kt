@@ -111,6 +111,46 @@ internal class SherpaOnnxTtsHelper(
     }
   }
 
+  /**
+   * libsherpa-onnx-jni looks up `invoke([F)Ljava/lang/Integer` (see sherpa-onnx `offline-tts.cc` CallCallback).
+   * Kotlin `Function1<*, Int>` compiles to `invoke([F)I`, so GetMethodID fails and JNI aborts.
+   * Using [java.lang.Integer] as the type parameter yields the boxed JVM signature the JNI expects.
+   * The cast is only for the Kotlin API (`generateWithCallback` still declares `Function1<FloatArray, Int>`).
+   */
+  /** Box for JNI: must be real [java.lang.Integer], not Kotlin [Int] (primitive `invoke([F)I` breaks sherpa JNI). */
+  @Suppress("DEPRECATION")
+  private fun boxForTtsJni(n: Int): java.lang.Integer = java.lang.Integer(n)
+
+  @Suppress("UNCHECKED_CAST")
+  private fun ttsChunkCallbackForJni(
+    sentenceChunkSizes: MutableList<Int>
+  ): kotlin.Function1<FloatArray, Int> {
+    val boxed =
+      object : kotlin.jvm.functions.Function1<FloatArray, java.lang.Integer> {
+        override fun invoke(chunk: FloatArray): java.lang.Integer {
+          sentenceChunkSizes.add(chunk.size)
+          return boxForTtsJni(chunk.size)
+        }
+      }
+    return boxed as kotlin.Function1<FloatArray, Int>
+  }
+
+  @Suppress("UNCHECKED_CAST")
+  private fun ttsStreamChunkCallbackForJni(
+    cancelled: AtomicBoolean,
+    onChunk: (FloatArray) -> Unit
+  ): kotlin.Function1<FloatArray, Int> {
+    val boxed =
+      object : kotlin.jvm.functions.Function1<FloatArray, java.lang.Integer> {
+        override fun invoke(chunk: FloatArray): java.lang.Integer {
+          if (cancelled.get()) return boxForTtsJni(0)
+          onChunk(chunk)
+          return boxForTtsJni(chunk.size)
+        }
+      }
+    return boxed as kotlin.Function1<FloatArray, Int>
+  }
+
   /** Single-thread executor for TTS init so the RN bridge thread is not blocked (avoids Inspector/dev WebSocket races in debug builds). */
   private val ttsInitExecutor = Executors.newSingleThreadExecutor()
 
@@ -525,10 +565,7 @@ internal class SherpaOnnxTtsHelper(
             }
           }
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
-            sentenceChunkSizes.add(chunk.size)
-            chunk.size
-          }
+          inst.tts!!.generateWithConfigAndCallback(text, config, ttsChunkCallbackForJni(sentenceChunkSizes))
         }
         hasReferenceAudio(options) -> {
           Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
@@ -547,10 +584,7 @@ internal class SherpaOnnxTtsHelper(
           return
         }
         else -> {
-          inst.tts!!.generateWithCallback(text, sid, speed) { chunk ->
-            sentenceChunkSizes.add(chunk.size)
-            chunk.size
-          }
+          inst.tts!!.generateWithCallback(text, sid, speed, ttsChunkCallbackForJni(sentenceChunkSizes))
         }
       }
 
@@ -642,18 +676,23 @@ internal class SherpaOnnxTtsHelper(
         when {
           hasReferenceAudio(options) && inst.isPocket -> {
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-            inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
-              if (inst.ttsStreamCancelled.get()) return@generateWithConfigAndCallback 0
-              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
-              chunk.size
-            }
+            inst.tts!!.generateWithConfigAndCallback(
+              text,
+              config,
+              ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
+                emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
+              }
+            )
           }
           else -> {
-            inst.tts!!.generateWithCallback(text, sid, speed) { chunk ->
-              if (inst.ttsStreamCancelled.get()) return@generateWithCallback 0
-              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
-              chunk.size
-            }
+            inst.tts!!.generateWithCallback(
+              text,
+              sid,
+              speed,
+              ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
+                emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
+              }
+            )
           }
         }
         if (!inst.ttsStreamCancelled.get()) {
