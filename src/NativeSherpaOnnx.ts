@@ -341,8 +341,8 @@ export interface Spec extends TurboModule {
    * Generate speech with subtitle/timestamp metadata.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
-   * @param options - Same as {@link generateTts} options (cloning: Zipvoice/Pocket; Zipvoice needs `referenceText`).
-   * @returns Object with samples, sampleRate, subtitles, and estimated flag
+   * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
+   * @returns Object with samples, sampleRate, subtitles, and timingMode
    */
   generateTtsWithTimestamps(
     instanceId: string,
@@ -352,7 +352,7 @@ export interface Spec extends TurboModule {
     samples: number[];
     sampleRate: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
-    estimated: boolean;
+    timingMode: string;
   }>;
 
   // ==================== Online (streaming) TTS Methods ====================

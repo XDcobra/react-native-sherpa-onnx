@@ -179,6 +179,30 @@ export interface TtsUpdateOptions {
   modelOptions?: TtsModelOptions;
 }
 
+export type SubtitleMode = 'off' | 'fast' | 'accurate';
+
+export type SubtitleGranularity = 'sentence' | 'word';
+
+export interface SubtitleOptions {
+  /**
+   * Subtitle generation mode.
+   *
+   * - 'off': Do not generate subtitles/timestamps
+   * - 'fast': Estimated timing based on callback chunks (default)
+   * - 'accurate': Reserved for future forced alignment
+   *
+   * @default 'fast'
+   */
+  mode?: SubtitleMode;
+
+  /**
+   * Subtitle granularity.
+   *
+   * @default 'sentence'
+   */
+  granularity?: SubtitleGranularity;
+}
+
 /**
  * Options for TTS generation. Maps to Kotlin GenerationConfig when reference
  * audio or advanced options are used; otherwise simple sid/speed are used.
@@ -235,6 +259,11 @@ export interface TtsGenerationOptions {
    * Model-specific (e.g. temperature, chunk_size for Pocket).
    */
   extra?: Record<string, string>;
+
+  /**
+   * Subtitle/timestamp generation options.
+   */
+  subtitles?: SubtitleOptions;
 }
 
 /**
@@ -288,9 +317,38 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
   subtitles: TtsSubtitleItem[];
 
   /**
-   * True if timestamps are estimated rather than model-provided.
+   * Subtitle timing mode.
+   *
+   * - 'off': No subtitle timing requested/generated
+   * - 'estimated': Fast mode estimation
+   * - 'aligned': Accurate alignment mode (future)
    */
-  estimated: boolean;
+  timingMode: 'off' | 'estimated' | 'aligned';
+}
+
+export interface SubtitleFromAudioOptions {
+  /**
+   * Subtitle generation mode.
+   * 'accurate' is currently a stub and rejects.
+   */
+  mode: 'fast' | 'accurate';
+
+  /**
+   * Subtitle granularity.
+   *
+   * @default 'sentence'
+   */
+  granularity?: SubtitleGranularity;
+
+  /**
+   * Optional language hint for future accurate alignment.
+   */
+  language?: string;
+}
+
+export interface SubtitleResult {
+  subtitles: TtsSubtitleItem[];
+  timingMode: 'estimated' | 'aligned';
 }
 
 /**

@@ -159,6 +159,12 @@ function toNativeTtsOptions(
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
   if (options.extra != null && Object.keys(options.extra).length > 0)
     out.extra = options.extra;
+  if (options.subtitles?.mode !== undefined) {
+    out.subtitleMode = options.subtitles.mode;
+  }
+  if (options.subtitles?.granularity !== undefined) {
+    out.subtitleGranularity = options.subtitles.granularity;
+  }
   return out;
 }
 
@@ -276,7 +282,18 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudio> {
       guard();
-      return SherpaOnnx.generateTts(instanceId, text, toNativeTtsOptions(opts));
+      const optionsWithSubtitlesOff: TtsGenerationOptions = {
+        ...(opts ?? {}),
+        subtitles: {
+          ...(opts?.subtitles ?? {}),
+          mode: 'off',
+        },
+      };
+      return SherpaOnnx.generateTts(
+        instanceId,
+        text,
+        toNativeTtsOptions(optionsWithSubtitlesOff)
+      );
     },
 
     async generateSpeechWithTimestamps(
@@ -284,11 +301,30 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
-      return SherpaOnnx.generateTtsWithTimestamps(
+      const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
+        ...(opts ?? {}),
+        subtitles: {
+          ...(opts?.subtitles ?? {}),
+          mode: opts?.subtitles?.mode ?? 'fast',
+        },
+      };
+      const native = await SherpaOnnx.generateTtsWithTimestamps(
         instanceId,
         text,
-        toNativeTtsOptions(opts)
+        toNativeTtsOptions(optionsWithDefaultSubtitleMode)
       );
+
+      const timingMode =
+        native.timingMode === 'off' ||
+        native.timingMode === 'estimated' ||
+        native.timingMode === 'aligned'
+          ? native.timingMode
+          : 'off';
+
+      return {
+        ...native,
+        timingMode,
+      };
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
@@ -437,6 +473,7 @@ export function shareAudioFile(
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';
+export { generateSubtitlesFromAudio } from './subtitles';
 
 // Export types and runtime type list
 export type {
@@ -451,6 +488,11 @@ export type {
   TtsSupertonicModelOptions,
   TtsUpdateOptions,
   TtsGenerationOptions,
+  SubtitleMode,
+  SubtitleGranularity,
+  SubtitleOptions,
+  SubtitleFromAudioOptions,
+  SubtitleResult,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,
