@@ -20,6 +20,11 @@
       "types": "./lib/typescript/src/tts/index.d.ts",
       "default": "./lib/module/tts/index.js"
     },
+    "./alignment": {
+      "source": "./src/alignment/index.ts",
+      "types": "./lib/typescript/src/alignment/index.d.ts",
+      "default": "./lib/module/alignment/index.js"
+    },
     "./vad": {
       "source": "./src/vad/index.ts",
       "types": "./lib/typescript/src/vad/index.d.ts",
