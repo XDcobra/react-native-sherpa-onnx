@@ -994,7 +994,7 @@ export default function TTSScreen() {
         sampleRate: result.sampleRate,
       });
       setGeneratedSubtitles(result.subtitles);
-      setSubtitleEstimated(result.estimated);
+      setSubtitleEstimated(result.timingMode === 'estimated');
       Alert.alert(
         'Success',
         `Generated ${result.samples.length} samples at ${result.sampleRate} Hz`
