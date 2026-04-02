@@ -1,4 +1,10 @@
+import {
+  DocumentDirectoryPath,
+  mkdir,
+  unlink,
+} from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { getAlignmentModelPath } from '../alignment';
 import type {
   TTSInitializeOptions,
   TTSModelType,
@@ -12,8 +18,39 @@ import type {
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+import {
+  assertSubtitleGranularityForMode,
+  generateSubtitlesFromAudio,
+} from './subtitles';
 
 let ttsInstanceCounter = 0;
+
+function createTempAlignmentWavPath(instanceId: string): string {
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${DocumentDirectoryPath}/sherpa-onnx/cache/${instanceId}-alignment-${nonce}.wav`.replace(
+    /\/+/g,
+    '/'
+  );
+}
+
+async function saveTempAlignmentAudio(
+  instanceId: string,
+  audio: GeneratedAudio
+): Promise<string> {
+  const cacheDir = `${DocumentDirectoryPath}/sherpa-onnx/cache`.replace(
+    /\/+/g,
+    '/'
+  );
+  await mkdir(cacheDir);
+
+  const tempPath = createTempAlignmentWavPath(instanceId);
+  await SherpaOnnx.saveTtsAudioToFile(
+    audio.samples,
+    audio.sampleRate,
+    tempPath
+  );
+  return tempPath;
+}
 
 /**
  * Flatten model-specific options for the given model type to native init/update params.
@@ -301,30 +338,88 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
-      const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
+      const subtitleMode = opts?.subtitles?.mode ?? 'fast';
+      const subtitleGranularity = opts?.subtitles?.granularity ?? 'sentence';
+
+      assertSubtitleGranularityForMode(subtitleMode, subtitleGranularity);
+
+      if (subtitleMode !== 'accurate') {
+        const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
+          ...(opts ?? {}),
+          subtitles: {
+            ...(opts?.subtitles ?? {}),
+            mode: subtitleMode,
+          },
+        };
+
+        const native = await SherpaOnnx.generateTtsWithTimestamps(
+          instanceId,
+          text,
+          toNativeTtsOptions(optionsWithDefaultSubtitleMode)
+        );
+
+        const timingMode =
+          native.timingMode === 'off' ||
+          native.timingMode === 'estimated' ||
+          native.timingMode === 'aligned'
+            ? native.timingMode
+            : 'off';
+
+        return {
+          ...native,
+          timingMode,
+        };
+      }
+
+      const alignmentModelPath =
+        opts?.subtitles?.alignmentModelPath?.trim() ||
+        (await getAlignmentModelPath());
+
+      if (!alignmentModelPath) {
+        throw new Error(
+          'ALIGNMENT_MODEL_MISSING: Download alignment model first via downloadAlignmentModel().'
+        );
+      }
+
+      const optionsWithSubtitlesOff: TtsGenerationOptions = {
         ...(opts ?? {}),
         subtitles: {
           ...(opts?.subtitles ?? {}),
-          mode: opts?.subtitles?.mode ?? 'fast',
+          mode: 'off',
         },
       };
-      const native = await SherpaOnnx.generateTtsWithTimestamps(
+
+      const generated = await SherpaOnnx.generateTts(
         instanceId,
         text,
-        toNativeTtsOptions(optionsWithDefaultSubtitleMode)
+        toNativeTtsOptions(optionsWithSubtitlesOff)
       );
 
-      const timingMode =
-        native.timingMode === 'off' ||
-        native.timingMode === 'estimated' ||
-        native.timingMode === 'aligned'
-          ? native.timingMode
-          : 'off';
+      let tempAudioPath: string | null = null;
+      try {
+        tempAudioPath = await saveTempAlignmentAudio(instanceId, generated);
+        const subtitleResult = await generateSubtitlesFromAudio(
+          text,
+          tempAudioPath,
+          {
+            mode: 'accurate',
+            granularity: subtitleGranularity,
+            alignmentModelPath,
+          }
+        );
 
-      return {
-        ...native,
-        timingMode,
-      };
+        return {
+          ...generated,
+          subtitles: subtitleResult.subtitles,
+          timingMode: subtitleResult.timingMode,
+        };
+      } finally {
+        if (tempAudioPath) {
+          unlink(tempAudioPath).catch(() => {
+            // ignore cleanup errors
+          });
+        }
+      }
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{

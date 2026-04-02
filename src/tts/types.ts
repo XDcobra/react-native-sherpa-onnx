@@ -181,7 +181,7 @@ export interface TtsUpdateOptions {
 
 export type SubtitleMode = 'off' | 'fast' | 'accurate';
 
-export type SubtitleGranularity = 'sentence' | 'word';
+export type SubtitleGranularity = 'sentence' | 'word' | 'character';
 
 export interface SubtitleOptions {
   /**
@@ -189,7 +189,7 @@ export interface SubtitleOptions {
    *
    * - 'off': Do not generate subtitles/timestamps
    * - 'fast': Estimated timing based on callback chunks (default)
-   * - 'accurate': Reserved for future forced alignment
+   * - 'accurate': wav2vec2 CTC forced alignment
    *
    * @default 'fast'
    */
@@ -198,9 +198,19 @@ export interface SubtitleOptions {
   /**
    * Subtitle granularity.
    *
+   * - 'sentence': sentence-level subtitles
+   * - 'word': word-level subtitles
+   * - 'character': character-level subtitles (only supported with mode: 'accurate')
+   *
    * @default 'sentence'
    */
   granularity?: SubtitleGranularity;
+
+  /**
+   * Optional absolute path to an alignment ONNX model.
+   * When omitted in accurate mode, the SDK uses getAlignmentModelPath().
+   */
+  alignmentModelPath?: string;
 }
 
 /**
@@ -321,7 +331,7 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
    *
    * - 'off': No subtitle timing requested/generated
    * - 'estimated': Fast mode estimation
-   * - 'aligned': Accurate alignment mode (future)
+   * - 'aligned': Accurate forced alignment mode
    */
   timingMode: 'off' | 'estimated' | 'aligned';
 }
@@ -329,21 +339,30 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
 export interface SubtitleFromAudioOptions {
   /**
    * Subtitle generation mode.
-   * 'accurate' is currently a stub and rejects.
    */
   mode: 'fast' | 'accurate';
 
   /**
    * Subtitle granularity.
    *
+   * - 'sentence': sentence-level subtitles
+   * - 'word': word-level subtitles
+   * - 'character': character-level subtitles (only supported with mode: 'accurate')
+   *
    * @default 'sentence'
    */
   granularity?: SubtitleGranularity;
 
   /**
-   * Optional language hint for future accurate alignment.
+   * Optional language hint for future multi-language alignment variants.
    */
   language?: string;
+
+  /**
+   * Optional absolute path to an alignment ONNX model.
+   * When omitted, the SDK uses getAlignmentModelPath().
+   */
+  alignmentModelPath?: string;
 }
 
 export interface SubtitleResult {

@@ -1,9 +1,30 @@
+import {
+  DocumentDirectoryPath,
+  mkdir,
+  unlink,
+} from '@dr.pogodin/react-native-fs';
+import SherpaOnnx from '../NativeSherpaOnnx';
+import { getAlignmentModelPath } from '../alignment';
+import { WAV2VEC2_VOCAB } from '../alignment/vocab';
 import { decodeAudioFileToFloatSamples } from '../audio';
 import type {
+  SubtitleGranularity,
+  SubtitleMode,
   SubtitleFromAudioOptions,
   SubtitleResult,
   TtsSubtitleItem,
 } from './types';
+
+export function assertSubtitleGranularityForMode(
+  mode: SubtitleMode,
+  granularity: SubtitleGranularity
+): void {
+  if (granularity === 'character' && mode !== 'accurate') {
+    throw new Error(
+      "Character granularity is only supported when subtitles.mode is 'accurate'."
+    );
+  }
+}
 
 const SENTENCE_TERMINATORS = new Set([
   '.',
@@ -209,6 +230,150 @@ function alignChunkCountsToSegments(
   return distributeSamplesByTextWeight(total, segments);
 }
 
+type AlignmentNativeItem = {
+  text: string;
+  start: number;
+  end: number;
+};
+
+function distributeItemCounts(total: number, weights: number[]): number[] {
+  if (weights.length === 0) {
+    return [];
+  }
+
+  const safeTotal = Math.max(0, Math.floor(total));
+  if (safeTotal === 0) {
+    return new Array(weights.length).fill(0);
+  }
+
+  const safeWeights = weights.map((weight) => Math.max(1, Math.floor(weight)));
+  const weightSum = safeWeights.reduce((sum, value) => sum + value, 0);
+  if (weightSum <= 0) {
+    return new Array(weights.length).fill(0);
+  }
+
+  const base = safeWeights.map((weight) =>
+    Math.floor((safeTotal * weight) / weightSum)
+  );
+
+  let assigned = base.reduce((sum, value) => sum + value, 0);
+  let remaining = safeTotal - assigned;
+  let index = 0;
+  while (remaining > 0 && base.length > 0) {
+    const slot = index % base.length;
+    base[slot] = (base[slot] ?? 0) + 1;
+    assigned += 1;
+    remaining = safeTotal - assigned;
+    index += 1;
+  }
+
+  return base;
+}
+
+function normalizeAlignmentItems(
+  items: AlignmentNativeItem[]
+): TtsSubtitleItem[] {
+  return items
+    .map((item) => ({
+      text: item.text,
+      start: Number.isFinite(item.start) ? Math.max(0, item.start) : 0,
+      end: Number.isFinite(item.end) ? Math.max(0, item.end) : 0,
+    }))
+    .map((item) => ({
+      ...item,
+      end: item.end < item.start ? item.start : item.end,
+    }))
+    .filter((item) => item.text.trim().length > 0);
+}
+
+function buildSentenceSubtitlesFromAlignedWords(
+  text: string,
+  alignedWords: TtsSubtitleItem[]
+): TtsSubtitleItem[] {
+  const sentences = splitTextIntoSentences(text);
+  if (sentences.length === 0 || alignedWords.length === 0) {
+    return [];
+  }
+
+  const sentenceWeights = sentences.map((sentence) =>
+    Math.max(1, splitTextIntoWords(sentence).length)
+  );
+  const sentenceWordCounts = distributeItemCounts(
+    alignedWords.length,
+    sentenceWeights
+  );
+
+  const subtitles: TtsSubtitleItem[] = [];
+  let wordCursor = 0;
+  let fallbackTime = alignedWords[0]?.start ?? 0;
+
+  for (let i = 0; i < sentences.length; i += 1) {
+    const sentence = sentences[i] ?? '';
+    const count = Math.max(0, sentenceWordCounts[i] ?? 0);
+    const chunk = alignedWords.slice(wordCursor, wordCursor + count);
+    wordCursor += count;
+
+    if (chunk.length === 0) {
+      subtitles.push({
+        text: sentence,
+        start: fallbackTime,
+        end: fallbackTime,
+      });
+      continue;
+    }
+
+    const start = chunk[0]?.start ?? fallbackTime;
+    const end = chunk[chunk.length - 1]?.end ?? start;
+    fallbackTime = end;
+
+    subtitles.push({
+      text: sentence,
+      start,
+      end,
+    });
+  }
+
+  const lastAlignedEnd = alignedWords[alignedWords.length - 1]?.end;
+  if (lastAlignedEnd !== undefined && subtitles.length > 0) {
+    const lastIndex = subtitles.length - 1;
+    const last = subtitles[lastIndex];
+    if (last != null) {
+      subtitles[lastIndex] = {
+        ...last,
+        end: Math.max(last.end, lastAlignedEnd),
+      };
+    }
+  }
+
+  return subtitles;
+}
+
+function createTempAlignmentWavPath(): string {
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${DocumentDirectoryPath}/sherpa-onnx/cache/alignment-${nonce}.wav`.replace(
+    /\/+/g,
+    '/'
+  );
+}
+
+async function saveSamplesToTempWav(audio: {
+  samples: number[];
+  sampleRate: number;
+}): Promise<string> {
+  const cacheDir = `${DocumentDirectoryPath}/sherpa-onnx/cache`.replace(
+    /\/+/g,
+    '/'
+  );
+  await mkdir(cacheDir);
+  const tempPath = createTempAlignmentWavPath();
+  await SherpaOnnx.saveTtsAudioToFile(
+    audio.samples,
+    audio.sampleRate,
+    tempPath
+  );
+  return tempPath;
+}
+
 function isCjkChar(char: string): boolean {
   return /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(
     char
@@ -363,10 +528,55 @@ export async function generateSubtitlesFromAudio(
   const mode = options.mode;
   const granularity = options.granularity ?? 'sentence';
 
+  assertSubtitleGranularityForMode(mode, granularity);
+
   if (mode === 'accurate') {
-    throw new Error(
-      "Accurate subtitle mode is not yet implemented. Use 'fast'."
-    );
+    const resolvedModelPath =
+      options.alignmentModelPath?.trim() || (await getAlignmentModelPath());
+
+    if (!resolvedModelPath) {
+      throw new Error(
+        'ALIGNMENT_MODEL_MISSING: Download alignment model first via downloadAlignmentModel().'
+      );
+    }
+
+    let audioPath = '';
+    let shouldCleanup = false;
+
+    if (typeof audioPathOrSamples === 'string') {
+      audioPath = audioPathOrSamples;
+    } else {
+      audioPath = await saveSamplesToTempWav(audioPathOrSamples);
+      shouldCleanup = true;
+    }
+
+    try {
+      const aligned = await SherpaOnnx.runCTCForcedAlignment(
+        resolvedModelPath,
+        audioPath,
+        text,
+        JSON.stringify(WAV2VEC2_VOCAB)
+      );
+
+      const wordItems = normalizeAlignmentItems(aligned.words ?? []);
+      const charItems = normalizeAlignmentItems(aligned.chars ?? []);
+
+      return {
+        subtitles:
+          granularity === 'character'
+            ? charItems
+            : granularity === 'word'
+            ? wordItems
+            : buildSentenceSubtitlesFromAlignedWords(text, wordItems),
+        timingMode: 'aligned',
+      };
+    } finally {
+      if (shouldCleanup) {
+        unlink(audioPath).catch(() => {
+          // ignore cleanup errors
+        });
+      }
+    }
   }
 
   const segments =
