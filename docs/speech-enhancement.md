@@ -41,7 +41,7 @@ Detection logic:
 - Scans the model directory recursively for `.onnx`
 - `*gtcrn*` filename -> `gtcrn`
 - `*dpdfnet*` filename -> `dpdfnet`
-- `auto` picks first supported match
+- `auto` prefers `gtcrn` when both are present; otherwise selects `dpdfnet` if available
 
 ## Offline Enhancement
 
