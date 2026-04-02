@@ -1,0 +1,62 @@
+name: Publish wav2vec2 model assets
+
+on:
+  push:
+  #workflow_dispatch:
+  #  inputs:
+  #    csv_path:
+  #      description: Path to sources CSV file
+  #      required: false
+  #      default: scripts/wav2vec2-models/sources.csv
+  #      type: string
+  #    release_tag:
+  #      description: Release tag for assets
+  #      required: false
+  #      default: wav2vec2-models
+  #      type: string
+  #    dry_run:
+  #      description: Build archives only and skip upload
+  #      required: false
+  #      default: false
+  #      type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check GitHub CLI
+        run: gh --version
+
+      - name: Build and publish wav2vec2 archives
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: add repo secret HUGGINGFACE_TOKEN for HF downloads (LFS / rate limits)
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(
+            --csv "${{ inputs.csv_path }}"
+            --repo "${{ github.repository }}"
+            --tag "${{ inputs.release_tag }}"
+          )
+
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+
+          node scripts/wav2vec2-models/build_and_upload.js "${args[@]}"

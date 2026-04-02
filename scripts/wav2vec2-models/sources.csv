@@ -1,0 +1,2 @@
+id;onnx_url;license
+wav2vec2-base-960h-int8;https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_int8.onnx;https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
