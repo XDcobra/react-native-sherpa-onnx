@@ -121,6 +121,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Live capture API | ✅ **Supported** | [PCM live stream](./docs/pcm-live-stream.md) | Native microphone capture with resampling for live transcription (use with streaming STT). |
 | Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
 | Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
+| TTS Subtitles / Timestamps | ✅ **Supported** | [TTS Subtitles](./docs/tts-subtitles.md) | SubtitleMode (`off`/`fast`) with callback-based timing. `accurate` is currently a defined API stub. |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
 | Play Asset Delivery (PAD) | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Android only. Archives: [Extraction API](./docs/extraction.md). |
 | Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
@@ -204,6 +205,7 @@ APIs, batch vs online processing, and initialization are covered in [Speech Enha
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
+- [TTS Subtitles / Timestamps](./docs/tts-subtitles.md) – Subtitle modes, timing behavior, and standalone subtitle estimation API
 - [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
