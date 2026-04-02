@@ -451,9 +451,64 @@ internal class SherpaOnnxTtsHelper(
         promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
       }
+
+      val subtitleMode = getSubtitleMode(options)
+      val subtitleGranularity = getSubtitleGranularity(options)
+      if (subtitleMode == "accurate") {
+        Log.e("SherpaOnnxTts", "TTS_SUBTITLE_ERROR: Accurate subtitle mode is not yet implemented")
+        promise.reject(
+          "TTS_SUBTITLE_ERROR",
+          "Accurate subtitle mode is not yet implemented. Use 'fast' or 'off'."
+        )
+        return
+      }
+
       val sid = getSid(options)
       val speed = getSpeed(options)
+
+      val sentenceChunkSizes = mutableListOf<Int>()
       val audio = when {
+        subtitleMode == "off" -> {
+          when {
+            hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
+              if (inst.isZipvoice) {
+                val promptText = options!!.getString("referenceText")?.trim().orEmpty()
+                if (promptText.isEmpty()) {
+                  Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
+                  promise.reject(
+                    "TTS_GENERATE_ERROR",
+                    "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
+                  )
+                  return
+                }
+              }
+              val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+              inst.tts!!.generateWithConfig(text, config)
+            }
+            hasReferenceAudio(options) -> {
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
+              promise.reject(
+                "TTS_GENERATE_ERROR",
+                "Reference audio is only supported for Zipvoice and Pocket TTS."
+              )
+              return
+            }
+            inst.isPocket -> {
+              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
+              promise.reject(
+                "TTS_GENERATE_ERROR",
+                "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
+              )
+              return
+            }
+            else -> dispatchGenerate(inst, text, sid, speed)
+              ?: run {
+                Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+                promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+                return
+              }
+          }
+        }
         hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
           if (inst.isZipvoice) {
             val promptText = options!!.getString("referenceText")?.trim().orEmpty()
@@ -467,7 +522,10 @@ internal class SherpaOnnxTtsHelper(
             }
           }
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          inst.tts!!.generateWithConfig(text, config)
+          inst.tts!!.generateWithConfigAndCallback(text, config) { chunk ->
+            sentenceChunkSizes.add(chunk.size)
+            chunk.size
+          }
         }
         hasReferenceAudio(options) -> {
           Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
@@ -485,13 +543,18 @@ internal class SherpaOnnxTtsHelper(
           )
           return
         }
-        else -> dispatchGenerate(inst, text, sid, speed)
-          ?: run {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-            return
+        else -> {
+          inst.tts!!.generateWithCallback(text, sid, speed) { chunk ->
+            sentenceChunkSizes.add(chunk.size)
+            chunk.size
           }
+        }
       }
+
+      if (subtitleMode != "off" && sentenceChunkSizes.isEmpty() && audio.samples.isNotEmpty()) {
+        sentenceChunkSizes.add(audio.samples.size)
+      }
+
       val map = Arguments.createMap()
       val samplesArray = Arguments.createArray()
       for (sample in audio.samples) {
@@ -499,17 +562,29 @@ internal class SherpaOnnxTtsHelper(
       }
       map.putArray("samples", samplesArray)
       map.putInt("sampleRate", audio.sampleRate)
-      val subtitlesArray = Arguments.createArray()
-      if (audio.samples.isNotEmpty() && audio.sampleRate > 0) {
-        val durationSec = audio.samples.size.toDouble() / audio.sampleRate
-        val subtitleMap = Arguments.createMap()
-        subtitleMap.putString("text", text)
-        subtitleMap.putDouble("start", 0.0)
-        subtitleMap.putDouble("end", durationSec)
-        subtitlesArray.pushMap(subtitleMap)
+
+      val subtitleItems = if (subtitleMode == "off") {
+        emptyList()
+      } else {
+        val sentenceSegments = SherpaOnnxTextSegmenter.splitIntoSentences(text)
+        if (subtitleGranularity == "word") {
+          SherpaOnnxTextSegmenter.buildWordSubtitlesFromSentenceChunks(
+            sentenceSegments,
+            sentenceChunkSizes,
+            audio.sampleRate
+          )
+        } else {
+          SherpaOnnxTextSegmenter.buildSubtitlesFromChunks(
+            sentenceSegments,
+            sentenceChunkSizes,
+            audio.sampleRate
+          )
+        }
       }
-      map.putArray("subtitles", subtitlesArray)
-      map.putBoolean("estimated", true)
+
+      map.putArray("subtitles", toSubtitleWritableArray(subtitleItems))
+      val timingMode = if (subtitleMode == "off") "off" else "estimated"
+      map.putString("timingMode", timingMode)
       promise.resolve(map)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: ${e.message ?: "Failed to generate speech"}", e)
@@ -914,6 +989,32 @@ internal class SherpaOnnxTtsHelper(
 
   private fun getSpeed(options: ReadableMap?): Float =
     if (options != null && options.hasKey("speed")) options.getDouble("speed").toFloat() else 1.0f
+
+  private fun getSubtitleMode(options: ReadableMap?): String {
+    val raw = options?.getString("subtitleMode")?.trim()?.lowercase()
+    return when (raw) {
+      "off", "fast", "accurate" -> raw
+      else -> "fast"
+    }
+  }
+
+  private fun getSubtitleGranularity(options: ReadableMap?): String {
+    val raw = options?.getString("subtitleGranularity")?.trim()?.lowercase()
+    return when (raw) {
+      "word", "sentence" -> raw
+      else -> "sentence"
+    }
+  }
+
+  private fun toSubtitleWritableArray(items: List<SubtitleTimingItem>) = Arguments.createArray().apply {
+    for (item in items) {
+      val subtitleMap = Arguments.createMap()
+      subtitleMap.putString("text", item.text)
+      subtitleMap.putDouble("start", item.start)
+      subtitleMap.putDouble("end", item.end)
+      pushMap(subtitleMap)
+    }
+  }
 
   /** Build Kotlin GenerationConfig from ReadableMap. Returns null only when options is null; otherwise returns a config with sid, speed, silenceScale, numSteps, and any reference/extra fields from options. */
   private fun parseGenerationConfig(options: ReadableMap?): GenerationConfig? {
