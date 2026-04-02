@@ -1,15 +1,11 @@
 # TTS Subtitles and Timestamps
 
-Subtitle generation was redesigned to provide consistent behavior across Android and iOS and to support both TTS generation and standalone audio subtitle estimation.
+Subtitle generation supports two timing strategies and two entry points:
 
-## Overview
+1. During TTS generation with `tts.generateSpeechWithTimestamps()`.
+2. From an existing audio file/samples with `generateSubtitlesFromAudio()`.
 
-You can generate subtitle/timestamp entries in two ways:
-
-1. During TTS generation with tts.generateSpeechWithTimestamps().
-2. From existing audio with generateSubtitlesFromAudio().
-
-Both APIs return subtitle items in this shape:
+Each subtitle item has this shape:
 
 ```ts
 { text: string; start: number; end: number }
@@ -17,47 +13,66 @@ Both APIs return subtitle items in this shape:
 
 Times are in seconds.
 
-## Subtitle Modes
+## Overview
 
-SubtitleMode values:
+Subtitle modes:
 
-- off: Disable subtitle generation.
-- fast: Generate estimated subtitle timing.
-- accurate: Reserved for future forced alignment (currently not implemented).
+- `off`: No subtitles.
+- `fast`: Estimated timing.
+- `accurate`: wav2vec2 CTC forced alignment.
 
 Timing result modes:
 
-- off: No subtitle timing generated.
-- estimated: Fast mode timing.
-- aligned: Future accurate alignment mode.
+- `off`: No subtitle timing generated.
+- `estimated`: Fast mode timing.
+- `aligned`: Accurate mode alignment.
+
+Granularity:
+
+- `sentence`
+- `word`
+- `character` (only with `mode: 'accurate'`)
 
 ## How Fast Mode Works
 
-Fast mode uses native TTS callback chunking with max sentence chunks and maps chunk sample counts to sentence boundaries.
+Fast mode uses native TTS callback chunking and maps chunk sample counts to sentence boundaries.
 
-- Android: generateWithCallback / generateWithConfigAndCallback.
-- iOS: generateStream callback variant.
+- Android: `generateWithCallback` / `generateWithConfigAndCallback`
+- iOS: `generateStream` callback variant
 
-This is deterministic and significantly better than naive equal splitting.
+For word granularity, sentence chunks are distributed across words by text-weight.
 
-For word granularity, each sentence chunk is further distributed across words using text-length weighting.
+`character` granularity is not supported in fast mode and throws a validation error.
 
-## Accurate Mode
+Standalone fast mode (`generateSubtitlesFromAudio`) estimates timings from total audio duration and text-weighting.
 
-Accurate mode is currently a stub.
+## How Accurate Mode Works
 
-- tts.generateSpeechWithTimestamps(): rejects with TTS_SUBTITLE_ERROR.
-- generateSubtitlesFromAudio(): rejects with an "not yet implemented" error.
+Accurate mode uses wav2vec2 CTC forced alignment (`onnx-community/wav2vec2-base-960h-ONNX`) against a transcript.
 
-This keeps the API stable so native forced-alignment can be added later without changing app-side contracts.
+Flow:
+
+1. Ensure the alignment model is available locally.
+2. Generate audio (or use existing audio input).
+3. Run native CTC alignment via `runCTCForcedAlignment`.
+4. Return aligned word/char timestamps.
+5. Map timestamps to requested granularity.
+
+The default alignment model target is:
+
+`https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_int8.onnx`
+
+Stored path:
+
+`DocumentDirectoryPath/sherpa-onnx/alignment/model.onnx`
 
 ## API: generateSpeechWithTimestamps
 
 ```ts
 const audio = await tts.generateSpeechWithTimestamps(text, {
   subtitles: {
-    mode: 'fast',
-    granularity: 'sentence', // or 'word'
+    mode: 'accurate',
+    granularity: 'character',
   },
 });
 ```
@@ -71,8 +86,8 @@ Returned fields:
 
 Default behavior:
 
-- generateSpeechWithTimestamps() defaults to subtitles.mode = 'fast'.
-- generateSpeech() forces subtitles.mode = 'off'.
+- `generateSpeechWithTimestamps()` defaults to `subtitles.mode = 'fast'`.
+- `generateSpeech()` forces `subtitles.mode = 'off'`.
 
 ## API: generateSubtitlesFromAudio
 
@@ -83,8 +98,8 @@ const result = await generateSubtitlesFromAudio(
   text,
   '/absolute/path/audio.wav',
   {
-    mode: 'fast',
-    granularity: 'sentence',
+    mode: 'accurate',
+    granularity: 'character',
   }
 );
 ```
@@ -94,38 +109,75 @@ Supported input types:
 - File path string.
 - In-memory samples object: { samples: number[]; sampleRate: number }.
 
-Standalone fast mode estimates timings from total audio duration and text weighting.
+## API: Alignment Model Management
 
-## Platform Consistency
+```ts
+import {
+  downloadAlignmentModel,
+  isAlignmentModelReady,
+  getAlignmentModelPath,
+  deleteAlignmentModel,
+} from 'react-native-sherpa-onnx/alignment';
 
-- Android and iOS now share the same subtitle mode semantics.
-- Both return timingMode with the same semantics.
-- Text segmentation rules are aligned for sentence-level subtitle generation.
+await downloadAlignmentModel({
+  onProgress: ({ bytesWritten, contentLength }) => {
+    // update progress UI
+  },
+});
+
+const ready = await isAlignmentModelReady();
+const path = await getAlignmentModelPath();
+
+await deleteAlignmentModel();
+```
+
+You can override the default URL:
+
+```ts
+await downloadAlignmentModel({
+  url: 'https://your-host/path/to/model.onnx',
+});
+```
+
+## Errors
+
+- `ALIGNMENT_MODEL_MISSING`: Accurate mode requested without a downloaded/provided model.
+- `ALIGNMENT_ERROR`: Native alignment failed (bad model/audio format/runtime failure).
+- `Character granularity is only supported when subtitles.mode is 'accurate'.`: thrown when `granularity: 'character'` is used with `mode: 'fast'` or `mode: 'off'`.
+
+## Platform Notes
+
+- Android and iOS share the same mode semantics and return `timingMode` consistently.
+- Accurate mode is compute-intensive and best for short-to-medium clips.
+- For best alignment quality, use WAV mono 16 kHz.
 
 ## Examples
 
-Sentence subtitles:
+Fast sentence subtitles during TTS:
 
 ```ts
-const audio = await tts.generateSpeechWithTimestamps('Hello world. How are you?', {
-  subtitles: { mode: 'fast', granularity: 'sentence' },
-});
+const audio = await tts.generateSpeechWithTimestamps(
+  'Hello world. How are you?',
+  {
+    subtitles: { mode: 'fast', granularity: 'sentence' },
+  }
+);
 ```
 
-Word subtitles:
-
-```ts
-const audio = await tts.generateSpeechWithTimestamps('Hello world', {
-  subtitles: { mode: 'fast', granularity: 'word' },
-});
-```
-
-Standalone estimation:
+Accurate character subtitles from existing audio:
 
 ```ts
 const subtitleResult = await generateSubtitlesFromAudio(
   transcript,
-  { samples, sampleRate },
-  { mode: 'fast', granularity: 'sentence' }
+  '/absolute/path/to/audio.wav',
+  { mode: 'accurate', granularity: 'character' }
 );
+```
+
+Accurate subtitles while generating TTS:
+
+```ts
+const aligned = await tts.generateSpeechWithTimestamps(transcript, {
+  subtitles: { mode: 'accurate', granularity: 'sentence' },
+});
 ```

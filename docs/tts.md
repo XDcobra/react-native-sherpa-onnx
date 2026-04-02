@@ -40,7 +40,7 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Model initialization | ✅ | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | `tts.generateSpeech()` |
 | Streaming generation | ✅ | `tts.generateSpeechStream()` with chunk callbacks |
-| Timestamps (mode-based) | ✅ | `tts.generateSpeechWithTimestamps()` with `subtitles.mode` (`off` / `fast`); `accurate` currently stubbed |
+| Timestamps (mode-based) | ✅ | `tts.generateSpeechWithTimestamps()` with `subtitles.mode` (`off` / `fast` / `accurate`). **`accurate`** uses on-device wav2vec2 CTC forced alignment; requires the alignment ONNX model (download via `react-native-sherpa-onnx/alignment`). See [TTS Subtitles and Timestamps](tts-subtitles.md). |
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Save/share WAV | ✅ | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Save MP3/FLAC | ✅ | Via `convertAudioToFormat()` + `copyFileToContentUri()` |
@@ -172,7 +172,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
 | `numSteps` | `number` | `5` | Flow-matching steps when cloning (Zipvoice / Pocket); native default **5** on Android and iOS if omitted |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
-| `subtitles` | `{ mode?: 'off' \| 'fast' \| 'accurate'; granularity?: 'sentence' \| 'word' }` | `mode: 'fast'` for `generateSpeechWithTimestamps` | Subtitle/timestamp mode and granularity. `accurate` is currently a defined stub that rejects. |
+| `subtitles` | `{ mode?: 'off' \| 'fast' \| 'accurate'; granularity?: 'sentence' \| 'word' \| 'character'; alignmentModelPath?: string }` | `mode: 'fast'` for `generateSpeechWithTimestamps` | Subtitle/timestamp mode and granularity. **`fast`**: native chunk-based timing (`timingMode: 'estimated'`). **`accurate`**: generates speech, then runs wav2vec2 CTC alignment (`timingMode: 'aligned'`); requires a downloaded or bundled alignment model. **`character`** granularity is only valid with **`accurate`**. Optional **`alignmentModelPath`**: absolute path to the alignment `.onnx` file (defaults to the path from `getAlignmentModelPath()`). See [tts-subtitles.md](tts-subtitles.md). |
 
 ---
 
@@ -189,11 +189,12 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 
 ### `TTS Subtitles and Timestamps`
 
-See [tts-subtitles.md](tts-subtitles.md) for the full subtitle architecture and examples.
+See [tts-subtitles.md](tts-subtitles.md) for the full subtitle architecture, alignment model download, and examples.
 
-- `generateSpeechWithTimestamps()` defaults to fast subtitle timing.
+- `generateSpeechWithTimestamps()` defaults to **`fast`** subtitle timing (`timingMode: 'estimated'`).
+- **`accurate`** mode uses wav2vec2 CTC forced alignment after synthesis; set `subtitles: { mode: 'accurate' }` and ensure the alignment model is available (see `downloadAlignmentModel()` in `react-native-sherpa-onnx/alignment`). Returns `timingMode: 'aligned'`.
 - `generateSpeech()` forces subtitle mode off.
-- `generateSubtitlesFromAudio()` provides standalone subtitle estimation for existing audio.
+- `generateSubtitlesFromAudio()` supports **`fast`** (duration/text heuristics) and **`accurate`** (same alignment pipeline as TTS accurate mode) for existing audio or in-memory samples.
 
 ```ts
 import { generateSubtitlesFromAudio } from 'react-native-sherpa-onnx/tts';
@@ -201,6 +202,12 @@ import { generateSubtitlesFromAudio } from 'react-native-sherpa-onnx/tts';
 const subtitleResult = await generateSubtitlesFromAudio(text, audioPath, {
   mode: 'fast',
   granularity: 'sentence',
+});
+
+// Accurate alignment (requires alignment model on disk)
+const aligned = await generateSubtitlesFromAudio(text, audioPath, {
+  mode: 'accurate',
+  granularity: 'word',
 });
 ```
 
@@ -456,6 +463,8 @@ if (result.success && result.modelType === 'kokoro') {
 | Zipvoice init fails | Use full model with vocoder (e.g. `vocos_24khz.onnx`), not distill |
 | Zipvoice OOM | Use int8 distill variant on low-RAM devices |
 | `TTS_STREAM_ERROR` | Only one stream per engine at a time. Wait for `onEnd` or `cancel()` first |
+| Accurate subtitles: `ALIGNMENT_MODEL_MISSING` | Download the alignment model first (`downloadAlignmentModel()` from `react-native-sherpa-onnx/alignment`) or pass `subtitles.alignmentModelPath` to a local `.onnx` file. See [tts-subtitles.md](tts-subtitles.md). |
+| `character` granularity with `fast` | Use **`accurate`** mode; `character` is only supported for accurate alignment. |
 | No sound from PCM player | Ensure `startPcmPlayer()` called before `writePcmChunk()`, stop after done |
 | `copyFileToContentUri` fails on iOS | Android SAF only; not supported on iOS |
 
@@ -474,7 +483,7 @@ if (result.success && result.modelType === 'kokoro') {
 | --- | --- | --- |
 | `createTTS()` | `initializeTts(instanceId, modelDir, ...)` | JS resolves `modelPath`, generates `instanceId` |
 | `tts.generateSpeech()` | `generateTts(instanceId, text, options)` | — |
-| `tts.generateSpeechWithTimestamps()` | `generateTtsWithTimestamps(instanceId, text, options)` | — |
+| `tts.generateSpeechWithTimestamps()` | If `subtitles.mode !== 'accurate'`: `generateTtsWithTimestamps(...)`. If **`accurate`**: `generateTts(...)` (subtitles off) then `runCTCForcedAlignment(...)` via the same pipeline as `generateSubtitlesFromAudio` | Accurate mode never calls `generateTtsWithTimestamps` |
 | `tts.generateSpeechStream()` | `generateTtsStream(instanceId, text, options)` | Events: `ttsStreamChunk`, `ttsStreamEnd`, `ttsStreamError` |
 | `tts.cancelSpeechStream()` | `cancelTtsStream(instanceId)` | — |
 | `tts.updateParams()` | `updateTtsParams(instanceId, ...)` | — |
@@ -492,7 +501,7 @@ if (result.success && result.modelType === 'kokoro') {
 
 ## See Also
 
-- [TTS Subtitles and Timestamps](tts-subtitles.md) — Subtitle modes, timing behavior, and standalone subtitle estimation
+- [TTS Subtitles and Timestamps](tts-subtitles.md) — `fast` / `accurate` modes, alignment model download (`react-native-sherpa-onnx/alignment`), and standalone `generateSubtitlesFromAudio`
 - [Streaming TTS](tts-streaming.md) — Detailed streaming generation API
 - [Model Setup](model-setup.md) — Model discovery, paths, and detection
 - [Download Manager](download-manager.md) — Download models in-app
