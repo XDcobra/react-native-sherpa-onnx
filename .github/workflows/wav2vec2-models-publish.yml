@@ -65,3 +65,27 @@ jobs:
           fi
 
           node scripts/wav2vec2-models/build_and_upload.js "${args[@]}"
+
+      - name: Sync subtitle model license status CSVs
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          CSV_PATH="${{ inputs.csv_path }}"
+          CSV_PATH="${CSV_PATH:-scripts/wav2vec2-models/sources.csv}"
+          node scripts/wav2vec2-models/sync_subtitle_license_status.js "$CSV_PATH"
+
+      - name: Commit license status updates
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/src/main/assets/model_licenses/subtitle-models-license-status.csv \
+            ios/Resources/model_licenses/subtitle-models-license-status.csv
+          if git diff --staged --quiet; then
+            echo "No license CSV changes to commit"
+          else
+            git commit -m "chore: sync subtitle model license status from wav2vec2 sources"
+            git push
+          fi

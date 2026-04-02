@@ -10,7 +10,7 @@ https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/wav2vec2-models
 File: `scripts/wav2vec2-models/sources.csv`
 
 - Delimiter: semicolon (`;`)
-- Required header (exact): `id;onnx_url;license`
+- Required header (exact): `id;onnx_url;license;license_type;commercial_use`
 
 Columns:
 
@@ -18,13 +18,28 @@ Columns:
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
 | `onnx_url` | yes | Direct URL to the ONNX model file |
-| `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE` |
+| `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE`; also written to `license_file` in `subtitle-models-license-status.csv` |
+| `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) for app license screens |
+| `commercial_use` | yes | `yes` or `no`, same convention as other `*-models-license-status.csv` files |
 
 Example row:
 
 ```text
-wav2vec2-base-960h-int8;https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/onnx/model.onnx;https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/LICENSE
+wav2vec2-base-960h-int8;https://huggingface.co/…/model.onnx;https://huggingface.co/…/LICENSE;apache-2.0;yes
 ```
+
+### `checksum.txt`
+
+After each non–dry-run publish, the script refreshes release asset **`checksum.txt`**: one line per `<id>.tar.bz2`, **tab** between filename and **SHA-256** (hex), same style as [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) release checksums. Existing hashes are reused when archives were not rebuilt; missing hashes are filled from local files or by downloading the asset from the release.
+
+### Subtitle license CSV sync (CI)
+
+The workflow **Publish wav2vec2 model assets** runs `sync_subtitle_license_status.js` (unless `--dry-run`), which merges rows into:
+
+- `android/src/main/assets/model_licenses/subtitle-models-license-status.csv`
+- `ios/Resources/model_licenses/subtitle-models-license-status.csv`
+
+Columns: `asset_name`, `license_type`, `commercial_use`, `confidence` (`high`), `detection_source` (`manual`), `license_file` (from the `license` column). The job commits and pushes when those files change.
 
 ## Archive layout
 

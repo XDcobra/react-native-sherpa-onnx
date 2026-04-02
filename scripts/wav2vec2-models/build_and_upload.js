@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const { fileURLToPath } = require('node:url');
 
 const DEFAULT_CSV = 'scripts/wav2vec2-models/sources.csv';
@@ -14,7 +15,14 @@ const DEFAULT_BUILD_DIR = 'build/wav2vec2-models';
 const DEFAULT_DIST_DIR = 'dist/wav2vec2-models';
 const DEFAULT_REPO = 'XDcobra/react-native-sherpa-onnx';
 const DEFAULT_TAG = 'wav2vec2-models';
-const EXPECTED_HEADER = ['id', 'onnx_url', 'license'];
+const EXPECTED_HEADER = [
+  'id',
+  'onnx_url',
+  'license',
+  'license_type',
+  'commercial_use',
+];
+const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
 
 function printHelp() {
@@ -28,6 +36,8 @@ Options:
   --tag <tag>         Release tag to inspect and upload assets to
   --dry-run           Build archives only, skip release lookup and upload
   -h, --help          Show this help message
+
+After uploads, writes ${CHECKSUM_ASSET_NAME} (SHA-256 per .tar.bz2, tab-separated) and uploads with --clobber.
 
 Environment (downloads):
   GITHUB_TOKEN / GH_TOKEN   Bearer token for github.com, raw.githubusercontent.com,
@@ -196,17 +206,21 @@ async function readSources(csvPath) {
     const lineNumber = i + 1;
     const row = rows[i];
 
-    if (row.length > 3) {
-      throw new Error(`Line ${lineNumber}: too many columns (expected 3)`);
+    if (row.length > EXPECTED_HEADER.length) {
+      throw new Error(
+        `Line ${lineNumber}: too many columns (expected ${EXPECTED_HEADER.length})`
+      );
     }
 
-    while (row.length < 3) {
+    while (row.length < EXPECTED_HEADER.length) {
       row.push('');
     }
 
     const modelId = normalizeCell(row[0]);
     const onnxUrl = normalizeCell(row[1]);
     const licenseUrl = normalizeCell(row[2]);
+    const licenseType = normalizeCell(row[3]);
+    let commercialUse = normalizeCell(row[4]).toLowerCase();
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -219,12 +233,26 @@ async function readSources(csvPath) {
     if (!onnxUrl) {
       throw new Error(`Line ${lineNumber}: onnx_url is required`);
     }
+    if (!licenseType) {
+      throw new Error(`Line ${lineNumber}: license_type is required`);
+    }
+    if (commercialUse !== 'yes' && commercialUse !== 'no') {
+      throw new Error(
+        `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[4]}")`
+      );
+    }
     if (seen.has(modelId)) {
       throw new Error(`Duplicate id value in CSV: ${modelId}`);
     }
 
     seen.add(modelId);
-    sources.push({ modelId, onnxUrl, licenseUrl });
+    sources.push({
+      modelId,
+      onnxUrl,
+      licenseUrl,
+      licenseType,
+      commercialUse,
+    });
   }
 
   if (sources.length === 0) {
@@ -344,7 +372,7 @@ function resolveToken() {
   return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 }
 
-async function getReleaseAssetNames(repo, tag, token) {
+async function getReleaseData(repo, tag, token) {
   if (typeof fetch !== 'function') {
     throw new Error('Node runtime does not provide fetch(); use Node 18+');
   }
@@ -370,13 +398,171 @@ async function getReleaseAssetNames(repo, tag, token) {
   }
 
   const payload = await response.json();
-  const assets = Array.isArray(payload.assets) ? payload.assets : [];
-  return new Set(
-    assets
-      .map((asset) =>
-        asset && typeof asset.name === 'string' ? asset.name : ''
-      )
-      .filter(Boolean)
+  const raw = Array.isArray(payload.assets) ? payload.assets : [];
+  const assets = raw
+    .filter(
+      (asset) =>
+        asset &&
+        typeof asset.name === 'string' &&
+        typeof asset.browser_download_url === 'string'
+    )
+    .map((asset) => ({
+      name: asset.name,
+      browser_download_url: asset.browser_download_url,
+    }));
+
+  return {
+    assetNames: new Set(assets.map((a) => a.name)),
+    assets,
+  };
+}
+
+function parseChecksumMap(text) {
+  const map = new Map();
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const tab = trimmed.indexOf('\t');
+    if (tab === -1) {
+      continue;
+    }
+    const name = trimmed.slice(0, tab).trim();
+    const hex = trimmed
+      .slice(tab + 1)
+      .trim()
+      .toLowerCase();
+    if (name && /^[a-f0-9]{64}$/.test(hex)) {
+      map.set(name, hex);
+    }
+  }
+  return map;
+}
+
+function formatChecksumMap(map, orderedArchiveNames) {
+  const lines = orderedArchiveNames.map((name) => {
+    const hex = map.get(name);
+    if (!hex) {
+      throw new Error(`Missing SHA-256 for ${name}`);
+    }
+    return `${name}\t${hex}`;
+  });
+  return lines.length > 0 ? `${lines.join('\n')}\n` : '';
+}
+
+async function sha256File(filePath) {
+  const buf = await fsp.readFile(filePath);
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+async function sha256FromUrl(url, token) {
+  if (typeof fetch !== 'function') {
+    throw new Error('Node runtime does not provide fetch(); use Node 18+');
+  }
+
+  const headers = {
+    ...headersForDownloadUrl(url),
+    'User-Agent': 'wav2vec2-model-publisher/1.0',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    const body = (await response.text()).slice(0, 300);
+    throw new Error(`HTTP ${response.status} while hashing ${url}: ${body}`);
+  }
+
+  const hash = createHash('sha256');
+  if (!response.body) {
+    const arrayBuffer = await response.arrayBuffer();
+    hash.update(Buffer.from(arrayBuffer));
+    return hash.digest('hex');
+  }
+
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      hash.update(value);
+    }
+  }
+  return hash.digest('hex');
+}
+
+async function fetchExistingChecksumTextAndMap(releaseAssets, token) {
+  const checksumAsset = releaseAssets.find(
+    (a) => a.name === CHECKSUM_ASSET_NAME
+  );
+  if (!checksumAsset) {
+    return { text: '', map: new Map() };
+  }
+
+  const headers = {
+    ...headersForDownloadUrl(checksumAsset.browser_download_url),
+    'User-Agent': 'wav2vec2-model-publisher/1.0',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(checksumAsset.browser_download_url, {
+    headers,
+  });
+  if (!response.ok) {
+    return { text: '', map: new Map() };
+  }
+
+  const text = await response.text();
+  return { text, map: parseChecksumMap(text) };
+}
+
+async function buildChecksumMap(
+  allSources,
+  distDir,
+  builtNames,
+  releaseAssets,
+  priorMap,
+  token
+) {
+  const map = new Map(priorMap);
+
+  for (const source of allSources) {
+    const name = `${source.modelId}.tar.bz2`;
+    const localPath = path.join(distDir, name);
+
+    if (builtNames.has(name) && fs.existsSync(localPath)) {
+      map.set(name, await sha256File(localPath));
+    } else if (!map.has(name)) {
+      const asset = releaseAssets.find((a) => a.name === name);
+      if (!asset) {
+        throw new Error(
+          `[checksum] ${name} is missing from the release; build or upload it first`
+        );
+      }
+      console.log(`[checksum] hashing remote ${name}`);
+      map.set(name, await sha256FromUrl(asset.browser_download_url, token));
+    }
+  }
+
+  return map;
+}
+
+function uploadChecksumFile(repo, tag, checksumPath, token) {
+  const env = { ...process.env };
+  if (token && !env.GH_TOKEN) {
+    env.GH_TOKEN = token;
+  }
+
+  runCommand(
+    'gh',
+    ['release', 'upload', tag, checksumPath, '--clobber', '--repo', repo],
+    { env }
   );
 }
 
@@ -422,10 +608,14 @@ async function buildArchives(sources, buildDir, distDir) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const sources = await readSources(args.csv);
-  const archives = await buildArchives(sources, args.buildDir, args.distDir);
+  const allSources = await readSources(args.csv);
 
   if (args.dryRun) {
+    const archives = await buildArchives(
+      allSources,
+      args.buildDir,
+      args.distDir
+    );
     console.log('[dry-run] Upload skipped.');
     for (const archive of archives) {
       console.log(`[dry-run] built ${archive}`);
@@ -440,34 +630,95 @@ async function main() {
     );
   }
 
-  const existingAssets = await getReleaseAssetNames(args.repo, args.tag, token);
+  const releaseData = await getReleaseData(args.repo, args.tag, token);
+  const { assetNames: existingAssets, assets: releaseAssets } = releaseData;
   console.log(
     `[release] Found ${existingAssets.size} assets on ${args.repo}@${args.tag}`
   );
 
-  let uploaded = 0;
+  const { text: priorChecksumText, map: priorChecksumMap } =
+    await fetchExistingChecksumTextAndMap(releaseAssets, token);
+
+  const sourcesToBuild = [];
   let skipped = 0;
 
-  for (const archive of archives) {
-    const assetName = path.basename(archive);
+  for (const source of allSources) {
+    const assetName = `${source.modelId}.tar.bz2`;
     if (existingAssets.has(assetName)) {
       console.log(`[skip] ${assetName} already exists in release`);
       skipped += 1;
-      continue;
+    } else {
+      sourcesToBuild.push(source);
     }
+  }
 
-    console.log(`[upload] ${assetName}`);
-    uploadArchive(args.repo, args.tag, archive, token);
-    uploaded += 1;
+  const builtNames = new Set();
+  let uploaded = 0;
+
+  if (sourcesToBuild.length > 0) {
+    const archives = await buildArchives(
+      sourcesToBuild,
+      args.buildDir,
+      args.distDir
+    );
+    for (const archive of archives) {
+      const assetName = path.basename(archive);
+      console.log(`[upload] ${assetName}`);
+      uploadArchive(args.repo, args.tag, archive, token);
+      uploaded += 1;
+      builtNames.add(assetName);
+    }
+  } else {
+    console.log('[build] No new archives (all assets already on release)');
+  }
+
+  let assetsForChecksum = releaseAssets;
+  if (uploaded > 0) {
+    const refreshed = await getReleaseData(args.repo, args.tag, token);
+    assetsForChecksum = refreshed.assets;
+  }
+
+  const archiveNames = allSources
+    .map((s) => `${s.modelId}.tar.bz2`)
+    .sort((a, b) => a.localeCompare(b));
+
+  const checksumMap = await buildChecksumMap(
+    allSources,
+    args.distDir,
+    builtNames,
+    assetsForChecksum,
+    priorChecksumMap,
+    token
+  );
+
+  const checksumContent = formatChecksumMap(checksumMap, archiveNames);
+  const checksumPath = path.join(args.distDir, CHECKSUM_ASSET_NAME);
+  await fsp.mkdir(path.dirname(checksumPath), { recursive: true });
+  await fsp.writeFile(checksumPath, checksumContent, 'utf8');
+
+  const priorNorm = priorChecksumText.replace(/\r\n/g, '\n').trimEnd();
+  const nextNorm = checksumContent.replace(/\r\n/g, '\n').trimEnd();
+  if (nextNorm !== priorNorm) {
+    console.log(`[upload] ${CHECKSUM_ASSET_NAME}`);
+    uploadChecksumFile(args.repo, args.tag, checksumPath, token);
+  } else {
+    console.log(`[checksum] ${CHECKSUM_ASSET_NAME} unchanged`);
   }
 
   console.log(
-    `[done] uploaded=${uploaded} skipped=${skipped} total=${archives.length}`
+    `[done] uploaded=${uploaded} skipped=${skipped} total=${allSources.length}`
   );
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[error] ${message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[error] ${message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  readSources,
+  EXPECTED_HEADER,
+};
