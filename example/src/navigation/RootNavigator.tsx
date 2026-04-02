@@ -4,6 +4,7 @@ import type { RootStackParamList } from '../types/navigation';
 import HomeScreen from '../screens/home/HomeScreen';
 import STTScreen from '../screens/stt/STTScreen';
 import TTSScreen from '../screens/tts/TTSScreen';
+import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import VADScreen from '../screens/vad/VADScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
@@ -45,6 +46,13 @@ export default function RootNavigator() {
         component={TTSScreen}
         options={{
           title: 'Text-to-Speech',
+        }}
+      />
+      <Stack.Screen
+        name="GenerateTimestamp"
+        component={GenerateTimestampScreen}
+        options={{
+          title: 'Generate timestamp',
         }}
       />
       <Stack.Screen

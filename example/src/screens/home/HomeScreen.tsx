@@ -30,6 +30,22 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'generate_timestamp',
+    title: 'Generate timestamp',
+    description: 'Generate subtitles/timestamps from a WAV file',
+    icon: 'time',
+    screen: 'GenerateTimestamp',
+    implemented: true,
+  },
+  {
+    id: 'enhancement',
+    title: 'Speech Enhancement',
+    description: 'Remove noise and improve audio quality (offline)',
+    icon: 'options',
+    screen: 'Enhancement',
+    implemented: true,
+  },
+  {
     id: 'vad',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
@@ -44,14 +60,6 @@ const FEATURES: Feature[] = [
     icon: 'people',
     screen: 'Diarization',
     implemented: false,
-  },
-  {
-    id: 'enhancement',
-    title: 'Speech Enhancement',
-    description: 'Remove noise and improve audio quality (offline)',
-    icon: 'options',
-    screen: 'Enhancement',
-    implemented: true,
   },
   {
     id: 'separation',
