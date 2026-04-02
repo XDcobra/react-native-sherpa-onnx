@@ -75,12 +75,8 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
-    if (modelDir == nil || [modelDir length] == 0) {
-        reject(@"DETECT_ERROR", @"modelDir is required", nil);
-        return;
-    }
     @try {
-        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelDirStr = (modelDir != nil) ? [modelDir UTF8String] : "";
         std::string modelTypeStr = (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
         auto result = sherpaonnx::DetectEnhancementModel(modelDirStr, modelTypeStr);
         resolve(enhancementDetectResultToDict(result));

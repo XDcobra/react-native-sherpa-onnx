@@ -1,58 +1,58 @@
 {
   "name": "react-native-sherpa-onnx",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "Offline Speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD with sherpa-onnx for React NativeSpeech-to-Text with sherpa-onnx for React Native",
   "main": "./lib/module/index.js",
-  "types": "./src/index.tsx",
+  "types": "./lib/typescript/src/index.d.ts",
   "exports": {
     ".": {
       "source": "./src/index.tsx",
-      "types": "./src/index.tsx",
+      "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
     "./stt": {
       "source": "./src/stt/index.ts",
-      "types": "./src/stt/index.ts",
+      "types": "./lib/typescript/src/stt/index.d.ts",
       "default": "./lib/module/stt/index.js"
     },
     "./tts": {
       "source": "./src/tts/index.ts",
-      "types": "./src/tts/index.ts",
+      "types": "./lib/typescript/src/tts/index.d.ts",
       "default": "./lib/module/tts/index.js"
     },
     "./vad": {
       "source": "./src/vad/index.ts",
-      "types": "./src/vad/index.ts",
+      "types": "./lib/typescript/src/vad/index.d.ts",
       "default": "./lib/module/vad/index.js"
     },
     "./diarization": {
       "source": "./src/diarization/index.ts",
-      "types": "./src/diarization/index.ts",
+      "types": "./lib/typescript/src/diarization/index.d.ts",
       "default": "./lib/module/diarization/index.js"
     },
     "./enhancement": {
       "source": "./src/enhancement/index.ts",
-      "types": "./src/enhancement/index.ts",
+      "types": "./lib/typescript/src/enhancement/index.d.ts",
       "default": "./lib/module/enhancement/index.js"
     },
     "./separation": {
       "source": "./src/separation/index.ts",
-      "types": "./src/separation/index.ts",
+      "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
     },
     "./download": {
       "source": "./src/download/index.ts",
-      "types": "./src/download/index.ts",
+      "types": "./lib/typescript/src/download/index.d.ts",
       "default": "./lib/module/download/index.js"
     },
     "./extraction": {
       "source": "./src/extraction/index.ts",
-      "types": "./src/extraction/index.ts",
+      "types": "./lib/typescript/src/extraction/index.d.ts",
       "default": "./lib/module/extraction/index.js"
     },
     "./audio": {
       "source": "./src/audio/index.ts",
-      "types": "./src/audio/index.ts",
+      "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
     },
     "./package.json": "./package.json"

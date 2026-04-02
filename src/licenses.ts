@@ -102,7 +102,7 @@ function parseCsv(csvString: string): ModelLicense[] {
       }
     }
 
-    if (entry['asset_name']) {
+    if (entry.asset_name) {
       results.push(entry as unknown as ModelLicense);
     }
   }

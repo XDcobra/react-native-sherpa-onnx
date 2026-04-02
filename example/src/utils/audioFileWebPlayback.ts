@@ -7,14 +7,14 @@ import { AudioContext, AudioBufferSourceNode } from 'react-native-audio-api';
 import { readFile } from '@dr.pogodin/react-native-fs';
 import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts';
 
+import { Buffer } from 'buffer';
+
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
+  const bytes = Buffer.from(base64, 'base64');
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  ) as ArrayBuffer;
 }
 
 /** Resolve content:// to a cache file path; strip file:// for readFile. */
