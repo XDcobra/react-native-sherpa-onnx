@@ -1,1 +1,5 @@
 asset_name,license_type,commercial_use,confidence,detection_source,license_file
+wav2vec2-base-960h-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-base-960h-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-base-960h-q4f16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-base-960h.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
