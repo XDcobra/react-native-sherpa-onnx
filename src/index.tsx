@@ -17,11 +17,13 @@ export {
 } from './utils';
 
 export { copyFileToContentUri } from './tts';
+export * from './alignment';
 
 export { getModelLicenses, type ModelLicense } from './licenses';
 // Note: Feature-specific exports are available via subpath imports:
 // - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'
+// - import { downloadAlignmentModel, ... } from 'react-native-sherpa-onnx/alignment'
 // - import { ... } from 'react-native-sherpa-onnx/download'
 // - import { getBundledArchives, listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction'
 // - import { ... } from 'react-native-sherpa-onnx/vad' (planned)

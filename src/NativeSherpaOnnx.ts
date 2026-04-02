@@ -355,6 +355,23 @@ export interface Spec extends TurboModule {
     timingMode: string;
   }>;
 
+  /**
+   * Run wav2vec2 CTC forced alignment on an audio file and transcript.
+   * @param modelPath - Absolute path to wav2vec2 ONNX model file
+   * @param audioPath - Absolute path to input audio file (WAV recommended)
+   * @param text - Transcript to align
+   * @param vocabJson - JSON map of token -> id (stringified to reduce bridge overhead)
+   */
+  runCTCForcedAlignment(
+    modelPath: string,
+    audioPath: string,
+    text: string,
+    vocabJson: string
+  ): Promise<{
+    words: Array<{ text: string; start: number; end: number }>;
+    chars: Array<{ text: string; start: number; end: number }>;
+  }>;
+
   // ==================== Online (streaming) TTS Methods ====================
 
   /**
