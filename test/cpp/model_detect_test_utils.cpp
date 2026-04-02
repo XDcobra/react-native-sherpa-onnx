@@ -189,4 +189,22 @@ std::string TtsKindToString(TtsModelKind kind) {
     }
 }
 
+EnhancementModelKind EnhancementKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "gtcrn") return EnhancementModelKind::kGtcrn;
+    if (t == "dpdfnet") return EnhancementModelKind::kDpdfNet;
+    return EnhancementModelKind::kUnknown;
+}
+
+std::string EnhancementKindToString(EnhancementModelKind kind) {
+    switch (kind) {
+        case EnhancementModelKind::kGtcrn:
+            return "gtcrn";
+        case EnhancementModelKind::kDpdfNet:
+            return "dpdfnet";
+        default:
+            return "unknown";
+    }
+}
+
 }  // namespace model_detect_test

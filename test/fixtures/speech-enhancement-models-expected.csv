@@ -1,0 +1,7 @@
+asset_name,model_type
+dpdfnet2.onnx,dpdfnet
+dpdfnet2_48khz_hr.onnx,dpdfnet
+dpdfnet4.onnx,dpdfnet
+dpdfnet8.onnx,dpdfnet
+dpdfnet_baseline.onnx,dpdfnet
+gtcrn_simple.onnx,gtcrn

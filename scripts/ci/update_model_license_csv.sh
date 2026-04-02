@@ -11,7 +11,7 @@
 # - Skips any asset whose license_type and commercial_use are both set and neither is `unknown`
 #   (case-insensitive). Rows with empty or `unknown` license_type and/or empty or `unknown`
 #   commercial_use are (re)processed. license_type `exhausted` is never auto-overwritten.
-# - Uses tree-cache (from asr/tts-models-structure.txt + new downloads) to see if a LICENSE-like
+# - Uses tree-cache (from asr/tts/speech-enhancement structure fixtures + new downloads) to see if a LICENSE-like
 #   path exists — no full extract unless we need file contents for detection.
 # - Downloads the .tar.bz2 only when a license-like path was found and license_type is still empty.
 # - Pipeline: try archive (if applicable) --> HF/ModelScope fallbacks for eligible assets. If no license

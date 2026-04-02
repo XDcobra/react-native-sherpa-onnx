@@ -50,6 +50,11 @@ import {
   createPcmLiveStream,
   type PcmLiveStreamHandle,
 } from 'react-native-sherpa-onnx/audio';
+import {
+  startWebAudioFilePlayback,
+  stopWebAudioPlayback,
+  type ActiveWebAudioPlayback,
+} from '../../utils/audioFileWebPlayback';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -90,9 +95,9 @@ export default function STTScreen() {
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const [soundPlayer, setSoundPlayer] = useState<any>(null);
 
   const sttEngineRef = useRef<SttEngine | null>(null);
+  const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
   const streamingEngineRef = useRef<StreamingSttEngine | null>(null);
   const liveStreamRef = useRef<SttStream | null>(null);
   const liveProcessPromiseRef = useRef<Promise<void>>(Promise.resolve());
@@ -448,42 +453,22 @@ export default function STTScreen() {
     }
   };
 
-  const handlePlayAudio = () => {
+  const handlePlayAudio = async () => {
     if (!customAudioPath) return;
-
     try {
-      // Try to use react-native-sound if available
-
-      const Sound = require('react-native-sound');
-      Sound.setCategory('Playback');
-
-      // Stop previous player if any
-      if (soundPlayer) {
-        soundPlayer.stop();
-        soundPlayer.release();
+      if (webAudioPlaybackRef.current) {
+        stopWebAudioPlayback(webAudioPlaybackRef.current);
+        webAudioPlaybackRef.current = null;
       }
-
-      const player = new Sound(customAudioPath, '', (soundErr: any) => {
-        if (soundErr) {
-          console.error('Failed to load sound', soundErr);
-          Alert.alert('Error', 'Failed to load audio file');
-          return;
+      webAudioPlaybackRef.current = await startWebAudioFilePlayback(
+        customAudioPath,
+        () => {
+          webAudioPlaybackRef.current = null;
         }
-        // Play the audio
-        player.play((success: boolean) => {
-          if (!success) {
-            Alert.alert('Error', 'Playback failed');
-          }
-          player.release();
-        });
-      });
-
-      setSoundPlayer(player);
-    } catch {
-      Alert.alert(
-        'Audio Playback Not Available',
-        'Please install react-native-sound to play audio files:\n\ncd example\nnpm install react-native-sound'
       );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
     }
   };
 
@@ -1062,10 +1047,9 @@ export default function STTScreen() {
                     setCustomAudioPath(null);
                     setCustomAudioName(null);
                     setTranscriptionResult(null);
-                    if (soundPlayer) {
-                      soundPlayer.stop();
-                      soundPlayer.release();
-                      setSoundPlayer(null);
+                    if (webAudioPlaybackRef.current) {
+                      stopWebAudioPlayback(webAudioPlaybackRef.current);
+                      webAudioPlaybackRef.current = null;
                     }
                   }}
                 >

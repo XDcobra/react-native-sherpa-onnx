@@ -122,7 +122,8 @@ export function getExtractionStatePath(
 /**
  * Directory where native `resolveAssetPath` materializes a bundled model folder
  * (`DocumentDirectoryPath/models/{modelId}` — Android internal `files/models/...`).
- * Separate from {@link getModelDir}. Remove on delete so empty dirs do not break detection.
+ * Separate from {@link getModelDir}. `deleteModelByCategory` does not remove this tree; it
+ * only deletes download-manager installs under `sherpa-onnx/models/`.
  */
 export function getNativeAssetExtractedModelDir(modelId: string): string {
   const safeId = modelId.replace(/[/\\]/g, '');

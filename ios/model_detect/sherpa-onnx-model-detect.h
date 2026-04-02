@@ -42,6 +42,12 @@ enum class TtsModelKind {
     kSupertonic
 };
 
+enum class EnhancementModelKind {
+    kUnknown,
+    kGtcrn,
+    kDpdfNet
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -170,6 +176,10 @@ struct TtsModelPaths {
     std::string voiceStyle;
 };
 
+struct EnhancementModelPaths {
+    std::string model;
+};
+
 struct SttDetectResult {
     bool ok = false;
     std::string error;
@@ -191,6 +201,14 @@ struct TtsDetectResult {
     std::vector<std::string> lexiconLanguageCandidates;
 };
 
+struct EnhancementDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    EnhancementModelKind selectedKind = EnhancementModelKind::kUnknown;
+    EnhancementModelPaths paths;
+};
+
 SttDetectResult DetectSttModel(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
@@ -199,6 +217,11 @@ SttDetectResult DetectSttModel(
 );
 
 TtsDetectResult DetectTtsModel(
+    const std::string& modelDir,
+    const std::string& modelType
+);
+
+EnhancementDetectResult DetectEnhancementModel(
     const std::string& modelDir,
     const std::string& modelType
 );

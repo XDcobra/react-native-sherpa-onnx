@@ -28,3 +28,27 @@ def source = androidDefaults.exists() ? "gradle/android-defaults.gradle" : "fall
 println "[example/android build.gradle] Source=${source} -> ndkVersion=${rootProject.ext.ndkVersion}, compileSdkVersion=${rootProject.ext.compileSdkVersion}, kotlinVersion=${rootProject.ext.kotlinVersion}"
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Avoid duplicate libav*.so: sherpa-onnx ships FFmpeg; exclude audio-api's bundled libs.
+subprojects { subproject ->
+    if (subproject.path == ':react-native-audio-api') {
+        subproject.plugins.withId('com.android.library') {
+            subproject.android {
+                packagingOptions {
+                    jniLibs {
+                        excludes += [
+                            '**/libavcodec.so',
+                            '**/libavformat.so',
+                            '**/libavutil.so',
+                            '**/libswresample.so',
+                            '**/libswscale.so',
+                            '**/libavfilter.so',
+                            '**/libavdevice.so'
+                        ]
+                    }
+                }
+            }
+            println '[example/android build.gradle] Excluding libav*.so from :react-native-audio-api jniLibs'
+        }
+    }
+}

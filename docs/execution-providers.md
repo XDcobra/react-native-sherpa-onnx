@@ -291,6 +291,7 @@ console.log('Available EPs:', providers);
 | `canInit` false for QNN | Check that QNN runtime `.so` files are in jniLibs and the SoC is SM8xxx |
 | `canInit` false for NNAPI | Model may use unsupported ops — test with `modelBase64` of your actual model |
 | Provider not in `getAvailableProviders()` | The EP was not compiled into the ORT build; check your `onnxruntime` AAR variant |
+| `dlopen` / missing `OrtGetApiBase` on Android | `libonnxruntime4j_jni.so` and `libonnxruntime.so` must be from the **same** ORT release. Both come from `com.xdcobra.sherpa:onnxruntime` (sherpa-onnx AAR does not ship `libonnxruntime.so`). Clean/rebuild so `jniLibs` refresh; see `prebuilt-download.gradle`. |
 | Core ML `canInit` false on Simulator | Neural Engine is not available in Simulator; test on physical device |
 | QNN models crash | Re-export the QNN context binary for the exact SoC family; mismatched HTP versions crash |
 

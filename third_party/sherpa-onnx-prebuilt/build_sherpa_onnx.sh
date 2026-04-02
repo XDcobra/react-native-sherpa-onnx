@@ -155,7 +155,8 @@ if [ -z "$ORT_PREBUILT_ANDROID_BASE" ] && [ -z "$ORT_PREBUILT_ROOT" ]; then
         RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
     fi
     if [ -z "$RELEASE_TAG" ] && [ -f "$VERSIONS_FILE" ]; then
-        RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}"
+        ORT_BN="${ORT_BUILD_NUMBER:-1}"
+        RELEASE_TAG="ort-android-qnn-v${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}-${ORT_BN}"
     fi
     if [ -n "$RELEASE_TAG" ]; then
         REPO_SLUG="${GITHUB_REPOSITORY:-}"
@@ -195,6 +196,45 @@ if [ "$ENABLE_QNN" = ON ] && [ -z "$ORT_PREBUILT_ROOT" ] && [ -z "$ORT_PREBUILT_
     exit 1
 fi
 
+# Version directory that upstream build-android-*.sh use (onnxruntime_version=...). Must match so our
+# prebuilt libonnxruntime.so is found instead of wget to csukuangfj/onnxruntime-libs.
+# Override for debugging: SHERPA_SCRIPT_ORT_VERSION=1.x.y
+SHERPA_SCRIPT_ORT_VERSION="${SHERPA_SCRIPT_ORT_VERSION:-}"
+if [ -n "$ONNXRUNTIME_VERSION" ] && [ -z "$SHERPA_SCRIPT_ORT_VERSION" ]; then
+    _sherpa_ort_scripts=(
+        "$SHERPA_SRC/build-android-arm64-v8a.sh"
+        "$SHERPA_SRC/build-android-armv7-eabi.sh"
+        "$SHERPA_SRC/build-android-x86.sh"
+        "$SHERPA_SRC/build-android-x86-64.sh"
+    )
+    _sherpa_ort_vers_file="$(mktemp)"
+    for _sf in "${_sherpa_ort_scripts[@]}"; do
+        if [ ! -f "$_sf" ]; then
+            rm -f "$_sherpa_ort_vers_file"
+            echo "Error: missing expected sherpa-onnx script: $_sf"
+            exit 1
+        fi
+        _v="$(grep -E '^[[:space:]]*onnxruntime_version=' "$_sf" | head -1 | sed -e 's/^[[:space:]]*//' -e 's/^onnxruntime_version=//' -e 's/[[:space:]]*$//' -e "s/^['\"]//" -e "s/['\"]$//")"
+        if [ -z "$_v" ]; then
+            rm -f "$_sherpa_ort_vers_file"
+            echo "Error: could not parse onnxruntime_version from $_sf (upstream sherpa-onnx layout changed?)."
+            exit 1
+        fi
+        echo "$_v" >> "$_sherpa_ort_vers_file"
+    done
+    _n="$(sort -u "$_sherpa_ort_vers_file" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [ "$_n" -ne 1 ]; then
+        echo "Error: onnxruntime_version must be identical in all sherpa-onnx build-android-*.sh; got:"
+        sort -u "$_sherpa_ort_vers_file" | sed 's/^/  /'
+        rm -f "$_sherpa_ort_vers_file"
+        exit 1
+    fi
+    SHERPA_SCRIPT_ORT_VERSION="$(sort -u "$_sherpa_ort_vers_file" | head -1)"
+    rm -f "$_sherpa_ort_vers_file"
+    echo "Sherpa upstream onnxruntime_version (for jni/headers path): $SHERPA_SCRIPT_ORT_VERSION"
+    echo ""
+fi
+
 # ABI -> build script name -> build dir (relative to sherpa-onnx)
 # build script is run from SHERPA_SRC; install dir is SHERPA_SRC/<build_dir>/install/lib
 build_abi() {
@@ -223,11 +263,11 @@ build_abi() {
                 cp -n "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/onnxruntime/core/session/"*.h "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/headers/" 2>/dev/null || true
             fi
         fi
-        # Sherpa-onnx's Android build scripts (build-android-arm64-v8a.sh etc.) use a hardcoded onnxruntime_version=1.17.1
-        # and only look for libonnxruntime.so under that path. If not found, they download from csukuangfj/onnxruntime-libs
-        # (vanilla ORT without our NNAPI/XNNPACK). So we duplicate our prebuilt into 1.17.1/ so the scripts find it and
-        # install/lib ends up with our libonnxruntime.so instead of the downloaded one.
-        SHERPA_SCRIPT_ORT_VERSION=1.17.1
+        # Duplicate our ORT prebuilt into the directory name upstream scripts expect (see onnxruntime_version= in build-android-*.sh).
+        if [ -z "$SHERPA_SCRIPT_ORT_VERSION" ]; then
+            echo "Error: SHERPA_SCRIPT_ORT_VERSION unset — could not detect onnxruntime_version from sherpa-onnx build-android-*.sh."
+            exit 1
+        fi
         mkdir -p "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/jni/$ABI"
         mkdir -p "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/headers"
         cp "$SHERPA_SRC/$BUILD_DIR/$ONNXRUNTIME_VERSION/jni/$ABI/libonnxruntime.so" "$SHERPA_SRC/$BUILD_DIR/$SHERPA_SCRIPT_ORT_VERSION/jni/$ABI/"
@@ -252,7 +292,7 @@ build_abi() {
     local INSTALL_LIB="$SHERPA_SRC/$BUILD_DIR/install/lib"
     local DST_LIB="$OUTPUT_BASE/$ABI/lib"
     mkdir -p "$DST_LIB"
-    for so in libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libonnxruntime.so; do
+    for so in libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
         if [ -f "$INSTALL_LIB/$so" ]; then
             cp -v "$INSTALL_LIB/$so" "$DST_LIB/"
         fi

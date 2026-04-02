@@ -45,7 +45,7 @@ println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libar
 def ortVersion = System.getenv('ORT_VERSION')
 if (!ortVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG'), 'ort-android-qnn-v')
-  ortVersion = v ?: (project.hasProperty('ortVersion') ? project.ortVersion : '1.24.2-qnn2.43.1.260218')
+  ortVersion = v ?: (project.hasProperty('ortVersion') ? project.ortVersion : '1.24.4-qnn2.43.1.260218-1')
 }
 project.ext.ortVersion = ortVersion
 println "[react-native-sherpa-onnx] onnxruntime version (extracted/used): ${ortVersion}"

@@ -16,7 +16,7 @@ Used by the **GitHub Actions workflow** (`.github/workflows/build-onnxruntime-an
 For **Gradle-based** publish (build AAR layout + checksums locally), use the ONNX Runtime Gradle wrapper:
 
 ```bash
-./third_party/onnxruntime/java/gradlew --no-daemon -b publish-maven/build.gradle -c publish-maven/settings.gradle -PaarPath=/path/to/onnxruntime-release.aar -PmavenVersion=1.24.2-qnn2.43.1.260218 publish
+./third_party/onnxruntime/java/gradlew --no-daemon -b publish-maven/build.gradle -c publish-maven/settings.gradle -PaarPath=/path/to/onnxruntime-release.aar -PmavenVersion=1.24.2-qnn2.43.1.260218-1 publish
 ```
 
 Output: `build/repo/com/xdcobra/sherpa/onnxruntime/<mavenVersion>/` (aar, pom, checksums).

@@ -1,69 +1,131 @@
-/**
- * Speech Enhancement feature module
- *
- * @remarks
- * This feature is not yet implemented. This module serves as a placeholder
- * for future speech enhancement functionality.
- *
- * @example
- * ```typescript
- * // Future usage:
- * import { initializeEnhancement, enhanceAudio } from 'react-native-sherpa-onnx/enhancement';
- *
- * await initializeEnhancement({ modelPath: { type: 'auto', path: 'models/enhancement-model' } });
- * const enhancedPath = await enhanceAudio('path/to/noisy-audio.wav');
- * ```
- */
-
+import SherpaOnnx from '../NativeSherpaOnnx';
 import type { ModelPathConfig } from '../types';
+import { resolveModelPath } from '../utils';
+import type {
+  EnhancedAudio,
+  EnhancementDetectResult,
+  EnhancementEngine,
+  EnhancementInitializeOptions,
+} from './types';
 
-/**
- * Enhancement initialization options (placeholder)
- */
-export interface EnhancementInitializeOptions {
-  modelPath: ModelPathConfig;
-  // Additional enhancement-specific options will be added here
+let enhancementInstanceCounter = 0;
+
+function normalizeEnhancedAudio(raw: {
+  samples?: number[] | Float32Array;
+  sampleRate?: number;
+}): EnhancedAudio {
+  const samplesArray = Array.isArray(raw.samples)
+    ? raw.samples
+    : Array.from(raw.samples ?? []);
+  return {
+    samples: Float32Array.from(samplesArray),
+    sampleRate: Number(raw.sampleRate ?? 0),
+  };
 }
 
-/**
- * Enhancement result
- */
-export interface EnhancementResult {
-  outputPath: string;
-  // Additional result fields will be added here
-}
-
-/**
- * Initialize Speech Enhancement with model directory.
- *
- * @throws {Error} Not yet implemented
- */
-export async function initializeEnhancement(
-  _options: EnhancementInitializeOptions
-): Promise<void> {
-  throw new Error(
-    'Speech Enhancement feature is not yet implemented. This is a placeholder module.'
+export async function detectEnhancementModel(
+  modelPath: ModelPathConfig,
+  options?: { modelType?: EnhancementInitializeOptions['modelType'] }
+): Promise<EnhancementDetectResult> {
+  const resolvedPath = await resolveModelPath(modelPath);
+  const raw = await SherpaOnnx.detectEnhancementModel(
+    resolvedPath,
+    options?.modelType
   );
+  const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  return {
+    success: raw.success,
+    ...(err.length > 0 ? { error: err } : {}),
+    detectedModels: raw.detectedModels ?? [],
+    ...(raw.modelType != null && raw.modelType !== ''
+      ? { modelType: raw.modelType }
+      : {}),
+  };
 }
 
-/**
- * Enhance speech quality in an audio file.
- *
- * @throws {Error} Not yet implemented
- */
-export function enhanceAudio(_filePath: string): Promise<EnhancementResult> {
-  throw new Error(
-    'Speech Enhancement feature is not yet implemented. This is a placeholder module.'
+export async function createEnhancement(
+  options: EnhancementInitializeOptions
+): Promise<EnhancementEngine> {
+  const instanceId = `enhancement_${++enhancementInstanceCounter}`;
+  const resolvedPath = await resolveModelPath(options.modelPath);
+  const init = await SherpaOnnx.initializeEnhancement(
+    instanceId,
+    resolvedPath,
+    options.modelType ?? 'auto',
+    options.numThreads,
+    options.provider,
+    options.debug
   );
+
+  if (!init.success) {
+    const nativeError = typeof init.error === 'string' ? init.error.trim() : '';
+    throw new Error(
+      nativeError.length > 0
+        ? `Enhancement initialization failed: ${nativeError}`
+        : `Enhancement initialization failed for ${instanceId}`
+    );
+  }
+
+  let destroyed = false;
+  const guard = () => {
+    if (destroyed) {
+      throw new Error(
+        `Enhancement instance ${instanceId} has been destroyed; cannot call methods on it.`
+      );
+    }
+  };
+
+  return {
+    get instanceId() {
+      return instanceId;
+    },
+    async enhanceFile(
+      inputPath: string,
+      outputPath?: string
+    ): Promise<EnhancedAudio> {
+      guard();
+      const raw = await SherpaOnnx.enhanceFile(
+        instanceId,
+        inputPath,
+        outputPath
+      );
+      return normalizeEnhancedAudio(raw);
+    },
+    async enhanceSamples(
+      samples: number[],
+      sampleRate: number
+    ): Promise<EnhancedAudio> {
+      guard();
+      const raw = await SherpaOnnx.enhanceSamples(
+        instanceId,
+        samples,
+        sampleRate
+      );
+      return normalizeEnhancedAudio(raw);
+    },
+    async getSampleRate(): Promise<number> {
+      guard();
+      return SherpaOnnx.getEnhancementSampleRate(instanceId);
+    },
+    async destroy(): Promise<void> {
+      if (destroyed) return;
+      destroyed = true;
+      await SherpaOnnx.unloadEnhancement(instanceId);
+    },
+  };
 }
 
-/**
- * Release enhancement resources.
- *
- * @throws {Error} Not yet implemented
- */
-export function unloadEnhancement(): Promise<void> {
-  throw new Error(
-    'Speech Enhancement feature is not yet implemented. This is a placeholder module.'
-  );
-}
+export { createStreamingEnhancement } from './streaming';
+export type {
+  OnlineEnhancementEngine,
+  StreamingEnhancementInitializeOptions,
+} from './streamingTypes';
+
+export type {
+  EnhancementModelType,
+  EnhancedAudio,
+  EnhancementInitializeOptions,
+  EnhancementDetectResult,
+  EnhancementEngine,
+} from './types';
+export { ENHANCEMENT_MODEL_TYPES } from './types';

@@ -6,7 +6,9 @@
 #   collect_all_sherpa_model_streams.sh [--config <file>] --print-git-paths
 #
 # Default config: scripts/ci/sherpa_asr_model_release_streams.json (ASR + QNN).
-# TTS: --config sherpa_tts_model_release_streams.json (relative to this dir or repo root, or absolute).
+# TTS: --config sherpa_tts_model_release_streams.json
+# Speech enhancement: --config sherpa_speech_enhancement_model_release_streams.json
+# (paths relative to this dir or repo root, or absolute).
 #
 # --print-git-paths prints newline-separated paths to git-add (deduped), then exits.
 set -euo pipefail

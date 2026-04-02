@@ -210,6 +210,19 @@ if [ "$BUILD_AAR" = ON ]; then
     AAR_PATH=$(find "$AAR_PUBLISH_DIR" -name "*.aar" 2>/dev/null | head -1)
     if [ -n "$AAR_PATH" ]; then
         echo "  -> $AAR_PATH"
+        # Append ORT C/C++ headers into the AAR (zip) for sherpa-onnx / consumer native builds.
+        # Same tree as arm64-v8a/headers (copied from onnxruntime include/).
+        # Guard against re-running on a cached AAR that already has the headers.
+        if unzip -l "$AAR_PATH" 2>/dev/null | grep -q "include/onnxruntime"; then
+            echo "  include/onnxruntime headers already present in AAR, skipping injection"
+        else
+            INCLUDE_STAGE=$(mktemp -d)
+            mkdir -p "$INCLUDE_STAGE/include"
+            cp -R "$DST_HEADERS"/. "$INCLUDE_STAGE/include/"
+            (cd "$INCLUDE_STAGE" && zip -qr "$AAR_PATH" include)
+            rm -rf "$INCLUDE_STAGE"
+            echo "  Appended include/ (ORT headers) to AAR"
+        fi
     fi
 fi
 

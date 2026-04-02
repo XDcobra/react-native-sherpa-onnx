@@ -64,7 +64,7 @@ jobs:
           echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
           echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
 
-      - name: Read VERSIONS (QNN SDK + ONNX Runtime for POM dependency)
+      - name: Read VERSIONS and ORT Maven version (from ANDROID_RELEASE_TAG)
         id: versions
         run: |
           set -a
@@ -72,7 +72,14 @@ jobs:
           set +a
           echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> "$GITHUB_OUTPUT"
           echo "ONNXRUNTIME_VERSION=$ONNXRUNTIME_VERSION" >> "$GITHUB_OUTPUT"
-          echo "ort_maven_version=${ONNXRUNTIME_VERSION}-qnn${QNN_SDK_VERSION}" >> "$GITHUB_OUTPUT"
+          TAG_FILE=third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
+          ORT_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          PREFIX="ort-android-qnn-v"
+          case "$ORT_TAG" in
+            "${PREFIX}"*) ;;
+            *) echo "::error::Invalid $TAG_FILE: expected prefix ${PREFIX}"; exit 1 ;;
+          esac
+          echo "ort_maven_version=${ORT_TAG#${PREFIX}}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Android NDK
         id: setup-ndk
@@ -132,7 +139,7 @@ jobs:
         id: sherpa-cache
         with:
           path: third_party/sherpa-onnx-prebuilt/android
-          key: sherpa-android-prebuilt-qnn-both-v2-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
+          key: sherpa-android-prebuilt-qnn-both-v3-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
 
       - name: Build sherpa-onnx (Android, all ABIs, with QNN; Kotlin + Java API)
         if: steps.sherpa-cache.outputs.cache-hit != 'true'
@@ -152,7 +159,7 @@ jobs:
           rm -rf "$LAYOUT"
           mkdir -p "$LAYOUT"
           ABIS="arm64-v8a armeabi-v7a x86 x86_64"
-          SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libonnxruntime.so"
+          SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so"
           PREBUILT=third_party/sherpa-onnx-prebuilt/android
           for abi in $ABIS; do
             mkdir -p "$LAYOUT/$abi"
@@ -175,27 +182,6 @@ jobs:
           fi
           echo "Layout contents:"
           find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' -o -name '*.jar' \) | head -50
-
-      - name: Validate libonnxruntime.so in sherpa prebuilt has QNN, NNAPI and XNNPACK symbols
-        run: |
-          PREBUILT=third_party/sherpa-onnx-prebuilt/android
-          SO="$PREBUILT/arm64-v8a/lib/libonnxruntime.so"
-          if [ ! -f "$SO" ]; then
-            echo "::error::libonnxruntime.so not found at $SO"
-            exit 1
-          fi
-          MISSING=""
-          for token in qnn nnapi xnnpack; do
-            if ! strings "$SO" | grep -qi "$token"; then
-              MISSING="$MISSING $token"
-            fi
-          done
-          if [ -n "$MISSING" ]; then
-            echo "::error::sherpa prebuilt libonnxruntime.so is missing expected provider symbols (strings):$MISSING"
-            echo "Ensure build_sherpa_onnx.sh uses your ORT release (1.17.1 layout) so the bundled .so is your build with NNAPI/XNNPACK."
-            exit 1
-          fi
-          echo "Validated: sherpa prebuilt libonnxruntime.so contains qnn, nnapi and xnnpack (strings)."
 
       - name: Create release zip
         run: |
@@ -231,8 +217,8 @@ jobs:
           name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false  # do not set this release as GitHub's "latest" (e.g. to keep app/npm release as latest)
           body: |
-            Prebuilt sherpa-onnx and ONNX Runtime for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN support.
-            - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so), `c-api/` (C headers), `java/classes.jar` (Kotlin API). Gradle copies to jniLibs, include, and sherpa-onnx-classes.
+            Prebuilt sherpa-onnx for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN-linked native libs. **ONNX Runtime** (`libonnxruntime.so`, JNI, Java API, headers) is provided by `com.xdcobra.sherpa:onnxruntime` — not bundled in this zip/AAR.
+            - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (Sherpa `.so` only), `c-api/` (C headers), `java/classes.jar` (Kotlin API).
             - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar** – Android library (Kotlin API: data classes, `WaveReader.readWave()`, etc.). Also on Maven as default artifact; depends on `com.xdcobra.sherpa:onnxruntime`.
             - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar** – Same library with **Java API** (Builder pattern). Use Maven classifier `java` or this file for Java projects.
 
@@ -283,7 +269,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`sherpa-onnx-android.zip\` | Layout: \`arm64-v8a/\`, \`armeabi-v7a/\`, \`x86/\`, \`x86_64/\` (.so), \`c-api/\`, \`java/classes.jar\` (Kotlin API). |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-android.zip\` | Sherpa \`.so\` only + \`c-api/\` + \`java/classes.jar\`. ORT via \`onnxruntime\` Maven. |" >> $GITHUB_STEP_SUMMARY
           echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar\` | Android library (Kotlin API, default on Maven). |" >> $GITHUB_STEP_SUMMARY
           echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar\` | Android library (Java API; Maven classifier \`java\`). |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

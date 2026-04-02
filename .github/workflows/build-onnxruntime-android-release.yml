@@ -1,6 +1,6 @@
 # Build ONNX Runtime for Android (all ABIs) with QNN, NNAPI, XNNPACK, Java; produce .aar and sherpa-onnx zip; publish as GitHub Release.
 # Release tag is read from third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG.
-# VERSIONS: ONNXRUNTIME_VERSION, QNN_SDK_VERSION. Tag e.g. ort-android-qnn-v<ORT>-qnn<QNN>.
+# VERSIONS: ONNXRUNTIME_VERSION, QNN_SDK_VERSION, ORT_BUILD_NUMBER. Tag: ort-android-qnn-v<ORT>-qnn<QNN>-<build>.
 # Build output is cached so other workflows or re-runs can reuse it.
 # If MAVEN_REPO_PAT is set, the AAR is also published to GitHub Pages Maven (XDcobra/maven) with MD5/SHA1 checksums.
 # 
@@ -17,8 +17,8 @@
 # ──────────────────────────────────────────────────────────
 #
 # When to run manually (Actions --> Prebuilt - ONNX Runtime (Android) Release --> Run workflow):
-# 1. After updating third_party/onnxruntime_prebuilt/VERSIONS (ONNXRUNTIME_VERSION, QNN_SDK_VERSION)
-#    and ANDROID_RELEASE_TAG to a new version (e.g. 1.24.2).
+# 1. After updating third_party/onnxruntime_prebuilt/VERSIONS and ANDROID_RELEASE_TAG
+#    (e.g. ort-android-qnn-v1.24.4-qnn2.43.1.260218-1; bump ORT_BUILD_NUMBER / tag suffix for rebuilds).
 # 2. When you want to publish a new ONNX Runtime Android release (GitHub Release + Maven).
 # Run this workflow first; then run "Prebuilt - Sherpa-onnx (Android) Release" so sherpa-onnx
 # can download this release and build against it.
@@ -52,7 +52,7 @@ jobs:
           TAG_FILE=third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG
           VERSIONS_FILE=third_party/onnxruntime_prebuilt/VERSIONS
           if [ ! -f "$TAG_FILE" ]; then
-            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.17.1-qnn2.43.1.260218)"
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. ort-android-qnn-v1.24.4-qnn2.43.1.260218-1)"
             exit 1
           fi
           RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
@@ -70,8 +70,18 @@ jobs:
           set +a
           echo "ONNXRUNTIME_VERSION=$ONNXRUNTIME_VERSION" >> $GITHUB_OUTPUT
           echo "QNN_SDK_VERSION=$QNN_SDK_VERSION" >> $GITHUB_OUTPUT
+          PREFIX="ort-android-qnn-v"
+          case "$RELEASE_TAG" in
+            "${PREFIX}"*) ;;
+            *)
+              echo "::error::ANDROID_RELEASE_TAG must start with ${PREFIX} (got: $RELEASE_TAG)"
+              exit 1
+              ;;
+          esac
+          ORT_MAVEN_VERSION="${RELEASE_TAG#${PREFIX}}"
+          echo "ort_maven_version=$ORT_MAVEN_VERSION" >> $GITHUB_OUTPUT
           echo "ort_commit=$(git -C third_party/onnxruntime rev-parse HEAD 2>/dev/null || echo 'none')" >> $GITHUB_OUTPUT
-          echo "Release tag: $RELEASE_TAG"
+          echo "Release tag: $RELEASE_TAG (Maven version: $ORT_MAVEN_VERSION)"
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -132,7 +142,7 @@ jobs:
         id: ort-cache
         with:
           path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack
-          key: ort-android-qnn-aar-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh', 'third_party/onnxruntime_prebuilt/VERSIONS') }}
+          key: ort-android-qnn-aar-${{ steps.versions.outputs.ort_commit }}-${{ hashFiles('third_party/onnxruntime_prebuilt/build_onnxruntime_android_aar.sh', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG') }}
 
       - name: Build ONNX Runtime (all ABIs + AAR) with QNN
         if: steps.ort-cache.outputs.cache-hit != 'true'
@@ -169,6 +179,15 @@ jobs:
           cp third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack/aar_out/onnxruntime-release.aar onnxruntime-android-qnn.aar
           ls -la onnxruntime-android-qnn.aar
 
+      - name: Validate AAR contains ORT include/ headers
+        run: |
+          if ! unzip -l onnxruntime-android-qnn.aar | grep -q 'include/onnxruntime'; then
+            echo "::error::onnxruntime-android-qnn.aar missing include/onnxruntime (headers not embedded)"
+            unzip -l onnxruntime-android-qnn.aar | head -40
+            exit 1
+          fi
+          echo "OK: AAR contains include/onnxruntime"
+
       - name: Create GitHub Release (AAR + zip)
         id: release
         uses: softprops/action-gh-release@v2
@@ -178,7 +197,7 @@ jobs:
           make_latest: false
           body: |
             Prebuilt ONNX Runtime for Android (all ABIs) with QNN, NNAPI, XNNPACK, Java.
-            - **onnxruntime-android-qnn.aar** – Android library (arm64-v8a, armeabi-v7a, x86, x86_64). Use in apps via `implementation(name: "onnxruntime-release", ext: "aar")` or Maven.
+            - **onnxruntime-android-qnn.aar** – Android library (arm64-v8a, armeabi-v7a, x86, x86_64) with `jni/*.so`, `classes.jar`, and **`include/`** (ORT C/C++ headers for native consumers).
             - **onnxruntime-android-qnn.zip** – Sherpa-onnx layout: `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so` and `${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/headers/`. Used by `third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh`.
 
             **Maven:** This AAR is also published to [GitHub Pages Maven](https://xdcobra.github.io/maven/). To use it in your Android project:
@@ -191,7 +210,7 @@ jobs:
             }
 
             dependencies {
-                implementation 'com.xdcobra.sherpa:onnxruntime:${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}-qnn${{ steps.versions.outputs.QNN_SDK_VERSION }}'
+                implementation 'com.xdcobra.sherpa:onnxruntime:${{ steps.versions.outputs.ort_maven_version }}'
             }
             ```
           files: |
@@ -206,7 +225,7 @@ jobs:
         if: success()
         env:
           MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
-          MAVEN_VERSION: ${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}-qnn${{ steps.versions.outputs.QNN_SDK_VERSION }}
+          MAVEN_VERSION: ${{ steps.versions.outputs.ort_maven_version }}
           AAR_SRC: onnxruntime-android-qnn.aar
         run: |
           if [ -z "${MAVEN_REPO_PAT}" ]; then
@@ -224,7 +243,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`onnxruntime-android-qnn.aar\` | Android library (all ABIs, QNN+NNAPI+XNNPACK+Java). Use in apps or Maven. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`onnxruntime-android-qnn.aar\` | Android library (all ABIs, QNN+NNAPI+XNNPACK+Java, \`include/\` headers). Maven: \`${{ steps.versions.outputs.ort_maven_version }}\`. |" >> $GITHUB_STEP_SUMMARY
           echo "| \`onnxruntime-android-qnn.zip\` | Sherpa-onnx layout: \`${{ steps.versions.outputs.ONNXRUNTIME_VERSION }}/jni/<abi>/libonnxruntime.so\` and \`headers/\`. Used by \`build_sherpa_onnx.sh\`. |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "If \`MAVEN_REPO_PAT\` is set, the AAR is also published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) (\`com.xdcobra.sherpa:onnxruntime:<version>\`) with MD5/SHA1 checksums." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,13 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "speech-enhancement-models",
+      "release_tag": "speech-enhancement-models",
+      "tree_cache_dir": "tree-cache/speech-enhancement-models",
+      "structure_file": "test/fixtures/speech-enhancement-models-structure.txt",
+      "expected_csv": "test/fixtures/speech-enhancement-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/speech-enhancement-models-license-status.csv"
+    }
+  ]
+}

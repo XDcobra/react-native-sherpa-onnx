@@ -45,6 +45,12 @@ for abi in $ABIS; do
   if [ -d "$SRC" ]; then
     mkdir -p "$DST"
     cp -v "$SRC"/*.so "$DST/" 2>/dev/null || true
+    for bad in libonnxruntime.so libonnxruntime4j_jni.so; do
+      if [ -f "$DST/$bad" ]; then
+        echo "Error: $bad must not be packaged in sherpa-onnx AAR (use com.xdcobra.sherpa:onnxruntime)."
+        exit 1
+      fi
+    done
   fi
 done
 

@@ -13,14 +13,17 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   const asrPath = 'model_licenses/asr-models-license-status.csv';
   const qnnPath = 'model_licenses/qnn-asr-models-license-status.csv';
   const ttsPath = 'model_licenses/tts-models-license-status.csv';
+  const speechEnhancementPath =
+    'model_licenses/speech-enhancement-models-license-status.csv';
 
   const results = await Promise.allSettled([
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
     SherpaOnnx.readAssetFileAsUtf8(qnnPath),
     SherpaOnnx.readAssetFileAsUtf8(ttsPath),
+    SherpaOnnx.readAssetFileAsUtf8(speechEnhancementPath),
   ]);
 
-  const [asrResult, qnnResult, ttsResult] = results;
+  const [asrResult, qnnResult, ttsResult, enhancementResult] = results;
 
   const licenses: ModelLicense[] = [];
 
@@ -45,6 +48,14 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load TTS model licenses: ${ttsResult.reason}`
+    );
+  }
+
+  if (enhancementResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(enhancementResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load speech enhancement model licenses: ${enhancementResult.reason}`
     );
   }
 
@@ -91,7 +102,7 @@ function parseCsv(csvString: string): ModelLicense[] {
       }
     }
 
-    if (entry['asset_name']) {
+    if (entry.asset_name) {
       results.push(entry as unknown as ModelLicense);
     }
   }

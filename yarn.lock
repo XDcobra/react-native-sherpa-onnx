@@ -10532,6 +10532,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-audio-api@npm:^0.11.6":
+  version: 0.11.7
+  resolution: "react-native-audio-api@npm:0.11.7"
+  dependencies:
+    semver: "npm:^7.7.3"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  bin:
+    setup-rn-audio-api-web: scripts/setup-rn-audio-api-web.js
+  checksum: 10c0/caae145442fdac60ae2a0404d100f7557fc6ce9056ec11324ae5a35cdce352eb6a42a2cad567c59780cc18d8110179e5c4d26ea28fea156624bece0bfa88fb9c
+  languageName: node
+  linkType: hard
+
 "react-native-builder-bob@npm:^0.40.13":
   version: 0.40.18
   resolution: "react-native-builder-bob@npm:0.40.18"
@@ -10620,11 +10634,11 @@ __metadata:
     "@types/react": "npm:^19.2.0"
     react: "npm:19.2.0"
     react-native: "npm:0.83.0"
+    react-native-audio-api: "npm:^0.11.6"
     react-native-builder-bob: "npm:^0.40.13"
     react-native-monorepo-config: "npm:^0.3.1"
     react-native-safe-area-context: "npm:^5.6.2"
     react-native-screens: "npm:^4.20.0"
-    react-native-sound: "npm:^0.13.0"
   languageName: unknown
   linkType: soft
 
@@ -10665,16 +10679,6 @@ __metadata:
     react-native: "*"
   languageName: unknown
   linkType: soft
-
-"react-native-sound@npm:^0.13.0":
-  version: 0.13.0
-  resolution: "react-native-sound@npm:0.13.0"
-  peerDependencies:
-    react: "*"
-    react-native: "*"
-  checksum: 10c0/c061e12bf505c3245c4c28438a1a6737121c3b65df36d32e920897c40393f3b8f52328fed9377f400b5d9ffc55052cbe4eaacba5586e2fa4108a01ba7a5a3e27
-  languageName: node
-  linkType: hard
 
 "react-native@npm:0.83.0":
   version: 0.83.0

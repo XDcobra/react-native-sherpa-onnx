@@ -83,11 +83,14 @@ set(SOURCES
     jni/model_detect/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/sherpa-onnx-model-detect-tts.cpp
+    jni/model_detect/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/sherpa-onnx-validate-stt.cpp
     jni/model_detect/sherpa-onnx-validate-tts.cpp
+    jni/model_detect/sherpa-onnx-validate-enhancement.cpp
     jni/model_detect/sherpa-onnx-detect-jni-common.cpp
     jni/model_detect/sherpa-onnx-stt-wrapper.cpp
     jni/model_detect/sherpa-onnx-tts-wrapper.cpp
+    jni/model_detect/sherpa-onnx-enhancement-wrapper.cpp
     jni/audio/sherpa-onnx-audio-convert-jni.cpp
     crypto/sha256.cpp
 )

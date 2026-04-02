@@ -92,6 +92,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Supported Model Types](#supported-model-types)
   - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
   - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
+  - [Speech Enhancement Models](#speech-enhancement-models)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
 - [Breaking changes (upgrading to 0.3.0)](#breaking-changes-upgrading-to-030)
@@ -108,8 +109,8 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 | Platform | Version |
 |----------|---------|
-| Android | 1.12.31 |
-| iOS | 1.12.31 |
+| Android | 1.12.34 |
+| iOS | 1.12.34 |
 
 ## Feature Support
 
@@ -126,7 +127,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Speech Enhancement | ❌ Not yet supported | [Enhancement](./docs/enhancement.md) | Scheduled for release 0.4.0 |
+| Speech Enhancement | ✅ **Supported** | [Speech Enhancement](./docs/speech-enhancement.md) | API and initialization covered in docs. |
 | Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 0.5.0 |
 | Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 0.6.0 |
 | VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 0.7.0 |
@@ -184,6 +185,18 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
 
+### Speech Enhancement Models
+
+Speech enhancement improves noisy or degraded speech using ONNX models from the sherpa-onnx **speech-enhancement-models** release. Detection looks for **`.onnx`** filenames containing **`gtcrn`** or **`dpdfnet`** (case-insensitive). With **`'auto'`**, **GTCRN** is preferred when both are present in the same folder.
+
+| Model Type   | `modelType` Value | Description                                                                 | Download Links                                                                 |
+| ------------ | ----------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Auto Detect** | `'auto'`       | Picks **GTCRN** if a matching `.onnx` exists, otherwise **DPDFNet** if found. | n/a                                                                              |
+| **GTCRN**    | `'gtcrn'`         | Lightweight speech enhancement (e.g. `gtcrn_simple.onnx`).                  | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
+| **DPDFNet**  | `'dpdfnet'`       | Deep speech enhancement variants (e.g. `dpdfnet2.onnx`, `dpdfnet4.onnx`, `dpdfnet8.onnx`, `dpdfnet_baseline.onnx`, `dpdfnet2_48khz_hr.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
+
+APIs, batch vs online processing, and initialization are covered in [Speech Enhancement](./docs/speech-enhancement.md).
+
 ## Documentation
 
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
@@ -195,7 +208,7 @@ For **streaming TTS** (incremental generation, low latency), use `createStreamin
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
-- [Speech Enhancement](./docs/enhancement.md)
+- [Speech Enhancement](./docs/speech-enhancement.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
