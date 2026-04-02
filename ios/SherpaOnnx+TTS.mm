@@ -605,6 +605,14 @@ static NSString *SubtitleGranularityFromOptions(NSDictionary *options) {
     return @"sentence";
 }
 
+static bool IsCharacterGranularityRequested(NSDictionary *options) {
+    NSString *raw = [options[@"subtitleGranularity"] isKindOfClass:[NSString class]] ? options[@"subtitleGranularity"] : nil;
+    NSString *normalized = raw != nil
+        ? [[raw lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        : @"";
+    return [normalized isEqualToString:@"character"];
+}
+
 /** When options omit numSteps, matches Android SherpaOnnxTtsHelper / upstream GenerationConfig default. */
 constexpr int32_t kDefaultVoiceCloneNumSteps = 5;
 
@@ -1067,8 +1075,8 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
 
     NSString *subtitleMode = SubtitleModeFromOptions(options);
     NSString *subtitleGranularity = SubtitleGranularityFromOptions(options);
-    if ([subtitleMode isEqualToString:@"accurate"]) {
-        reject(@"TTS_SUBTITLE_ERROR", @"Accurate subtitle mode is not yet implemented. Use 'fast' or 'off'.", nil);
+    if (IsCharacterGranularityRequested(options) && ![subtitleMode isEqualToString:@"accurate"]) {
+        reject(@"TTS_SUBTITLE_ERROR", @"Character granularity is only supported when subtitleMode is 'accurate'.", nil);
         return;
     }
 
