@@ -56,6 +56,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
     { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
   )
+  private val alignmentHelper = SherpaOnnxAlignmentHelper(reactApplicationContext)
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
@@ -73,6 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pcmCapture = null
     onlineSttHelper.shutdown()
     ttsHelper.shutdown()
+    alignmentHelper.shutdown()
     enhancementHelper.shutdown()
   }
 
@@ -962,6 +964,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
     ttsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
+  }
+
+  override fun runCTCForcedAlignment(
+    modelPath: String,
+    audioPath: String,
+    text: String,
+    vocabJson: String,
+    promise: Promise,
+  ) {
+    alignmentHelper.runCTCForcedAlignment(modelPath, audioPath, text, vocabJson, promise)
   }
 
   /**

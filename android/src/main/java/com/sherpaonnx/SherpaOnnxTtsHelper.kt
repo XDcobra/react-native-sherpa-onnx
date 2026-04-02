@@ -454,11 +454,14 @@ internal class SherpaOnnxTtsHelper(
 
       val subtitleMode = getSubtitleMode(options)
       val subtitleGranularity = getSubtitleGranularity(options)
-      if (subtitleMode == "accurate") {
-        Log.e("SherpaOnnxTts", "TTS_SUBTITLE_ERROR: Accurate subtitle mode is not yet implemented")
+      if (isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
+        Log.e(
+          "SherpaOnnxTts",
+          "TTS_SUBTITLE_ERROR: Character granularity is only supported when subtitleMode is 'accurate'"
+        )
         promise.reject(
           "TTS_SUBTITLE_ERROR",
-          "Accurate subtitle mode is not yet implemented. Use 'fast' or 'off'."
+          "Character granularity is only supported when subtitleMode is 'accurate'."
         )
         return
       }
@@ -1004,6 +1007,11 @@ internal class SherpaOnnxTtsHelper(
       "word", "sentence" -> raw
       else -> "sentence"
     }
+  }
+
+  private fun isCharacterGranularityRequested(options: ReadableMap?): Boolean {
+    val raw = options?.getString("subtitleGranularity")?.trim()?.lowercase()
+    return raw == "character"
   }
 
   private fun toSubtitleWritableArray(items: List<SubtitleTimingItem>) = Arguments.createArray().apply {
