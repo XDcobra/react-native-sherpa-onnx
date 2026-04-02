@@ -391,13 +391,6 @@ export const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
-  generateButtonSecondary: {
-    backgroundColor: '#5856D6',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 10,
-  },
   generateButtonText: {
     fontSize: 16,
     fontWeight: '600',
@@ -438,12 +431,6 @@ export const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
-  subtitleActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
   audioButton: {
     flexBasis: '30%',
     maxWidth: '32%',
@@ -465,12 +452,6 @@ export const styles = StyleSheet.create({
   },
   shareButton: {
     backgroundColor: '#5856D6',
-  },
-  exportButton: {
-    backgroundColor: '#6E56CF',
-  },
-  saveSubtitleButton: {
-    backgroundColor: '#34C759',
   },
   audioButtonText: {
     fontSize: 14,
