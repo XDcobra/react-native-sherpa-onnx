@@ -1,24 +1,23 @@
 name: Publish wav2vec2 model assets
 
 on:
-  push:
-  #workflow_dispatch:
-  #  inputs:
-  #    csv_path:
-  #      description: Path to sources CSV file
-  #      required: false
-  #      default: scripts/wav2vec2-models/sources.csv
-  #      type: string
-  #    release_tag:
-  #      description: Release tag for assets
-  #      required: false
-  #      default: wav2vec2-models
-  #      type: string
-  #    dry_run:
-  #      description: Build archives only and skip upload
-  #      required: false
-  #      default: false
-  #      type: boolean
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: Path to sources CSV file
+        required: false
+        default: scripts/wav2vec2-models/sources.csv
+        type: string
+      release_tag:
+        description: Release tag for assets
+        required: false
+        default: wav2vec2-models
+        type: string
+      dry_run:
+        description: Build archives only and skip upload
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,10 +48,16 @@ jobs:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           set -euo pipefail
+          # Empty string inputs (cleared UI fields) bypass YAML defaults; restore them here.
+          CSV_PATH="${{ inputs.csv_path }}"
+          RELEASE_TAG="${{ inputs.release_tag }}"
+          CSV_PATH="${CSV_PATH:-scripts/wav2vec2-models/sources.csv}"
+          RELEASE_TAG="${RELEASE_TAG:-wav2vec2-models}"
+
           args=(
-            --csv "${{ inputs.csv_path }}"
+            --csv "$CSV_PATH"
             --repo "${{ github.repository }}"
-            --tag "${{ inputs.release_tag }}"
+            --tag "$RELEASE_TAG"
           )
 
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
