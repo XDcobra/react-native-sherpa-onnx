@@ -1,5 +1,30 @@
 # Changelog
 
+# [0.4.0](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.9...v0.4.0) (2026-04-02)
+
+
+### Bug Fixes
+
+* address PR review comments - types paths, detectEnhancementModel, AAR header idempotency, docs ([6e9bed4](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6e9bed4e601ec992ac81ed16553be170da1edad6))
+
+
+### Features
+
+* **asset-helper:** add model detection for speech enhancement in SherpaOnnxAssetHelper ([f914f79](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f914f797a59f79efe6d8d6cffbc26ce618384381))
+* **asset-helper:** enhance model detection to classify 'gtcrn' and 'dpdfnet' as enhancements ([97d492d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/97d492d3390124203e2e12963bcc68c27297ba5d))
+* **build:** enhance build script to dynamically detect onnxruntime_version from upstream scripts and ensure consistency across builds ([cf825bf](https://github.com/XDcobra/react-native-sherpa-onnx/commit/cf825bf5944eb5d5d15dfb0dfefd0d658e2f6c20))
+* **ci:** extend model CSV checks and collection scripts to include speech enhancement models ([64f56f3](https://github.com/XDcobra/react-native-sherpa-onnx/commit/64f56f38bc0cbe3c0a3b4962d3395abca839855a))
+* **enhancement:** implement speech enhancement functionality with model detection and processing in Android ([90611d9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/90611d9ba0127bb95862fc6315f2a56e938906bf))
+* **example:** implement speech enhancement screen with model selection and audio playback features ([ef3ebad](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ef3ebad11779245bb817badbde48f7ebc920a0e7))
+* **js:** add comprehensive speech enhancement methods and streaming support ([24ac986](https://github.com/XDcobra/react-native-sherpa-onnx/commit/24ac9869d09c9bbbb98774746754d5a0a417ee69))
+* **licenses:** add CSV files for speech enhancement models' license status in Android and iOS ([e46dc6a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e46dc6a7a194194a09a6f16183e8c8f40bc2717b))
+* **licenses:** include speech enhancement model licenses in getModelLicenses function ([d42b2f5](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d42b2f5c3574fd20e413267a90609c7c9ff1c2bb))
+* **model-detection:** add enhancement model detection, validation, and processing wrappers for iOS ([c926a5d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c926a5d22e70b4429817c98e59ba702594c77055))
+* **model-detection:** add new source files for enhancement and validation in model detection ([e25605d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e25605d9e08cbc9548fa83a0c0e8faf32fbe3071))
+* **model-detection:** introduce enhancement model detection and validation with JNI integration ([c187493](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c187493d51416404f65ba3c4c6cbe59aebfdd030))
+* **podspec:** add enhancement directory to iOS podspec for improved functionality ([6056f63](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6056f638038783ed1d45e3b1147833b4b5dbd0d6))
+* **release:** update Android release tag format and include ORT headers in AAR ([c7c5b5c](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c7c5b5ca7b4bf8e5217229d74061dc1de2d959e8))
+
 ## [0.3.9](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.8...v0.3.9) (2026-03-28)
 
 
