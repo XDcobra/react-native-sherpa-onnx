@@ -12,7 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { unlink } from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath, unlink } from '@dr.pogodin/react-native-fs';
+import {
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx';
 import {
   copyContentUriToCache,
   generateSubtitlesFromAudio,
@@ -30,8 +35,25 @@ import {
   subscribeModelsListUpdated,
   type ModelMetaBase,
 } from 'react-native-sherpa-onnx/download';
-import { getFileModelPath, getModelDisplayName } from '../../modelConfig';
+import {
+  getAssetModelPath,
+  getFileModelPath,
+  getModelDisplayName,
+} from '../../modelConfig';
 import { styles } from './GenerateTimestampScreen.styles';
+
+const PAD_PACK_NAME = 'sherpa_models';
+
+/** Bundled wav2vec2 alignment folders are inferred as `unknown` by native listAssetModels (see STT/TTS hints). */
+function isAlignmentModelFolder(folder: string, hint: string): boolean {
+  if (hint === 'alignment') {
+    return true;
+  }
+  const n = folder.toLowerCase();
+  return n.includes('wav2vec');
+}
+
+type AlignmentModelEntry = { id: string; label: string };
 
 type DropdownType = 'mode' | 'granularity' | null;
 type ScreenSubtitleMode = Extract<SubtitleMode, 'fast' | 'accurate'>;
@@ -108,8 +130,41 @@ function getModelLabel(model: ModelMetaBase): string {
   return getModelDisplayName(model.id);
 }
 
+function getAlignmentModelPathConfig(
+  modelId: string,
+  ctx: {
+    padModelIds: string[];
+    padModelsPath: string | null;
+    bundledFolders: string[];
+    downloadedIds: Set<string>;
+  }
+) {
+  if (ctx.padModelIds.includes(modelId)) {
+    return ctx.padModelsPath
+      ? getFileModelPath(modelId, ModelCategory.Alignment, ctx.padModelsPath)
+      : getFileModelPath(modelId, ModelCategory.Alignment);
+  }
+  if (ctx.downloadedIds.has(modelId)) {
+    return getFileModelPath(modelId, ModelCategory.Alignment);
+  }
+  if (ctx.bundledFolders.includes(modelId)) {
+    return getAssetModelPath(modelId);
+  }
+  return getAssetModelPath(modelId);
+}
+
 export default function GenerateTimestampScreen() {
-  const [availableModels, setAvailableModels] = useState<ModelMetaBase[]>([]);
+  const [availableModels, setAvailableModels] = useState<AlignmentModelEntry[]>(
+    []
+  );
+  const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
+  const [bundledAlignmentFolders, setBundledAlignmentFolders] = useState<
+    string[]
+  >([]);
+  const [downloadedAlignmentIds, setDownloadedAlignmentIds] = useState<
+    string[]
+  >([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [initializedModelId, setInitializedModelId] = useState<string | null>(
@@ -144,18 +199,77 @@ export default function GenerateTimestampScreen() {
   const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
     try {
-      const models = await listDownloadedModelsByCategory<ModelMetaBase>(
+      const assetModels = await listAssetModels();
+      const bundledFolders = assetModels
+        .filter((m) => isAlignmentModelFolder(m.folder, m.hint))
+        .map((m) => m.folder);
+
+      let padFolders: string[] = [];
+      let resolvedPadPath: string | null = null;
+      try {
+        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+        const fallbackPath = `${DocumentDirectoryPath}/models`;
+        const padPath = padPathFromNative ?? fallbackPath;
+        const padResults = await listModelsAtPath(padPath);
+        padFolders = (padResults || [])
+          .filter((m) => isAlignmentModelFolder(m.folder, m.hint))
+          .map((m) => m.folder);
+        if (padFolders.length > 0) {
+          resolvedPadPath = padPath;
+          console.log(
+            'GenerateTimestampScreen: PAD/filesystem alignment models:',
+            padFolders,
+            'at',
+            padPath
+          );
+        }
+      } catch (e) {
+        console.warn('GenerateTimestampScreen: PAD/listModelsAtPath failed', e);
+        padFolders = [];
+      }
+      setPadModelsPath(resolvedPadPath);
+      setPadModelIds(padFolders);
+      setBundledAlignmentFolders(bundledFolders);
+
+      const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
         ModelCategory.Alignment
       );
-      setAvailableModels(models);
+      const downloadedIds = new Set(downloaded.map((d) => d.id));
+      setDownloadedAlignmentIds([...downloadedIds]);
 
-      const ids = new Set(models.map((item) => item.id));
+      const combinedIds: string[] = [];
+      const pushId = (id: string) => {
+        if (!combinedIds.includes(id)) {
+          combinedIds.push(id);
+        }
+      };
+      for (const id of padFolders) {
+        pushId(id);
+      }
+      for (const id of bundledFolders) {
+        pushId(id);
+      }
+      for (const d of downloaded) {
+        pushId(d.id);
+      }
 
+      const metaById = new Map(downloaded.map((m) => [m.id, m] as const));
+      const entries: AlignmentModelEntry[] = combinedIds.map((id) => {
+        const meta = metaById.get(id);
+        return {
+          id,
+          label: meta ? getModelLabel(meta) : getModelDisplayName(id),
+        };
+      });
+
+      setAvailableModels(entries);
+
+      const ids = new Set(combinedIds);
       setSelectedModelId((prev) => {
         if (prev && ids.has(prev)) {
           return prev;
         }
-        return models[0]?.id ?? null;
+        return combinedIds[0] ?? null;
       });
 
       if (initializedModelId && !ids.has(initializedModelId)) {
@@ -166,10 +280,14 @@ export default function GenerateTimestampScreen() {
       }
     } catch (err) {
       console.error(
-        'GenerateTimestampScreen: Failed to load subtitle models',
+        'GenerateTimestampScreen: Failed to load alignment models',
         err
       );
       setAvailableModels([]);
+      setPadModelIds([]);
+      setPadModelsPath(null);
+      setBundledAlignmentFolders([]);
+      setDownloadedAlignmentIds([]);
       setSelectedModelId(null);
     } finally {
       setLoadingModels(false);
@@ -290,7 +408,12 @@ export default function GenerateTimestampScreen() {
 
     try {
       const detection = await detectAlignmentModel(
-        getFileModelPath(selectedModelId, ModelCategory.Alignment),
+        getAlignmentModelPathConfig(selectedModelId, {
+          padModelIds,
+          padModelsPath,
+          bundledFolders: bundledAlignmentFolders,
+          downloadedIds: new Set(downloadedAlignmentIds),
+        }),
         { modelType: 'auto' as AlignmentModelType }
       );
 
@@ -400,8 +523,9 @@ export default function GenerateTimestampScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize Model</Text>
             <Text style={styles.sectionDescription}>
-              Select a downloaded subtitle model and validate it with autodetect
-              before generation.
+              Select an alignment model from bundled assets (assets/models/),
+              Play Asset Delivery, app documents, or downloads, then validate
+              with autodetect before generation.
             </Text>
 
             {(selectedModelId || initializedModelId) && (
@@ -427,14 +551,15 @@ export default function GenerateTimestampScreen() {
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#007AFF" />
                 <Text style={styles.loadingText}>
-                  Loading downloaded subtitle models...
+                  Loading alignment models...
                 </Text>
               </View>
             ) : availableModels.length === 0 ? (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningBannerText}>
-                  No subtitle models found. Download one in the Download screen
-                  (category: subtitles).
+                  No alignment models found. Add a wav2vec2 model under
+                  assets/models/, use PAD or documents/models, or download one
+                  (category: alignment).
                 </Text>
               </View>
             ) : (
@@ -460,7 +585,7 @@ export default function GenerateTimestampScreen() {
                           isSelected && styles.modelSelectButtonTitleActive,
                         ]}
                       >
-                        {getModelLabel(model)}
+                        {model.label}
                       </Text>
                       <Text style={styles.modelSelectButtonId}>{model.id}</Text>
                     </TouchableOpacity>
