@@ -1109,6 +1109,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val detectedModels = result["detectedModels"] as? ArrayList<*>
         ?: arrayListOf<HashMap<String, String>>()
       val modelTypeStr = result["modelType"] as? String
+      val paths = result["paths"] as? HashMap<*, *>
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", success)
@@ -1125,6 +1126,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       resultMap.putArray("detectedModels", modelsArray)
       if (modelTypeStr != null) {
         resultMap.putString("modelType", modelTypeStr)
+      }
+      val alignmentModelPath = paths?.get("model") as? String
+      if (!alignmentModelPath.isNullOrBlank()) {
+        val pathsMap = Arguments.createMap()
+        pathsMap.putString("model", alignmentModelPath)
+        resultMap.putMap("paths", pathsMap)
       }
       if (!success) {
         val error = result["error"] as? String
