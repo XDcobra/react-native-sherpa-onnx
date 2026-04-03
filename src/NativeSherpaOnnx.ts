@@ -355,6 +355,8 @@ export interface Spec extends TurboModule {
     timingMode: string;
   }>;
 
+  // ==================== Alignment / Subtitle Methods ====================
+
   /**
    * Run wav2vec2 CTC forced alignment on an audio file and transcript.
    * @param modelPath - Absolute path to wav2vec2 ONNX model file
@@ -370,6 +372,19 @@ export interface Spec extends TurboModule {
   ): Promise<{
     words: Array<{ text: string; start: number; end: number }>;
     chars: Array<{ text: string; start: number; end: number }>;
+  }>;
+
+  detectAlignmentModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    paths?: {
+      model?: string;
+    };
   }>;
 
   // ==================== Online (streaming) TTS Methods ====================
@@ -449,19 +464,6 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-  }>;
-
-  detectAlignmentModel(
-    modelDir: string,
-    modelType?: string
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    detectedModels: Array<{ type: string; modelDir: string }>;
-    modelType?: string;
-    paths?: {
-      model?: string;
-    };
   }>;
 
   initializeEnhancement(

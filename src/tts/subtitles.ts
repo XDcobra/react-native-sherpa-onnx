@@ -1,11 +1,8 @@
-import {
-  DocumentDirectoryPath,
-  mkdir,
-  unlink,
-} from '@dr.pogodin/react-native-fs';
+import { unlink } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { WAV2VEC2_VOCAB } from '../alignment/vocab';
 import { decodeAudioFileToFloatSamples } from '../audio';
+import { saveAlignmentAudioToTempWav } from './tempAudio';
 import type {
   SubtitleGranularity,
   SubtitleMode,
@@ -64,6 +61,8 @@ const COMMON_ABBREVIATIONS = new Set([
   'e.g',
   'i.e',
 ]);
+
+const WAV2VEC2_VOCAB_JSON = JSON.stringify(WAV2VEC2_VOCAB);
 
 function isWhitespaceChar(char: string): boolean {
   return /\s/u.test(char);
@@ -347,32 +346,6 @@ function buildSentenceSubtitlesFromAlignedWords(
   return subtitles;
 }
 
-function createTempAlignmentWavPath(): string {
-  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  return `${DocumentDirectoryPath}/sherpa-onnx/cache/alignment-${nonce}.wav`.replace(
-    /\/+/g,
-    '/'
-  );
-}
-
-async function saveSamplesToTempWav(audio: {
-  samples: number[];
-  sampleRate: number;
-}): Promise<string> {
-  const cacheDir = `${DocumentDirectoryPath}/sherpa-onnx/cache`.replace(
-    /\/+/g,
-    '/'
-  );
-  await mkdir(cacheDir);
-  const tempPath = createTempAlignmentWavPath();
-  await SherpaOnnx.saveTtsAudioToFile(
-    audio.samples,
-    audio.sampleRate,
-    tempPath
-  );
-  return tempPath;
-}
-
 function isCjkChar(char: string): boolean {
   return /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(
     char
@@ -558,7 +531,7 @@ export async function generateSubtitlesFromAudio(
     if (typeof audioPathOrSamples === 'string') {
       audioPath = audioPathOrSamples;
     } else {
-      audioPath = await saveSamplesToTempWav(audioPathOrSamples);
+      audioPath = await saveAlignmentAudioToTempWav(audioPathOrSamples);
       shouldCleanup = true;
     }
 
@@ -567,7 +540,7 @@ export async function generateSubtitlesFromAudio(
         resolvedModelPath,
         audioPath,
         text,
-        JSON.stringify(WAV2VEC2_VOCAB)
+        WAV2VEC2_VOCAB_JSON
       );
 
       const wordItems = normalizeAlignmentItems(aligned.words ?? []);

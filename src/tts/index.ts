@@ -1,8 +1,4 @@
-import {
-  DocumentDirectoryPath,
-  mkdir,
-  unlink,
-} from '@dr.pogodin/react-native-fs';
+import { unlink } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
@@ -21,35 +17,9 @@ import {
   assertSubtitleGranularityForMode,
   generateSubtitlesFromAudio,
 } from './subtitles';
+import { saveAlignmentAudioToTempWav } from './tempAudio';
 
 let ttsInstanceCounter = 0;
-
-function createTempAlignmentWavPath(instanceId: string): string {
-  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  return `${DocumentDirectoryPath}/sherpa-onnx/cache/${instanceId}-alignment-${nonce}.wav`.replace(
-    /\/+/g,
-    '/'
-  );
-}
-
-async function saveTempAlignmentAudio(
-  instanceId: string,
-  audio: GeneratedAudio
-): Promise<string> {
-  const cacheDir = `${DocumentDirectoryPath}/sherpa-onnx/cache`.replace(
-    /\/+/g,
-    '/'
-  );
-  await mkdir(cacheDir);
-
-  const tempPath = createTempAlignmentWavPath(instanceId);
-  await SherpaOnnx.saveTtsAudioToFile(
-    audio.samples,
-    audio.sampleRate,
-    tempPath
-  );
-  return tempPath;
-}
 
 /**
  * Flatten model-specific options for the given model type to native init/update params.
@@ -394,7 +364,10 @@ export async function createTTS(
 
       let tempAudioPath: string | null = null;
       try {
-        tempAudioPath = await saveTempAlignmentAudio(instanceId, generated);
+        tempAudioPath = await saveAlignmentAudioToTempWav(
+          generated,
+          instanceId
+        );
         const subtitleResult = await generateSubtitlesFromAudio(
           text,
           tempAudioPath,
