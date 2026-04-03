@@ -901,6 +901,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val detectedModels = result["detectedModels"] as? ArrayList<*>
         ?: arrayListOf<HashMap<String, String>>()
       val modelTypeStr = result["modelType"] as? String
+      val paths = result["paths"] as? HashMap<*, *>
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", success)
@@ -917,6 +918,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       resultMap.putArray("detectedModels", modelsArray)
       if (modelTypeStr != null) {
         resultMap.putString("modelType", modelTypeStr)
+      }
+      val modelPath = paths?.get("model") as? String
+      if (!modelPath.isNullOrBlank()) {
+        val pathsMap = Arguments.createMap()
+        pathsMap.putString("model", modelPath)
+        resultMap.putMap("paths", pathsMap)
       }
       if (!success) {
         val error = result["error"] as? String
@@ -1084,6 +1091,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     enhancementHelper.detectEnhancementModel(modelDir, modelType, promise)
+  }
+
+  override fun detectAlignmentModel(
+    modelDir: String,
+    modelType: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectAlignmentModel(modelDir, modelType ?: "auto")
+      if (result == null) {
+        android.util.Log.e(NAME, "DETECT_ERROR: Alignment model detection returned null")
+        promise.reject("DETECT_ERROR", "Alignment model detection returned null")
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "DETECT_ERROR: Alignment model detection failed: ${e.message}", e)
+      promise.reject("DETECT_ERROR", "Alignment model detection failed: ${e.message}", e)
+    }
   }
 
   override fun initializeEnhancement(
@@ -1373,6 +1426,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
     private external fun nativeDetectEnhancementModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
+    @JvmStatic
+    private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
 
     /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
      * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.

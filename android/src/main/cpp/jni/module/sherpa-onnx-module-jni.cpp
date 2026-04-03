@@ -21,6 +21,7 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-alignment-wrapper.h"
 
 extern "C" {
 
@@ -206,6 +207,26 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
   sherpaonnx::EnhancementDetectResult result =
       sherpaonnx::DetectEnhancementModel(model_dir, model_type);
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
+}
+
+// Detect alignment model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_model_type) {
+  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
+  const char* model_type_c =
+      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
+  std::string model_dir(model_dir_c ? model_dir_c : "");
+  std::string model_type(model_type_c ? model_type_c : "auto");
+  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
+  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
+
+  sherpaonnx::AlignmentDetectResult result =
+      sherpaonnx::DetectAlignmentModel(model_dir, model_type);
+  return sherpaonnx::AlignmentDetectResultToJava(env, result);
 }
 
 }  // extern "C"
