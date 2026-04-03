@@ -55,6 +55,19 @@ internal class SherpaOnnxAlignmentHelper(
     executor.execute {
       var cleanupPath: String? = null
       try {
+        if (modelPath.isBlank()) {
+          promise.reject("ALIGNMENT_ERROR", "modelPath is required")
+          return@execute
+        }
+        if (audioPath.isBlank()) {
+          promise.reject("ALIGNMENT_ERROR", "audioPath is required")
+          return@execute
+        }
+        if (text.isBlank()) {
+          promise.reject("ALIGNMENT_ERROR", "text is required")
+          return@execute
+        }
+
         val resolvedAudio = resolveAudioPath(audioPath)
         cleanupPath = resolvedAudio.second
 
