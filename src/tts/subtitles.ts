@@ -4,7 +4,6 @@ import {
   unlink,
 } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { getAlignmentModelPath } from '../alignment';
 import { WAV2VEC2_VOCAB } from '../alignment/vocab';
 import { decodeAudioFileToFloatSamples } from '../audio';
 import type {
@@ -520,6 +519,20 @@ export function buildSubtitlesFromChunks(
   return subtitles;
 }
 
+/**
+ * Generate subtitle timelines from an existing transcript plus audio.
+ *
+ * This helper supports two modes:
+ * - `mode: 'fast'`: single-stage estimation from transcript chunks + audio duration.
+ * - `mode: 'accurate'`: two-stage pipeline: external STT transcript + wav2vec2 CTC forced alignment.
+ *
+ * For accurate mode, an alignment model from `ModelCategory.Alignment` must be available.
+ * You can pre-validate a model path via `detectAlignmentModel` from `react-native-sherpa-onnx/alignment`
+ * before calling this function.
+ *
+ * Related exports:
+ * - Alignment detection: `detectAlignmentModel`
+ */
 export async function generateSubtitlesFromAudio(
   text: string,
   audioPathOrSamples: string | { samples: number[]; sampleRate: number },
@@ -531,12 +544,11 @@ export async function generateSubtitlesFromAudio(
   assertSubtitleGranularityForMode(mode, granularity);
 
   if (mode === 'accurate') {
-    const resolvedModelPath =
-      options.alignmentModelPath?.trim() || (await getAlignmentModelPath());
+    const resolvedModelPath = options.alignmentModelPath?.trim();
 
     if (!resolvedModelPath) {
       throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Download alignment model first via downloadAlignmentModel().'
+        'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate subtitles.'
       );
     }
 

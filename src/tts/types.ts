@@ -208,7 +208,7 @@ export interface SubtitleOptions {
 
   /**
    * Optional absolute path to an alignment ONNX model.
-   * When omitted in accurate mode, the SDK uses getAlignmentModelPath().
+   * Required when `mode: 'accurate'`.
    */
   alignmentModelPath?: string;
 }
@@ -360,7 +360,7 @@ export interface SubtitleFromAudioOptions {
 
   /**
    * Optional absolute path to an alignment ONNX model.
-   * When omitted, the SDK uses getAlignmentModelPath().
+   * Required when `mode: 'accurate'`.
    */
   alignmentModelPath?: string;
 }

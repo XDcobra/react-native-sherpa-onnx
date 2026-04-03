@@ -13,7 +13,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   const asrPath = 'model_licenses/asr-models-license-status.csv';
   const qnnPath = 'model_licenses/qnn-asr-models-license-status.csv';
   const ttsPath = 'model_licenses/tts-models-license-status.csv';
-  const subtitlePath = 'model_licenses/subtitle-models-license-status.csv';
+  const alignmentPath = 'model_licenses/alignment-models-license-status.csv';
   const speechEnhancementPath =
     'model_licenses/speech-enhancement-models-license-status.csv';
 
@@ -21,11 +21,11 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
     SherpaOnnx.readAssetFileAsUtf8(qnnPath),
     SherpaOnnx.readAssetFileAsUtf8(ttsPath),
-    SherpaOnnx.readAssetFileAsUtf8(subtitlePath),
+    SherpaOnnx.readAssetFileAsUtf8(alignmentPath),
     SherpaOnnx.readAssetFileAsUtf8(speechEnhancementPath),
   ]);
 
-  const [asrResult, qnnResult, ttsResult, subtitleResult, enhancementResult] =
+  const [asrResult, qnnResult, ttsResult, alignmentResult, enhancementResult] =
     results;
 
   const licenses: ModelLicense[] = [];
@@ -54,11 +54,11 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     );
   }
 
-  if (subtitleResult.status === 'fulfilled') {
-    licenses.push(...parseCsv(subtitleResult.value));
+  if (alignmentResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(alignmentResult.value));
   } else {
     console.warn(
-      `[SherpaOnnx] Failed to load subtitle model licenses: ${subtitleResult.reason}`
+      `[SherpaOnnx] Failed to load alignment model licenses: ${alignmentResult.reason}`
     );
   }
 

@@ -451,6 +451,19 @@ export interface Spec extends TurboModule {
     modelType?: string;
   }>;
 
+  detectAlignmentModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    paths?: {
+      model?: string;
+    };
+  }>;
+
   initializeEnhancement(
     instanceId: string,
     modelDir: string,

@@ -194,7 +194,7 @@ function isAssetSupportedForCategory(
         lower.includes('binary') &&
         lower.includes('seconds')
       );
-    case ModelCategory.Subtitles:
+    case ModelCategory.Alignment:
       return ext === 'tar.bz2';
     default:
       return false;

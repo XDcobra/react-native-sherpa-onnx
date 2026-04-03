@@ -46,10 +46,10 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'qnn-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/qnn`,
   },
-  [ModelCategory.Subtitles]: {
-    tag: 'wav2vec2-models',
-    cacheFile: 'subtitle-models.json',
-    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/subtitles`,
+  [ModelCategory.Alignment]: {
+    tag: 'alignment-models',
+    cacheFile: 'alignment-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/alignment`,
     releaseApiBase:
       'https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags',
   },

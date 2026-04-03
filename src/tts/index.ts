@@ -4,7 +4,6 @@ import {
   unlink,
 } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { getAlignmentModelPath } from '../alignment';
 import type {
   TTSInitializeOptions,
   TTSModelType,
@@ -371,13 +370,11 @@ export async function createTTS(
         };
       }
 
-      const alignmentModelPath =
-        opts?.subtitles?.alignmentModelPath?.trim() ||
-        (await getAlignmentModelPath());
+      const alignmentModelPath = opts?.subtitles?.alignmentModelPath?.trim();
 
       if (!alignmentModelPath) {
         throw new Error(
-          'ALIGNMENT_MODEL_MISSING: Download alignment model first via downloadAlignmentModel().'
+          'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
         );
       }
 
