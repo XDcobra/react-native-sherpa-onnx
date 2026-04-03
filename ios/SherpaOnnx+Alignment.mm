@@ -2,6 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "sherpa-onnx/c-api/cxx-api.h"
+#include "sherpa-onnx-model-detect.h"
 
 #if __has_include("../third_party/onnxruntime/include/onnxruntime/core/session/onnxruntime_c_api.h")
 #include "../third_party/onnxruntime/include/onnxruntime/core/session/onnxruntime_c_api.h"
@@ -34,6 +35,42 @@ struct ExpandedTarget {
   std::vector<int32_t> ids;
   std::vector<int32_t> tokenIndices;
 };
+
+static NSString *alignmentKindToNSString(sherpaonnx::AlignmentModelKind kind) {
+  using K = sherpaonnx::AlignmentModelKind;
+  switch (kind) {
+    case K::kWav2Vec2:
+      return @"wav2vec2";
+    default:
+      return @"unknown";
+  }
+}
+
+static NSDictionary *alignmentDetectResultToDict(
+    const sherpaonnx::AlignmentDetectResult &result) {
+  NSMutableArray *detectedModelsArray = [NSMutableArray array];
+  for (const auto &model : result.detectedModels) {
+    [detectedModelsArray addObject:@{
+      @"type": [NSString stringWithUTF8String:model.type.c_str()] ?: @"",
+      @"modelDir": [NSString stringWithUTF8String:model.modelDir.c_str()] ?: @""
+    }];
+  }
+
+  NSMutableDictionary *dict = [@{
+    @"success": @(result.ok),
+    @"detectedModels": detectedModelsArray,
+    @"modelType": alignmentKindToNSString(result.selectedKind),
+  } mutableCopy];
+  if (!result.paths.model.empty()) {
+    dict[@"paths"] = @{
+      @"model": [NSString stringWithUTF8String:result.paths.model.c_str()] ?: @""
+    };
+  }
+  if (!result.ok && !result.error.empty()) {
+    dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Alignment model detection failed";
+  }
+  return dict;
+}
 
 static std::unordered_map<std::string, int32_t> ParseVocabJson(NSString *vocabJson) {
   if (vocabJson == nil || vocabJson.length == 0) {
@@ -470,6 +507,26 @@ static NSArray *AlignmentItemsToNSArray(const std::vector<AlignmentItem> &items)
 }  // namespace
 
 @implementation SherpaOnnx (Alignment)
+
+- (void)detectAlignmentModel:(NSString *)modelDir
+                  modelType:(NSString *)modelType
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    std::string modelDirStr = (modelDir != nil) ? [modelDir UTF8String] : "";
+    std::string modelTypeStr =
+        (modelType != nil && [modelType length] > 0) ? [modelType UTF8String]
+                                                      : "auto";
+    auto result = sherpaonnx::DetectAlignmentModel(modelDirStr, modelTypeStr);
+    resolve(alignmentDetectResultToDict(result));
+  } @catch (NSException *exception) {
+    reject(@"DETECT_ERROR",
+           [NSString stringWithFormat:@"Alignment detect failed: %@",
+                                      exception.reason],
+           nil);
+  }
+}
 
 - (void)runCTCForcedAlignment:(NSString *)modelPath
                     audioPath:(NSString *)audioPath

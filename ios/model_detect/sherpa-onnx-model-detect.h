@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_DETECT_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect-helper.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,6 +47,11 @@ enum class EnhancementModelKind {
     kUnknown,
     kGtcrn,
     kDpdfNet
+};
+
+enum class AlignmentModelKind {
+    kUnknown,
+    kWav2Vec2
 };
 
 struct SttModelPaths {
@@ -180,6 +186,10 @@ struct EnhancementModelPaths {
     std::string model;
 };
 
+struct AlignmentModelPaths {
+    std::string model;
+};
+
 struct SttDetectResult {
     bool ok = false;
     std::string error;
@@ -209,6 +219,14 @@ struct EnhancementDetectResult {
     EnhancementModelPaths paths;
 };
 
+struct AlignmentDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    AlignmentModelKind selectedKind = AlignmentModelKind::kUnknown;
+    AlignmentModelPaths paths;
+};
+
 SttDetectResult DetectSttModel(
     const std::string& modelDir,
     const std::optional<bool>& preferInt8,
@@ -224,6 +242,19 @@ TtsDetectResult DetectTtsModel(
 EnhancementDetectResult DetectEnhancementModel(
     const std::string& modelDir,
     const std::string& modelType
+);
+
+AlignmentDetectResult DetectAlignmentModel(
+    const std::string& modelDir,
+    const std::string& modelType
+);
+
+/** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
+AlignmentDetectResult DetectAlignmentModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
 );
 
 } // namespace sherpaonnx
