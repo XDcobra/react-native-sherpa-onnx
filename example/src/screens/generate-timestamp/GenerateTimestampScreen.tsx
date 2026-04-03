@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -21,10 +21,16 @@ import {
   type SubtitleResult,
 } from 'react-native-sherpa-onnx/tts';
 import {
-  deleteAlignmentModel,
-  downloadAlignmentModel,
-  isAlignmentModelReady,
-} from 'react-native-sherpa-onnx';
+  detectAlignmentModel,
+  type AlignmentModelType,
+} from 'react-native-sherpa-onnx/alignment';
+import {
+  listDownloadedModelsByCategory,
+  ModelCategory,
+  subscribeModelsListUpdated,
+  type ModelMetaBase,
+} from 'react-native-sherpa-onnx/download';
+import { getFileModelPath, getModelDisplayName } from '../../modelConfig';
 import { styles } from './GenerateTimestampScreen.styles';
 
 type DropdownType = 'mode' | 'granularity' | null;
@@ -94,21 +100,30 @@ function getFileNameFromUri(uri: string): string {
   return decodeURIComponent(segments[segments.length - 1] ?? 'audio.wav');
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B';
+function getModelLabel(model: ModelMetaBase): string {
+  const title = model.displayName?.trim();
+  if (title && title.length > 0) {
+    return title;
   }
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let value = bytes;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
-  }
-  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+  return getModelDisplayName(model.id);
 }
 
 export default function GenerateTimestampScreen() {
+  const [availableModels, setAvailableModels] = useState<ModelMetaBase[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [initializedModelId, setInitializedModelId] = useState<string | null>(
+    null
+  );
+  const [initializedModelPath, setInitializedModelPath] = useState<
+    string | null
+  >(null);
+  const [detectedModelType, setDetectedModelType] = useState<string | null>(
+    null
+  );
+  const [initializingModel, setInitializingModel] = useState(false);
+  const [initResult, setInitResult] = useState<string | null>(null);
+
   const [selectedAudioUri, setSelectedAudioUri] = useState<string | null>(null);
   const [selectedAudioName, setSelectedAudioName] = useState<string | null>(
     null
@@ -118,15 +133,67 @@ export default function GenerateTimestampScreen() {
   const [granularity, setGranularity] =
     useState<SubtitleGranularity>('sentence');
   const [openDropdown, setOpenDropdown] = useState<DropdownType>(null);
-  const [modelReady, setModelReady] = useState(false);
-  const [isDownloadingModel, setIsDownloadingModel] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<{
-    bytesWritten: number;
-    contentLength: number;
-  } | null>(null);
+
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorSource, setErrorSource] = useState<'init' | 'generate' | null>(
+    null
+  );
   const [result, setResult] = useState<SubtitleResult | null>(null);
+
+  const loadAvailableModels = useCallback(async () => {
+    setLoadingModels(true);
+    try {
+      const models = await listDownloadedModelsByCategory<ModelMetaBase>(
+        ModelCategory.Alignment
+      );
+      setAvailableModels(models);
+
+      const ids = new Set(models.map((item) => item.id));
+
+      setSelectedModelId((prev) => {
+        if (prev && ids.has(prev)) {
+          return prev;
+        }
+        return models[0]?.id ?? null;
+      });
+
+      if (initializedModelId && !ids.has(initializedModelId)) {
+        setInitializedModelId(null);
+        setInitializedModelPath(null);
+        setDetectedModelType(null);
+        setInitResult(null);
+      }
+    } catch (err) {
+      console.error(
+        'GenerateTimestampScreen: Failed to load subtitle models',
+        err
+      );
+      setAvailableModels([]);
+      setSelectedModelId(null);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [initializedModelId]);
+
+  useEffect(() => {
+    loadAvailableModels().catch(() => {
+      // ignore initial loading errors
+    });
+  }, [loadAvailableModels]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeModelsListUpdated((category) => {
+      if (category !== ModelCategory.Alignment) {
+        return;
+      }
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+
+    return unsubscribe;
+  }, [loadAvailableModels]);
 
   const selectedMode = useMemo(
     () =>
@@ -160,52 +227,12 @@ export default function GenerateTimestampScreen() {
     [mode]
   );
 
-  const downloadProgressPercent = useMemo(() => {
-    if (
-      !downloadProgress ||
-      !Number.isFinite(downloadProgress.contentLength) ||
-      downloadProgress.contentLength <= 0
-    ) {
-      return 0;
-    }
-    return Math.max(
-      0,
-      Math.min(
-        100,
-        (downloadProgress.bytesWritten / downloadProgress.contentLength) * 100
-      )
-    );
-  }, [downloadProgress]);
-
   const shouldWarnNonWav = useMemo(() => {
     if (!selectedAudioName) {
       return false;
     }
     return !selectedAudioName.toLowerCase().endsWith('.wav');
   }, [selectedAudioName]);
-
-  const refreshAlignmentModelStatus = async () => {
-    try {
-      const ready = await isAlignmentModelReady();
-      setModelReady(ready);
-    } catch {
-      setModelReady(false);
-    }
-  };
-
-  useEffect(() => {
-    refreshAlignmentModelStatus().catch(() => {
-      // ignore initial status errors
-    });
-  }, []);
-
-  useEffect(() => {
-    if (mode === 'accurate') {
-      refreshAlignmentModelStatus().catch(() => {
-        // ignore status refresh errors
-      });
-    }
-  }, [mode]);
 
   useEffect(() => {
     const isValid = granularityOptions.some(
@@ -218,6 +245,7 @@ export default function GenerateTimestampScreen() {
 
   const pickAudioFile = async () => {
     setError(null);
+    setErrorSource(null);
     try {
       const picked = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
@@ -225,6 +253,7 @@ export default function GenerateTimestampScreen() {
       const file = Array.isArray(picked) ? picked[0] : picked;
       const uri = file?.uri ?? (file as { fileUri?: string })?.fileUri ?? '';
       if (!uri) {
+        setErrorSource('generate');
         setError('Could not resolve file URI from picker result.');
         return;
       }
@@ -243,67 +272,80 @@ export default function GenerateTimestampScreen() {
       setError(
         err instanceof Error ? err.message : 'Failed to pick audio file'
       );
+      setErrorSource('generate');
     }
   };
 
-  const handleDownloadAlignmentModel = async () => {
+  const handleInitializeModel = async () => {
+    if (!selectedModelId) {
+      setErrorSource('init');
+      setError('Please select a subtitle model first.');
+      return;
+    }
+
     setError(null);
-    setIsDownloadingModel(true);
-    setDownloadProgress({ bytesWritten: 0, contentLength: 0 });
+    setErrorSource(null);
+    setInitializingModel(true);
+    setInitResult(null);
 
     try {
-      await downloadAlignmentModel({
-        onProgress: (progress: {
-          bytesWritten: number;
-          contentLength: number;
-        }) => {
-          setDownloadProgress(progress);
-        },
-      });
-      setModelReady(true);
+      const detection = await detectAlignmentModel(
+        getFileModelPath(selectedModelId, ModelCategory.Alignment),
+        { modelType: 'auto' as AlignmentModelType }
+      );
+
+      const modelPath = detection.paths?.model?.trim();
+      if (!detection.success || !modelPath) {
+        throw new Error(
+          detection.error ||
+            'Alignment model detection failed: no model.onnx path found.'
+        );
+      }
+
+      setInitializedModelId(selectedModelId);
+      setInitializedModelPath(modelPath);
+      setDetectedModelType(
+        detection.modelType ?? detection.detectedModels[0]?.type ?? null
+      );
+      setInitResult(
+        `Initialized: ${getModelDisplayName(
+          selectedModelId
+        )}\nModel file: ${modelPath}`
+      );
+      setResult(null);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to download model';
-      setError(message);
+      setErrorSource('init');
+      setError(
+        err instanceof Error ? err.message : 'Failed to initialize model'
+      );
     } finally {
-      setIsDownloadingModel(false);
-    }
-  };
-
-  const handleDeleteAlignmentModel = async () => {
-    setError(null);
-    try {
-      await deleteAlignmentModel();
-      setModelReady(false);
-      setDownloadProgress(null);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to delete model';
-      setError(message);
+      setInitializingModel(false);
     }
   };
 
   const handleGenerateTimestamps = async () => {
+    if (!initializedModelPath) {
+      setErrorSource('generate');
+      setError('Please initialize a subtitle model first.');
+      return;
+    }
+
     if (!selectedAudioUri) {
+      setErrorSource('generate');
       setError('Please choose an audio file first.');
       return;
     }
 
     const text = transcriptText.trim();
     if (!text) {
+      setErrorSource('generate');
       setError('Please enter transcript text.');
-      return;
-    }
-
-    if (mode === 'accurate' && !modelReady) {
-      setError(
-        'Accurate mode requires the alignment model. Download it first.'
-      );
       return;
     }
 
     setRunning(true);
     setError(null);
+    setErrorSource(null);
     setResult(null);
 
     let cleanupPath: string | null = null;
@@ -317,15 +359,23 @@ export default function GenerateTimestampScreen() {
         cleanupPath = audioPath;
       }
 
-      const subtitleResult = await generateSubtitlesFromAudio(text, audioPath, {
-        mode,
-        granularity,
-      });
+      const subtitleResult =
+        mode === 'accurate'
+          ? await generateSubtitlesFromAudio(text, audioPath, {
+              mode,
+              granularity,
+              alignmentModelPath: initializedModelPath,
+            })
+          : await generateSubtitlesFromAudio(text, audioPath, {
+              mode,
+              granularity,
+            });
       setResult(subtitleResult);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to generate timestamps';
       setError(message);
+      setErrorSource('generate');
     } finally {
       if (cleanupPath) {
         unlink(cleanupPath).catch(() => {
@@ -348,7 +398,112 @@ export default function GenerateTimestampScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>1. Select Audio File</Text>
+            <Text style={styles.sectionTitle}>1. Initialize Model</Text>
+            <Text style={styles.sectionDescription}>
+              Select a downloaded subtitle model and validate it with autodetect
+              before generation.
+            </Text>
+
+            {(selectedModelId || initializedModelId) && (
+              <View style={styles.currentModelContainer}>
+                <Text style={styles.currentModelText}>
+                  {initializedModelId
+                    ? `Initialized: ${getModelDisplayName(initializedModelId)}`
+                    : `Selected: ${
+                        selectedModelId
+                          ? getModelDisplayName(selectedModelId)
+                          : ''
+                      }`}
+                </Text>
+                {detectedModelType && initializedModelId && (
+                  <Text style={styles.currentModelMetaText}>
+                    Detected type: {detectedModelType}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {loadingModels ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>
+                  Loading downloaded subtitle models...
+                </Text>
+              </View>
+            ) : availableModels.length === 0 ? (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningBannerText}>
+                  No subtitle models found. Download one in the Download screen
+                  (category: subtitles).
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.modelButtons}>
+                {availableModels.map((model) => {
+                  const isSelected = selectedModelId === model.id;
+                  const isInitialized = initializedModelId === model.id;
+                  return (
+                    <TouchableOpacity
+                      key={model.id}
+                      style={[
+                        styles.modelSelectButton,
+                        isSelected && styles.modelSelectButtonActive,
+                        isInitialized && styles.modelSelectButtonInitialized,
+                        initializingModel && styles.buttonDisabled,
+                      ]}
+                      onPress={() => setSelectedModelId(model.id)}
+                      disabled={initializingModel}
+                    >
+                      <Text
+                        style={[
+                          styles.modelSelectButtonTitle,
+                          isSelected && styles.modelSelectButtonTitleActive,
+                        ]}
+                      >
+                        {getModelLabel(model)}
+                      </Text>
+                      <Text style={styles.modelSelectButtonId}>{model.id}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                styles.applyButton,
+                initializingModel && styles.buttonDisabled,
+              ]}
+              onPress={handleInitializeModel}
+              disabled={
+                initializingModel ||
+                !selectedModelId ||
+                availableModels.length === 0
+              }
+            >
+              {initializingModel ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.buttonText}>Use model</Text>
+              )}
+            </TouchableOpacity>
+
+            {initResult && !(error && errorSource === 'init') && (
+              <View style={styles.initResultCard}>
+                <Text style={styles.initResultText}>{initResult}</Text>
+              </View>
+            )}
+
+            {error && errorSource === 'init' && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>2. Select Audio File</Text>
             <Text style={styles.sectionDescription}>
               Choose the audio file for timestamp generation.
             </Text>
@@ -383,7 +538,7 @@ export default function GenerateTimestampScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Transcript Text</Text>
+            <Text style={styles.sectionTitle}>3. Transcript Text</Text>
             <Text style={styles.sectionDescription}>
               Enter the text that should be aligned to the selected audio.
             </Text>
@@ -399,10 +554,24 @@ export default function GenerateTimestampScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Options</Text>
+            <Text style={styles.sectionTitle}>4. Options</Text>
             <Text style={styles.sectionDescription}>
               Set subtitle mode and granularity (character is accurate-only).
             </Text>
+
+            <View style={styles.modelSummaryCard}>
+              <Text style={styles.modelSummaryLabel}>Initialized model</Text>
+              <Text style={styles.modelSummaryValue}>
+                {initializedModelId
+                  ? getModelDisplayName(initializedModelId)
+                  : 'Not initialized'}
+              </Text>
+              {initializedModelPath && (
+                <Text style={styles.modelSummaryPath}>
+                  {initializedModelPath}
+                </Text>
+              )}
+            </View>
 
             <View style={styles.optionRow}>
               <Text style={styles.inputLabel}>Mode</Text>
@@ -430,84 +599,6 @@ export default function GenerateTimestampScreen() {
               </TouchableOpacity>
             </View>
 
-            {mode === 'accurate' && (
-              <View style={styles.modelCard}>
-                <Text style={styles.inputLabel}>Alignment model</Text>
-                <Text style={styles.sectionDescription}>
-                  Accurate mode uses wav2vec2 forced alignment and requires a
-                  one-time model download.
-                </Text>
-
-                <View style={styles.modelStatusRow}>
-                  <Text style={styles.modelStatusLabel}>Status:</Text>
-                  <Text
-                    style={[
-                      styles.modelStatusValue,
-                      modelReady && styles.modelStatusValueReady,
-                    ]}
-                  >
-                    {modelReady ? 'Ready' : 'Not downloaded'}
-                  </Text>
-                </View>
-
-                {isDownloadingModel && (
-                  <View style={styles.progressContainer}>
-                    <View style={styles.progressTrack}>
-                      <View
-                        style={[
-                          styles.progressFill,
-                          { width: `${downloadProgressPercent}%` },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.progressText}>
-                      {formatBytes(downloadProgress?.bytesWritten ?? 0)}
-                      {' / '}
-                      {formatBytes(downloadProgress?.contentLength ?? 0)}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.modelButtonsRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.modelButton,
-                      (isDownloadingModel || modelReady) &&
-                        styles.modelButtonDisabled,
-                    ]}
-                    onPress={handleDownloadAlignmentModel}
-                    disabled={isDownloadingModel || modelReady}
-                  >
-                    {isDownloadingModel ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.modelButtonText}>Download model</Text>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.modelButton,
-                      styles.modelButtonSecondary,
-                      (isDownloadingModel || !modelReady) &&
-                        styles.modelButtonDisabled,
-                    ]}
-                    onPress={handleDeleteAlignmentModel}
-                    disabled={isDownloadingModel || !modelReady}
-                  >
-                    <Text
-                      style={[
-                        styles.modelButtonText,
-                        styles.modelButtonTextSecondary,
-                      ]}
-                    >
-                      Delete model
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
             <TouchableOpacity
               style={[
                 styles.button,
@@ -524,46 +615,52 @@ export default function GenerateTimestampScreen() {
               )}
             </TouchableOpacity>
 
-            {error && (
+            {error && errorSource === 'generate' && (
               <View style={styles.errorContainer}>
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
           </View>
 
-          {result && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>4. Result</Text>
-              <View style={styles.resultCard}>
-                <Text style={styles.resultMetaText}>
-                  Timing mode: {result.timingMode}
-                </Text>
-                <Text style={styles.resultMetaText}>
-                  Subtitle items: {result.subtitles.length}
-                </Text>
-              </View>
-
-              {result.subtitles.length > 0 ? (
-                <View style={styles.subtitleList}>
-                  {result.subtitles.map((item, index) => (
-                    <View
-                      key={`${item.text}-${item.start}-${index}`}
-                      style={styles.subtitleItem}
-                    >
-                      <Text style={styles.subtitleText}>
-                        {item.text.trim().length > 0 ? item.text : '...'}
-                      </Text>
-                      <Text style={styles.subtitleTime}>
-                        {formatTime(item.start)}s - {formatTime(item.end)}s
-                      </Text>
-                    </View>
-                  ))}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>5. Result</Text>
+            {result ? (
+              <>
+                <View style={styles.resultCard}>
+                  <Text style={styles.resultMetaText}>
+                    Timing mode: {result.timingMode}
+                  </Text>
+                  <Text style={styles.resultMetaText}>
+                    Subtitle items: {result.subtitles.length}
+                  </Text>
                 </View>
-              ) : (
-                <Text style={styles.emptyText}>No subtitles generated.</Text>
-              )}
-            </View>
-          )}
+
+                {result.subtitles.length > 0 ? (
+                  <View style={styles.subtitleList}>
+                    {result.subtitles.map((item, index) => (
+                      <View
+                        key={`${item.text}-${item.start}-${index}`}
+                        style={styles.subtitleItem}
+                      >
+                        <Text style={styles.subtitleText}>
+                          {item.text.trim().length > 0 ? item.text : '...'}
+                        </Text>
+                        <Text style={styles.subtitleTime}>
+                          {formatTime(item.start)}s - {formatTime(item.end)}s
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.emptyText}>No subtitles generated.</Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.emptyText}>
+                No result yet. Initialize a model and run generation.
+              </Text>
+            )}
+          </View>
         </ScrollView>
       </View>
 

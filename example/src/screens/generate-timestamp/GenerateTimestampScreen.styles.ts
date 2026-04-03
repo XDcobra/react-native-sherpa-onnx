@@ -33,6 +33,90 @@ export const styles = StyleSheet.create({
     marginBottom: 12,
     lineHeight: 20,
   },
+  currentModelContainer: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#E3F2FD',
+  },
+  currentModelText: {
+    fontSize: 14,
+    color: '#1565C0',
+    fontWeight: '600',
+  },
+  currentModelMetaText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#1E88E5',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6D6D72',
+  },
+  warningContainer: {
+    marginTop: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+  },
+  warningBannerText: {
+    fontSize: 13,
+    color: '#795548',
+    lineHeight: 18,
+  },
+  modelButtons: {
+    gap: 10,
+  },
+  modelSelectButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F9F9FB',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  modelSelectButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E3F2FD',
+  },
+  modelSelectButtonInitialized: {
+    borderColor: '#34C759',
+  },
+  modelSelectButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1C1E',
+    marginBottom: 4,
+  },
+  modelSelectButtonTitleActive: {
+    color: '#007AFF',
+  },
+  modelSelectButtonId: {
+    fontSize: 12,
+    color: '#6D6D72',
+  },
+  applyButton: {
+    marginTop: 12,
+  },
+  initResultCard: {
+    marginTop: 12,
+    borderRadius: 8,
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+  },
+  initResultText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#1B5E20',
+  },
   hintCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -109,6 +193,27 @@ export const styles = StyleSheet.create({
   optionRow: {
     gap: 10,
     marginBottom: 12,
+  },
+  modelSummaryCard: {
+    borderRadius: 8,
+    backgroundColor: '#F2F2F7',
+    padding: 12,
+    marginBottom: 12,
+  },
+  modelSummaryLabel: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginBottom: 2,
+  },
+  modelSummaryValue: {
+    fontSize: 14,
+    color: '#1C1C1E',
+    fontWeight: '600',
+  },
+  modelSummaryPath: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#6D6D72',
   },
   dropdownTrigger: {
     flexDirection: 'row',
