@@ -39,6 +39,26 @@ const checksumCacheByCategory: Partial<
   Record<ModelCategory, Map<string, string>>
 > = {};
 
+const DEFAULT_RELEASE_REPO = 'k2-fsa/sherpa-onnx';
+
+function getReleaseRepoFromConfig(category: ModelCategory): string {
+  const releaseApiBase = CATEGORY_CONFIG[category].releaseApiBase;
+  if (!releaseApiBase) {
+    return DEFAULT_RELEASE_REPO;
+  }
+
+  const match = releaseApiBase.match(
+    /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/releases\/tags\/?$/
+  );
+  return match?.[1] ?? DEFAULT_RELEASE_REPO;
+}
+
+function getChecksumUrl(category: ModelCategory): string {
+  const tag = CATEGORY_CONFIG[category].tag;
+  const repo = getReleaseRepoFromConfig(category);
+  return `https://github.com/${repo}/releases/download/${tag}/checksum.txt`;
+}
+
 export async function fetchChecksumsFromRelease(
   category: ModelCategory
 ): Promise<Map<string, string>> {
@@ -51,9 +71,7 @@ export async function fetchChecksumsFromRelease(
   try {
     const checksums = await retryWithBackoff(
       async () => {
-        const response = await fetch(
-          `https://github.com/k2-fsa/sherpa-onnx/releases/download/${CATEGORY_CONFIG[category].tag}/checksum.txt`
-        );
+        const response = await fetch(getChecksumUrl(category));
         if (!response.ok) {
           throw new Error(
             `Failed to fetch checksum.txt for ${category}: ${response.status}`
@@ -176,6 +194,8 @@ function isAssetSupportedForCategory(
         lower.includes('binary') &&
         lower.includes('seconds')
       );
+    case ModelCategory.Subtitles:
+      return ext === 'tar.bz2';
     default:
       return false;
   }

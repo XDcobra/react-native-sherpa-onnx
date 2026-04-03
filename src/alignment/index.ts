@@ -1,4 +1,5 @@
 export {
+  DEFAULT_ALIGNMENT_MODEL_ID,
   DEFAULT_ALIGNMENT_MODEL_URL,
   deleteAlignmentModel,
   downloadAlignmentModel,

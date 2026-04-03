@@ -1,84 +1,111 @@
+import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
-  DocumentDirectoryPath,
-  downloadFile,
-  exists,
-  mkdir,
-  unlink,
-  writeFile,
-} from '@dr.pogodin/react-native-fs';
+  ModelCategory,
+  ensureModelByCategory,
+  getLocalModelPathByCategory,
+  isModelDownloadedByCategory,
+  deleteModelByCategory,
+  refreshModelsByCategory,
+} from '../download';
+import type { ModelMetaBase } from '../download';
 import type { DownloadAlignmentModelOptions } from './types';
 
-export const DEFAULT_ALIGNMENT_MODEL_URL =
-  'https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_int8.onnx';
+export const DEFAULT_ALIGNMENT_MODEL_ID = 'wav2vec2-base-960h-int8';
+/** @deprecated Use DEFAULT_ALIGNMENT_MODEL_ID. */
+export const DEFAULT_ALIGNMENT_MODEL_URL = DEFAULT_ALIGNMENT_MODEL_ID;
+const ALIGNMENT_MODEL_FILENAME = 'model.onnx';
 
-const ALIGNMENT_BASE_DIR =
-  `${DocumentDirectoryPath}/sherpa-onnx/alignment`.replace(/\/+/g, '/');
-const ALIGNMENT_MODEL_PATH = `${ALIGNMENT_BASE_DIR}/model.onnx`;
-const ALIGNMENT_READY_MARKER_PATH = `${ALIGNMENT_BASE_DIR}/.ready`;
-
-async function removeIfExists(path: string): Promise<void> {
-  if (await exists(path)) {
-    await unlink(path);
+async function findModelFilePath(
+  rootDir: string,
+  maxDepth = 4
+): Promise<string | null> {
+  const directPath = `${rootDir}/${ALIGNMENT_MODEL_FILENAME}`.replace(
+    /\/+/g,
+    '/'
+  );
+  if (await exists(directPath)) {
+    return directPath;
   }
-}
 
-async function ensureBaseDir(): Promise<void> {
-  await mkdir(ALIGNMENT_BASE_DIR);
+  if (maxDepth <= 0) {
+    return null;
+  }
+
+  try {
+    const entries = await readDir(rootDir);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const entryPath = (entry.path ?? `${rootDir}/${entry.name}`).replace(
+        /\/+/g,
+        '/'
+      );
+      const foundPath = await findModelFilePath(entryPath, maxDepth - 1);
+      if (foundPath) {
+        return foundPath;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export async function downloadAlignmentModel(
   options?: DownloadAlignmentModelOptions
 ): Promise<string> {
-  const url = options?.url?.trim() || DEFAULT_ALIGNMENT_MODEL_URL;
-  await ensureBaseDir();
+  const modelId = options?.modelId?.trim() || DEFAULT_ALIGNMENT_MODEL_ID;
 
-  await removeIfExists(ALIGNMENT_READY_MARKER_PATH);
-  await removeIfExists(ALIGNMENT_MODEL_PATH);
-
-  try {
-    const task = downloadFile({
-      fromUrl: url,
-      toFile: ALIGNMENT_MODEL_PATH,
-      progressDivider: 1,
-      progress: ({ bytesWritten, contentLength }) => {
-        options?.onProgress?.({ bytesWritten, contentLength });
-      },
-    });
-
-    const result = await task.promise;
-    if (result.statusCode < 200 || result.statusCode >= 300) {
-      throw new Error(
-        `Failed to download alignment model (status ${result.statusCode}).`
-      );
-    }
-
-    await writeFile(ALIGNMENT_READY_MARKER_PATH, 'ready', 'utf8');
-    return ALIGNMENT_MODEL_PATH;
-  } catch (error) {
-    await removeIfExists(ALIGNMENT_READY_MARKER_PATH).catch(() => {
-      // ignore cleanup errors
-    });
-    await removeIfExists(ALIGNMENT_MODEL_PATH).catch(() => {
-      // ignore cleanup errors
-    });
-
-    throw error;
+  if (options?.url?.trim()) {
+    console.warn(
+      '[SherpaOnnxAlignment] DownloadAlignmentModelOptions.url is deprecated and ignored. Use modelId from ModelCategory.Subtitles.'
+    );
   }
+
+  await refreshModelsByCategory<ModelMetaBase>(ModelCategory.Subtitles, {
+    forceRefresh: false,
+  });
+
+  await ensureModelByCategory<ModelMetaBase>(ModelCategory.Subtitles, modelId, {
+    signal: options?.signal,
+    onProgress: (progress) => {
+      options?.onProgress?.({
+        bytesWritten: progress.bytesDownloaded,
+        contentLength: progress.totalBytes ?? 0,
+      });
+    },
+  });
+
+  const modelPath = await getAlignmentModelPath(modelId);
+  if (!modelPath) {
+    throw new Error(
+      `Failed to resolve ${ALIGNMENT_MODEL_FILENAME} for alignment model: ${modelId}`
+    );
+  }
+  return modelPath;
 }
 
-export async function isAlignmentModelReady(): Promise<boolean> {
-  const [hasModel, hasReadyMarker] = await Promise.all([
-    exists(ALIGNMENT_MODEL_PATH),
-    exists(ALIGNMENT_READY_MARKER_PATH),
-  ]);
-  return hasModel && hasReadyMarker;
+export async function isAlignmentModelReady(
+  modelId = DEFAULT_ALIGNMENT_MODEL_ID
+): Promise<boolean> {
+  return isModelDownloadedByCategory(ModelCategory.Subtitles, modelId);
 }
 
-export async function getAlignmentModelPath(): Promise<string | null> {
-  return (await isAlignmentModelReady()) ? ALIGNMENT_MODEL_PATH : null;
+export async function getAlignmentModelPath(
+  modelId = DEFAULT_ALIGNMENT_MODEL_ID
+): Promise<string | null> {
+  const modelDir = await getLocalModelPathByCategory(
+    ModelCategory.Subtitles,
+    modelId
+  );
+  if (!modelDir) {
+    return null;
+  }
+  return findModelFilePath(modelDir);
 }
 
-export async function deleteAlignmentModel(): Promise<void> {
-  await removeIfExists(ALIGNMENT_READY_MARKER_PATH);
-  await removeIfExists(ALIGNMENT_MODEL_PATH);
+export async function deleteAlignmentModel(
+  modelId = DEFAULT_ALIGNMENT_MODEL_ID
+): Promise<void> {
+  await deleteModelByCategory(ModelCategory.Subtitles, modelId);
 }

@@ -8,6 +8,7 @@ export enum ModelCategory {
   Enhancement = 'enhancement',
   Separation = 'separation',
   Qnn = 'qnn',
+  Subtitles = 'subtitles',
 }
 
 /** TTS model type for meta; 'unknown' when id could not be classified. */
