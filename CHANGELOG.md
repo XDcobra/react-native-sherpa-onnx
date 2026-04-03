@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.0...v0.4.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* **tts:** update TTS JNI integration to use boxed Integer for callback compatibility ([60c9eea](https://github.com/XDcobra/react-native-sherpa-onnx/commit/60c9eeaac910ecf2838ac849b3415b7e4713fb85))
+
 # [0.4.0](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.3.9...v0.4.0) (2026-04-02)
 
 

@@ -508,7 +508,6 @@ internal class SherpaOnnxTtsHelper(
 
       val sid = getSid(options)
       val speed = getSpeed(options)
-
       val sentenceChunkSizes = mutableListOf<Int>()
       val audio = when {
         subtitleMode == "off" -> {
@@ -565,7 +564,11 @@ internal class SherpaOnnxTtsHelper(
             }
           }
           val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          inst.tts!!.generateWithConfigAndCallback(text, config, ttsChunkCallbackForJni(sentenceChunkSizes))
+          inst.tts!!.generateWithConfigAndCallback(
+            text,
+            config,
+            ttsChunkCallbackForJni(sentenceChunkSizes)
+          )
         }
         hasReferenceAudio(options) -> {
           Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
@@ -584,7 +587,13 @@ internal class SherpaOnnxTtsHelper(
           return
         }
         else -> {
-          inst.tts!!.generateWithCallback(text, sid, speed, ttsChunkCallbackForJni(sentenceChunkSizes))
+          val tts = inst.tts
+          if (tts == null) {
+            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+            return
+          }
+          tts.generateWithCallback(text, sid, speed, ttsChunkCallbackForJni(sentenceChunkSizes))
         }
       }
 
