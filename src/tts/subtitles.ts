@@ -108,13 +108,14 @@ function shouldSplitOnPeriod(text: string, periodIndex: number): boolean {
     return false;
   }
 
-  const token = extractTokenBeforePeriod(text, periodIndex).toLowerCase();
+  const tokenRaw = extractTokenBeforePeriod(text, periodIndex);
+  const token = tokenRaw.toLowerCase();
   if (COMMON_ABBREVIATIONS.has(token)) {
     return false;
   }
 
-  // Likely initial, e.g. "A. Smith".
-  if (token.length === 1 && token.toUpperCase() === token) {
+  // Likely initial, e.g. "A. Smith" (check original case; token is lowercased for abbreviations).
+  if (tokenRaw.length === 1 && /\p{Lu}/u.test(tokenRaw)) {
     return false;
   }
 

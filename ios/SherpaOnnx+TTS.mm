@@ -214,16 +214,18 @@ static bool ShouldSplitOnPeriod(NSString *text, NSInteger periodIndex) {
         "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e"
     };
 
-    NSString *token = [[ExtractTokenBeforePeriod(text, periodIndex) lowercaseString]
+    NSString *tokenRaw = [[ExtractTokenBeforePeriod(text, periodIndex)
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    std::string tokenUtf8 = token != nil ? std::string([token UTF8String]) : std::string();
+    NSString *tokenLower = [tokenRaw lowercaseString];
+    std::string tokenUtf8 = tokenLower != nil ? std::string([tokenLower UTF8String]) : std::string();
     if (!tokenUtf8.empty() && kAbbreviations.find(tokenUtf8) != kAbbreviations.end()) {
         return false;
     }
 
-    if (token.length == 1) {
+    // Likely initial, e.g. "A. Smith" — use original case; tokenLower cannot match uppercaseLetter.
+    if (tokenRaw.length == 1) {
         NSCharacterSet *upper = [NSCharacterSet uppercaseLetterCharacterSet];
-        if ([upper characterIsMember:[token characterAtIndex:0]]) {
+        if ([upper characterIsMember:[tokenRaw characterAtIndex:0]]) {
             return false;
         }
     }

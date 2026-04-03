@@ -253,12 +253,14 @@ internal object SherpaOnnxTextSegmenter {
       return false
     }
 
-    val token = extractTokenBeforePeriod(text, periodIndex).lowercase()
-    if (commonAbbreviations.contains(token)) {
+    val tokenRaw = extractTokenBeforePeriod(text, periodIndex)
+    val tokenLower = tokenRaw.lowercase()
+    if (commonAbbreviations.contains(tokenLower)) {
       return false
     }
 
-    if (token.length == 1 && token[0].isUpperCase()) {
+    // Likely initial, e.g. "A. Smith" — use original case; tokenLower[0] is never uppercase.
+    if (tokenRaw.length == 1 && tokenRaw[0].isUpperCase()) {
       return false
     }
 
