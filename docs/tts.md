@@ -19,6 +19,7 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
   - [Persistence (Save/Share)](#persistence-saveshare)
   - [Types & Constants](#types--constants)
 - [Streaming TTS](#streaming-tts)
+- [TTS Alignment and Timestamps](#tts-alignment-and-timestamps)
 - [Native PCM Playback](#native-pcm-playback)
 - [Voice Cloning](#voice-cloning)
 - [Model-Specific Options](#model-specific-options)
@@ -39,7 +40,7 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Model initialization | ✅ | `createTTS()` --> `TtsEngine` |
 | Full-buffer generation | ✅ | `tts.generateSpeech()` |
 | Streaming generation | ✅ | `tts.generateSpeechStream()` with chunk callbacks |
-| Timestamps (estimated) | ✅ | `tts.generateSpeechWithTimestamps()` |
+| Timestamps (mode-based) | ✅ | `tts.generateSpeechWithTimestamps()` with `subtitles.mode` (`off` / `fast` / `accurate`). **`accurate`** uses on-device wav2vec2 CTC forced alignment; requires the alignment ONNX model (download via `react-native-sherpa-onnx/alignment`). See [TTS Alignment and Timestamps](tts-alignment.md). |
 | Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
 | Save/share WAV | ✅ | `saveAudioToFile()` / `saveAudioToContentUri()` |
 | Save MP3/FLAC | ✅ | Via `convertAudioToFormat()` + `copyFileToContentUri()` |
@@ -47,7 +48,7 @@ Offline text-to-speech: generate speech audio from text using on-device models. 
 | Runtime param updates | ✅ | `tts.updateParams()` |
 | Model downloads | ✅ | Via [Download Manager](download-manager.md) |
 
-Supported model types: `vits`, `matcha`, `kokoro`, `kitten`, `pocket`, `zipvoice`, `auto`.
+Supported model types: `vits`, `matcha`, `kokoro`, `kitten`, `pocket`, `zipvoice`, `supertonic`, `auto`.
 
 ---
 
@@ -145,7 +146,7 @@ Returned by `createTTS()`. Call `destroy()` when done.
 | --- | --- | --- |
 | `instanceId` | `string` (read-only) | Engine instance ID |
 | `generateSpeech` | `(text: string, options?: TtsGenerationOptions) => Promise<GeneratedAudio>` | Full-buffer generation |
-| `generateSpeechWithTimestamps` | `(text: string, options?: TtsGenerationOptions) => Promise<GeneratedAudioWithTimestamps>` | Full-buffer with subtitles and estimated timestamps |
+| `generateSpeechWithTimestamps` | `(text: string, options?: TtsGenerationOptions) => Promise<GeneratedAudioWithTimestamps>` | Full-buffer with subtitle timing metadata (`timingMode`) |
 | `generateSpeechStream` | `(text: string, options?: TtsGenerationOptions, handlers: TtsStreamHandlers) => Promise<TtsStreamController>` | Streaming generation with chunk callbacks |
 | `cancelSpeechStream` | `() => Promise<void>` | Cancel current stream |
 | `updateParams` | `(options: TtsUpdateOptions) => Promise<void>` | Update params at runtime without reloading |
@@ -171,6 +172,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
 | `numSteps` | `number` | `5` | Flow-matching steps when cloning (Zipvoice / Pocket); native default **5** on Android and iOS if omitted |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
+| `subtitles` | `{ mode?: 'off' \| 'fast' \| 'accurate'; granularity?: 'sentence' \| 'word' \| 'character'; alignmentModelPath?: string }` | `mode: 'fast'` for `generateSpeechWithTimestamps` | Alignment/timestamp mode and granularity. **`fast`**: native chunk-based timing (`timingMode: 'estimated'`). **`accurate`**: generates speech, then runs wav2vec2 CTC alignment (`timingMode: 'aligned'`). **`character`** granularity is only valid with **`accurate`**. **`alignmentModelPath` is required in accurate mode** and should come from alignment model selection + `detectAlignmentModel(...)`. See [tts-alignment.md](tts-alignment.md). |
 
 ---
 
@@ -181,7 +183,34 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `samples` | `number[]` | Float PCM samples in [-1, 1] |
 | `sampleRate` | `number` | Sample rate in Hz |
 
-`GeneratedAudioWithTimestamps` extends this with `subtitles: TtsSubtitleItem[]` and `estimated: boolean`.
+`GeneratedAudioWithTimestamps` extends this with `subtitles: TtsSubtitleItem[]` and `timingMode: 'off' | 'estimated' | 'aligned'`.
+
+---
+
+### `TTS Alignment and Timestamps`
+
+See [tts-alignment.md](tts-alignment.md) for the full alignment architecture, alignment model selection, and examples.
+
+- `generateSpeechWithTimestamps()` defaults to **`fast`** subtitle timing (`timingMode: 'estimated'`).
+- **`accurate`** mode uses wav2vec2 CTC forced alignment after synthesis; set `subtitles: { mode: 'accurate', alignmentModelPath: '/absolute/path/to/model.onnx' }`. Returns `timingMode: 'aligned'`.
+- `generateSpeech()` forces subtitle mode off.
+- `generateSubtitlesFromAudio()` supports **`fast`** (duration/text heuristics) and **`accurate`** (same alignment pipeline as TTS accurate mode) for existing audio or in-memory samples.
+
+```ts
+import { generateSubtitlesFromAudio } from 'react-native-sherpa-onnx/tts';
+
+const subtitleResult = await generateSubtitlesFromAudio(text, audioPath, {
+  mode: 'fast',
+  granularity: 'sentence',
+});
+
+// Accurate alignment (requires explicit alignmentModelPath)
+const aligned = await generateSubtitlesFromAudio(text, audioPath, {
+  mode: 'accurate',
+  granularity: 'word',
+  alignmentModelPath: '/absolute/path/to/model.onnx',
+});
+```
 
 ---
 
@@ -211,6 +240,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 import {
   createTTS,
   detectTtsModel,
+  generateSubtitlesFromAudio,
   saveAudioToFile,
   saveAudioToContentUri,
   copyFileToContentUri,
@@ -223,6 +253,11 @@ import type {
   TTSModelType,
   TtsModelOptions,
   TtsGenerationOptions,
+  SubtitleMode,
+  SubtitleGranularity,
+  SubtitleOptions,
+  SubtitleFromAudioOptions,
+  SubtitleResult,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,
@@ -231,7 +266,7 @@ import type {
 } from 'react-native-sherpa-onnx/tts';
 ```
 
-- **`TTS_MODEL_TYPES`:** `['vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'auto']`
+- **`TTS_MODEL_TYPES`:** `['vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'supertonic', 'auto']`
 
 ---
 
@@ -429,6 +464,8 @@ if (result.success && result.modelType === 'kokoro') {
 | Zipvoice init fails | Use full model with vocoder (e.g. `vocos_24khz.onnx`), not distill |
 | Zipvoice OOM | Use int8 distill variant on low-RAM devices |
 | `TTS_STREAM_ERROR` | Only one stream per engine at a time. Wait for `onEnd` or `cancel()` first |
+| Accurate alignment: `ALIGNMENT_MODEL_MISSING` | Provide `subtitles.alignmentModelPath` (or `options.alignmentModelPath` for `generateSubtitlesFromAudio`) from alignment model selection + `detectAlignmentModel(...)`. See [tts-alignment.md](tts-alignment.md). |
+| `character` granularity with `fast` | Use **`accurate`** mode; `character` is only supported for accurate alignment. |
 | No sound from PCM player | Ensure `startPcmPlayer()` called before `writePcmChunk()`, stop after done |
 | `copyFileToContentUri` fails on iOS | Android SAF only; not supported on iOS |
 
@@ -447,7 +484,7 @@ if (result.success && result.modelType === 'kokoro') {
 | --- | --- | --- |
 | `createTTS()` | `initializeTts(instanceId, modelDir, ...)` | JS resolves `modelPath`, generates `instanceId` |
 | `tts.generateSpeech()` | `generateTts(instanceId, text, options)` | — |
-| `tts.generateSpeechWithTimestamps()` | `generateTtsWithTimestamps(instanceId, text, options)` | — |
+| `tts.generateSpeechWithTimestamps()` | If `subtitles.mode !== 'accurate'`: `generateTtsWithTimestamps(...)`. If **`accurate`**: `generateTts(...)` (subtitles off) then `runCTCForcedAlignment(...)` via the same pipeline as `generateSubtitlesFromAudio` | Accurate mode never calls `generateTtsWithTimestamps` |
 | `tts.generateSpeechStream()` | `generateTtsStream(instanceId, text, options)` | Events: `ttsStreamChunk`, `ttsStreamEnd`, `ttsStreamError` |
 | `tts.cancelSpeechStream()` | `cancelTtsStream(instanceId)` | — |
 | `tts.updateParams()` | `updateTtsParams(instanceId, ...)` | — |
@@ -465,6 +502,7 @@ if (result.success && result.modelType === 'kokoro') {
 
 ## See Also
 
+- [TTS Alignment and Timestamps](tts-alignment.md) — `fast` / `accurate` modes, alignment model selection + detection, and standalone `generateSubtitlesFromAudio`
 - [Streaming TTS](tts-streaming.md) — Detailed streaming generation API
 - [Model Setup](model-setup.md) — Model discovery, paths, and detection
 - [Download Manager](download-manager.md) — Download models in-app

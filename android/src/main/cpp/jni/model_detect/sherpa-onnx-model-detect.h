@@ -49,6 +49,11 @@ enum class EnhancementModelKind {
     kDpdfNet
 };
 
+enum class AlignmentModelKind {
+    kUnknown,
+    kWav2Vec2
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -184,6 +189,10 @@ struct EnhancementModelPaths {
     std::string model;
 };
 
+struct AlignmentModelPaths {
+    std::string model;
+};
+
 struct SttDetectResult {
     bool ok = false;
     std::string error;
@@ -211,6 +220,14 @@ struct EnhancementDetectResult {
     std::vector<DetectedModel> detectedModels;
     EnhancementModelKind selectedKind = EnhancementModelKind::kUnknown;
     EnhancementModelPaths paths;
+};
+
+struct AlignmentDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    AlignmentModelKind selectedKind = AlignmentModelKind::kUnknown;
+    AlignmentModelPaths paths;
 };
 
 SttDetectResult DetectSttModel(
@@ -251,9 +268,22 @@ EnhancementDetectResult DetectEnhancementModel(
     const std::string& modelType
 );
 
+AlignmentDetectResult DetectAlignmentModel(
+    const std::string& modelDir,
+    const std::string& modelType
+);
+
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
+AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"

@@ -179,6 +179,40 @@ export interface TtsUpdateOptions {
   modelOptions?: TtsModelOptions;
 }
 
+export type SubtitleMode = 'off' | 'fast' | 'accurate';
+
+export type SubtitleGranularity = 'sentence' | 'word' | 'character';
+
+export interface SubtitleOptions {
+  /**
+   * Subtitle generation mode.
+   *
+   * - 'off': Do not generate subtitles/timestamps
+   * - 'fast': Estimated timing based on callback chunks (default)
+   * - 'accurate': wav2vec2 CTC forced alignment
+   *
+   * @default 'fast'
+   */
+  mode?: SubtitleMode;
+
+  /**
+   * Subtitle granularity.
+   *
+   * - 'sentence': sentence-level subtitles
+   * - 'word': word-level subtitles
+   * - 'character': character-level subtitles (only supported with mode: 'accurate')
+   *
+   * @default 'sentence'
+   */
+  granularity?: SubtitleGranularity;
+
+  /**
+   * Optional absolute path to an alignment ONNX model.
+   * Required when `mode: 'accurate'`.
+   */
+  alignmentModelPath?: string;
+}
+
 /**
  * Options for TTS generation. Maps to Kotlin GenerationConfig when reference
  * audio or advanced options are used; otherwise simple sid/speed are used.
@@ -235,6 +269,11 @@ export interface TtsGenerationOptions {
    * Model-specific (e.g. temperature, chunk_size for Pocket).
    */
   extra?: Record<string, string>;
+
+  /**
+   * Subtitle/timestamp generation options.
+   */
+  subtitles?: SubtitleOptions;
 }
 
 /**
@@ -288,9 +327,47 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
   subtitles: TtsSubtitleItem[];
 
   /**
-   * True if timestamps are estimated rather than model-provided.
+   * Subtitle timing mode.
+   *
+   * - 'off': No subtitle timing requested/generated
+   * - 'estimated': Fast mode estimation
+   * - 'aligned': Accurate forced alignment mode
    */
-  estimated: boolean;
+  timingMode: 'off' | 'estimated' | 'aligned';
+}
+
+export interface SubtitleFromAudioOptions {
+  /**
+   * Subtitle generation mode.
+   */
+  mode: 'fast' | 'accurate';
+
+  /**
+   * Subtitle granularity.
+   *
+   * - 'sentence': sentence-level subtitles
+   * - 'word': word-level subtitles
+   * - 'character': character-level subtitles (only supported with mode: 'accurate')
+   *
+   * @default 'sentence'
+   */
+  granularity?: SubtitleGranularity;
+
+  /**
+   * Optional language hint for future multi-language alignment variants.
+   */
+  language?: string;
+
+  /**
+   * Optional absolute path to an alignment ONNX model.
+   * Required when `mode: 'accurate'`.
+   */
+  alignmentModelPath?: string;
+}
+
+export interface SubtitleResult {
+  subtitles: TtsSubtitleItem[];
+  timingMode: 'estimated' | 'aligned';
 }
 
 /**

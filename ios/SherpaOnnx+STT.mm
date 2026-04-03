@@ -177,6 +177,12 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
                 if (w[@"language"] != nil) whisperOpts.language = std::string([(NSString *)w[@"language"] UTF8String]);
                 if (w[@"task"] != nil) whisperOpts.task = std::string([(NSString *)w[@"task"] UTF8String]);
                 if (w[@"tailPaddings"] != nil) whisperOpts.tail_paddings = [(NSNumber *)w[@"tailPaddings"] intValue];
+                if (w[@"enableTokenTimestamps"] != nil) {
+                    whisperOpts.enable_token_timestamps = [(NSNumber *)w[@"enableTokenTimestamps"] boolValue];
+                }
+                if (w[@"enableSegmentTimestamps"] != nil) {
+                    whisperOpts.enable_segment_timestamps = [(NSNumber *)w[@"enableSegmentTimestamps"] boolValue];
+                }
                 whisperOptsPtr = &whisperOpts;
             }
             NSDictionary *sv = modelOptions[@"senseVoice"];

@@ -3,10 +3,14 @@ import { ModelCategory } from './types';
 import type { ModelArchiveExt } from './types';
 import { RELEASE_API_BASE } from './constants';
 
-export const CATEGORY_CONFIG: Record<
-  ModelCategory,
-  { tag: string; cacheFile: string; baseDir: string }
-> = {
+type CategoryConfig = {
+  tag: string;
+  cacheFile: string;
+  baseDir: string;
+  releaseApiBase?: string;
+};
+
+export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
   [ModelCategory.Tts]: {
     tag: 'tts-models',
     cacheFile: 'tts-models.json',
@@ -41,6 +45,13 @@ export const CATEGORY_CONFIG: Record<
     tag: 'asr-models-qnn-binary',
     cacheFile: 'qnn-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/qnn`,
+  },
+  [ModelCategory.Alignment]: {
+    tag: 'alignment-models',
+    cacheFile: 'alignment-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/alignment`,
+    releaseApiBase:
+      'https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags',
   },
 };
 
@@ -131,5 +142,7 @@ export function getNativeAssetExtractedModelDir(modelId: string): string {
 }
 
 export function getReleaseUrl(category: ModelCategory): string {
-  return `${RELEASE_API_BASE}/${CATEGORY_CONFIG[category].tag}`;
+  const config = CATEGORY_CONFIG[category];
+  const releaseApiBase = config.releaseApiBase ?? RELEASE_API_BASE;
+  return `${releaseApiBase}/${config.tag}`;
 }

@@ -1,0 +1,5 @@
+id;onnx_url;license;license_type;commercial_use
+wav2vec2-base-960h-int8;https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_int8.onnx;https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md;apache-2.0;yes
+wav2vec2-base-960h-fp16;https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_fp16.onnx;https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md;apache-2.0;yes
+wav2vec2-base-960h;https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model.onnx;https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md;apache-2.0;yes
+wav2vec2-base-960h-q4f16;https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/main/onnx/model_q4f16.onnx;https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md;apache-2.0;yes

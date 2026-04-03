@@ -1,0 +1,91 @@
+name: Publish alignment model assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: Path to sources CSV file
+        required: false
+        default: scripts/alignment-models/sources.csv
+        type: string
+      release_tag:
+        description: Release tag for assets
+        required: false
+        default: alignment-models
+        type: string
+      dry_run:
+        description: Build archives only and skip upload
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check GitHub CLI
+        run: gh --version
+
+      - name: Build and publish alignment archives
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: add repo secret HUGGINGFACE_TOKEN for HF downloads (LFS / rate limits)
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Empty string inputs (cleared UI fields) bypass YAML defaults; restore them here.
+          CSV_PATH="${{ inputs.csv_path }}"
+          RELEASE_TAG="${{ inputs.release_tag }}"
+          CSV_PATH="${CSV_PATH:-scripts/alignment-models/sources.csv}"
+          RELEASE_TAG="${RELEASE_TAG:-alignment-models}"
+
+          args=(
+            --csv "$CSV_PATH"
+            --repo "${{ github.repository }}"
+            --tag "$RELEASE_TAG"
+          )
+
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+
+          node scripts/alignment-models/build_and_upload.js "${args[@]}"
+
+      - name: Sync alignment model license status CSVs
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          CSV_PATH="${{ inputs.csv_path }}"
+          CSV_PATH="${CSV_PATH:-scripts/alignment-models/sources.csv}"
+          node scripts/alignment-models/sync_alignment_license_status.js "$CSV_PATH"
+
+      - name: Commit license status updates
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/src/main/assets/model_licenses/alignment-models-license-status.csv \
+            ios/Resources/model_licenses/alignment-models-license-status.csv
+          if git diff --staged --quiet; then
+            echo "No license CSV changes to commit"
+          else
+            git commit -m "chore: sync alignment model license status from alignment sources"
+            git push
+          fi

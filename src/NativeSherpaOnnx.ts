@@ -341,8 +341,8 @@ export interface Spec extends TurboModule {
    * Generate speech with subtitle/timestamp metadata.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
-   * @param options - Same as {@link generateTts} options (cloning: Zipvoice/Pocket; Zipvoice needs `referenceText`).
-   * @returns Object with samples, sampleRate, subtitles, and estimated flag
+   * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
+   * @returns Object with samples, sampleRate, subtitles, and timingMode
    */
   generateTtsWithTimestamps(
     instanceId: string,
@@ -352,7 +352,39 @@ export interface Spec extends TurboModule {
     samples: number[];
     sampleRate: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
-    estimated: boolean;
+    timingMode: string;
+  }>;
+
+  // ==================== Alignment / Subtitle Methods ====================
+
+  /**
+   * Run wav2vec2 CTC forced alignment on an audio file and transcript.
+   * @param modelPath - Absolute path to wav2vec2 ONNX model file
+   * @param audioPath - Absolute path to input audio file (WAV recommended)
+   * @param text - Transcript to align
+   * @param vocabJson - JSON map of token -> id (stringified to reduce bridge overhead)
+   */
+  runCTCForcedAlignment(
+    modelPath: string,
+    audioPath: string,
+    text: string,
+    vocabJson: string
+  ): Promise<{
+    words: Array<{ text: string; start: number; end: number }>;
+    chars: Array<{ text: string; start: number; end: number }>;
+  }>;
+
+  detectAlignmentModel(
+    modelDir: string,
+    modelType?: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    paths?: {
+      model?: string;
+    };
   }>;
 
   // ==================== Online (streaming) TTS Methods ====================

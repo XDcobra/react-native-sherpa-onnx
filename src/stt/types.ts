@@ -80,9 +80,12 @@ export interface SttWhisperModelOptions {
   task?: 'transcribe' | 'translate';
   /** Padding at end of samples. Kotlin default 1000; C++ default -1. */
   tailPaddings?: number;
-  /** Token-level timestamps. Android only; ignored on iOS. */
+  /**
+   * Token-level timestamps (cross-attention / DTW). Requires Whisper ONNX models
+   * built with attention outputs (see sherpa-onnx).
+   */
   enableTokenTimestamps?: boolean;
-  /** Segment-level timestamps. Android only; ignored on iOS. */
+  /** Segment-level timestamps via Whisper timestamp tokens. */
   enableSegmentTimestamps?: boolean;
 }
 
