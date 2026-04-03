@@ -339,9 +339,9 @@ static std::vector<std::vector<float>> RunOrtInference(
       CheckOrtStatus(api, api->GetDimensions(shapeInfo, dims.data(), dimCount), "GetDimensions failed");
     }
 
-    int64_t elementCount = 0;
+    size_t elementCount = 0;
     CheckOrtStatus(api, api->GetTensorShapeElementCount(shapeInfo, &elementCount), "GetTensorShapeElementCount failed");
-    if (elementCount <= 0) {
+    if (elementCount == 0) {
       throw std::runtime_error("Model output tensor is empty");
     }
 
