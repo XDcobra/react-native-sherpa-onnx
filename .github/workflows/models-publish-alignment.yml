@@ -1,24 +1,23 @@
 name: Publish alignment model assets
 
 on:
-  push:
-  #workflow_dispatch:
-  #  inputs:
-  #    csv_path:
-  #      description: Path to sources CSV file
-  #      required: false
-  #      default: scripts/alignment-models/sources.csv
-  #      type: string
-  #    release_tag:
-  #      description: Release tag for assets
-  #      required: false
-  #      default: alignment-models
-  #      type: string
-  #    dry_run:
-  #      description: Build archives only and skip upload
-  #      required: false
-  #      default: false
-  #      type: boolean
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: Path to sources CSV file
+        required: false
+        default: scripts/alignment-models/sources.csv
+        type: string
+      release_tag:
+        description: Release tag for assets
+        required: false
+        default: alignment-models
+        type: string
+      dry_run:
+        description: Build archives only and skip upload
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
