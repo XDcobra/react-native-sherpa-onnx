@@ -10,11 +10,11 @@ const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { fileURLToPath } = require('node:url');
 
-const DEFAULT_CSV = 'scripts/wav2vec2-models/sources.csv';
-const DEFAULT_BUILD_DIR = 'build/wav2vec2-models';
-const DEFAULT_DIST_DIR = 'dist/wav2vec2-models';
+const DEFAULT_CSV = 'scripts/alignment-models/sources.csv';
+const DEFAULT_BUILD_DIR = 'build/alignment-models';
+const DEFAULT_DIST_DIR = 'dist/alignment-models';
 const DEFAULT_REPO = 'XDcobra/react-native-sherpa-onnx';
-const DEFAULT_TAG = 'wav2vec2-models';
+const DEFAULT_TAG = 'alignment-models';
 const EXPECTED_HEADER = [
   'id',
   'onnx_url',
@@ -26,7 +26,7 @@ const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
 
 function printHelp() {
-  console.log(`Usage: node scripts/wav2vec2-models/build_and_upload.js [options]
+  console.log(`Usage: node scripts/alignment-models/build_and_upload.js [options]
 
 Options:
   --csv <path>        Path to semicolon-separated CSV source list

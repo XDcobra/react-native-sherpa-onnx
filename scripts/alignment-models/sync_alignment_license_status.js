@@ -11,11 +11,11 @@ const DEFAULT_CSV = path.join(__dirname, 'sources.csv');
 const TARGETS = [
   path.join(
     REPO_ROOT,
-    'android/src/main/assets/model_licenses/subtitle-models-license-status.csv'
+    'android/src/main/assets/model_licenses/alignment-models-license-status.csv'
   ),
   path.join(
     REPO_ROOT,
-    'ios/Resources/model_licenses/subtitle-models-license-status.csv'
+    'ios/Resources/model_licenses/alignment-models-license-status.csv'
   ),
 ];
 
