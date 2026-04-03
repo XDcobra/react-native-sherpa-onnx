@@ -49,10 +49,14 @@ fi
 
 cd "$SHERPA_SRC"
 echo "===== Patching build-ios.sh (C++ API) ====="
-sed -i.bak 's/libsherpa-onnx-c-api.a libsherpa-onnx-core.a/libsherpa-onnx-c-api.a libsherpa-onnx-cxx-api.a libsherpa-onnx-core.a/g' build-ios.sh
-sed -i.bak 's|build/simulator/lib/libsherpa-onnx-c-api.a|build/simulator/lib/libsherpa-onnx-c-api.a build/simulator/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
-sed -i.bak 's|build/os64/lib/libsherpa-onnx-c-api.a|build/os64/lib/libsherpa-onnx-c-api.a build/os64/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
-rm -f build-ios.sh.bak
+if grep -q 'libsherpa-onnx-cxx-api\.a' build-ios.sh 2>/dev/null; then
+  echo "build-ios.sh already includes C++ API (e.g. build-ios-patched.sh); skipping sed."
+else
+  sed -i.bak 's/libsherpa-onnx-c-api.a libsherpa-onnx-core.a/libsherpa-onnx-c-api.a libsherpa-onnx-cxx-api.a libsherpa-onnx-core.a/g' build-ios.sh
+  sed -i.bak 's|build/simulator/lib/libsherpa-onnx-c-api.a|build/simulator/lib/libsherpa-onnx-c-api.a build/simulator/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
+  sed -i.bak 's|build/os64/lib/libsherpa-onnx-c-api.a|build/os64/lib/libsherpa-onnx-c-api.a build/os64/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
+  rm -f build-ios.sh.bak
+fi
 
 # espeak-ng (Piper/Vits TTS) uses a fixed path buffer (N_PATH_HOME_DEF 255 on Posix). Long iOS paths get
 # truncated and cause fallback to /usr/share/espeak-ng-data and init failure. Patch sherpa-onnx's CMake
@@ -116,15 +120,35 @@ if [ ! -d "$ONNXRUNTIME_DIR" ]; then
   exit 1
 fi
 
+# ORT 1.17.x: $SLICE/onnxruntime.a. ORT 1.24+ static xcframework: $SLICE/onnxruntime.framework/onnxruntime
+resolve_onnx_static_lib() {
+  local root="$1"
+  local slice="$2"
+  local base="${root}/${slice}"
+  if [ -f "${base}/onnxruntime.framework/libonnxruntime.a" ]; then
+    echo "${base}/onnxruntime.framework/libonnxruntime.a"
+  elif [ -f "${base}/onnxruntime.framework/onnxruntime" ]; then
+    echo "${base}/onnxruntime.framework/onnxruntime"
+  elif [ -f "${base}/onnxruntime.a" ]; then
+    echo "${base}/onnxruntime.a"
+  elif [ -f "${base}/libonnxruntime.a" ]; then
+    echo "${base}/libonnxruntime.a"
+  else
+    echo ""
+  fi
+}
+
 for SLICE in ios-arm64 ios-arm64_x86_64-simulator; do
   SHERPA_LIB="$FRAMEWORK_NAME/$SLICE/libsherpa-onnx.a"
-  ONNX_LIB="$ONNXRUNTIME_DIR/$SLICE/onnxruntime.a"
-  if [ -f "$SHERPA_LIB" ] && [ -f "$ONNX_LIB" ]; then
+  ONNX_LIB="$(resolve_onnx_static_lib "$ONNXRUNTIME_DIR" "$SLICE")"
+  if [ -f "$SHERPA_LIB" ] && [ -n "$ONNX_LIB" ] && [ -f "$ONNX_LIB" ]; then
     mv "$SHERPA_LIB" "${SHERPA_LIB}.original"
     libtool -static -o "$SHERPA_LIB" "${SHERPA_LIB}.original" "$ONNX_LIB"
     rm "${SHERPA_LIB}.original"
   else
     echo "Error: Missing libs for $SLICE" >&2
+    echo "  expected sherpa: $SHERPA_LIB" >&2
+    echo "  expected onnx under: $ONNXRUNTIME_DIR/$SLICE/ (onnxruntime.framework/onnxruntime or onnxruntime.a)" >&2
     exit 1
   fi
 done
