@@ -255,6 +255,12 @@ SttInitializeResult SttWrapper::initialize(
                         config.model_config.whisper.task = *whisperOpts->task;
                     if (whisperOpts->tail_paddings.has_value())
                         config.model_config.whisper.tail_paddings = *whisperOpts->tail_paddings;
+                    if (whisperOpts->enable_token_timestamps.has_value())
+                        config.model_config.whisper.enable_token_timestamps =
+                            *whisperOpts->enable_token_timestamps;
+                    if (whisperOpts->enable_segment_timestamps.has_value())
+                        config.model_config.whisper.enable_segment_timestamps =
+                            *whisperOpts->enable_segment_timestamps;
                 }
                 break;
             case SttModelKind::kSenseVoice:

@@ -50,11 +50,13 @@ struct SttRuntimeConfigOptions {
     std::optional<std::string> rule_fars;
 };
 
-/** Model-specific options: Whisper (iOS: language, task, tail_paddings only). */
+/** Model-specific options: Whisper (matches JS `modelOptions.whisper` / Android). */
 struct SttWhisperOptions {
     std::optional<std::string> language;
     std::optional<std::string> task;
     std::optional<int32_t> tail_paddings;
+    std::optional<bool> enable_token_timestamps;
+    std::optional<bool> enable_segment_timestamps;
 };
 
 /** Model-specific options: SenseVoice. */

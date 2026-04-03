@@ -221,7 +221,7 @@ Pass via `modelOptions` in `createSTT()`. Only the block matching the loaded mod
 
 | Model | Key | Options |
 | --- | --- | --- |
-| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?` (Android only), `enableSegmentTimestamps?` (Android only) |
+| **Whisper** | `whisper` | `language?`, `task?` (`'transcribe'` \| `'translate'`), `tailPaddings?`, `enableTokenTimestamps?`, `enableSegmentTimestamps?` (token timestamps need Whisper ONNX models exported with attention outputs; see sherpa-onnx docs) |
 | **SenseVoice** | `senseVoice` | `language?`, `useItn?` |
 | **Canary** | `canary` | `srcLang?`, `tgtLang?`, `usePnc?` |
 | **FunASR Nano** | `funasrNano` | `systemPrompt?`, `userPrompt?`, `maxNewTokens?`, `temperature?`, `topP?`, `seed?`, `language?`, `itn?`, `hotwords?` |
