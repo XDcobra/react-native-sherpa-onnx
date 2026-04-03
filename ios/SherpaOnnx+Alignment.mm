@@ -374,34 +374,6 @@ static std::vector<std::vector<float>> RunOrtInference(
 
 #endif
 
-static std::vector<std::vector<float>> BuildFallbackLogProbs(
-    int32_t frames,
-    int32_t vocabSize,
-    const std::vector<int32_t> &tokenIds,
-    int32_t blankId) {
-  std::vector<std::vector<float>> out(frames, std::vector<float>(vocabSize, -8.0f));
-  if (frames <= 0 || vocabSize <= 0) {
-    return out;
-  }
-
-  for (int32_t t = 0; t < frames; ++t) {
-    out[t][std::clamp(blankId, 0, vocabSize - 1)] = -1.5f;
-  }
-
-  if (tokenIds.empty()) {
-    return out;
-  }
-
-  for (size_t i = 0; i < tokenIds.size(); ++i) {
-    int32_t frame = static_cast<int32_t>((static_cast<double>(i + 1) / (tokenIds.size() + 1)) * (frames - 1));
-    frame = std::clamp(frame, 0, frames - 1);
-    int32_t tokenId = std::clamp(tokenIds[i], 0, vocabSize - 1);
-    out[frame][tokenId] = -0.1f;
-  }
-
-  return out;
-}
-
 static ExpandedTarget BuildExpandedTarget(const std::vector<int32_t> &tokenIds, int32_t blankId) {
   ExpandedTarget target;
   target.ids.reserve(tokenIds.size() * 2 + 1);
@@ -601,11 +573,10 @@ static NSArray *AlignmentItemsToNSArray(const std::vector<AlignmentItem> &items)
 #if SHERPA_ONNX_HAS_ORT_C_API
       logProbs = RunOrtInference(modelPathStr, normalized);
 #else
-      {
-        int32_t approxFrames = std::max<int32_t>(1, static_cast<int32_t>(normalized.size() / 320));
-        int32_t vocabSize = 32;
-        logProbs = BuildFallbackLogProbs(approxFrames, vocabSize, tokenIds, blankId);
-      }
+      reject(@"ALIGNMENT_ERROR",
+         @"Accurate alignment requires ONNX Runtime, which is not available in this build.",
+         nil);
+      return;
 #endif
 
       if (logProbs.empty()) {
