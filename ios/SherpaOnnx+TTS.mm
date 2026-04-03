@@ -214,7 +214,7 @@ static bool ShouldSplitOnPeriod(NSString *text, NSInteger periodIndex) {
         "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e"
     };
 
-    NSString *tokenRaw = [[ExtractTokenBeforePeriod(text, periodIndex)
+    NSString *tokenRaw = [ExtractTokenBeforePeriod(text, periodIndex)
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *tokenLower = [tokenRaw lowercaseString];
     std::string tokenUtf8 = tokenLower != nil ? std::string([tokenLower UTF8String]) : std::string();
