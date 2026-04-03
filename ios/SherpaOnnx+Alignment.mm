@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -259,10 +260,41 @@ static void CheckOrtStatus(const OrtApi *api, OrtStatus *status, const char *pre
   throw std::runtime_error(message);
 }
 
+/** ORT GetApi(ORT_API_VERSION) can be null if the embedded runtime is older than compile-time headers. */
+static const OrtApi *ResolveOrtApiForAlignment() {
+  const OrtApiBase *base = OrtGetApiBase();
+  if (base == nullptr) {
+    throw std::runtime_error(
+        "ONNX Runtime is not available (OrtGetApiBase returned null). "
+        "Subtitle-accurate alignment requires SherpaOnnx built with ONNX Runtime.");
+  }
+
+  const char *rtVersion = "unknown";
+  if (base->GetVersionString != nullptr) {
+    rtVersion = base->GetVersionString();
+  }
+
+  // Try compile-time version first, then older API versions. ORT appends new entries to OrtApi;
+  // early function pointers stay at stable offsets for the calls we use.
+  constexpr uint32_t kMinOrtApiVersion = 17;
+  for (uint32_t ver = ORT_API_VERSION; ver >= kMinOrtApiVersion; --ver) {
+    const OrtApi *api = base->GetApi(ver);
+    if (api != nullptr && api->CreateEnv != nullptr && api->CreateSession != nullptr) {
+      return api;
+    }
+  }
+
+  std::ostringstream oss;
+  oss << "ONNX Runtime API mismatch: GetApi() returned null for API " << ORT_API_VERSION
+      << " down to " << kMinOrtApiVersion << ". Runtime version string: " << rtVersion
+      << ". Rebuild ios/Frameworks/sherpa_onnx (or align onnxruntime headers with embedded ORT).";
+  throw std::runtime_error(oss.str());
+}
+
 static std::vector<std::vector<float>> RunOrtInference(
     const std::string &modelPath,
     const std::vector<float> &samples) {
-  const OrtApi *api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+  const OrtApi *api = ResolveOrtApiForAlignment();
 
   OrtEnv *env = nullptr;
   OrtSessionOptions *sessionOptions = nullptr;
