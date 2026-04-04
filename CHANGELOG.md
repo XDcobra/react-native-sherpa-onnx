@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.2](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.1...v0.4.2) (2026-04-04)
+
+
+### Bug Fixes
+
+* **alignment-path:** add support for model paths in alignment result handling ([742f8ad](https://github.com/XDcobra/react-native-sherpa-onnx/commit/742f8ad19c61a2909994ccd34a343cd0283545f5))
+* **alignment:** add validation for required model, audio, and text paths in alignment processing ([fdb315d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/fdb315db79bd01b6bfd89e4df27e639e72aee095))
+* **example:** update subtitle estimation logic to use timingMode for improved accuracy in TTSScreen ([04e0cd9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/04e0cd9ffe8a6061139d479511d574d44da298eb))
+* **tts:** update TTS JNI integration to use boxed Integer for callback compatibility ([0d93e7b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0d93e7bebe9d67311c5746244e75b5145e8eefdb))
+
+
+### Features
+
+* **alignment-ios:** add alignment functionality and character granularity option for TTS subtitles ([ad6e3cb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ad6e3cb76274589592051c68f8863a0b7df592e3))
+* **alignment-kotlin:** implement CTC forced alignment helper for audio transcription ([4859590](https://github.com/XDcobra/react-native-sherpa-onnx/commit/48595907719c22cbae93742928beb17c4ed8d352))
+* **alignment:** add detectAlignmentModel function and update related types and paths ([37aa88a](https://github.com/XDcobra/react-native-sherpa-onnx/commit/37aa88a5acb0f8e204f0e5d696e3e18c1c979d59))
+* **alignment:** add download functionality for alignment model and related types ([0ab53a5](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0ab53a5eabafbb4d015e1d3ba3b55766ba8c4065))
+* **alignment:** add runCTCForcedAlignment method to interface for audio transcription ([2fc0b70](https://github.com/XDcobra/react-native-sherpa-onnx/commit/2fc0b70b673f8f6c7918caa080e9170464843a45))
+* **alignment:** implement alignment auto model detection and validation functionality ([8a7e8bc](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8a7e8bcbf0928bf3f7a5cd1b72c08d5da8ccfbd7))
+* **alignment:** implement alignment auto model detection and validation functionality for ios ([36cc213](https://github.com/XDcobra/react-native-sherpa-onnx/commit/36cc2131e0a71775e4c9f4af60c0e0731ce5b8ea))
+* **alignment:** implement subtitle model management and update download functionality ([3ced43b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3ced43b868a1befe47bf19e938ba0e08a74bf9ea))
+* **build:** add support for ONNX Runtime versioning and patching in iOS framework build process ([6c5d6e0](https://github.com/XDcobra/react-native-sherpa-onnx/commit/6c5d6e09f40a707a101b6afced59c782a4d1f657))
+* **example:** add GenerateTimestampScreen for generating subtitles from audio files ([4198735](https://github.com/XDcobra/react-native-sherpa-onnx/commit/419873598263ecefe94945778bc498d4eb184e5f))
+* **example:** enhance alignment model loading and selection process with improved state management and asset handling ([f84f5bf](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f84f5bfbe70c4c93b4ebe0ba7cf2fddfabb8fc40))
+* **example:** redesign model selection and initialization process with enhanced UI and state management ([ad327eb](https://github.com/XDcobra/react-native-sherpa-onnx/commit/ad327ebb80c642652b81d002623518a8f52cd276))
+* **generate-timestamp:** enhance UI styles and integrate model download functionality ([8d30329](https://github.com/XDcobra/react-native-sherpa-onnx/commit/8d30329cd09534db2e78eee4c16c1d91140f801d))
+* **ios:** add text processing utilities for improved subtitle timing and segmentation in SherpaOnnx+TTS ([df71606](https://github.com/XDcobra/react-native-sherpa-onnx/commit/df7160627188fee0f0c0fb80e00f4032fad5afc7))
+* **kotlin:** implement text segmentation and subtitle generation in SherpaOnnxTextSegmenter, enhancing TTS functionality with accurate and word-level subtitle options ([eed5cec](https://github.com/XDcobra/react-native-sherpa-onnx/commit/eed5cec5a9fe9c3d3a2c6b78b689ddbf71d32a1e))
+* **stt:** add support for token and segment timestamps in Whisper model options for ios ([5e919a1](https://github.com/XDcobra/react-native-sherpa-onnx/commit/5e919a172cc64b5c5ac295368edd96d0f86c5b9b))
+* **tts:** enhance subtitle generation with new options and methods for improved timing and granularity ([9ba2d98](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9ba2d986721708ed9add71bc45670944dfec32b5))
+* **tts:** implement accurate subtitle generation with forced alignment and character granularity support ([d96e106](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d96e106e19d40ebc09d6897c6398fbd0da2f3904))
+* **wav2vec2:** add additional model entries to sources.csv for various ONNX formats ([f13a43b](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f13a43b5a2ac74b6ef568ae45b9da8da9813dbba))
+* **wav2vec2:** add CSV-driven model release asset pipeline and GitHub Actions workflow for building and publishing models ([f0cdd69](https://github.com/XDcobra/react-native-sherpa-onnx/commit/f0cdd69d11355158dd0060cd1ec266e2752e9293))
+
 ## [0.4.1](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.0...v0.4.1) (2026-04-02)
 
 
