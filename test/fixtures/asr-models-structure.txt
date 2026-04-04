@@ -6866,3 +6866,20 @@ sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/decoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/encoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/tokens.txt
 
+# Asset: sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/en.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ja.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/de.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/es.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ko.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/vi.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/zh.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ar.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/fr.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/decoder.int8.onnx
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx.data
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/tokens.txt
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/README.md
