@@ -274,6 +274,7 @@ Several models accept a language hint. The SDK provides per-model lists of valid
 | Canary | `getCanaryLanguages()` | `modelOptions.canary.srcLang` / `tgtLang` |
 | FunASR Nano | `getFunasrNanoLanguages()` | `modelOptions.funasrNano.language` |
 | FunASR MLT Nano | `getFunasrMltNanoLanguages()` | `modelOptions.funasrNano.language` |
+| Cohere Transcribe (14-lang) | `getCohereTranscribeLanguages()` | `modelOptions.cohereTranscribe.language` |
 
 Each returns `{ id: string; name: string }[]`. Use `id` for the model option, `name` for display.
 

@@ -235,3 +235,36 @@ export function getFunasrNanoLanguages(): readonly SttModelLanguage[] {
 export function getFunasrMltNanoLanguages(): readonly SttModelLanguage[] {
   return FUNASR_MLT_NANO_LANGUAGES;
 }
+
+// ========== Cohere Transcribe (14-language bundle) ==========
+// sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2
+// European: EN, FR, DE, IT, ES, PT, EL, NL, PL
+// AIPAC: ZH (Mandarin), JA, KO, VI
+// MENA: AR
+
+/** 14 languages for Cohere Transcribe ONNX (ISO-style ids for modelOptions.cohereTranscribe.language). */
+export const COHERE_TRANSCRIBE_14_LANG_LANGUAGES: readonly SttModelLanguage[] =
+  [
+    { id: 'en', name: 'english' },
+    { id: 'fr', name: 'french' },
+    { id: 'de', name: 'german' },
+    { id: 'it', name: 'italian' },
+    { id: 'es', name: 'spanish' },
+    { id: 'pt', name: 'portuguese' },
+    { id: 'el', name: 'greek' },
+    { id: 'nl', name: 'dutch' },
+    { id: 'pl', name: 'polish' },
+    { id: 'zh', name: 'chinese' },
+    { id: 'ja', name: 'japanese' },
+    { id: 'ko', name: 'korean' },
+    { id: 'vi', name: 'vietnamese' },
+    { id: 'ar', name: 'arabic' },
+  ] as const;
+
+/**
+ * Returns languages for Cohere Transcribe 14-lang models.
+ * Id is the value for modelOptions.cohereTranscribe.language (e.g. "en", "zh").
+ */
+export function getCohereTranscribeLanguages(): readonly SttModelLanguage[] {
+  return COHERE_TRANSCRIBE_14_LANG_LANGUAGES;
+}

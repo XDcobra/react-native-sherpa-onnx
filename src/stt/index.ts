@@ -282,5 +282,7 @@ export {
   FUNASR_NANO_LANGUAGES,
   getFunasrMltNanoLanguages,
   FUNASR_MLT_NANO_LANGUAGES,
+  getCohereTranscribeLanguages,
+  COHERE_TRANSCRIBE_14_LANG_LANGUAGES,
 } from './sttModelLanguages';
 export type { SttModelLanguage, WhisperLanguage } from './sttModelLanguages';
