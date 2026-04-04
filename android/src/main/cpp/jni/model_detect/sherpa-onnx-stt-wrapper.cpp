@@ -24,6 +24,7 @@ const char* SttModelKindToString(SttModelKind k) {
     case SttModelKind::kWhisper: return "whisper";
     case SttModelKind::kFunAsrNano: return "funasr_nano";
     case SttModelKind::kQwen3Asr: return "qwen3_asr";
+    case SttModelKind::kCohereTranscribe: return "cohere_transcribe";
     case SttModelKind::kFireRedAsr: return "fire_red_asr";
     case SttModelKind::kMoonshine: return "moonshine";
     case SttModelKind::kMoonshineV2: return "moonshine_v2";
@@ -84,6 +85,8 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
       PutString(env, pathsMap, mapPut, "qwen3Encoder", result.paths.qwen3Encoder);
       PutString(env, pathsMap, mapPut, "qwen3Decoder", result.paths.qwen3Decoder);
       PutString(env, pathsMap, mapPut, "qwen3Tokenizer", result.paths.qwen3Tokenizer);
+      PutString(env, pathsMap, mapPut, "cohereEncoder", result.paths.cohereEncoder);
+      PutString(env, pathsMap, mapPut, "cohereDecoder", result.paths.cohereDecoder);
       PutString(env, pathsMap, mapPut, "moonshinePreprocessor", result.paths.moonshinePreprocessor);
       PutString(env, pathsMap, mapPut, "moonshineEncoder", result.paths.moonshineEncoder);
       PutString(env, pathsMap, mapPut, "moonshineUncachedDecoder", result.paths.moonshineUncachedDecoder);
