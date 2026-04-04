@@ -275,6 +275,7 @@ Several models accept a language hint. The SDK provides per-model lists of valid
 | FunASR Nano | `getFunasrNanoLanguages()` | `modelOptions.funasrNano.language` |
 | FunASR MLT Nano | `getFunasrMltNanoLanguages()` | `modelOptions.funasrNano.language` |
 | Cohere Transcribe (14-lang) | `getCohereTranscribeLanguages()` | `modelOptions.cohereTranscribe.language` |
+| Qwen3 ASR | `getQwen3AsrLanguages()` | Informational / UI only — `SttQwen3AsrModelOptions` has no language field in this SDK. |
 | Dolphin (multilingual) | `getDolphinInfoLanguages()` | Informational / UI only — not used in `modelOptions` (no language hint in sherpa-onnx; see [k2-fsa/sherpa-onnx#2293](https://github.com/k2-fsa/sherpa-onnx/issues/2293)). |
 
 Each returns `{ id: string; name: string }[]`. For models with a **Use For** `modelOptions` path, use `id` for the option and `name` for display. For Dolphin, `id` values are Language–Region tags (e.g. `zh-cn`, `ct-hk`); they are metadata for apps only and are not passed to the native recognizer.

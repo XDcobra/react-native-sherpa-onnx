@@ -284,6 +284,8 @@ export {
   FUNASR_MLT_NANO_LANGUAGES,
   getCohereTranscribeLanguages,
   COHERE_TRANSCRIBE_LANGUAGES,
+  getQwen3AsrLanguages,
+  QWEN3_ASR_LANGUAGES,
   getDolphinInfoLanguages,
   DOLPHIN_INFO_LANGUAGES,
 } from './sttModelLanguages';

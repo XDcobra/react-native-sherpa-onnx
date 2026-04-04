@@ -3,8 +3,8 @@
  * Per-model lists for Whisper, SenseVoice, and others. Use these for language-hint
  * dropdowns so users only pick valid codes (invalid codes can crash the app, e.g. Whisper).
  *
- * Dolphin: informational Language–Region tags only; sherpa-onnx does not accept a language
- * hint for Dolphin models (see k2-fsa/sherpa-onnx#2293). Use for UI / model capability hints.
+ * Dolphin / Qwen3 ASR: informational lists only when the native API has no language hint in this
+ * SDK (Dolphin: see k2-fsa/sherpa-onnx#2293). Use for UI / model capability hints.
  */
 
 export interface SttModelLanguage {
@@ -269,6 +269,52 @@ export const COHERE_TRANSCRIBE_LANGUAGES: readonly SttModelLanguage[] = [
  */
 export function getCohereTranscribeLanguages(): readonly SttModelLanguage[] {
   return COHERE_TRANSCRIBE_LANGUAGES;
+}
+
+// ========== Qwen3 ASR (informational only) ==========
+// Multilingual Qwen3 ASR in sherpa-onnx. SttQwen3AsrModelOptions has no language field here —
+// this list is for apps to show supported spoken languages (UI / docs).
+
+/** Languages supported by Qwen3 ASR (ISO-style ids for display; not passed as modelOptions). */
+export const QWEN3_ASR_LANGUAGES: readonly SttModelLanguage[] = [
+  { id: 'zh', name: 'chinese' },
+  { id: 'en', name: 'english' },
+  { id: 'yue', name: 'cantonese' },
+  { id: 'ar', name: 'arabic' },
+  { id: 'de', name: 'german' },
+  { id: 'fr', name: 'french' },
+  { id: 'es', name: 'spanish' },
+  { id: 'pt', name: 'portuguese' },
+  { id: 'id', name: 'indonesian' },
+  { id: 'it', name: 'italian' },
+  { id: 'ko', name: 'korean' },
+  { id: 'ru', name: 'russian' },
+  { id: 'th', name: 'thai' },
+  { id: 'vi', name: 'vietnamese' },
+  { id: 'ja', name: 'japanese' },
+  { id: 'tr', name: 'turkish' },
+  { id: 'hi', name: 'hindi' },
+  { id: 'ms', name: 'malay' },
+  { id: 'nl', name: 'dutch' },
+  { id: 'sv', name: 'swedish' },
+  { id: 'da', name: 'danish' },
+  { id: 'fi', name: 'finnish' },
+  { id: 'pl', name: 'polish' },
+  { id: 'cs', name: 'czech' },
+  { id: 'fil', name: 'filipino' },
+  { id: 'fa', name: 'persian' },
+  { id: 'el', name: 'greek' },
+  { id: 'hu', name: 'hungarian' },
+  { id: 'mk', name: 'macedonian' },
+  { id: 'ro', name: 'romanian' },
+] as const;
+
+/**
+ * Returns Qwen3 ASR supported languages for display only (e.g. model capability hints in apps).
+ * Not for modelOptions — this SDK does not expose a Qwen3 language hint.
+ */
+export function getQwen3AsrLanguages(): readonly SttModelLanguage[] {
+  return QWEN3_ASR_LANGUAGES;
 }
 
 // ========== Dolphin (informational only) ==========
