@@ -260,6 +260,7 @@ export type {
   STTModelType,
   SttModelOptions,
   SttQwen3AsrModelOptions,
+  SttCohereTranscribeModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
   SttEngine,
