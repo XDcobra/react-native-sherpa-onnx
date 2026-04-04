@@ -350,7 +350,7 @@ internal class SherpaOnnxSttHelper(
       } else {
         filePath
       }
-      if (pathToRead == null || pathToRead.isBlank()) {
+      if (pathToRead.isBlank()) {
         promise.reject("TRANSCRIBE_ERROR", "Could not resolve audio file path")
         return
       }
@@ -361,7 +361,7 @@ internal class SherpaOnnxSttHelper(
       }
       val wave = WaveReader.readWave(pathToRead)
       val samples = wave.samples
-      if (samples == null || samples.isEmpty()) {
+      if (samples.isEmpty()) {
         promise.reject("TRANSCRIBE_ERROR", "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
         return
       }
