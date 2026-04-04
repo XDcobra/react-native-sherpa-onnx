@@ -59,6 +59,12 @@ static const SttFieldRequirement kQwen3AsrReqs[] = {
     {"qwen3Tokenizer",    &SttModelPaths::qwen3Tokenizer,    true},
 };
 
+static const SttFieldRequirement kCohereTranscribeReqs[] = {
+    {"cohereEncoder", &SttModelPaths::cohereEncoder, true},
+    {"cohereDecoder", &SttModelPaths::cohereDecoder, true},
+    {"tokens",        &SttModelPaths::tokens,        true},
+};
+
 static const SttFieldRequirement kMoonshineReqs[] = {
     {"moonshinePreprocessor",    &SttModelPaths::moonshinePreprocessor,    true},
     {"moonshineEncoder",         &SttModelPaths::moonshineEncoder,         true},
@@ -130,6 +136,9 @@ static const SttFieldRequirement* GetRequirements(SttModelKind kind, size_t& cou
         case SttModelKind::kQwen3Asr:
             count = std::size(kQwen3AsrReqs);
             return kQwen3AsrReqs;
+        case SttModelKind::kCohereTranscribe:
+            count = std::size(kCohereTranscribeReqs);
+            return kCohereTranscribeReqs;
         case SttModelKind::kMoonshine:
             count = std::size(kMoonshineReqs);
             return kMoonshineReqs;
@@ -172,6 +181,7 @@ static const char* SttKindToName(SttModelKind k) {
         case SttModelKind::kWhisper:       return "Whisper";
         case SttModelKind::kFunAsrNano:    return "FunASR Nano";
         case SttModelKind::kQwen3Asr:      return "Qwen3 ASR";
+        case SttModelKind::kCohereTranscribe: return "Cohere Transcribe";
         case SttModelKind::kFireRedAsr:    return "Fire Red ASR";
         case SttModelKind::kMoonshine:     return "Moonshine";
         case SttModelKind::kMoonshineV2:   return "Moonshine v2";

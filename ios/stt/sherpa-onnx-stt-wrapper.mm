@@ -15,6 +15,7 @@
 #include <sstream>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 // iOS logging
 #ifdef __APPLE__
@@ -35,6 +36,37 @@ namespace fs = std::filesystem;
 #include "sherpa-onnx/c-api/cxx-api.h"
 
 namespace sherpaonnx {
+
+namespace {
+
+/** Qwen3-ASR reads hotwords from the stream option "hotwords" (comma-separated), not from hotwords_file. */
+static std::string NormalizeQwen3HotwordsCsv(const std::string& s) {
+    if (s.empty()) return "";
+    std::string flat;
+    flat.reserve(s.size());
+    for (unsigned char uc : s) {
+        char c = static_cast<char>(uc);
+        if (c == '\n' || c == '\r') flat += ',';
+        else flat += c;
+    }
+    std::vector<std::string> parts;
+    std::istringstream iss(flat);
+    std::string part;
+    while (std::getline(iss, part, ',')) {
+        size_t a = part.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        size_t b = part.find_last_not_of(" \t");
+        parts.push_back(part.substr(a, b - a + 1));
+    }
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i) out += ',';
+        out += parts[i];
+    }
+    return out;
+}
+
+}  // namespace
 
 // Hotwords are supported for transducer and NeMo transducer (sherpa-onnx; NeMo: #3077).
 static bool SupportsHotwords(sherpaonnx::SttModelKind kind) {
@@ -112,6 +144,7 @@ public:
     sherpaonnx::SttModelKind currentModelKind = sherpaonnx::SttModelKind::kUnknown;
     std::optional<sherpa_onnx::cxx::OfflineRecognizer> recognizer;
     std::optional<sherpa_onnx::cxx::OfflineRecognizerConfig> lastConfig;
+    std::string qwen3_hotwords_csv;
 };
 
 SttWrapper::SttWrapper() : pImpl(std::make_unique<Impl>()) {
@@ -139,7 +172,8 @@ SttInitializeResult SttWrapper::initialize(
     const SttSenseVoiceOptions* senseVoiceOpts,
     const SttCanaryOptions* canaryOpts,
     const SttFunAsrNanoOptions* funasrNanoOpts,
-    const SttQwen3AsrOptions* qwen3AsrOpts
+    const SttQwen3AsrOptions* qwen3AsrOpts,
+    const SttCohereTranscribeOptions* cohereTranscribeOpts
 ) {
     SttInitializeResult result;
     result.success = false;
@@ -203,6 +237,13 @@ SttInitializeResult SttWrapper::initialize(
                 config.model_config.qwen3_asr.encoder = detect.paths.qwen3Encoder;
                 config.model_config.qwen3_asr.decoder = detect.paths.qwen3Decoder;
                 config.model_config.qwen3_asr.tokenizer = detect.paths.qwen3Tokenizer;
+                break;
+            case SttModelKind::kCohereTranscribe:
+                config.model_config.cohere_transcribe.encoder = detect.paths.cohereEncoder;
+                config.model_config.cohere_transcribe.decoder = detect.paths.cohereDecoder;
+                config.model_config.cohere_transcribe.language = "en";
+                config.model_config.cohere_transcribe.use_punct = true;
+                config.model_config.cohere_transcribe.use_itn = true;
                 break;
             case SttModelKind::kFireRedAsr:
                 config.model_config.fire_red_asr.encoder = detect.paths.fireRedEncoder;
@@ -317,6 +358,16 @@ SttInitializeResult SttWrapper::initialize(
                         config.model_config.qwen3_asr.seed = *qwen3AsrOpts->seed;
                 }
                 break;
+            case SttModelKind::kCohereTranscribe:
+                if (cohereTranscribeOpts) {
+                    if (cohereTranscribeOpts->language.has_value())
+                        config.model_config.cohere_transcribe.language = *cohereTranscribeOpts->language;
+                    if (cohereTranscribeOpts->use_punct.has_value())
+                        config.model_config.cohere_transcribe.use_punct = *cohereTranscribeOpts->use_punct;
+                    if (cohereTranscribeOpts->use_itn.has_value())
+                        config.model_config.cohere_transcribe.use_itn = *cohereTranscribeOpts->use_itn;
+                }
+                break;
             default:
                 break;
         }
@@ -358,6 +409,12 @@ SttInitializeResult SttWrapper::initialize(
 
         bool isWhisperModel = detect.selectedKind == SttModelKind::kWhisper &&
             !config.model_config.whisper.encoder.empty() && !config.model_config.whisper.decoder.empty();
+        pImpl->qwen3_hotwords_csv.clear();
+        if (detect.selectedKind == SttModelKind::kQwen3Asr && qwen3AsrOpts &&
+            qwen3AsrOpts->hotwords.has_value() && !qwen3AsrOpts->hotwords->empty()) {
+            pImpl->qwen3_hotwords_csv = NormalizeQwen3HotwordsCsv(*qwen3AsrOpts->hotwords);
+        }
+
         if (isWhisperModel) {
             LOGI("Initializing Whisper model with encoder: %s, decoder: %s", config.model_config.whisper.encoder.c_str(), config.model_config.whisper.decoder.c_str());
         } else if (detect.selectedKind == SttModelKind::kQwen3Asr) {
@@ -366,6 +423,11 @@ SttInitializeResult SttWrapper::initialize(
                  config.model_config.qwen3_asr.encoder.c_str(),
                  config.model_config.qwen3_asr.decoder.c_str(),
                  config.model_config.qwen3_asr.tokenizer.c_str());
+        } else if (detect.selectedKind == SttModelKind::kCohereTranscribe) {
+            LOGI("Initializing Cohere Transcribe: encoder=%s decoder=%s language=%s",
+                 config.model_config.cohere_transcribe.encoder.c_str(),
+                 config.model_config.cohere_transcribe.decoder.c_str(),
+                 config.model_config.cohere_transcribe.language.c_str());
         } else {
             LOGI("Initializing non-Whisper model");
         }
@@ -452,6 +514,8 @@ SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
 
     try {
         auto stream = pImpl->recognizer.value().CreateStream();
+        if (pImpl->currentModelKind == SttModelKind::kQwen3Asr && !pImpl->qwen3_hotwords_csv.empty())
+            stream.SetOption("hotwords", pImpl->qwen3_hotwords_csv.c_str());
 
         // Ensure safe conversions: AcceptWaveform expects 32-bit ints
         if (wave.samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
@@ -499,6 +563,8 @@ SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& sam
     }
     try {
         auto stream = pImpl->recognizer.value().CreateStream();
+        if (pImpl->currentModelKind == SttModelKind::kQwen3Asr && !pImpl->qwen3_hotwords_csv.empty())
+            stream.SetOption("hotwords", pImpl->qwen3_hotwords_csv.c_str());
         int32_t n = static_cast<int32_t>(samples.size());
         stream.AcceptWaveform(sampleRate, samples.data(), n);
         pImpl->recognizer.value().Decode(&stream);
@@ -552,6 +618,7 @@ void SttWrapper::release() {
     if (pImpl->initialized) {
         pImpl->recognizer.reset();
         pImpl->lastConfig.reset();
+        pImpl->qwen3_hotwords_csv.clear();
         pImpl->initialized = false;
         pImpl->modelDir.clear();
         pImpl->currentModelKind = sherpaonnx::SttModelKind::kUnknown;

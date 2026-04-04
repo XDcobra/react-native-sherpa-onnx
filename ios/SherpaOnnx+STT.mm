@@ -37,6 +37,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         case K::kWhisper: return @"whisper";
         case K::kFunAsrNano: return @"funasr_nano";
         case K::kQwen3Asr: return @"qwen3_asr";
+        case K::kCohereTranscribe: return @"cohere_transcribe";
         case K::kFireRedAsr: return @"fire_red_asr";
         case K::kMoonshine: return @"moonshine";
         case K::kMoonshineV2: return @"moonshine_v2";
@@ -166,11 +167,13 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         sherpaonnx::SttCanaryOptions canaryOpts;
         sherpaonnx::SttFunAsrNanoOptions funasrNanoOpts;
         sherpaonnx::SttQwen3AsrOptions qwen3AsrOpts;
+        sherpaonnx::SttCohereTranscribeOptions cohereTranscribeOpts;
         const sherpaonnx::SttWhisperOptions *whisperOptsPtr = nullptr;
         const sherpaonnx::SttSenseVoiceOptions *senseVoiceOptsPtr = nullptr;
         const sherpaonnx::SttCanaryOptions *canaryOptsPtr = nullptr;
         const sherpaonnx::SttFunAsrNanoOptions *funasrNanoOptsPtr = nullptr;
         const sherpaonnx::SttQwen3AsrOptions *qwen3AsrOptsPtr = nullptr;
+        const sherpaonnx::SttCohereTranscribeOptions *cohereTranscribeOptsPtr = nullptr;
         if (modelOptions != nil && [modelOptions isKindOfClass:[NSDictionary class]]) {
             NSDictionary *w = modelOptions[@"whisper"];
             if ([w isKindOfClass:[NSDictionary class]]) {
@@ -218,14 +221,23 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
                 if (q3[@"temperature"] != nil) qwen3AsrOpts.temperature = [(NSNumber *)q3[@"temperature"] floatValue];
                 if (q3[@"topP"] != nil) qwen3AsrOpts.top_p = [(NSNumber *)q3[@"topP"] floatValue];
                 if (q3[@"seed"] != nil) qwen3AsrOpts.seed = [(NSNumber *)q3[@"seed"] intValue];
+                if (q3[@"hotwords"] != nil) qwen3AsrOpts.hotwords = std::string([(NSString *)q3[@"hotwords"] UTF8String]);
                 qwen3AsrOptsPtr = &qwen3AsrOpts;
+            }
+            NSDictionary *cohere = modelOptions[@"cohereTranscribe"];
+            if ([cohere isKindOfClass:[NSDictionary class]]) {
+                if (cohere[@"language"] != nil) cohereTranscribeOpts.language = std::string([(NSString *)cohere[@"language"] UTF8String]);
+                if (cohere[@"usePunct"] != nil) cohereTranscribeOpts.use_punct = [(NSNumber *)cohere[@"usePunct"] boolValue];
+                if (cohere[@"useItn"] != nil) cohereTranscribeOpts.use_itn = [(NSNumber *)cohere[@"useItn"] boolValue];
+                cohereTranscribeOptsPtr = &cohereTranscribeOpts;
             }
         }
 
         sherpaonnx::SttInitializeResult result = inst->wrapper->initialize(
             modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
             numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
-            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr);
+            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
+            cohereTranscribeOptsPtr);
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");

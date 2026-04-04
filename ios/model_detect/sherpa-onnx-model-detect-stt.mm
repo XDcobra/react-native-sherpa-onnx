@@ -59,6 +59,7 @@ static const char* KindToName(SttModelKind k) {
         case SttModelKind::kWhisper: return "whisper";
         case SttModelKind::kFunAsrNano: return "funasr_nano";
         case SttModelKind::kQwen3Asr: return "qwen3_asr";
+        case SttModelKind::kCohereTranscribe: return "cohere_transcribe";
         case SttModelKind::kFireRedAsr: return "fire_red_asr";
         case SttModelKind::kMoonshine: return "moonshine";
         case SttModelKind::kMoonshineV2: return "moonshine_v2";
@@ -87,6 +88,7 @@ SttModelKind ParseSttModelType(const std::string& modelType) {
     if (modelType == "whisper") return SttModelKind::kWhisper;
     if (modelType == "funasr_nano") return SttModelKind::kFunAsrNano;
     if (modelType == "qwen3_asr") return SttModelKind::kQwen3Asr;
+    if (modelType == "cohere_transcribe") return SttModelKind::kCohereTranscribe;
     if (modelType == "fire_red_asr") return SttModelKind::kFireRedAsr;
     if (modelType == "moonshine") return SttModelKind::kMoonshine;
     if (modelType == "moonshine_v2") return SttModelKind::kMoonshineV2;
@@ -127,6 +129,8 @@ static bool CapabilitySupportsKind(
             return cap.hasFunAsrNano;
         case SttModelKind::kQwen3Asr:
             return cap.hasQwen3Asr;
+        case SttModelKind::kCohereTranscribe:
+            return cap.hasCohereTranscribeLayout;
         case SttModelKind::kFireRedAsr:
             return cap.hasFireRedAsr;
         case SttModelKind::kMoonshine:
@@ -191,6 +195,8 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
     }
     if (lower.find("qwen3-asr") != std::string::npos || lower.find("qwen3_asr") != std::string::npos)
         add(SttModelKind::kQwen3Asr);
+    if (lower.find("cohere") != std::string::npos)
+        add(SttModelKind::kCohereTranscribe);
     if (lower.find("funasr") != std::string::npos)
         add(SttModelKind::kFunAsrNano);
     if (lower.find("canary") != std::string::npos)
@@ -318,6 +324,7 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     h.isLikelySenseVoice = lower.find("sense") != std::string::npos || lower.find("sensevoice") != std::string::npos;
     h.isLikelyFunAsrNano = lower.find("funasr") != std::string::npos || lower.find("funasr-nano") != std::string::npos;
     h.isLikelyQwen3Asr = lower.find("qwen3-asr") != std::string::npos || lower.find("qwen3_asr") != std::string::npos;
+    h.isLikelyCohere = lower.find("cohere") != std::string::npos;
     h.isLikelyZipformer = lower.find("zipformer") != std::string::npos;
     h.isLikelyMoonshine = lower.find("moonshine") != std::string::npos;
     h.isLikelyDolphin = lower.find("dolphin") != std::string::npos;
@@ -361,7 +368,11 @@ static SttCapabilities ComputeSttCapabilities(const SttCandidatePaths& paths, co
     bool hasWhisperDec = !paths.decoder.empty();
     bool hasQwen3Tok = !paths.qwen3TokenizerDir.empty();
     c.hasQwen3Asr = !paths.qwen3ConvFrontend.empty() && hasWhisperEnc && hasWhisperDec && hasQwen3Tok;
-    c.hasWhisper = hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && !c.hasQwen3Asr;
+    c.hasCohereTranscribeLayout =
+        hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && !paths.tokens.empty() && !c.hasQwen3Asr;
+    c.hasCohereTranscribe = c.hasCohereTranscribeLayout && hints.isLikelyCohere;
+    c.hasWhisper =
+        hasWhisperEnc && hasWhisperDec && paths.joiner.empty() && !c.hasQwen3Asr && !c.hasCohereTranscribe;
     bool hasFunAsrTok = !paths.funasrTokenizerDir.empty();
     c.hasFunAsrNano = !paths.funasrEncoderAdaptor.empty() && !paths.funasrLLM.empty() &&
                       !paths.funasrEmbedding.empty() && hasFunAsrTok;
@@ -401,6 +412,7 @@ static void CollectDetectedModels(
         out.push_back({"paraformer", modelDir});
     }
     if (cap.hasWhisper) out.push_back({"whisper", modelDir});
+    if (cap.hasCohereTranscribe) out.push_back({"cohere_transcribe", modelDir});
     if (cap.hasQwen3Asr) out.push_back({"qwen3_asr", modelDir});
     if (cap.hasFunAsrNano) out.push_back({"funasr_nano", modelDir});
     if (cap.hasMoonshine) out.push_back({"moonshine", modelDir});
@@ -465,6 +477,10 @@ static SttModelKind ResolveSttKind(
         }
         if (selected == SttModelKind::kQwen3Asr && !cap.hasQwen3Asr) {
             outError = "Qwen3-ASR model requested but conv_frontend/encoder/decoder/tokenizer not found in " + modelDir;
+            return SttModelKind::kUnknown;
+        }
+        if (selected == SttModelKind::kCohereTranscribe && !cap.hasCohereTranscribeLayout) {
+            outError = "Cohere Transcribe model requested but encoder/decoder/tokens.txt not found in " + modelDir;
             return SttModelKind::kUnknown;
         }
         if (selected == SttModelKind::kMoonshine && !cap.hasMoonshine) {
@@ -534,6 +550,7 @@ static SttModelKind ResolveSttKind(
     if (cap.hasCanary) return SttModelKind::kCanary;
     if (cap.hasFireRedAsr) return SttModelKind::kFireRedAsr;
     if (cap.hasQwen3Asr && hints.isLikelyQwen3Asr) return SttModelKind::kQwen3Asr;
+    if (cap.hasCohereTranscribe) return SttModelKind::kCohereTranscribe;
     if (cap.hasWhisper) return SttModelKind::kWhisper;
     if (cap.hasQwen3Asr) return SttModelKind::kQwen3Asr;
     if (cap.hasFunAsrNano) return SttModelKind::kFunAsrNano;
@@ -586,6 +603,10 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
             resultPaths.qwen3Encoder = candidate.encoder;
             resultPaths.qwen3Decoder = candidate.decoder;
             resultPaths.qwen3Tokenizer = candidate.qwen3TokenizerDir;
+            break;
+        case SttModelKind::kCohereTranscribe:
+            resultPaths.cohereEncoder = candidate.encoder;
+            resultPaths.cohereDecoder = candidate.decoder;
             break;
         case SttModelKind::kMoonshine:
             resultPaths.moonshinePreprocessor = candidate.moonshinePreprocessor;
@@ -662,13 +683,14 @@ SttDetectResult DetectSttModel(
             EmptyOrPath(candidate.funasrEncoderAdaptor), EmptyOrPath(candidate.funasrLLM), EmptyOrPath(candidate.funasrEmbedding), EmptyOrPath(candidate.funasrTokenizerDir));
         LOGI("DetectSttModel: qwen3_asr conv=%s tokenizerDir=%s",
             EmptyOrPath(candidate.qwen3ConvFrontend), EmptyOrPath(candidate.qwen3TokenizerDir));
-        LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d hasQwen3Asr=%d hasDolphin=%d hasFireRedAsr=%d hasFireRedCtc=%d hasCanary=%d hasOmnilingual=%d hasMedAsr=%d hasTeleSpeechCtc=%d hasToneCtc=%d",
+        LOGI("DetectSttModel: hasTransducer=%d hasWhisper=%d hasMoonshine=%d hasMoonshineV2=%d hasParaformer=%d hasFunAsrNano=%d hasQwen3Asr=%d hasCohereLayout=%d hasCohere=%d hasDolphin=%d hasFireRedAsr=%d hasFireRedCtc=%d hasCanary=%d hasOmnilingual=%d hasMedAsr=%d hasTeleSpeechCtc=%d hasToneCtc=%d",
             (int)cap.hasTransducer, (int)cap.hasWhisper, (int)cap.hasMoonshine, (int)cap.hasMoonshineV2,
-            (int)cap.hasParaformer, (int)cap.hasFunAsrNano, (int)cap.hasQwen3Asr, (int)cap.hasDolphin, (int)cap.hasFireRedAsr, (int)cap.hasFireRedCtc,
+            (int)cap.hasParaformer, (int)cap.hasFunAsrNano, (int)cap.hasQwen3Asr, (int)cap.hasCohereTranscribeLayout, (int)cap.hasCohereTranscribe,
+            (int)cap.hasDolphin, (int)cap.hasFireRedAsr, (int)cap.hasFireRedCtc,
             (int)cap.hasCanary, (int)cap.hasOmnilingual, (int)cap.hasMedAsr, (int)cap.hasTeleSpeechCtc, (int)cap.hasToneCtc);
-        LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyQwen3Asr=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d isLikelyVad=%d isLikelyTdnn=%d",
+        LOGI("DetectSttModel: hints isLikelyNemo=%d isLikelyTdt=%d isLikelyWenetCtc=%d isLikelySenseVoice=%d isLikelyFunAsrNano=%d isLikelyQwen3Asr=%d isLikelyCohere=%d isLikelyZipformer=%d isLikelyMoonshine=%d isLikelyDolphin=%d isLikelyFireRedAsr=%d isLikelyCanary=%d isLikelyOmnilingual=%d isLikelyMedAsr=%d isLikelyTeleSpeech=%d isLikelyToneCtc=%d isLikelyParaformer=%d isLikelyVad=%d isLikelyTdnn=%d",
              (int)hints.isLikelyNemo, (int)hints.isLikelyTdt, (int)hints.isLikelyWenetCtc, (int)hints.isLikelySenseVoice,
-             (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyQwen3Asr, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
+             (int)hints.isLikelyFunAsrNano, (int)hints.isLikelyQwen3Asr, (int)hints.isLikelyCohere, (int)hints.isLikelyZipformer, (int)hints.isLikelyMoonshine, (int)hints.isLikelyDolphin,
              (int)hints.isLikelyFireRedAsr, (int)hints.isLikelyCanary, (int)hints.isLikelyOmnilingual, (int)hints.isLikelyMedAsr,
              (int)hints.isLikelyTeleSpeech, (int)hints.isLikelyToneCtc, (int)hints.isLikelyParaformer, (int)hints.isLikelyVad, (int)hints.isLikelyTdnn);
     }
@@ -754,6 +776,10 @@ SttDetectResult DetectSttModel(
             LOGI("DetectSttModel: paths set qwen3_asr conv=%s encoder=%s decoder=%s tokenizer=%s",
                  EmptyOrPath(result.paths.qwen3ConvFrontend), EmptyOrPath(result.paths.qwen3Encoder),
                  EmptyOrPath(result.paths.qwen3Decoder), EmptyOrPath(result.paths.qwen3Tokenizer));
+            break;
+        case SttModelKind::kCohereTranscribe:
+            LOGI("DetectSttModel: paths set cohere_transcribe encoder=%s decoder=%s",
+                 EmptyOrPath(result.paths.cohereEncoder), EmptyOrPath(result.paths.cohereDecoder));
             break;
         default:
             break;

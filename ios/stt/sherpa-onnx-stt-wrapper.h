@@ -92,6 +92,15 @@ struct SttQwen3AsrOptions {
     std::optional<float> temperature;
     std::optional<float> top_p;
     std::optional<int32_t> seed;
+    /** Comma-separated phrases; applied per stream via SetOption (not hotwords_file). Optional. */
+    std::optional<std::string> hotwords;
+};
+
+/** Model-specific options: Cohere Transcribe (OfflineCohereTranscribeModelConfig). */
+struct SttCohereTranscribeOptions {
+    std::optional<std::string> language;
+    std::optional<bool> use_punct;
+    std::optional<bool> use_itn;
 };
 
 /**
@@ -118,7 +127,8 @@ public:
         const SttSenseVoiceOptions* senseVoiceOpts = nullptr,
         const SttCanaryOptions* canaryOpts = nullptr,
         const SttFunAsrNanoOptions* funasrNanoOpts = nullptr,
-        const SttQwen3AsrOptions* qwen3AsrOpts = nullptr
+        const SttQwen3AsrOptions* qwen3AsrOpts = nullptr,
+        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr
     );
 
     SttRecognitionResult transcribeFile(const std::string& filePath);
