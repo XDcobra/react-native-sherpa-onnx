@@ -68,7 +68,8 @@ internal class SherpaOnnxSttHelper(
   /** Normalizes Qwen3-ASR hotwords to a comma-separated string for stream option "hotwords". */
   private fun normalizeQwen3HotwordsCsv(raw: String): String {
     if (raw.isEmpty()) return ""
-    val flat = raw.replace('\r', ' ').replace('\n', ',')
+    // Match iOS: treat \r and \n as phrase separators (then comma-split).
+    val flat = raw.replace('\r', '\n').replace('\n', ',')
     return flat.split(',')
       .map { it.trim() }
       .filter { it.isNotEmpty() }
@@ -344,9 +345,8 @@ internal class SherpaOnnxSttHelper(
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
-      val pathToRead = if (filePath.startsWith("content://")) {
-        tempPath = resolveContentUriToFile(filePath, "stt_transcribe")
-        tempPath
+      val pathToRead: String = if (filePath.startsWith("content://")) {
+        resolveContentUriToFile(filePath, "stt_transcribe").also { tempPath = it }
       } else {
         filePath
       }
@@ -360,7 +360,7 @@ internal class SherpaOnnxSttHelper(
         return
       }
       val wave = WaveReader.readWave(pathToRead)
-      val samples = wave.samples
+      val samples = wave.samples ?: FloatArray(0)
       if (samples.isEmpty()) {
         promise.reject("TRANSCRIBE_ERROR", "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
         return
