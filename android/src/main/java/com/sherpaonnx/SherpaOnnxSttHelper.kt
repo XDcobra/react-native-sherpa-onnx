@@ -23,6 +23,7 @@ import com.k2fsa.sherpa.onnx.OfflineZipformerCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWenetCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineFunAsrNanoModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
+import com.k2fsa.sherpa.onnx.OfflineCohereTranscribeModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineDolphinModelConfig
 import com.k2fsa.sherpa.onnx.OfflineFireRedAsrModelConfig
@@ -48,7 +49,9 @@ internal class SherpaOnnxSttHelper(
   private data class SttEngineInstance(
     @Volatile var recognizer: OfflineRecognizer? = null,
     @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
-    @Volatile var currentSttModelType: String? = null
+    @Volatile var currentSttModelType: String? = null,
+    /** Qwen3-ASR: comma-separated hotwords applied via OfflineStream.setOption (not hotwords_file). */
+    @Volatile var qwen3HotwordsForStream: String = ""
   )
 
   private val instances = ConcurrentHashMap<String, SttEngineInstance>()
@@ -61,6 +64,17 @@ internal class SherpaOnnxSttHelper(
   /** Hotwords are supported for transducer and NeMo transducer models (sherpa-onnx; NeMo: https://github.com/k2-fsa/sherpa-onnx/pull/3077). */
   private fun supportsHotwords(modelType: String): Boolean =
     modelType == "transducer" || modelType == "nemo_transducer"
+
+  /** Normalizes Qwen3-ASR hotwords to a comma-separated string for stream option "hotwords". */
+  private fun normalizeQwen3HotwordsCsv(raw: String): String {
+    if (raw.isEmpty()) return ""
+    // Match iOS: treat \r and \n as phrase separators (then comma-split).
+    val flat = raw.replace('\r', '\n').replace('\n', ',')
+    return flat.split(',')
+      .map { it.trim() }
+      .filter { it.isNotEmpty() }
+      .joinToString(",")
+  }
 
   /**
    * Resolves a single path to a file path. For content URIs (content://...) copies to app cache
@@ -282,6 +296,9 @@ internal class SherpaOnnxSttHelper(
       )
       inst.lastRecognizerConfig = config
       inst.currentSttModelType = modelTypeStr
+      inst.qwen3HotwordsForStream = if (modelTypeStr == "qwen3_asr") {
+        normalizeQwen3HotwordsCsv(modelOptions?.getMap("qwen3Asr")?.getString("hotwords")?.trim().orEmpty())
+      } else ""
       // Defer recognizer creation to the dedicated background thread so release() of the previous
       // recognizer can complete off the UI thread (avoids "destroyed mutex" / SIGSEGV when switching models).
       initHandler.post {
@@ -328,13 +345,12 @@ internal class SherpaOnnxSttHelper(
         promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
         return
       }
-      val pathToRead = if (filePath.startsWith("content://")) {
-        tempPath = resolveContentUriToFile(filePath, "stt_transcribe")
-        tempPath
+      val pathToRead: String = if (filePath.startsWith("content://")) {
+        resolveContentUriToFile(filePath, "stt_transcribe").also { tempPath = it }
       } else {
         filePath
       }
-      if (pathToRead == null || pathToRead.isBlank()) {
+      if (pathToRead.isBlank()) {
         promise.reject("TRANSCRIBE_ERROR", "Could not resolve audio file path")
         return
       }
@@ -344,13 +360,17 @@ internal class SherpaOnnxSttHelper(
         return
       }
       val wave = WaveReader.readWave(pathToRead)
-      val samples = wave.samples
-      if (samples == null || samples.isEmpty()) {
+      val samples = wave.samples ?: FloatArray(0)
+      if (samples.isEmpty()) {
         promise.reject("TRANSCRIBE_ERROR", "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
         return
       }
       val stream: OfflineStream = rec.createStream()
       try {
+        if (inst.currentSttModelType == "qwen3_asr") {
+          val hw = inst.qwen3HotwordsForStream
+          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
+        }
         stream.acceptWaveform(samples, wave.sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
@@ -385,6 +405,10 @@ internal class SherpaOnnxSttHelper(
       val floatSamples = FloatArray(samples.size()) { i -> samples.getDouble(i).toFloat() }
       val stream: OfflineStream = rec.createStream()
       try {
+        if (inst.currentSttModelType == "qwen3_asr") {
+          val hw = inst.qwen3HotwordsForStream
+          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
+        }
         stream.acceptWaveform(floatSamples, sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
@@ -544,7 +568,12 @@ internal class SherpaOnnxSttHelper(
     }
     modelOptions.getMap("qwen3Asr")?.let { q ->
       val mnt = if (q.hasKey("maxNewTokens")) q.getInt("maxNewTokens") else null
-      parts.add("qwen3Asr:maxNewTokens=$mnt")
+      val hasHw = q.hasKey("hotwords") && q.getString("hotwords")?.isNotBlank() == true
+      parts.add("qwen3Asr:maxNewTokens=$mnt,hotwords=$hasHw")
+    }
+    modelOptions.getMap("cohereTranscribe")?.let { c ->
+      val lang = c.getString("language") ?: ""
+      parts.add("cohereTranscribe:lang=$lang")
     }
     return parts.joinToString(";").take(200)
   }
@@ -716,9 +745,24 @@ internal class SherpaOnnxSttHelper(
             maxNewTokens = if (q3?.hasKey("maxNewTokens") == true) q3.getInt("maxNewTokens") else 128,
             temperature = if (q3?.hasKey("temperature") == true) q3.getDouble("temperature").toFloat() else 1e-6f,
             topP = if (q3?.hasKey("topP") == true) q3.getDouble("topP").toFloat() else 0.8f,
-            seed = if (q3?.hasKey("seed") == true) q3.getInt("seed") else 42
+            seed = if (q3?.hasKey("seed") == true) q3.getInt("seed") else 42,
+            hotwords = ""
           ),
           tokens = ""
+        )
+      }
+      "cohere_transcribe" -> {
+        val ct = modelOptions?.getMap("cohereTranscribe")
+        OfflineModelConfig(
+          cohereTranscribe = OfflineCohereTranscribeModelConfig(
+            encoder = path(paths, "cohereEncoder"),
+            decoder = path(paths, "cohereDecoder"),
+            language = ct?.getString("language")?.trim()?.takeIf { it.isNotEmpty() } ?: "en",
+            usePunct = if (ct?.hasKey("usePunct") == true) ct.getBoolean("usePunct") else true,
+            useItn = if (ct?.hasKey("useItn") == true) ct.getBoolean("useItn") else true
+          ),
+          tokens = path(paths, "tokens"),
+          modelType = "cohere_transcribe"
         )
       }
       else -> {

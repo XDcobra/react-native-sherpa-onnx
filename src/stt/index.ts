@@ -260,6 +260,7 @@ export type {
   STTModelType,
   SttModelOptions,
   SttQwen3AsrModelOptions,
+  SttCohereTranscribeModelOptions,
   SttRecognitionResult,
   SttRuntimeConfig,
   SttEngine,
@@ -281,5 +282,7 @@ export {
   FUNASR_NANO_LANGUAGES,
   getFunasrMltNanoLanguages,
   FUNASR_MLT_NANO_LANGUAGES,
+  getCohereTranscribeLanguages,
+  COHERE_TRANSCRIBE_LANGUAGES,
 } from './sttModelLanguages';
 export type { SttModelLanguage, WhisperLanguage } from './sttModelLanguages';

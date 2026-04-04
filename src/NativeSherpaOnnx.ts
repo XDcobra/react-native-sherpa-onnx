@@ -21,7 +21,7 @@ export interface Spec extends TurboModule {
    * @param instanceId - Unique ID for this engine instance (from createSTT)
    * @param modelDir - Absolute path to model directory
    * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'qwen3_asr', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
+   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'qwen3_asr', 'cohere_transcribe', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
    * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
    * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
    * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
@@ -30,7 +30,7 @@ export interface Spec extends TurboModule {
    * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
    * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
    * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
-   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano, qwen3Asr). Only the block for the loaded model type is applied.
+   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano, qwen3Asr, cohereTranscribe). Only the block for the loaded model type is applied.
    * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
    * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
    * @returns Object with success boolean, array of detected models (each with type and modelDir), and optional error when success is false.

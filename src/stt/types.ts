@@ -16,6 +16,7 @@ export type STTModelType =
   | 'whisper'
   | 'funasr_nano'
   | 'qwen3_asr'
+  | 'cohere_transcribe'
   | 'fire_red_asr'
   | 'moonshine'
   | 'dolphin'
@@ -52,6 +53,7 @@ export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'whisper',
   'funasr_nano',
   'qwen3_asr',
+  'cohere_transcribe',
   'fire_red_asr',
   'moonshine',
   'dolphin',
@@ -131,6 +133,11 @@ export interface SttFunAsrNanoModelOptions {
 
 /** Options for Qwen3 ASR models. Applied only when modelType is 'qwen3_asr'. */
 export interface SttQwen3AsrModelOptions {
+  /**
+   * Optional comma-separated hotword phrases (UTF-8). Applied per decode via native stream option
+   * `"hotwords"` — not the same as transducer `hotwordsFile`. Omit when unused.
+   */
+  hotwords?: string;
   /** Max total sequence length. Default: 512. */
   maxTotalLen?: number;
   /** Max new tokens to generate. Default: 128. */
@@ -143,6 +150,16 @@ export interface SttQwen3AsrModelOptions {
   seed?: number;
 }
 
+/** Options for Cohere Transcribe models. Applied only when modelType is 'cohere_transcribe'. */
+export interface SttCohereTranscribeModelOptions {
+  /** Spoken language code (e.g. en, de, zh). Default: "en". */
+  language?: string;
+  /** Punctuation. Default: true. */
+  usePunct?: boolean;
+  /** Inverse text normalization. Default: true. */
+  useItn?: boolean;
+}
+
 /**
  * Model-specific STT options. Only the block for the actually loaded model type is applied;
  * others are ignored (e.g. whisper options have no effect when a paraformer model is loaded).
@@ -153,6 +170,7 @@ export interface SttModelOptions {
   canary?: SttCanaryModelOptions;
   funasrNano?: SttFunAsrNanoModelOptions;
   qwen3Asr?: SttQwen3AsrModelOptions;
+  cohereTranscribe?: SttCohereTranscribeModelOptions;
 }
 
 /**
@@ -183,6 +201,7 @@ export interface STTInitializeOptions {
    * - 'sense_voice': Force detection as SenseVoice model
    * - 'funasr_nano': Force detection as FunASR Nano model
    * - 'qwen3_asr': Force detection as Qwen3 ASR
+   * - 'cohere_transcribe': Cohere Transcribe (encoder/decoder + tokens.txt)
    * - 'fire_red_asr': FireRed ASR (encoder/decoder)
    * - 'moonshine': Moonshine (preprocess, encode, uncached_decode, cached_decode)
    * - 'dolphin': Dolphin (single model)

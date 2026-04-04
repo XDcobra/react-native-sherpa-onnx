@@ -21,6 +21,7 @@ enum class SttModelKind {
     kWhisper,
     kFunAsrNano,
     kQwen3Asr,
+    kCohereTranscribe,
     kFireRedAsr,
     kMoonshine,
     kMoonshineV2,
@@ -74,6 +75,9 @@ struct SttModelPaths {
     std::string qwen3Encoder;
     std::string qwen3Decoder;
     std::string qwen3Tokenizer;
+    /** Cohere Transcribe: encoder + decoder ONNX; tokens.txt in model_config.tokens. */
+    std::string cohereEncoder;
+    std::string cohereDecoder;
     // Moonshine
     std::string moonshinePreprocessor;
     std::string moonshineEncoder;
@@ -124,6 +128,8 @@ struct SttPathHints {
     bool isLikelySenseVoice = false;
     bool isLikelyFunAsrNano = false;
     bool isLikelyQwen3Asr = false;
+    /** Directory name contains cohere / cohere-transcribe (CohereLabs ASR). */
+    bool isLikelyCohere = false;
     bool isLikelyZipformer = false;
     bool isLikelyMoonshine = false;
     bool isLikelyDolphin = false;
@@ -149,6 +155,10 @@ struct SttCapabilities {
     bool hasParaformer = false;
     bool hasFunAsrNano = false;
     bool hasQwen3Asr = false;
+    /** Encoder+decoder+tokens, no joiner, not Qwen3 — structural match for Cohere (explicit type). */
+    bool hasCohereTranscribeLayout = false;
+    /** Auto: layout + directory name suggests Cohere (excludes from Whisper). */
+    bool hasCohereTranscribe = false;
     bool hasDolphin = false;
     bool hasFireRedAsr = false;
     /** True when dir name suggests Fire Red but only a single CTC/paraformer model (no encoder/decoder). Use zipformer_ctc. */

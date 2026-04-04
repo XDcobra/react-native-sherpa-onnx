@@ -129,6 +129,7 @@ SttModelKind SttKindFromString(const std::string& modelType) {
     if (t == "whisper") return SttModelKind::kWhisper;
     if (t == "funasr_nano") return SttModelKind::kFunAsrNano;
     if (t == "qwen3_asr") return SttModelKind::kQwen3Asr;
+    if (t == "cohere_transcribe") return SttModelKind::kCohereTranscribe;
     if (t == "fire_red_asr") return SttModelKind::kFireRedAsr;
     if (t == "moonshine") return SttModelKind::kMoonshine;
     if (t == "moonshine_v2") return SttModelKind::kMoonshineV2;
@@ -153,6 +154,7 @@ std::string SttKindToString(SttModelKind kind) {
         case SttModelKind::kWhisper: return "whisper";
         case SttModelKind::kFunAsrNano: return "funasr_nano";
         case SttModelKind::kQwen3Asr: return "qwen3_asr";
+        case SttModelKind::kCohereTranscribe: return "cohere_transcribe";
         case SttModelKind::kFireRedAsr: return "fire_red_asr";
         case SttModelKind::kMoonshine: return "moonshine";
         case SttModelKind::kMoonshineV2: return "moonshine_v2";
