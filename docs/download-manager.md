@@ -4,24 +4,50 @@ Unified model download and extraction API for public SDK usage.
 
 **Import path:** `react-native-sherpa-onnx/download`
 
+## Peer dependency
+
+`react-native-sherpa-onnx` declares **`@kesha-antonov/react-native-background-downloader` (^4.5.4)** as a peer dependency; install it in your app alongside this package to be able to use the download manager api from this sdk.
+
+## Model ids
+
+Use **`ModelMeta.id`** from **`listModels(category)`** after **`refreshModels(category)`** (or **`getModelById`**). It is the release asset name **without** `.tar.bz2` or `.onnx`. To pick ids by hand, open the GitHub release whose **tag** matches your category (assets list = valid ids + extension):
+
+| `ModelCategory` | Release tag |
+| --- | --- |
+| `Tts` | [`tts-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
+| `Stt`, `Vad` | [`asr-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) |
+| `Diarization` | [`speaker-segmentation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
+| `Enhancement` | [`speech-enhancement-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
+| `Separation` | [`source-separation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
+| `Qnn` | [`asr-models-qnn-binary`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary) |
+| `Alignment` | [`alignment-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models) |
+
 ## Quick Start
 
 ### 1) One call: ensure model is ready
 
 ```ts
-import { ModelCategory, ensureModel, refreshModels } from 'react-native-sherpa-onnx/download';
+import {
+  ModelCategory,
+  ensureModel,
+  refreshModels,
+  type EnsureModelResult,
+  type ModelMeta,
+} from 'react-native-sherpa-onnx/download';
 
-// Load model list from remote/cache so ids resolve.
-await refreshModels(ModelCategory.Stt, { forceRefresh: true });
+// refreshModels --> Promise<ModelMeta[]> — cached list for this category (id, displayName, downloadUrl, bytes, archiveExt, …).
+const models: ModelMeta[] = await refreshModels(ModelCategory.Stt, { forceRefresh: true });
+console.log(models[0]?.id); // could be: sherpa-onnx-whisper-tiny (use m.id for ensureModel / downloadModel)
 
-// Single entry: resumes incomplete download/extract if needed, else downloads + extracts.
-const { modelId, localPath } = await ensureModel(
+// ensureModel --> Promise<EnsureModelResult> — { modelId, localPath }; localPath is the extracted model root.
+const ready: EnsureModelResult = await ensureModel(
   ModelCategory.Stt,
   'sherpa-onnx-whisper-tiny',
   {
     onProgress: (p) => console.log(p.phase, p.percent),
   }
 );
+console.log(ready.localPath); // …/Documents/sherpa-onnx/models/stt/sherpa-onnx-whisper-tiny (pass to native STT init)
 ```
 
 ### 2) Low-level download with explicit pause/resume
@@ -33,9 +59,11 @@ import {
   PauseError,
   pauseDownload,
   resumeDownload,
+  type DownloadResult,
 } from 'react-native-sherpa-onnx/download';
 
-// `run` is a Promise that starts work immediately; it keeps running in parallel.
+// downloadModel --> Promise<DownloadResult> (same shape as EnsureModelResult: { modelId, localPath }).
+// The promise starts work immediately and keeps running until done, paused, or error.
 const run = downloadModel(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium', {
   onProgress: (p) => console.log(p.percent),
 });
@@ -51,7 +79,12 @@ try {
   }
 }
 
-await resumeDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+// resumeDownload --> Promise<DownloadResult> when the full download (+ extract) pipeline finishes.
+const finished: DownloadResult = await resumeDownload(
+  ModelCategory.Tts,
+  'vits-piper-en_US-lessac-medium'
+);
+console.log(finished.localPath); // …/Documents/sherpa-onnx/models/tts/vits-piper-en_US-lessac-medium
 ```
 
 ### 3) Extraction-only flow (archive already on disk)
@@ -63,9 +96,10 @@ import {
   PauseError,
   pauseExtraction,
   resumeExtraction,
+  type DownloadResult,
 } from 'react-native-sherpa-onnx/download';
 
-// Same pattern as download: extraction runs in the background as a Promise.
+// extractModel --> Promise<DownloadResult> — on success, { modelId, localPath } (extracted root).
 const extraction = extractModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 await pauseExtraction(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
@@ -78,14 +112,18 @@ try {
   }
 }
 
-await resumeExtraction(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
+// resumeExtraction --> Promise<DownloadResult> when unpacking completes.
+const unpacked: DownloadResult = await resumeExtraction(
+  ModelCategory.Stt,
+  'sherpa-onnx-whisper-tiny'
+);
+console.log(unpacked.localPath); // …/Documents/sherpa-onnx/models/stt/sherpa-onnx-whisper-tiny
 ```
 
 ## Setup (iOS & Android)
 
 | Topic | Requirement |
 | --- | --- |
-| Downloader | **Peer dependency:** `@kesha-antonov/react-native-background-downloader` (^4.5.4). Install it in your app alongside `react-native-sherpa-onnx`; React Native autolinking only picks up native modules from your app’s direct dependencies. |
 | Android | Foreground service permissions are merged by dependency |
 | Android 13+ | Request `POST_NOTIFICATIONS` at runtime for visible notifications |
 | iOS | Forward background URL session completion in AppDelegate |
@@ -111,9 +149,15 @@ configureBackgroundDownloader({
 
 ## API Reference
 
+Each function below includes a one-line TypeScript signature (exported names match `react-native-sherpa-onnx/download`). Parameter names follow the implementation (`id` is the model id string).
+
 ## High-Level API
 
 ### `ensureModel(category, modelId, options?)`
+
+```ts
+function ensureModel(category: ModelCategory, id: string, opts?: EnsureModelOptions): Promise<EnsureModelResult>;
+```
 
 One-call flow: ready check -> resume extraction -> resume download -> extract archive -> download.
 
@@ -125,6 +169,10 @@ const ready = await ensureModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `refreshModels(category, options?)`
 
+```ts
+function refreshModels(category: ModelCategory, options?: { forceRefresh?: boolean; cacheTtlMinutes?: number; maxRetries?: number; signal?: AbortSignal }): Promise<ModelMeta[]>;
+```
+
 Fetches remote release metadata and updates cache.
 
 ```ts
@@ -132,6 +180,10 @@ await refreshModels(ModelCategory.Tts, { forceRefresh: true });
 ```
 
 ### `listModels(category)`
+
+```ts
+function listModels(category: ModelCategory): Promise<ModelMeta[]>;
+```
 
 Reads cached model list for one category.
 
@@ -141,6 +193,10 @@ const models = await listModels(ModelCategory.Alignment);
 
 ### `getModelById(category, modelId)`
 
+```ts
+function getModelById(category: ModelCategory, modelId: string): Promise<ModelMeta | null>;
+```
+
 Returns one model from the cached list or `null`.
 
 ```ts
@@ -149,6 +205,10 @@ const model = await getModelById(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `getModelsCacheStatus(category)`
 
+```ts
+function getModelsCacheStatus(category: ModelCategory): Promise<CacheStatus>;
+```
+
 Returns cache timestamp metadata.
 
 ```ts
@@ -156,6 +216,10 @@ const status = await getModelsCacheStatus(ModelCategory.Stt);
 ```
 
 ### `clearModelsCache(category)`
+
+```ts
+function clearModelsCache(category: ModelCategory): Promise<void>;
+```
 
 Deletes local cache for a category.
 
@@ -167,6 +231,10 @@ await clearModelsCache(ModelCategory.Stt);
 
 ### `downloadModel(category, modelId, options?)`
 
+```ts
+function downloadModel(category: ModelCategory, id: string, options?: DownloadOptions): Promise<DownloadResult>;
+```
+
 Starts model download and post-processing.
 
 ```ts
@@ -177,6 +245,10 @@ await downloadModel(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium', {
 
 ### `pauseDownload(category, modelId)`
 
+```ts
+function pauseDownload(category: ModelCategory, id: string): Promise<void>;
+```
+
 Pauses an active download and keeps partial bytes.
 
 ```ts
@@ -184,6 +256,10 @@ await pauseDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
 ```
 
 ### `resumeDownload(category, modelId, options?)`
+
+```ts
+function resumeDownload(category: ModelCategory, id: string, options?: DownloadOptions): Promise<DownloadResult>;
+```
 
 Resumes a paused or interrupted download.
 
@@ -193,6 +269,10 @@ await resumeDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
 
 ### `getIncompleteDownloads(category)`
 
+```ts
+function getIncompleteDownloads(category: ModelCategory): Promise<DownloadState[]>;
+```
+
 Lists paused/interrupted downloads in one category.
 
 ```ts
@@ -200,6 +280,10 @@ const pending = await getIncompleteDownloads(ModelCategory.Stt);
 ```
 
 ### `deleteIncompleteDownload(category, modelId)`
+
+```ts
+function deleteIncompleteDownload(category: ModelCategory, id: string): Promise<void>;
+```
 
 Removes partial download artifacts and state.
 
@@ -211,6 +295,10 @@ await deleteIncompleteDownload(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `extractModel(category, modelId, options?)`
 
+```ts
+function extractModel(category: ModelCategory, id: string, options?: ExtractOptions): Promise<DownloadResult>;
+```
+
 Starts extraction from an already available archive.
 
 ```ts
@@ -218,6 +306,10 @@ await extractModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 ```
 
 ### `pauseExtraction(category, modelId)`
+
+```ts
+function pauseExtraction(category: ModelCategory, id: string): Promise<void>;
+```
 
 Pauses an active extraction. Resume metadata is persisted in `.extraction-state-<modelId>.json` as described above.
 
@@ -227,6 +319,10 @@ await pauseExtraction(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `resumeExtraction(category, modelId, options?)`
 
+```ts
+function resumeExtraction(category: ModelCategory, id: string, options?: ExtractOptions): Promise<DownloadResult>;
+```
+
 Resumes a paused or interrupted extraction using the saved `.extraction-state-*.json` (including **`lastEntryIndex`** when present) so native extraction resumes with the correct **`skipEntries`**.
 
 ```ts
@@ -235,6 +331,10 @@ await resumeExtraction(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `getIncompleteExtractions(category)`
 
+```ts
+function getIncompleteExtractions(category: ModelCategory): Promise<ExtractionState[]>;
+```
+
 Lists interrupted extractions in one category.
 
 ```ts
@@ -242,6 +342,10 @@ const extractionStates = await getIncompleteExtractions(ModelCategory.Stt);
 ```
 
 ### `deleteIncompleteExtraction(category, modelId)`
+
+```ts
+function deleteIncompleteExtraction(category: ModelCategory, id: string): Promise<void>;
+```
 
 Removes extraction state and partial output.
 
@@ -253,6 +357,10 @@ await deleteIncompleteExtraction(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `isModelDownloaded(category, modelId)`
 
+```ts
+function isModelDownloaded(category: ModelCategory, id: string): Promise<boolean>;
+```
+
 Checks if model is fully ready.
 
 ```ts
@@ -260,6 +368,10 @@ const ready = await isModelDownloaded(ModelCategory.Alignment, 'sherpa-onnx-wav2
 ```
 
 ### `getModelPath(category, modelId)`
+
+```ts
+function getModelPath(category: ModelCategory, id: string): Promise<string | null>;
+```
 
 Returns resolved local path for model initialization.
 
@@ -269,6 +381,10 @@ const path = await getModelPath(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `listDownloadedModels(category)`
 
+```ts
+function listDownloadedModels(category: ModelCategory): Promise<ModelMeta[]>;
+```
+
 Lists downloaded models (without runtime status fields).
 
 ```ts
@@ -276,6 +392,10 @@ const installed = await listDownloadedModels(ModelCategory.Stt);
 ```
 
 ### `listDownloadedModelsWithMetadata(category)`
+
+```ts
+function listDownloadedModelsWithMetadata(category: ModelCategory): Promise<ModelWithMetadata[]>;
+```
 
 Lists downloaded models with metadata (`downloadedAt`, `lastUsed`, `sizeOnDisk`, `status`).
 
@@ -285,6 +405,10 @@ const entries = await listDownloadedModelsWithMetadata(ModelCategory.Stt);
 
 ### `deleteModel(category, modelId)`
 
+```ts
+function deleteModel(category: ModelCategory, id: string): Promise<void>;
+```
+
 Deletes a fully downloaded model and local artifacts.
 
 ```ts
@@ -293,6 +417,10 @@ await deleteModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 
 ### `updateModelLastUsed(category, modelId)`
 
+```ts
+function updateModelLastUsed(category: ModelCategory, id: string): Promise<void>;
+```
+
 Updates `lastUsed` timestamp in model manifest.
 
 ```ts
@@ -300,6 +428,10 @@ await updateModelLastUsed(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 ```
 
 ### `cleanupLeastRecentlyUsed(category, options?)`
+
+```ts
+function cleanupLeastRecentlyUsed(category: ModelCategory, options?: { targetBytes?: number; maxModelsToDelete?: number; keepCount?: number }): Promise<string[]>;
+```
 
 Deletes least-recently-used models in a category.
 
@@ -311,6 +443,10 @@ await cleanupLeastRecentlyUsed(ModelCategory.Stt, { keepCount: 2 });
 
 ### `purgeAll(options?)`
 
+```ts
+function purgeAll(options?: { protectKeys?: ReadonlySet<string> }): Promise<PurgeAllResult>;
+```
+
 Deletes complete and incomplete artifacts across all categories.
 
 ```ts
@@ -319,6 +455,10 @@ console.log(purge.deletedComplete, purge.skippedProtected);
 ```
 
 ### `getProtectedKeys()`
+
+```ts
+function getProtectedKeys(): Promise<ReadonlySet<string>>;
+```
 
 Returns keys that should not be deleted during bulk operations.
 
@@ -330,6 +470,10 @@ const protectedKeys = await getProtectedKeys();
 
 ### `onProgress(listener)`
 
+```ts
+function onProgress(listener: DownloadProgressListener): () => void;
+```
+
 Subscribes to progress updates; returns unsubscribe function.
 
 ```ts
@@ -339,6 +483,10 @@ const unsubscribe = onProgress((category, modelId, progress) => {
 ```
 
 ### `onModelsListUpdated(listener)`
+
+```ts
+function onModelsListUpdated(listener: ModelsListUpdatedListener): () => void;
+```
 
 Subscribes to registry updates; returns unsubscribe function.
 
@@ -352,6 +500,10 @@ const unsubscribe = onModelsListUpdated((category, models) => {
 
 ### `configureBackgroundDownloader(options)`
 
+```ts
+function configureBackgroundDownloader(options: BackgroundDownloaderSetConfigOptions): void;
+```
+
 Applies downloader runtime config before first download.
 
 ```ts
@@ -359,6 +511,10 @@ configureBackgroundDownloader({ showNotificationsEnabled: true });
 ```
 
 ### `checkDiskSpace(requiredBytes)`
+
+```ts
+function checkDiskSpace(requiredBytes: number): Promise<ValidationResult>;
+```
 
 Checks available storage with safety buffer.
 
@@ -368,6 +524,10 @@ if (!disk.success) console.log(disk.message);
 ```
 
 ### `getStorageBasePath()`
+
+```ts
+function getStorageBasePath(): Promise<string>;
+```
 
 Returns SDK storage base path.
 
@@ -381,15 +541,22 @@ const basePath = await getStorageBasePath();
 
 | Type | Notes |
 | --- | --- |
-| `ModelCategory` | `Tts | Stt | Vad | Diarization | Enhancement | Separation | Qnn | Alignment` |
+| `ModelCategory` | Enum: `Tts`, `Stt`, `Vad`, `Diarization`, `Enhancement`, `Separation`, `Qnn`, `Alignment` |
 | `ModelMeta` | Unified model metadata type (TTS fields are optional) |
 | `Progress` | `{ bytesProcessed, totalBytes, percent, phase, archiveEntryIndex?, speed?, eta? }` |
 | `isActiveExtractionPhase(phase)` | `true` for `extracting` or `extracting_resume_skipping` (e.g. pause-extract UI) |
 | `EnsureModelResult` | `{ modelId, localPath }` |
+| `DownloadResult` | Same shape as `EnsureModelResult` |
 | `DownloadState` | Incomplete download state |
 | `ExtractionState` | Incomplete extraction state; may include `lastEntryIndex` / `lastEntryPath` after `pauseExtraction` for native resume |
 | `ModelWithMetadata` | Installed model + manifest data |
 | `ChecksumMismatchInfo` | Checksum mismatch/failure callback payload |
+| `CacheStatus` | Return type of `getModelsCacheStatus` |
+| `DownloadProgressListener` | `(category, modelId, progress) => void` — parameter of `onProgress` |
+| `ModelsListUpdatedListener` | `(category, models) => void` — parameter of `onModelsListUpdated` |
+| `PurgeAllResult` | Return type of `purgeAll` |
+| `BackgroundDownloaderSetConfigOptions` | Parameter type of `configureBackgroundDownloader` |
+| `ValidationResult` | Return type of `checkDiskSpace` (instance with `success`, optional `error`, `message`) |
 
 ### Option Types
 
