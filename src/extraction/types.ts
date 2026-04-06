@@ -45,16 +45,24 @@ export type ExtractProgressEvent = {
   operationId?: string;
 };
 
-/** Result returned by `extractArchive`. */
-export type ExtractResult = {
-  success: boolean;
-  /** Absolute path to the extracted directory (on success). */
-  path?: string;
-  /** SHA-256 hex digest of the source archive (when available). */
-  sha256?: string;
-  /** Error description (on failure). */
-  reason?: string;
-};
+/**
+ * Result returned by `extractArchive` / `extractTarBz2`.
+ * Failures other than native pause throw; `paused` is returned so callers can persist resume metadata.
+ */
+export type ExtractResult =
+  | {
+      success: true;
+      path?: string;
+      sha256?: string;
+    }
+  | {
+      success: false;
+      paused: true;
+      lastEntryIndex: number;
+      lastEntryPath: string;
+      bytesExtracted: number;
+      reason?: string;
+    };
 
 /** Options for `extractArchive`. */
 export type ExtractArchiveOptions = {

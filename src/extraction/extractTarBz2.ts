@@ -1,6 +1,6 @@
 import { DeviceEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { ExtractNotificationArgs } from './types';
+import type { ExtractNotificationArgs, ExtractResult } from './types';
 
 export type ExtractProgressEvent = {
   bytes: number;
@@ -10,13 +10,6 @@ export type ExtractProgressEvent = {
   operationId?: string;
 };
 
-type ExtractResult = {
-  success: boolean;
-  path?: string;
-  sha256?: string;
-  reason?: string;
-};
-
 export type NativeExtractPathExtra = {
   skipEntries?: number;
   operationId?: string;
@@ -24,6 +17,9 @@ export type NativeExtractPathExtra = {
 
 /**
  * Path-based archive extraction (.tar.bz2 / .tar.zst / … — format auto-detected natively).
+ *
+ * On user pause (`pauseExtraction` / cancel), returns `{ success: false, paused: true, ... }`
+ * with `lastEntryIndex` for resume. Other failures throw.
  */
 export async function extractTarBz2(
   sourcePath: string,
@@ -89,14 +85,32 @@ export async function extractTarBz2(
       notification?.notificationTitle,
       notification?.notificationText
     );
+
+    if (!result.success && result.paused) {
+      if (signal?.aborted) {
+        const err = new Error(result.reason || 'Extraction aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+      return {
+        success: false,
+        paused: true,
+        lastEntryIndex: result.lastEntryIndex,
+        lastEntryPath: result.lastEntryPath ?? '',
+        bytesExtracted: result.bytesExtracted,
+        reason: result.reason,
+      };
+    }
+
     if (!result.success) {
       const message = result.reason || 'Extraction failed';
       const error = new Error(message);
-      if (signal?.aborted || result.paused || /cancel/i.test(message)) {
+      if (signal?.aborted || /cancel/i.test(message)) {
         error.name = 'AbortError';
       }
       throw error;
     }
+
     return {
       success: true,
       path: result.path,

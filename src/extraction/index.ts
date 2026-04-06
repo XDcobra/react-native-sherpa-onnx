@@ -268,10 +268,26 @@ async function extractFromAsset(
       notification?.notificationText
     );
 
+    if (!result.success && result.paused) {
+      if (signal?.aborted) {
+        const err = new Error(result.reason || 'Extraction aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+      return {
+        success: false,
+        paused: true,
+        lastEntryIndex: result.lastEntryIndex,
+        lastEntryPath: result.lastEntryPath ?? '',
+        bytesExtracted: result.bytesExtracted,
+        reason: result.reason,
+      };
+    }
+
     if (!result.success) {
       const message = result.reason ?? 'Extraction failed';
       const error = new Error(message);
-      if (signal?.aborted || result.paused || /cancel/i.test(message)) {
+      if (signal?.aborted || /cancel/i.test(message)) {
         error.name = 'AbortError';
       }
       throw error;
