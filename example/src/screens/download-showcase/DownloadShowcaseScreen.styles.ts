@@ -187,6 +187,27 @@ export const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
   },
+  modelRowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modelRowMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  deleteModelBtn: {
+    minWidth: 72,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteModelBtnText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   modelId: {
     fontSize: 15,
     fontWeight: '500',

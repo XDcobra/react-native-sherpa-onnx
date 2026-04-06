@@ -9,9 +9,12 @@ import {
 import { emitModelsListUpdated } from './downloadEvents';
 import {
   getCachePath,
+  getDownloadStatePath,
+  getExtractionStatePath,
   getManifestPath,
   getModelDir,
   getModelsBaseDir,
+  getNativeAssetExtractedModelDir,
   getOnnxPath,
   getReadyMarkerPath,
   getTarArchivePath,
@@ -23,7 +26,7 @@ import {
   type ModelMeta,
   type ModelWithMetadata,
 } from './types';
-import { resolveActualModelDir } from './validation';
+import { removeDirectoryRecursive, resolveActualModelDir } from './validation';
 
 export async function listDownloadedModels(
   category: ModelCategory
@@ -205,6 +208,8 @@ export async function deleteModel(
   const modelDir = getModelDir(category, id);
   const tarPath = getTarArchivePath(category, id);
   const onnxPath = getOnnxPath(category, id);
+  const downloadStatePath = getDownloadStatePath(category, id);
+  const extractionStatePath = getExtractionStatePath(category, id);
 
   if (await exists(modelDir)) {
     await unlink(modelDir);
@@ -215,6 +220,14 @@ export async function deleteModel(
   if (await exists(onnxPath)) {
     await unlink(onnxPath);
   }
+  if (await exists(downloadStatePath)) {
+    await unlink(downloadStatePath);
+  }
+  if (await exists(extractionStatePath)) {
+    await unlink(extractionStatePath);
+  }
+
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 
   const list = await listDownloadedModels(category);
   emitModelsListUpdated(category, list);

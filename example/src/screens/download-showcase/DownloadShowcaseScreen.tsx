@@ -25,6 +25,7 @@ import {
   pauseExtraction,
   resumeExtraction,
   deleteIncompleteExtraction,
+  deleteModel,
   getIncompleteExtractions,
   isActiveExtractionPhase,
   isPauseError,
@@ -71,6 +72,8 @@ export default function DownloadShowcaseScreen() {
   >(() => ({ [ModelCategory.Tts]: true, [ModelCategory.Stt]: true }));
 
   const [error, setError] = useState<string | null>(null);
+  /** `category:modelId` while deleteModel is in flight for that row */
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   const activeKeyRef = useRef<string | null>(null);
   const lastPhaseRef = useRef<Progress['phase'] | null>(null);
@@ -286,6 +289,33 @@ export default function DownloadShowcaseScreen() {
     setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
   };
 
+  const handleDeleteDownloaded = (cat: ModelCategory, id: string) => {
+    Alert.alert(
+      'Delete model',
+      `Remove "${id}" from this device (extracted files, manifest, and any archive copy in the models folder)?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            const key = `${cat}:${id}`;
+            setDeletingKey(key);
+            setError(null);
+            deleteModel(cat, id)
+              .then(() => loadDownloaded())
+              .catch((err) => {
+                setError(err instanceof Error ? err.message : String(err));
+              })
+              .finally(() => {
+                setDeletingKey((k) => (k === key ? null : k));
+              });
+          },
+        },
+      ]
+    );
+  };
+
   const statusLabel = useMemo(() => {
     if (preparing) return 'Preparing (registry)…';
     if (runPhase === 'paused') return 'Paused — resume or clear';
@@ -485,18 +515,51 @@ export default function DownloadShowcaseScreen() {
                   list.length === 0 ? (
                     <Text style={styles.emptyHint}>No models</Text>
                   ) : (
-                    list.map((m) => (
-                      <View key={m.model.id} style={styles.modelRow}>
-                        <Text style={styles.modelId}>{m.model.id}</Text>
-                        <Text style={styles.modelMeta}>
-                          {m.status}
-                          {m.progress != null
-                            ? ` · ${Math.round(m.progress)}%`
-                            : ''}
-                          {m.sizeOnDisk != null ? ` · ${m.sizeOnDisk} B` : ''}
-                        </Text>
-                      </View>
-                    ))
+                    list.map((m) => {
+                      const rowKey = `${cat}:${m.model.id}`;
+                      const isDeleting = deletingKey === rowKey;
+                      const showDelete = m.status === 'ready';
+                      return (
+                        <View key={m.model.id} style={styles.modelRow}>
+                          <View style={styles.modelRowInner}>
+                            <View style={styles.modelRowMain}>
+                              <Text style={styles.modelId}>{m.model.id}</Text>
+                              <Text style={styles.modelMeta}>
+                                {m.status}
+                                {m.progress != null
+                                  ? ` · ${Math.round(m.progress)}%`
+                                  : ''}
+                                {m.sizeOnDisk != null
+                                  ? ` · ${m.sizeOnDisk} B`
+                                  : ''}
+                              </Text>
+                            </View>
+                            {showDelete ? (
+                              <TouchableOpacity
+                                style={styles.deleteModelBtn}
+                                disabled={isDeleting}
+                                onPress={() =>
+                                  handleDeleteDownloaded(cat, m.model.id)
+                                }
+                                accessibilityRole="button"
+                                accessibilityLabel={`Delete ${m.model.id}`}
+                              >
+                                {isDeleting ? (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color="#FF3B30"
+                                  />
+                                ) : (
+                                  <Text style={styles.deleteModelBtnText}>
+                                    Delete
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    })
                   )
                 ) : null}
               </View>
