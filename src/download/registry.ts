@@ -30,6 +30,7 @@ import {
 import { parseChecksumFile } from './validation';
 import { retryWithBackoff } from './retry';
 import { emitModelsListUpdated } from './downloadEvents';
+import { deriveLanguages } from './deriveTtsLanguages';
 
 const memoryCacheByCategory: Partial<
   Record<ModelCategory, CachePayload<ModelMetaBase>>
@@ -136,25 +137,6 @@ function deriveSizeTier(id: string): SizeTier {
   if (lower.includes('large')) return 'large';
   if (lower.includes('low')) return 'small';
   return 'unknown';
-}
-
-function deriveLanguages(id: string): string[] {
-  const tokens = id.split(/[-_]+/g);
-  const languages = new Set<string>();
-  for (const token of tokens) {
-    if (/^[a-z]{2}$/.test(token)) {
-      languages.add(token);
-      continue;
-    }
-    if (/^[a-z]{2}[A-Z]{2}$/.test(token)) {
-      languages.add(token.slice(0, 2).toLowerCase());
-      continue;
-    }
-    if (/^[a-z]{2}-[A-Z]{2}$/.test(token)) {
-      languages.add(token.slice(0, 2).toLowerCase());
-    }
-  }
-  return Array.from(languages);
 }
 
 function getAssetExtension(name: string): ModelArchiveExt | null {
