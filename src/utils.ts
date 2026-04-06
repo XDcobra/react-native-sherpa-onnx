@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import type { ModelPathConfig } from './types';
 import SherpaOnnx from './NativeSherpaOnnx';
-import { resolveActualModelDir } from './download';
+import { resolveActualModelDir } from './download/validation';
 
 /**
  * Utility functions for model path handling
