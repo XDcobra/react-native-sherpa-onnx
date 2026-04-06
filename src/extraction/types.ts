@@ -39,6 +39,10 @@ export type ExtractProgressEvent = {
   totalBytes: number;
   /** Progress percentage 0–100. */
   percent: number;
+  /** Native archive entry index (resume / diagnostics). */
+  entryIndex?: number;
+  /** Matches `operationId` passed to native `extractArchive` (when emitted). */
+  operationId?: string;
 };
 
 /** Result returned by `extractArchive`. */
@@ -56,6 +60,15 @@ export type ExtractResult = {
 export type ExtractArchiveOptions = {
   /** Overwrite existing files. Defaults to `true`. */
   force?: boolean;
+  /**
+   * Resume: skip the first N archive entries (from a paused native result). Default 0.
+   */
+  skipEntries?: number;
+  /**
+   * Per-operation ID for native cancel (`cancelExtraction`) and progress correlation.
+   * Defaults to `archive.archivePath`.
+   */
+  operationId?: string;
   /** Callback for extraction progress. */
   onProgress?: (event: ExtractProgressEvent) => void;
   /** AbortSignal to cancel the extraction. */

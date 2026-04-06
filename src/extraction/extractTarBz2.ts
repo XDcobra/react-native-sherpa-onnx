@@ -6,6 +6,8 @@ export type ExtractProgressEvent = {
   bytes: number;
   totalBytes: number;
   percent: number;
+  entryIndex?: number;
+  operationId?: string;
 };
 
 type ExtractResult = {
@@ -15,14 +17,26 @@ type ExtractResult = {
   reason?: string;
 };
 
+export type NativeExtractPathExtra = {
+  skipEntries?: number;
+  operationId?: string;
+};
+
+/**
+ * Path-based archive extraction (.tar.bz2 / .tar.zst / … — format auto-detected natively).
+ */
 export async function extractTarBz2(
   sourcePath: string,
   targetPath: string,
   force = true,
   onProgress?: (event: ExtractProgressEvent) => void,
   signal?: AbortSignal,
-  notification?: ExtractNotificationArgs
+  notification?: ExtractNotificationArgs,
+  extra?: NativeExtractPathExtra
 ): Promise<ExtractResult> {
+  const skipEntries = extra?.skipEntries ?? 0;
+  const operationId = extra?.operationId ?? sourcePath;
+
   let subscription: { remove: () => void } | null = null;
   let removeAbortListener: (() => void) | null = null;
 
@@ -34,10 +48,16 @@ export async function extractTarBz2(
 
   if (onProgress) {
     subscription = DeviceEventEmitter.addListener(
-      'extractTarBz2Progress',
+      'extractArchiveProgress',
       (event: ExtractProgressEvent & { sourcePath?: string }) => {
-        // Only handle events for this extraction (fixes parallel extractions showing same %)
         if (event.sourcePath != null && event.sourcePath !== sourcePath) {
+          return;
+        }
+        if (
+          event.operationId != null &&
+          event.operationId !== '' &&
+          event.operationId !== operationId
+        ) {
           return;
         }
         const safePercent = Math.max(0, Math.min(100, event.percent));
@@ -49,9 +69,7 @@ export async function extractTarBz2(
   if (signal) {
     const onAbort = () => {
       try {
-        // Use per-path cancel so aborting this extraction doesn't affect
-        // other extractions that may be running in parallel.
-        SherpaOnnx.cancelExtractBySourcePath(sourcePath);
+        SherpaOnnx.cancelExtraction(operationId);
       } catch {
         // Ignore cancel errors to avoid crashing on abort.
       }
@@ -61,10 +79,12 @@ export async function extractTarBz2(
   }
 
   try {
-    const result = await SherpaOnnx.extractTarBz2(
+    const result = await SherpaOnnx.extractArchive(
       sourcePath,
       targetPath,
       force,
+      skipEntries,
+      operationId,
       notification?.showNotificationsEnabled,
       notification?.notificationTitle,
       notification?.notificationText
@@ -72,12 +92,16 @@ export async function extractTarBz2(
     if (!result.success) {
       const message = result.reason || 'Extraction failed';
       const error = new Error(message);
-      if (signal?.aborted || /cancel/i.test(message)) {
+      if (signal?.aborted || result.paused || /cancel/i.test(message)) {
         error.name = 'AbortError';
       }
       throw error;
     }
-    return result;
+    return {
+      success: true,
+      path: result.path,
+      sha256: result.sha256,
+    };
   } finally {
     subscription?.remove();
     removeAbortListener?.();

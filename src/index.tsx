@@ -2,7 +2,10 @@ import SherpaOnnx from './NativeSherpaOnnx';
 import type { AccelerationSupport } from './NativeSherpaOnnx';
 
 // Export common types and utilities
-export type { AccelerationSupport } from './NativeSherpaOnnx';
+export type {
+  AccelerationSupport,
+  ExtractArchiveResult,
+} from './NativeSherpaOnnx';
 export type { ModelPathConfig } from './types';
 export {
   assetModelPath,
