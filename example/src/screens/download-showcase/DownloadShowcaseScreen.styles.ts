@@ -1,0 +1,210 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#000',
+    backgroundColor: '#FAFAFA',
+    marginBottom: 12,
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '70%',
+    paddingBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5EA',
+  },
+  modalItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F2F2F7',
+  },
+  modalItemText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  progressLabel: {
+    fontSize: 13,
+    color: '#636366',
+    marginBottom: 6,
+  },
+  progressTrack: {
+    height: 8,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+  },
+  progressFillExtract: {
+    backgroundColor: '#34C759',
+  },
+  progressMeta: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: -10,
+    marginBottom: 12,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  btn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPrimary: {
+    backgroundColor: '#007AFF',
+  },
+  btnPrimaryDisabled: {
+    backgroundColor: '#A7C4F2',
+  },
+  btnDanger: {
+    backgroundColor: '#FF3B30',
+  },
+  btnDangerDisabled: {
+    backgroundColor: '#F7A8A3',
+  },
+  btnOutline: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#C7C7CC',
+  },
+  btnTextLight: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  btnTextDark: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    gap: 8,
+  },
+  statusText: {
+    fontSize: 13,
+    color: '#636366',
+    textAlign: 'center',
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  accordionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  accordionChevron: {
+    fontSize: 18,
+    color: '#8E8E93',
+  },
+  modelRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  modelId: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#000',
+  },
+  modelMeta: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: '#8E8E93',
+    paddingVertical: 8,
+  },
+  errorText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#FF3B30',
+  },
+});

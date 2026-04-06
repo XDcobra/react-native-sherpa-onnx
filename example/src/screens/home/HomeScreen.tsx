@@ -38,6 +38,15 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'download_showcase',
+    title: 'Download showcase',
+    description:
+      'Try the download manager: pause, resume, and clear partial installs',
+    icon: 'cloud-download-outline',
+    screen: 'DownloadShowcase',
+    implemented: true,
+  },
+  {
     id: 'enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality (offline)',

@@ -30,10 +30,10 @@ import {
   type AlignmentModelType,
 } from 'react-native-sherpa-onnx/alignment';
 import {
-  listDownloadedModelsByCategory,
+  listDownloadedModels,
   ModelCategory,
-  subscribeModelsListUpdated,
-  type ModelMetaBase,
+  onModelsListUpdated,
+  type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import {
   getAssetModelPath,
@@ -122,7 +122,7 @@ function getFileNameFromUri(uri: string): string {
   return decodeURIComponent(segments[segments.length - 1] ?? 'audio.wav');
 }
 
-function getModelLabel(model: ModelMetaBase): string {
+function getModelLabel(model: ModelMeta): string {
   const title = model.displayName?.trim();
   if (title && title.length > 0) {
     return title;
@@ -231,9 +231,7 @@ export default function GenerateTimestampScreen() {
       setPadModelIds(padFolders);
       setBundledAlignmentFolders(bundledFolders);
 
-      const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
-        ModelCategory.Alignment
-      );
+      const downloaded = await listDownloadedModels(ModelCategory.Alignment);
       const downloadedIds = new Set(downloaded.map((d) => d.id));
       setDownloadedAlignmentIds([...downloadedIds]);
 
@@ -301,7 +299,7 @@ export default function GenerateTimestampScreen() {
   }, [loadAvailableModels]);
 
   useEffect(() => {
-    const unsubscribe = subscribeModelsListUpdated((category) => {
+    const unsubscribe = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Alignment) {
         return;
       }
