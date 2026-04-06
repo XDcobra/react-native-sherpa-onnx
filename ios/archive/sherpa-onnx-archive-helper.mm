@@ -1,8 +1,9 @@
 /**
  * sherpa-onnx-archive-helper.mm
  *
- * Purpose: Extracts .tar.bz2 archives (e.g. downloaded model bundles) to a target directory and
- * computes file SHA-256. Used by the main module for model download and verification on iOS.
+ * Extracts .tar.bz2 / .tar.zst / .tar.gz / .tar.xz archives to a target
+ * directory with resumable extraction support and per-operation cancellation.
+ * Computes SHA-256 of the archive during extraction.
  */
 
 #import "sherpa-onnx-archive-helper.h"
@@ -12,29 +13,30 @@
 #endif
 #import <CommonCrypto/CommonCrypto.h>
 #include <array>
-#include <atomic>
-#include <cstdio>
 #include <mutex>
 #include <set>
 #include <string>
 
+// ── Per-operation cancel state ───────────────────────────────────
+
 static std::mutex g_cancelMutex;
-static std::set<std::string> g_cancelledPaths;
+static std::set<std::string> g_cancelledOperations;
 
-static bool isPathCancelled(const std::string& path) {
+static bool isOperationCancelled(const std::string& opId) {
   std::lock_guard<std::mutex> lock(g_cancelMutex);
-  // If the set contains an empty string, ALL extractions are cancelled (legacy global cancel).
-  return g_cancelledPaths.count("") > 0 || g_cancelledPaths.count(path) > 0;
+  return g_cancelledOperations.count(opId) > 0;
 }
 
-static void clearCancelForPath(const std::string& path) {
+static void clearCancelFlag(const std::string& opId) {
   std::lock_guard<std::mutex> lock(g_cancelMutex);
-  g_cancelledPaths.erase(path);
-  g_cancelledPaths.erase(""); // Clear the global cancel flag too
+  g_cancelledOperations.erase(opId);
 }
+
+// ── Helpers ──────────────────────────────────────────────────────
 
 namespace {
 #ifdef HAVE_LIBARCHIVE
+
 struct ArchiveReadContext {
   FILE* file = nullptr;
   std::array<unsigned char, 64 * 1024> buffer{};
@@ -48,7 +50,6 @@ static la_ssize_t ArchiveReadCallback(struct archive* archive, void* client_data
     archive_set_error(archive, EINVAL, "Invalid read context");
     return -1;
   }
-
   size_t bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file);
   if (bytes > 0) {
     CC_SHA256_Update(&ctx->sha_ctx, ctx->buffer.data(), (CC_LONG)bytes);
@@ -56,35 +57,33 @@ static la_ssize_t ArchiveReadCallback(struct archive* archive, void* client_data
     *buff = ctx->buffer.data();
     return (la_ssize_t)bytes;
   }
-
-  if (feof(ctx->file)) {
-    return 0;
-  }
-
+  if (feof(ctx->file)) return 0;
   archive_set_error(archive, errno, "Read error");
   return -1;
 }
 
-static int ArchiveCloseCallback(struct archive* /* archive */, void* client_data) {
-  (void)client_data;
-  return ARCHIVE_OK;
-}
+static int ArchiveCloseCallback(struct archive*, void*) { return ARCHIVE_OK; }
 
 static void DrainRemainingAndClose(ArchiveReadContext* ctx) {
-  if (!ctx || !ctx->file) {
-    return;
-  }
-
+  if (!ctx || !ctx->file) return;
   size_t bytes = 0;
   while ((bytes = fread(ctx->buffer.data(), 1, ctx->buffer.size(), ctx->file)) > 0) {
     CC_SHA256_Update(&ctx->sha_ctx, ctx->buffer.data(), (CC_LONG)bytes);
     ctx->bytes_read += (long long)bytes;
   }
-
   fclose(ctx->file);
   ctx->file = nullptr;
 }
-#endif
+
+static void ConfigureArchiveFormats(struct archive* a) {
+  archive_read_support_format_tar(a);
+  archive_read_support_filter_bzip2(a);
+  archive_read_support_filter_gzip(a);
+  archive_read_support_filter_xz(a);
+  archive_read_support_filter_zstd(a);
+}
+
+#endif  // HAVE_LIBARCHIVE
 
 static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
   static const char* kHex = "0123456789abcdef";
@@ -98,13 +97,12 @@ static NSString* HexStringFromDigest(const unsigned char* digest, size_t size) {
   return [NSString stringWithUTF8String:out.c_str()];
 }
 
-static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
+static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) {
   const char* path = [filePath UTF8String];
   FILE* file = fopen(path, "rb");
   if (!file) {
     if (error) {
-      *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                   code:5
+      *error = [NSError errorWithDomain:@"SherpaOnnx" code:5
                                userInfo:@{NSLocalizedDescriptionKey: @"Failed to open file"}];
     }
     return nil;
@@ -122,8 +120,7 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   if (ferror(file)) {
     fclose(file);
     if (error) {
-      *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                   code:6
+      *error = [NSError errorWithDomain:@"SherpaOnnx" code:6
                                userInfo:@{NSLocalizedDescriptionKey: @"Read error while hashing file"}];
     }
     return nil;
@@ -135,201 +132,240 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   CC_SHA256_Final(digest, &sha_ctx);
   return HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
 }
+
 }  // namespace
+
+// ── Implementation ──────────────────────────────────────────────
 
 @implementation SherpaOnnxArchiveHelper
 
-+ (void)cancelExtractTarBz2
-{
-#ifdef HAVE_LIBARCHIVE
-  std::lock_guard<std::mutex> lock(g_cancelMutex);
-  g_cancelledPaths.insert(""); // Empty string = cancel ALL
-#else
-  // feature disabled
-#endif
-}
-
-+ (void)cancelExtractTarZst
-{
-#ifdef HAVE_LIBARCHIVE
-  std::lock_guard<std::mutex> lock(g_cancelMutex);
-  g_cancelledPaths.insert(""); // Empty string = cancel ALL
-#else
-  // feature disabled
-#endif
-}
-
-+ (void)cancelExtractForPath:(NSString *)sourcePath
-{
-#ifdef HAVE_LIBARCHIVE
-  std::string path = [sourcePath UTF8String] ?: "";
-  if (!path.empty()) {
++ (void)cancelOperation:(NSString *)operationId {
+  std::string opId = [operationId UTF8String] ?: "";
+  if (!opId.empty()) {
     std::lock_guard<std::mutex> lock(g_cancelMutex);
-    g_cancelledPaths.insert(path);
+    g_cancelledOperations.insert(opId);
   }
-#else
-  // feature disabled
-#endif
 }
 
-- (NSDictionary *)extractTarBz2:(NSString *)sourcePath
-         targetPath:(NSString *)targetPath
-           force:(BOOL)force
-           progress:(SherpaOnnxArchiveProgressBlock)progress
+- (NSDictionary *)extract:(NSString *)sourcePath
+                targetPath:(NSString *)targetPath
+                     force:(BOOL)force
+               skipEntries:(int)skipEntries
+               operationId:(NSString *)operationId
+                  progress:(SherpaOnnxArchiveProgressBlock)progress
 {
 #ifndef HAVE_LIBARCHIVE
-  return @{ @"success": @NO, @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1." };
+  return @{
+    @"success": @NO,
+    @"paused": @NO,
+    @"lastEntryIndex": @(-1),
+    @"bytesExtracted": @(0),
+    @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1."
+  };
 #else
-  std::string sourcePathStr = [sourcePath UTF8String] ?: "";
-  clearCancelForPath(sourcePathStr);
-  NSFileManager *fileManager = [NSFileManager defaultManager];
+  std::string opId = [operationId UTF8String] ?: "";
+  clearCancelFlag(opId);
 
-  if (![fileManager fileExistsAtPath:sourcePath]) {
-    return @{ @"success": @NO, @"reason": @"Source file does not exist" };
+  NSFileManager *fm = [NSFileManager defaultManager];
+
+  if (![fm fileExistsAtPath:sourcePath]) {
+    return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+              @"bytesExtracted": @(0), @"reason": @"Source file does not exist" };
   }
 
-  if ([fileManager fileExistsAtPath:targetPath]) {
-    if (force) {
-      NSError *removeError = nil;
-      [fileManager removeItemAtPath:targetPath error:&removeError];
-      if (removeError) {
-        return @{ @"success": @NO, @"reason": removeError.localizedDescription ?: @"Failed to remove target" };
+  // ── Prepare target ──
+  BOOL isDir = NO;
+  if ([fm fileExistsAtPath:targetPath isDirectory:&isDir]) {
+    if (isDir) {
+      // Merge: extract into existing directory (supports resume)
+    } else if (force) {
+      NSError *err = nil;
+      [fm removeItemAtPath:targetPath error:&err];
+      if (err) {
+        return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+                  @"bytesExtracted": @(0), @"reason": err.localizedDescription ?: @"Failed to remove target" };
       }
     } else {
-      return @{ @"success": @NO, @"reason": @"Target path already exists" };
+      return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+                @"bytesExtracted": @(0), @"reason": @"Target path already exists" };
     }
   }
 
-  NSError *mkdirError = nil;
-  [fileManager createDirectoryAtPath:targetPath withIntermediateDirectories:YES attributes:nil error:&mkdirError];
-  if (mkdirError) {
-    return @{ @"success": @NO, @"reason": mkdirError.localizedDescription ?: @"Failed to create target directory" };
+  NSError *mkdirErr = nil;
+  [fm createDirectoryAtPath:targetPath withIntermediateDirectories:YES attributes:nil error:&mkdirErr];
+  if (mkdirErr) {
+    return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+              @"bytesExtracted": @(0), @"reason": mkdirErr.localizedDescription ?: @"Failed to create target directory" };
   }
 
   NSString *canonicalTarget = [[targetPath stringByStandardizingPath] stringByAppendingString:@"/"];
 
-  NSDictionary *fileAttributes = [fileManager attributesOfItemAtPath:sourcePath error:nil];
-  long long totalBytes = [[fileAttributes objectForKey:NSFileSize] longLongValue];
+  NSDictionary *attrs = [fm attributesOfItemAtPath:sourcePath error:nil];
+  long long totalBytes = [[attrs objectForKey:NSFileSize] longLongValue];
 
+  // ── Open archive ──
   struct archive *archive = archive_read_new();
-  archive_read_support_format_tar(archive);
-  archive_read_support_filter_bzip2(archive);
-  archive_read_support_filter_zstd(archive);
+  ConfigureArchiveFormats(archive);
 
   ArchiveReadContext read_ctx;
   read_ctx.file = fopen([sourcePath UTF8String], "rb");
   if (!read_ctx.file) {
-    return @{ @"success": @NO, @"reason": @"Failed to open archive file" };
+    archive_read_free(archive);
+    return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+              @"bytesExtracted": @(0), @"reason": @"Failed to open archive file" };
   }
-  auto close_reader = [&read_ctx]() {
-    DrainRemainingAndClose(&read_ctx);
-  };
+
+  auto close_reader = [&read_ctx]() { DrainRemainingAndClose(&read_ctx); };
   CC_SHA256_Init(&read_ctx.sha_ctx);
 
   if (archive_read_open(archive, &read_ctx, nullptr, ArchiveReadCallback, ArchiveCloseCallback) != ARCHIVE_OK) {
-    const char *errorStr = archive_error_string(archive);
-    NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to open archive";
+    const char *errStr = archive_error_string(archive);
+    NSString *reason = errStr ? [NSString stringWithUTF8String:errStr] : @"Failed to open archive";
     close_reader();
     archive_read_free(archive);
-    return @{ @"success": @NO, @"reason": reason };
+    return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(-1),
+              @"bytesExtracted": @(0), @"reason": reason };
   }
 
   struct archive *disk = archive_write_disk_new();
-  archive_write_disk_set_options(disk, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
+  archive_write_disk_set_options(disk,
+      ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
   archive_write_disk_set_standard_lookup(disk);
 
+  // ── Extract loop ──
   struct archive_entry *entry = nullptr;
   int result = ARCHIVE_OK;
   long long extractedBytes = 0;
   int lastPercent = -1;
   long long lastEmitBytes = 0;
+  int entryIndex = 0;
+  int lastExtractedIndex = -1;
+  NSString *lastExtractedPath = @"";
+
   while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
-    if (isPathCancelled(sourcePathStr)) {
+    // ── Cancel check ──
+    if (isOperationCancelled(opId)) {
       archive_read_free(archive);
       archive_write_free(disk);
-      close_reader();
-      clearCancelForPath(sourcePathStr);
-      return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
+      if (read_ctx.file) { fclose(read_ctx.file); read_ctx.file = nullptr; }
+      return @{ @"success": @NO, @"paused": @YES,
+                @"lastEntryIndex": @(lastExtractedIndex),
+                @"lastEntryPath": lastExtractedPath,
+                @"bytesExtracted": @(extractedBytes) };
     }
+
+    // ── Skip phase (resume) ──
+    if (entryIndex < skipEntries) {
+      archive_read_data_skip(archive);
+
+      if (progress && totalBytes > 0) {
+        long long compressed = archive_filter_bytes(archive, -1);
+        int pct = (int)((compressed * 100) / totalBytes);
+        pct = MAX(0, MIN(100, pct));
+        if (pct != lastPercent) {
+          lastPercent = pct;
+          progress(compressed, totalBytes, (double)pct, entryIndex);
+        }
+      }
+
+      entryIndex++;
+      continue;
+    }
+
+    // ── Get entry path ──
     const char *currentPath = archive_entry_pathname(entry);
     NSString *entryPath = currentPath ? [NSString stringWithUTF8String:currentPath] : @"";
     NSString *fullPath = [[targetPath stringByAppendingPathComponent:entryPath] stringByStandardizingPath];
 
+    // ── Security check ──
     if (![fullPath hasPrefix:canonicalTarget]) {
       archive_read_free(archive);
       archive_write_free(disk);
       close_reader();
-      return @{ @"success": @NO, @"reason": @"Blocked path traversal" };
+      return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(lastExtractedIndex),
+                @"bytesExtracted": @(extractedBytes), @"reason": @"Blocked path traversal" };
     }
 
+    // ── Write header ──
     archive_entry_set_pathname(entry, [fullPath UTF8String]);
     result = archive_write_header(disk, entry);
     if (result != ARCHIVE_OK) {
-      const char *errorStr = archive_error_string(disk);
-      NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to write entry";
+      const char *errStr = archive_error_string(disk);
+      NSString *reason = errStr ? [NSString stringWithUTF8String:errStr] : @"Failed to write entry";
       archive_read_free(archive);
       archive_write_free(disk);
       close_reader();
-      return @{ @"success": @NO, @"reason": reason };
+      return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(lastExtractedIndex),
+                @"bytesExtracted": @(extractedBytes), @"reason": reason };
     }
 
+    // ── Write data ──
     const void *buff = nullptr;
     size_t size = 0;
     la_int64_t offset = 0;
+
     while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
-      if (isPathCancelled(sourcePathStr)) {
+      if (isOperationCancelled(opId)) {
         archive_read_free(archive);
         archive_write_free(disk);
-        close_reader();
-        clearCancelForPath(sourcePathStr);
-        return @{ @"success": @NO, @"reason": @"Extraction cancelled" };
+        if (read_ctx.file) { fclose(read_ctx.file); read_ctx.file = nullptr; }
+        return @{ @"success": @NO, @"paused": @YES,
+                  @"lastEntryIndex": @(lastExtractedIndex),
+                  @"lastEntryPath": lastExtractedPath,
+                  @"bytesExtracted": @(extractedBytes) };
       }
-      la_ssize_t writeResult = archive_write_data_block(disk, buff, size, offset);
-      if (writeResult != ARCHIVE_OK) {
-        const char *errorStr = archive_error_string(disk);
-        NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to write data";
+
+      la_ssize_t wr = archive_write_data_block(disk, buff, size, offset);
+      if (wr != ARCHIVE_OK) {
+        const char *errStr = archive_error_string(disk);
+        NSString *reason = errStr ? [NSString stringWithUTF8String:errStr] : @"Failed to write data";
         archive_read_free(archive);
         archive_write_free(disk);
         close_reader();
-        return @{ @"success": @NO, @"reason": reason };
+        return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(lastExtractedIndex),
+                  @"bytesExtracted": @(extractedBytes), @"reason": reason };
       }
 
       extractedBytes += (long long)size;
+
       if (progress) {
         if (totalBytes > 0) {
-          long long compressedBytes = archive_filter_bytes(archive, -1);
-          int percent = (int)((compressedBytes * 100) / totalBytes);
-          if (percent > 100) {
-            percent = 100;
-          } else if (percent < 0) {
-            percent = 0;
-          }
-          if (percent != lastPercent) {
-            lastPercent = percent;
-            progress(compressedBytes, totalBytes, (double)percent);
+          long long compressed = archive_filter_bytes(archive, -1);
+          int pct = (int)((compressed * 100) / totalBytes);
+          pct = MAX(0, MIN(100, pct));
+          if (pct != lastPercent) {
+            lastPercent = pct;
+            progress(compressed, totalBytes, (double)pct, entryIndex);
           }
         } else if (extractedBytes - lastEmitBytes >= 1024 * 1024) {
           lastEmitBytes = extractedBytes;
-          progress(extractedBytes, totalBytes, 0.0);
+          progress(extractedBytes, totalBytes, 0.0, entryIndex);
         }
       }
     }
 
     if (result != ARCHIVE_EOF && result != ARCHIVE_OK) {
-      const char *errorStr = archive_error_string(archive);
-      NSString *reason = errorStr ? [NSString stringWithUTF8String:errorStr] : @"Failed to read data";
+      const char *errStr = archive_error_string(archive);
+      NSString *reason = errStr ? [NSString stringWithUTF8String:errStr] : @"Failed to read data";
       archive_read_free(archive);
       archive_write_free(disk);
       close_reader();
-      return @{ @"success": @NO, @"reason": reason };
+      return @{ @"success": @NO, @"paused": @NO, @"lastEntryIndex": @(lastExtractedIndex),
+                @"bytesExtracted": @(extractedBytes), @"reason": reason };
     }
+
+    // ── Mark entry as fully extracted ──
+    lastExtractedIndex = entryIndex;
+    lastExtractedPath = entryPath;
+    entryIndex++;
   }
 
+  // ── Cleanup & finalize ──
   archive_read_free(archive);
   archive_write_free(disk);
 
   if (progress) {
-    progress(extractedBytes, extractedBytes, 100.0);
+    progress(extractedBytes, extractedBytes, 100.0, entryIndex - 1);
   }
 
   close_reader();
@@ -338,22 +374,22 @@ static NSString* ComputeFileSha256(NSString* filePath, NSError** error) {
   CC_SHA256_Final(digest, &read_ctx.sha_ctx);
   NSString *sha256Hex = HexStringFromDigest(digest, CC_SHA256_DIGEST_LENGTH);
 
-  return @{ @"success": @YES, @"path": targetPath, @"sha256": sha256Hex ?: @"" };
-#endif
-}
-
-- (NSDictionary *)extractTarZst:(NSString *)sourcePath
-                     targetPath:(NSString *)targetPath
-                          force:(BOOL)force
-                       progress:(SherpaOnnxArchiveProgressBlock)progress
-{
-  return [self extractTarBz2:sourcePath targetPath:targetPath force:force progress:progress];
+  return @{
+    @"success": @YES,
+    @"paused": @NO,
+    @"lastEntryIndex": @(lastExtractedIndex),
+    @"lastEntryPath": lastExtractedPath,
+    @"bytesExtracted": @(extractedBytes),
+    @"path": targetPath,
+    @"sha256": sha256Hex ?: @""
+  };
+#endif  // HAVE_LIBARCHIVE
 }
 
 - (NSString *)computeFileSha256:(NSString *)filePath
                            error:(NSError * _Nullable * _Nullable)error
 {
-  return ComputeFileSha256(filePath, error);
+  return ComputeFileSha256Internal(filePath, error);
 }
 
 @end
