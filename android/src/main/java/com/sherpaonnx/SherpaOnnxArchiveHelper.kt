@@ -1,7 +1,6 @@
 package com.sherpaonnx
 
 import android.content.Context
-import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import java.util.concurrent.ExecutorService
@@ -37,7 +36,7 @@ class SherpaOnnxArchiveHelper {
     skipEntries: Int,
     operationId: String,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double, entryIndex: Int) -> Unit,
     extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
     extractExecutor.execute {
@@ -45,8 +44,8 @@ class SherpaOnnxArchiveHelper {
       try {
         notif?.start()
         val wrappedCallback = object : Any() {
-          fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
-            onProgress(bytesExtracted, totalBytes, percent)
+          fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double, entryIndex: Int) {
+            onProgress(bytesExtracted, totalBytes, percent, entryIndex)
             notif?.updateProgress(percent)
           }
         }
@@ -76,7 +75,7 @@ class SherpaOnnxArchiveHelper {
     skipEntries: Int,
     operationId: String,
     promise: Promise,
-    onProgress: (bytes: Long, totalBytes: Long, percent: Double) -> Unit,
+    onProgress: (bytes: Long, totalBytes: Long, percent: Double, entryIndex: Int) -> Unit,
     extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
   ) {
     extractExecutor.execute {
@@ -84,8 +83,8 @@ class SherpaOnnxArchiveHelper {
       try {
         notif?.start()
         val progressCallback = object : Any() {
-          fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double) {
-            onProgress(bytesExtracted, totalBytes, percent)
+          fun invoke(bytesExtracted: Long, totalBytes: Long, percent: Double, entryIndex: Int) {
+            onProgress(bytesExtracted, totalBytes, percent, entryIndex)
             notif?.updateProgress(percent)
           }
         }

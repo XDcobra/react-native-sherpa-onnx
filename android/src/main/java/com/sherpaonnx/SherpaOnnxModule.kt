@@ -323,8 +323,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       skipEntries.toInt(),
       operationId,
       promise,
-      { bytes, total, percent ->
-        emitExtractProgress(operationId, sourcePath, bytes, total, percent)
+      { bytes, total, percent, entryIndex ->
+        emitExtractProgress(operationId, sourcePath, bytes, total, percent, entryIndex)
       },
       notif,
     )
@@ -345,6 +345,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bytes: Long,
     totalBytes: Long,
     percent: Double,
+    entryIndex: Int,
   ) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -354,6 +355,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     payload.putDouble("bytes", bytes.toDouble())
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
+    payload.putInt("entryIndex", entryIndex)
     eventEmitter.emit("extractArchiveProgress", payload)
   }
 
@@ -1313,8 +1315,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       skipEntries.toInt(),
       operationId,
       promise,
-      { bytes, total, percent ->
-        emitExtractProgress(operationId, assetPath, bytes, total, percent)
+      { bytes, total, percent, entryIndex ->
+        emitExtractProgress(operationId, assetPath, bytes, total, percent, entryIndex)
       },
       notif,
     )

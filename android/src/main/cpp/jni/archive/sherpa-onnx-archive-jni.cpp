@@ -97,7 +97,13 @@ static ArchiveHelper::ProgressCallback MakeProgressCallback(
     }
 
     if (env) {
-      env->CallVoidMethod(j_callback_global, method, bytes, total, percent);
+      env->CallVoidMethod(
+          j_callback_global,
+          method,
+          static_cast<jlong>(bytes),
+          static_cast<jlong>(total),
+          static_cast<jdouble>(percent),
+          static_cast<jint>(entry_index));
       if (env->ExceptionCheck()) env->ExceptionClear();
       if (should_detach) g_vm->DetachCurrentThread();
     }
@@ -115,6 +121,7 @@ struct InputStreamReadContext {
 };
 
 static std::ptrdiff_t JniStreamRead(void* buf, size_t len, void* user_data) {
+  (void)len;
   auto* ctx = static_cast<InputStreamReadContext*>(user_data);
   if (!ctx || !ctx->env || !ctx->stream_global || !ctx->read_method || !ctx->byte_array) {
     return -1;
@@ -158,7 +165,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtract(
   jobject callback_global = nullptr;
   if (j_progress_callback) {
     jclass cb_class = env->GetObjectClass(j_progress_callback);
-    progress_method = env->GetMethodID(cb_class, "invoke", "(JJD)V");
+    progress_method = env->GetMethodID(cb_class, "invoke", "(JJDI)V");
     env->DeleteLocalRef(cb_class);
     callback_global = env->NewGlobalRef(j_progress_callback);
   }
@@ -229,7 +236,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractFromStream(
   jobject callback_global = nullptr;
   if (j_progress_callback) {
     jclass cb_class = env->GetObjectClass(j_progress_callback);
-    progress_method = env->GetMethodID(cb_class, "invoke", "(JJD)V");
+    progress_method = env->GetMethodID(cb_class, "invoke", "(JJDI)V");
     env->DeleteLocalRef(cb_class);
     callback_global = env->NewGlobalRef(j_progress_callback);
   }

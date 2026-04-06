@@ -12,6 +12,7 @@
 #import <archive_entry.h>
 #endif
 #import <CommonCrypto/CommonCrypto.h>
+#import <Foundation/Foundation.h>
 #include <array>
 #include <mutex>
 #include <set>
@@ -245,6 +246,12 @@ static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) 
   while ((result = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
     // ── Cancel check ──
     if (isOperationCancelled(opId)) {
+      if (entryIndex > 0) {
+        const int candidate = entryIndex - 1;
+        if (candidate > lastExtractedIndex) {
+          lastExtractedIndex = candidate;
+        }
+      }
       archive_read_free(archive);
       archive_write_free(disk);
       if (read_ctx.file) { fclose(read_ctx.file); read_ctx.file = nullptr; }
@@ -306,6 +313,12 @@ static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) 
 
     while ((result = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
       if (isOperationCancelled(opId)) {
+        if (entryIndex > 0) {
+          const int candidate = entryIndex - 1;
+          if (candidate > lastExtractedIndex) {
+            lastExtractedIndex = candidate;
+          }
+        }
         archive_read_free(archive);
         archive_write_free(disk);
         if (read_ctx.file) { fclose(read_ctx.file); read_ctx.file = nullptr; }

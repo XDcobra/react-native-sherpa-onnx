@@ -11,12 +11,12 @@
 #include <archive.h>
 #include <archive_entry.h>
 #endif
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
 #include <cstdio>
-#include <android/log.h>
 #include "crypto/sha256.h"
 
 // ── Cancel state ─────────────────────────────────────────────────
@@ -107,7 +107,8 @@ struct StreamReadContext {
   void* user_data = nullptr;
 };
 
-static la_ssize_t StreamReadCallback(struct archive* archive, void* client_data, const void** buff) {
+/** Libarchive read callback; must not share a name with ArchiveHelper::StreamReadCallback (type alias). */
+static la_ssize_t LibarchiveStreamRead(struct archive* archive, void* client_data, const void** buff) {
   auto* ctx = static_cast<StreamReadContext*>(client_data);
   if (!ctx || !ctx->read_cb) {
     archive_set_error(archive, EINVAL, "Invalid stream read context");
@@ -125,7 +126,7 @@ static la_ssize_t StreamReadCallback(struct archive* archive, void* client_data,
   return -1;
 }
 
-static int StreamCloseCallback(struct archive*, void*) { return ARCHIVE_OK; }
+static int LibarchiveStreamClose(struct archive*, void*) { return ARCHIVE_OK; }
 
 // ── Shared extraction core ──────────────────────────────────────
 
@@ -157,7 +158,12 @@ static ExtractionResult ExtractEntries(
     // ── Cancel check ──
     if (ArchiveHelper::IsOperationCancelled(operation_id)) {
       result.paused = true;
-      // last_entry_index was set by the previous iteration (or stays -1)
+      // After resume skip, last_entry_index is still -1 until we finish an entry; last fully done is
+      // entry_index - 1 (header for `entry_index` not processed yet).
+      if (entry_index > 0) {
+        result.last_entry_index =
+            std::max(result.last_entry_index, entry_index - 1);
+      }
       return result;
     }
 
@@ -236,9 +242,12 @@ static ExtractionResult ExtractEntries(
 
     while ((r = archive_read_data_block(archive, &buff, &size, &offset)) == ARCHIVE_OK) {
       if (ArchiveHelper::IsOperationCancelled(operation_id)) {
-        // Paused mid-entry: report the PREVIOUS fully completed entry
         result.paused = true;
-        // last_entry_index / last_entry_path were set after the previous completed entry
+        // Same as header pause: last fully extracted index is entry_index - 1 (current entry incomplete).
+        if (entry_index > 0) {
+          result.last_entry_index =
+              std::max(result.last_entry_index, entry_index - 1);
+        }
         return result;
       }
 
@@ -519,7 +528,8 @@ ExtractionResult ArchiveHelper::ExtractFromStream(
   stream_ctx.user_data = read_user_data;
   sha256_init(&stream_ctx.sha_ctx);
 
-  if (archive_read_open(archive, &stream_ctx, nullptr, StreamReadCallback, StreamCloseCallback) != ARCHIVE_OK) {
+  if (archive_read_open(archive, &stream_ctx, nullptr, LibarchiveStreamRead, LibarchiveStreamClose) !=
+      ARCHIVE_OK) {
     const char* err = archive_error_string(archive);
     result.error = err ? std::string("Failed to open archive: ") + err : "Failed to open archive";
     archive_read_free(archive);
