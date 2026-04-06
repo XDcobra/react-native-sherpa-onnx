@@ -131,7 +131,7 @@ Extracts one archive into `targetPath`. Handles both source types transparently:
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `force` | `boolean` | `true` | Overwrite existing files in `targetPath` |
-| `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent }`. Correctly handles parallel extractions by filtering by source path. |
+| `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent, entryIndex? }`. `entryIndex` is the 0-based archive entry when native emits it (Android path/stream, iOS path). Parallel extractions are filtered by source path / `operationId`. |
 | `signal` | `AbortSignal` | — | Cancel extraction (throws `AbortError`). Cancellation is **per-operation**, so cancelling one archive won't affect others. |
 | `showNotificationsEnabled` | `boolean` | `true` | **Android:** Native `NotificationManager` progress notification during extraction (updated on the native thread). Set `false` to disable (e.g. first-run prep with in-app UI only). **iOS:** Ignored; no extraction progress notification is shown. |
 | `notificationTitle` | `string` | generic | **Android:** Notification title. **iOS:** Ignored. |
@@ -173,6 +173,7 @@ type ExtractProgressEvent = {
   bytes: number;
   totalBytes: number;
   percent: number;       // 0–100
+  entryIndex?: number;   // 0-based archive entry (when native provides it)
 };
 ```
 
