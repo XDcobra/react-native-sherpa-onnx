@@ -16,6 +16,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-helper.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-stt.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-tts.cpp"
+  "${MODEL_DETECT_DIR}/sherpa-onnx-tts-catalog-hints.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-enhancement.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-validate-stt.cpp"
   "${MODEL_DETECT_DIR}/sherpa-onnx-validate-tts.cpp"
@@ -25,6 +26,7 @@ set(PRODUCTION_SOURCES
 add_executable(model_detect_test
   "${MODEL_DETECT_TEST_DIR}/model_detect_test.cpp"
   "${MODEL_DETECT_TEST_DIR}/model_detect_test_utils.cpp"
+  "${MODEL_DETECT_TEST_DIR}/tts_catalog_hints_test.cpp"
 )
 
 target_sources(model_detect_test PRIVATE ${PRODUCTION_SOURCES})
