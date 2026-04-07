@@ -15,103 +15,14 @@ import type {
 import type { StreamingTtsEngine } from './streamingTypes';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+import {
+  expandTtsInitializeOptions,
+  flattenTtsModelOptionsForNative,
+  toNativeTtsGenerationOptions,
+} from './ttsNativeBridge';
 
 let streamingTtsInstanceCounter = 0;
 let ttsRequestIdCounter = 0;
-
-/**
- * Flatten model-specific options for the given model type to native init params.
- */
-function flattenTtsModelOptionsForNative(
-  modelType: TTSModelType | undefined,
-  modelOptions: TtsModelOptions | undefined
-): {
-  noiseScale: number | undefined;
-  noiseScaleW: number | undefined;
-  lengthScale: number | undefined;
-} {
-  if (
-    !modelOptions ||
-    !modelType ||
-    modelType === 'auto' ||
-    modelType === 'zipvoice'
-  )
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const block =
-    modelType === 'vits'
-      ? modelOptions.vits
-      : modelType === 'matcha'
-      ? modelOptions.matcha
-      : modelType === 'kokoro'
-      ? modelOptions.kokoro
-      : modelType === 'kitten'
-      ? modelOptions.kitten
-      : modelType === 'pocket'
-      ? modelOptions.pocket
-      : modelType === 'supertonic'
-      ? modelOptions.supertonic
-      : undefined;
-  if (!block)
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const n = block as {
-    noiseScale?: number;
-    noiseScaleW?: number;
-    lengthScale?: number;
-  };
-  return {
-    noiseScale:
-      n.noiseScale !== undefined && typeof n.noiseScale === 'number'
-        ? n.noiseScale
-        : undefined,
-    noiseScaleW:
-      n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number'
-        ? n.noiseScaleW
-        : undefined,
-    lengthScale:
-      n.lengthScale !== undefined && typeof n.lengthScale === 'number'
-        ? n.lengthScale
-        : undefined,
-  };
-}
-
-function toNativeTtsOptions(
-  options?: TtsGenerationOptions
-): Record<string, unknown> {
-  if (options == null) return {};
-  const out: Record<string, unknown> = {};
-  if (options.sid !== undefined) out.sid = options.sid;
-  if (options.speed !== undefined) out.speed = options.speed;
-  if (options.silenceScale !== undefined)
-    out.silenceScale = options.silenceScale;
-  if (options.referenceAudio != null) {
-    const sr = options.referenceAudio.sampleRate;
-    if (
-      typeof __DEV__ !== 'undefined' &&
-      __DEV__ &&
-      (!Number.isFinite(sr) || sr <= 0)
-    ) {
-      console.warn(
-        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
-      );
-    }
-    out.referenceAudio = options.referenceAudio.samples;
-    out.referenceSampleRate = options.referenceAudio.sampleRate;
-  }
-  if (options.referenceText !== undefined)
-    out.referenceText = options.referenceText;
-  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
-  if (options.extra != null && Object.keys(options.extra).length > 0)
-    out.extra = options.extra;
-  return out;
-}
 
 /**
  * Create a streaming TTS engine instance. Use for incremental generation with
@@ -149,16 +60,17 @@ export async function createStreamingTTS(
   let silenceScale: number | undefined;
 
   if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    modelType = options.modelType;
-    provider = options.provider;
-    numThreads = options.numThreads;
-    debug = options.debug;
-    modelOptions = options.modelOptions;
-    ruleFsts = options.ruleFsts;
-    ruleFars = options.ruleFars;
-    maxNumSentences = options.maxNumSentences;
-    silenceScale = options.silenceScale;
+    const expanded = expandTtsInitializeOptions(options);
+    modelPath = expanded.modelPath;
+    modelType = expanded.modelType;
+    provider = expanded.provider;
+    numThreads = expanded.numThreads;
+    debug = expanded.debug;
+    modelOptions = expanded.modelOptions;
+    ruleFsts = expanded.ruleFsts;
+    ruleFars = expanded.ruleFars;
+    maxNumSentences = expanded.maxNumSentences;
+    silenceScale = expanded.silenceScale;
   } else {
     modelPath = options;
     modelType = undefined;
@@ -283,7 +195,7 @@ export async function createStreamingTTS(
           instanceId,
           requestId,
           text,
-          toNativeTtsOptions(opts)
+          toNativeTtsGenerationOptions(opts)
         );
       } catch (error) {
         unsubscribe();

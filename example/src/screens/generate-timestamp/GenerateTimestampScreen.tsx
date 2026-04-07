@@ -488,8 +488,8 @@ export default function GenerateTimestampScreen() {
               alignmentModelPath: initializedModelPath,
             })
           : await generateSubtitlesFromAudio(text, audioPath, {
-              mode,
-              granularity,
+              mode: 'fast',
+              ...(granularity === 'character' ? {} : { granularity }),
             });
       setResult(subtitleResult);
     } catch (err) {

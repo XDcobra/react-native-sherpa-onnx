@@ -10,6 +10,8 @@ import type {
   GeneratedAudioWithTimestamps,
   TTSModelInfo,
   TtsEngine,
+  TtsDetectedModelEntry,
+  SubtitleOptions,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
@@ -18,74 +20,14 @@ import {
   generateSubtitlesFromAudio,
 } from './subtitles';
 import { saveAlignmentAudioToTempWav } from './tempAudio';
+import {
+  expandTtsInitializeOptions,
+  expandTtsUpdateOptions,
+  flattenTtsModelOptionsForNative,
+  toNativeTtsGenerationOptions,
+} from './ttsNativeBridge';
 
 let ttsInstanceCounter = 0;
-
-/**
- * Flatten model-specific options for the given model type to native init/update params.
- * When modelType is 'auto' or missing, returns undefined for all (native uses defaults).
- */
-function flattenTtsModelOptionsForNative(
-  modelType: TTSModelType | undefined,
-  modelOptions: TtsModelOptions | undefined
-): {
-  noiseScale: number | undefined;
-  noiseScaleW: number | undefined;
-  lengthScale: number | undefined;
-} {
-  if (
-    !modelOptions ||
-    !modelType ||
-    modelType === 'auto' ||
-    modelType === 'zipvoice' // Zipvoice does not use noise/length scale; native uses its own defaults
-  )
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const block =
-    modelType === 'vits'
-      ? modelOptions.vits
-      : modelType === 'matcha'
-      ? modelOptions.matcha
-      : modelType === 'kokoro'
-      ? modelOptions.kokoro
-      : modelType === 'kitten'
-      ? modelOptions.kitten
-      : modelType === 'pocket'
-      ? modelOptions.pocket
-      : modelType === 'supertonic'
-      ? modelOptions.supertonic
-      : undefined;
-  if (!block)
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const out: {
-    noiseScale: number | undefined;
-    noiseScaleW: number | undefined;
-    lengthScale: number | undefined;
-  } = {
-    noiseScale: undefined,
-    noiseScaleW: undefined,
-    lengthScale: undefined,
-  };
-  const n = block as {
-    noiseScale?: number;
-    noiseScaleW?: number;
-    lengthScale?: number;
-  };
-  if (n.noiseScale !== undefined && typeof n.noiseScale === 'number')
-    out.noiseScale = n.noiseScale;
-  if (n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number')
-    out.noiseScaleW = n.noiseScaleW;
-  if (n.lengthScale !== undefined && typeof n.lengthScale === 'number')
-    out.lengthScale = n.lengthScale;
-  return out;
-}
 
 /**
  * Detect TTS model type and structure without initializing the engine.
@@ -111,18 +53,24 @@ export async function detectTtsModel(
   success: boolean;
   /** Native validation/detect failure (e.g. missing lexicon for Zipvoice). */
   error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
+  detectedModels: TtsDetectedModelEntry[];
+  modelType?: TTSModelType | string;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
   const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  const detectedModels: TtsDetectedModelEntry[] = (
+    raw.detectedModels ?? []
+  ).map((m) => ({
+    type: m.type,
+    modelDir: m.modelDir,
+  }));
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
-    detectedModels: raw.detectedModels ?? [],
+    detectedModels,
     ...(raw.modelType != null && raw.modelType !== ''
       ? { modelType: raw.modelType }
       : {}),
@@ -131,47 +79,6 @@ export async function detectTtsModel(
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
       : {}),
   };
-}
-
-/**
- * Convert TtsGenerationOptions to a flat object for the native bridge.
- * Flattens referenceAudio { samples, sampleRate } to referenceAudio array + referenceSampleRate.
- */
-function toNativeTtsOptions(
-  options?: TtsGenerationOptions
-): Record<string, unknown> {
-  if (options == null) return {};
-  const out: Record<string, unknown> = {};
-  if (options.sid !== undefined) out.sid = options.sid;
-  if (options.speed !== undefined) out.speed = options.speed;
-  if (options.silenceScale !== undefined)
-    out.silenceScale = options.silenceScale;
-  if (options.referenceAudio != null) {
-    const sr = options.referenceAudio.sampleRate;
-    if (
-      typeof __DEV__ !== 'undefined' &&
-      __DEV__ &&
-      (!Number.isFinite(sr) || sr <= 0)
-    ) {
-      console.warn(
-        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
-      );
-    }
-    out.referenceAudio = options.referenceAudio.samples;
-    out.referenceSampleRate = options.referenceAudio.sampleRate;
-  }
-  if (options.referenceText !== undefined)
-    out.referenceText = options.referenceText;
-  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
-  if (options.extra != null && Object.keys(options.extra).length > 0)
-    out.extra = options.extra;
-  if (options.subtitles?.mode !== undefined) {
-    out.subtitleMode = options.subtitles.mode;
-  }
-  if (options.subtitles?.granularity !== undefined) {
-    out.subtitleGranularity = options.subtitles.granularity;
-  }
-  return out;
 }
 
 // TTS stream events are sent from native via sendEventWithName; use DeviceEventEmitter
@@ -209,16 +116,17 @@ export async function createTTS(
   let silenceScale: number | undefined;
 
   if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    modelType = options.modelType;
-    provider = options.provider;
-    numThreads = options.numThreads;
-    debug = options.debug;
-    modelOptions = options.modelOptions;
-    ruleFsts = options.ruleFsts;
-    ruleFars = options.ruleFars;
-    maxNumSentences = options.maxNumSentences;
-    silenceScale = options.silenceScale;
+    const expanded = expandTtsInitializeOptions(options);
+    modelPath = expanded.modelPath;
+    modelType = expanded.modelType;
+    provider = expanded.provider;
+    numThreads = expanded.numThreads;
+    debug = expanded.debug;
+    modelOptions = expanded.modelOptions;
+    ruleFsts = expanded.ruleFsts;
+    ruleFars = expanded.ruleFars;
+    maxNumSentences = expanded.maxNumSentences;
+    silenceScale = expanded.silenceScale;
   } else {
     modelPath = options;
     modelType = undefined;
@@ -290,15 +198,12 @@ export async function createTTS(
       guard();
       const optionsWithSubtitlesOff: TtsGenerationOptions = {
         ...(opts ?? {}),
-        subtitles: {
-          ...(opts?.subtitles ?? {}),
-          mode: 'off',
-        },
+        subtitles: { mode: 'off' },
       };
       return SherpaOnnx.generateTts(
         instanceId,
         text,
-        toNativeTtsOptions(optionsWithSubtitlesOff)
+        toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
       );
     },
 
@@ -307,24 +212,33 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
-      const subtitleMode = opts?.subtitles?.mode ?? 'fast';
-      const subtitleGranularity = opts?.subtitles?.granularity ?? 'sentence';
+      const subs = opts?.subtitles;
+      const subtitleMode = subs?.mode ?? 'fast';
+      const subtitleGranularity = subs?.granularity ?? 'sentence';
 
       assertSubtitleGranularityForMode(subtitleMode, subtitleGranularity);
 
       if (subtitleMode !== 'accurate') {
+        let subtitles: SubtitleOptions;
+        if (subs && subs.mode !== 'accurate') {
+          subtitles = {
+            mode: subtitleMode,
+            ...(subs.granularity != null
+              ? { granularity: subs.granularity }
+              : {}),
+          };
+        } else {
+          subtitles = { mode: subtitleMode };
+        }
         const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
           ...(opts ?? {}),
-          subtitles: {
-            ...(opts?.subtitles ?? {}),
-            mode: subtitleMode,
-          },
+          subtitles,
         };
 
         const native = await SherpaOnnx.generateTtsWithTimestamps(
           instanceId,
           text,
-          toNativeTtsOptions(optionsWithDefaultSubtitleMode)
+          toNativeTtsGenerationOptions(optionsWithDefaultSubtitleMode)
         );
 
         const timingMode =
@@ -340,7 +254,12 @@ export async function createTTS(
         };
       }
 
-      const alignmentModelPath = opts?.subtitles?.alignmentModelPath?.trim();
+      if (!subs || subs.mode !== 'accurate') {
+        throw new Error(
+          'ALIGNMENT_MODEL_MISSING: Provide subtitles with mode accurate and alignmentModelPath.'
+        );
+      }
+      const alignmentModelPath = subs.alignmentModelPath.trim();
 
       if (!alignmentModelPath) {
         throw new Error(
@@ -350,16 +269,13 @@ export async function createTTS(
 
       const optionsWithSubtitlesOff: TtsGenerationOptions = {
         ...(opts ?? {}),
-        subtitles: {
-          ...(opts?.subtitles ?? {}),
-          mode: 'off',
-        },
+        subtitles: { mode: 'off' },
       };
 
       const generated = await SherpaOnnx.generateTts(
         instanceId,
         text,
-        toNativeTtsOptions(optionsWithSubtitlesOff)
+        toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
       );
 
       let tempAudioPath: string | null = null;
@@ -394,16 +310,17 @@ export async function createTTS(
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
       success: boolean;
-      detectedModels: Array<{ type: string; modelDir: string }>;
+      detectedModels: TtsDetectedModelEntry[];
     }> {
       guard();
+      const expanded = expandTtsUpdateOptions(opts);
       const effectiveModelTypeForUpdate =
-        opts.modelType && opts.modelType !== 'auto'
-          ? opts.modelType
+        expanded.modelType && expanded.modelType !== 'auto'
+          ? expanded.modelType
           : effectiveModelType;
       const flatOpts = flattenTtsModelOptionsForNative(
         effectiveModelTypeForUpdate,
-        opts.modelOptions
+        expanded.modelOptions
       );
       const noiseArg =
         flatOpts.noiseScale === undefined ? Number.NaN : flatOpts.noiseScale;
@@ -411,12 +328,19 @@ export async function createTTS(
         flatOpts.noiseScaleW === undefined ? Number.NaN : flatOpts.noiseScaleW;
       const lengthArg =
         flatOpts.lengthScale === undefined ? Number.NaN : flatOpts.lengthScale;
-      return SherpaOnnx.updateTtsParams(
+      const raw = await SherpaOnnx.updateTtsParams(
         instanceId,
         noiseArg,
         noiseWArg,
         lengthArg
       );
+      return {
+        success: raw.success,
+        detectedModels: (raw.detectedModels ?? []).map((m) => ({
+          type: m.type,
+          modelDir: m.modelDir,
+        })),
+      };
     },
 
     async getModelInfo(): Promise<TTSModelInfo> {
@@ -543,6 +467,15 @@ export { generateSubtitlesFromAudio } from './subtitles';
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
+  TTSInitializeOptionsAuto,
+  TTSInitializeOptionsBase,
+  TTSInitializeOptionsVits,
+  TTSInitializeOptionsMatcha,
+  TTSInitializeOptionsKokoro,
+  TTSInitializeOptionsKitten,
+  TTSInitializeOptionsPocket,
+  TTSInitializeOptionsZipvoice,
+  TTSInitializeOptionsSupertonic,
   TTSModelType,
   TtsModelOptions,
   TtsVitsModelOptions,
@@ -552,11 +485,22 @@ export type {
   TtsPocketModelOptions,
   TtsSupertonicModelOptions,
   TtsUpdateOptions,
+  TtsUpdateOptionsEmpty,
   TtsGenerationOptions,
+  TtsReferenceAudio,
+  TtsExecutionProvider,
+  TtsVoiceClone,
+  TtsVoiceCloneZipvoice,
+  TtsVoiceClonePocket,
+  TtsDetectedModelEntry,
   SubtitleMode,
   SubtitleGranularity,
   SubtitleOptions,
+  SubtitleOptionsFast,
+  SubtitleOptionsAccurate,
   SubtitleFromAudioOptions,
+  SubtitleFromAudioOptionsFast,
+  SubtitleFromAudioOptionsAccurate,
   SubtitleResult,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,

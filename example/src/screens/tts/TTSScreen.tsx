@@ -21,7 +21,8 @@ import {
   shareAudioFile,
   type TTSModelType,
   type TtsGenerationOptions,
-  type TtsModelOptions,
+  type TtsMatchaModelOptions,
+  type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
 import type {
   TtsEngine,
@@ -249,31 +250,45 @@ export default function TTSScreen() {
       ) {
         return;
       }
-      const modelOptions: TtsModelOptions = {};
-      if (modelType === 'vits') {
-        modelOptions.vits = {};
-        if (nextNoise != null) modelOptions.vits.noiseScale = nextNoise;
-        if (nextNoiseW != null) modelOptions.vits.noiseScaleW = nextNoiseW;
-        if (nextLength != null) modelOptions.vits.lengthScale = nextLength;
-      } else if (modelType === 'matcha') {
-        modelOptions.matcha = {};
-        if (nextNoise != null) modelOptions.matcha.noiseScale = nextNoise;
-        if (nextLength != null) modelOptions.matcha.lengthScale = nextLength;
-      } else if (modelType === 'kokoro' && nextLength != null) {
-        modelOptions.kokoro = { lengthScale: nextLength };
-      } else if (modelType === 'kitten' && nextLength != null) {
-        modelOptions.kitten = { lengthScale: nextLength };
-      }
-      engine
-        .updateParams({
-          modelType,
-          modelOptions,
-        })
-        .catch((err) => {
-          const message =
-            err instanceof Error ? err.message : 'Failed to update TTS params';
-          setError(message);
-        });
+      const runUpdate = () => {
+        if (modelType === 'vits') {
+          const vits: TtsVitsModelOptions = {};
+          if (nextNoise != null) vits.noiseScale = nextNoise;
+          if (nextNoiseW != null) vits.noiseScaleW = nextNoiseW;
+          if (nextLength != null) vits.lengthScale = nextLength;
+          return engine.updateParams({
+            modelType: 'vits',
+            modelOptions: { vits },
+          });
+        }
+        if (modelType === 'matcha') {
+          const matcha: TtsMatchaModelOptions = {};
+          if (nextNoise != null) matcha.noiseScale = nextNoise;
+          if (nextLength != null) matcha.lengthScale = nextLength;
+          return engine.updateParams({
+            modelType: 'matcha',
+            modelOptions: { matcha },
+          });
+        }
+        if (modelType === 'kokoro' && nextLength != null) {
+          return engine.updateParams({
+            modelType: 'kokoro',
+            modelOptions: { kokoro: { lengthScale: nextLength } },
+          });
+        }
+        if (modelType === 'kitten' && nextLength != null) {
+          return engine.updateParams({
+            modelType: 'kitten',
+            modelOptions: { kitten: { lengthScale: nextLength } },
+          });
+        }
+        return Promise.resolve();
+      };
+      runUpdate().catch((err) => {
+        const message =
+          err instanceof Error ? err.message : 'Failed to update TTS params';
+        setError(message);
+      });
     }, 500);
     return () => {
       if (paramsDebounceRef.current) {
@@ -408,29 +423,11 @@ export default function TTSScreen() {
     if (isNaN(speedValue) || speedValue <= 0) {
       throw new Error('Invalid speed value');
     }
-    const options: TtsGenerationOptions = { sid, speed: speedValue };
     const silenceScaleVal = silenceScale.trim();
-    if (silenceScaleVal.length > 0) {
-      const v = parseFloat(silenceScaleVal);
-      if (!isNaN(v) && v > 0) options.silenceScale = v;
-    }
     const numStepsVal = numSteps.trim();
-    if (numStepsVal.length > 0) {
-      const v = parseInt(numStepsVal, 10);
-      if (!isNaN(v) && v > 0) options.numSteps = v;
-    }
-    const hasValidRefAudio =
-      referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
-      referenceAudio.sampleRate > 0;
-    if (hasValidRefAudio) {
-      options.referenceAudio = referenceAudio;
-      if (referenceText.trim().length > 0) {
-        options.referenceText = referenceText.trim();
-      }
-    }
+    let extra: Record<string, string> | undefined;
     if (extraOptions.trim().length > 0) {
-      const extra: Record<string, string> = {};
+      const ex: Record<string, string> = {};
       extraOptions
         .split(',')
         .map((s) => s.trim())
@@ -440,12 +437,59 @@ export default function TTSScreen() {
           if (idx > 0) {
             const k = pair.slice(0, idx).trim();
             const v = pair.slice(idx + 1).trim();
-            if (k && v) extra[k] = v;
+            if (k && v) ex[k] = v;
           }
         });
-      if (Object.keys(extra).length > 0) options.extra = extra;
+      if (Object.keys(ex).length > 0) extra = ex;
     }
-    return options;
+    const hasValidRefAudio =
+      referenceAudio != null &&
+      referenceAudio.samples.length > 0 &&
+      referenceAudio.sampleRate > 0;
+    const refTrim = referenceText.trim();
+
+    const base: TtsGenerationOptions = {
+      sid,
+      speed: speedValue,
+      ...(silenceScaleVal.length > 0
+        ? (() => {
+            const v = parseFloat(silenceScaleVal);
+            return !isNaN(v) && v > 0 ? { silenceScale: v } : {};
+          })()
+        : {}),
+      ...(numStepsVal.length > 0
+        ? (() => {
+            const v = parseInt(numStepsVal, 10);
+            return !isNaN(v) && v > 0 ? { numSteps: v } : {};
+          })()
+        : {}),
+      ...(extra != null ? { extra } : {}),
+    };
+
+    if (hasValidRefAudio && selectedModelType === 'zipvoice') {
+      if (!refTrim) {
+        throw new Error('Zipvoice voice cloning requires reference text');
+      }
+      return {
+        ...base,
+        voiceClone: {
+          kind: 'zipvoice',
+          referenceAudio,
+          referenceText: refTrim,
+        },
+      };
+    }
+    if (hasValidRefAudio && selectedModelType === 'pocket') {
+      return {
+        ...base,
+        voiceClone: {
+          kind: 'pocket',
+          referenceAudio,
+          ...(refTrim.length > 0 ? { referenceText: refTrim } : {}),
+        },
+      };
+    }
+    return base;
   }, [
     speakerId,
     speed,
@@ -455,6 +499,7 @@ export default function TTSScreen() {
     referenceAudio,
     extraOptions,
     modelInfo?.numSpeakers,
+    selectedModelType,
   ]);
 
   const handlePickReferenceWav = useCallback(async () => {
