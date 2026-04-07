@@ -1,5 +1,12 @@
-# Host-side C++ tests: same android/src/.../jni/audio/*.cpp as Android, linked against system libav (Linux).
-# Runs convert-file and f32le→format tests. MP3 cases skip if libshine is not in system FFmpeg (common on Ubuntu).
+# Host-side C++ tests (test/cpp): CMake builds GTest targets and runs ctest.
+#
+# - Audio: same android/src/.../jni/audio/*.cpp as Android, linked against system libav (Linux).
+#   convert-file and f32le→format tests; MP3 cases skip if libshine is not in system FFmpeg (Ubuntu).
+# - model_detect: STT/TTS model detection helpers.
+# - ctc_alignment_host_test (Linux): downloads ONNX Runtime host build (version from
+#   third_party/onnxruntime_prebuilt/VERSIONS, ONNXRUNTIME_VERSION), then runs ORT smoke +
+#   CTC alignment pipeline smoke on fixtures. Catches ORT/integration regressions; does not
+#   assert alignment accuracy vs. reference timestamps.
 
 name: Test – host audio convert (C++)
 
@@ -9,14 +16,18 @@ on:
       - main
     paths:
       - 'android/src/main/cpp/jni/audio/**'
+      - 'android/src/main/cpp/alignment/**'
       - 'test/cpp/**'
+      - 'test/fixtures/**'
       - '.github/workflows/test-audio-convert-host.yml'
   push:
     branches:
       - main
     paths:
       - 'android/src/main/cpp/jni/audio/**'
+      - 'android/src/main/cpp/alignment/**'
       - 'test/cpp/**'
+      - 'test/fixtures/**'
       - '.github/workflows/test-audio-convert-host.yml'
   workflow_dispatch:
 
@@ -44,6 +55,6 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build .
 
-      - name: Run CTest (audio + model_detect)
+      - name: Run CTest (audio, model_detect, CTC alignment host)
         working-directory: ${{ github.workspace }}
         run: cd test/cpp/build && ctest --output-on-failure
