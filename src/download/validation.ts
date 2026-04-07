@@ -1,10 +1,9 @@
 import {
   DocumentDirectoryPath,
-  stat,
   exists,
   readDir,
+  stat,
   unlink,
-  type ReadDirResItemT,
 } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 
@@ -31,15 +30,23 @@ export class ValidationResult {
  * Best-effort: continues on per-entry errors (permissions, race).
  */
 export async function removeDirectoryRecursive(dirPath: string): Promise<void> {
-  if (!(await exists(dirPath))) return;
-  let entries: ReadDirResItemT[];
+  if (!(await exists(dirPath))) {
+    return;
+  }
+
+  let entries:
+    | Array<{ name: string; isDirectory: () => boolean; path?: string }>
+    | undefined;
+
   try {
     entries = await readDir(dirPath);
   } catch {
     return;
   }
+
   for (const entry of entries) {
     const childPath = `${dirPath}/${entry.name}`.replace(/\/+/g, '/');
+
     try {
       if (entry.isDirectory()) {
         await removeDirectoryRecursive(childPath);
@@ -47,9 +54,10 @@ export async function removeDirectoryRecursive(dirPath: string): Promise<void> {
         await unlink(childPath);
       }
     } catch {
-      // ignore
+      // ignore per-entry failures
     }
   }
+
   try {
     await unlink(dirPath);
   } catch {
@@ -57,13 +65,6 @@ export async function removeDirectoryRecursive(dirPath: string): Promise<void> {
   }
 }
 
-/**
- * Parse checksum.txt format into a Map of filename -> hash
- * Expected format:
- * filename\tsha256hash
- * example:
- * vits-vctk.tar.bz2	4f0a02db66914b3760b144cebc004e65dd4d1aeef43379f2b058849e74002490
- */
 export function parseChecksumFile(content: string): Map<string, string> {
   const checksums = new Map<string, string>();
   const lines = content.split('\n').filter((line) => line.trim());
@@ -78,10 +79,6 @@ export function parseChecksumFile(content: string): Map<string, string> {
   return checksums;
 }
 
-/**
- * Calculate SHA256 hash of a file in chunks to avoid OOM
- * Reads file in 1MB chunks and processes them efficiently
- */
 export async function calculateFileChecksum(
   filePath: string,
   onProgress?: (
@@ -92,20 +89,19 @@ export async function calculateFileChecksum(
 ): Promise<string> {
   try {
     const digest = await SherpaOnnx.computeFileSha256(filePath);
+
     if (onProgress) {
       const statResult = await stat(filePath);
       const total = statResult.size;
       onProgress(total, total, 100);
     }
+
     return digest.toLowerCase();
   } catch (error) {
-    throw new Error(`Failed to calculate checksum: ${error}`);
+    throw new Error(`Failed to calculate checksum: ${String(error)}`);
   }
 }
 
-/**
- * Validate checksum of downloaded file
- */
 export async function validateChecksum(
   filePath: string,
   expectedChecksum: string,
@@ -117,7 +113,7 @@ export async function validateChecksum(
 ): Promise<ValidationResult> {
   try {
     const actualChecksum = await calculateFileChecksum(filePath, onProgress);
-    // checksum comparison logged
+
     if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
       return new ValidationResult(
         false,
@@ -125,25 +121,17 @@ export async function validateChecksum(
         `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`
       );
     }
+
     return new ValidationResult(true);
   } catch (error) {
     return new ValidationResult(
       false,
       'CHECKSUM_FAILED',
-      `Failed to validate checksum: ${error}`
+      `Failed to validate checksum: ${String(error)}`
     );
   }
 }
 
-/**
- * Validate that extraction was successful by checking:
- * - Directory exists and is not empty
- * - Contains at least some files (not just directories)
- *
- * The actual model validation (correct files for specific model type)
- * is delegated to the native DetectSttModel / DetectTtsModel functions,
- * so we don't need to check for specific filenames here.
- */
 export async function validateExtractedFiles(
   modelDir: string,
   _category: string
@@ -158,7 +146,7 @@ export async function validateExtractedFiles(
       );
     }
 
-    const isModelLikeFile = (name: string) => {
+    const isModelLikeFile = (name: string): boolean => {
       const lower = name.toLowerCase();
       return (
         lower.endsWith('.onnx') ||
@@ -172,18 +160,25 @@ export async function validateExtractedFiles(
       dir: string,
       depth = 0,
       maxDepth = 4
-    ): Promise<ReadDirResItemT[]> => {
-      if (depth > maxDepth) return [];
+    ): Promise<
+      Array<{ name: string; isDirectory: () => boolean; path?: string }>
+    > => {
+      if (depth > maxDepth) {
+        return [];
+      }
 
       const entries = await readDir(dir);
-      const files: ReadDirResItemT[] = [];
+      const files: Array<{
+        name: string;
+        isDirectory: () => boolean;
+        path?: string;
+      }> = [];
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          const subPath = entry.path;
-          if (subPath != null) {
+          if (entry.path != null) {
             const nested = await collectFilesRecursive(
-              subPath,
+              entry.path,
               depth + 1,
               maxDepth
             );
@@ -233,73 +228,66 @@ export async function validateExtractedFiles(
     return new ValidationResult(
       false,
       'MISSING_FILES',
-      `Failed to validate extracted files: ${error}`
+      `Failed to validate extracted files: ${String(error)}`
     );
   }
 }
 
-/** True if the file is a native sherpa-onnx model file (e.g. encoder.onnx). Excludes our metadata (.ready, manifest.json). */
 function isNativeModelFileName(name: string): boolean {
   const lower = name.toLowerCase();
   return lower.endsWith('.onnx') || lower.endsWith('.bin');
 }
 
-/**
- * Check if a directory contains native model files (.onnx or .bin) at the top level or one level of subdirectories.
- * Used to find the actual model dir; ignores our metadata (manifest.json, .ready).
- */
 async function dirContainsModelFiles(dir: string): Promise<boolean> {
   const entries = await readDir(dir);
-  const files = entries.filter((e) => !e.isDirectory());
-  if (files.some((f) => isNativeModelFileName(f.name ?? ''))) return true;
-  const subdirs = entries.filter((e) => e.isDirectory());
-  for (const sub of subdirs) {
-    const subPath = sub?.path;
-    if (subPath == null) continue;
-    const subEntries = await readDir(subPath);
-    const subFiles = subEntries.filter((e) => !e.isDirectory());
-    if (subFiles.some((f) => isNativeModelFileName(f.name ?? ''))) return true;
+  const files = entries.filter((entry) => !entry.isDirectory());
+
+  if (files.some((entry) => isNativeModelFileName(entry.name ?? ''))) {
+    return true;
   }
+
+  const subdirs = entries.filter((entry) => entry.isDirectory());
+  for (const sub of subdirs) {
+    const subPath = sub.path;
+    if (subPath == null) {
+      continue;
+    }
+
+    const subEntries = await readDir(subPath);
+    const subFiles = subEntries.filter((entry) => !entry.isDirectory());
+    if (subFiles.some((entry) => isNativeModelFileName(entry.name ?? ''))) {
+      return true;
+    }
+  }
+
   return false;
 }
 
-/**
- * Resolve the directory that actually contains model files.
- * After extracting a tarball, model files often end up in a single top-level subdirectory
- * (e.g. installDir/modelId/encoder.onnx). Native APIs expect the path to the folder
- * that directly contains encoder.onnx, decoder.onnx, etc.
- *
- * - If installDir itself contains native model files (.onnx/.bin), returns installDir.
- * - If installDir has exactly one subdirectory that contains native model files, returns that subdirectory path.
- *   (Ignores our metadata: .ready, manifest.json.) This can produce paths like
- *   .../tts/vits-piper-de_DE-thorsten-medium-int8/vits-piper-de_DE-thorsten-medium-int8 when the
- *   archive extracts a top-level folder with the same name as the model id; that is intentional.
- * - Otherwise returns installDir unchanged.
- */
 export async function resolveActualModelDir(
   installDir: string
 ): Promise<string> {
   try {
     const dirExists = await exists(installDir);
-    if (!dirExists) return installDir;
-
-    const entries = await readDir(installDir);
-    const topLevelFiles = entries.filter((e) => !e.isDirectory());
-    if (topLevelFiles.some((f) => isNativeModelFileName(f.name ?? ''))) {
+    if (!dirExists) {
       return installDir;
     }
 
-    const subdirs = entries.filter((e) => e.isDirectory());
+    const entries = await readDir(installDir);
+    const topLevelFiles = entries.filter((entry) => !entry.isDirectory());
+    if (
+      topLevelFiles.some((entry) => isNativeModelFileName(entry.name ?? ''))
+    ) {
+      return installDir;
+    }
+
+    const subdirs = entries.filter((entry) => entry.isDirectory());
     const firstSubdir = subdirs[0];
     const singleSubdir = subdirs.length === 1 ? firstSubdir : undefined;
 
-    if (singleSubdir != null) {
-      const candidatePath = singleSubdir.path;
-      if (
-        candidatePath != null &&
-        (await dirContainsModelFiles(candidatePath))
-      ) {
-        return candidatePath;
+    if (singleSubdir?.path != null) {
+      const containsModels = await dirContainsModelFiles(singleSubdir.path);
+      if (containsModels) {
+        return singleSubdir.path;
       }
     }
 
@@ -309,42 +297,31 @@ export async function resolveActualModelDir(
   }
 }
 
-/**
- * Get available disk space (in bytes)
- * This is a simplified version. For accurate values on Android/iOS, use native modules.
- */
 export async function getAvailableDiskSpace(): Promise<number> {
   try {
-    // Try to get the document directory (simple check for availability)
     const dirExists = await exists(DocumentDirectoryPath);
     if (dirExists) {
-      // Default to 10GB for modern devices
-      // In production, integrate native disk space calculation
-      return 10 * 1024 * 1024 * 1024; // 10GB
+      return 10 * 1024 * 1024 * 1024;
     }
   } catch (error) {
     console.warn('Failed to check disk space:', error);
   }
 
-  // Fallback: return 10GB estimate for modern devices
   return 10 * 1024 * 1024 * 1024;
 }
 
-/**
- * Check if there's enough disk space for download
- * Adds 20% buffer to the required size
- */
 export async function checkDiskSpace(
   requiredBytes: number
 ): Promise<ValidationResult> {
   try {
     const available = await getAvailableDiskSpace();
-    const buffer = requiredBytes * 0.2; // 20% safety buffer
+    const buffer = requiredBytes * 0.2;
     const totalRequired = requiredBytes + buffer;
 
     if (available < totalRequired) {
       const availableGB = (available / (1024 * 1024 * 1024)).toFixed(2);
       const requiredGB = (totalRequired / (1024 * 1024 * 1024)).toFixed(2);
+
       return new ValidationResult(
         false,
         'INSUFFICIENT_DISK_SPACE',
@@ -357,29 +334,7 @@ export async function checkDiskSpace(
     return new ValidationResult(
       false,
       'INSUFFICIENT_DISK_SPACE',
-      `Failed to check disk space: ${error}`
+      `Failed to check disk space: ${String(error)}`
     );
   }
-}
-
-/**
- * Update expected files configuration for a category
- * DEPRECATED: The native DetectSttModel/DetectTtsModel functions handle model validation.
- * This function is kept for backward compatibility but does nothing.
- */
-export function setExpectedFilesForCategory(
-  _category: string,
-  _files: string[]
-): void {
-  // No-op: validation is now handled by native detect functions
-}
-
-/**
- * Get expected files for a category
- * DEPRECATED: The native DetectSttModel/DetectTtsModel functions handle model validation.
- * This function is kept for backward compatibility.
- */
-export function getExpectedFilesForCategory(_category: string): string[] {
-  // Return empty array: validation is now handled by native detect functions
-  return [];
 }

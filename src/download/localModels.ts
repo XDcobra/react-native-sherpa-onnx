@@ -1,49 +1,57 @@
-import { Platform } from 'react-native';
 import {
   DocumentDirectoryPath,
   exists,
-  readFile,
   readDir,
+  readFile,
   unlink,
   writeFile,
 } from '@dr.pogodin/react-native-fs';
-import type {
-  ModelCategory,
-  ModelMetaBase,
-  ModelManifest,
-  ModelWithMetadata,
-} from './types';
+import { emitModelsListUpdated } from './downloadEvents';
 import {
   getCachePath,
-  getModelsBaseDir,
-  getModelDir,
+  getDownloadStatePath,
+  getExtractionStatePath,
   getManifestPath,
+  getModelDir,
+  getModelsBaseDir,
+  getNativeAssetExtractedModelDir,
+  getOnnxPath,
   getReadyMarkerPath,
   getTarArchivePath,
-  getOnnxPath,
 } from './paths';
-import { resolveActualModelDir } from './validation';
-import { emitModelsListUpdated } from './downloadEvents';
 import { clearMemoryCacheForCategory } from './registry';
+import {
+  type ModelCategory,
+  type ModelManifest,
+  type ModelMeta,
+  type ModelWithMetadata,
+} from './types';
+import { removeDirectoryRecursive, resolveActualModelDir } from './validation';
 
-export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
+export async function listDownloadedModels(
   category: ModelCategory
-): Promise<T[]> {
+): Promise<ModelMeta[]> {
   const baseDir = getModelsBaseDir(category);
-  const existsResult = await exists(baseDir);
-  if (!existsResult) return [];
+  if (!(await exists(baseDir))) {
+    return [];
+  }
 
   const entries = await readDir(baseDir);
-  const models: T[] = [];
+  const models: ModelMeta[] = [];
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
     const manifestPath = getManifestPath(category, entry.name);
-    const manifestExists = await exists(manifestPath);
-    if (!manifestExists) continue;
+    if (!(await exists(manifestPath))) {
+      continue;
+    }
+
     try {
       const raw = await readFile(manifestPath, 'utf8');
-      const manifest = JSON.parse(raw) as ModelManifest<T>;
+      const manifest = JSON.parse(raw) as ModelManifest;
       if (manifest.model) {
         models.push(manifest.model);
       }
@@ -55,25 +63,24 @@ export async function listDownloadedModelsByCategory<T extends ModelMetaBase>(
   return models;
 }
 
-export async function isModelDownloadedByCategory(
+export async function isModelDownloaded(
   category: ModelCategory,
   id: string
 ): Promise<boolean> {
-  const readyPath = getReadyMarkerPath(category, id);
-  return exists(readyPath);
+  return exists(getReadyMarkerPath(category, id));
 }
 
-export async function getLocalModelPathByCategory(
+export async function getModelPath(
   category: ModelCategory,
   id: string
 ): Promise<string | null> {
-  const ready = await isModelDownloadedByCategory(category, id);
-  if (!ready) return null;
+  const ready = await isModelDownloaded(category, id);
+  if (!ready) {
+    return null;
+  }
 
   await updateModelLastUsed(category, id);
-
-  const installDir = getModelDir(category, id);
-  return resolveActualModelDir(installDir);
+  return resolveActualModelDir(getModelDir(category, id));
 }
 
 export async function updateModelLastUsed(
@@ -81,8 +88,9 @@ export async function updateModelLastUsed(
   id: string
 ): Promise<void> {
   const manifestPath = getManifestPath(category, id);
-  const existsResult = await exists(manifestPath);
-  if (!existsResult) return;
+  if (!(await exists(manifestPath))) {
+    return;
+  }
 
   try {
     const raw = await readFile(manifestPath, 'utf8');
@@ -94,41 +102,45 @@ export async function updateModelLastUsed(
   }
 }
 
-export async function listDownloadedModelsWithMetadata<T extends ModelMetaBase>(
+export async function listDownloadedModelsWithMetadata(
   category: ModelCategory
-): Promise<ModelWithMetadata<T>[]> {
+): Promise<ModelWithMetadata[]> {
   const baseDir = getModelsBaseDir(category);
-  const existsResult = await exists(baseDir);
-  if (!existsResult) return [];
+  if (!(await exists(baseDir))) {
+    return [];
+  }
 
   const entries = await readDir(baseDir);
-  const modelsWithMetadata: ModelWithMetadata<T>[] = [];
+  const modelsWithMetadata: ModelWithMetadata[] = [];
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
 
     const manifestPath = getManifestPath(category, entry.name);
-    const manifestExists = await exists(manifestPath);
+    if (!(await exists(manifestPath))) {
+      continue;
+    }
 
-    if (manifestExists) {
-      try {
-        const raw = await readFile(manifestPath, 'utf8');
-        const manifest = JSON.parse(raw) as ModelManifest<T>;
-        if (manifest.model) {
-          modelsWithMetadata.push({
-            model: manifest.model,
-            downloadedAt: manifest.downloadedAt,
-            lastUsed: manifest.lastUsed ?? null,
-            sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
-            status: 'ready',
-          });
-        }
-      } catch (error) {
-        console.warn(
-          `Failed to read manifest for ${category}:${entry.name}:`,
-          error
-        );
+    try {
+      const raw = await readFile(manifestPath, 'utf8');
+      const manifest = JSON.parse(raw) as ModelManifest;
+
+      if (manifest.model) {
+        modelsWithMetadata.push({
+          model: manifest.model,
+          downloadedAt: manifest.downloadedAt,
+          lastUsed: manifest.lastUsed ?? null,
+          sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
+          status: 'ready',
+        });
       }
+    } catch (error) {
+      console.warn(
+        `Failed to read manifest for ${category}:${entry.name}:`,
+        error
+      );
     }
   }
 
@@ -144,7 +156,6 @@ export async function cleanupLeastRecentlyUsed(
   }
 ): Promise<string[]> {
   const modelsWithMetadata = await listDownloadedModelsWithMetadata(category);
-
   if (modelsWithMetadata.length === 0) {
     return [];
   }
@@ -165,20 +176,16 @@ export async function cleanupLeastRecentlyUsed(
   const targetBytes = options?.targetBytes ?? 0;
   const maxToDelete = options?.maxModelsToDelete ?? sorted.length - keepCount;
 
-  for (let i = 0; i < sorted.length - keepCount && i < maxToDelete; i++) {
+  for (let i = 0; i < sorted.length - keepCount && i < maxToDelete; i += 1) {
     const item = sorted[i];
-    if (!item) continue;
+    if (!item) {
+      continue;
+    }
 
     try {
-      await deleteModelByCategory(category, item.model.id);
+      await deleteModel(category, item.model.id);
       deletedIds.push(item.model.id);
       bytesFreed += item.sizeOnDisk ?? 0;
-
-      console.log(
-        `[LRU Cleanup] Deleted ${category}:${item.model.id} (freed ${
-          (item.sizeOnDisk ?? 0) / 1024 / 1024
-        } MB)`
-      );
 
       if (targetBytes > 0 && bytesFreed >= targetBytes) {
         break;
@@ -194,13 +201,16 @@ export async function cleanupLeastRecentlyUsed(
   return deletedIds;
 }
 
-export async function deleteModelByCategory(
+export async function deleteModel(
   category: ModelCategory,
   id: string
 ): Promise<void> {
   const modelDir = getModelDir(category, id);
   const tarPath = getTarArchivePath(category, id);
   const onnxPath = getOnnxPath(category, id);
+  const downloadStatePath = getDownloadStatePath(category, id);
+  const extractionStatePath = getExtractionStatePath(category, id);
+
   if (await exists(modelDir)) {
     await unlink(modelDir);
   }
@@ -210,13 +220,20 @@ export async function deleteModelByCategory(
   if (await exists(onnxPath)) {
     await unlink(onnxPath);
   }
-  const list = await listDownloadedModelsByCategory<ModelMetaBase>(category);
+  if (await exists(downloadStatePath)) {
+    await unlink(downloadStatePath);
+  }
+  if (await exists(extractionStatePath)) {
+    await unlink(extractionStatePath);
+  }
+
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
+
+  const list = await listDownloadedModels(category);
   emitModelsListUpdated(category, list);
 }
 
-export async function clearModelCacheByCategory(
-  category: ModelCategory
-): Promise<void> {
+export async function clearModelsCache(category: ModelCategory): Promise<void> {
   const cachePath = getCachePath(category);
   if (await exists(cachePath)) {
     await unlink(cachePath);
@@ -224,9 +241,6 @@ export async function clearModelCacheByCategory(
   clearMemoryCacheForCategory(category);
 }
 
-export async function getDownloadStorageBase(): Promise<string> {
-  if (Platform.OS === 'ios') {
-    return DocumentDirectoryPath;
-  }
+export async function getStorageBasePath(): Promise<string> {
   return DocumentDirectoryPath;
 }

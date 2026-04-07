@@ -11,16 +11,12 @@ export enum ModelCategory {
   Alignment = 'alignment',
 }
 
-/** TTS model type for meta; 'unknown' when id could not be classified. */
 export type TtsModelType = TTSModelType | 'unknown';
-
 export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
-
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
-
 export type ModelArchiveExt = 'tar.bz2' | 'onnx';
 
-export type ModelMetaBase = {
+export type ModelMeta = {
   id: string;
   displayName: string;
   downloadUrl: string;
@@ -28,42 +24,54 @@ export type ModelMetaBase = {
   bytes: number;
   sha256?: string;
   category: ModelCategory;
+  type?: TtsModelType;
+  languages?: string[];
+  quantization?: Quantization;
+  sizeTier?: SizeTier;
 };
 
-export type TtsModelMeta = ModelMetaBase & {
-  type: TtsModelType;
-  languages: string[];
-  quantization: Quantization;
-  sizeTier: SizeTier;
-  category: ModelCategory.Tts;
-};
+export type ProgressPhase =
+  | 'downloading'
+  | 'extracting'
+  /** Archive entries are being skipped to reach the resume point (same byte/percent semantics as extracting). */
+  | 'extracting_resume_skipping';
 
-export type DownloadProgress = {
-  bytesDownloaded: number;
+export type Progress = {
+  bytesProcessed: number;
   totalBytes: number;
   percent: number;
-  phase?: 'downloading' | 'extracting';
+  phase: ProgressPhase;
+  /** When native reports it: 0-based archive entry ordinal for this extract pass. */
+  archiveEntryIndex?: number;
   speed?: number;
   eta?: number;
 };
 
-export type DownloadResult = {
+/** True for any in-progress extraction phase (unpacking or resume skip scan). */
+export function isActiveExtractionPhase(
+  phase: ProgressPhase
+): phase is 'extracting' | 'extracting_resume_skipping' {
+  return phase === 'extracting' || phase === 'extracting_resume_skipping';
+}
+
+export type EnsureModelResult = {
   modelId: string;
   localPath: string;
 };
 
+export type DownloadResult = EnsureModelResult;
+
 export type DownloadState = {
   modelId: string;
   category: ModelCategory;
-  phase: 'downloading' | 'extracting';
+  phase: ProgressPhase;
   startedAt: string;
   archivePath: string;
-  model: ModelMetaBase;
+  model: ModelMeta;
   bytesDownloaded?: number;
   totalBytes?: number;
 };
 
-/** State for an in-progress or interrupted model extraction (archive --> model dir). */
 export type ExtractionState = {
   modelId: string;
   category: ModelCategory;
@@ -71,46 +79,55 @@ export type ExtractionState = {
   startedAt: string;
   archivePath: string;
   modelDir: string;
-  model: ModelMetaBase;
+  model: ModelMeta;
+  lastEntryIndex?: number;
+  lastEntryPath?: string;
 };
 
 export type DownloadProgressListener = (
   category: ModelCategory,
   modelId: string,
-  progress: DownloadProgress
+  progress: Progress
 ) => void;
 
 export type ModelsListUpdatedListener = (
   category: ModelCategory,
-  models: ModelMetaBase[]
+  models: ModelMeta[]
 ) => void;
 
-export type ModelManifest<T extends ModelMetaBase = ModelMetaBase> = {
+export type ModelManifest = {
   downloadedAt: string;
   lastUsed?: string;
-  model: T;
+  model: ModelMeta;
   sizeOnDisk?: number;
 };
 
-export type ModelWithMetadata<T extends ModelMetaBase = ModelMetaBase> = {
-  model: T;
+export type ModelWithMetadata = {
+  model: ModelMeta;
   downloadedAt: string;
   lastUsed: string | null;
   sizeOnDisk?: number;
-  status: 'ready' | 'downloading' | 'extracting' | 'failed';
+  status:
+    | 'ready'
+    | 'downloading'
+    | 'extracting'
+    | 'extracting_resume_skipping'
+    | 'failed';
   progress?: number;
 };
 
-export type ChecksumIssue = {
+export type ChecksumMismatchReason = 'CHECKSUM_MISMATCH' | 'CHECKSUM_FAILED';
+
+export type ChecksumMismatchInfo = {
   category: ModelCategory;
-  id: string;
-  archivePath: string;
+  modelId: string;
+  filePath: string;
   expected?: string;
-  message: string;
-  reason: 'CHECKSUM_FAILED' | 'CHECKSUM_MISMATCH';
+  actual?: string;
+  reason: ChecksumMismatchReason;
 };
 
-export type CachePayload<T extends ModelMetaBase> = {
+export type CachePayload<T extends ModelMeta = ModelMeta> = {
   lastUpdated: string;
   models: T[];
 };
@@ -119,3 +136,38 @@ export type CacheStatus = {
   lastUpdated: string | null;
   source: 'cache' | 'remote';
 };
+
+export type EnsureModelOptions = {
+  onProgress?: (progress: Progress) => void;
+  signal?: AbortSignal;
+  overwrite?: boolean;
+  verifyChecksum?: boolean;
+  onChecksumMismatch?: (info: ChecksumMismatchInfo) => Promise<boolean>;
+  deleteArchiveAfterExtract?: boolean;
+};
+
+export type DownloadOptions = EnsureModelOptions & {
+  maxRetries?: number;
+};
+
+export type ExtractOptions = Omit<EnsureModelOptions, 'overwrite'>;
+
+export class PauseError extends Error {
+  public readonly category: ModelCategory;
+  public readonly modelId: string;
+
+  constructor(
+    category: ModelCategory,
+    modelId: string,
+    message = 'Operation paused'
+  ) {
+    super(message);
+    this.name = 'PauseError';
+    this.category = category;
+    this.modelId = modelId;
+  }
+}
+
+export function isPauseError(error: unknown): error is PauseError {
+  return error instanceof Error && error.name === 'PauseError';
+}

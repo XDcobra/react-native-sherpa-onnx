@@ -60,3 +60,134 @@ await stt.destroy();
   - Types: `TtsModelOptions`, `TtsVitsModelOptions`, `TtsMatchaModelOptions`, `TtsKokoroModelOptions`, `TtsKittenModelOptions`, `TtsPocketModelOptions` are exported from the TTS module. See [docs/tts.md](./docs/tts.md) for details.
 - **Removed deprecated type:** `SynthesisOptions` has been removed. Use `TtsGenerationOptions` instead (same shape).
 
+## Download Manager API (upgrading to 0.4.0)
+
+This release redesigns the public download manager API for SDK consumers.
+
+### Renamed Functions
+
+| Before | After | Notes |
+| --- | --- | --- |
+| `ensureModelByCategory` | `ensureModel` | High-level flow unchanged |
+| `refreshModelsByCategory` | `refreshModels` | |
+| `listModelsByCategory` | `listModels` | |
+| `getModelByIdByCategory` | `getModelById` | |
+| `getModelsCacheStatusByCategory` | `getModelsCacheStatus` | |
+| `clearModelCacheByCategory` | `clearModelsCache` | |
+| `downloadModelByCategory` | `downloadModel` | |
+| `extractModelByCategory` | `extractModel` | |
+| `isModelDownloadedByCategory` | `isModelDownloaded` | |
+| `getLocalModelPathByCategory` | `getModelPath` | |
+| `listDownloadedModelsByCategory` | `listDownloadedModels` | |
+| `deleteModelByCategory` | `deleteModel` | |
+| `getDownloadStorageBase` | `getStorageBasePath` | |
+| `subscribeDownloadProgress` | `onProgress` | Returns unsubscribe |
+| `subscribeModelsListUpdated` | `onModelsListUpdated` | Returns unsubscribe |
+| `configureModelDownloadBackgroundDownloader` | `configureBackgroundDownloader` | |
+| `getProtectedModelKeysForBulkDelete` | `getProtectedKeys` | |
+| `purgeDownloadedModelArtifacts` | `purgeAll` | |
+
+### Added Functions
+
+| New | Purpose |
+| --- | --- |
+| `pauseDownload(category, modelId)` | Explicitly pause an active download |
+| `pauseExtraction(category, modelId)` | Explicitly pause an active extraction |
+
+### Removed Exports
+
+The following exports were removed from the public download manager surface:
+
+- `extractTarBz2`
+- `extractTarZst`
+- `validateChecksum`
+- `validateExtractedFiles`
+- `resolveActualModelDir`
+- `parseChecksumFile`
+- `calculateFileChecksum`
+- `setExpectedFilesForCategory`
+- `getExpectedFilesForCategory`
+
+### Type Changes
+
+| Before | After |
+| --- | --- |
+| `ModelMetaBase` + `TtsModelMeta` | `ModelMeta` (single unified type, TTS fields optional) |
+| `DownloadProgress` | `Progress` |
+| `bytesDownloaded` | `bytesProcessed` |
+| `ChecksumIssue` | `ChecksumMismatchInfo` |
+| `onChecksumIssue` | `onChecksumMismatch` |
+
+### New Pause / Resume Style
+
+Pause no longer requires using `AbortController` as a pause mechanism.
+
+**Before (pause via abort):**
+
+```ts
+const controller = new AbortController();
+
+const run = downloadModelByCategory(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny', {
+  signal: controller.signal,
+});
+
+controller.abort();
+await run;
+```
+
+**After (explicit pause API):**
+
+```ts
+import { ModelCategory, PauseError, downloadModel, pauseDownload, resumeDownload } from 'react-native-sherpa-onnx/download';
+
+const run = downloadModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
+
+await pauseDownload(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
+
+try {
+  await run;
+} catch (error) {
+  if (!(error instanceof PauseError)) {
+    throw error;
+  }
+}
+
+await resumeDownload(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
+```
+
+### Before / After Examples
+
+**Ensure model**
+
+```ts
+// Before
+await ensureModelByCategory(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+
+// After
+await ensureModel(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+```
+
+**List downloaded models**
+
+```ts
+// Before
+const installed = await listDownloadedModelsByCategory(ModelCategory.Alignment);
+
+// After
+const installed = await listDownloadedModels(ModelCategory.Alignment);
+```
+
+**Progress subscription**
+
+```ts
+// Before
+const unsubscribe = subscribeDownloadProgress((category, modelId, progress) => {
+  console.log(progress.bytesDownloaded);
+});
+
+// After
+const unsubscribe = onProgress((category, modelId, progress) => {
+  console.log(progress.bytesProcessed);
+});
+```
+

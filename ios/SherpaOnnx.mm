@@ -2,7 +2,7 @@
  * SherpaOnnx.mm
  *
  * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
- * SherpaOnnx+Assets.mm), extractTarBz2/computeFileSha256 via sherpa-onnx-archive-helper, capability
+ * SherpaOnnx+Assets.mm), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
  * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
  * SherpaOnnx+Assets.mm; STT/TTS in SherpaOnnx+STT.mm and SherpaOnnx+TTS.mm.
  */
@@ -38,7 +38,7 @@
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractTarBz2Progress", @"extractTarZstProgress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
+    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"extractArchiveProgress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
@@ -135,77 +135,70 @@
     });
 }
 
-- (void)extractTarBz2:(NSString *)sourcePath
-           targetPath:(NSString *)targetPath
-                force:(BOOL)force
+- (void)extractArchive:(NSString *)sourcePath
+            targetPath:(NSString *)targetPath
+                 force:(BOOL)force
+           skipEntries:(double)skipEntries
+           operationId:(NSString *)operationId
 showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
-    notificationTitle:(NSString *)notificationTitle
-     notificationText:(NSString *)notificationText
-              resolve:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
+     notificationTitle:(NSString *)notificationTitle
+      notificationText:(NSString *)notificationText
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
 {
     (void)showNotificationsEnabled;
     (void)notificationTitle;
     (void)notificationText;
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
-    NSDictionary *result = [helper extractTarBz2:sourcePath
-                                     targetPath:targetPath
-                                          force:force
-                                       progress:^(long long bytes, long long totalBytes, double percent) {
-        [self sendEventWithName:@"extractTarBz2Progress"
+    NSDictionary *result = [helper extract:sourcePath
+                                targetPath:targetPath
+                                     force:force
+                               skipEntries:(int)skipEntries
+                               operationId:operationId
+                                  progress:^(long long bytes, long long totalBytes, double percent, int entryIndex) {
+        [self sendEventWithName:@"extractArchiveProgress"
                            body:@{ @"sourcePath": sourcePath,
+                                   @"operationId": operationId ?: @"",
                                    @"bytes": @(bytes),
                                    @"totalBytes": @(totalBytes),
-                                   @"percent": @(percent) }];
+                                   @"percent": @(percent),
+                                   @"entryIndex": @(entryIndex) }];
     }];
     resolve(result);
 }
 
-- (void)cancelExtractTarBz2:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
+- (void)extractArchiveFromAsset:(NSString *)assetPath
+                     targetPath:(NSString *)targetPath
+                          force:(BOOL)force
+                    skipEntries:(double)skipEntries
+                    operationId:(NSString *)operationId
+       showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
+              notificationTitle:(NSString *)notificationTitle
+               notificationText:(NSString *)notificationText
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
 {
-    [SherpaOnnxArchiveHelper cancelExtractTarBz2];
-    resolve(nil);
-}
-
-- (void)extractTarZst:(NSString *)sourcePath
-           targetPath:(NSString *)targetPath
-                force:(BOOL)force
-showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
-    notificationTitle:(NSString *)notificationTitle
-     notificationText:(NSString *)notificationText
-              resolve:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
-{
+    (void)force;
+    (void)skipEntries;
+    (void)operationId;
     (void)showNotificationsEnabled;
     (void)notificationTitle;
     (void)notificationText;
-    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
-    NSDictionary *result = [helper extractTarZst:sourcePath
-                                    targetPath:targetPath
-                                         force:force
-                                      progress:^(long long bytes, long long totalBytes, double percent) {
-        [self sendEventWithName:@"extractTarZstProgress"
-                           body:@{ @"sourcePath": sourcePath,
-                                   @"bytes": @(bytes),
-                                   @"totalBytes": @(totalBytes),
-                                   @"percent": @(percent) }];
-    }];
-    resolve(result);
+    resolve(@{
+        @"success": @NO,
+        @"paused": @NO,
+        @"lastEntryIndex": @(-1),
+        @"lastEntryPath": @"",
+        @"bytesExtracted": @(0),
+        @"reason": @"Not supported on iOS; use path-based extraction.",
+    });
 }
 
-- (void)cancelExtractTarZst:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
+- (void)cancelExtraction:(NSString *)operationId
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
-    [SherpaOnnxArchiveHelper cancelExtractTarZst];
-    resolve(nil);
-}
-
-- (void)cancelExtractBySourcePath:(NSString *)sourcePath
-                          resolve:(RCTPromiseResolveBlock)resolve
-                           reject:(RCTPromiseRejectBlock)reject
-{
-    [SherpaOnnxArchiveHelper cancelExtractForPath:sourcePath];
+    [SherpaOnnxArchiveHelper cancelOperation:operationId];
     resolve(nil);
 }
 
@@ -237,38 +230,6 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
 {
     // PAD APK_ASSETS listing is Android-only.
     resolve(@[]);
-}
-
-- (void)extractTarZstFromAsset:(NSString *)assetPath
-                   targetPath:(NSString *)targetPath
-                        force:(BOOL)force
-      showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
-             notificationTitle:(NSString *)notificationTitle
-              notificationText:(NSString *)notificationText
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    (void)force;
-    (void)showNotificationsEnabled;
-    (void)notificationTitle;
-    (void)notificationText;
-    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
-}
-
-- (void)extractTarBz2FromAsset:(NSString *)assetPath
-                   targetPath:(NSString *)targetPath
-                        force:(BOOL)force
-      showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
-             notificationTitle:(NSString *)notificationTitle
-              notificationText:(NSString *)notificationText
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    (void)force;
-    (void)showNotificationsEnabled;
-    (void)notificationTitle;
-    (void)notificationText;
-    resolve(@{ @"success": @NO, @"reason": @"Not supported on iOS; use path-based extraction." });
 }
 
 - (void)convertAudioToFormat:(NSString *)inputPath

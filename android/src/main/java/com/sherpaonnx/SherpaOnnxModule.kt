@@ -49,6 +49,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val kwsHelper = SherpaOnnxKwsHelper(reactApplicationContext, NAME)
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
@@ -73,6 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pcmCapture?.stop()
     pcmCapture = null
     onlineSttHelper.shutdown()
+    kwsHelper.shutdown()
     ttsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
@@ -300,10 +302,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.resolveModelPath(config, promise)
   }
 
-  override fun extractTarBz2(
+  override fun extractArchive(
     sourcePath: String,
     targetPath: String,
     force: Boolean,
+    skipEntries: Double,
+    operationId: String,
     showNotificationsEnabled: Boolean?,
     notificationTitle: String?,
     notificationText: String?,
@@ -314,56 +318,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       notificationTitle,
       notificationText,
     )
-    archiveHelper.extractTarBz2(
+    archiveHelper.extract(
       sourcePath,
       targetPath,
       force,
+      skipEntries.toInt(),
+      operationId,
       promise,
-      { bytes, total, percent ->
-        emitExtractProgress(sourcePath, bytes, total, percent)
+      { bytes, total, percent, entryIndex ->
+        emitExtractProgress(operationId, sourcePath, bytes, total, percent, entryIndex)
       },
       notif,
     )
   }
 
-  override fun cancelExtractTarBz2(promise: Promise) {
-    archiveHelper.cancelExtractTarBz2()
-    promise.resolve(null)
-  }
-
-  override fun extractTarZst(
-    sourcePath: String,
-    targetPath: String,
-    force: Boolean,
-    showNotificationsEnabled: Boolean?,
-    notificationTitle: String?,
-    notificationText: String?,
-    promise: Promise,
-  ) {
-    val notif = extractionNotificationOrNull(
-      showNotificationsEnabled,
-      notificationTitle,
-      notificationText,
-    )
-    archiveHelper.extractTarZst(
-      sourcePath,
-      targetPath,
-      force,
-      promise,
-      { bytes, total, percent ->
-        emitExtractTarZstProgress(sourcePath, bytes, total, percent)
-      },
-      notif,
-    )
-  }
-
-  override fun cancelExtractTarZst(promise: Promise) {
-    archiveHelper.cancelExtractTarZst()
-    promise.resolve(null)
-  }
-
-  override fun cancelExtractBySourcePath(sourcePath: String, promise: Promise) {
-    archiveHelper.cancelExtractBySourcePath(sourcePath)
+  override fun cancelExtraction(operationId: String, promise: Promise) {
+    archiveHelper.cancelOperation(operationId)
     promise.resolve(null)
   }
 
@@ -371,26 +341,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     archiveHelper.computeFileSha256(filePath, promise)
   }
 
-  private fun emitExtractProgress(sourcePath: String, bytes: Long, totalBytes: Long, percent: Double) {
+  private fun emitExtractProgress(
+    operationId: String,
+    sourcePath: String,
+    bytes: Long,
+    totalBytes: Long,
+    percent: Double,
+    entryIndex: Int,
+  ) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
+    payload.putString("operationId", operationId)
     payload.putString("sourcePath", sourcePath)
     payload.putDouble("bytes", bytes.toDouble())
     payload.putDouble("totalBytes", totalBytes.toDouble())
     payload.putDouble("percent", percent)
-    eventEmitter.emit("extractTarBz2Progress", payload)
-  }
-
-  private fun emitExtractTarZstProgress(sourcePath: String, bytes: Long, totalBytes: Long, percent: Double) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("sourcePath", sourcePath)
-    payload.putDouble("bytes", bytes.toDouble())
-    payload.putDouble("totalBytes", totalBytes.toDouble())
-    payload.putDouble("percent", percent)
-    eventEmitter.emit("extractTarZstProgress", payload)
+    payload.putInt("entryIndex", entryIndex)
+    eventEmitter.emit("extractArchiveProgress", payload)
   }
 
   /** Null when extraction notifications are disabled (`showNotificationsEnabled == false`). */
@@ -602,6 +570,73 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun processSttAudioChunk(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
     onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
+  }
+
+  // ==================== Keyword Spotting (KWS) Methods ====================
+
+  override fun initializeKwsWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
+    val modelDir = options.getString("modelDir")
+    if (modelDir.isNullOrEmpty()) {
+      promise.reject("INIT_ERROR", "modelDir is required")
+      return
+    }
+    val keywordsFile = if (options.hasKey("keywordsFile")) options.getString("keywordsFile") else null
+    val keywordsScore = if (options.hasKey("keywordsScore")) options.getDouble("keywordsScore") else null
+    val keywordsThreshold = if (options.hasKey("keywordsThreshold")) options.getDouble("keywordsThreshold") else null
+    val numTrailingBlanks = if (options.hasKey("numTrailingBlanks")) options.getDouble("numTrailingBlanks") else null
+    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths") else null
+    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
+    val provider = if (options.hasKey("provider")) options.getString("provider") else null
+    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
+    kwsHelper.initializeKws(
+      instanceId,
+      modelDir,
+      keywordsFile,
+      keywordsScore,
+      keywordsThreshold,
+      numTrailingBlanks,
+      maxActivePaths,
+      numThreads,
+      provider,
+      debug,
+      promise
+    )
+  }
+
+  override fun createKwsStream(instanceId: String, streamId: String, keywords: String?, promise: Promise) {
+    kwsHelper.createKwsStream(instanceId, streamId, keywords, promise)
+  }
+
+  override fun acceptKwsWaveform(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    kwsHelper.acceptKwsWaveform(streamId, samples, sampleRate.toInt(), promise)
+  }
+
+  override fun decodeKwsStream(streamId: String, promise: Promise) {
+    kwsHelper.decodeKwsStream(streamId, promise)
+  }
+
+  override fun isKwsStreamReady(streamId: String, promise: Promise) {
+    kwsHelper.isKwsStreamReady(streamId, promise)
+  }
+
+  override fun getKwsStreamResult(streamId: String, promise: Promise) {
+    kwsHelper.getKwsStreamResult(streamId, promise)
+  }
+
+  override fun resetKwsStream(streamId: String, promise: Promise) {
+    kwsHelper.resetKwsStream(streamId, promise)
+  }
+
+  override fun releaseKwsStream(streamId: String, promise: Promise) {
+    kwsHelper.releaseKwsStream(streamId, promise)
+  }
+
+  override fun unloadKws(instanceId: String, promise: Promise) {
+    kwsHelper.unloadKws(instanceId, promise)
+  }
+
+  override fun processKwsAudioChunk(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    kwsHelper.processKwsAudioChunk(streamId, samples, sampleRate.toInt(), promise)
   }
 
   override fun startPcmLiveStream(options: ReadableMap, promise: Promise) {
@@ -1325,10 +1360,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.listBundledArchiveAssetPaths(packName, promise)
   }
 
-  override fun extractTarZstFromAsset(
+  override fun extractArchiveFromAsset(
     assetPath: String,
     targetPath: String,
     force: Boolean,
+    skipEntries: Double,
+    operationId: String,
     showNotificationsEnabled: Boolean?,
     notificationTitle: String?,
     notificationText: String?,
@@ -1339,41 +1376,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       notificationTitle,
       notificationText,
     )
-    archiveHelper.extractTarZstFromAsset(
+    archiveHelper.extractFromAsset(
       reactApplicationContext,
       assetPath,
       targetPath,
       force,
+      skipEntries.toInt(),
+      operationId,
       promise,
-      { bytes, total, percent ->
-        emitExtractTarZstProgress(assetPath, bytes, total, percent)
-      },
-      notif,
-    )
-  }
-
-  override fun extractTarBz2FromAsset(
-    assetPath: String,
-    targetPath: String,
-    force: Boolean,
-    showNotificationsEnabled: Boolean?,
-    notificationTitle: String?,
-    notificationText: String?,
-    promise: Promise,
-  ) {
-    val notif = extractionNotificationOrNull(
-      showNotificationsEnabled,
-      notificationTitle,
-      notificationText,
-    )
-    archiveHelper.extractTarBz2FromAsset(
-      reactApplicationContext,
-      assetPath,
-      targetPath,
-      force,
-      promise,
-      { bytes, total, percent ->
-        emitExtractProgress(assetPath, bytes, total, percent)
+      { bytes, total, percent, entryIndex ->
+        emitExtractProgress(operationId, assetPath, bytes, total, percent, entryIndex)
       },
       notif,
     )

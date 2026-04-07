@@ -5,6 +5,7 @@ import HomeScreen from '../screens/home/HomeScreen';
 import STTScreen from '../screens/stt/STTScreen';
 import TTSScreen from '../screens/tts/TTSScreen';
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
+import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
@@ -53,6 +54,13 @@ export default function RootNavigator() {
         component={GenerateTimestampScreen}
         options={{
           title: 'Generate timestamp',
+        }}
+      />
+      <Stack.Screen
+        name="DownloadShowcase"
+        component={DownloadShowcaseScreen}
+        options={{
+          title: 'Download showcase',
         }}
       />
       <Stack.Screen

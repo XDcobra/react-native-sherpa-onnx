@@ -1,19 +1,17 @@
+export type RetryOptions = {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffFactor?: number;
+  signal?: AbortSignal;
+};
+
 /**
- * Retry helper with exponential backoff
- * @param fn - The async function to retry
- * @param options - Retry configuration
- * @returns The result of the function
- * @throws The last error if all retries fail or AbortError if aborted
+ * Retry helper with exponential backoff.
  */
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  options: {
-    maxRetries?: number;
-    initialDelayMs?: number;
-    maxDelayMs?: number;
-    backoffFactor?: number;
-    signal?: AbortSignal;
-  } = {}
+  options: RetryOptions = {}
 ): Promise<T> {
   const maxRetries = options.maxRetries ?? 3;
   const initialDelayMs = options.initialDelayMs ?? 1000;
@@ -22,7 +20,7 @@ export async function retryWithBackoff<T>(
 
   let lastError: Error | undefined;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     if (options.signal?.aborted) {
       const abortError = new Error('Operation aborted');
       abortError.name = 'AbortError';
@@ -34,40 +32,38 @@ export async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Don't retry on abort
       if (lastError.name === 'AbortError' || options.signal?.aborted) {
         throw lastError;
       }
 
-      // If this was the last attempt, throw the error
       if (attempt === maxRetries) {
         throw lastError;
       }
 
-      // Calculate delay with exponential backoff
       const delayMs = Math.min(
         initialDelayMs * Math.pow(backoffFactor, attempt),
         maxDelayMs
       );
 
-      console.warn(
-        `Retry attempt ${attempt + 1}/${maxRetries} after ${delayMs}ms due to:`,
-        lastError.message
-      );
-
-      // Wait before retrying (abort-aware: cancel the delay if signal fires)
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, delayMs);
-        if (options.signal) {
-          const onAbort = () => {
-            clearTimeout(timer);
-            options.signal!.removeEventListener('abort', onAbort);
-            const abortErr = new Error('Operation aborted');
-            abortErr.name = 'AbortError';
-            reject(abortErr);
-          };
-          options.signal.addEventListener('abort', onAbort);
+        if (!options.signal) {
+          setTimeout(resolve, delayMs);
+          return;
         }
+
+        const onAbort = () => {
+          clearTimeout(timer);
+          const abortError = new Error('Operation aborted');
+          abortError.name = 'AbortError';
+          reject(abortError);
+        };
+
+        const timer = setTimeout(() => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, delayMs);
+
+        options.signal.addEventListener('abort', onAbort);
       });
     }
   }

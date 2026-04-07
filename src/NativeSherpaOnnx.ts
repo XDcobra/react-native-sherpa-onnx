@@ -7,6 +7,19 @@ export type AccelerationSupport = {
   canInit: boolean;
 };
 
+/** Result from unified archive extraction (path or asset stream). */
+export type ExtractArchiveResult = {
+  success: boolean;
+  /** True when extraction stopped due to cancel (resume with skipEntries = lastEntryIndex + 1). */
+  paused: boolean;
+  lastEntryIndex: number;
+  lastEntryPath: string;
+  bytesExtracted: number;
+  path?: string;
+  sha256?: string;
+  reason?: string;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -219,6 +232,80 @@ export interface Spec extends TurboModule {
     tokens: string[];
     timestamps: number[];
     isEndpoint: boolean;
+  }>;
+
+  // ==================== Keyword Spotting (KWS) Methods ====================
+
+  /**
+   * Initialize KeywordSpotter for wake-word/keyword detection (single options object).
+   * @param instanceId - Unique ID for this engine instance (from createKeywordSpotter)
+   * @param options - All init options (modelDir, modelType, keywordsFile, and optional tuning params).
+   * @returns `{ success: true }` on success, or `{ success: false, error?: string }` on structured native failure.
+   */
+  initializeKwsWithOptions(
+    instanceId: string,
+    options: {
+      modelDir: string;
+      modelType: string;
+      keywordsFile?: string;
+      keywordsScore?: number;
+      keywordsThreshold?: number;
+      numTrailingBlanks?: number;
+      maxActivePaths?: number;
+      numThreads?: number;
+      provider?: string;
+      debug?: boolean;
+    }
+  ): Promise<{ success: boolean; error?: string }>;
+
+  /** Create a new stream for the given KeywordSpotter instance. */
+  createKwsStream(
+    instanceId: string,
+    streamId: string,
+    keywords?: string
+  ): Promise<void>;
+
+  /** Feed PCM samples to a keyword spotting stream. */
+  acceptKwsWaveform(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<void>;
+
+  /** Run decoding on the stream (call when isKwsStreamReady is true). */
+  decodeKwsStream(streamId: string): Promise<void>;
+
+  /** True if the stream has enough audio to decode. */
+  isKwsStreamReady(streamId: string): Promise<boolean>;
+
+  /** Get current result (call after decodeKwsStream). */
+  getKwsStreamResult(streamId: string): Promise<{
+    keyword: string;
+    tokens: string[];
+    timestamps: number[];
+  }>;
+
+  /** Reset stream state for reuse. */
+  resetKwsStream(streamId: string): Promise<void>;
+
+  /** Release stream and remove from native state. */
+  releaseKwsStream(streamId: string): Promise<void>;
+
+  /** Release KeywordSpotter and all its streams. */
+  unloadKws(instanceId: string): Promise<void>;
+
+  /**
+   * Convenience: feed audio, decode while ready, return result in one call.
+   * Automatically resets stream if keyword is detected.
+   */
+  processKwsAudioChunk(
+    streamId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<{
+    keyword: string;
+    tokens: string[];
+    timestamps: number[];
   }>;
 
   /**
@@ -658,105 +745,50 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Extraction ====================
 
   /**
-   * Extract a .tar.bz2 archive to a target folder.
-   * Returns { success, path } or { success, reason }.
+   * Extract a tar archive (.tar.bz2, .tar.zst, etc.) from a filesystem path. Native layer auto-detects format.
    *
-   * **Android:** When `showNotificationsEnabled` is true (default), a system notification shows
-   * extraction progress. Optional `notificationTitle` / `notificationText` customize the copy.
-   * **iOS:** Notification parameters are accepted but have no effect (no extraction progress notification).
+   * @param skipEntries - 0 for a fresh run; for resume, pass `lastEntryIndex + 1` from a paused result.
+   * @param operationId - Unique ID for this extraction; use with `cancelExtraction` and progress events.
+   *
+   * **Android:** When `showNotificationsEnabled` is true (default), a system notification shows progress.
+   * **iOS:** Notification parameters are accepted but have no effect.
    */
-  extractTarBz2(
+  extractArchive(
     sourcePath: string,
     targetPath: string,
     force: boolean,
+    skipEntries: number,
+    operationId: string,
     showNotificationsEnabled?: boolean,
     notificationTitle?: string,
     notificationText?: string
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
+  ): Promise<ExtractArchiveResult>;
 
   /**
-   * Cancel any in-progress tar.bz2 extraction.
+   * Extract from an Android APK asset path (PAD APK_ASSETS). Not supported on iOS (resolves to failure).
+   * Same `skipEntries` / `operationId` semantics as `extractArchive`.
    */
-  cancelExtractTarBz2(): Promise<void>;
-
-  /**
-   * Extract a .tar.zst (or .zst) archive to a target folder.
-   * Returns { success, path } or { success, reason }.
-   *
-   * **Android:** Same notification behavior as `extractTarBz2`. **iOS:** No effect.
-   */
-  extractTarZst(
-    sourcePath: string,
+  extractArchiveFromAsset(
+    assetPath: string,
     targetPath: string,
     force: boolean,
+    skipEntries: number,
+    operationId: string,
     showNotificationsEnabled?: boolean,
     notificationTitle?: string,
     notificationText?: string
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
+  ): Promise<ExtractArchiveResult>;
 
   /**
-   * Cancel any in-progress tar.zst extraction.
+   * Cancel an in-progress extraction for the given `operationId`.
    */
-  cancelExtractTarZst(): Promise<void>;
-
-  /**
-   * Cancel extraction for a specific source archive path (per-operation cancel for parallel extractions).
-   */
-  cancelExtractBySourcePath(sourcePath: string): Promise<void>;
+  cancelExtraction(operationId: string): Promise<void>;
 
   /**
    * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
    * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
    */
   listBundledArchiveAssetPaths(packName: string): Promise<string[]>;
-
-  /**
-   * Extract a .tar.zst archive from Android assets (AssetManager) to a target folder. Android only.
-   * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
-   * Notification options match `extractTarZst` (Android only).
-   */
-  extractTarZstFromAsset(
-    assetPath: string,
-    targetPath: string,
-    force: boolean,
-    showNotificationsEnabled?: boolean,
-    notificationTitle?: string,
-    notificationText?: string
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
-
-  /**
-   * Extract a .tar.bz2 archive from Android assets (AssetManager) to a target folder. Android only.
-   * Streams from asset; no copy of the archive to disk. Used when PAD pack is APK_ASSETS.
-   * Notification options match `extractTarBz2` (Android only).
-   */
-  extractTarBz2FromAsset(
-    assetPath: string,
-    targetPath: string,
-    force: boolean,
-    showNotificationsEnabled?: boolean,
-    notificationTitle?: string,
-    notificationText?: string
-  ): Promise<{
-    success: boolean;
-    path?: string;
-    sha256?: string;
-    reason?: string;
-  }>;
 
   /**
    * Compute SHA-256 of a file and return the hex digest.

@@ -2,12 +2,15 @@
  * STT model language codes and display names.
  * Per-model lists for Whisper, SenseVoice, and others. Use these for language-hint
  * dropdowns so users only pick valid codes (invalid codes can crash the app, e.g. Whisper).
+ *
+ * Dolphin / Qwen3 ASR: informational lists only when the native API has no language hint in this
+ * SDK (Dolphin: see k2-fsa/sherpa-onnx#2293). Use for UI / model capability hints.
  */
 
 export interface SttModelLanguage {
   /**
-   * Value to pass as language (e.g. "en" for Whisper, "中文" for FunASR Nano).
-   * Use as modelOptions.<model>.language (or srcLang/tgtLang where applicable).
+   * Language identifier: value for modelOptions where supported (e.g. "en" for Whisper,
+   * "中文" for FunASR Nano), or informational tag (e.g. Dolphin "zh-cn") for display only.
    */
   id: string;
   /** Display name in English (e.g. "english", "chinese"). */
@@ -266,4 +269,142 @@ export const COHERE_TRANSCRIBE_LANGUAGES: readonly SttModelLanguage[] = [
  */
 export function getCohereTranscribeLanguages(): readonly SttModelLanguage[] {
   return COHERE_TRANSCRIBE_LANGUAGES;
+}
+
+// ========== Qwen3 ASR (informational only) ==========
+// Multilingual Qwen3 ASR in sherpa-onnx. SttQwen3AsrModelOptions has no language field here —
+// this list is for apps to show supported spoken languages (UI / docs).
+
+/** Languages supported by Qwen3 ASR (ISO-style ids for display; not passed as modelOptions). */
+export const QWEN3_ASR_LANGUAGES: readonly SttModelLanguage[] = [
+  { id: 'zh', name: 'chinese' },
+  { id: 'en', name: 'english' },
+  { id: 'yue', name: 'cantonese' },
+  { id: 'ar', name: 'arabic' },
+  { id: 'de', name: 'german' },
+  { id: 'fr', name: 'french' },
+  { id: 'es', name: 'spanish' },
+  { id: 'pt', name: 'portuguese' },
+  { id: 'id', name: 'indonesian' },
+  { id: 'it', name: 'italian' },
+  { id: 'ko', name: 'korean' },
+  { id: 'ru', name: 'russian' },
+  { id: 'th', name: 'thai' },
+  { id: 'vi', name: 'vietnamese' },
+  { id: 'ja', name: 'japanese' },
+  { id: 'tr', name: 'turkish' },
+  { id: 'hi', name: 'hindi' },
+  { id: 'ms', name: 'malay' },
+  { id: 'nl', name: 'dutch' },
+  { id: 'sv', name: 'swedish' },
+  { id: 'da', name: 'danish' },
+  { id: 'fi', name: 'finnish' },
+  { id: 'pl', name: 'polish' },
+  { id: 'cs', name: 'czech' },
+  { id: 'fil', name: 'filipino' },
+  { id: 'fa', name: 'persian' },
+  { id: 'el', name: 'greek' },
+  { id: 'hu', name: 'hungarian' },
+  { id: 'mk', name: 'macedonian' },
+  { id: 'ro', name: 'romanian' },
+] as const;
+
+/**
+ * Returns Qwen3 ASR supported languages for display only (e.g. model capability hints in apps).
+ * Not for modelOptions — this SDK does not expose a Qwen3 language hint.
+ */
+export function getQwen3AsrLanguages(): readonly SttModelLanguage[] {
+  return QWEN3_ASR_LANGUAGES;
+}
+
+// ========== Dolphin (informational only) ==========
+// Language–region tags supported by Dolphin ASR (reference for multilingual models such as
+// sherpa-onnx-dolphin-base-ctc-multi-lang). Not used as modelOptions — no language API in sherpa-onnx.
+
+/** Dolphin ASR language–region tags for UI / documentation (not passed to native options). */
+export const DOLPHIN_INFO_LANGUAGES: readonly SttModelLanguage[] = [
+  { id: 'zh-cn', name: 'chinese (mandarin)' },
+  { id: 'zh-tw', name: 'chinese (taiwan)' },
+  { id: 'zh-wu', name: 'chinese (wuyu)' },
+  { id: 'zh-sichuan', name: 'chinese (sichuan)' },
+  { id: 'zh-shanxi', name: 'chinese (shanxi)' },
+  { id: 'zh-anhui', name: 'chinese (anhui)' },
+  { id: 'zh-tianjin', name: 'chinese (tianjin)' },
+  { id: 'zh-ningxia', name: 'chinese (ningxia)' },
+  { id: 'zh-shaanxi', name: 'chinese (shaanxi)' },
+  { id: 'zh-hebei', name: 'chinese (hebei)' },
+  { id: 'zh-shandong', name: 'chinese (shandong)' },
+  { id: 'zh-guangdong', name: 'chinese (guangdong)' },
+  { id: 'zh-shanghai', name: 'chinese (shanghai)' },
+  { id: 'zh-hubei', name: 'chinese (hubei)' },
+  { id: 'zh-liaoning', name: 'chinese (liaoning)' },
+  { id: 'zh-gansu', name: 'chinese (gansu)' },
+  { id: 'zh-fujian', name: 'chinese (fujian)' },
+  { id: 'zh-hunan', name: 'chinese (hunan)' },
+  { id: 'zh-henan', name: 'chinese (henan)' },
+  { id: 'zh-yunnan', name: 'chinese (yunnan)' },
+  { id: 'zh-minnan', name: 'chinese (minnan)' },
+  { id: 'zh-wenzhou', name: 'chinese (wenzhou)' },
+  { id: 'ja-jp', name: 'japanese' },
+  { id: 'th-th', name: 'thai' },
+  { id: 'ru-ru', name: 'russian' },
+  { id: 'ko-kr', name: 'korean' },
+  { id: 'id-id', name: 'indonesian' },
+  { id: 'vi-vn', name: 'vietnamese' },
+  { id: 'ct-null', name: 'yue (unknown)' },
+  { id: 'ct-hk', name: 'yue (hong kong)' },
+  { id: 'ct-gz', name: 'yue (guangdong)' },
+  { id: 'hi-in', name: 'hindi' },
+  { id: 'ur-in', name: 'urdu' },
+  { id: 'ur-pk', name: 'urdu (pakistan)' },
+  { id: 'ms-my', name: 'malay' },
+  { id: 'uz-uz', name: 'uzbek' },
+  { id: 'ar-ma', name: 'arabic (morocco)' },
+  { id: 'ar-gla', name: 'arabic' },
+  { id: 'ar-sa', name: 'arabic (saudi arabia)' },
+  { id: 'ar-eg', name: 'arabic (egypt)' },
+  { id: 'ar-kw', name: 'arabic (kuwait)' },
+  { id: 'ar-ly', name: 'arabic (libya)' },
+  { id: 'ar-jo', name: 'arabic (jordan)' },
+  { id: 'ar-ae', name: 'arabic (uae)' },
+  { id: 'ar-lvt', name: 'arabic (levant)' },
+  { id: 'fa-ir', name: 'persian' },
+  { id: 'bn-bd', name: 'bengali' },
+  { id: 'ta-sg', name: 'tamil (singapore)' },
+  { id: 'ta-lk', name: 'tamil (sri lanka)' },
+  { id: 'ta-in', name: 'tamil (india)' },
+  { id: 'ta-my', name: 'tamil (malaysia)' },
+  { id: 'te-in', name: 'telugu' },
+  { id: 'ug-null', name: 'uighur' },
+  { id: 'ug-cn', name: 'uighur (china)' },
+  { id: 'gu-in', name: 'gujarati' },
+  { id: 'my-mm', name: 'burmese' },
+  { id: 'tl-ph', name: 'tagalog' },
+  { id: 'kk-kz', name: 'kazakh' },
+  { id: 'or-in', name: 'odia' },
+  { id: 'ne-np', name: 'nepali' },
+  { id: 'mn-mn', name: 'mongolian' },
+  { id: 'km-kh', name: 'khmer' },
+  { id: 'jv-id', name: 'javanese' },
+  { id: 'lo-la', name: 'lao' },
+  { id: 'si-lk', name: 'sinhala' },
+  { id: 'fil-ph', name: 'filipino' },
+  { id: 'ps-af', name: 'pushto' },
+  { id: 'pa-in', name: 'panjabi' },
+  { id: 'kab-null', name: 'kabyle' },
+  { id: 'ba-null', name: 'bashkir' },
+  { id: 'ks-in', name: 'kashmiri' },
+  { id: 'tg-tj', name: 'tajik' },
+  { id: 'su-id', name: 'sundanese' },
+  { id: 'mr-in', name: 'marathi' },
+  { id: 'ky-kg', name: 'kirghiz' },
+  { id: 'az-az', name: 'azerbaijani' },
+] as const;
+
+/**
+ * Returns Dolphin language–region tags for display only (e.g. model capability hints in apps).
+ * Not for modelOptions — sherpa-onnx Dolphin has no language hint API.
+ */
+export function getDolphinInfoLanguages(): readonly SttModelLanguage[] {
+  return DOLPHIN_INFO_LANGUAGES;
 }

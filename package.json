@@ -15,6 +15,11 @@
       "types": "./lib/typescript/src/stt/index.d.ts",
       "default": "./lib/module/stt/index.js"
     },
+    "./kws": {
+      "source": "./src/kws/index.ts",
+      "types": "./lib/typescript/src/kws/index.d.ts",
+      "default": "./lib/module/kws/index.js"
+    },
     "./tts": {
       "source": "./src/tts/index.ts",
       "types": "./lib/typescript/src/tts/index.d.ts",
@@ -149,6 +154,7 @@
     "@eslint/compat": "^1.3.2",
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.35.0",
+    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "@react-native-community/cli": "^20.1.1",
     "@react-native/babel-preset": "0.83.0",
     "@react-native/eslint-config": "0.83.0",
@@ -171,11 +177,11 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "buffer": "^6.0.3"
   },
   "peerDependencies": {
     "@dr.pogodin/react-native-fs": "*",
+    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "react": "*",
     "react-native": "*"
   },
