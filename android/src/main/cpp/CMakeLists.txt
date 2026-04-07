@@ -75,27 +75,27 @@ if(SHERPA_ONNX_DISABLE_LIBARCHIVE)
     message(STATUS "libarchive disabled (SHERPA_ONNX_DISABLE_LIBARCHIVE=ON). extractTarBz2/cancelExtractTarBz2 will return an error at runtime.")
 endif()
 
-# Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). Move .cpp into subdirs; .h go alongside for include path.
+# Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
     alignment/sherpa_onnx_ctc_alignment.cpp
     jni/alignment/sherpa-onnx-alignment-jni.cpp
     jni/module/sherpa-onnx-module-jni.cpp
     jni/archive/sherpa-onnx-archive-helper.cpp
     jni/archive/sherpa-onnx-archive-jni.cpp
-    jni/model_detect/sherpa-onnx-model-detect-helper.cpp
-    jni/model_detect/sherpa-onnx-model-detect-stt.cpp
-    jni/model_detect/sherpa-onnx-model-detect-tts.cpp
-    jni/model_detect/sherpa-onnx-model-detect-enhancement.cpp
-    jni/model_detect/sherpa-onnx-model-detect-alignment.cpp
-    jni/model_detect/sherpa-onnx-validate-stt.cpp
-    jni/model_detect/sherpa-onnx-validate-tts.cpp
-    jni/model_detect/sherpa-onnx-validate-enhancement.cpp
-    jni/model_detect/sherpa-onnx-validate-alignment.cpp
-    jni/model_detect/sherpa-onnx-detect-jni-common.cpp
-    jni/model_detect/sherpa-onnx-stt-wrapper.cpp
-    jni/model_detect/sherpa-onnx-tts-wrapper.cpp
-    jni/model_detect/sherpa-onnx-enhancement-wrapper.cpp
-    jni/model_detect/sherpa-onnx-alignment-wrapper.cpp
+    jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
+    jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
+    jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
+    jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp
+    jni/model_detect/tts/sherpa-onnx-model-detect-tts.cpp
+    jni/model_detect/tts/sherpa-onnx-validate-tts.cpp
+    jni/model_detect/tts/sherpa-onnx-tts-wrapper.cpp
+    jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
+    jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
+    jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
+    jni/model_detect/alignment/sherpa-onnx-model-detect-alignment.cpp
+    jni/model_detect/alignment/sherpa-onnx-validate-alignment.cpp
+    jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
     jni/audio/sherpa-onnx-audio-convert-jni.cpp
     jni/audio/audio_convert_file.cpp
     jni/audio/audio_f32le_to_format.cpp
@@ -193,7 +193,11 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
-    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/stt
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/tts
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

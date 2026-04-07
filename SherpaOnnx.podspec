@@ -99,7 +99,11 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
-    "\"#{pod_root}/android/src/main/cpp/jni/model_detect\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios\"",

@@ -1,5 +1,5 @@
 # Host-side C++ tests (Linux/macOS CI): no Android NDK.
-# Layout: model_detect/ — STT/TTS model detection; audio_conversion/ — FFmpeg audio convert (same sources as Android).
+# Layout: model_detect/ — host tests; production sources under android/.../jni/model_detect/{common,stt,tts,enhancement}/; audio_conversion/ — FFmpeg (same sources as Android).
 cmake_minimum_required(VERSION 3.16)
 project(sherpa-onnx-host-cpp-tests LANGUAGES CXX)
 
@@ -13,13 +13,13 @@ set(MODEL_DETECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni
 set(JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni")
 
 set(PRODUCTION_SOURCES
-  "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-helper.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-stt.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-tts.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-model-detect-enhancement.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-validate-stt.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-validate-tts.cpp"
-  "${MODEL_DETECT_DIR}/sherpa-onnx-validate-enhancement.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-helper.cpp"
+  "${MODEL_DETECT_DIR}/stt/sherpa-onnx-model-detect-stt.cpp"
+  "${MODEL_DETECT_DIR}/tts/sherpa-onnx-model-detect-tts.cpp"
+  "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-model-detect-enhancement.cpp"
+  "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-stt.cpp"
+  "${MODEL_DETECT_DIR}/tts/sherpa-onnx-validate-tts.cpp"
+  "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-validate-enhancement.cpp"
 )
 
 add_executable(model_detect_test
@@ -31,7 +31,11 @@ add_executable(model_detect_test
 target_sources(model_detect_test PRIVATE ${PRODUCTION_SOURCES})
 
 target_include_directories(model_detect_test PRIVATE
-  "${MODEL_DETECT_DIR}"
+  "${MODEL_DETECT_DIR}/common"
+  "${MODEL_DETECT_DIR}/stt"
+  "${MODEL_DETECT_DIR}/tts"
+  "${MODEL_DETECT_DIR}/enhancement"
+  "${MODEL_DETECT_DIR}/alignment"
   "${JNI_DIR}"
   "${MODEL_DETECT_TEST_DIR}"
 )
