@@ -60,10 +60,20 @@ await tts.destroy();
 ### 2) Batch with timestamps (`fast` or `accurate`)
 
 ```ts
-import { createTTS, type GeneratedAudioWithTimestamps } from 'react-native-sherpa-onnx/tts';
+import {
+  createTTS,
+  detectTtsModel,
+  type GeneratedAudioWithTimestamps,
+} from 'react-native-sherpa-onnx/tts';
+
+const det = await detectTtsModel({ type: 'file', path: '/path/to/model-dir' });
+if (!det.success || !det.modelType) {
+  throw new Error(det.error ?? 'TTS model detection failed');
+}
 
 const tts = await createTTS({
   modelPath: { type: 'file', path: '/path/to/model-dir' },
+  modelType: det.modelType,
 });
 
 // Fast estimated timing (default subtitle mode).
@@ -87,6 +97,8 @@ const aligned: GeneratedAudioWithTimestamps = await tts.generateSpeechWithTimest
 
 await tts.destroy();
 ```
+
+`modelType: 'auto'` (or omitted `modelType`) is still valid, but an explicit detected `modelType` is recommended when you need model-specific `modelOptions`.
 
 ## Setup (iOS & Android)
 
@@ -112,7 +124,7 @@ function detectTtsModel(
   success: boolean;
   error?: string;
   detectedModels: TtsDetectedModelEntry[];
-  modelType?: TTSModelType | string;
+  modelType?: TTSModelType;
   // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
   /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */

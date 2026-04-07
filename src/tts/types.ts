@@ -49,6 +49,11 @@ export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'auto',
 ] as const;
 
+/** Runtime guard for model kind literals returned from native detection. */
+export function isTtsModelType(s: string): s is TTSModelType {
+  return (TTS_MODEL_TYPES as readonly string[]).includes(s);
+}
+
 /**
  * ONNX Runtime execution provider string passed to native TTS init.
  * Extend with `(string & {})` so callers can pass future/custom provider ids.

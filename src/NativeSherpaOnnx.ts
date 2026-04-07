@@ -294,6 +294,7 @@ export interface Spec extends TurboModule {
    * Detect TTS model type and structure without initializing the engine.
    * Uses the same native file-based detection as initializeTts.
    * For Kokoro/Kitten multi-language models, also returns lexiconLanguageCandidates (e.g. ["default"], ["us-en", "gb-en", "zh"]) from detected lexicon.txt / lexicon-*.txt files.
+   * Note: this is the raw native bridge shape; JS facade `tts/detectTtsModel` narrows `modelType` to `TTSModelType`.
    * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
    * @param modelType - Optional: explicit type or 'auto' (default)
    * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)

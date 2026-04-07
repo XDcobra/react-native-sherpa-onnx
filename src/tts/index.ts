@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   isTtsDetectionSource,
+  isTtsModelType,
   type TTSInitializeOptions,
   type TTSModelType,
   type TtsModelOptions,
@@ -41,7 +42,10 @@ let ttsInstanceCounter = 0;
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional modelType (default: 'auto')
- * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional error when success is false, and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
+ * @returns Object with success, detectedModels (array of { type, modelDir }),
+ * modelType (primary detected type, narrowed to known `TTSModelType` literals),
+ * optional error when success is false, and optionally lexiconLanguageCandidates
+ * (language ids for multi-lang Kokoro/Kitten)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
@@ -59,7 +63,8 @@ export async function detectTtsModel(
   /** Native validation/detect failure (e.g. missing lexicon for Zipvoice). */
   error?: string;
   detectedModels: TtsDetectedModelEntry[];
-  modelType?: TTSModelType | string;
+  /** Primary detected kind, narrowed to known SDK literals. */
+  modelType?: TTSModelType;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
   /** Trace of how native detection chose the model kind (omitted if native returned nothing). */
@@ -83,13 +88,15 @@ export async function detectTtsModel(
       }
     }
   }
+  const modelType =
+    typeof raw.modelType === 'string' && isTtsModelType(raw.modelType)
+      ? raw.modelType
+      : undefined;
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
-    ...(raw.modelType != null && raw.modelType !== ''
-      ? { modelType: raw.modelType }
-      : {}),
+    ...(modelType != null ? { modelType } : {}),
     ...(raw.lexiconLanguageCandidates != null &&
     raw.lexiconLanguageCandidates.length > 0
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
@@ -494,4 +501,9 @@ export type {
   TtsStreamEnd,
   TtsStreamError,
 } from './types';
-export { TTS_MODEL_TYPES, TTS_DETECTION_SOURCES, isTtsDetectionSource } from './types';
+export {
+  TTS_MODEL_TYPES,
+  TTS_DETECTION_SOURCES,
+  isTtsDetectionSource,
+  isTtsModelType,
+} from './types';

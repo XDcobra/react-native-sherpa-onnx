@@ -160,9 +160,7 @@ async function buildTtsCatalogHintsMap(
     return map;
   }
   const step =
-    Number.isFinite(chunkSize) && chunkSize > 0
-      ? chunkSize
-      : ids.length;
+    Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : ids.length;
   for (let i = 0; i < ids.length; i += step) {
     const chunk = ids.slice(i, i + step);
     const rows = await SherpaOnnx.batchTtsCatalogHints(chunk);
@@ -180,7 +178,9 @@ function collectTtsModelIdsFromAssets(assets: ReleaseAsset[]): string[] {
     if (archiveExt !== 'tar.bz2') {
       continue;
     }
-    if (!isAssetSupportedForCategory(ModelCategory.Tts, asset.name, archiveExt)) {
+    if (
+      !isAssetSupportedForCategory(ModelCategory.Tts, asset.name, archiveExt)
+    ) {
       continue;
     }
     out.push(stripAssetExtension(asset.name, archiveExt));
@@ -388,7 +388,9 @@ export async function refreshModels(
     let ttsHints = new Map<string, NativeTtsCatalogHint>();
     if (category === ModelCategory.Tts) {
       const ttsIds = collectTtsModelIdsFromAssets(assets);
-      const chunk = resolveTtsCatalogHintsChunkSize(options?.ttsCatalogHintsChunkSize);
+      const chunk = resolveTtsCatalogHintsChunkSize(
+        options?.ttsCatalogHintsChunkSize
+      );
       ttsHints = await buildTtsCatalogHintsMap(ttsIds, chunk);
     }
 
