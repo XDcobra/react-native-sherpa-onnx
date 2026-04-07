@@ -421,61 +421,6 @@ export function saveAudio(
   );
 }
 
-/**
- * Save a text file via Android SAF content URI.
- */
-export function saveTextToContentUri(
-  text: string,
-  directoryUri: string,
-  filename: string,
-  mimeType = 'text/plain'
-): Promise<string> {
-  return SherpaOnnx.saveTtsTextToContentUri(
-    text,
-    directoryUri,
-    filename,
-    mimeType
-  );
-}
-
-/**
- * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
- * Use for saving converted audio (e.g. MP3, FLAC) to a content URI.
- */
-export function copyFileToContentUri(
-  filePath: string,
-  directoryUri: string,
-  filename: string,
-  mimeType: string
-): Promise<string> {
-  return SherpaOnnx.copyFileToContentUri(
-    filePath,
-    directoryUri,
-    filename,
-    mimeType
-  );
-}
-
-/**
- * Copy a SAF content URI to a cache file for local playback (Android only).
- */
-export function copyContentUriToCache(
-  fileUri: string,
-  filename: string
-): Promise<string> {
-  return SherpaOnnx.copyTtsContentUriToCache(fileUri, filename);
-}
-
-/**
- * Share a TTS audio file (file path or content URI).
- */
-export function shareAudioFile(
-  fileUri: string,
-  mimeType = 'audio/wav'
-): Promise<void> {
-  return SherpaOnnx.shareTtsAudio(fileUri, mimeType);
-}
-
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';

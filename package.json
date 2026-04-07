@@ -60,6 +60,11 @@
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
     },
+    "./files": {
+      "source": "./src/files/index.ts",
+      "types": "./lib/typescript/src/files/index.d.ts",
+      "default": "./lib/module/files/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
