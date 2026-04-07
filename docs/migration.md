@@ -251,8 +251,8 @@ The TTS public TypeScript surface uses **discriminated unions** so invalid combi
 | Init + concrete type | Any keys on `TtsModelOptions` | Only the block matching `modelType` (e.g. `modelType: 'vits'` + `modelOptions: { vits: { ... } }`). |
 | `updateParams` | `modelOptions` without a strict tie to `modelType` | Same rules as init: use a variant with matching `modelType` and `modelOptions` (or `{}` / `{ modelType: 'auto' }` for no-op style updates). |
 | Generation / cloning | Top-level `referenceAudio` / `referenceText` | Use **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }`. |
-| Subtitles | `granularity: 'character'` with `mode: 'fast'` accepted by types | **`character`** only with `subtitles: { mode: 'accurate', alignmentModelPath: string, ... }`. For `off` / `fast`, `alignmentModelPath` must not be set. |
-| `generateSubtitlesFromAudio` | `mode: 'accurate'` with optional `alignmentModelPath` | **`accurate`** requires `alignmentModelPath`. **`fast`** only allows `granularity: 'sentence' \| 'word'`. |
+| Subtitles | `mode: 'fast'` | Renamed to **`proportional`**; **`estimated`** uses native chunk timeline; **`character`** only with `subtitles: { mode: 'accurate', alignmentModelPath: string, ... }`. For `off` / `proportional` / `estimated`, `alignmentModelPath` must not be set. |
+| Standalone alignment | `generateSubtitlesFromAudio` | Removed; use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`**. **`accurate`** requires `alignmentModelPath`. **`proportional`** / **`estimated`** only allow `granularity: 'sentence' \| 'word'`. |
 
 **Zipvoice example (`voiceClone`):**
 
@@ -266,5 +266,24 @@ await tts.generateSpeech('Hello', {
 });
 ```
 
-See [docs/tts.md](./tts.md) and [docs/tts-streaming.md](./tts-streaming.md) for updated option tables.
+See [docs/tts.md](./tts.md), [docs/tts-streaming.md](./tts-streaming.md), and [docs/alignment.md](./alignment.md) for updated option tables and standalone `alignTextToAudio`.
+
+## Alignment: native low-I/O refactor (upcoming major; **no** backward compatibility)
+
+A future **major** release will replace the current alignment stack with a native-first design (shared C++ CTC path, path-based proportional metrics, optional TTS→alignment without redundant I/O). **There will be no long-lived compatibility shims:** superseded TurboModule methods and obsolete JS exports are **removed** rather than deprecated.
+
+**Who must read this**
+
+- Callers of **`NativeSherpaOnnx`** alignment-related APIs **directly** (bypassing [`react-native-sherpa-onnx/alignment`](./alignment.md)).
+- Anyone relying on **implementation details** that may disappear (e.g. alignment-only use of temp WAV helpers).
+
+**Migration principles**
+
+| Topic | Policy |
+| --- | --- |
+| TurboModule | **`runCTCForcedAlignment`** was removed. Use **`alignAccurateFromPath(modelPath, audioPath, text, vocabJson)`** for file-based CTC, or **`alignAccurateFromFloat32(modelPath, samples, sampleRate, text, vocabJson)`** when PCM is already in JS. For fast proportional duration on **16-bit mono WAV**, use **`getAlignmentAudioMetrics(audioPath)`**; see [alignment.md](./alignment.md). |
+| Public JS | Prefer **`alignTextToAudio`** (and related types) from **`react-native-sherpa-onnx/alignment`** as the stable app-facing API. Its surface may change in the same major; there will be **no** parallel deprecated export set. |
+| Docs | [alignment.md](./alignment.md) will describe the final APIs and performance expectations; this section will be tightened with **concrete** removed symbols at ship time. |
+
+**At release time:** maintainers should (1) list every removed export and TurboModule method in **CHANGELOG**, (2) replace the placeholders in the table above with exact names, and (3) keep this guide in sync.
 

@@ -63,7 +63,7 @@ console.log(mp3Path);
 await tts.destroy();
 ```
 
-### 2) Batch with timestamps (`fast` or `accurate`)
+### 2) Batch with timestamps (`proportional`, `estimated`, or `accurate`)
 
 ```ts
 import {
@@ -88,14 +88,14 @@ const tts = await createTTS({
   },
 });
 
-// Fast estimated timing (default subtitle mode).
+// Proportional timing (default subtitle mode): duration × text weight in JS.
 const est: GeneratedAudioWithTimestamps = await tts.generateSpeechWithTimestamps(
   'Hello.',
-  { subtitles: { mode: 'fast', granularity: 'sentence' } }
+  { subtitles: { mode: 'proportional', granularity: 'sentence' } }
 );
 console.log(est.timingMode, est.subtitles.length);
 
-// Accurate alignment requires a wav2vec2 ONNX path — see tts-alignment.md.
+// Accurate alignment requires a wav2vec2 ONNX path — see [alignment.md](alignment.md).
 const aligned: GeneratedAudioWithTimestamps = await tts.generateSpeechWithTimestamps(
   'Hello.',
   {
@@ -117,7 +117,7 @@ await tts.destroy();
 | Topic | Requirement |
 | --- | --- |
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
-| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [tts-alignment.md](tts-alignment.md) |
+| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [alignment.md](alignment.md) |
 | Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 
 ## API Reference
@@ -196,11 +196,11 @@ generateSpeechWithTimestamps(
 ): Promise<GeneratedAudioWithTimestamps>;
 ```
 
-Synthesizes with subtitle metadata; `subtitles.mode` **`fast`** (estimated) or **`accurate`** (alignment ONNX required on `subtitles`).
+Synthesizes with subtitle metadata; `subtitles.mode` **`proportional`**, **`estimated`** (synthesis chunk timeline), or **`accurate`** (alignment ONNX on `subtitles`).
 
 ```ts
 const out = await tts.generateSpeechWithTimestamps('Test.', {
-  subtitles: { mode: 'fast', granularity: 'word' },
+  subtitles: { mode: 'proportional', granularity: 'word' },
 });
 ```
 
@@ -315,24 +315,7 @@ See also [TTS save example](audio-conversion.md#tts-save-example).
 
 ## Subtitles (standalone audio)
 
-### `generateSubtitlesFromAudio(text, audioPathOrSamples, options)`
-
-```ts
-function generateSubtitlesFromAudio(
-  text: string,
-  audioPathOrSamples: string | { samples: number[]; sampleRate: number },
-  options: SubtitleFromAudioOptions
-): Promise<SubtitleResult>;
-```
-
-Builds subtitle timelines from transcript + existing audio (`fast` heuristic or `accurate` CTC alignment).
-
-```ts
-const r = await generateSubtitlesFromAudio('Hello world.', '/path/to/audio.wav', {
-  mode: 'fast',
-  granularity: 'sentence',
-});
-```
+Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** (see [alignment.md](alignment.md)). Modes: `proportional`, `estimated` (requires `AlignmentChunkTimeline`), `accurate` (CTC).
 
 ## Types
 
@@ -374,11 +357,10 @@ const r = await generateSubtitlesFromAudio('Hello world.', '/path/to/audio.wav',
 
 | Type | Notes |
 | --- | --- |
-| `SubtitleMode` | `'off' \| 'fast' \| 'accurate'` |
+| `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` |
 | `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (character only with accurate) |
-| `SubtitleOptions` | `SubtitleOptionsFast` \| `SubtitleOptionsAccurate` |
-| `SubtitleFromAudioOptions` | `mode: 'fast'` vs `mode: 'accurate'` + required `alignmentModelPath` when accurate |
-| `SubtitleResult` | `{ subtitles: TtsSubtitleItem[]; timingMode: 'estimated' \| 'aligned' }` |
+| `SubtitleOptions` | Proportional/estimated vs accurate (see TypeScript unions) |
+| Alignment standalone | `alignTextToAudio`, types in `react-native-sherpa-onnx/alignment` |
 
 Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
 
@@ -386,7 +368,7 @@ Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [tts-alignment.md](tts-alignment.md) |
+| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [alignment.md](alignment.md) |
 | `TTS_GENERATE_ERROR` / cloning | `voiceClone` on non–Zipvoice/Pocket model | Remove `voiceClone` or switch model |
 | Zipvoice clone fails | Missing / empty `referenceText` | Use `voiceClone: { kind: 'zipvoice', referenceAudio, referenceText }` with non-empty text |
 | Init throws with `modelOptions` | `modelType` is `'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
@@ -401,7 +383,7 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTT
 ## See also
 
 - [tts-streaming.md](tts-streaming.md) — incremental synthesis, PCM player, `generateSpeechStream`  
-- [tts-alignment.md](tts-alignment.md) — alignment models, accurate subtitles  
+- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models  
 - [execution-providers.md](execution-providers.md) — ORT execution providers  
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
 - [audio-conversion.md](audio-conversion.md) — WAV → MP3/FLAC for Android save flows  

@@ -2,7 +2,7 @@
 
 Incremental speech generation with chunk callbacks: lower time-to-first-byte, playback while generating, or piping float PCM into another pipeline. The API is **instance-based** — create an engine with `createStreamingTTS()`, then call `destroy()` when done.
 
-**For full-buffer synthesis, timestamps on the batch path, WAV save/share, and `generateSubtitlesFromAudio`:** see [Offline TTS](tts-offline.md).
+**For full-buffer synthesis, timestamps on the batch path, WAV save/share, and `alignTextToAudio`:** see [Offline TTS](tts-offline.md) and [alignment.md](alignment.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -85,7 +85,7 @@ await tts.destroy();
 | Topic | Requirement |
 | --- | --- |
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
-| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [tts-alignment.md](tts-alignment.md) |
+| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [alignment.md](alignment.md) |
 | Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 
 ## API Reference
@@ -345,11 +345,10 @@ controller.unsubscribe();
 
 | Type | Notes |
 | --- | --- |
-| `SubtitleMode` | `'off' \| 'fast' \| 'accurate'` |
+| `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` |
 | `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (character only with accurate) |
-| `SubtitleOptions` | `SubtitleOptionsFast` \| `SubtitleOptionsAccurate` |
-| `SubtitleFromAudioOptions` | `mode: 'fast'` vs `mode: 'accurate'` + required `alignmentModelPath` when accurate |
-| `SubtitleResult` | `{ subtitles: TtsSubtitleItem[]; timingMode: 'estimated' \| 'aligned' }` |
+| `SubtitleOptions` | Proportional/estimated vs accurate (see TypeScript unions in `tts`) |
+| Standalone alignment | `AlignTextToAudioOptions`, `AlignTextToAudioResult` in `react-native-sherpa-onnx/alignment` |
 
 Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
 
@@ -357,7 +356,7 @@ Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [tts-alignment.md](tts-alignment.md) |
+| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [alignment.md](alignment.md) |
 | `TTS_GENERATE_ERROR` / cloning | `voiceClone` on non–Zipvoice/Pocket model | Remove `voiceClone` or switch model |
 | Zipvoice clone fails | Missing / empty `referenceText` | Use `voiceClone: { kind: 'zipvoice', referenceAudio, referenceText }` with non-empty text |
 | Init throws with `modelOptions` | `modelType` is `'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
@@ -373,7 +372,7 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTT
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share, standalone subtitles  
-- [tts-alignment.md](tts-alignment.md) — alignment models, accurate subtitles  
+- [alignment.md](alignment.md) — alignment models, `alignTextToAudio`, accurate subtitles  
 - [execution-providers.md](execution-providers.md) — ORT execution providers  
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
 - [migration.md](migration.md) — strict TTS TypeScript unions (0.4.0)
