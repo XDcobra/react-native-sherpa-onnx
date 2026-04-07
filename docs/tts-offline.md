@@ -24,18 +24,24 @@ import {
   type GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
 
+// Example folder: Piper VITS from the download manager (`vits-piper-en_US-lessac-medium` — see download-manager.md / Model ids).
+const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+
 // detectTtsModel does not load the TTS engine — it only inspects files. That keeps CPU/memory low and is ideal as a pre-check before createTTS. Use the returned modelType (and optional lexiconLanguageCandidates for Kokoro/Kitten) so you can pass matching modelOptions when creating the engine.
-const det = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
-if (!det.success || !det.modelType) {
-  throw new Error(det.error ?? 'TTS model detection failed');
+const det = await detectTtsModel(modelPath);
+if (!det.success || det.modelType !== 'vits') {
+  throw new Error(det.error ?? 'This example expects a VITS (e.g. Piper) model');
 }
 
 // createTTS --> Promise<TtsEngine>. Pass an explicit modelType (here from detection) if you need modelOptions for that engine.
 // If you use modelType: 'auto' or omit modelType entirely, createTTS still auto-detects the stack on init, but modelOptions is not available in that mode.
 const tts = await createTTS({
-  modelPath: { type: 'asset', path: 'models/my-tts-model' },
+  modelPath,
   modelType: det.modelType,
   numThreads: 2,
+  modelOptions: {
+    vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 },
+  },
 });
 
 // generateSpeech --> Promise<GeneratedAudio> — subtitles are forced off internally.
@@ -66,14 +72,20 @@ import {
   type GeneratedAudioWithTimestamps,
 } from 'react-native-sherpa-onnx/tts';
 
-const det = await detectTtsModel({ type: 'file', path: '/path/to/model-dir' });
-if (!det.success || !det.modelType) {
-  throw new Error(det.error ?? 'TTS model detection failed');
+// e.g. `ensureModel` → extracted VITS Piper folder on disk (same id as in §1).
+const modelPath = { type: 'file' as const, path: '/path/to/vits-piper-en_US-lessac-medium' };
+
+const det = await detectTtsModel(modelPath);
+if (!det.success || det.modelType !== 'vits') {
+  throw new Error(det.error ?? 'This example expects a VITS (e.g. Piper) model');
 }
 
 const tts = await createTTS({
-  modelPath: { type: 'file', path: '/path/to/model-dir' },
+  modelPath,
   modelType: det.modelType,
+  modelOptions: {
+    vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 },
+  },
 });
 
 // Fast estimated timing (default subtitle mode).

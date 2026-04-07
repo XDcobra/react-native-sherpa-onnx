@@ -57,15 +57,21 @@ Same idea as [Offline TTS Quick Start §1](tts-offline.md#1-batch-create-engine-
 ```ts
 import { createStreamingTTS, detectTtsModel } from 'react-native-sherpa-onnx/tts';
 
-const det = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
-if (!det.success || !det.modelType) {
-  throw new Error(det.error ?? 'TTS model detection failed');
+// Same layout as offline Quick Start §1: Piper VITS (`vits-piper-en_US-lessac-medium` — see download-manager.md).
+const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+
+const det = await detectTtsModel(modelPath);
+if (!det.success || det.modelType !== 'vits') {
+  throw new Error(det.error ?? 'This example expects a VITS (e.g. Piper) model');
 }
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'asset', path: 'models/my-tts-model' },
+  modelPath,
   modelType: det.modelType,
   numThreads: 2,
+  modelOptions: {
+    vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 },
+  },
 });
 
 // … generateSpeechStream, PCM player, destroy — as in §1 above
