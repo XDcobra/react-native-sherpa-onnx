@@ -183,19 +183,19 @@ static std::string convertF32leMonoFileToFormat(const char* rawPath, int pcmSamp
         av_channel_layout_copy(&encCtx->ch_layout, &mono);
     }
 
-    // Probe encoder-supported configurations (sample formats, sample rates, channel layouts)
+    // Probe encoder-supported configurations (FFmpeg 7+). Older libav skips these calls.
     AVSampleFormat chosen_fmt = AV_SAMPLE_FMT_NONE;
     const void *fmt_configs = nullptr;
     int fmt_num = 0;
-    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &fmt_configs, &fmt_num);
-
     const void *sr_configs = nullptr;
     int sr_num = 0;
-    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &sr_configs, &sr_num);
-
     const void *chl_configs = nullptr;
     int chl_num = 0;
+#if defined(AV_CODEC_CONFIG_SAMPLE_FORMAT)
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &fmt_configs, &fmt_num);
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &sr_configs, &sr_num);
     avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_CHANNEL_LAYOUT, 0, &chl_configs, &chl_num);
+#endif
 
     if (fmt_configs && fmt_num > 0) {
         const AVSampleFormat *fmts = (const AVSampleFormat *)fmt_configs;
@@ -585,8 +585,8 @@ static std::string convertF32leMonoFileToFormat(const char* rawPath, int pcmSamp
                         av_packet_unref(pkt);
                         continue;
                     }
-                    const uint8_t* const* in_data = frame->extended_data ? frame->extended_data : frame->data;
-                    int converted = swr_convert(swr, outData, (int)out_nb_samples, in_data, frame->nb_samples);
+                    uint8_t** in_planes = frame->extended_data ? frame->extended_data : frame->data;
+                    int converted = swr_convert(swr, outData, (int)out_nb_samples, reinterpret_cast<const uint8_t**>(static_cast<void*>(in_planes)), frame->nb_samples);
                     if (converted <= 0) {
                         av_freep(&outData[0]);
                         av_freep(&outData);

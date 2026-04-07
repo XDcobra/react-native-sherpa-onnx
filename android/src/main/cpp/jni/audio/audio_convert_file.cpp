@@ -209,19 +209,20 @@ std::string sherpa_audio_convert_to_format(const char* inputPath, const char* ou
         av_channel_layout_copy(&encCtx->ch_layout, &mono);
     }
 
-    // Probe encoder-supported configurations (sample formats, sample rates, channel layouts)
+    // Probe encoder-supported configurations (sample formats, sample rates, channel layouts).
+    // avcodec_get_supported_config / AV_CODEC_CONFIG_* exist in FFmpeg 7+ (libavcodec 61+).
     AVSampleFormat chosen_fmt = AV_SAMPLE_FMT_NONE;
     const void *fmt_configs = nullptr;
     int fmt_num = 0;
-    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &fmt_configs, &fmt_num);
-
     const void *sr_configs = nullptr;
     int sr_num = 0;
-    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &sr_configs, &sr_num);
-
     const void *chl_configs = nullptr;
     int chl_num = 0;
+#if defined(AV_CODEC_CONFIG_SAMPLE_FORMAT)
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &fmt_configs, &fmt_num);
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &sr_configs, &sr_num);
     avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_CHANNEL_LAYOUT, 0, &chl_configs, &chl_num);
+#endif
 
     if (fmt_configs && fmt_num > 0) {
         const AVSampleFormat *fmts = (const AVSampleFormat *)fmt_configs;
@@ -611,8 +612,8 @@ std::string sherpa_audio_convert_to_format(const char* inputPath, const char* ou
                         av_packet_unref(pkt);
                         continue;
                     }
-                    const uint8_t* const* in_data = frame->extended_data ? frame->extended_data : frame->data;
-                    int converted = swr_convert(swr, outData, (int)out_nb_samples, in_data, frame->nb_samples);
+                    uint8_t** in_planes = frame->extended_data ? frame->extended_data : frame->data;
+                    int converted = swr_convert(swr, outData, (int)out_nb_samples, reinterpret_cast<const uint8_t**>(static_cast<void*>(in_planes)), frame->nb_samples);
                     if (converted <= 0) {
                         av_freep(&outData[0]);
                         av_freep(&outData);
@@ -836,7 +837,7 @@ std::string sherpa_audio_decode_file_to_float_mono(const char* inputPath,
     };
 
     auto convertOneFrame = [&](AVFrame* fr) {
-        const uint8_t* const* in_data = fr->extended_data ? fr->extended_data : fr->data;
+        uint8_t** in_planes = fr->extended_data ? fr->extended_data : fr->data;
         int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
         int64_t max_out =
             av_rescale_rnd(swr_get_delay(swr, in_sr2) + (int64_t)fr->nb_samples, out_sr, in_sr2, AV_ROUND_UP);
@@ -845,7 +846,7 @@ std::string sherpa_audio_decode_file_to_float_mono(const char* inputPath,
         if (av_samples_alloc(&out_buf, nullptr, 1, (int)max_out, AV_SAMPLE_FMT_FLT, 0) < 0) {
             return;
         }
-        int converted = swr_convert(swr, &out_buf, (int)max_out, in_data, fr->nb_samples);
+        int converted = swr_convert(swr, &out_buf, (int)max_out, reinterpret_cast<const uint8_t**>(static_cast<void*>(in_planes)), fr->nb_samples);
         if (converted > 0) {
             appendConverted(out_buf, converted);
         }
