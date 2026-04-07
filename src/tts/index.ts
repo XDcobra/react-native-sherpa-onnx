@@ -1,4 +1,5 @@
 import { unlink } from '@dr.pogodin/react-native-fs';
+import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   TTSInitializeOptions,
@@ -12,6 +13,8 @@ import type {
   TtsEngine,
   TtsDetectedModelEntry,
   SubtitleOptions,
+  SaveAudioTarget,
+  SaveAudioOptions,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
@@ -375,32 +378,46 @@ export async function createTTS(
 // ========== Module-level utilities (stateless, no instance required) ==========
 
 /**
- * Save generated TTS audio to a WAV file.
+ * Save generated TTS audio to a file or (Android) SAF tree. Default format is `wav`.
+ * For non-WAV formats, native encodes from float PCM without requiring the app to write a WAV first.
+ *
+ * @returns Absolute file path, or on Android SAF a `content://` URI string.
  */
-export function saveAudioToFile(
+export function saveAudio(
   audio: GeneratedAudio,
-  filePath: string
+  target: SaveAudioTarget,
+  options?: SaveAudioOptions
 ): Promise<string> {
-  return SherpaOnnx.saveTtsAudioToFile(
-    audio.samples,
-    audio.sampleRate,
-    filePath
-  );
-}
+  const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
+  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
 
-/**
- * Save generated TTS audio to a WAV file via Android SAF content URI.
- */
-export function saveAudioToContentUri(
-  audio: GeneratedAudio,
-  directoryUri: string,
-  filename: string
-): Promise<string> {
-  return SherpaOnnx.saveTtsAudioToContentUri(
+  if (target.kind === 'androidContent') {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(
+        new Error(
+          'saveAudio: kind "androidContent" is only supported on Android.'
+        )
+      );
+    }
+    return SherpaOnnx.saveTtsAudio(
+      audio.samples,
+      audio.sampleRate,
+      'androidContent',
+      target.directoryUri,
+      target.filename,
+      format,
+      outputSampleRateHz
+    );
+  }
+
+  return SherpaOnnx.saveTtsAudio(
     audio.samples,
     audio.sampleRate,
-    directoryUri,
-    filename
+    'file',
+    target.path,
+    '',
+    format,
+    outputSampleRateHz
   );
 }
 
@@ -506,6 +523,10 @@ export type {
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,
   TTSModelInfo,
+  SaveAudioTarget,
+  SaveAudioTargetFile,
+  SaveAudioTargetAndroidContent,
+  SaveAudioOptions,
   TtsEngine,
   TtsStreamController,
   TtsStreamHandlers,

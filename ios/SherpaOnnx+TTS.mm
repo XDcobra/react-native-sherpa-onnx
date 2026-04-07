@@ -6,6 +6,7 @@
  */
 
 #import "SherpaOnnx.h"
+#import "SherpaOnnxAudioConvert.h"
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
 #import <UIKit/UIKit.h>
@@ -1669,70 +1670,78 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
     }
 }
 
-- (void)saveTtsAudioToFile:(NSArray<NSNumber *> *)samples
-                sampleRate:(double)sampleRate
-                  filePath:(NSString *)filePath
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
+- (void)saveTtsAudio:(NSArray<NSNumber *> *)samples
+          sampleRate:(double)sampleRate
+   destinationType:(NSString *)destinationType
+pathOrDirectoryUri:(NSString *)pathOrDirectoryUri
+          filename:(NSString *)filename
+            format:(NSString *)format
+outputSampleRateHz:(double)outputSampleRateHz
+            resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject
 {
     @try {
-        std::vector<float> samplesVec;
-        samplesVec.reserve([samples count]);
-        for (NSNumber *num in samples) {
-            samplesVec.push_back([num floatValue]);
-        }
-
-        std::string filePathStr = std::string([filePath UTF8String]);
-
-        bool success = sherpaonnx::TtsWrapper::saveToWavFile(
-            samplesVec,
-            static_cast<int32_t>(sampleRate),
-            filePathStr
-        );
-
-        if (success) {
-            resolve(filePath);
-        } else {
-            reject(@"TTS_SAVE_ERROR", @"Failed to save audio to file", nil);
-        }
-    } @catch (NSException *exception) {
-        NSString *errorMsg = [NSString stringWithFormat:@"Exception saving TTS audio: %@", exception.reason];
-        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
-    }
-}
-
-- (void)saveTtsAudioToContentUri:(NSArray<NSNumber *> *)samples
-                      sampleRate:(double)sampleRate
-                    directoryUri:(NSString *)directoryUri
-                        filename:(NSString *)filename
-                         resolve:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject
-{
-    @try {
-        if ([directoryUri hasPrefix:@"content://"]) {
-            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+        NSString *fmt = format.length > 0 ? [format lowercaseString] : @"wav";
+        if ([destinationType isEqualToString:@"androidContent"]) {
+            reject(@"TTS_SAVE_ERROR", @"destinationType androidContent is only supported on Android", nil);
             return;
         }
+        if (![destinationType isEqualToString:@"file"]) {
+            reject(@"TTS_SAVE_ERROR", @"Invalid destinationType (iOS: use file)", nil);
+            return;
+        }
+
         std::vector<float> samplesVec;
         samplesVec.reserve([samples count]);
         for (NSNumber *num in samples) {
             samplesVec.push_back([num floatValue]);
         }
-        NSString *dirPath = [directoryUri hasPrefix:@"file://"]
-            ? [[NSURL URLWithString:directoryUri] path]
-            : directoryUri;
-        NSString *filePath = [dirPath stringByAppendingPathComponent:filename];
-        std::string filePathStr = std::string([filePath UTF8String]);
-        bool success = sherpaonnx::TtsWrapper::saveToWavFile(
-            samplesVec,
-            static_cast<int32_t>(sampleRate),
-            filePathStr
-        );
-        if (success) {
-            resolve(filePath);
-        } else {
-            reject(@"TTS_SAVE_ERROR", @"Failed to save audio to file", nil);
+
+        NSString *outPath = pathOrDirectoryUri;
+        if ([outPath hasPrefix:@"file://"]) {
+            outPath = [[NSURL URLWithString:outPath] path];
         }
+
+        if ([fmt isEqualToString:@"wav"] || [fmt isEqualToString:@"wav16k"]) {
+            std::string filePathStr = std::string([outPath UTF8String]);
+            bool success = sherpaonnx::TtsWrapper::saveToWavFile(
+                samplesVec,
+                static_cast<int32_t>(sampleRate),
+                filePathStr
+            );
+            if (success) {
+                resolve(outPath);
+            } else {
+                reject(@"TTS_SAVE_ERROR", @"Failed to save audio to file", nil);
+            }
+            return;
+        }
+
+#if HAVE_FFMPEG
+        NSString *tmpWav = [NSTemporaryDirectory() stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"sherpa_tts_encode_%lld.wav", (long long)([[NSDate date] timeIntervalSince1970] * 1000000)]];
+        std::string tmpStr = std::string([tmpWav UTF8String]);
+        if (!sherpaonnx::TtsWrapper::saveToWavFile(samplesVec, static_cast<int32_t>(sampleRate), tmpStr)) {
+            reject(@"TTS_SAVE_ERROR", @"Failed to write temporary WAV for encoding", nil);
+            return;
+        }
+        NSError *convErr = nil;
+        int outHz = (int)lround(outputSampleRateHz);
+        BOOL ok = [SherpaOnnxAudioConvert convertAudioToFormat:tmpWav
+                                                     outputPath:outPath
+                                                         format:fmt
+                                             outputSampleRateHz:outHz
+                                                          error:&convErr];
+        [[NSFileManager defaultManager] removeItemAtPath:tmpWav error:nil];
+        if (ok) {
+            resolve(outPath);
+        } else {
+            NSString *msg = convErr.localizedDescription ?: @"Audio conversion failed";
+            reject(@"TTS_SAVE_ERROR", msg, convErr);
+        }
+#else
+        reject(@"TTS_SAVE_ERROR", @"Non-WAV TTS export requires FFmpeg (HAVE_FFMPEG). Use format wav or enable FFmpeg in the pod build.", nil);
+#endif
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception saving TTS audio: %@", exception.reason];
         reject(@"TTS_SAVE_ERROR", errorMsg, nil);

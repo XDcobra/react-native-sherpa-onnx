@@ -22,10 +22,14 @@ export async function saveAlignmentAudioToTempWav(
   await mkdir(cacheDir);
 
   const tempPath = createTempAlignmentWavPath(instanceId);
-  await SherpaOnnx.saveTtsAudioToFile(
+  await SherpaOnnx.saveTtsAudio(
     audio.samples,
     audio.sampleRate,
-    tempPath
+    'file',
+    tempPath,
+    '',
+    'wav',
+    0
   );
   return tempPath;
 }

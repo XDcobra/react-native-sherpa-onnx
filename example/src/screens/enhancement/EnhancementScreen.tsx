@@ -31,10 +31,7 @@ import {
   type EnhancementEngine,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
-import {
-  saveAudioToFile,
-  saveAudioToContentUri,
-} from 'react-native-sherpa-onnx/tts';
+import { saveAudio } from 'react-native-sherpa-onnx/tts';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -170,10 +167,14 @@ export default function EnhancementScreen() {
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
-        const savedUri = await saveAudioToContentUri(
+        const savedUri = await saveAudio(
           lastEnhancedAudio,
-          directoryUri,
-          filename
+          {
+            kind: 'androidContent',
+            directoryUri,
+            filename,
+          },
+          { format: 'wav' }
         );
         Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(savedUri)}`);
         return;
@@ -188,7 +189,11 @@ export default function EnhancementScreen() {
       }
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      await saveAudioToFile(lastEnhancedAudio, filePath);
+      await saveAudio(
+        lastEnhancedAudio,
+        { kind: 'file', path: filePath },
+        { format: 'wav' }
+      );
       Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -450,7 +455,11 @@ export default function EnhancementScreen() {
         samples: Array.from(enhanced.samples),
         sampleRate: sr,
       };
-      await saveAudioToFile(audioForFile, outPath);
+      await saveAudio(
+        audioForFile,
+        { kind: 'file', path: outPath },
+        { format: 'wav' }
+      );
       setOutputWavPath(outPath);
       setLastInputPath(inputPath);
       setLastEnhancedAudio(audioForFile);

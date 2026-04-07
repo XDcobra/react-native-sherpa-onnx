@@ -539,31 +539,21 @@ export interface Spec extends TurboModule {
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
 
   /**
-   * Save TTS audio samples to a WAV file.
-   * @param samples - Audio samples array
-   * @param sampleRate - Sample rate in Hz
-   * @param filePath - Absolute path where to save the WAV file
-   * @returns The file path where audio was saved
+   * Save TTS audio (mono float PCM) to a file path or Android SAF directory.
+   * @param destinationType - `'file'` = `pathOrDirectoryUri` is the full output file path; `'androidContent'` = directory tree URI + `filename`
+   * @param pathOrDirectoryUri - Absolute file path (when `file`) or SAF directory URI (when `androidContent`)
+   * @param filename - Used when `androidContent`; ignored / empty when `file`
+   * @param format - Output container/codec hint: `wav` (default behavior), `mp3`, `flac`, `m4a`, `opus`, … (same as convertAudioToFormat; requires FFmpeg when not WAV)
+   * @param outputSampleRateHz - Encoder hint (e.g. MP3 32000/44100/48000); use 0 for defaults
    */
-  saveTtsAudioToFile(
+  saveTtsAudio(
     samples: number[],
     sampleRate: number,
-    filePath: string
-  ): Promise<string>;
-
-  /**
-   * Save TTS audio samples to a WAV file via Android SAF content URI.
-   * @param samples - Audio samples array
-   * @param sampleRate - Sample rate in Hz
-   * @param directoryUri - Directory content URI (tree or document)
-   * @param filename - Desired file name (e.g., tts_123.wav)
-   * @returns The content URI of the saved file
-   */
-  saveTtsAudioToContentUri(
-    samples: number[],
-    sampleRate: number,
-    directoryUri: string,
-    filename: string
+    destinationType: string,
+    pathOrDirectoryUri: string,
+    filename: string,
+    format: string,
+    outputSampleRateHz: number
   ): Promise<string>;
 
   /**

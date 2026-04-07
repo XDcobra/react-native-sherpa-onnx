@@ -15,8 +15,7 @@ import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudioToFile,
-  saveAudioToContentUri,
+  saveAudio,
   copyContentUriToCache,
   shareAudioFile,
   type TTSModelType,
@@ -30,7 +29,6 @@ import type {
   TtsStreamController,
 } from 'react-native-sherpa-onnx/tts';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
   getAssetPackPath,
@@ -1150,22 +1148,20 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = 'wav';
-      const filename = `tts_${timestamp}.${ext}`;
+      const format = 'wav';
+      const filename = `tts_${timestamp}.${format}`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
-        if (ext !== 'wav') {
-          Alert.alert(
-            'Format not supported for content URI',
-            'Saving non-WAV formats to a content URI is not supported. Saving WAV instead.'
-          );
-        }
-        const savedUri = await saveAudioToContentUri(
+        const savedUri = await saveAudio(
           audio,
-          directoryUri,
-          `tts_${timestamp}.wav`
+          {
+            kind: 'androidContent',
+            directoryUri,
+            filename,
+          },
+          { format }
         );
         setSavedAudioPath(savedUri);
         setCachedPlaybackPath(null);
@@ -1181,45 +1177,17 @@ export default function TTSScreen() {
       }
 
       await mkdir(targetDirectory);
-      if (ext === 'wav') {
-        const filePath = `${targetDirectory}/${filename}`;
-        // Save audio to file (WAV)
-        const savedPath = await saveAudioToFile(audio, filePath);
-        setSavedAudioPath(savedPath);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
+      const filePath = `${targetDirectory}/${filename}`;
+      const savedPath = await saveAudio(
+        audio,
+        { kind: 'file', path: filePath },
+        { format }
+      );
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
 
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
-      } else {
-        // Save as WAV first, then convert to requested format
-        const tempWav = `${targetDirectory}/tts_${timestamp}.wav`;
-        await saveAudioToFile(audio, tempWav);
-        const targetPath = `${targetDirectory}/tts_${timestamp}.${ext}`;
-        try {
-          await convertAudioToFormat(tempWav, targetPath, ext);
-          setSavedAudioPath(targetPath);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          // Remove temporary WAV
-          try {
-            await unlink(tempWav);
-          } catch {}
-          Alert.alert(
-            'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`
-          );
-        } catch (convErr) {
-          // Conversion failed: fall back to WAV
-          console.warn('Conversion failed, saved WAV at', tempWav, convErr);
-          setSavedAudioPath(tempWav);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          Alert.alert(
-            'Partial success',
-            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
-          );
-        }
-      }
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1250,47 +1218,22 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = 'wav';
+      const format = 'wav';
       const directoryPath = DocumentDirectoryPath;
       await mkdir(directoryPath);
 
-      if (ext === 'wav') {
-        const filename = `tts_${timestamp}.wav`;
-        const filePath = `${directoryPath}/${filename}`;
-        const savedPath = await saveAudioToFile(generatedAudio, filePath);
-        setSavedAudioPath(savedPath);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
+      const filename = `tts_${timestamp}.wav`;
+      const filePath = `${directoryPath}/${filename}`;
+      const savedPath = await saveAudio(
+        generatedAudio,
+        { kind: 'file', path: filePath },
+        { format }
+      );
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
 
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
-      } else {
-        // Save WAV first then convert
-        const tempWav = `${directoryPath}/tts_${timestamp}.wav`;
-        await saveAudioToFile(generatedAudio, tempWav);
-        const targetPath = `${directoryPath}/tts_${timestamp}.${ext}`;
-        try {
-          await convertAudioToFormat(tempWav, targetPath, ext);
-          setSavedAudioPath(targetPath);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          try {
-            await unlink(tempWav);
-          } catch {}
-          Alert.alert(
-            'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`
-          );
-        } catch (convErr) {
-          console.warn('Conversion failed, WAV saved at', tempWav, convErr);
-          setSavedAudioPath(tempWav);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          Alert.alert(
-            'Partial success',
-            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
-          );
-        }
-      }
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';

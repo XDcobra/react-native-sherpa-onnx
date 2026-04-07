@@ -54,7 +54,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
     { instanceId, requestId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, requestId, samples, sampleRate, progress, isFinal) },
     { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
-    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
+    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) },
+    { rawPath, pcmSr, outPath, fmt, outHz ->
+      Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
+    }
   )
   private val alignmentHelper = SherpaOnnxAlignmentHelper(reactApplicationContext)
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
@@ -1199,29 +1202,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.unloadOnline(instanceId, promise)
   }
 
-  /**
-   * Save TTS audio samples to a WAV file.
-   */
-  override fun saveTtsAudioToFile(
+  override fun saveTtsAudio(
     samples: ReadableArray,
     sampleRate: Double,
-    filePath: String,
-    promise: Promise
-  ) {
-    ttsHelper.saveTtsAudioToFile(samples, sampleRate, filePath, promise)
-  }
-
-  /**
-   * Save TTS audio samples to a WAV file via Android SAF content URI.
-   */
-  override fun saveTtsAudioToContentUri(
-    samples: ReadableArray,
-    sampleRate: Double,
-    directoryUri: String,
+    destinationType: String,
+    pathOrDirectoryUri: String,
     filename: String,
+    format: String,
+    outputSampleRateHz: Double,
     promise: Promise
   ) {
-    ttsHelper.saveTtsAudioToContentUri(samples, sampleRate, directoryUri, filename, promise)
+    ttsHelper.saveTtsAudio(
+      samples,
+      sampleRate,
+      destinationType,
+      pathOrDirectoryUri,
+      filename,
+      format,
+      outputSampleRateHz,
+      promise
+    )
   }
 
   /**
@@ -1397,5 +1397,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
      */
     @JvmStatic
     private external fun nativeDecodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Int): Array<Any>
+
+    /** Mono float32 little-endian raw PCM file to output format (requires FFmpeg). Empty = success. */
+    @JvmStatic
+    private external fun nativeConvertFloat32MonoFileToFormat(
+      rawPath: String,
+      pcmSampleRate: Int,
+      outputPath: String,
+      format: String,
+      outputSampleRateHz: Int
+    ): String
   }
 }

@@ -95,6 +95,8 @@ set(SOURCES
     jni/model_detect/sherpa-onnx-enhancement-wrapper.cpp
     jni/model_detect/sherpa-onnx-alignment-wrapper.cpp
     jni/audio/sherpa-onnx-audio-convert-jni.cpp
+    jni/audio/audio_convert_file.cpp
+    jni/audio/audio_f32le_to_format.cpp
     crypto/sha256.cpp
 )
 

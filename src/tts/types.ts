@@ -551,3 +551,31 @@ export interface TTSModelInfo {
    */
   numSpeakers: number;
 }
+
+/** Save TTS audio to an absolute file path (include extension matching `format`, e.g. `.wav`, `.mp3`). */
+export type SaveAudioTargetFile = { kind: 'file'; path: string };
+
+/**
+ * Save TTS audio via Android Storage Access Framework into a user-granted directory tree.
+ * **Android only** — throws on other platforms.
+ */
+export type SaveAudioTargetAndroidContent = {
+  kind: 'androidContent';
+  directoryUri: string;
+  filename: string;
+};
+
+export type SaveAudioTarget =
+  | SaveAudioTargetFile
+  | SaveAudioTargetAndroidContent;
+
+/**
+ * Options for `saveAudio()` in `react-native-sherpa-onnx/tts`. `format` defaults to `'wav'`.
+ * Non-WAV formats require native FFmpeg; see docs/disable-ffmpeg.md.
+ */
+export type SaveAudioOptions = {
+  /** Same format strings as `convertAudioToFormat` in `react-native-sherpa-onnx/audio` (e.g. `wav`, `mp3`, `flac`, `m4a`, `opus`). */
+  format?: string;
+  /** Encoder output sample rate hint; `0` uses native defaults. MP3/Opus have allowed values — see audio-conversion.md. */
+  outputSampleRateHz?: number;
+};
