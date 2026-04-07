@@ -17,7 +17,7 @@ On-device **batch** synthesis: full-buffer `generateSpeech`, optional subtitle t
 ### 1) Batch: create engine, synthesize, destroy
 
 ```ts
-import { createTTS, type GeneratedAudio } from 'react-native-sherpa-onnx/tts';
+import { createTTS, saveAudio, type GeneratedAudio } from 'react-native-sherpa-onnx/tts';
 
 // createTTS --> Promise<TtsEngine>. Omit modelType for auto-detect (no modelOptions then).
 const tts = await createTTS({
@@ -31,6 +31,15 @@ const audio: GeneratedAudio = await tts.generateSpeech('Hello, world.', {
   speed: 1.0,
 });
 console.log(audio.sampleRate, audio.samples.length);
+
+// saveAudio — `target.kind`: `'file'` = absolute filesystem path; `'androidContent'` = SAF directory URI + filename (Android only).
+// If you omit `options` or do not pass `format`, output defaults to WAV (`'wav'`). Non-WAV (e.g. mp3) needs FFmpeg; see disable-ffmpeg.md.
+const mp3Path = await saveAudio(
+  audio,
+  { kind: 'file', path: '/path/to/hello.mp3' },
+  { format: 'mp3' }
+);
+console.log(mp3Path);
 
 await tts.destroy();
 ```
