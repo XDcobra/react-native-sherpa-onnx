@@ -1,9 +1,9 @@
 import type {
-  ModelCategory,
-  ModelMetaBase,
-  DownloadProgress,
   DownloadProgressListener,
+  ModelCategory,
+  ModelMeta,
   ModelsListUpdatedListener,
+  Progress,
 } from './types';
 
 const downloadProgressListeners = new Set<DownloadProgressListener>();
@@ -30,7 +30,7 @@ export const subscribeModelsListUpdated = (
 export function emitDownloadProgress(
   category: ModelCategory,
   modelId: string,
-  progress: DownloadProgress
+  progress: Progress
 ): void {
   for (const listener of downloadProgressListeners) {
     try {
@@ -43,7 +43,7 @@ export function emitDownloadProgress(
 
 export function emitModelsListUpdated(
   category: ModelCategory,
-  models: ModelMetaBase[]
+  models: ModelMeta[]
 ): void {
   for (const listener of modelsListUpdatedListeners) {
     try {

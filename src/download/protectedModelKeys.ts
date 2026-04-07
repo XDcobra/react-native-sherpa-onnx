@@ -3,28 +3,29 @@ import { getActivePostProcessKeys } from './activeModelOperations';
 import { getActiveDownloadTaskKeys } from './downloadTask';
 
 /**
- * Model keys (`category:modelId`) that must not be removed by bulk delete: active JS download tasks,
- * native background-downloader tasks, and models in post-download processing (extraction / validation).
+ * Model keys (`category:modelId`) that must not be removed by bulk delete.
  */
-export async function getProtectedModelKeysForBulkDelete(): Promise<
-  ReadonlySet<string>
-> {
+export async function getProtectedKeys(): Promise<ReadonlySet<string>> {
   const set = new Set<string>();
-  for (const k of getActiveDownloadTaskKeys()) {
-    set.add(k);
+
+  for (const key of getActiveDownloadTaskKeys()) {
+    set.add(key);
   }
-  for (const k of getActivePostProcessKeys()) {
-    set.add(k);
+
+  for (const key of getActivePostProcessKeys()) {
+    set.add(key);
   }
+
   try {
-    const existing = await getExistingDownloadTasks();
-    for (const t of existing) {
-      if (t.id && typeof t.id === 'string') {
-        set.add(t.id);
+    const existingTasks = await getExistingDownloadTasks();
+    for (const task of existingTasks) {
+      if (task.id && typeof task.id === 'string') {
+        set.add(task.id);
       }
     }
   } catch {
-    // ignore — still return JS/post-process protection
+    // ignore native query failures
   }
+
   return set;
 }

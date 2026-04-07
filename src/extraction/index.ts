@@ -12,7 +12,6 @@
 import { DeviceEventEmitter, Platform } from 'react-native';
 import { readDir, stat, exists } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { extractTarZst } from './extractTarZst';
 import { extractTarBz2 } from './extractTarBz2';
 import type {
   BundledArchive,
@@ -162,11 +161,14 @@ export async function extractArchive(
   const force = options?.force !== false;
   const onProgress = options?.onProgress;
   const signal = options?.signal;
+  const skipEntries = options?.skipEntries ?? 0;
+  const operationId = options?.operationId ?? archive.archivePath;
   const notification = {
     showNotificationsEnabled: options?.showNotificationsEnabled,
     notificationTitle: options?.notificationTitle,
     notificationText: options?.notificationText,
   };
+  const nativeExtra = { skipEntries, operationId };
 
   if (signal?.aborted) {
     const err = new Error('Extraction aborted');
@@ -186,27 +188,19 @@ export async function extractArchive(
       force,
       onProgress,
       signal,
-      notification
+      notification,
+      nativeExtra
     );
   }
 
-  if (archive.format === 'tar.zst') {
-    return extractTarZst(
-      archive.archivePath,
-      targetPath,
-      force,
-      onProgress,
-      signal,
-      notification
-    );
-  }
   return extractTarBz2(
     archive.archivePath,
     targetPath,
     force,
     onProgress,
     signal,
-    notification
+    notification,
+    nativeExtra
   );
 }
 
@@ -218,23 +212,29 @@ async function extractFromAsset(
   force: boolean,
   onProgress?: (event: ExtractProgressEvent) => void,
   signal?: AbortSignal,
-  notification?: ExtractNotificationArgs
+  notification?: ExtractNotificationArgs,
+  nativeExtra?: { skipEntries: number; operationId: string }
 ): Promise<ExtractResult> {
-  const eventName =
-    archive.format === 'tar.zst'
-      ? 'extractTarZstProgress'
-      : 'extractTarBz2Progress';
+  const skipEntries = nativeExtra?.skipEntries ?? 0;
+  const operationId = nativeExtra?.operationId ?? archive.archivePath;
 
   let subscription: { remove: () => void } | null = null;
   let removeAbortListener: (() => void) | null = null;
 
   if (onProgress) {
     subscription = DeviceEventEmitter.addListener(
-      eventName,
+      'extractArchiveProgress',
       (event: ExtractProgressEvent & { sourcePath?: string }) => {
         if (
           event.sourcePath != null &&
           event.sourcePath !== archive.archivePath
+        ) {
+          return;
+        }
+        if (
+          event.operationId != null &&
+          event.operationId !== '' &&
+          event.operationId !== operationId
         ) {
           return;
         }
@@ -247,7 +247,7 @@ async function extractFromAsset(
   if (signal) {
     const onAbort = () => {
       try {
-        SherpaOnnx.cancelExtractBySourcePath(archive.archivePath);
+        SherpaOnnx.cancelExtraction(operationId);
       } catch {
         // ignore
       }
@@ -257,24 +257,32 @@ async function extractFromAsset(
   }
 
   try {
-    const result =
-      archive.format === 'tar.zst'
-        ? await SherpaOnnx.extractTarZstFromAsset(
-            archive.archivePath,
-            targetPath,
-            force,
-            notification?.showNotificationsEnabled,
-            notification?.notificationTitle,
-            notification?.notificationText
-          )
-        : await SherpaOnnx.extractTarBz2FromAsset(
-            archive.archivePath,
-            targetPath,
-            force,
-            notification?.showNotificationsEnabled,
-            notification?.notificationTitle,
-            notification?.notificationText
-          );
+    const result = await SherpaOnnx.extractArchiveFromAsset(
+      archive.archivePath,
+      targetPath,
+      force,
+      skipEntries,
+      operationId,
+      notification?.showNotificationsEnabled,
+      notification?.notificationTitle,
+      notification?.notificationText
+    );
+
+    if (!result.success && result.paused) {
+      if (signal?.aborted) {
+        const err = new Error(result.reason || 'Extraction aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+      return {
+        success: false,
+        paused: true,
+        lastEntryIndex: result.lastEntryIndex,
+        lastEntryPath: result.lastEntryPath ?? '',
+        bytesExtracted: result.bytesExtracted,
+        reason: result.reason,
+      };
+    }
 
     if (!result.success) {
       const message = result.reason ?? 'Extraction failed';
@@ -284,7 +292,11 @@ async function extractFromAsset(
       }
       throw error;
     }
-    return result;
+    return {
+      success: true,
+      path: result.path,
+      sha256: result.sha256,
+    };
   } finally {
     subscription?.remove();
     removeAbortListener?.();

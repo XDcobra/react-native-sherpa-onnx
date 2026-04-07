@@ -1,7 +1,6 @@
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from './types';
-import type { ModelArchiveExt } from './types';
 import { RELEASE_API_BASE } from './constants';
+import { ModelCategory, type ModelArchiveExt } from './types';
 
 type CategoryConfig = {
   tag: string;
@@ -84,9 +83,11 @@ export function getArchivePath(
   archiveExt: ModelArchiveExt
 ): string {
   const filename = getArchiveFilename(modelId, archiveExt);
+
   if (archiveExt === 'onnx') {
     return `${getModelDir(category, modelId)}/${filename}`;
   }
+
   return `${getModelsBaseDir(category)}/${filename}`;
 }
 
@@ -122,7 +123,6 @@ export function getDownloadStatePath(
   return `${getModelsBaseDir(category)}/.download-state-${modelId}.json`;
 }
 
-/** Path to extraction state file; used to detect and resume incomplete extractions after app restart. */
 export function getExtractionStatePath(
   category: ModelCategory,
   modelId: string
@@ -131,10 +131,7 @@ export function getExtractionStatePath(
 }
 
 /**
- * Directory where native `resolveAssetPath` materializes a bundled model folder
- * (`DocumentDirectoryPath/models/{modelId}` — Android internal `files/models/...`).
- * Separate from {@link getModelDir}. `deleteModelByCategory` does not remove this tree; it
- * only deletes download-manager installs under `sherpa-onnx/models/`.
+ * Directory where native `resolveAssetPath` materializes a bundled model folder.
  */
 export function getNativeAssetExtractedModelDir(modelId: string): string {
   const safeId = modelId.replace(/[/\\]/g, '');

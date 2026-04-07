@@ -1,62 +1,76 @@
-export { extractTarBz2 } from '../extraction/extractTarBz2';
-export type { ExtractProgressEvent } from '../extraction/extractTarBz2';
-export { extractTarZst } from '../extraction/extractTarZst';
-export type { ExtractProgressEvent as ExtractZstProgressEvent } from '../extraction/extractTarZst';
 export {
-  listModelsByCategory,
-  refreshModelsByCategory,
-  getModelsCacheStatusByCategory,
-  getModelByIdByCategory,
-  listDownloadedModelsByCategory,
-  isModelDownloadedByCategory,
-  getLocalModelPathByCategory,
-  downloadModelByCategory,
-  deleteModelByCategory,
-  clearModelCacheByCategory,
-  getDownloadStorageBase,
-  subscribeDownloadProgress,
-  subscribeModelsListUpdated,
+  ModelCategory,
+  PauseError,
+  isPauseError,
+  type CacheStatus,
+  type ChecksumMismatchInfo,
+  type ChecksumMismatchReason,
+  type DownloadOptions,
+  type DownloadProgressListener,
+  type DownloadResult,
+  type DownloadState,
+  type EnsureModelOptions,
+  type EnsureModelResult,
+  type ExtractOptions,
+  type ExtractionState,
+  type ModelMeta,
+  type ModelWithMetadata,
+  type ModelsListUpdatedListener,
+  type Progress,
+  type ProgressPhase,
+  isActiveExtractionPhase,
+  type Quantization,
+  type SizeTier,
+  type TtsModelType,
+} from './types';
+
+export {
+  subscribeDownloadProgress as onProgress,
+  subscribeModelsListUpdated as onModelsListUpdated,
+} from './downloadEvents';
+
+export {
+  listModels,
+  refreshModels,
+  getModelsCacheStatus,
+  getModelById,
+} from './registry';
+
+export {
+  listDownloadedModels,
+  isModelDownloaded,
+  getModelPath,
   updateModelLastUsed,
   listDownloadedModelsWithMetadata,
   cleanupLeastRecentlyUsed,
-  getIncompleteDownloads,
-  resumeDownload,
-  deleteIncompleteDownload,
-  extractModelByCategory,
-  getIncompleteExtractions,
-  resumeExtraction,
-  deleteIncompleteExtraction,
-  ensureModelByCategory,
-  ModelCategory,
-  getProtectedModelKeysForBulkDelete,
-  purgeDownloadedModelArtifacts,
-  configureModelDownloadBackgroundDownloader,
-} from './ModelDownloadManager';
-export type {
-  BackgroundDownloaderSetConfigOptions,
-  ModelMetaBase,
-  TtsModelMeta,
-  TtsModelType,
-  Quantization,
-  SizeTier,
-  DownloadProgress,
-  DownloadProgressListener,
-  ModelsListUpdatedListener,
-  DownloadResult,
-  DownloadState,
-  ExtractionState,
-  ModelWithMetadata,
-  EnsureModelOptions,
-  PurgeDownloadedModelArtifactsResult,
-} from './ModelDownloadManager';
+  deleteModel,
+  clearModelsCache,
+  getStorageBasePath,
+} from './localModels';
+
 export {
-  validateChecksum,
-  validateExtractedFiles,
-  checkDiskSpace,
-  resolveActualModelDir,
-  setExpectedFilesForCategory,
-  getExpectedFilesForCategory,
-  parseChecksumFile,
-  calculateFileChecksum,
-} from './validation';
-export type { ValidationError } from './validation';
+  configureBackgroundDownloader,
+  downloadModel,
+  pauseDownload,
+  resumeDownload,
+  getIncompleteDownloads,
+  deleteIncompleteDownload,
+} from './downloadTask';
+
+export {
+  extractModel,
+  pauseExtraction,
+  resumeExtraction,
+  getIncompleteExtractions,
+  deleteIncompleteExtraction,
+} from './modelExtraction';
+
+export { ensureModel } from './ensureModel';
+
+export { getProtectedKeys } from './protectedModelKeys';
+
+export { purgeAll, type PurgeAllResult } from './bulkPurge';
+
+export { checkDiskSpace } from './validation';
+
+export type { BackgroundDownloaderSetConfigOptions } from './background-downloader-types';

@@ -1,0 +1,49 @@
+# Jest / TypeScript unit tests for the SDK (src/). Add new *.test.ts(x) files under src/ — they run here automatically.
+# Excludes third_party from test discovery to avoid duplicate package.json names in the Haste map.
+
+name: Test – JS unit tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'readme.md'
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-js
+  cancel-in-progress: true
+
+jobs:
+  jest:
+    name: Jest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+          cache-dependency-path: yarn.lock
+
+      - name: Enable Corepack (Yarn)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Run Jest
+        run: yarn test --testPathIgnorePatterns=third_party --passWithNoTests

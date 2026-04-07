@@ -10619,6 +10619,7 @@ __metadata:
     "@babel/preset-env": "npm:^7.25.3"
     "@babel/runtime": "npm:^7.25.0"
     "@dr.pogodin/react-native-fs": "npm:^2.37.0"
+    "@kesha-antonov/react-native-background-downloader": "npm:^4.5.4"
     "@react-native-clipboard/clipboard": "npm:^1.16.3"
     "@react-native-community/cli": "npm:20.0.0"
     "@react-native-community/cli-platform-android": "npm:20.0.0"
@@ -10675,6 +10676,7 @@ __metadata:
     typescript: "npm:^5.9.2"
   peerDependencies:
     "@dr.pogodin/react-native-fs": "*"
+    "@kesha-antonov/react-native-background-downloader": ^4.5.4
     react: "*"
     react-native: "*"
   languageName: unknown

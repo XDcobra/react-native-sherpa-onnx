@@ -109,8 +109,8 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 | Platform | Version |
 |----------|---------|
-| Android | 1.12.34 |
-| iOS | 1.12.34 |
+| Android | 1.12.35 |
+| iOS | 1.12.35 |
 
 ## Feature Support
 

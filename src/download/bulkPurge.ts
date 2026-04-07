@@ -1,42 +1,39 @@
 import { exists, unlink } from '@dr.pogodin/react-native-fs';
-import { CATEGORY_CONFIG, getArchivePath } from './paths';
-import type { ModelCategory, ModelMetaBase } from './types';
 import { makeModelOperationKey } from './activeModelOperations';
-import { getProtectedModelKeysForBulkDelete } from './protectedModelKeys';
-import {
-  deleteModelByCategory,
-  listDownloadedModelsByCategory,
-} from './localModels';
 import {
   deleteIncompleteDownload,
   getIncompleteDownloads,
 } from './downloadTask';
+import { deleteModel, listDownloadedModels } from './localModels';
 import {
   deleteIncompleteExtraction,
   getIncompleteExtractions,
 } from './modelExtraction';
+import { getArchivePath } from './paths';
+import { getProtectedKeys } from './protectedModelKeys';
+import { ModelCategory } from './types';
 
-function allModelCategories(): ModelCategory[] {
-  return Object.keys(CATEGORY_CONFIG) as ModelCategory[];
-}
-
-export type PurgeDownloadedModelArtifactsResult = {
+export type PurgeAllResult = {
   deletedComplete: number;
   deletedIncompleteDownloads: number;
   deletedIncompleteExtractions: number;
   skippedProtected: number;
 };
 
+function allModelCategories(): ModelCategory[] {
+  return Object.values(ModelCategory);
+}
+
 /**
- * Deletes completed downloads, incomplete downloads, and incomplete extractions for every
- * {@link ModelCategory}, except keys in `protectKeys` (or current {@link getProtectedModelKeysForBulkDelete}).
+ * Deletes completed and incomplete artifacts across all categories,
+ * except keys in `protectKeys`.
  */
-export async function purgeDownloadedModelArtifacts(opts?: {
+export async function purgeAll(opts?: {
   protectKeys?: ReadonlySet<string>;
-}): Promise<PurgeDownloadedModelArtifactsResult> {
-  const protect =
-    opts?.protectKeys ?? (await getProtectedModelKeysForBulkDelete());
-  const result: PurgeDownloadedModelArtifactsResult = {
+}): Promise<PurgeAllResult> {
+  const protect = opts?.protectKeys ?? (await getProtectedKeys());
+
+  const result: PurgeAllResult = {
     deletedComplete: 0,
     deletedIncompleteDownloads: 0,
     deletedIncompleteExtractions: 0,
@@ -46,47 +43,52 @@ export async function purgeDownloadedModelArtifacts(opts?: {
   const categories = allModelCategories();
 
   for (const category of categories) {
-    const downloaded = await listDownloadedModelsByCategory<ModelMetaBase>(
-      category
-    );
-    for (const m of downloaded) {
-      const key = makeModelOperationKey(category, m.id);
+    const downloaded = await listDownloadedModels(category);
+
+    for (const model of downloaded) {
+      const key = makeModelOperationKey(category, model.id);
       if (protect.has(key)) {
         result.skippedProtected += 1;
         continue;
       }
-      await deleteModelByCategory(category, m.id);
+
+      await deleteModel(category, model.id);
       result.deletedComplete += 1;
     }
   }
 
   for (const category of categories) {
     const incomplete = await getIncompleteDownloads(category);
-    for (const s of incomplete) {
-      const key = makeModelOperationKey(category, s.modelId);
+
+    for (const state of incomplete) {
+      const key = makeModelOperationKey(category, state.modelId);
       if (protect.has(key)) {
         result.skippedProtected += 1;
         continue;
       }
-      await deleteIncompleteDownload(category, s.modelId);
+
+      await deleteIncompleteDownload(category, state.modelId);
       result.deletedIncompleteDownloads += 1;
     }
   }
 
   for (const category of categories) {
     const extractions = await getIncompleteExtractions(category);
-    for (const e of extractions) {
-      const key = makeModelOperationKey(category, e.modelId);
+
+    for (const extraction of extractions) {
+      const key = makeModelOperationKey(category, extraction.modelId);
       if (protect.has(key)) {
         result.skippedProtected += 1;
         continue;
       }
-      await deleteIncompleteExtraction(category, e.modelId);
+
+      await deleteIncompleteExtraction(category, extraction.modelId);
+
       try {
         const archivePath = getArchivePath(
           category,
-          e.modelId,
-          e.model.archiveExt
+          extraction.modelId,
+          extraction.model.archiveExt
         );
         if (await exists(archivePath)) {
           await unlink(archivePath);
@@ -94,6 +96,7 @@ export async function purgeDownloadedModelArtifacts(opts?: {
       } catch {
         // non-fatal
       }
+
       result.deletedIncompleteExtractions += 1;
     }
   }

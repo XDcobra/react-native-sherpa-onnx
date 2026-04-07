@@ -1,40 +1,50 @@
 import {
   exists,
-  readFile,
   mkdir,
+  readFile,
   writeFile,
 } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from './types';
-import type {
-  ModelMetaBase,
-  ModelArchiveExt,
-  CachePayload,
-  CacheStatus,
-  TtsModelType,
-  Quantization,
-  SizeTier,
-  TtsModelMeta,
-} from './types';
 import {
   CACHE_TTL_MINUTES,
   MODEL_ARCHIVE_EXT,
   MODEL_ONNX_EXT,
 } from './constants';
+import { emitModelsListUpdated } from './downloadEvents';
+import { deriveLanguages } from './deriveTtsLanguages';
 import {
+  CATEGORY_CONFIG,
+  getArchiveFilename,
   getCacheDir,
   getCachePath,
-  getArchiveFilename,
   getReleaseUrl,
-  CATEGORY_CONFIG,
 } from './paths';
-import { parseChecksumFile } from './validation';
 import { retryWithBackoff } from './retry';
-import { emitModelsListUpdated } from './downloadEvents';
+import {
+  ModelCategory,
+  type CachePayload,
+  type CacheStatus,
+  type ModelMeta,
+  type Quantization,
+  type SizeTier,
+  type TtsModelType,
+} from './types';
+import { parseChecksumFile } from './validation';
 
-const memoryCacheByCategory: Partial<
-  Record<ModelCategory, CachePayload<ModelMetaBase>>
-> = {};
+type RefreshModelsOptions = {
+  forceRefresh?: boolean;
+  cacheTtlMinutes?: number;
+  maxRetries?: number;
+  signal?: AbortSignal;
+};
 
+type ReleaseAsset = {
+  name: string;
+  size: number;
+  browser_download_url: string;
+  digest?: string;
+};
+
+const memoryCacheByCategory: Partial<Record<ModelCategory, CachePayload>> = {};
 const checksumCacheByCategory: Partial<
   Record<ModelCategory, Map<string, string>>
 > = {};
@@ -65,9 +75,12 @@ export async function fetchChecksumsFromRelease(
   if (category === ModelCategory.Qnn) {
     return new Map<string, string>();
   }
-  if (checksumCacheByCategory[category]) {
-    return checksumCacheByCategory[category]!;
+
+  const cached = checksumCacheByCategory[category];
+  if (cached) {
+    return cached;
   }
+
   try {
     const checksums = await retryWithBackoff(
       async () => {
@@ -77,11 +90,16 @@ export async function fetchChecksumsFromRelease(
             `Failed to fetch checksum.txt for ${category}: ${response.status}`
           );
         }
+
         const content = await response.text();
         return parseChecksumFile(content);
       },
-      { maxRetries: 3, initialDelayMs: 1000 }
+      {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+      }
     );
+
     checksumCacheByCategory[category] = checksums;
     return checksums;
   } catch (error) {
@@ -89,7 +107,7 @@ export async function fetchChecksumsFromRelease(
       `SherpaOnnxChecksum: Error fetching checksums for ${category}:`,
       error
     );
-    return new Map();
+    return new Map<string, string>();
   }
 }
 
@@ -97,7 +115,10 @@ function toTitleCase(value: string): string {
   return value
     .split(/[-_\s]+/g)
     .filter(Boolean)
-    .map((token) => token[0]!.toUpperCase() + token.slice(1))
+    .map((token) => {
+      const first = token[0] ?? '';
+      return first.toUpperCase() + token.slice(1);
+    })
     .join(' ');
 }
 
@@ -138,32 +159,13 @@ function deriveSizeTier(id: string): SizeTier {
   return 'unknown';
 }
 
-function deriveLanguages(id: string): string[] {
-  const tokens = id.split(/[-_]+/g);
-  const languages = new Set<string>();
-  for (const token of tokens) {
-    if (/^[a-z]{2}$/.test(token)) {
-      languages.add(token);
-      continue;
-    }
-    if (/^[a-z]{2}[A-Z]{2}$/.test(token)) {
-      languages.add(token.slice(0, 2).toLowerCase());
-      continue;
-    }
-    if (/^[a-z]{2}-[A-Z]{2}$/.test(token)) {
-      languages.add(token.slice(0, 2).toLowerCase());
-    }
-  }
-  return Array.from(languages);
-}
-
-function getAssetExtension(name: string): ModelArchiveExt | null {
+function getAssetExtension(name: string): 'tar.bz2' | 'onnx' | null {
   if (name.endsWith(MODEL_ARCHIVE_EXT)) return 'tar.bz2';
   if (name.endsWith(MODEL_ONNX_EXT)) return 'onnx';
   return null;
 }
 
-function stripAssetExtension(name: string, ext: ModelArchiveExt): string {
+function stripAssetExtension(name: string, ext: 'tar.bz2' | 'onnx'): string {
   const suffix = `.${ext}`;
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
 }
@@ -171,9 +173,10 @@ function stripAssetExtension(name: string, ext: ModelArchiveExt): string {
 function isAssetSupportedForCategory(
   category: ModelCategory,
   name: string,
-  ext: ModelArchiveExt
+  ext: 'tar.bz2' | 'onnx'
 ): boolean {
   const lower = name.toLowerCase();
+
   switch (category) {
     case ModelCategory.Tts:
       return ext === 'tar.bz2';
@@ -201,53 +204,40 @@ function isAssetSupportedForCategory(
   }
 }
 
-function parseDigestSha256(value?: string | null): string | undefined {
-  if (!value) return undefined;
+function parseDigestSha256(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
   const match = value.match(/^sha256:([a-f0-9]{64})$/i);
   return match?.[1]?.toLowerCase();
 }
 
-function toTtsModelMeta(
-  asset: {
-    name: string;
-    size: number;
-    browser_download_url: string;
-    digest?: string | null;
-  },
-  archiveExt: ModelArchiveExt
-): TtsModelMeta | null {
-  if (archiveExt !== 'tar.bz2') return null;
+function toTtsModelMeta(asset: ReleaseAsset, archiveExt: 'tar.bz2'): ModelMeta {
   const id = stripAssetExtension(asset.name, archiveExt);
-  const type = deriveType(id);
-  if (type === 'unknown') {
-    console.warn('SherpaOnnxModelList: Unsupported model', id);
-  }
+
   return {
     id,
     displayName: deriveDisplayName(id),
-    type,
-    languages: deriveLanguages(id),
-    quantization: deriveQuantization(id),
-    sizeTier: deriveSizeTier(id),
     downloadUrl: asset.browser_download_url,
     archiveExt,
     bytes: asset.size,
     sha256: parseDigestSha256(asset.digest),
     category: ModelCategory.Tts,
+    type: deriveType(id),
+    languages: deriveLanguages(id),
+    quantization: deriveQuantization(id),
+    sizeTier: deriveSizeTier(id),
   };
 }
 
 function toGenericModelMeta(
   category: ModelCategory,
-  asset: {
-    name: string;
-    size: number;
-    browser_download_url: string;
-    digest?: string | null;
-  },
-  archiveExt: ModelArchiveExt
-): ModelMetaBase | null {
+  asset: ReleaseAsset,
+  archiveExt: 'tar.bz2' | 'onnx'
+): ModelMeta {
   const id = stripAssetExtension(asset.name, archiveExt);
+
   return {
     id,
     displayName: deriveDisplayName(id),
@@ -261,77 +251,75 @@ function toGenericModelMeta(
 
 function toModelMeta(
   category: ModelCategory,
-  asset: {
-    name: string;
-    size: number;
-    browser_download_url: string;
-    digest?: string | null;
-  }
-): ModelMetaBase | null {
+  asset: ReleaseAsset
+): ModelMeta | null {
   const archiveExt = getAssetExtension(asset.name);
-  if (!archiveExt) return null;
+  if (!archiveExt) {
+    return null;
+  }
+
   if (!isAssetSupportedForCategory(category, asset.name, archiveExt)) {
     return null;
   }
-  if (category === ModelCategory.Tts) {
+
+  if (category === ModelCategory.Tts && archiveExt === 'tar.bz2') {
     return toTtsModelMeta(asset, archiveExt);
   }
+
   return toGenericModelMeta(category, asset, archiveExt);
 }
 
-async function loadCacheFromDisk<T extends ModelMetaBase>(
+async function loadCacheFromDisk(
   category: ModelCategory
-): Promise<CachePayload<T> | null> {
-  const memoryCache = memoryCacheByCategory[category] as
-    | CachePayload<T>
-    | undefined;
-  if (memoryCache) return memoryCache;
+): Promise<CachePayload | null> {
+  const memoryCache = memoryCacheByCategory[category];
+  if (memoryCache) {
+    return memoryCache;
+  }
+
   const cachePath = getCachePath(category);
-  const existsResult = await exists(cachePath);
-  if (!existsResult) return null;
+  if (!(await exists(cachePath))) {
+    return null;
+  }
+
   const raw = await readFile(cachePath, 'utf8');
-  const parsed = JSON.parse(raw) as CachePayload<T>;
-  memoryCacheByCategory[category] = parsed as CachePayload<ModelMetaBase>;
+  const parsed = JSON.parse(raw) as CachePayload;
+  memoryCacheByCategory[category] = parsed;
   return parsed;
 }
 
-async function saveCache<T extends ModelMetaBase>(
+async function saveCache(
   category: ModelCategory,
-  payload: CachePayload<T>
+  payload: CachePayload
 ): Promise<void> {
   await mkdir(getCacheDir());
   await writeFile(getCachePath(category), JSON.stringify(payload), 'utf8');
-  memoryCacheByCategory[category] = payload as CachePayload<ModelMetaBase>;
+  memoryCacheByCategory[category] = payload;
 }
 
-function isCacheFresh<T extends ModelMetaBase>(
-  payload: CachePayload<T>,
-  ttlMinutes: number
-): boolean {
+function isCacheFresh(payload: CachePayload, ttlMinutes: number): boolean {
   const updated = new Date(payload.lastUpdated).getTime();
-  if (!updated) return false;
+  if (!updated) {
+    return false;
+  }
+
   const ageMs = Date.now() - updated;
   return ageMs < ttlMinutes * 60 * 1000;
 }
 
-export async function listModelsByCategory<T extends ModelMetaBase>(
+export async function listModels(
   category: ModelCategory
-): Promise<T[]> {
-  const cache = await loadCacheFromDisk<T>(category);
+): Promise<ModelMeta[]> {
+  const cache = await loadCacheFromDisk(category);
   return cache?.models ?? [];
 }
 
-export async function refreshModelsByCategory<T extends ModelMetaBase>(
+export async function refreshModels(
   category: ModelCategory,
-  options?: {
-    forceRefresh?: boolean;
-    cacheTtlMinutes?: number;
-    maxRetries?: number;
-    signal?: AbortSignal;
-  }
-): Promise<T[]> {
+  options?: RefreshModelsOptions
+): Promise<ModelMeta[]> {
   const ttl = options?.cacheTtlMinutes ?? CACHE_TTL_MINUTES;
-  const cached = await loadCacheFromDisk<T>(category);
+  const cached = await loadCacheFromDisk(category);
 
   if (!options?.forceRefresh && cached && isCacheFresh(cached, ttl)) {
     return cached.models;
@@ -353,28 +341,19 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
       }
     );
 
-    const assets = Array.isArray(body?.assets) ? body.assets : [];
-    const models: T[] = assets
-      .map(
-        (asset: {
-          name: string;
-          size: number;
-          browser_download_url: string;
-          digest?: string | null;
-        }) =>
-          toModelMeta(category, {
-            name: asset.name,
-            size: asset.size,
-            browser_download_url: asset.browser_download_url,
-            digest: asset.digest,
-          })
-      )
-      .filter((model: ModelMetaBase | null): model is T => Boolean(model));
+    const assets = Array.isArray(body?.assets)
+      ? (body.assets as ReleaseAsset[])
+      : [];
+
+    const models = assets
+      .map((asset) => toModelMeta(category, asset))
+      .filter((model): model is ModelMeta => model != null);
 
     const checksums = await fetchChecksumsFromRelease(category);
     for (const model of models) {
       const archiveFilename = getArchiveFilename(model.id, model.archiveExt);
       const sha256 = checksums.get(archiveFilename);
+
       if (sha256) {
         model.sha256 = sha256;
       } else if (model.sha256) {
@@ -382,12 +361,13 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
       }
     }
 
-    const payload: CachePayload<T> = {
+    const payload: CachePayload = {
       lastUpdated: new Date().toISOString(),
       models,
     };
+
     await saveCache(category, payload);
-    emitModelsListUpdated(category, models as ModelMetaBase[]);
+    emitModelsListUpdated(category, models);
     return models;
   } catch (error) {
     if (cached) {
@@ -397,25 +377,33 @@ export async function refreshModelsByCategory<T extends ModelMetaBase>(
       );
       return cached.models;
     }
+
     throw error;
   }
 }
 
-export async function getModelsCacheStatusByCategory(
+export async function getModelsCacheStatus(
   category: ModelCategory
 ): Promise<CacheStatus> {
   const cached = await loadCacheFromDisk(category);
   if (!cached) {
-    return { lastUpdated: null, source: 'cache' };
+    return {
+      lastUpdated: null,
+      source: 'cache',
+    };
   }
-  return { lastUpdated: cached.lastUpdated, source: 'cache' };
+
+  return {
+    lastUpdated: cached.lastUpdated,
+    source: 'cache',
+  };
 }
 
-export async function getModelByIdByCategory<T extends ModelMetaBase>(
+export async function getModelById(
   category: ModelCategory,
   id: string
-): Promise<T | null> {
-  const models = await listModelsByCategory<T>(category);
+): Promise<ModelMeta | null> {
+  const models = await listModels(category);
   return models.find((model) => model.id === id) ?? null;
 }
 

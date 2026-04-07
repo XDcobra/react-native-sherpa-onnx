@@ -1,117 +1,229 @@
 import {
   exists,
-  readFile,
-  readDir,
   mkdir,
+  readDir,
+  readFile,
   stat,
   unlink,
 } from '@dr.pogodin/react-native-fs';
-import type {
-  ModelCategory,
-  ModelMetaBase,
-  ChecksumIssue,
-  DownloadProgress,
-  ExtractionState,
-} from './types';
-import type { DownloadResult } from './types';
+import SherpaOnnx from '../NativeSherpaOnnx';
+import { makeModelOperationKey } from './activeModelOperations';
+import { listDownloadedModels, getModelPath } from './localModels';
 import {
-  getModelsBaseDir,
-  getModelDir,
   getArchivePath,
-  getReadyMarkerPath,
   getExtractionStatePath,
+  getModelDir,
+  getModelsBaseDir,
   getNativeAssetExtractedModelDir,
+  getReadyMarkerPath,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
-import { getModelByIdByCategory } from './registry';
+import { getModelById } from './registry';
 import {
-  listDownloadedModelsByCategory,
-  getLocalModelPathByCategory,
-} from './localModels';
-import { resolveActualModelDir, removeDirectoryRecursive } from './validation';
+  type DownloadResult,
+  type ExtractOptions,
+  type ExtractionState,
+  type ModelCategory,
+  PauseError,
+} from './types';
+import { removeDirectoryRecursive, resolveActualModelDir } from './validation';
 
 const EXTRACTION_STATE_PREFIX = '.extraction-state-';
 const EXTRACTION_STATE_SUFFIX = '.json';
 
-/**
- * Start extraction for a model: archive must already exist (e.g. after download or from PAD).
- * Writes extraction state so that if the app crashes, extraction can be resumed via
- * getIncompleteExtractions + resumeExtraction.
- * Use signal to abort (pause) extraction.
- */
-export async function extractModelByCategory<T extends ModelMetaBase>(
+type ActiveExtractionOperation = {
+  operationId: string;
+  pauseRequested: boolean;
+};
+
+const activeExtractionOperations = new Map<string, ActiveExtractionOperation>();
+const pendingExplicitPauseRequests = new Set<string>();
+
+function makeExtractionOperationId(
+  category: ModelCategory,
+  id: string
+): string {
+  return `extract:${category}:${id}`;
+}
+
+export function consumePausedExtractionRequest(
+  category: ModelCategory,
+  id: string
+): boolean {
+  const key = makeModelOperationKey(category, id);
+  const hasRequest = pendingExplicitPauseRequests.has(key);
+  if (hasRequest) {
+    pendingExplicitPauseRequests.delete(key);
+  }
+  return hasRequest;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function createAbortError(): Error {
+  const abortError = new Error('Extraction aborted');
+  abortError.name = 'AbortError';
+  return abortError;
+}
+
+async function cleanupCancelledExtraction(
+  category: ModelCategory,
+  id: string
+): Promise<void> {
+  const statePath = getExtractionStatePath(category, id);
+  const modelDir = getModelDir(category, id);
+
+  try {
+    if (await exists(statePath)) {
+      await unlink(statePath);
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (await exists(modelDir)) {
+      await unlink(modelDir);
+    }
+  } catch {
+    // ignore
+  }
+
+  await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
+}
+
+async function runExtraction(
   category: ModelCategory,
   id: string,
-  opts?: {
-    onProgress?: (progress: DownloadProgress) => void;
-    signal?: AbortSignal;
-    onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
-    deleteArchiveAfterExtract?: boolean;
-  }
+  opts?: ExtractOptions,
+  resumeState?: ExtractionState
 ): Promise<DownloadResult> {
-  const model = await getModelByIdByCategory<T>(category, id);
+  const model = await getModelById(category, id);
   if (!model) {
     throw new Error(`Unknown model id: ${id}`);
   }
+
   if (model.archiveExt !== 'tar.bz2') {
     throw new Error(
       `Model ${id} is not a tar.bz2 archive; extraction is only for archived models.`
     );
   }
 
-  const downloadPath = getArchivePath(category, id, model.archiveExt);
-  const modelDir = getModelDir(category, id);
+  const downloadPath =
+    resumeState?.archivePath ?? getArchivePath(category, id, model.archiveExt);
+  const modelDir = resumeState?.modelDir ?? getModelDir(category, id);
   const statePath = getExtractionStatePath(category, id);
 
-  const archiveExists = await exists(downloadPath);
-  if (!archiveExists) {
+  if (!(await exists(downloadPath))) {
     throw new Error(
       `Archive not found at ${downloadPath}. Download the model first or ensure the archive is present.`
     );
   }
-  try {
-    const archiveStat = await stat(downloadPath);
-    if (model.bytes > 0 && archiveStat.size < model.bytes) {
-      throw new Error(
-        `Archive is truncated (${archiveStat.size}/${model.bytes} bytes). Re-download or replace the file.`
-      );
-    }
-  } catch (statErr) {
-    if (statErr instanceof Error) throw statErr;
-    throw new Error('Failed to read archive size.');
+
+  const archiveStat = await stat(downloadPath);
+  if (model.bytes > 0 && archiveStat.size < model.bytes) {
+    throw new Error(
+      `Archive is truncated (${archiveStat.size}/${model.bytes} bytes). Re-download or replace the file.`
+    );
   }
 
   await mkdir(getModelsBaseDir(category));
 
-  return runPostDownloadProcessing({
-    category,
-    id,
-    model,
-    downloadPath,
-    modelDir,
-    isArchive: true,
-    statePath,
-    signal: opts?.signal,
-    onChecksumIssue: opts?.onChecksumIssue,
-    deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
-    onProgress: opts?.onProgress,
-    getDownloadedList: () =>
-      listDownloadedModelsByCategory<ModelMetaBase>(category),
-  });
+  const key = makeModelOperationKey(category, id);
+  pendingExplicitPauseRequests.delete(key);
+  const activeOperation: ActiveExtractionOperation = {
+    operationId: makeExtractionOperationId(category, id),
+    pauseRequested: false,
+  };
+  activeExtractionOperations.set(key, activeOperation);
+
+  const extractionSkipEntries =
+    typeof resumeState?.lastEntryIndex === 'number'
+      ? resumeState.lastEntryIndex + 1
+      : 0;
+
+  try {
+    return await runPostDownloadProcessing({
+      category,
+      id,
+      model,
+      downloadPath,
+      modelDir,
+      isArchive: true,
+      statePath,
+      signal: opts?.signal,
+      verifyChecksum: opts?.verifyChecksum,
+      onChecksumMismatch: opts?.onChecksumMismatch,
+      deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
+      onProgress: opts?.onProgress,
+      getDownloadedList: () => listDownloadedModels(category),
+      extractionOperationId: activeOperation.operationId,
+      extractionSkipEntries,
+    });
+  } catch (error) {
+    if (activeOperation.pauseRequested) {
+      consumePausedExtractionRequest(category, id);
+      throw new PauseError(category, id, 'Extraction paused');
+    }
+
+    if (isAbortError(error) || opts?.signal?.aborted) {
+      await cleanupCancelledExtraction(category, id);
+      throw createAbortError();
+    }
+
+    throw error;
+  } finally {
+    activeExtractionOperations.delete(key);
+  }
 }
 
 /**
- * Returns models in the given category that have incomplete extractions (e.g. after app
- * crash during extraction). Use with resumeExtraction to continue.
+ * Start extraction for a model. Archive must already exist.
+ */
+export async function extractModel(
+  category: ModelCategory,
+  id: string,
+  opts?: ExtractOptions
+): Promise<DownloadResult> {
+  return runExtraction(category, id, opts);
+}
+
+export async function pauseExtraction(
+  category: ModelCategory,
+  id: string
+): Promise<void> {
+  const key = makeModelOperationKey(category, id);
+  pendingExplicitPauseRequests.add(key);
+
+  const operation = activeExtractionOperations.get(key);
+  const operationId =
+    operation?.operationId ?? makeExtractionOperationId(category, id);
+
+  if (operation) {
+    operation.pauseRequested = true;
+  }
+
+  try {
+    await SherpaOnnx.cancelExtraction(operationId);
+  } catch {
+    // ignore pause races
+  }
+}
+
+/**
+ * Returns models with incomplete extractions in the given category.
  */
 export async function getIncompleteExtractions(
   category: ModelCategory
 ): Promise<ExtractionState[]> {
   const baseDir = getModelsBaseDir(category);
-  const baseExists = await exists(baseDir);
-  if (!baseExists) return [];
+  if (!(await exists(baseDir))) {
+    return [];
+  }
 
-  let entries: { name: string; isDirectory: () => boolean }[];
+  let entries: Array<{ name: string; isDirectory: () => boolean }>;
   try {
     entries = await readDir(baseDir);
   } catch {
@@ -119,6 +231,7 @@ export async function getIncompleteExtractions(
   }
 
   const results: ExtractionState[] = [];
+
   for (const entry of entries) {
     const name = entry.name;
     if (
@@ -127,11 +240,13 @@ export async function getIncompleteExtractions(
     ) {
       continue;
     }
+
     const modelId = name.slice(
       EXTRACTION_STATE_PREFIX.length,
       name.length - EXTRACTION_STATE_SUFFIX.length
     );
     const statePath = getExtractionStatePath(category, modelId);
+
     let state: ExtractionState;
     try {
       const raw = await readFile(statePath, 'utf8');
@@ -139,57 +254,56 @@ export async function getIncompleteExtractions(
     } catch {
       continue;
     }
+
     const readyPath = getReadyMarkerPath(category, modelId);
-    if (await exists(readyPath)) continue;
+    if (await exists(readyPath)) {
+      continue;
+    }
+
     try {
-      const archiveExists = await exists(state.archivePath);
-      if (!archiveExists) continue;
-      const st = await stat(state.archivePath);
-      if (
-        state.model.bytes > 0 &&
-        st.size != null &&
-        st.size < state.model.bytes
-      ) {
+      if (!(await exists(state.archivePath))) {
+        continue;
+      }
+
+      const sourceStat = await stat(state.archivePath);
+      if (state.model.bytes > 0 && sourceStat.size < state.model.bytes) {
         continue;
       }
     } catch {
       continue;
     }
+
     results.push(state);
   }
+
   return results;
 }
 
 /**
- * Resume an incomplete extraction (e.g. after app restart). Use getIncompleteExtractions
- * to discover items to resume. Runs extraction from the start (archive is overwritten into
- * model dir with force).
+ * Resume an incomplete extraction.
  */
-export async function resumeExtraction<T extends ModelMetaBase>(
+export async function resumeExtraction(
   category: ModelCategory,
   id: string,
-  opts?: {
-    onProgress?: (progress: DownloadProgress) => void;
-    signal?: AbortSignal;
-    onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
-    deleteArchiveAfterExtract?: boolean;
-  }
+  opts?: ExtractOptions
 ): Promise<DownloadResult> {
   const statePath = getExtractionStatePath(category, id);
-  const stateExists = await exists(statePath);
-  if (!stateExists) {
-    return extractModelByCategory<T>(category, id, opts);
+  if (!(await exists(statePath))) {
+    return extractModel(category, id, opts);
   }
+
   let state: ExtractionState;
   try {
     const raw = await readFile(statePath, 'utf8');
     state = JSON.parse(raw) as ExtractionState;
   } catch {
-    return extractModelByCategory<T>(category, id, opts);
+    return extractModel(category, id, opts);
   }
+
   if (state.modelId !== id || state.category !== category) {
-    return extractModelByCategory<T>(category, id, opts);
+    return extractModel(category, id, opts);
   }
+
   const readyPath = getReadyMarkerPath(category, id);
   if (await exists(readyPath)) {
     try {
@@ -197,48 +311,44 @@ export async function resumeExtraction<T extends ModelMetaBase>(
     } catch {
       // non-fatal
     }
+
     const localPath =
-      (await getLocalModelPathByCategory(category, id)) ??
+      (await getModelPath(category, id)) ??
       (await resolveActualModelDir(state.modelDir));
-    return { modelId: id, localPath };
+
+    return {
+      modelId: id,
+      localPath,
+    };
   }
 
-  return runPostDownloadProcessing({
-    category: state.category,
-    id: state.modelId,
-    model: state.model,
-    downloadPath: state.archivePath,
-    modelDir: state.modelDir,
-    isArchive: true,
-    statePath,
-    signal: opts?.signal,
-    onChecksumIssue: opts?.onChecksumIssue,
-    deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
-    onProgress: opts?.onProgress,
-    getDownloadedList: () =>
-      listDownloadedModelsByCategory<ModelMetaBase>(category),
-  });
+  return runExtraction(category, id, opts, state);
 }
 
 /**
- * Cancel/delete an incomplete extraction: removes extraction state and partial model dir.
- * Does not delete the archive so the user can retry extraction later.
+ * Remove extraction state and partial extraction output.
  */
 export async function deleteIncompleteExtraction(
   category: ModelCategory,
   id: string
 ): Promise<void> {
   const statePath = getExtractionStatePath(category, id);
-  try {
-    if (await exists(statePath)) await unlink(statePath);
-  } catch {
-    // non-fatal
+  if (await exists(statePath)) {
+    try {
+      await unlink(statePath);
+    } catch {
+      // ignore – may already be removed by a concurrent cleanup
+    }
   }
+
   const modelDir = getModelDir(category, id);
-  try {
-    if (await exists(modelDir)) await unlink(modelDir);
-  } catch {
-    // non-fatal
+  if (await exists(modelDir)) {
+    try {
+      await unlink(modelDir);
+    } catch {
+      // ignore – may already be removed by a concurrent cleanup
+    }
   }
+
   await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 }

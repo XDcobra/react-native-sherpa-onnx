@@ -1,101 +1,146 @@
 import {
   exists,
   mkdir,
-  writeFile,
+  readFile,
   stat,
   unlink,
+  writeFile,
 } from '@dr.pogodin/react-native-fs';
-import type {
-  ModelCategory,
-  ModelMetaBase,
-  ModelManifest,
-  ChecksumIssue,
-  DownloadProgress,
-} from './types';
-import {
-  getReadyMarkerPath,
-  getManifestPath,
-  getExtractionStatePath,
-} from './paths';
-import {
-  validateChecksum,
-  validateExtractedFiles,
-  resolveActualModelDir,
-} from './validation';
 import { extractTarBz2 } from '../extraction/extractTarBz2';
-import { promptChecksumFallback } from './checksumPrompt';
-import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
-import type { DownloadResult } from './types';
 import {
   registerActivePostProcess,
   unregisterActivePostProcess,
 } from './activeModelOperations';
+import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
+import {
+  getExtractionStatePath,
+  getManifestPath,
+  getReadyMarkerPath,
+} from './paths';
+import {
+  type ChecksumMismatchInfo,
+  type DownloadResult,
+  type ExtractionState,
+  type ModelCategory,
+  type ModelMeta,
+  type Progress,
+  type ProgressPhase,
+} from './types';
+import {
+  resolveActualModelDir,
+  validateChecksum,
+  validateExtractedFiles,
+} from './validation';
+
+function extractionProgressPhase(
+  skipEntriesTarget: number,
+  entryIndex: number | undefined
+): ProgressPhase {
+  if (
+    skipEntriesTarget > 0 &&
+    typeof entryIndex === 'number' &&
+    entryIndex < skipEntriesTarget
+  ) {
+    return 'extracting_resume_skipping';
+  }
+  return 'extracting';
+}
+
+async function persistPausedExtractionState(
+  extractionStatePath: string,
+  params: {
+    category: ModelCategory;
+    id: string;
+    downloadPath: string;
+    modelDir: string;
+    model: ModelMeta;
+    lastEntryIndex: number;
+    lastEntryPath: string;
+  }
+): Promise<void> {
+  const {
+    category,
+    id,
+    downloadPath,
+    modelDir,
+    model,
+    lastEntryIndex,
+    lastEntryPath,
+  } = params;
+
+  let startedAt = new Date().toISOString();
+  let effectiveLastEntryIndex = lastEntryIndex;
+  let effectiveLastEntryPath = lastEntryPath;
+  try {
+    if (await exists(extractionStatePath)) {
+      const raw = await readFile(extractionStatePath, 'utf8');
+      const prev = JSON.parse(raw) as Partial<ExtractionState>;
+      if (typeof prev.startedAt === 'string') {
+        startedAt = prev.startedAt;
+      }
+      if (
+        effectiveLastEntryIndex < 0 &&
+        typeof prev.lastEntryIndex === 'number' &&
+        prev.lastEntryIndex >= 0
+      ) {
+        effectiveLastEntryIndex = prev.lastEntryIndex;
+        effectiveLastEntryPath =
+          typeof prev.lastEntryPath === 'string' ? prev.lastEntryPath : '';
+      }
+    }
+  } catch {
+    // keep defaults
+  }
+
+  const doc: ExtractionState = {
+    modelId: id,
+    category,
+    phase: 'extracting',
+    startedAt,
+    archivePath: downloadPath,
+    modelDir,
+    model,
+    lastEntryIndex: effectiveLastEntryIndex,
+    lastEntryPath: effectiveLastEntryPath,
+  };
+
+  try {
+    await writeFile(extractionStatePath, JSON.stringify(doc), 'utf8');
+  } catch {
+    // non-fatal; resume may still work from partial native state only in edge cases
+  }
+}
 
 export type RunPostDownloadProcessingOptions = {
   category: ModelCategory;
   id: string;
-  model: ModelMetaBase;
+  model: ModelMeta;
   downloadPath: string;
   modelDir: string;
   isArchive: boolean;
   statePath: string;
   signal?: AbortSignal;
-  onChecksumIssue?: (issue: ChecksumIssue) => Promise<boolean>;
+  verifyChecksum?: boolean;
+  onChecksumMismatch?: (issue: ChecksumMismatchInfo) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
-  onProgress?: (progress: DownloadProgress) => void;
-  /**
-   * **Android:** Native extraction progress notification (default true), aligned with the download-manager flow.
-   * **iOS:** No effect.
-   */
+  onProgress?: (progress: Progress) => void;
+  getDownloadedList: () => Promise<ModelMeta[]>;
   showExtractionNotifications?: boolean;
-  /** **Android:** Optional notification title (default: SDK/native default title). */
   extractionNotificationTitle?: string;
-  /** **Android:** Optional notification body prefix (progress percent is appended natively). */
   extractionNotificationText?: string;
-  /** Called to get current list of downloaded models for emitModelsListUpdated. */
-  getDownloadedList: () => Promise<ModelMetaBase[]>;
+  extractionOperationId?: string;
+  extractionSkipEntries?: number;
 };
 
 export async function runPostDownloadProcessing(
   options: RunPostDownloadProcessingOptions
 ): Promise<DownloadResult> {
-  const {
-    category,
-    id,
-    model,
-    downloadPath,
-    modelDir,
-    isArchive,
-    statePath,
-    signal,
-    onChecksumIssue,
-    deleteArchiveAfterExtract,
-    onProgress,
-    getDownloadedList,
-    showExtractionNotifications,
-    extractionNotificationTitle,
-    extractionNotificationText,
-  } = options;
+  const { category, id } = options;
 
   registerActivePostProcess(category, id);
+
   try {
-    return await runPostDownloadProcessingBody({
-      category,
-      id,
-      model,
-      downloadPath,
-      modelDir,
-      isArchive,
-      statePath,
-      signal,
-      onChecksumIssue,
-      deleteArchiveAfterExtract,
-      onProgress,
-      getDownloadedList,
-      showExtractionNotifications,
-      extractionNotificationTitle,
-      extractionNotificationText,
-    });
+    return await runPostDownloadProcessingBody(options);
   } finally {
     unregisterActivePostProcess(category, id);
   }
@@ -113,72 +158,102 @@ async function runPostDownloadProcessingBody(
     isArchive,
     statePath,
     signal,
-    onChecksumIssue,
+    verifyChecksum,
+    onChecksumMismatch,
     deleteArchiveAfterExtract,
     onProgress,
     getDownloadedList,
     showExtractionNotifications,
     extractionNotificationTitle,
     extractionNotificationText,
+    extractionOperationId,
+    extractionSkipEntries,
   } = options;
 
-  const isAborted = () => Boolean(signal?.aborted);
-  const abortError = new Error('Download aborted');
-  abortError.name = 'AbortError';
+  const isAborted = (): boolean => Boolean(signal?.aborted);
 
-  if (signal?.aborted) throw abortError;
+  const createAbortError = (): Error => {
+    const abortError = new Error('Operation aborted');
+    abortError.name = 'AbortError';
+    return abortError;
+  };
 
-  let extractResult: { sha256?: string } | null = null;
+  if (isAborted()) {
+    throw createAbortError();
+  }
+
+  let extractResult: {
+    success: boolean;
+    path?: string;
+    sha256?: string;
+  } | null = null;
   let extractedTotalBytes = 0;
 
   if (isArchive) {
     try {
       const archiveStat = await stat(downloadPath);
       if (model.bytes > 0 && archiveStat.size < model.bytes) {
-        console.warn(
-          `[Download] Archive truncated for ${category}:${id}: ${archiveStat.size}/${model.bytes} bytes. Deleting for re-download.`
-        );
         await unlink(downloadPath);
         throw new Error(
           `Archive file is truncated (${archiveStat.size}/${model.bytes} bytes). Please retry the download.`
         );
       }
-    } catch (statErr) {
-      if (statErr instanceof Error && statErr.message.includes('truncated'))
-        throw statErr;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('truncated')) {
+        throw error;
+      }
     }
+
     await mkdir(modelDir);
+
     const extractionStatePath = getExtractionStatePath(category, id);
-    try {
-      await writeFile(
-        extractionStatePath,
-        JSON.stringify({
-          modelId: id,
-          category,
-          phase: 'extracting' as const,
-          startedAt: new Date().toISOString(),
-          archivePath: downloadPath,
-          modelDir,
-          model,
-        }),
-        'utf8'
-      );
-    } catch {
-      // non-fatal; resume after crash may not be possible for this run
+    const isResumeExtract =
+      typeof extractionSkipEntries === 'number' && extractionSkipEntries > 0;
+
+    if (!isResumeExtract) {
+      try {
+        await writeFile(
+          extractionStatePath,
+          JSON.stringify({
+            modelId: id,
+            category,
+            phase: 'extracting',
+            startedAt: new Date().toISOString(),
+            archivePath: downloadPath,
+            modelDir,
+            model,
+          }),
+          'utf8'
+        );
+      } catch {
+        // non-fatal; resume after crash may not be possible for this run
+      }
     }
-    extractResult = await extractTarBz2(
+
+    const outcome = await extractTarBz2(
       downloadPath,
       modelDir,
       true,
-      (evt) => {
-        if (isAborted()) return;
-        if (evt.totalBytes > 0) extractedTotalBytes = evt.totalBytes;
-        const progress: DownloadProgress = {
-          bytesDownloaded: evt.bytes,
-          totalBytes: evt.totalBytes,
-          percent: evt.percent,
-          phase: 'extracting',
+      (event) => {
+        if (isAborted()) {
+          return;
+        }
+
+        if (event.totalBytes > 0) {
+          extractedTotalBytes = event.totalBytes;
+        }
+
+        const skipTarget = extractionSkipEntries ?? 0;
+        const entryIdx = event.entryIndex;
+        const progress: Progress = {
+          bytesProcessed: event.bytes,
+          totalBytes: event.totalBytes,
+          percent: event.percent,
+          phase: extractionProgressPhase(skipTarget, entryIdx),
+          archiveEntryIndex:
+            typeof entryIdx === 'number' ? entryIdx : undefined,
         };
+
         onProgress?.(progress);
         emitDownloadProgress(category, id, progress);
       },
@@ -187,31 +262,52 @@ async function runPostDownloadProcessingBody(
         showNotificationsEnabled: showExtractionNotifications !== false,
         notificationTitle: extractionNotificationTitle,
         notificationText: extractionNotificationText,
+      },
+      {
+        operationId: extractionOperationId,
+        skipEntries: extractionSkipEntries,
       }
     );
+
+    if (!outcome.success && outcome.paused) {
+      await persistPausedExtractionState(extractionStatePath, {
+        category,
+        id,
+        downloadPath,
+        modelDir,
+        model,
+        lastEntryIndex: outcome.lastEntryIndex,
+        lastEntryPath: outcome.lastEntryPath,
+      });
+      throw createAbortError();
+    }
+
+    extractResult = outcome;
   }
 
-  if (model.sha256) {
+  const shouldVerifyChecksum = verifyChecksum !== false;
+  if (shouldVerifyChecksum && model.sha256) {
     const expectedSha = model.sha256.toLowerCase();
-    let issue: ChecksumIssue | null = null;
+    let issue: ChecksumMismatchInfo | null = null;
+
     if (isArchive) {
-      const nativeSha = extractResult?.sha256?.toLowerCase();
-      if (!nativeSha) {
+      const actualSha = extractResult?.sha256?.toLowerCase();
+
+      if (!actualSha) {
         issue = {
           category,
-          id,
-          archivePath: downloadPath,
+          modelId: id,
+          filePath: downloadPath,
           expected: model.sha256,
-          message: 'Native SHA-256 not available after extraction.',
           reason: 'CHECKSUM_FAILED',
         };
-      } else if (nativeSha !== expectedSha) {
+      } else if (actualSha !== expectedSha) {
         issue = {
           category,
-          id,
-          archivePath: downloadPath,
+          modelId: id,
+          filePath: downloadPath,
           expected: model.sha256,
-          message: `Checksum mismatch: expected ${model.sha256}, got ${extractResult?.sha256}`,
+          actual: actualSha,
           reason: 'CHECKSUM_MISMATCH',
         };
       }
@@ -220,10 +316,9 @@ async function runPostDownloadProcessingBody(
       if (!checksumResult.success) {
         issue = {
           category,
-          id,
-          archivePath: downloadPath,
+          modelId: id,
+          filePath: downloadPath,
           expected: model.sha256,
-          message: checksumResult.message ?? 'Checksum validation failed.',
           reason:
             checksumResult.error === 'CHECKSUM_MISMATCH'
               ? 'CHECKSUM_MISMATCH'
@@ -231,41 +326,54 @@ async function runPostDownloadProcessingBody(
         };
       }
     }
+
     if (issue) {
-      const keepFile = onChecksumIssue
-        ? await onChecksumIssue(issue)
-        : await promptChecksumFallback(issue);
+      const keepFile = onChecksumMismatch
+        ? await onChecksumMismatch(issue)
+        : false;
+
       if (!keepFile) {
-        if (await exists(modelDir)) await unlink(modelDir);
-        if (await exists(downloadPath)) await unlink(downloadPath);
-        throw new Error(`Checksum validation failed: ${issue.message}`);
+        if (await exists(modelDir)) {
+          await unlink(modelDir);
+        }
+        if (await exists(downloadPath)) {
+          await unlink(downloadPath);
+        }
+        throw new Error('Checksum verification failed and file was rejected');
       }
     }
   }
 
-  if (signal?.aborted) throw abortError;
+  if (isAborted()) {
+    throw createAbortError();
+  }
 
   const filesValidation = await validateExtractedFiles(modelDir, category);
   if (!filesValidation.success) {
     await unlink(modelDir);
     throw new Error(
-      `Extracted files validation failed: ${filesValidation.message}`
+      `Extracted files validation failed: ${
+        filesValidation.message ?? 'unknown reason'
+      }`
     );
   }
 
   await writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
+
   const now = new Date().toISOString();
   let sizeOnDisk: number | undefined;
+
   if (isArchive && extractedTotalBytes > 0) {
     sizeOnDisk = extractedTotalBytes;
   } else if (!isArchive) {
     try {
-      const s = await stat(downloadPath);
-      sizeOnDisk = s.size;
+      const sourceStat = await stat(downloadPath);
+      sizeOnDisk = sourceStat.size;
     } catch {
       // ignore
     }
   }
+
   await writeFile(
     getManifestPath(category, id),
     JSON.stringify({
@@ -273,15 +381,18 @@ async function runPostDownloadProcessingBody(
       lastUsed: now,
       model,
       sizeOnDisk,
-    } as ModelManifest),
+    }),
     'utf8'
   );
 
   try {
-    if (await exists(statePath)) await unlink(statePath);
+    if (await exists(statePath)) {
+      await unlink(statePath);
+    }
   } catch {
     // non-fatal
   }
+
   if (isArchive) {
     try {
       const extractionStatePath = getExtractionStatePath(category, id);
@@ -298,11 +409,13 @@ async function runPostDownloadProcessingBody(
 
   if (isArchive && deleteArchiveAfterExtract !== false) {
     try {
-      if (await exists(downloadPath)) await unlink(downloadPath);
-    } catch (err) {
+      if (await exists(downloadPath)) {
+        await unlink(downloadPath);
+      }
+    } catch (error) {
       console.warn(
         `[Download] Failed to delete archive after extraction for ${category}:${id}:`,
-        err instanceof Error ? err.message : String(err)
+        error instanceof Error ? error.message : String(error)
       );
     }
   }
@@ -311,5 +424,8 @@ async function runPostDownloadProcessingBody(
   emitModelsListUpdated(category, list);
 
   const resolvedPath = await resolveActualModelDir(modelDir);
-  return { modelId: id, localPath: resolvedPath };
+  return {
+    modelId: id,
+    localPath: resolvedPath,
+  };
 }
