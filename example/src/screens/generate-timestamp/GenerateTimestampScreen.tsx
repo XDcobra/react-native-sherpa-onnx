@@ -18,8 +18,8 @@ import {
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
+import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
 import {
-  copyContentUriToCache,
   generateSubtitlesFromAudio,
   type SubtitleGranularity,
   type SubtitleMode,

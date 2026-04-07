@@ -16,13 +16,15 @@ import {
   createStreamingTTS,
   detectTtsModel,
   saveAudio,
-  copyContentUriToCache,
-  shareAudioFile,
   type TTSModelType,
   type TtsGenerationOptions,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  copyContentUriToCache,
+  shareAudioFile,
+} from 'react-native-sherpa-onnx/files';
 import type {
   TtsEngine,
   StreamingTtsEngine,
