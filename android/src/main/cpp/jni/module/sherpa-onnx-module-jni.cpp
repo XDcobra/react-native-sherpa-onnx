@@ -2,7 +2,7 @@
  * sherpa-onnx-module-jni.cpp
  *
  * Purpose: JNI entry points for SherpaOnnxModule: nativeTestSherpaInit, nativeCanInitQnnHtp,
- * nativeHasNnapiAccelerator, nativeDetectSttModel, nativeDetectTtsModel, nativeBatchTtsCatalogHints.
+ * nativeHasNnapiAccelerator, nativeDetectSttModel, nativeDetectTtsModel.
  * Used by Kotlin to probe
  * capabilities and get model paths for the Kotlin STT/TTS API.
  */
@@ -172,53 +172,32 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
   return sherpaonnx::SttDetectResultToJava(env, result);
 }
 
-// Detect TTS model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.
+// Detect TTS model: optional directory path and/or asset name (release id stem). Returns HashMap.
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
     JNIEnv* env,
     jobject /* this */,
     jstring j_model_dir,
+    jstring j_asset_name,
     jstring j_model_type) {
-  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  if (j_model_dir) {
+    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
+    if (c && c[0] != '\0') model_dir = std::string(c);
+    env->ReleaseStringUTFChars(j_model_dir, c);
+  }
+  if (j_asset_name) {
+    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
+    if (c && c[0] != '\0') asset_name = std::string(c);
+    env->ReleaseStringUTFChars(j_asset_name, c);
+  }
   const char* model_type_c = j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_dir(model_dir_c ? model_dir_c : "");
   std::string model_type(model_type_c ? model_type_c : "auto");
-  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
   if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
-  sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, model_type);
+  sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, asset_name, model_type);
   return sherpaonnx::TtsDetectResultToJava(env, result);
-}
-
-// Batch TTS catalog hints from model id strings (release asset stems). Returns ArrayList<HashMap<...>>.
-JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxModule_nativeBatchTtsCatalogHints(
-    JNIEnv* env,
-    jobject /* this */,
-    jobjectArray j_ids) {
-  if (!j_ids) {
-    jclass listClass = env->FindClass("java/util/ArrayList");
-    if (!listClass) return nullptr;
-    jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
-    jobject empty = env->NewObject(listClass, listInit);
-    env->DeleteLocalRef(listClass);
-    return empty;
-  }
-  jsize n = env->GetArrayLength(j_ids);
-  std::vector<std::string> ids;
-  ids.reserve(static_cast<size_t>(n));
-  for (jsize i = 0; i < n; ++i) {
-    jstring js = static_cast<jstring>(env->GetObjectArrayElement(j_ids, i));
-    if (!js) {
-      ids.emplace_back("");
-      continue;
-    }
-    const char* c = env->GetStringUTFChars(js, nullptr);
-    ids.emplace_back(c ? c : "");
-    env->ReleaseStringUTFChars(js, c);
-    env->DeleteLocalRef(js);
-  }
-  std::vector<sherpaonnx::TtsCatalogHints> batch = sherpaonnx::BatchDeriveTtsCatalogHints(ids);
-  return sherpaonnx::TtsCatalogHintsBatchToJava(env, batch);
 }
 
 // Detect enhancement model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.

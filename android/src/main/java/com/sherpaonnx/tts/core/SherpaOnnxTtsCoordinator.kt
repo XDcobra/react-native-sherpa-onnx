@@ -19,8 +19,7 @@ import java.util.concurrent.Executors
  */
 internal class SherpaOnnxTtsCoordinator(
   context: ReactApplicationContext,
-  detectTtsModel: (modelDir: String, modelType: String) -> HashMap<String, Any>?,
-  nativeBatchTtsCatalogHints: (Array<String>) -> java.util.ArrayList<java.util.HashMap<String, Any>>,
+  detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,
   private val emitChunk: (String, String, FloatArray, Int, Float, Boolean) -> Unit,
   private val emitError: (String, String, String) -> Unit,
   private val emitEnd: (String, String, Boolean) -> Unit,
@@ -57,8 +56,7 @@ internal class SherpaOnnxTtsCoordinator(
   private val lifecycleService = TtsLifecycleService(
     repository,
     ttsInitExecutor,
-    detectTtsModel,
-    nativeBatchTtsCatalogHints
+    detectTtsModel
   )
 
   private val audioExportService = TtsAudioExportService(context, encodeMonoFromRawFile)
@@ -164,9 +162,6 @@ internal class SherpaOnnxTtsCoordinator(
     promise
   )
 
-  fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) =
-    lifecycleService.detectTtsModel(modelDir, modelType, promise)
-
-  fun batchTtsCatalogHints(ids: ReadableArray, promise: Promise) =
-    lifecycleService.batchTtsCatalogHints(ids, promise)
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) =
+    lifecycleService.detectTtsModel(modelDir, assetName, modelType, promise)
 }

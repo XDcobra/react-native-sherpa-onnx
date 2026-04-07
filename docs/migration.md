@@ -2,9 +2,11 @@
 
 ## TTS release catalog metadata (native)
 
-For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`batchTtsCatalogHints`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
+For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`detectTtsModel`** with an empty directory and the release **asset id** as **`assetName`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
 
-**`refreshModels(ModelCategory.Tts)`** loads hints in **chunks** to limit JNI bridge payload per call. The default chunk size is **`DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE`** (256). Override with **`refreshModels('tts', { ttsCatalogHintsChunkSize: N })`** — use **`0`** or **`Infinity`** to pass all ids in a single native batch (tests or debugging).
+**`refreshModels(ModelCategory.Tts)`** resolves those fields with **one `detectTtsModel` call per asset id** (JavaScript loop; no native batch API).
+
+The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogHints`** are removed. The export **`DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE`** and the **`refreshModels`** option **`ttsCatalogHintsChunkSize`** are removed. Use **`SherpaOnnx.detectTtsModel(modelDir, assetName, modelType?)`** instead: pass **`''`** for `modelDir` and the release id string for `assetName` when you only need name-based catalog metadata.
 
 ## TTS `detectTtsModel` — `detectionSources` (additive)
 

@@ -11,9 +11,6 @@ namespace sherpaonnx {
 // Caller must DeleteLocalRef the returned jobject.
 jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result);
 
-/** ArrayList<HashMap> for batchTtsCatalogHints: modelId, modelType, languages, quantization, sizeTier. */
-jobject TtsCatalogHintsBatchToJava(JNIEnv* env, const std::vector<TtsCatalogHints>& batch);
-
 }  // namespace sherpaonnx
 
 #endif  // SHERPA_ONNX_TTS_WRAPPER_H

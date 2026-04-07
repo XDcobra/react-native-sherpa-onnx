@@ -3,7 +3,6 @@ package com.sherpaonnx.tts.service
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.dispatchNumSpeakers
 import com.sherpaonnx.tts.core.dispatchSampleRate
@@ -14,8 +13,7 @@ import com.sherpaonnx.tts.core.dispatchSampleRate
 internal class TtsLifecycleService(
   private val repository: TtsEngineRepository,
   private val ttsInitExecutor: java.util.concurrent.ExecutorService,
-  private val nativeDetectTtsModel: (String, String) -> HashMap<String, Any>?,
-  private val nativeBatchTtsCatalogHints: (Array<String>) -> java.util.ArrayList<java.util.HashMap<String, Any>>
+  private val nativeDetectTtsModel: (String, String?, String?) -> HashMap<String, Any>?,
 ) {
   /**
    * Shuts down the TTS init executor and releases all engine instances.
@@ -94,9 +92,9 @@ internal class TtsLifecycleService(
    * Detect TTS model type and structure without initializing the engine.
    * Mirrors [SherpaOnnxModule.detectTtsModel] for delegation from facades.
    */
-  fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) {
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) {
     try {
-      val result = nativeDetectTtsModel(modelDir, modelType ?: "auto")
+      val result = nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto")
       if (result == null) {
         Log.e("SherpaOnnx", "DETECT_ERROR: TTS model detection returned null")
         promise.reject("DETECT_ERROR", "TTS model detection returned null")
@@ -124,7 +122,7 @@ internal class TtsLifecycleService(
       if (modelTypeStr != null) {
         resultMap.putString("modelType", modelTypeStr)
       }
-      val modelPath = paths?.get("model") as? String
+      val modelPath = (paths?.get("ttsModel") ?: paths?.get("model")) as? String
       if (!modelPath.isNullOrBlank()) {
         val pathsMap = Arguments.createMap()
         pathsMap.putString("model", modelPath)
@@ -144,39 +142,34 @@ internal class TtsLifecycleService(
         }
         resultMap.putArray("lexiconLanguageCandidates", candidatesArray)
       }
+      val derivedLangs = result["languages"] as? ArrayList<*>
+      if (!derivedLangs.isNullOrEmpty()) {
+        val langs = Arguments.createArray()
+        for (c in derivedLangs) {
+          (c as? String)?.let { langs.pushString(it) }
+        }
+        resultMap.putArray("languages", langs)
+      }
+      val q = result["quantization"] as? String
+      if (!q.isNullOrBlank()) {
+        resultMap.putString("quantization", q)
+      }
+      val st = result["sizeTier"] as? String
+      if (!st.isNullOrBlank()) {
+        resultMap.putString("sizeTier", st)
+      }
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (!detectionSources.isNullOrEmpty()) {
+        val srcArr = Arguments.createArray()
+        for (c in detectionSources) {
+          (c as? String)?.let { srcArr.pushString(it) }
+        }
+        resultMap.putArray("detectionSources", srcArr)
+      }
       promise.resolve(resultMap)
     } catch (e: Exception) {
       Log.e("SherpaOnnx", "DETECT_ERROR: TTS model detection failed: ${e.message}", e)
       promise.reject("DETECT_ERROR", "TTS model detection failed: ${e.message}", e)
-    }
-  }
-
-  /**
-   * Batch-resolve TTS catalog metadata from release asset ids (no filesystem).
-   */
-  fun batchTtsCatalogHints(ids: ReadableArray, promise: Promise) {
-    try {
-      val n = ids.size()
-      val arr = Array(n) { i -> ids.getString(i) ?: "" }
-      val raw = nativeBatchTtsCatalogHints(arr)
-      val out = Arguments.createArray()
-      for (m in raw) {
-        val map = Arguments.createMap()
-        map.putString("modelId", m["modelId"] as? String ?: "")
-        map.putString("modelType", m["modelType"] as? String ?: "")
-        val langs = Arguments.createArray()
-        (m["languages"] as? java.util.ArrayList<*>)?.forEach { item ->
-          (item as? String)?.let { langs.pushString(it) }
-        }
-        map.putArray("languages", langs)
-        map.putString("quantization", m["quantization"] as? String ?: "")
-        map.putString("sizeTier", m["sizeTier"] as? String ?: "")
-        out.pushMap(map)
-      }
-      promise.resolve(out)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnx", "batchTtsCatalogHints failed: ${e.message}", e)
-      promise.reject("BATCH_TTS_CATALOG_HINTS_ERROR", e.message, e)
     }
   }
 }

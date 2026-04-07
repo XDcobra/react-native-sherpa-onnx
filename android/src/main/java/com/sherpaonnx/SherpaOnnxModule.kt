@@ -4,7 +4,6 @@ import android.net.Uri
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
@@ -56,8 +55,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
-    { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
-    { ids -> Companion.nativeBatchTtsCatalogHints(ids) },
+    { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
     { instanceId, requestId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, requestId, samples, sampleRate, progress, isFinal) },
     { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
     { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) },
@@ -870,16 +868,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Detect TTS model type and structure without initializing the engine.
    */
-  override fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) {
-    commonTtsHelper.detectTtsModel(modelDir, modelType, promise)
-  }
-
-  /**
-   * Batch-resolve TTS catalog metadata from release asset ids (no filesystem).
-   * Order matches [ids]; one entry per id.
-   */
-  override fun batchTtsCatalogHints(ids: ReadableArray, promise: Promise) {
-    commonTtsHelper.batchTtsCatalogHints(ids, promise)
+  override fun detectTtsModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise,
+  ) {
+    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, promise)
   }
 
   /**
@@ -1401,13 +1396,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       debug: Boolean
     ): HashMap<String, Any>?
 
-    /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
+    /** Model detection for TTS: optional directory and/or asset name; returns HashMap (for Kotlin API config). */
     @JvmStatic
-    private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
-
-    /** Batch catalog hints for TTS release asset ids (see [batchTtsCatalogHints]). */
-    @JvmStatic
-    private external fun nativeBatchTtsCatalogHints(ids: Array<String>): java.util.ArrayList<java.util.HashMap<String, Any>>
+    private external fun nativeDetectTtsModel(
+      modelDir: String,
+      assetName: String?,
+      modelType: String?,
+    ): HashMap<String, Any>?
 
     /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic

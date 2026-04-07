@@ -30,7 +30,6 @@ Pod::Spec.new do |s|
     "ios/**/*.{h,m,mm,swift,cpp}",
     # Shared with Android NDK (single TTS detection implementation).
     "android/src/main/cpp/jni/model_detect/sherpa-onnx-model-detect-tts.cpp",
-    "android/src/main/cpp/jni/model_detect/sherpa-onnx-tts-catalog-hints.cpp",
     # Shared CTC alignment core (ORT C API).
     "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp"
   ]

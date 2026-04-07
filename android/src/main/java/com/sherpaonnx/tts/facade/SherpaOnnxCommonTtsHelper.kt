@@ -43,11 +43,8 @@ internal class SherpaOnnxCommonTtsHelper(
 
   fun shutdown() = core.shutdown()
 
-  fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) =
-    core.detectTtsModel(modelDir, modelType, promise)
-
-  fun batchTtsCatalogHints(ids: com.facebook.react.bridge.ReadableArray, promise: Promise) =
-    core.batchTtsCatalogHints(ids, promise)
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) =
+    core.detectTtsModel(modelDir, assetName, modelType, promise)
 
   fun getTtsSampleRate(instanceId: String, promise: Promise) =
     core.getTtsSampleRate(instanceId, promise)

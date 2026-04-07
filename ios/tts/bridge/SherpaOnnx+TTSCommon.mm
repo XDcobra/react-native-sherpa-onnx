@@ -17,12 +17,10 @@
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject;
 - (void)so_detectTtsModel:(NSString *)modelDir
+                assetName:(NSString *)assetName
                 modelType:(NSString *)modelType
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject;
-- (void)so_batchTtsCatalogHints:(NSArray *)ids
-                         resolve:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject;
 - (void)so_getTtsSampleRate:(NSString *)instanceId
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject;
@@ -69,16 +67,11 @@
 }
 
 - (void)detectTtsModel:(NSString *)modelDir
+             assetName:(NSString *)assetName
              modelType:(NSString *)modelType
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject {
-  [self so_detectTtsModel:modelDir modelType:modelType resolve:resolve reject:reject];
-}
-
-- (void)batchTtsCatalogHints:(NSArray *)ids
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject {
-  [self so_batchTtsCatalogHints:ids resolve:resolve reject:reject];
+  [self so_detectTtsModel:modelDir assetName:assetName modelType:modelType resolve:resolve reject:reject];
 }
 
 - (void)getTtsSampleRate:(NSString *)instanceId

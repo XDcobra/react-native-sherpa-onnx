@@ -41,8 +41,9 @@ let ttsInstanceCounter = 0;
  * @param options - Optional modelType (default: 'auto')
  * @returns Object with success, detectedModels (array of { type, modelDir }),
  * modelType (primary detected type, narrowed to known `TTSModelType` literals),
- * optional error when success is false, and optionally lexiconLanguageCandidates
- * (language ids for multi-lang Kokoro/Kitten)
+ * optional error when success is false, optionally lexiconLanguageCandidates
+ * (from lexicon files for Kokoro/Kitten), and optionally **languages**, **quantization**, **sizeTier**
+ * (name-based heuristics from the folder/asset stem — same keys as native / download catalog metadata)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
@@ -64,11 +65,21 @@ export async function detectTtsModel(
   modelType?: TTSModelType;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
+  /** Heuristic language tags from the folder / asset basename (catalog-style); not from lexicon files. */
+  languages?: string[];
+  /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+  quantization?: string;
+  /** tiny, small, medium, large, unknown — from name heuristics. */
+  sizeTier?: string;
   /** Trace of how native detection chose the model kind (omitted if native returned nothing). */
   detectionSources?: readonly TtsDetectionSource[];
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
-  const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
+  const raw = await SherpaOnnx.detectTtsModel(
+    resolvedPath,
+    null,
+    options?.modelType ?? null
+  );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: TtsDetectedModelEntry[] = (
     raw.detectedModels ?? []
@@ -89,6 +100,18 @@ export async function detectTtsModel(
     typeof raw.modelType === 'string' && isTtsModelType(raw.modelType)
       ? raw.modelType
       : undefined;
+  const derivedLanguages =
+    Array.isArray(raw.languages) && raw.languages.length > 0
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
+      : undefined;
+  const quantization =
+    typeof raw.quantization === 'string' && raw.quantization.length > 0
+      ? raw.quantization
+      : undefined;
+  const sizeTier =
+    typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
+      ? raw.sizeTier
+      : undefined;
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
@@ -98,6 +121,11 @@ export async function detectTtsModel(
     raw.lexiconLanguageCandidates.length > 0
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
       : {}),
+    ...(derivedLanguages != null && derivedLanguages.length > 0
+      ? { languages: derivedLanguages }
+      : {}),
+    ...(quantization != null ? { quantization } : {}),
+    ...(sizeTier != null ? { sizeTier } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
   };
 }

@@ -85,7 +85,8 @@ TtsInitializeResult TtsWrapper::initialize(
             config.model.provider = *provider;
         }
 
-        auto detect = DetectTtsModel(modelDir, modelType);
+        auto detect = DetectTtsModel(
+            std::optional<std::string>(modelDir), std::nullopt, modelType);
         if (!detect.ok) {
             result.error = detect.error;
             LOGE("%s", detect.error.c_str());

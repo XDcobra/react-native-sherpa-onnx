@@ -75,5 +75,3 @@ export { purgeAll, type PurgeAllResult } from './bulkPurge';
 export { checkDiskSpace } from './validation';
 
 export type { BackgroundDownloaderSetConfigOptions } from './background-downloader-types';
-
-export { DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE } from './constants';

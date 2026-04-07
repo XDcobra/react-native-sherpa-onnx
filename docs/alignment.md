@@ -1,8 +1,8 @@
 # Alignment and subtitles (text + audio)
 
-Public API: `react-native-sherpa-onnx/alignment`.
-
 Use this module whenever you have **transcript text** and **audio** (file path, float PCM, or samples from TTS) and need **timed subtitle lines**.
+
+**Import path:** `react-native-sherpa-onnx/alignment`
 
 ## Modes
 
@@ -14,42 +14,128 @@ Use this module whenever you have **transcript text** and **audio** (file path, 
 
 Granularity is `sentence` or `word` for proportional / estimated; **character** is only valid for **accurate** (CTC).
 
-## API
+## Quick Start
+
+### 1) Proportional timing (no ONNX model)
+
+Spreads the total audio duration across segments by **text weight** only — no wav2vec2 model and no native CTC. Good for previews when you only have WAV + transcript.
+
+```ts
+import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
+
+// `audioPath`: absolute file path (WAV or other formats supported by the audio decoder; WAV can use a fast metrics path on native).
+const r = await alignTextToAudio('Hello world.', '/path/to/audio.wav', {
+  mode: 'proportional',
+  granularity: 'sentence', // or 'word'
+});
+
+console.log(r.timingMode); // 'proportional'
+console.log(r.subtitles); // [{ text, start, end }, ...] in seconds
+```
+
+### 2) Accurate CTC (wav2vec2 ONNX)
+
+Requires an alignment model (`ModelCategory.Alignment`). Resolve a path with **`detectAlignmentModel`** (inspect only) or **`ensureModel`** from [Download Manager](download-manager.md), then pass **`paths.model`** (or equivalent) as **`alignmentModelPath`**.
+
+```ts
+import { alignTextToAudio, detectAlignmentModel } from 'react-native-sherpa-onnx/alignment';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+
+// Example: folder containing the alignment pack (asset, file, or auto — same as elsewhere).
+const modelPath: ModelPathConfig = {
+  type: 'file',
+  path: '/path/to/extracted-alignment-folder',
+};
+
+const det = await detectAlignmentModel(modelPath);
+if (!det.success || !det.paths?.model) {
+  throw new Error(det.error ?? 'Alignment model not found');
+}
+
+// Option 1: absolute file path (native reads the file)
+const r = await alignTextToAudio('Hello world.', '/path/to/audio.wav', {
+  mode: 'accurate',
+  alignmentModelPath: det.paths.model,
+  granularity: 'word', // 'sentence' | 'word' | 'character' (character ⇒ accurate only)
+});
+
+// Option 2: mono float PCM — second argument `{ samples: number[], sampleRate: number }` instead of a path
+// (e.g. `samples` / `sampleRate` from `generateSpeech` or your decoder)
+const r2 = await alignTextToAudio('Hello world.', { samples: yourMonoSamples, sampleRate: yourSampleRate }, {
+  mode: 'accurate',
+  alignmentModelPath: det.paths.model,
+  granularity: 'word', // 'sentence' | 'word' | 'character' (character ⇒ accurate only)
+});
+
+console.log(r.timingMode, r2.timingMode); // 'aligned', 'aligned'
+```
+
+### 3) Estimated timing (chunk timeline)
+
+Use when you already know **how many samples** belong to each text segment (e.g. from **`generateSpeechWithTimestamps`** with `exportChunkTimelineOnly`). See [Offline TTS](tts-offline.md#2-batch-with-timestamps-proportional-estimated-or-accurate) and [`AlignmentChunkTimeline`](#alignmentchunktimeline) below.
+
+```ts
+import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
+
+const r = await alignTextToAudio(longText, '/path/to/audio.wav', {
+  mode: 'estimated',
+  granularity: 'sentence',
+  chunks: {
+    sampleRate: 22050,
+    segmentSampleCounts: [12000, 8000, 15000], // one count per segment; sum ≈ audio length in samples
+  },
+});
+```
+
+## API Reference
+
+Each entry below uses a one-line TypeScript signature (exported names match `react-native-sherpa-onnx/alignment`). Import **`ModelPathConfig`** from `react-native-sherpa-onnx` when you pass a path config to **`detectAlignmentModel`**. Full walkthroughs: [Quick Start](#quick-start).
 
 ### `alignTextToAudio(text, audio, options)`
 
 ```ts
-import {
-  alignTextToAudio,
-  type AlignTextToAudioOptions,
-} from 'react-native-sherpa-onnx/alignment';
-
-// Proportional (file path or { samples, sampleRate })
-const r = await alignTextToAudio('Hello world.', '/path/to/audio.wav', {
-  mode: 'proportional',
-  granularity: 'sentence',
-});
-
-// Accurate (absolute path to ONNX from detectAlignmentModel)
-const r2 = await alignTextToAudio('Hello.', audioPath, {
-  mode: 'accurate',
-  alignmentModelPath: '/path/to/model.onnx',
-  granularity: 'word',
-});
+function alignTextToAudio(
+  text: string,
+  audio: string | { samples: number[]; sampleRate: number },
+  options: AlignTextToAudioOptions
+): Promise<AlignTextToAudioResult>;
 ```
 
-### `detectAlignmentModel`
+Builds subtitle cues from transcript + audio. **`options.mode`** picks **`proportional`**, **`estimated`**, or **`accurate`** (discriminated union — use **`AlignTextToAudioOptions`** for correct fields per mode).
 
-Same as before: resolve a downloaded alignment pack and read `paths.model` for `alignmentModelPath`. See [download-manager.md](download-manager.md) (`ModelCategory.Alignment`).
+```ts
+const out = await alignTextToAudio('Hello.', '/path/a.wav', { mode: 'proportional', granularity: 'sentence' });
+```
+
+### `detectAlignmentModel(modelPath, options?)`
+
+```ts
+function detectAlignmentModel(
+  modelPath: ModelPathConfig,
+  options?: { modelType?: AlignmentModelType }
+): Promise<AlignmentDetectResult>;
+```
+
+Inspects an alignment model directory **without** loading the CTC engine; use **`paths.model`** as **`alignmentModelPath`**. See [download-manager.md](download-manager.md) (`ModelCategory.Alignment`) and [§2 Accurate CTC](#2-accurate-ctc-wav2vec2-onnx).
+
+```ts
+const det = await detectAlignmentModel({ type: 'file', path: '/path/to/alignment-pack' });
+```
 
 ### `AlignmentChunkTimeline`
 
-Engine-agnostic structure for **estimated** mode:
+```ts
+interface AlignmentChunkTimeline {
+  sampleRate: number;
+  segmentSampleCounts: readonly number[];
+}
+```
 
-- `sampleRate`: Hz of the mono PCM timeline.
-- `segmentSampleCounts`: one non-negative integer per text segment after splitting `text` with the chosen `granularity` (`sentence` or `word`). The sum should match the audio length in samples (small rounding differences are tolerated).
+Used with **`alignTextToAudio`** when **`options.mode === 'estimated'`**: one sample count per text segment after splitting with **`granularity`** (`sentence` or `word`). The sum of **`segmentSampleCounts`** should match the mono PCM length (small rounding differences are tolerated). Often filled from **`generateSpeechWithTimestamps`** with **`exportChunkTimelineOnly`** (see [Offline TTS](tts-offline.md)).
 
-TTS supplies this via native synthesis when using `createTTS().generateSpeechWithTimestamps` with `subtitles: { mode: 'estimated', ... }` (see [Offline TTS](tts-offline.md)).
+```ts
+const chunks: AlignmentChunkTimeline = { sampleRate: 22050, segmentSampleCounts: [12000, 8000] };
+```
 
 ## TTS integration
 

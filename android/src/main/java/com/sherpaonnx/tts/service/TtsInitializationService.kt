@@ -19,7 +19,7 @@ import com.sherpaonnx.tts.core.TtsInitState
 internal class TtsInitializationService(
   private val context: ReactApplicationContext,
   private val repository: TtsEngineRepository,
-  private val detectTtsModel: (modelDir: String, modelType: String) -> HashMap<String, Any>?,
+  private val detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,
   private val mainHandler: Handler,
   private val ttsInitExecutor: java.util.concurrent.ExecutorService
 ) {
@@ -51,7 +51,7 @@ internal class TtsInitializationService(
   ) {
     ttsInitExecutor.execute init@{
       try {
-        val result = detectTtsModel(modelDir, modelType)
+        val result = detectTtsModel(modelDir, null, modelType)
         if (result == null) {
           Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
           rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
@@ -220,7 +220,7 @@ internal class TtsInitializationService(
       else -> lengthScale
     }
     try {
-      val result = detectTtsModel(state.modelDir, state.modelType)
+      val result = detectTtsModel(state.modelDir, null, state.modelType)
       if (result == null || result["success"] as? Boolean != true) {
         Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Failed to re-detect TTS model")
         promise.reject("TTS_UPDATE_ERROR", "Failed to re-detect TTS model")

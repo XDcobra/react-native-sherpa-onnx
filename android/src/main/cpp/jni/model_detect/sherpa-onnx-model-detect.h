@@ -250,6 +250,12 @@ struct TtsDetectResult {
     std::vector<std::string> lexiconLanguageCandidates;
     /** Ordered trace of detection mechanisms (see TtsDetectionSource). */
     std::vector<TtsDetectionSource> detectionSources;
+    /** Heuristic languages from asset/folder name (release id stem); not from lexicon files. */
+    std::vector<std::string> derivedLanguages;
+    /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
+    std::string quantization;
+    /** tiny, small, medium, large, unknown — from asset/folder name heuristics. */
+    std::string sizeTier;
 };
 
 struct EnhancementDetectResult {
@@ -286,10 +292,16 @@ SttDetectResult DetectSttModelFromFileList(
     const std::optional<std::string>& modelType = std::nullopt
 );
 
+/**
+ * TTS model detection. Pass at least one of `model_dir` or `asset_name`.
+ * - `model_dir`: absolute path to extracted model (full file scan when directory exists).
+ * - `asset_name`: release asset stem / folder basename (e.g. vits-piper-en_US-lessac-medium); name-only detection when no directory.
+ * When both are set, the directory is scanned and derived catalog metadata uses `asset_name` for languages/quantization/sizeTier.
+ */
 TtsDetectResult DetectTtsModel(
-    const std::string& modelDir,
-    const std::string& modelType
-);
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto");
 
 /** Test-only: Like DetectTtsModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). Not used in
@@ -333,23 +345,6 @@ AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::string& modelDir,
     const std::string& modelType = "auto"
 );
-
-/** Release-asset / basename metadata aligned with native TTS name-only detection (single source for catalog). */
-struct TtsCatalogHints {
-    std::string modelId;
-    /** Engine kind string: vits, matcha, kokoro, kitten, pocket, zipvoice, supertonic, unknown */
-    std::string primaryKind;
-    std::vector<std::string> languages;
-    /** fp16, int8, int8-quantized, unknown */
-    std::string quantization;
-    /** tiny, small, medium, large, unknown */
-    std::string sizeTier;
-};
-
-/** Derive catalog hints from a model id string (asset stem, no .tar.bz2). No filesystem; uses name-only TTS path. */
-TtsCatalogHints DeriveTtsCatalogHintsFromModelId(const std::string& modelId);
-
-std::vector<TtsCatalogHints> BatchDeriveTtsCatalogHints(const std::vector<std::string>& modelIds);
 
 } // namespace sherpaonnx
 

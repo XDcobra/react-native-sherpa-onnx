@@ -295,13 +295,15 @@ export interface Spec extends TurboModule {
    * Uses the same native file-based detection as initializeTts.
    * For Kokoro/Kitten multi-language models, also returns lexiconLanguageCandidates (e.g. ["default"], ["us-en", "gb-en", "zh"]) from detected lexicon.txt / lexicon-*.txt files.
    * Note: this is the raw native bridge shape; JS facade `tts/detectTtsModel` narrows `modelType` to `TTSModelType`.
-   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * @param modelDir - Absolute path to extracted model directory, or empty string when using `assetName` only (catalog hints).
+   * @param assetName - Release asset stem / folder basename (e.g. vits-piper-en_US-lessac-medium), or null/empty when scanning `modelDir` only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
+   * @returns Object with success, detectedModels, modelType, optional lexiconLanguageCandidates, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
    */
   detectTtsModel(
     modelDir: string,
-    modelType?: string
+    assetName: string | null,
+    modelType?: string | null
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -310,24 +312,15 @@ export interface Spec extends TurboModule {
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
     lexiconLanguageCandidates?: string[];
+    /** Heuristic languages from asset/folder name (catalog); not from lexicon files. */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** tiny, small, medium, large, unknown — from name heuristics. */
+    sizeTier?: string;
     /** Optional trace strings from native (see TtsDetectionSource in src/tts/types.ts). */
     detectionSources?: string[];
   }>;
-
-  /**
-   * Batch-resolve TTS catalog metadata from release asset ids (folder basename / archive stem, no extension).
-   * Same length and order as `ids`. Uses native name-only heuristics only (no filesystem).
-   */
-  batchTtsCatalogHints(ids: string[]): Promise<
-    Array<{
-      modelId: string;
-      /** Primary engine kind: vits, matcha, kokoro, … */
-      modelType: string;
-      languages: string[];
-      quantization: string;
-      sizeTier: string;
-    }>
-  >;
 
   /**
    * Update TTS model parameters by re-initializing with stored config.

@@ -73,6 +73,16 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
     env->DeleteLocalRef(detectionSourcesList);
   }
 
+  jobject derivedLangs = BuildStringList(env, result.derivedLanguages);
+  if (derivedLangs) {
+    jstring keyLang = env->NewStringUTF("languages");
+    env->CallObjectMethod(map, mapPut, keyLang, derivedLangs);
+    env->DeleteLocalRef(keyLang);
+    env->DeleteLocalRef(derivedLangs);
+  }
+  PutString(env, map, mapPut, "quantization", result.quantization);
+  PutString(env, map, mapPut, "sizeTier", result.sizeTier);
+
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {
     jobject pathsMap = env->NewObject(hashMapClass, mapInit);
@@ -105,53 +115,6 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
     }
   }
   return map;
-}
-
-jobject TtsCatalogHintsBatchToJava(JNIEnv* env, const std::vector<TtsCatalogHints>& batch) {
-  jclass listClass = env->FindClass("java/util/ArrayList");
-  if (!listClass) return nullptr;
-  jmethodID listInit = env->GetMethodID(listClass, "<init>", "(I)V");
-  jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
-  if (!listInit || !listAdd) {
-    env->DeleteLocalRef(listClass);
-    return nullptr;
-  }
-  jobject list = env->NewObject(listClass, listInit, static_cast<jint>(batch.size()));
-  env->DeleteLocalRef(listClass);
-  if (!list) return nullptr;
-
-  jclass mapClass = env->FindClass("java/util/HashMap");
-  if (!mapClass) {
-    env->DeleteLocalRef(list);
-    return nullptr;
-  }
-  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
-  jmethodID mapPut = env->GetMethodID(mapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
-  if (!mapInit || !mapPut) {
-    env->DeleteLocalRef(mapClass);
-    env->DeleteLocalRef(list);
-    return nullptr;
-  }
-
-  for (const auto& h : batch) {
-    jobject map = env->NewObject(mapClass, mapInit);
-    if (!map) continue;
-    PutString(env, map, mapPut, "modelId", h.modelId);
-    PutString(env, map, mapPut, "modelType", h.primaryKind);
-    jobject langs = BuildStringList(env, h.languages);
-    if (langs) {
-      jstring keyLang = env->NewStringUTF("languages");
-      env->CallObjectMethod(map, mapPut, keyLang, langs);
-      env->DeleteLocalRef(keyLang);
-      env->DeleteLocalRef(langs);
-    }
-    PutString(env, map, mapPut, "quantization", h.quantization);
-    PutString(env, map, mapPut, "sizeTier", h.sizeTier);
-    env->CallBooleanMethod(list, listAdd, map);
-    env->DeleteLocalRef(map);
-  }
-  env->DeleteLocalRef(mapClass);
-  return list;
 }
 
 }  // namespace sherpaonnx

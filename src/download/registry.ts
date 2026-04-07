@@ -6,7 +6,6 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import {
   CACHE_TTL_MINUTES,
-  DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE,
   MODEL_ARCHIVE_EXT,
   MODEL_ONNX_EXT,
 } from './constants';
@@ -36,11 +35,6 @@ export type RefreshModelsOptions = {
   cacheTtlMinutes?: number;
   maxRetries?: number;
   signal?: AbortSignal;
-  /**
-   * Max number of model ids per native `batchTtsCatalogHints` call when refreshing TTS catalog metadata.
-   * Default: {@link DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE}. Use `0` or `Infinity` to send all ids in one batch.
-   */
-  ttsCatalogHintsChunkSize?: number;
 };
 
 type ReleaseAsset = {
@@ -141,32 +135,34 @@ function deriveDisplayName(id: string): string {
   return toTitleCase(cleaned);
 }
 
-function resolveTtsCatalogHintsChunkSize(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE;
-  }
-  if (!Number.isFinite(value) || value <= 0) {
-    return Number.POSITIVE_INFINITY;
-  }
-  return Math.floor(value);
-}
-
 async function buildTtsCatalogHintsMap(
-  ids: string[],
-  chunkSize: number
+  ids: string[]
 ): Promise<Map<string, NativeTtsCatalogHint>> {
   const map = new Map<string, NativeTtsCatalogHint>();
-  if (ids.length === 0) {
-    return map;
-  }
-  const step =
-    Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : ids.length;
-  for (let i = 0; i < ids.length; i += step) {
-    const chunk = ids.slice(i, i + step);
-    const rows = await SherpaOnnx.batchTtsCatalogHints(chunk);
-    for (const row of rows) {
-      map.set(row.modelId, row);
-    }
+  for (const id of ids) {
+    const raw = await SherpaOnnx.detectTtsModel('', id, 'auto');
+    const modelType =
+      typeof raw.modelType === 'string' && raw.modelType.length > 0
+        ? raw.modelType
+        : 'unknown';
+    const languages = Array.isArray(raw.languages)
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
+      : [];
+    const quantization =
+      typeof raw.quantization === 'string' && raw.quantization.length > 0
+        ? raw.quantization
+        : 'unknown';
+    const sizeTier =
+      typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
+        ? raw.sizeTier
+        : 'unknown';
+    map.set(id, {
+      modelId: id,
+      modelType,
+      languages,
+      quantization,
+      sizeTier,
+    });
   }
   return map;
 }
@@ -251,7 +247,7 @@ function toTtsModelMeta(
   const hint = hints.get(id);
   if (!hint) {
     throw new Error(
-      `Missing native TTS catalog hints for "${id}" — batchTtsCatalogHints did not return this id.`
+      `Missing native TTS catalog hints for "${id}" — detectTtsModel did not produce metadata for this id.`
     );
   }
 
@@ -388,10 +384,7 @@ export async function refreshModels(
     let ttsHints = new Map<string, NativeTtsCatalogHint>();
     if (category === ModelCategory.Tts) {
       const ttsIds = collectTtsModelIdsFromAssets(assets);
-      const chunk = resolveTtsCatalogHintsChunkSize(
-        options?.ttsCatalogHintsChunkSize
-      );
-      ttsHints = await buildTtsCatalogHintsMap(ttsIds, chunk);
+      ttsHints = await buildTtsCatalogHintsMap(ttsIds);
     }
 
     const models = assets
