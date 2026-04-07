@@ -22,6 +22,21 @@ export type TTSModelType =
   | 'supertonic'
   | 'auto';
 
+/** How native TTS detection chose the model kind (mirrors C++ TtsDetectionSource). */
+export const TTS_DETECTION_SOURCES = [
+  'fileListing',
+  'dirName',
+  'fallbackOrder',
+  'explicitModelType',
+  'nameOnly',
+] as const;
+
+export type TtsDetectionSource = (typeof TTS_DETECTION_SOURCES)[number];
+
+export function isTtsDetectionSource(s: string): s is TtsDetectionSource {
+  return (TTS_DETECTION_SOURCES as readonly string[]).includes(s);
+}
+
 /** Runtime list of supported TTS model types. */
 export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'vits',

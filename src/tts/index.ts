@@ -1,20 +1,22 @@
 import { unlink } from '@dr.pogodin/react-native-fs';
 import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type {
-  TTSInitializeOptions,
-  TTSModelType,
-  TtsModelOptions,
-  TtsUpdateOptions,
-  TtsGenerationOptions,
-  GeneratedAudio,
-  GeneratedAudioWithTimestamps,
-  TTSModelInfo,
-  TtsEngine,
-  TtsDetectedModelEntry,
-  SubtitleOptions,
-  SaveAudioTarget,
-  SaveAudioOptions,
+import {
+  isTtsDetectionSource,
+  type TTSInitializeOptions,
+  type TTSModelType,
+  type TtsModelOptions,
+  type TtsUpdateOptions,
+  type TtsGenerationOptions,
+  type GeneratedAudio,
+  type GeneratedAudioWithTimestamps,
+  type TTSModelInfo,
+  type TtsEngine,
+  type TtsDetectedModelEntry,
+  type SubtitleOptions,
+  type SaveAudioTarget,
+  type SaveAudioOptions,
+  type TtsDetectionSource,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
@@ -60,6 +62,8 @@ export async function detectTtsModel(
   modelType?: TTSModelType | string;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
+  /** Trace of how native detection chose the model kind (omitted if native returned nothing). */
+  detectionSources?: readonly TtsDetectionSource[];
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
   const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
@@ -70,6 +74,15 @@ export async function detectTtsModel(
     type: m.type,
     modelDir: m.modelDir,
   }));
+  const detectionSources: TtsDetectionSource[] = [];
+  const rawSources = raw.detectionSources;
+  if (Array.isArray(rawSources)) {
+    for (const s of rawSources) {
+      if (typeof s === 'string' && isTtsDetectionSource(s)) {
+        detectionSources.push(s);
+      }
+    }
+  }
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
@@ -81,6 +94,7 @@ export async function detectTtsModel(
     raw.lexiconLanguageCandidates.length > 0
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
       : {}),
+    ...(detectionSources.length > 0 ? { detectionSources } : {}),
   };
 }
 
@@ -455,6 +469,7 @@ export type {
   TtsVoiceCloneZipvoice,
   TtsVoiceClonePocket,
   TtsDetectedModelEntry,
+  TtsDetectionSource,
   SubtitleMode,
   SubtitleGranularity,
   SubtitleOptions,
@@ -479,4 +494,4 @@ export type {
   TtsStreamEnd,
   TtsStreamError,
 } from './types';
-export { TTS_MODEL_TYPES } from './types';
+export { TTS_MODEL_TYPES, TTS_DETECTION_SOURCES, isTtsDetectionSource } from './types';

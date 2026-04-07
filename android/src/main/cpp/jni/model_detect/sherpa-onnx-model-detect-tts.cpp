@@ -34,6 +34,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-tts.h"
 #include <algorithm>
+#include <cstdio>
 #include <string>
 #include <vector>
 #ifdef __ANDROID__
@@ -41,6 +42,19 @@
 #define LOG_TAG "TtsModelDetect"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#elif defined(__APPLE__)
+#define LOGI(...) \
+    do { \
+        fprintf(stderr, "[TtsModelDetect] "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
+#define LOGE(...) \
+    do { \
+        fprintf(stderr, "[TtsModelDetect] ERROR "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
 #else
 #define LOGI(...) ((void)0)
 #define LOGE(...) ((void)0)
@@ -120,7 +134,26 @@ static std::vector<TtsModelKind> GetKindsFromDirNameTts(const std::string& model
     return out;
 }
 
-/** Shared detection logic: runs on a pre-built file list. No filesystem access, no logging. */
+static void AppendUniqueDetectionSource(std::vector<TtsDetectionSource>& out, TtsDetectionSource s) {
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+        out.push_back(s);
+    }
+}
+
+static const char* TtsModelKindTag(TtsModelKind k) {
+    switch (k) {
+        case TtsModelKind::kVits: return "vits";
+        case TtsModelKind::kMatcha: return "matcha";
+        case TtsModelKind::kKokoro: return "kokoro";
+        case TtsModelKind::kKitten: return "kitten";
+        case TtsModelKind::kPocket: return "pocket";
+        case TtsModelKind::kZipvoice: return "zipvoice";
+        case TtsModelKind::kSupertonic: return "supertonic";
+        default: return "unknown";
+    }
+}
+
+/** Shared detection logic: runs on a pre-built file list. No filesystem listing; logging when called from DetectTtsModel. */
 static TtsDetectResult DetectTtsModelFromFiles(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
@@ -129,6 +162,41 @@ static TtsDetectResult DetectTtsModelFromFiles(
     using namespace model_detect;
 
     TtsDetectResult result;
+
+    if (files.empty()) {
+        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kNameOnly);
+        std::vector<TtsModelKind> nameKinds = GetKindsFromDirNameTts(modelDir);
+        for (TtsModelKind k : nameKinds) {
+            result.detectedModels.push_back({TtsModelKindTag(k), modelDir});
+        }
+        static constexpr const char* kNameOnlyErr =
+            "TTS: Name-only detection cannot validate files; run a full directory scan before createTTS.";
+        if (modelType != "auto") {
+            TtsModelKind sel = ParseTtsModelType(modelType);
+            if (sel == TtsModelKind::kUnknown) {
+                result.error = "TTS: Unknown model type: " + modelType;
+                return result;
+            }
+            AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kExplicitModelType);
+            result.selectedKind = sel;
+            result.detectedModels.clear();
+            result.detectedModels.push_back({TtsModelKindTag(sel), modelDir});
+            result.ok = false;
+            result.error = kNameOnlyErr;
+            return result;
+        }
+        if (nameKinds.empty()) {
+            result.error = "TTS: No model type inferred from directory name (name-only mode).";
+            return result;
+        }
+        result.selectedKind = nameKinds[0];
+        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kDirName);
+        result.ok = false;
+        result.error = kNameOnlyErr;
+        return result;
+    }
+
+    AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kFileListing);
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
@@ -221,18 +289,23 @@ static TtsDetectResult DetectTtsModelFromFiles(
             result.error = "TTS: Unknown model type: " + modelType;
             return result;
         }
+        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kExplicitModelType);
     } else {
         std::vector<TtsModelKind> nameCandidates = GetKindsFromDirNameTts(modelDir);
+        bool pickedFromDir = false;
         if (!nameCandidates.empty()) {
             for (TtsModelKind k : nameCandidates) {
                 if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice, hasSupertonic,
                                               hasVoicesFile, hasDataDir)) {
                     selected = k;
+                    pickedFromDir = true;
                     break;
                 }
             }
         }
-        if (selected == TtsModelKind::kUnknown) {
+        if (pickedFromDir) {
+            AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kDirName);
+        } else if (selected == TtsModelKind::kUnknown) {
             if (hasMatcha) selected = TtsModelKind::kMatcha;
             else if (hasPocket) selected = TtsModelKind::kPocket;
             else if (hasZipvoice) selected = TtsModelKind::kZipvoice;
@@ -242,6 +315,9 @@ static TtsDetectResult DetectTtsModelFromFiles(
                 else if (isLikelyKokoro && !isLikelyKitten) selected = TtsModelKind::kKokoro;
                 else selected = TtsModelKind::kKokoro;
             } else if (hasVits) selected = TtsModelKind::kVits;
+            if (selected != TtsModelKind::kUnknown) {
+                AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kFallbackOrder);
+            }
         }
     }
 

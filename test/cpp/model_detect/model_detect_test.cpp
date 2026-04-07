@@ -466,6 +466,59 @@ TEST(ModelDetectValidation, TtsMatchaOptionalLexicon) {
     EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kMatcha);
 }
 
+TEST(ModelDetectValidation, TtsNameOnlyEmptyFilesAutoUsesDirName) {
+    std::vector<FE> files;
+    const std::string dir = "test-models/vits-piper";
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "auto");
+    EXPECT_FALSE(result.ok) << "Name-only mode must not validate without a file listing";
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kVits);
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kNameOnly),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kDirName),
+              result.detectionSources.end());
+}
+
+TEST(ModelDetectValidation, TtsNameOnlyEmptyFilesExplicit) {
+    std::vector<FE> files;
+    const std::string dir = "test-models/vits-piper";
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "matcha");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kMatcha);
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kNameOnly),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kExplicitModelType),
+              result.detectionSources.end());
+}
+
+TEST(ModelDetectValidation, TtsNameOnlyEmptyFilesNoHintInName) {
+    std::vector<FE> files;
+    const std::string dir = "test-models/unknown-folder";
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kUnknown);
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(ModelDetectValidation, TtsFullScanDetectionSourcesExplicit) {
+    const std::string dir = "test-models/vits-piper";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kFileListing),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::TtsDetectionSource::kExplicitModelType),
+              result.detectionSources.end());
+}
+
 // ============================================================
 // Direct validation function unit tests
 // ============================================================
