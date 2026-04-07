@@ -107,6 +107,9 @@ function detectTtsModel(
   modelType?: TTSModelType;
   // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
+  languages?: string[];
+  quantization?: string;
+  sizeTier?: string;
   /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
   detectionSources?: readonly TtsDetectionSource[];
 }>;
