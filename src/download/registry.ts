@@ -76,8 +76,9 @@ export async function fetchChecksumsFromRelease(
     return new Map<string, string>();
   }
 
-  if (checksumCacheByCategory[category]) {
-    return checksumCacheByCategory[category];
+  const cached = checksumCacheByCategory[category];
+  if (cached) {
+    return cached;
   }
 
   try {

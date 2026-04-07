@@ -334,12 +334,20 @@ export async function deleteIncompleteExtraction(
 ): Promise<void> {
   const statePath = getExtractionStatePath(category, id);
   if (await exists(statePath)) {
-    await unlink(statePath);
+    try {
+      await unlink(statePath);
+    } catch {
+      // ignore – may already be removed by a concurrent cleanup
+    }
   }
 
   const modelDir = getModelDir(category, id);
   if (await exists(modelDir)) {
-    await unlink(modelDir);
+    try {
+      await unlink(modelDir);
+    } catch {
+      // ignore – may already be removed by a concurrent cleanup
+    }
   }
 
   await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));

@@ -56,6 +56,7 @@ class SherpaOnnxArchiveHelper {
         result.putBoolean("paused", false)
         result.putInt("lastEntryIndex", -1)
         result.putDouble("bytesExtracted", 0.0)
+        result.putString("lastEntryPath", "")
         result.putString("reason", "Archive extraction error: ${e.message}")
         promise.resolve(result)
       } finally {
@@ -97,6 +98,7 @@ class SherpaOnnxArchiveHelper {
         result.putBoolean("paused", false)
         result.putInt("lastEntryIndex", -1)
         result.putDouble("bytesExtracted", 0.0)
+        result.putString("lastEntryPath", "")
         result.putString("reason", e.message ?: "Failed to open asset")
         promise.resolve(result)
       } finally {

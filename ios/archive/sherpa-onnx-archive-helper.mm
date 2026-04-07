@@ -161,6 +161,7 @@ static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) 
     @"paused": @NO,
     @"lastEntryIndex": @(-1),
     @"bytesExtracted": @(0),
+    @"lastEntryPath": @"",
     @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1."
   };
 #else

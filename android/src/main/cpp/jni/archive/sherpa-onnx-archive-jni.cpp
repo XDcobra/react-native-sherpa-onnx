@@ -6,6 +6,7 @@
  */
 #include <jni.h>
 #include <string>
+#include <algorithm>
 #include "sherpa-onnx-archive-helper.h"
 #include <android/log.h>
 
@@ -51,10 +52,8 @@ static void ResolveWithExtractionResult(
   env->CallVoidMethod(map, putDouble, env->NewStringUTF("bytesExtracted"),
                        static_cast<double>(result.bytes_extracted));
 
-  if (!result.last_entry_path.empty()) {
-    env->CallVoidMethod(map, putString, env->NewStringUTF("lastEntryPath"),
-                         env->NewStringUTF(result.last_entry_path.c_str()));
-  }
+  env->CallVoidMethod(map, putString, env->NewStringUTF("lastEntryPath"),
+                       env->NewStringUTF(result.last_entry_path.c_str()));
 
   if (result.success) {
     env->CallVoidMethod(map, putString, env->NewStringUTF("path"),
@@ -121,12 +120,13 @@ struct InputStreamReadContext {
 };
 
 static std::ptrdiff_t JniStreamRead(void* buf, size_t len, void* user_data) {
-  (void)len;
   auto* ctx = static_cast<InputStreamReadContext*>(user_data);
   if (!ctx || !ctx->env || !ctx->stream_global || !ctx->read_method || !ctx->byte_array) {
     return -1;
   }
-  jint n = ctx->env->CallIntMethod(ctx->stream_global, ctx->read_method, ctx->byte_array);
+  jint to_read = static_cast<jint>(std::min(static_cast<size_t>(len), static_cast<size_t>(ctx->buffer_size)));
+  jint n = ctx->env->CallIntMethod(ctx->stream_global, ctx->read_method,
+                                    ctx->byte_array, static_cast<jint>(0), to_read);
   if (ctx->env->ExceptionCheck()) {
     ctx->env->ExceptionClear();
     return -1;
@@ -204,7 +204,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractFromStream(
   // Setup stream read context
   jobject stream_global = env->NewGlobalRef(j_input_stream);
   jclass stream_class = env->GetObjectClass(j_input_stream);
-  jmethodID read_method = env->GetMethodID(stream_class, "read", "([B)I");
+  jmethodID read_method = env->GetMethodID(stream_class, "read", "([BII)I");
   env->DeleteLocalRef(stream_class);
 
   if (!read_method) {

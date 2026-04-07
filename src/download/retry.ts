@@ -46,19 +46,22 @@ export async function retryWithBackoff<T>(
       );
 
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, delayMs);
-
         if (!options.signal) {
+          setTimeout(resolve, delayMs);
           return;
         }
 
         const onAbort = () => {
           clearTimeout(timer);
-          options.signal?.removeEventListener('abort', onAbort);
           const abortError = new Error('Operation aborted');
           abortError.name = 'AbortError';
           reject(abortError);
         };
+
+        const timer = setTimeout(() => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, delayMs);
 
         options.signal.addEventListener('abort', onAbort);
       });
