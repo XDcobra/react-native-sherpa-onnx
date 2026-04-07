@@ -1,5 +1,18 @@
 # Migration Guides
 
+## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
+
+The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:
+
+| Before | After |
+| --- | --- |
+| `saveAudioToFile(audio, path)` | `saveAudio(audio, { kind: 'file', path })` |
+| `saveAudioToContentUri(audio, directoryUri, filename)` | `saveAudio(audio, { kind: 'androidContent', directoryUri, filename })` (Android only) |
+
+Optional third argument: **`{ format?: string; outputSampleRateHz?: number }`** — default `format` is `'wav'`. Non-WAV formats require FFmpeg (see [disable-ffmpeg.md](./disable-ffmpeg.md)).
+
+TurboModule consumers: call **`saveTtsAudio`** with flat arguments (`destinationType`: `'file'` | `'androidContent'`, `pathOrDirectoryUri`, `filename`, `format`, `outputSampleRateHz`).
+
 ## Breaking changes (upgrading to 0.3.0)
 
 If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
@@ -190,4 +203,31 @@ const unsubscribe = onProgress((category, modelId, progress) => {
   console.log(progress.bytesProcessed);
 });
 ```
+
+### Text-to-Speech: strict types (0.4.0)
+
+The TTS public TypeScript surface uses **discriminated unions** so invalid combinations are caught at compile time. This is a **breaking change** for code that relied on the previous loose shapes.
+
+| Topic | Before | After |
+| --- | --- | --- |
+| Init + `auto` | `modelType: 'auto'` (or omitted) with `modelOptions` | With `'auto'` or omitted `modelType`, **`modelOptions` is not allowed**. Set an explicit `modelType` (e.g. `'vits'`) to pass scales. |
+| Init + concrete type | Any keys on `TtsModelOptions` | Only the block matching `modelType` (e.g. `modelType: 'vits'` + `modelOptions: { vits: { ... } }`). |
+| `updateParams` | `modelOptions` without a strict tie to `modelType` | Same rules as init: use a variant with matching `modelType` and `modelOptions` (or `{}` / `{ modelType: 'auto' }` for no-op style updates). |
+| Generation / cloning | Top-level `referenceAudio` / `referenceText` | Use **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }`. |
+| Subtitles | `granularity: 'character'` with `mode: 'fast'` accepted by types | **`character`** only with `subtitles: { mode: 'accurate', alignmentModelPath: string, ... }`. For `off` / `fast`, `alignmentModelPath` must not be set. |
+| `generateSubtitlesFromAudio` | `mode: 'accurate'` with optional `alignmentModelPath` | **`accurate`** requires `alignmentModelPath`. **`fast`** only allows `granularity: 'sentence' \| 'word'`. |
+
+**Zipvoice example (`voiceClone`):**
+
+```ts
+await tts.generateSpeech('Hello', {
+  voiceClone: {
+    kind: 'zipvoice',
+    referenceAudio: { samples, sampleRate },
+    referenceText: 'Transcript of reference',
+  },
+});
+```
+
+See [docs/tts.md](./tts.md) and [docs/tts-streaming.md](./tts-streaming.md) for updated option tables.
 
