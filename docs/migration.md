@@ -1,5 +1,15 @@
 # Migration Guides
 
+## TTS release catalog metadata (native)
+
+For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`batchTtsCatalogHints`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
+
+**`refreshModels(ModelCategory.Tts)`** loads hints in **chunks** to limit JNI bridge payload per call. The default chunk size is **`DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE`** (256). Override with **`refreshModels('tts', { ttsCatalogHintsChunkSize: N })`** — use **`0`** or **`Infinity`** to pass all ids in a single native batch (tests or debugging).
+
+## TTS `detectTtsModel` — `detectionSources` (additive)
+
+Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly TtsDetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isTtsDetectionSource`** when parsing unknown payloads.
+
 ## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
 
 The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:

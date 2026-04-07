@@ -10,18 +10,31 @@ On-device **batch** synthesis: full-buffer `generateSpeech`, optional subtitle t
 
 - **`ModelPathConfig`** (from `react-native-sherpa-onnx`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
-- **`detectTtsModel()`** below validates layout and returns detected stacks without loading the engine.
+- **`detectTtsModel()`** below scans the model directory and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
 ## Quick Start
 
 ### 1) Batch: create engine, synthesize, destroy
 
 ```ts
-import { createTTS, saveAudio, type GeneratedAudio } from 'react-native-sherpa-onnx/tts';
+import {
+  createTTS,
+  saveAudio,
+  detectTtsModel,
+  type GeneratedAudio,
+} from 'react-native-sherpa-onnx/tts';
 
-// createTTS --> Promise<TtsEngine>. Omit modelType for auto-detect (no modelOptions then).
+// detectTtsModel does not load the TTS engine — it only inspects files. That keeps CPU/memory low and is ideal as a pre-check before createTTS. Use the returned modelType (and optional lexiconLanguageCandidates for Kokoro/Kitten) so you can pass matching modelOptions when creating the engine.
+const det = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
+if (!det.success || !det.modelType) {
+  throw new Error(det.error ?? 'TTS model detection failed');
+}
+
+// createTTS --> Promise<TtsEngine>. Pass an explicit modelType (here from detection) if you need modelOptions for that engine.
+// If you use modelType: 'auto' or omit modelType entirely, createTTS still auto-detects the stack on init, but modelOptions is not available in that mode.
 const tts = await createTTS({
   modelPath: { type: 'asset', path: 'models/my-tts-model' },
+  modelType: det.modelType,
   numThreads: 2,
 });
 
@@ -100,11 +113,16 @@ function detectTtsModel(
   error?: string;
   detectedModels: TtsDetectedModelEntry[];
   modelType?: TTSModelType | string;
+  // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
+  /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
+  detectionSources?: readonly TtsDetectionSource[];
 }>;
 ```
 
-File-based detection and validation without loading the engine; Kokoro/Kitten may return `lexiconLanguageCandidates` for language UI.
+File-based detection and validation **without** initializing the TTS engine: no native synthesizer is created, so this call is comparatively cheap and suitable as a **pre-check** before `createTTS` — for example to obtain a concrete `modelType` (and Kokoro/Kitten `lexiconLanguageCandidates`) so you can pass the right `modelOptions` on init.
+
+**`detectionSources`** is an optional, ordered trace of mechanisms used (stable string literals; see `TtsDetectionSource` in `react-native-sherpa-onnx/tts`). The host-only **name-only** path (empty file list in C++ tests) never validates paths and is not used by production `detectTtsModel` after a real directory scan.
 
 ```ts
 const result = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
@@ -120,6 +138,8 @@ function createTTS(options: TTSInitializeOptions | ModelPathConfig): Promise<Tts
 ```
 
 Creates a **batch** TTS engine. You must call `tts.destroy()` when finished.
+
+With **`modelType: 'auto'`** or **no `modelType`**, the native layer picks the stack on first init, but **`modelOptions` is not available** in that mode — pass a concrete `modelType` (e.g. from `detectTtsModel`) if you need engine-specific options.
 
 ```ts
 const tts = await createTTS({
