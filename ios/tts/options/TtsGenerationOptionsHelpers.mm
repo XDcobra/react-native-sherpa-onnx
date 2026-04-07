@@ -67,15 +67,24 @@ NSString *SubtitleModeFromOptions(NSDictionary *options) {
     NSString *raw = [options[@"subtitleMode"] isKindOfClass:[NSString class]] ? options[@"subtitleMode"] : nil;
     NSString *normalized = raw != nil
         ? [[raw lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-        : @"fast";
+        : @"proportional";
 
     if ([normalized isEqualToString:@"off"] ||
-        [normalized isEqualToString:@"fast"] ||
+        [normalized isEqualToString:@"proportional"] ||
+        [normalized isEqualToString:@"estimated"] ||
         [normalized isEqualToString:@"accurate"]) {
         return normalized;
     }
 
-    return @"fast";
+    return @"proportional";
+}
+
+BOOL ExportChunkTimelineOnly(NSDictionary *options) {
+    if (options == nil) {
+        return NO;
+    }
+    NSNumber *n = options[@"exportChunkTimelineOnly"];
+    return [n isKindOfClass:[NSNumber class]] && [n boolValue];
 }
 
 NSString *SubtitleGranularityFromOptions(NSDictionary *options) {

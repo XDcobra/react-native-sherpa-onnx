@@ -116,9 +116,13 @@
         return;
     }
 
+    BOOL exportChunkOnly = ExportChunkTimelineOnly(options);
     NSString *subtitleMode = SubtitleModeFromOptions(options);
+    if (exportChunkOnly) {
+        subtitleMode = @"estimated";
+    }
     NSString *subtitleGranularity = SubtitleGranularityFromOptions(options);
-    if (IsCharacterGranularityRequested(options) && ![subtitleMode isEqualToString:@"accurate"]) {
+    if (!exportChunkOnly && IsCharacterGranularityRequested(options) && ![subtitleMode isEqualToString:@"accurate"]) {
         reject(@"TTS_SUBTITLE_ERROR", @"Character granularity is only supported when subtitleMode is 'accurate'.", nil);
         return;
     }
@@ -170,7 +174,7 @@
         int32_t sampleRate = 0;
         std::vector<int32_t> sentenceChunkSizes;
 
-        if ([subtitleMode isEqualToString:@"off"]) {
+        if ([subtitleMode isEqualToString:@"off"] || [subtitleMode isEqualToString:@"proportional"]) {
             auto result = wrapper->generate(
                 textStr,
                 static_cast<int32_t>(sid),
@@ -227,6 +231,22 @@
         NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:generatedSamples.size()];
         for (float sample : generatedSamples) {
             [samplesArray addObject:@(sample)];
+        }
+
+        if (exportChunkOnly) {
+            NSMutableArray *counts = [NSMutableArray arrayWithCapacity:sentenceChunkSizes.size()];
+            for (int32_t c : sentenceChunkSizes) {
+                [counts addObject:@(c)];
+            }
+            NSDictionary *resultDict = @{
+                @"samples": samplesArray,
+                @"sampleRate": @(sampleRate),
+                @"segmentSampleCounts": counts,
+                @"subtitles": @[],
+                @"timingMode": @"estimated"
+            };
+            resolve(resultDict);
+            return;
         }
 
         NSMutableArray *subtitlesArray = [NSMutableArray array];

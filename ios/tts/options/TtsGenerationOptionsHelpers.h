@@ -24,3 +24,4 @@ BOOL NSDictionaryHasValidReferenceAudio(NSDictionary *options);
 NSString *SubtitleModeFromOptions(NSDictionary *options);
 NSString *SubtitleGranularityFromOptions(NSDictionary *options);
 BOOL IsCharacterGranularityRequested(NSDictionary *options);
+BOOL ExportChunkTimelineOnly(NSDictionary *options);

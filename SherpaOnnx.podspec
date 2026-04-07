@@ -30,7 +30,9 @@ Pod::Spec.new do |s|
     "ios/**/*.{h,m,mm,swift,cpp}",
     # Shared with Android NDK (single TTS detection implementation).
     "android/src/main/cpp/jni/model_detect/sherpa-onnx-model-detect-tts.cpp",
-    "android/src/main/cpp/jni/model_detect/sherpa-onnx-tts-catalog-hints.cpp"
+    "android/src/main/cpp/jni/model_detect/sherpa-onnx-tts-catalog-hints.cpp",
+    # Shared CTC alignment core (ORT C API).
+    "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -95,6 +97,8 @@ Pod::Spec.new do |s|
   header_search_paths = [
     "$(inherited)",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect\"",
+    "\"#{pod_root}/android/src/main/cpp/alignment\"",
+    "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/model_detect\"",
