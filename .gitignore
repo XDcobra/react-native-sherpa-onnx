@@ -50,6 +50,9 @@ CMakeFiles/
 cmake_install.cmake
 android/test_build/
 
+# Local venv for one-off ONNX scripts (e.g. tiny model generation)
+.venv-ort-test/
+
 # Cocoapods
 #
 example/ios/Pods
