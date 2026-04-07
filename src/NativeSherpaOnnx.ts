@@ -435,6 +435,18 @@ export interface Spec extends TurboModule {
   ): Promise<void>;
 
   /**
+   * Generate speech in streaming mode and write directly to file in native.
+   * Emits `ttsStreamFileEnd` / `ttsStreamFileError` and optionally `ttsStreamChunk`.
+   */
+  generateTtsStreamToFile(
+    instanceId: string,
+    requestId: string,
+    text: string,
+    options: Object,
+    fileOptions: Object
+  ): Promise<void>;
+
+  /**
    * Cancel an ongoing streaming TTS generation.
    * @param instanceId - Unique ID for this engine instance
    */

@@ -1,6 +1,9 @@
 import type {
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamToFileHandlers,
+  TtsStreamFileController,
+  TtsStreamToFileOptions,
   TtsGenerationOptions,
   TTSModelInfo,
 } from './types';
@@ -12,6 +15,11 @@ export type {
   TtsStreamError,
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamToFileHandlers,
+  TtsStreamFileController,
+  TtsStreamToFileOptions,
+  TtsStreamFileEnd,
+  TtsStreamFileError,
   TtsGenerationOptions,
   TTSModelInfo,
 } from './types';
@@ -30,6 +38,14 @@ export interface StreamingTtsEngine {
     options: TtsGenerationOptions | undefined,
     handlers: TtsStreamHandlers
   ): Promise<TtsStreamController>;
+
+  /** Generate speech in streaming mode and write directly to a file sink. */
+  generateSpeechStreamToFile(
+    text: string,
+    options: TtsGenerationOptions | undefined,
+    fileOptions: TtsStreamToFileOptions,
+    handlers: TtsStreamToFileHandlers
+  ): Promise<TtsStreamFileController>;
 
   /** Cancel the current streaming generation. */
   cancelSpeechStream(): Promise<void>;

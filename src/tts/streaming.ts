@@ -10,6 +10,11 @@ import type {
   TtsStreamError,
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamToFileOptions,
+  TtsStreamToFileHandlers,
+  TtsStreamFileController,
+  TtsStreamFileEnd,
+  TtsStreamFileError,
   TTSModelInfo,
 } from './types';
 import type { StreamingTtsEngine } from './streamingTypes';
@@ -203,6 +208,88 @@ export async function createStreamingTTS(
       }
 
       const controller: TtsStreamController = {
+        async cancel(): Promise<void> {
+          guard();
+          await SherpaOnnx.cancelTtsStream(instanceId);
+          unsubscribe();
+        },
+        unsubscribe,
+      };
+      return controller;
+    },
+
+    async generateSpeechStreamToFile(
+      text: string,
+      opts: TtsGenerationOptions | undefined,
+      fileOptions: TtsStreamToFileOptions,
+      handlers: TtsStreamToFileHandlers
+    ): Promise<TtsStreamFileController> {
+      guard();
+      const requestId = `tts_req_${++ttsRequestIdCounter}`;
+      const subscriptions: Array<{ remove: () => void }> = [];
+      let unsubscribed = false;
+
+      const unsubscribe = () => {
+        if (unsubscribed) return;
+        unsubscribed = true;
+        subscriptions.forEach((sub) => sub.remove());
+      };
+
+      const matchesRequest = (e: { instanceId?: string; requestId?: string }) =>
+        (e.instanceId == null || e.instanceId === instanceId) &&
+        (e.requestId == null || e.requestId === requestId);
+
+      subscriptions.push(
+        DeviceEventEmitter.addListener('ttsStreamChunk', (event: unknown) => {
+          const e = event as TtsStreamChunk;
+          if (!matchesRequest(e)) return;
+          handlers.onChunk?.(e);
+        }),
+        DeviceEventEmitter.addListener('ttsStreamFileEnd', (event: unknown) => {
+          const e = event as TtsStreamFileEnd;
+          if (!matchesRequest(e)) return;
+          try {
+            handlers.onEnd?.(e);
+          } finally {
+            unsubscribe();
+          }
+        }),
+        DeviceEventEmitter.addListener(
+          'ttsStreamFileError',
+          (event: unknown) => {
+            const e = event as TtsStreamFileError;
+            if (!matchesRequest(e)) return;
+            try {
+              handlers.onError?.(e);
+            } finally {
+              unsubscribe();
+            }
+          }
+        )
+      );
+
+      await new Promise<void>((resolve) => {
+        if (typeof setImmediate === 'function') {
+          setImmediate(resolve);
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
+
+      try {
+        await SherpaOnnx.generateTtsStreamToFile(
+          instanceId,
+          requestId,
+          text,
+          toNativeTtsGenerationOptions(opts),
+          fileOptions
+        );
+      } catch (error) {
+        unsubscribe();
+        throw error;
+      }
+
+      const controller: TtsStreamFileController = {
         async cancel(): Promise<void> {
           guard();
           await SherpaOnnx.cancelTtsStream(instanceId);

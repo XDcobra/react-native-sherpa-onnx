@@ -529,6 +529,58 @@ export interface TtsStreamHandlers {
   onError?: (event: TtsStreamError) => void;
 }
 
+/** File output target for streaming-to-file generation. */
+export type TtsStreamFileOutput = {
+  kind: 'file';
+  /** Absolute output path. */
+  path: string;
+};
+
+/** Event payload emitted when stream-to-file finishes. */
+export interface TtsStreamFileEnd {
+  instanceId?: string;
+  requestId?: string;
+  cancelled: boolean;
+  path: string;
+  bytesWritten: number;
+  sampleRate: number;
+}
+
+/** Event payload emitted when stream-to-file fails. */
+export interface TtsStreamFileError {
+  instanceId?: string;
+  requestId?: string;
+  message: string;
+  path?: string;
+}
+
+/** Stream-to-file behavior options. */
+export type TtsStreamToFileOptions = {
+  output: TtsStreamFileOutput;
+  /**
+   * Output format. v1 supports 'wav'.
+   * Reserved for future expansion.
+   */
+  format?: 'wav';
+  /** Keep finalized partial file when cancelled. Default: false. */
+  keepPartialOnCancel?: boolean;
+  /** Emit normal chunk events while writing to file. Default: false. */
+  emitChunks?: boolean;
+};
+
+/** Handlers for stream-to-file generation. */
+export interface TtsStreamToFileHandlers {
+  onChunk?: (chunk: TtsStreamChunk) => void;
+  onEnd?: (event: TtsStreamFileEnd) => void;
+  onError?: (event: TtsStreamFileError) => void;
+}
+
+/** Controller returned by generateSpeechStreamToFile(). */
+export interface TtsStreamFileController {
+  cancel(): Promise<void>;
+  unsubscribe(): void;
+}
+
 /**
  * Instance-based batch TTS engine returned by createTTS().
  * Use for one-shot synthesis (generateSpeech, generateSpeechWithTimestamps).

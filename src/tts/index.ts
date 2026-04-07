@@ -500,6 +500,12 @@ export type {
   TtsStreamChunk,
   TtsStreamEnd,
   TtsStreamError,
+  TtsStreamFileOutput,
+  TtsStreamToFileOptions,
+  TtsStreamToFileHandlers,
+  TtsStreamFileController,
+  TtsStreamFileEnd,
+  TtsStreamFileError,
 } from './types';
 export {
   TTS_MODEL_TYPES,
