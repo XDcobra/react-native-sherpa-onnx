@@ -28,14 +28,18 @@ Pod::Spec.new do |s|
 
   s.source_files = [
     "ios/**/*.{h,m,mm,swift,cpp}",
-    # Shared with Android NDK (single TTS detection implementation).
-    "android/src/main/cpp/jni/model_detect/sherpa-onnx-model-detect-tts.cpp",
+    # Shared with Android NDK: all model_detect (STT/TTS/enhancement/alignment + JNI wrappers).
+    "android/src/main/cpp/jni/model_detect/**/*.cpp",
     # Shared CTC alignment core (ORT C API).
     "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
-  s.exclude_files = ["ios/Frameworks/**/*"]
+  s.exclude_files = [
+    "ios/Frameworks/**/*",
+    # Duplicate implementations: use android/src/main/cpp/jni/model_detect sources only.
+    "ios/model_detect/**/*"
+  ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
   end
@@ -100,7 +104,6 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
-    "\"#{pod_root}/ios/model_detect\"",
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
     "\"#{pod_root}/ios/enhancement\"",

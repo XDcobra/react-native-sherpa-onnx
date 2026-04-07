@@ -34,6 +34,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-stt.h"
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <algorithm>
@@ -42,6 +43,19 @@
 #define LOG_TAG "SttModelDetect"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#elif defined(__APPLE__)
+#define LOGI(...) \
+    do { \
+        fprintf(stderr, "[SttModelDetect] "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
+#define LOGE(...) \
+    do { \
+        fprintf(stderr, "[SttModelDetect] ERROR "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
 #else
 #define LOGI(...) ((void)0)
 #define LOGE(...) ((void)0)
