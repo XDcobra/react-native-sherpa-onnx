@@ -917,6 +917,36 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Batch-resolve TTS catalog metadata from release asset ids (no filesystem).
+   * Order matches [ids]; one entry per id.
+   */
+  override fun batchTtsCatalogHints(ids: ReadableArray, promise: Promise) {
+    try {
+      val n = ids.size()
+      val arr = Array(n) { i -> ids.getString(i) ?: "" }
+      val raw = Companion.nativeBatchTtsCatalogHints(arr)
+      val out = Arguments.createArray()
+      for (m in raw) {
+        val map = Arguments.createMap()
+        map.putString("modelId", m["modelId"] as? String ?: "")
+        map.putString("modelType", m["modelType"] as? String ?: "")
+        val langs = Arguments.createArray()
+        (m["languages"] as? java.util.ArrayList<*>)?.forEach { item ->
+          (item as? String)?.let { langs.pushString(it) }
+        }
+        map.putArray("languages", langs)
+        map.putString("quantization", m["quantization"] as? String ?: "")
+        map.putString("sizeTier", m["sizeTier"] as? String ?: "")
+        out.pushMap(map)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      android.util.Log.e(NAME, "batchTtsCatalogHints failed: ${e.message}", e)
+      promise.reject("BATCH_TTS_CATALOG_HINTS_ERROR", e.message, e)
+    }
+  }
+
+  /**
    * Update TTS params by re-initializing with stored config.
    */
   override fun updateTtsParams(
@@ -1364,6 +1394,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
     private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    /** Batch catalog hints for TTS release asset ids (see [batchTtsCatalogHints]). */
+    @JvmStatic
+    private external fun nativeBatchTtsCatalogHints(ids: Array<String>): java.util.ArrayList<java.util.HashMap<String, Any>>
 
     /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic

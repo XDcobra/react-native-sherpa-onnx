@@ -2,7 +2,8 @@
  * sherpa-onnx-module-jni.cpp
  *
  * Purpose: JNI entry points for SherpaOnnxModule: nativeTestSherpaInit, nativeCanInitQnnHtp,
- * nativeHasNnapiAccelerator, nativeDetectSttModel, nativeDetectTtsModel. Used by Kotlin to probe
+ * nativeHasNnapiAccelerator, nativeDetectSttModel, nativeDetectTtsModel, nativeBatchTtsCatalogHints.
+ * Used by Kotlin to probe
  * capabilities and get model paths for the Kotlin STT/TTS API.
  */
 #include <jni.h>
@@ -187,6 +188,37 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
 
   sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, model_type);
   return sherpaonnx::TtsDetectResultToJava(env, result);
+}
+
+// Batch TTS catalog hints from model id strings (release asset stems). Returns ArrayList<HashMap<...>>.
+JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxModule_nativeBatchTtsCatalogHints(
+    JNIEnv* env,
+    jobject /* this */,
+    jobjectArray j_ids) {
+  if (!j_ids) {
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    if (!listClass) return nullptr;
+    jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+    jobject empty = env->NewObject(listClass, listInit);
+    env->DeleteLocalRef(listClass);
+    return empty;
+  }
+  jsize n = env->GetArrayLength(j_ids);
+  std::vector<std::string> ids;
+  ids.reserve(static_cast<size_t>(n));
+  for (jsize i = 0; i < n; ++i) {
+    jstring js = static_cast<jstring>(env->GetObjectArrayElement(j_ids, i));
+    if (!js) {
+      ids.emplace_back("");
+      continue;
+    }
+    const char* c = env->GetStringUTFChars(js, nullptr);
+    ids.emplace_back(c ? c : "");
+    env->ReleaseStringUTFChars(js, c);
+    env->DeleteLocalRef(js);
+  }
+  std::vector<sherpaonnx::TtsCatalogHints> batch = sherpaonnx::BatchDeriveTtsCatalogHints(ids);
+  return sherpaonnx::TtsCatalogHintsBatchToJava(env, batch);
 }
 
 // Detect enhancement model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.

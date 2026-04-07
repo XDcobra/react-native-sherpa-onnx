@@ -835,11 +835,60 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
             }
             resultDict[@"lexiconLanguageCandidates"] = langCandidates;
         }
+        if (!result.detectionSources.empty()) {
+            NSMutableArray *sources = [NSMutableArray array];
+            for (const auto s : result.detectionSources) {
+                [sources addObject:[NSString stringWithUTF8String:sherpaonnx::TtsDetectionSourceToLiteral(s)]];
+            }
+            resultDict[@"detectionSources"] = sources;
+        }
         resolve(resultDict);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"TTS model detection failed: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"DETECT_ERROR", errorMsg, nil);
+    }
+}
+
+- (void)batchTtsCatalogHints:(NSArray *)ids
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (ids == nil || [ids count] == 0) {
+            resolve(@[]);
+            return;
+        }
+        std::vector<std::string> vids;
+        vids.reserve([ids count]);
+        for (id item in ids) {
+            if (![item isKindOfClass:[NSString class]]) {
+                vids.emplace_back("");
+                continue;
+            }
+            vids.emplace_back([(NSString *)item UTF8String] ?: "");
+        }
+        std::vector<sherpaonnx::TtsCatalogHints> batch =
+            sherpaonnx::BatchDeriveTtsCatalogHints(vids);
+        NSMutableArray *out = [NSMutableArray arrayWithCapacity:batch.size()];
+        for (const auto &h : batch) {
+            NSMutableArray *langs = [NSMutableArray array];
+            for (const auto &l : h.languages) {
+                [langs addObject:[NSString stringWithUTF8String:l.c_str()]];
+            }
+            [out addObject:@{
+                @"modelId": [NSString stringWithUTF8String:h.modelId.c_str()],
+                @"modelType": [NSString stringWithUTF8String:h.primaryKind.c_str()],
+                @"languages": langs,
+                @"quantization": [NSString stringWithUTF8String:h.quantization.c_str()],
+                @"sizeTier": [NSString stringWithUTF8String:h.sizeTier.c_str()],
+            }];
+        }
+        resolve(out);
+    } @catch (NSException *exception) {
+        NSString *errorMsg = [NSString stringWithFormat:@"batchTtsCatalogHints failed: %@", exception.reason];
+        RCTLogError(@"%@", errorMsg);
+        reject(@"BATCH_TTS_CATALOG_HINTS_ERROR", errorMsg, nil);
     }
 }
 

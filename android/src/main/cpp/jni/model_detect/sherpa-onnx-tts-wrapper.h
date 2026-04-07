@@ -3,13 +3,16 @@
 
 #include <jni.h>
 
-namespace sherpaonnx {
+#include "sherpa-onnx-model-detect.h"
 
-struct TtsDetectResult;
+namespace sherpaonnx {
 
 // Converts C++ TtsDetectResult to a Java HashMap (success, error, modelType, detectedModels, paths).
 // Caller must DeleteLocalRef the returned jobject.
 jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result);
+
+/** ArrayList<HashMap> for batchTtsCatalogHints: modelId, modelType, languages, quantization, sizeTier. */
+jobject TtsCatalogHintsBatchToJava(JNIEnv* env, const std::vector<TtsCatalogHints>& batch);
 
 }  // namespace sherpaonnx
 

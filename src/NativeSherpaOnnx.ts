@@ -309,7 +309,24 @@ export interface Spec extends TurboModule {
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
     lexiconLanguageCandidates?: string[];
+    /** Optional trace strings from native (see TtsDetectionSource in src/tts/types.ts). */
+    detectionSources?: string[];
   }>;
+
+  /**
+   * Batch-resolve TTS catalog metadata from release asset ids (folder basename / archive stem, no extension).
+   * Same length and order as `ids`. Uses native name-only heuristics only (no filesystem).
+   */
+  batchTtsCatalogHints(ids: string[]): Promise<
+    Array<{
+      modelId: string;
+      /** Primary engine kind: vits, matcha, kokoro, … */
+      modelType: string;
+      languages: string[];
+      quantization: string;
+      sizeTier: string;
+    }>
+  >;
 
   /**
    * Update TTS model parameters by re-initializing with stored config.

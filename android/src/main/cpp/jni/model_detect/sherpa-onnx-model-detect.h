@@ -44,6 +44,32 @@ enum class TtsModelKind {
     kSupertonic
 };
 
+/** Traces how TTS model kind was chosen; serialized to JS as stable string literals (see TtsDetectionSourceToLiteral). */
+enum class TtsDetectionSource {
+    /** Recursive file listing was used (non-empty file vector). */
+    kFileListing,
+    /** Directory basename contained a known type token (GetKindsFromDirNameTts) and that drove selection in auto mode. */
+    kDirName,
+    /** Default priority order among capabilities (matcha → pocket → zipvoice → …) when folder name did not resolve. */
+    kFallbackOrder,
+    /** Caller passed an explicit modelType string (not "auto"). */
+    kExplicitModelType,
+    /** files vector was empty: name-only heuristics only; no path validation. */
+    kNameOnly,
+};
+
+/** Stable literals for JNI / NSDictionary / TypeScript (must match src/tts/types.ts). */
+inline const char* TtsDetectionSourceToLiteral(TtsDetectionSource s) {
+    switch (s) {
+        case TtsDetectionSource::kFileListing: return "fileListing";
+        case TtsDetectionSource::kDirName: return "dirName";
+        case TtsDetectionSource::kFallbackOrder: return "fallbackOrder";
+        case TtsDetectionSource::kExplicitModelType: return "explicitModelType";
+        case TtsDetectionSource::kNameOnly: return "nameOnly";
+    }
+    return "fileListing";
+}
+
 enum class EnhancementModelKind {
     kUnknown,
     kGtcrn,
@@ -222,6 +248,8 @@ struct TtsDetectResult {
     TtsModelPaths paths;
     /** Language ids from detected lexicon files (e.g. "default", "us-en", "zh") for multi-lang Kokoro/Kitten. Empty when not applicable. */
     std::vector<std::string> lexiconLanguageCandidates;
+    /** Ordered trace of detection mechanisms (see TtsDetectionSource). */
+    std::vector<TtsDetectionSource> detectionSources;
 };
 
 struct EnhancementDetectResult {
@@ -266,7 +294,14 @@ TtsDetectResult DetectTtsModel(
 /** Test-only: Like DetectTtsModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). Not used in
  *  production (Android/iOS use DetectTtsModel). Does not validate modelDir existence or
- *  call FileExists / IsDirectory. */
+ *  call FileExists / IsDirectory.
+ *
+ *  Contract for DetectTtsModelFromFiles (shared implementation):
+ *  - If `files` is non-empty: full capability scan, ValidateTtsPaths on success, `detectionSources` includes
+ *    kFileListing plus kDirName, kFallbackOrder, and/or kExplicitModelType as applicable.
+ *  - If `files` is empty: name-only mode (kNameOnly). Infers kinds from the last path component of
+ *    `modelDir` only; does not run ValidateTtsPaths; leaves paths empty; sets ok to false with an error
+ *    explaining that a full scan is required before createTTS. Use for pre-check / UI hints only. */
 TtsDetectResult DetectTtsModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
@@ -298,6 +333,23 @@ AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::string& modelDir,
     const std::string& modelType = "auto"
 );
+
+/** Release-asset / basename metadata aligned with native TTS name-only detection (single source for catalog). */
+struct TtsCatalogHints {
+    std::string modelId;
+    /** Engine kind string: vits, matcha, kokoro, kitten, pocket, zipvoice, supertonic, unknown */
+    std::string primaryKind;
+    std::vector<std::string> languages;
+    /** fp16, int8, int8-quantized, unknown */
+    std::string quantization;
+    /** tiny, small, medium, large, unknown */
+    std::string sizeTier;
+};
+
+/** Derive catalog hints from a model id string (asset stem, no .tar.bz2). No filesystem; uses name-only TTS path. */
+TtsCatalogHints DeriveTtsCatalogHintsFromModelId(const std::string& modelId);
+
+std::vector<TtsCatalogHints> BatchDeriveTtsCatalogHints(const std::vector<std::string>& modelIds);
 
 } // namespace sherpaonnx
 
