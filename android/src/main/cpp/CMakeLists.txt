@@ -77,6 +77,8 @@ endif()
 
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). Move .cpp into subdirs; .h go alongside for include path.
 set(SOURCES
+    alignment/sherpa_onnx_ctc_alignment.cpp
+    jni/alignment/sherpa-onnx-alignment-jni.cpp
     jni/module/sherpa-onnx-module-jni.cpp
     jni/archive/sherpa-onnx-archive-helper.cpp
     jni/archive/sherpa-onnx-archive-jni.cpp
@@ -169,8 +171,26 @@ else()
 endif()
 
 # Include directories (must be after add_library). Subdirs so #include "sherpa-onnx-*.h" resolves after move.
+set(ORT_INCLUDE_DIR "${PROJECT_ROOT}/../third_party/onnxruntime/include")
+if(EXISTS "${ORT_INCLUDE_DIR}/onnxruntime/core/session/onnxruntime_c_api.h")
+    message(STATUS "ONNX Runtime C API headers (CTC alignment): ${ORT_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR "ONNX Runtime headers not found at ${ORT_INCLUDE_DIR}. "
+                        "Add third_party/onnxruntime or run prebuilt setup so onnxruntime_c_api.h exists.")
+endif()
+
+set(ORT_JNILIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+if(EXISTS "${ORT_JNILIB_DIR}/libonnxruntime.so")
+    message(STATUS "Linking libonnxruntime for CTC alignment: ${ORT_JNILIB_DIR}")
+else()
+    message(FATAL_ERROR "libonnxruntime.so not found for ${ANDROID_ABI} at ${ORT_JNILIB_DIR}. "
+                        "Gradle should populate jniLibs from the onnxruntime bundle.")
+endif()
+
 target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/alignment
+    ${ORT_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
@@ -205,6 +225,8 @@ if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
 endif()
+target_link_directories(sherpaonnx PRIVATE ${ORT_JNILIB_DIR})
+target_link_libraries(sherpaonnx PRIVATE onnxruntime)
 # Link archive only when USE_LIBARCHIVE (otherwise libsherpaonnx.so would depend on libarchive.so at load time).
 if(USE_FFMPEG)
     target_link_libraries(sherpaonnx
