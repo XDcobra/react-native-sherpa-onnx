@@ -13,6 +13,33 @@ Optional third argument: **`{ format?: string; outputSampleRateHz?: number }`** 
 
 TurboModule consumers: call **`saveTtsAudio`** with flat arguments (`destinationType`: `'file'` | `'androidContent'`, `pathOrDirectoryUri`, `filename`, `format`, `outputSampleRateHz`).
 
+## Files API (persistence & sharing helpers)
+
+The following are **no longer** exported from **`react-native-sherpa-onnx/tts`**. Import them from **`react-native-sherpa-onnx/files`** (or `copyFileToContentUri` from the package root).
+
+| Before | After |
+| --- | --- |
+| `import { saveTextToContentUri, … } from 'react-native-sherpa-onnx/tts'` | `import { saveTextToContentUri, … } from 'react-native-sherpa-onnx/files'` |
+| `import { copyFileToContentUri } from 'react-native-sherpa-onnx/tts'` | `import { copyFileToContentUri } from 'react-native-sherpa-onnx/files'` (or from `'react-native-sherpa-onnx'`) |
+| `import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts'` | `import { copyContentUriToCache } from 'react-native-sherpa-onnx/files'` |
+| `import { shareAudioFile } from 'react-native-sherpa-onnx/tts'` | `import { shareAudioFile } from 'react-native-sherpa-onnx/files'` |
+
+**`saveAudio`** stays on **`react-native-sherpa-onnx/tts`** (unchanged).
+
+### TurboModule (`NativeSherpaOnnx` / `SherpaOnnx`)
+
+If you call the native module directly (bypassing the JS helpers), method names were renamed to match the **`files`** surface:
+
+| Before | After |
+| --- | --- |
+| `saveTtsTextToContentUri` | `saveTextToContentUri` |
+| `copyTtsContentUriToCache` | `copyContentUriToCache` |
+| `shareTtsAudio` | `shareAudioFile` |
+| `copyFileToContentUri` | *(unchanged)* |
+| `saveTtsAudio` | *(unchanged; TTS PCM export)* |
+
+See [docs/files.md](./files.md).
+
 ## Breaking changes (upgrading to 0.3.0)
 
 If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.

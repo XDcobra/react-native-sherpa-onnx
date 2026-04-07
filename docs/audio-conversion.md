@@ -87,7 +87,7 @@ Pick file --> copy to cache --> validate --> convert to 16 kHz WAV if non-WAV --
 ```ts
 import * as DocumentPicker from '@react-native-documents/picker';
 import { convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts';
+import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
 import { CachesDirectoryPath, copyFile, stat, unlink } from '@dr.pogodin/react-native-fs';
 
 // 1. Pick audio file
@@ -157,7 +157,7 @@ const path = await saveAudio(
 );
 ```
 
-**Alternative (still valid):** file-based pipeline using `react-native-sherpa-onnx/audio` — save WAV, `convertAudioToFormat`, then `copyFileToContentUri` for SAF. See [TTS offline — Persistence](tts-offline.md#persistence--sharing).
+**Alternative (still valid):** file-based pipeline using `react-native-sherpa-onnx/audio` — save WAV, `convertAudioToFormat`, then `copyFileToContentUri` from [`react-native-sherpa-onnx/files`](files.md) for SAF. See [TTS offline — Persistence](tts-offline.md#persistence--sharing).
 
 ## Disabling FFmpeg (Android)
 

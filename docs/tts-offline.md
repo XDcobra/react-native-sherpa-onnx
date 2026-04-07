@@ -215,16 +215,16 @@ await tts.destroy();
 
 ## Persistence & sharing
 
-Helpers for writing TTS output and for typical Android **Storage Access Framework (SAF)** flows. **`saveAudio`** takes `GeneratedAudio` and writes **WAV by default** or another format when FFmpeg is enabled (same format strings as [`convertAudioToFormat`](audio-conversion.md)). Generic **`copyFileToContentUri`** works for **any** existing file on disk.
+**`saveAudio`** (below) takes `GeneratedAudio` and writes **WAV by default** or another format when FFmpeg is enabled (same format strings as [`convertAudioToFormat`](audio-conversion.md)). Additional file-related helpers ship under **`react-native-sherpa-onnx/files`**; see [Files (persistence & sharing)](files.md).
 
 ### File path vs `content://` directory URI
 
 | Use | When |
 | --- | --- |
 | **Absolute file path** (`saveAudio` with `{ kind: 'file', path }`, or paths from your app cache/documents) | iOS and Android: you control the destination (app sandbox, temp files, RNFS paths). No user-picked folder. |
-| **Directory `content://` URI** (`saveAudio` with `{ kind: 'androidContent', ... }`, `saveTextToContentUri`, `copyFileToContentUri` target) | **Android:** user (or your app) granted access to a folder via SAF; you write **into** that tree. `androidContent` is rejected on iOS. |
+| **Directory `content://` URI** (`saveAudio` with `{ kind: 'androidContent', ... }`) | **Android:** user (or your app) granted access to a folder via SAF; you write **into** that tree. `androidContent` is rejected on iOS. |
 
-Rule of thumb: need **Files** / **Downloads** / a user-chosen folder on Android → obtain a **tree** or document URI, then use **`saveAudio`** (for PCM from TTS) or **`copyFileToContentUri`** (for an existing encoded file). Everything else (playback, file-based conversion, sharing from a temp file) → **normal path** first, then optionally copy or share.
+Rule of thumb: need **Files** / **Downloads** / a user-chosen folder on Android → obtain a **tree** or document URI, then use **`saveAudio`** for PCM from TTS into that tree. Everything else (playback, file-based conversion, sharing from a temp file) → **normal path** first, then optionally copy or share.
 
 ### `saveAudio(audio, target, options?)`
 
@@ -258,77 +258,7 @@ const uri = await saveAudio(
 );
 ```
 
-### Android: files and SAF
-
-Generic copy helpers: **existing file on disk** ↔ **user-visible storage** via `content://`. Not TTS-specific beyond typical export pipelines.
-
-#### `copyFileToContentUri(filePath, directoryUri, filename, mimeType)`
-
-```ts
-function copyFileToContentUri(
-  filePath: string,
-  directoryUri: string,
-  filename: string,
-  mimeType: string
-): Promise<string>;
-```
-
-Copies a **local file** (e.g. MP3/FLAC after [`convertAudioToFormat`](audio-conversion.md)) into a SAF directory.
-
-```ts
-await copyFileToContentUri('/cache/out.mp3', dirUri, 'out.mp3', 'audio/mpeg');
-```
-
-#### `copyContentUriToCache(fileUri, filename)`
-
-```ts
-function copyContentUriToCache(fileUri: string, filename: string): Promise<string>;
-```
-
-Android: copies a **`content://`** document (e.g. user-picked reference audio) into **app cache** and returns a **file path** for native code or `file://` consumers.
-
-```ts
-const path = await copyContentUriToCache(uri, 'ref.wav');
-```
-
-#### Saving MP3/FLAC to content URI (Android)
-
-Prefer a single call: **`saveAudio`** with `{ kind: 'androidContent', ... }` and `{ format: 'mp3' }` / `'flac'` (requires FFmpeg). Alternatively, write a temp file with `saveAudio` and `format: 'wav'`, convert with [`convertAudioToFormat`](audio-conversion.md), then **`copyFileToContentUri`**.
-
-See [TTS save example](audio-conversion.md#tts-save-example) in `audio-conversion.md` for snippets.
-
-### Share
-
-#### `shareAudioFile(fileUri, mimeType?)`
-
-```ts
-function shareAudioFile(fileUri: string, mimeType?: string): Promise<void>;
-```
-
-Opens the system share sheet. Accepts a **file path** or **`content://` URI** (default MIME `audio/wav`).
-
-```ts
-await shareAudioFile('/path/to/out.wav');
-```
-
-### Text export
-
-#### `saveTextToContentUri(text, directoryUri, filename, mimeType?)`
-
-```ts
-function saveTextToContentUri(
-  text: string,
-  directoryUri: string,
-  filename: string,
-  mimeType?: string
-): Promise<string>;
-```
-
-Android: writes plain text into a SAF directory (e.g. transcript or notes next to exported audio). Not related to `GeneratedAudio`.
-
-```ts
-await saveTextToContentUri('Hello', dirUri, 'note.txt');
-```
+See also [TTS save example](audio-conversion.md#tts-save-example).
 
 ## Subtitles (standalone audio)
 
