@@ -248,7 +248,7 @@ SttDetectResult DetectSttModel(
 );
 
 /** Test-only: Like DetectSttModel but takes a pre-built file list; no filesystem access.
- *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). Not used in
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). Not used in
  *  production (Android/iOS use DetectSttModel). Does not validate modelDir existence or
  *  call FileExists on tokens/bpeVocab. */
 SttDetectResult DetectSttModelFromFileList(
@@ -264,7 +264,7 @@ TtsDetectResult DetectTtsModel(
 );
 
 /** Test-only: Like DetectTtsModel but takes a pre-built file list; no filesystem access.
- *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). Not used in
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). Not used in
  *  production (Android/iOS use DetectTtsModel). Does not validate modelDir existence or
  *  call FileExists / IsDirectory. */
 TtsDetectResult DetectTtsModelFromFileList(
@@ -284,7 +284,7 @@ AlignmentDetectResult DetectAlignmentModel(
 );
 
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
- *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
@@ -292,7 +292,7 @@ EnhancementDetectResult DetectEnhancementModelFromFileList(
 );
 
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
- *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,

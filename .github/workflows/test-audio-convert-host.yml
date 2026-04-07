@@ -1,0 +1,50 @@
+# Host-side C++ tests: same android/src/.../jni/audio/*.cpp as Android, linked against system libav (Linux).
+# Runs convert-file and f32le→format tests. MP3 cases skip if libshine is not in system FFmpeg (common on Ubuntu).
+
+name: Test – host audio convert (C++)
+
+on:
+  push:
+  #pull_request:
+  #  branches:
+  #    - main
+  #  paths:
+  #    - 'android/src/main/cpp/jni/audio/**'
+  #    - 'test/cpp/**'
+  #    - '.github/workflows/test-audio-convert-host.yml'
+  #push:
+  #  branches:
+  #    - main
+  #  paths:
+  #    - 'android/src/main/cpp/jni/audio/**'
+  #    - 'test/cpp/**'
+  #    - '.github/workflows/test-audio-convert-host.yml'
+  #workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-audio-host
+  cancel-in-progress: true
+
+jobs:
+  audio-convert-host:
+    name: Audio convert host tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config libgtest-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev ffmpeg
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run CTest (audio + model_detect)
+        working-directory: ${{ github.workspace }}
+        run: cd test/cpp/build && ctest --output-on-failure

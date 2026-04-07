@@ -257,7 +257,7 @@ AlignmentDetectResult DetectAlignmentModel(
 );
 
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
- *  Only used by the host-side C++ test suite (test/cpp/model_detect_test.cpp). */
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
