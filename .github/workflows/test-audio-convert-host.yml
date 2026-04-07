@@ -4,22 +4,21 @@
 name: Test – host audio convert (C++)
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/jni/audio/**'
+      - 'test/cpp/**'
+      - '.github/workflows/test-audio-convert-host.yml'
   push:
-  #pull_request:
-  #  branches:
-  #    - main
-  #  paths:
-  #    - 'android/src/main/cpp/jni/audio/**'
-  #    - 'test/cpp/**'
-  #    - '.github/workflows/test-audio-convert-host.yml'
-  #push:
-  #  branches:
-  #    - main
-  #  paths:
-  #    - 'android/src/main/cpp/jni/audio/**'
-  #    - 'test/cpp/**'
-  #    - '.github/workflows/test-audio-convert-host.yml'
-  #workflow_dispatch:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/jni/audio/**'
+      - 'test/cpp/**'
+      - '.github/workflows/test-audio-convert-host.yml'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-audio-host
