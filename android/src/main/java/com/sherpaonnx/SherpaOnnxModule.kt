@@ -1,6 +1,7 @@
 package com.sherpaonnx
 
 import android.net.Uri
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
@@ -908,14 +909,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
   }
 
-  override fun runCTCForcedAlignment(
+  override fun alignAccurateFromPath(
     modelPath: String,
     audioPath: String,
     text: String,
     vocabJson: String,
     promise: Promise,
   ) {
-    alignmentHelper.runCTCForcedAlignment(modelPath, audioPath, text, vocabJson, promise)
+    alignmentHelper.alignAccurateFromPath(modelPath, audioPath, text, vocabJson, promise)
+  }
+
+  override fun alignAccurateFromFloat32(
+    modelPath: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    text: String,
+    vocabJson: String,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignAccurateFromFloat32(modelPath, samples, sampleRate, text, vocabJson, promise)
+  }
+
+  override fun getAlignmentAudioMetrics(
+    audioPath: String,
+    promise: Promise,
+  ) {
+    alignmentHelper.getAlignmentAudioMetrics(audioPath, promise)
   }
 
   /**

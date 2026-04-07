@@ -95,9 +95,13 @@ internal class TtsBatchGenerationService(
         return
       }
 
-      val subtitleMode = TtsGenerationOptionsParser.getSubtitleMode(options)
+      val exportChunkOnly = TtsGenerationOptionsParser.isExportChunkTimelineOnly(options)
+      var subtitleMode = TtsGenerationOptionsParser.getSubtitleMode(options)
+      if (exportChunkOnly) {
+        subtitleMode = "estimated"
+      }
       val subtitleGranularity = TtsGenerationOptionsParser.getSubtitleGranularity(options)
-      if (TtsGenerationOptionsParser.isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
+      if (!exportChunkOnly && TtsGenerationOptionsParser.isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
         Log.e(
           "SherpaOnnxTts",
           "TTS_SUBTITLE_ERROR: Character granularity is only supported when subtitleMode is 'accurate'"
@@ -113,7 +117,7 @@ internal class TtsBatchGenerationService(
       val speed = TtsGenerationOptionsParser.getSpeed(options)
       val sentenceChunkSizes = mutableListOf<Int>()
       val audio: GeneratedAudio = when {
-        subtitleMode == "off" -> {
+        subtitleMode == "off" || subtitleMode == "proportional" -> {
           when {
             TtsGenerationOptionsParser.hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
               if (inst.isZipvoice) {
@@ -211,6 +215,18 @@ internal class TtsBatchGenerationService(
       }
       map.putArray("samples", samplesArray)
       map.putInt("sampleRate", audio.sampleRate)
+
+      if (exportChunkOnly) {
+        val counts = Arguments.createArray()
+        for (c in sentenceChunkSizes) {
+          counts.pushInt(c)
+        }
+        map.putArray("segmentSampleCounts", counts)
+        map.putArray("subtitles", Arguments.createArray())
+        map.putString("timingMode", "estimated")
+        promise.resolve(map)
+        return
+      }
 
       val subtitleItems = if (subtitleMode == "off") {
         emptyList()

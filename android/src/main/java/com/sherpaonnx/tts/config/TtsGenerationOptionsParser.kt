@@ -36,10 +36,13 @@ internal object TtsGenerationOptionsParser {
   fun getSubtitleMode(options: ReadableMap?): String {
     val raw = options?.getString("subtitleMode")?.trim()?.lowercase()
     return when (raw) {
-      "off", "fast", "accurate" -> raw
-      else -> "fast"
+      "off", "proportional", "estimated", "accurate" -> raw
+      else -> "proportional"
     }
   }
+
+  fun isExportChunkTimelineOnly(options: ReadableMap?): Boolean =
+    options != null && options.hasKey("exportChunkTimelineOnly") && options.getBoolean("exportChunkTimelineOnly")
 
   fun getSubtitleGranularity(options: ReadableMap?): String {
     val raw = options?.getString("subtitleGranularity")?.trim()?.lowercase()
