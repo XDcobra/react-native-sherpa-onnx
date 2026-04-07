@@ -1,26 +1,4 @@
-import { unlink } from '@dr.pogodin/react-native-fs';
-import SherpaOnnx from '../NativeSherpaOnnx';
-import { WAV2VEC2_VOCAB } from '../alignment/vocab';
-import { decodeAudioFileToFloatSamples } from '../audio';
-import { saveAlignmentAudioToTempWav } from './tempAudio';
-import type {
-  SubtitleGranularity,
-  SubtitleMode,
-  SubtitleFromAudioOptions,
-  SubtitleResult,
-  TtsSubtitleItem,
-} from './types';
-
-export function assertSubtitleGranularityForMode(
-  mode: SubtitleMode,
-  granularity: SubtitleGranularity
-): void {
-  if (granularity === 'character' && mode !== 'accurate') {
-    throw new Error(
-      "Character granularity is only supported when subtitles.mode is 'accurate'."
-    );
-  }
-}
+import type { SubtitleTimingItem } from './types';
 
 const SENTENCE_TERMINATORS = new Set([
   '.',
@@ -62,8 +40,6 @@ const COMMON_ABBREVIATIONS = new Set([
   'i.e',
 ]);
 
-const WAV2VEC2_VOCAB_JSON = JSON.stringify(WAV2VEC2_VOCAB);
-
 function isWhitespaceChar(char: string): boolean {
   return /\s/u.test(char);
 }
@@ -103,7 +79,6 @@ function shouldSplitOnPeriod(text: string, periodIndex: number): boolean {
   const prev = text[periodIndex - 1] ?? '';
   const next = text[periodIndex + 1] ?? '';
 
-  // Do not split decimal numbers like 3.14.
   if (/\d/u.test(prev) && /\d/u.test(next)) {
     return false;
   }
@@ -114,7 +89,6 @@ function shouldSplitOnPeriod(text: string, periodIndex: number): boolean {
     return false;
   }
 
-  // Likely initial, e.g. "A. Smith" (check original case; token is lowercased for abbreviations).
   if (tokenRaw.length === 1 && /\p{Lu}/u.test(tokenRaw)) {
     return false;
   }
@@ -142,7 +116,7 @@ function sanitizeSegments(segments: string[]): string[] {
     .filter((segment) => segment.length > 0);
 }
 
-function distributeSamplesByTextWeight(
+export function distributeSamplesByTextWeight(
   totalSamples: number,
   segments: string[]
 ): number[] {
@@ -197,7 +171,7 @@ function distributeSamplesByTextWeight(
   return base;
 }
 
-function alignChunkCountsToSegments(
+export function alignChunkCountsToSegments(
   segments: string[],
   chunkSampleCounts: number[]
 ): number[] {
@@ -228,12 +202,6 @@ function alignChunkCountsToSegments(
   const total = counts.reduce((sum, value) => sum + value, 0);
   return distributeSamplesByTextWeight(total, segments);
 }
-
-type AlignmentNativeItem = {
-  text: string;
-  start: number;
-  end: number;
-};
 
 function distributeItemCounts(total: number, weights: number[]): number[] {
   if (weights.length === 0) {
@@ -269,26 +237,10 @@ function distributeItemCounts(total: number, weights: number[]): number[] {
   return base;
 }
 
-function normalizeAlignmentItems(
-  items: AlignmentNativeItem[]
-): TtsSubtitleItem[] {
-  return items
-    .map((item) => ({
-      text: item.text,
-      start: Number.isFinite(item.start) ? Math.max(0, item.start) : 0,
-      end: Number.isFinite(item.end) ? Math.max(0, item.end) : 0,
-    }))
-    .map((item) => ({
-      ...item,
-      end: item.end < item.start ? item.start : item.end,
-    }))
-    .filter((item) => item.text.trim().length > 0);
-}
-
-function buildSentenceSubtitlesFromAlignedWords(
+export function buildSentenceSubtitlesFromAlignedWords(
   text: string,
-  alignedWords: TtsSubtitleItem[]
-): TtsSubtitleItem[] {
+  alignedWords: SubtitleTimingItem[]
+): SubtitleTimingItem[] {
   const sentences = splitTextIntoSentences(text);
   if (sentences.length === 0 || alignedWords.length === 0) {
     return [];
@@ -302,7 +254,7 @@ function buildSentenceSubtitlesFromAlignedWords(
     sentenceWeights
   );
 
-  const subtitles: TtsSubtitleItem[] = [];
+  const subtitles: SubtitleTimingItem[] = [];
   let wordCursor = 0;
   let fallbackTime = alignedWords[0]?.start ?? 0;
 
@@ -455,7 +407,7 @@ export function buildSubtitlesFromChunks(
   segments: string[],
   chunkSampleCounts: number[],
   sampleRate: number
-): TtsSubtitleItem[] {
+): SubtitleTimingItem[] {
   if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
     return [];
   }
@@ -470,7 +422,7 @@ export function buildSubtitlesFromChunks(
     chunkSampleCounts
   );
 
-  const subtitles: TtsSubtitleItem[] = [];
+  const subtitles: SubtitleTimingItem[] = [];
   let offsetSamples = 0;
 
   for (let i = 0; i < cleanedSegments.length; i += 1) {
@@ -491,121 +443,4 @@ export function buildSubtitlesFromChunks(
   }
 
   return subtitles;
-}
-
-/**
- * Generate subtitle timelines from an existing transcript plus audio.
- *
- * This helper supports two modes:
- * - `mode: 'fast'`: single-stage estimation from transcript chunks + audio duration.
- * - `mode: 'accurate'`: two-stage pipeline: external STT transcript + wav2vec2 CTC forced alignment.
- *
- * For accurate mode, an alignment model from `ModelCategory.Alignment` must be available.
- * You can pre-validate a model path via `detectAlignmentModel` from `react-native-sherpa-onnx/alignment`
- * before calling this function.
- *
- * Related exports:
- * - Alignment detection: `detectAlignmentModel`
- */
-export async function generateSubtitlesFromAudio(
-  text: string,
-  audioPathOrSamples: string | { samples: number[]; sampleRate: number },
-  options: SubtitleFromAudioOptions
-): Promise<SubtitleResult> {
-  const mode = options.mode;
-  const granularity = options.granularity ?? 'sentence';
-
-  assertSubtitleGranularityForMode(mode, granularity);
-
-  if (mode === 'accurate') {
-    const resolvedModelPath = options.alignmentModelPath?.trim();
-
-    if (!resolvedModelPath) {
-      throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate subtitles.'
-      );
-    }
-
-    let audioPath = '';
-    let shouldCleanup = false;
-
-    if (typeof audioPathOrSamples === 'string') {
-      audioPath = audioPathOrSamples;
-    } else {
-      audioPath = await saveAlignmentAudioToTempWav(audioPathOrSamples);
-      shouldCleanup = true;
-    }
-
-    try {
-      const aligned = await SherpaOnnx.runCTCForcedAlignment(
-        resolvedModelPath,
-        audioPath,
-        text,
-        WAV2VEC2_VOCAB_JSON
-      );
-
-      const wordItems = normalizeAlignmentItems(aligned.words ?? []);
-      const charItems = normalizeAlignmentItems(aligned.chars ?? []);
-
-      return {
-        subtitles:
-          granularity === 'character'
-            ? charItems
-            : granularity === 'word'
-            ? wordItems
-            : buildSentenceSubtitlesFromAlignedWords(text, wordItems),
-        timingMode: 'aligned',
-      };
-    } finally {
-      if (shouldCleanup) {
-        unlink(audioPath).catch(() => {
-          // ignore cleanup errors
-        });
-      }
-    }
-  }
-
-  const segments =
-    granularity === 'word'
-      ? splitTextIntoWords(text)
-      : splitTextIntoSentences(text);
-
-  if (segments.length === 0) {
-    return {
-      subtitles: [],
-      timingMode: 'estimated',
-    };
-  }
-
-  let totalSamples = 0;
-  let sampleRate = 0;
-
-  if (typeof audioPathOrSamples === 'string') {
-    const decoded = await decodeAudioFileToFloatSamples(audioPathOrSamples);
-    totalSamples = decoded.samples.length;
-    sampleRate = decoded.sampleRate;
-  } else {
-    totalSamples = audioPathOrSamples.samples.length;
-    sampleRate = audioPathOrSamples.sampleRate;
-  }
-
-  if (!Number.isFinite(sampleRate) || sampleRate <= 0 || totalSamples <= 0) {
-    return {
-      subtitles: [],
-      timingMode: 'estimated',
-    };
-  }
-
-  const chunkSampleCounts = distributeSamplesByTextWeight(
-    totalSamples,
-    segments
-  );
-  return {
-    subtitles: buildSubtitlesFromChunks(
-      segments,
-      chunkSampleCounts,
-      sampleRate
-    ),
-    timingMode: 'estimated',
-  };
 }

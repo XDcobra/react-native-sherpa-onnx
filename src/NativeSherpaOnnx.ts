@@ -384,18 +384,16 @@ export interface Spec extends TurboModule {
     sampleRate: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
     timingMode: string;
+    /** Present when `exportChunkTimelineOnly` is set (synthesis chunk sample counts). */
+    segmentSampleCounts?: number[];
   }>;
 
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
-   * Run wav2vec2 CTC forced alignment on an audio file and transcript.
-   * @param modelPath - Absolute path to wav2vec2 ONNX model file
-   * @param audioPath - Absolute path to input audio file (WAV recommended)
-   * @param text - Transcript to align
-   * @param vocabJson - JSON map of token -> id (stringified to reduce bridge overhead)
+   * Wav2vec2 CTC forced alignment from a **file path** (no temp file on the JS side).
    */
-  runCTCForcedAlignment(
+  alignAccurateFromPath(
     modelPath: string,
     audioPath: string,
     text: string,
@@ -403,6 +401,29 @@ export interface Spec extends TurboModule {
   ): Promise<{
     words: Array<{ text: string; start: number; end: number }>;
     chars: Array<{ text: string; start: number; end: number }>;
+  }>;
+
+  /**
+   * Same as [alignAccurateFromPath] but with mono float PCM already in memory (avoids temp WAV).
+   */
+  alignAccurateFromFloat32(
+    modelPath: string,
+    samples: number[],
+    sampleRate: number,
+    text: string,
+    vocabJson: string
+  ): Promise<{
+    words: Array<{ text: string; start: number; end: number }>;
+    chars: Array<{ text: string; start: number; end: number }>;
+  }>;
+
+  /**
+   * Fast **16-bit mono PCM WAV** metrics without decoding samples (for proportional alignment).
+   * Rejects non-WAV or unsupported WAV layouts; use `decodeAudioFileToFloatSamples` + in-memory path instead.
+   */
+  getAlignmentAudioMetrics(audioPath: string): Promise<{
+    sampleRate: number;
+    totalSamples: number;
   }>;
 
   detectAlignmentModel(

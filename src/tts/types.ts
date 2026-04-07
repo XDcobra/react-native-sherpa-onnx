@@ -1,4 +1,8 @@
 import type { ModelPathConfig } from '../types';
+import type { SubtitleTimingItem } from '../alignment/types';
+
+/** @deprecated Import `SubtitleTimingItem` from `react-native-sherpa-onnx/alignment`. */
+export type TtsSubtitleItem = SubtitleTimingItem;
 
 /**
  * Supported TTS model types.
@@ -293,13 +297,13 @@ export type TtsUpdateOptions =
   | TtsUpdateOptionsZipvoice
   | TtsUpdateOptionsSupertonic;
 
-export type SubtitleMode = 'off' | 'fast' | 'accurate';
+export type SubtitleMode = 'off' | 'proportional' | 'estimated' | 'accurate';
 
 export type SubtitleGranularity = 'sentence' | 'word' | 'character';
 
-/** Subtitles off, fast estimation, or defaults: no alignment model; character granularity not allowed. */
-export type SubtitleOptionsFast = {
-  mode?: 'off' | 'fast';
+/** Subtitles off, proportional timing, or estimated (synthesis chunks); no alignment model; character not allowed. */
+export type SubtitleOptionsProportionalOrEstimated = {
+  mode?: 'off' | 'proportional' | 'estimated';
   granularity?: 'sentence' | 'word';
   alignmentModelPath?: never;
 };
@@ -312,7 +316,9 @@ export type SubtitleOptionsAccurate = {
   granularity?: 'sentence' | 'word' | 'character';
 };
 
-export type SubtitleOptions = SubtitleOptionsFast | SubtitleOptionsAccurate;
+export type SubtitleOptions =
+  | SubtitleOptionsProportionalOrEstimated
+  | SubtitleOptionsAccurate;
 
 /** Mono float samples in [-1, 1] for Zipvoice / Pocket voice cloning. */
 export type TtsReferenceAudio = {
@@ -405,66 +411,18 @@ export interface GeneratedAudio {
 }
 
 /**
- * Subtitle/timestamp item for synthesized speech.
- */
-export interface TtsSubtitleItem {
-  /**
-   * Text token for this time range.
-   */
-  text: string;
-
-  /**
-   * Start time in seconds.
-   */
-  start: number;
-
-  /**
-   * End time in seconds.
-   */
-  end: number;
-}
-
-/**
  * Generated audio with subtitle/timestamp metadata.
  */
 export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
   /**
    * Subtitle/timestamp entries.
    */
-  subtitles: TtsSubtitleItem[];
+  subtitles: SubtitleTimingItem[];
 
   /**
-   * Subtitle timing mode.
-   *
-   * - 'off': No subtitle timing requested/generated
-   * - 'estimated': Fast mode estimation
-   * - 'aligned': Accurate forced alignment mode
+   * Subtitle timing mode (aligned with `react-native-sherpa-onnx/alignment`).
    */
-  timingMode: 'off' | 'estimated' | 'aligned';
-}
-
-export type SubtitleFromAudioOptionsFast = {
-  mode: 'fast';
-  granularity?: 'sentence' | 'word';
-  language?: string;
-  alignmentModelPath?: never;
-};
-
-export type SubtitleFromAudioOptionsAccurate = {
-  mode: 'accurate';
-  /** Required for CTC forced alignment. */
-  alignmentModelPath: string;
-  granularity?: SubtitleGranularity;
-  language?: string;
-};
-
-export type SubtitleFromAudioOptions =
-  | SubtitleFromAudioOptionsFast
-  | SubtitleFromAudioOptionsAccurate;
-
-export interface SubtitleResult {
-  subtitles: TtsSubtitleItem[];
-  timingMode: 'estimated' | 'aligned';
+  timingMode: 'off' | 'proportional' | 'estimated' | 'aligned';
 }
 
 /** One detected TTS stack under a model directory (native may return unknown `type` strings). */

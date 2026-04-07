@@ -1,35 +1,14 @@
-import { DocumentDirectoryPath, mkdir } from '@dr.pogodin/react-native-fs';
-import SherpaOnnx from '../NativeSherpaOnnx';
+import {
+  saveAlignmentAudioToTempWav as saveToTemp,
+  type AlignmentAudioBuffer,
+} from '../alignment/tempAudio';
 import type { GeneratedAudio } from './types';
 
-function createTempAlignmentWavPath(instanceId?: string): string {
-  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const prefix = instanceId?.trim() ? `${instanceId}-` : '';
-  return `${DocumentDirectoryPath}/sherpa-onnx/cache/${prefix}alignment-${nonce}.wav`.replace(
-    /\/+/g,
-    '/'
-  );
-}
+export type { AlignmentAudioBuffer };
 
 export async function saveAlignmentAudioToTempWav(
-  audio: GeneratedAudio,
+  audio: GeneratedAudio | AlignmentAudioBuffer,
   instanceId?: string
 ): Promise<string> {
-  const cacheDir = `${DocumentDirectoryPath}/sherpa-onnx/cache`.replace(
-    /\/+/g,
-    '/'
-  );
-  await mkdir(cacheDir);
-
-  const tempPath = createTempAlignmentWavPath(instanceId);
-  await SherpaOnnx.saveTtsAudio(
-    audio.samples,
-    audio.sampleRate,
-    'file',
-    tempPath,
-    '',
-    'wav',
-    0
-  );
-  return tempPath;
+  return saveToTemp(audio, instanceId);
 }

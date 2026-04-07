@@ -181,9 +181,10 @@ export function expandTtsUpdateOptions(opts: TtsUpdateOptions): {
  * Convert TtsGenerationOptions to a flat object for the native bridge.
  */
 export function toNativeTtsGenerationOptions(
-  options?: TtsGenerationOptions
+  options?: TtsGenerationOptions,
+  extras?: Record<string, unknown>
 ): Record<string, unknown> {
-  if (options == null) return {};
+  if (options == null) return { ...(extras ?? {}) };
   const out: Record<string, unknown> = {};
   if (options.sid !== undefined) out.sid = options.sid;
   if (options.speed !== undefined) out.speed = options.speed;
@@ -220,5 +221,5 @@ export function toNativeTtsGenerationOptions(
   if (options.subtitles?.granularity !== undefined) {
     out.subtitleGranularity = options.subtitles.granularity;
   }
-  return out;
+  return extras != null ? { ...out, ...extras } : out;
 }

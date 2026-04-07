@@ -1,4 +1,3 @@
-import { unlink } from '@dr.pogodin/react-native-fs';
 import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
@@ -14,7 +13,6 @@ import {
   type TTSModelInfo,
   type TtsEngine,
   type TtsDetectedModelEntry,
-  type SubtitleOptions,
   type SaveAudioTarget,
   type SaveAudioOptions,
   type TtsDetectionSource,
@@ -22,10 +20,9 @@ import {
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
-  assertSubtitleGranularityForMode,
-  generateSubtitlesFromAudio,
-} from './subtitles';
-import { saveAlignmentAudioToTempWav } from './tempAudio';
+  alignTextToAudio,
+  assertAlignmentGranularityForMode,
+} from '../alignment/alignTextToAudio';
 import {
   expandTtsInitializeOptions,
   expandTtsUpdateOptions,
@@ -237,80 +234,50 @@ export async function createTTS(
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
       const subs = opts?.subtitles;
-      const subtitleMode = subs?.mode ?? 'fast';
+      const subtitleMode = subs?.mode ?? 'proportional';
       const subtitleGranularity = subs?.granularity ?? 'sentence';
 
-      assertSubtitleGranularityForMode(subtitleMode, subtitleGranularity);
+      if (subtitleMode !== 'off') {
+        assertAlignmentGranularityForMode(
+          subtitleMode === 'accurate' ? 'aligned' : subtitleMode,
+          subtitleGranularity
+        );
+      }
 
-      if (subtitleMode !== 'accurate') {
-        let subtitles: SubtitleOptions;
-        if (subs && subs.mode !== 'accurate') {
-          subtitles = {
-            mode: subtitleMode,
-            ...(subs.granularity != null
-              ? { granularity: subs.granularity }
-              : {}),
-          };
-        } else {
-          subtitles = { mode: subtitleMode };
-        }
-        const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
-          ...(opts ?? {}),
-          subtitles,
-        };
-
-        const native = await SherpaOnnx.generateTtsWithTimestamps(
+      if (subtitleMode === 'off') {
+        const audio = await SherpaOnnx.generateTts(
           instanceId,
           text,
-          toNativeTtsGenerationOptions(optionsWithDefaultSubtitleMode)
+          toNativeTtsGenerationOptions({
+            ...(opts ?? {}),
+            subtitles: { mode: 'off' },
+          })
         );
+        return { ...audio, subtitles: [], timingMode: 'off' };
+      }
 
-        const timingMode =
-          native.timingMode === 'off' ||
-          native.timingMode === 'estimated' ||
-          native.timingMode === 'aligned'
-            ? native.timingMode
-            : 'off';
+      if (subs?.mode === 'accurate') {
+        const alignmentModelPath = subs.alignmentModelPath.trim();
+        if (!alignmentModelPath) {
+          throw new Error(
+            'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
+          );
+        }
 
-        return {
-          ...native,
-          timingMode,
+        const optionsWithSubtitlesOff: TtsGenerationOptions = {
+          ...(opts ?? {}),
+          subtitles: { mode: 'off' },
         };
-      }
 
-      if (!subs || subs.mode !== 'accurate') {
-        throw new Error(
-          'ALIGNMENT_MODEL_MISSING: Provide subtitles with mode accurate and alignmentModelPath.'
-        );
-      }
-      const alignmentModelPath = subs.alignmentModelPath.trim();
-
-      if (!alignmentModelPath) {
-        throw new Error(
-          'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
-        );
-      }
-
-      const optionsWithSubtitlesOff: TtsGenerationOptions = {
-        ...(opts ?? {}),
-        subtitles: { mode: 'off' },
-      };
-
-      const generated = await SherpaOnnx.generateTts(
-        instanceId,
-        text,
-        toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
-      );
-
-      let tempAudioPath: string | null = null;
-      try {
-        tempAudioPath = await saveAlignmentAudioToTempWav(
-          generated,
-          instanceId
-        );
-        const subtitleResult = await generateSubtitlesFromAudio(
+        const generated = await SherpaOnnx.generateTts(
+          instanceId,
           text,
-          tempAudioPath,
+          toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
+        );
+
+        const subtitleResult = await alignTextToAudio(
+          text,
+          { samples: generated.samples, sampleRate: generated.sampleRate },
           {
             mode: 'accurate',
             granularity: subtitleGranularity,
@@ -321,15 +288,71 @@ export async function createTTS(
         return {
           ...generated,
           subtitles: subtitleResult.subtitles,
+          timingMode: 'aligned',
+        };
+      }
+
+      const gran =
+        subtitleGranularity === 'character' ? 'sentence' : subtitleGranularity;
+
+      if (subtitleMode === 'proportional') {
+        const generated = await SherpaOnnx.generateTts(
+          instanceId,
+          text,
+          toNativeTtsGenerationOptions({
+            ...(opts ?? {}),
+            subtitles: { mode: 'off' },
+          })
+        );
+        const subtitleResult = await alignTextToAudio(
+          text,
+          { samples: generated.samples, sampleRate: generated.sampleRate },
+          { mode: 'proportional', granularity: gran }
+        );
+        return {
+          ...generated,
+          subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
-      } finally {
-        if (tempAudioPath) {
-          unlink(tempAudioPath).catch(() => {
-            // ignore cleanup errors
-          });
-        }
       }
+
+      if (subtitleMode === 'estimated') {
+        const raw = await SherpaOnnx.generateTtsWithTimestamps(
+          instanceId,
+          text,
+          toNativeTtsGenerationOptions(opts ?? {}, {
+            exportChunkTimelineOnly: true,
+            subtitleMode: 'estimated',
+            subtitleGranularity: gran,
+          })
+        );
+        const counts = raw.segmentSampleCounts;
+        if (!counts || !Array.isArray(counts)) {
+          throw new Error(
+            'TTS_CHUNK_TIMELINE: native did not return segmentSampleCounts; ensure exportChunkTimelineOnly is supported.'
+          );
+        }
+        const subtitleResult = await alignTextToAudio(
+          text,
+          { samples: raw.samples, sampleRate: raw.sampleRate },
+          {
+            mode: 'estimated',
+            chunks: {
+              sampleRate: raw.sampleRate,
+              segmentSampleCounts: counts.map((n) => Number(n)),
+            },
+            granularity: gran,
+          }
+        );
+        return {
+          samples: raw.samples,
+          sampleRate: raw.sampleRate,
+          subtitles: subtitleResult.subtitles,
+          timingMode: subtitleResult.timingMode,
+        };
+      }
+
+      throw new Error(`Unsupported subtitles.mode: ${String(subtitleMode)}`);
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
@@ -445,7 +468,17 @@ export function saveAudio(
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';
-export { generateSubtitlesFromAudio } from './subtitles';
+
+export {
+  alignTextToAudio,
+  assertAlignmentGranularityForMode,
+} from '../alignment/alignTextToAudio';
+export type {
+  AlignTextToAudioOptions,
+  AlignTextToAudioResult,
+  AlignmentChunkTimeline,
+  SubtitleTimingItem,
+} from '../alignment/types';
 
 // Export types and runtime type list
 export type {
@@ -480,12 +513,8 @@ export type {
   SubtitleMode,
   SubtitleGranularity,
   SubtitleOptions,
-  SubtitleOptionsFast,
   SubtitleOptionsAccurate,
-  SubtitleFromAudioOptions,
-  SubtitleFromAudioOptionsFast,
-  SubtitleFromAudioOptionsAccurate,
-  SubtitleResult,
+  SubtitleOptionsProportionalOrEstimated,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
   TtsSubtitleItem,

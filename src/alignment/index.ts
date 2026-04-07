@@ -10,6 +10,34 @@ export {
   WAV2VEC2_WORD_BOUNDARY_ID,
 } from './vocab';
 
+export {
+  alignTextToAudio,
+  assertAlignmentGranularityForMode,
+} from './alignTextToAudio';
+
+export {
+  splitTextIntoSentences,
+  splitTextIntoWords,
+  buildSubtitlesFromChunks,
+} from './textSegments';
+
+export type {
+  AlignTextToAudioOptions,
+  AlignTextToAudioOptionsAccurate,
+  AlignTextToAudioOptionsEstimated,
+  AlignTextToAudioOptionsProportional,
+  AlignTextToAudioResult,
+  AlignmentChunkTimeline,
+  AlignmentDetectResult,
+  AlignmentGranularity,
+  AlignmentModelType,
+  AlignmentResult,
+  AlignmentTimestamp,
+  AlignmentTimingMode,
+  CtcAlignmentNativeResult,
+  SubtitleTimingItem,
+} from './types';
+
 export async function detectAlignmentModel(
   modelPath: ModelPathConfig,
   options?: { modelType?: AlignmentModelType }
@@ -32,10 +60,3 @@ export async function detectAlignmentModel(
     ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
   };
 }
-
-export type {
-  AlignmentResult,
-  AlignmentTimestamp,
-  AlignmentDetectResult,
-  AlignmentModelType,
-} from './types';
