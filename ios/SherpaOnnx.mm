@@ -4,7 +4,7 @@
  * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
  * SherpaOnnx+Assets.mm), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
  * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
- * SherpaOnnx+Assets.mm; STT/TTS in SherpaOnnx+STT.mm and SherpaOnnx+TTS.mm.
+ * SherpaOnnx+Assets.mm; STT/TTS in SherpaOnnx+STT.mm and SherpaOnnx+TTS.mm; file/share helpers in SherpaOnnx+Files.mm.
  */
 
 #import "SherpaOnnx.h"

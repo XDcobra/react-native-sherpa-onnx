@@ -2,7 +2,6 @@ package com.sherpaonnx
 
 import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -11,9 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.DocumentsContract
 import android.util.Log
-import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
@@ -35,7 +32,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -1032,7 +1028,7 @@ internal class SherpaOnnxTtsHelper(
       }
       val resolver = context.contentResolver
       val dirUri = Uri.parse(directoryUri)
-      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
+      val fileUri = SherpaOnnxContentUriUtils.createDocumentInDirectory(resolver, dirUri, filename, mimeType)
       FileInputStream(cacheFile).use { inputStream ->
         resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
           inputStream.copyTo(outputStream)
@@ -1087,7 +1083,7 @@ internal class SherpaOnnxTtsHelper(
       }
       val resolver = context.contentResolver
       val dirUri = Uri.parse(directoryUri)
-      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, "audio/wav")
+      val fileUri = SherpaOnnxContentUriUtils.createDocumentInDirectory(resolver, dirUri, filename, "audio/wav")
       resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
         writeWavToStream(samplesArray, sampleRate.toInt(), outputStream)
       } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
@@ -1095,111 +1091,6 @@ internal class SherpaOnnxTtsHelper(
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save audio to content URI", e)
       promise.reject("TTS_SAVE_ERROR", "Failed to save audio to content URI", e)
-    }
-  }
-
-  fun saveTtsTextToContentUri(
-    text: String,
-    directoryUri: String,
-    filename: String,
-    mimeType: String,
-    promise: Promise
-  ) {
-    try {
-      val resolver = context.contentResolver
-      val dirUri = Uri.parse(directoryUri)
-      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
-      resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
-        outputStream.write(text.toByteArray(Charsets.UTF_8))
-      } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
-      promise.resolve(fileUri.toString())
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to save text to content URI", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to save text to content URI", e)
-    }
-  }
-
-  /**
-   * Copy a local file into a document under a SAF directory URI.
-   * Format-agnostic: any file (e.g. WAV, MP3, FLAC) can be written.
-   * Resolves with the created content URI string.
-   */
-  fun copyFileToContentUri(
-    filePath: String,
-    directoryUri: String,
-    filename: String,
-    mimeType: String,
-    promise: Promise
-  ) {
-    try {
-      val file = File(filePath)
-      if (!file.isFile || !file.canRead()) {
-        promise.reject("TTS_SAVE_ERROR", "File not found or not readable: $filePath")
-        return
-      }
-      val resolver = context.contentResolver
-      val dirUri = Uri.parse(directoryUri)
-      val fileUri = createDocumentInDirectory(resolver, dirUri, filename, mimeType)
-      FileInputStream(file).use { inputStream ->
-        resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
-          inputStream.copyTo(outputStream)
-          outputStream.flush()
-        } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
-      }
-      promise.resolve(fileUri.toString())
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to copy file to content URI", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to copy file to content URI", e)
-    }
-  }
-
-  fun copyTtsContentUriToCache(fileUri: String, filename: String, promise: Promise) {
-    try {
-      val resolver = context.contentResolver
-      val uri = Uri.parse(fileUri)
-      val cacheFile = File(context.cacheDir, filename)
-      resolver.openInputStream(uri)?.use { inputStream ->
-        FileOutputStream(cacheFile).use { outputStream ->
-          copyStream(inputStream, outputStream)
-        }
-      } ?: throw IllegalStateException("Failed to open input stream for URI: $fileUri")
-      promise.resolve(cacheFile.absolutePath)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: Failed to copy audio to cache", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to copy audio to cache", e)
-    }
-  }
-
-  fun shareTtsAudio(fileUri: String, mimeType: String, promise: Promise) {
-    try {
-      val uri = if (fileUri.startsWith("content://")) {
-        Uri.parse(fileUri)
-      } else {
-        val path = if (fileUri.startsWith("file://")) {
-          try {
-            Uri.parse(fileUri).path ?: fileUri.replaceFirst("file://", "")
-          } catch (_: Exception) {
-            fileUri.replaceFirst("file://", "")
-          }
-        } else {
-          fileUri
-        }
-        val file = File(path)
-        val authority = context.packageName + ".fileprovider"
-        FileProvider.getUriForFile(context, authority, file)
-      }
-      val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = mimeType
-        putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
-      val chooser = Intent.createChooser(shareIntent, "Share audio")
-      chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      context.startActivity(chooser)
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_SHARE_ERROR: Failed to share audio", e)
-      promise.reject("TTS_SHARE_ERROR", "Failed to share audio", e)
     }
   }
 
@@ -1477,23 +1368,6 @@ internal class SherpaOnnxTtsHelper(
     )
   }
 
-  private fun createDocumentInDirectory(
-    resolver: android.content.ContentResolver,
-    directoryUri: Uri,
-    filename: String,
-    mimeType: String
-  ): Uri {
-    return if (DocumentsContract.isTreeUri(directoryUri)) {
-      val documentId = DocumentsContract.getTreeDocumentId(directoryUri)
-      val dirDocUri = DocumentsContract.buildDocumentUriUsingTree(directoryUri, documentId)
-      DocumentsContract.createDocument(resolver, dirDocUri, mimeType, filename)
-        ?: throw IllegalStateException("Failed to create document in tree URI")
-    } else {
-      DocumentsContract.createDocument(resolver, directoryUri, mimeType, filename)
-        ?: throw IllegalStateException("Failed to create document in directory URI")
-    }
-  }
-
   private fun writeWavToStream(samples: FloatArray, sampleRate: Int, outputStream: OutputStream) {
     val numChannels = 1
     val bitsPerSample = 16
@@ -1535,13 +1409,4 @@ internal class SherpaOnnxTtsHelper(
     outputStream.write((intValue shr 8) and 0xFF)
   }
 
-  private fun copyStream(inputStream: InputStream, outputStream: OutputStream) {
-    val buffer = ByteArray(8192)
-    var bytes = inputStream.read(buffer)
-    while (bytes >= 0) {
-      outputStream.write(buffer, 0, bytes)
-      bytes = inputStream.read(buffer)
-    }
-    outputStream.flush()
-  }
 }

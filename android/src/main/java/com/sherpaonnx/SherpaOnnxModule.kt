@@ -59,6 +59,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
     }
   )
+  private val filesHelper = SherpaOnnxFilesHelper(reactApplicationContext)
   private val alignmentHelper = SherpaOnnxAlignmentHelper(reactApplicationContext)
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
@@ -1234,38 +1235,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     mimeType: String,
     promise: Promise
   ) {
-    ttsHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
+    filesHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
   }
 
-  /**
-   * Save text content to a file via Android SAF content URI.
-   */
-  override fun saveTtsTextToContentUri(
+  override fun saveTextToContentUri(
     text: String,
     directoryUri: String,
     filename: String,
     mimeType: String,
     promise: Promise
   ) {
-    ttsHelper.saveTtsTextToContentUri(text, directoryUri, filename, mimeType, promise)
+    filesHelper.saveTextToContentUri(text, directoryUri, filename, mimeType, promise)
   }
 
-  /**
-   * Copy a SAF content URI to a cache file for local playback.
-   */
-  override fun copyTtsContentUriToCache(
+  override fun copyContentUriToCache(
     fileUri: String,
     filename: String,
     promise: Promise
   ) {
-    ttsHelper.copyTtsContentUriToCache(fileUri, filename, promise)
+    filesHelper.copyContentUriToCache(fileUri, filename, promise)
   }
 
-  /**
-   * Share a TTS audio file (file path or content URI).
-   */
-  override fun shareTtsAudio(fileUri: String, mimeType: String, promise: Promise) {
-    ttsHelper.shareTtsAudio(fileUri, mimeType, promise)
+  override fun shareAudioFile(fileUri: String, mimeType: String, promise: Promise) {
+    filesHelper.shareAudioFile(fileUri, mimeType, promise)
   }
 
   /**

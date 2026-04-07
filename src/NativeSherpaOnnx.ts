@@ -556,15 +556,17 @@ export interface Spec extends TurboModule {
     outputSampleRateHz: number
   ): Promise<string>;
 
+  // ==================== File / persistence (shared) ====================
+
   /**
-   * Save a text file via Android SAF content URI.
+   * Save a text file via Android SAF directory URI, or a regular directory path on iOS.
    * @param text - Text content to write
-   * @param directoryUri - Directory content URI (tree or document)
-   * @param filename - Desired file name (e.g., tts_123.srt)
-   * @param mimeType - MIME type (e.g., application/x-subrip)
-   * @returns The content URI of the saved file
+   * @param directoryUri - Directory content URI (tree or document) on Android; file URL or path on iOS
+   * @param filename - Desired file name (e.g. note.txt)
+   * @param mimeType - MIME type (e.g. text/plain)
+   * @returns The content URI of the saved file (Android) or file path (iOS)
    */
-  saveTtsTextToContentUri(
+  saveTextToContentUri(
     text: string,
     directoryUri: string,
     filename: string,
@@ -573,9 +575,11 @@ export interface Spec extends TurboModule {
 
   /**
    * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
-   * @param fileUri - Content URI of the saved WAV file
-   * @param filename - Desired cache filename
-   * @returns Absolute file path to the cached copy
+   * @param filePath - Absolute path to an existing file on disk
+   * @param directoryUri - SAF directory tree or document URI
+   * @param filename - Display name for the new document
+   * @param mimeType - MIME type for the created document
+   * @returns The content URI of the created document
    */
   copyFileToContentUri(
     filePath: string,
@@ -585,19 +589,19 @@ export interface Spec extends TurboModule {
   ): Promise<string>;
 
   /**
-   * Copy a SAF content URI to a cache file for local playback.
-   * @param fileUri - Content URI of the saved WAV file
-   * @param filename - Desired cache filename
+   * Copy a content URI (or file path) to an app cache file for native consumers.
+   * @param fileUri - content:// URI or file path
+   * @param filename - Desired cache file name
    * @returns Absolute file path to the cached copy
    */
-  copyTtsContentUriToCache(fileUri: string, filename: string): Promise<string>;
+  copyContentUriToCache(fileUri: string, filename: string): Promise<string>;
 
   /**
-   * Share a TTS audio file (file path or content URI).
+   * Open the system share sheet for an audio file (file path or content URI).
    * @param fileUri - File path or content URI
-   * @param mimeType - MIME type (e.g., audio/wav)
+   * @param mimeType - MIME type (e.g. audio/wav)
    */
-  shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
+  shareAudioFile(fileUri: string, mimeType: string): Promise<void>;
 
   // ==================== Helper - Assets ====================
 
