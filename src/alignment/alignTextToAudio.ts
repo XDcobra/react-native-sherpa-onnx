@@ -1,29 +1,33 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { WAV2VEC2_VOCAB } from './vocab';
-import { decodeAudioFileToFloatSamples } from '../audio';
 import type {
+  AlignAudioInput,
+  AlignTextToAudioFn,
   AlignTextToAudioOptions,
   AlignTextToAudioResult,
+  AlignTextToTtsSinkFn,
   AlignmentGranularity,
+  AlignmentTimingMode,
   SubtitleTimingItem,
 } from './types';
-import {
-  alignChunkCountsToSegments,
-  buildSentenceSubtitlesFromAlignedWords,
-  buildSubtitlesFromChunks,
-  distributeSamplesByTextWeight,
-  splitTextIntoSentences,
-  splitTextIntoWords,
-} from './textSegments';
 
-const WAV2VEC2_VOCAB_JSON = JSON.stringify(WAV2VEC2_VOCAB);
+type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate';
+type NativeGranularity = 'sentence' | 'word' | 'character';
+type NativeTtsSinkHandle = {
+  generation: number;
+  _instanceId?: string;
+  instanceId?: string;
+};
 
 function normalizeAlignmentItems(
-  items: Array<{ text: string; start: number; end: number }>
+  items: Array<{ text: string; start: number; end: number }> | null | undefined
 ): SubtitleTimingItem[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
   return items
     .map((item) => ({
-      text: item.text,
+      text: typeof item.text === 'string' ? item.text : '',
       start: Number.isFinite(item.start) ? Math.max(0, item.start) : 0,
       end: Number.isFinite(item.end) ? Math.max(0, item.end) : 0,
     }))
@@ -32,6 +36,36 @@ function normalizeAlignmentItems(
       end: item.end < item.start ? item.start : item.end,
     }))
     .filter((item) => item.text.trim().length > 0);
+}
+
+function expectedTimingMode(mode: NativeAlignmentMode): AlignmentTimingMode {
+  if (mode === 'accurate') {
+    return 'aligned';
+  }
+  return mode;
+}
+
+function normalizeTimingMode(
+  mode: NativeAlignmentMode,
+  rawTimingMode: unknown
+): AlignmentTimingMode {
+  if (
+    rawTimingMode === 'proportional' ||
+    rawTimingMode === 'estimated' ||
+    rawTimingMode === 'aligned'
+  ) {
+    return rawTimingMode;
+  }
+  return expectedTimingMode(mode);
+}
+
+function normalizeGranularity(
+  granularity: AlignmentGranularity | undefined
+): NativeGranularity {
+  if (granularity === 'word' || granularity === 'character') {
+    return granularity;
+  }
+  return 'sentence';
 }
 
 /**
@@ -48,152 +82,158 @@ export function assertAlignmentGranularityForMode(
   }
 }
 
-function segmentsForGranularity(
-  text: string,
-  granularity: 'sentence' | 'word'
-): string[] {
-  return granularity === 'word'
-    ? splitTextIntoWords(text)
-    : splitTextIntoSentences(text);
+function toNativeMode(
+  mode: AlignTextToAudioOptions['mode']
+): NativeAlignmentMode {
+  if (mode === 'proportional' || mode === 'estimated' || mode === 'accurate') {
+    return mode;
+  }
+  throw new Error(`Unsupported alignment mode: ${String(mode)}`);
 }
 
-function isLikelyWavPath(p: string): boolean {
-  return p.trim().toLowerCase().endsWith('.wav');
-}
-
-/**
- * Build subtitle timelines from a transcript plus audio (file path or float PCM buffer).
- *
- * - **proportional**: spread total duration by text weight (no model, no engine chunks).
- * - **estimated**: use {@link import('./types').AlignmentChunkTimeline} from TTS synthesis, STT, etc.
- * - **accurate**: wav2vec2 CTC forced alignment (`alignAccurateFromPath` / `alignAccurateFromFloat32`).
- */
-export async function alignTextToAudio(
-  text: string,
-  audioPathOrSamples: string | { samples: number[]; sampleRate: number },
+function buildNativeOptions(
   options: AlignTextToAudioOptions
-): Promise<AlignTextToAudioResult> {
+): Record<string, unknown> {
   if (options.mode === 'accurate') {
-    const g: AlignmentGranularity = options.granularity ?? 'sentence';
-    assertAlignmentGranularityForMode('aligned', g);
-    const resolvedModelPath = options.alignmentModelPath?.trim();
-    if (!resolvedModelPath) {
+    const alignmentModelPath = options.alignmentModelPath?.trim();
+    if (!alignmentModelPath) {
       throw new Error(
         'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.'
       );
     }
-
-    let aligned: {
-      words: Array<{ text: string; start: number; end: number }>;
-      chars: Array<{ text: string; start: number; end: number }>;
-    };
-
-    if (typeof audioPathOrSamples === 'string') {
-      aligned = await SherpaOnnx.alignAccurateFromPath(
-        resolvedModelPath,
-        audioPathOrSamples,
-        text,
-        WAV2VEC2_VOCAB_JSON
-      );
-    } else {
-      aligned = await SherpaOnnx.alignAccurateFromFloat32(
-        resolvedModelPath,
-        audioPathOrSamples.samples,
-        audioPathOrSamples.sampleRate,
-        text,
-        WAV2VEC2_VOCAB_JSON
-      );
-    }
-
-    const wordItems = normalizeAlignmentItems(aligned.words ?? []);
-    const charItems = normalizeAlignmentItems(aligned.chars ?? []);
-
-    const subtitles: SubtitleTimingItem[] =
-      g === 'character'
-        ? charItems
-        : g === 'word'
-        ? wordItems
-        : buildSentenceSubtitlesFromAlignedWords(text, wordItems);
-
-    return {
-      subtitles,
-      timingMode: 'aligned',
-    };
+    return { alignmentModelPath };
   }
 
   if (options.mode === 'estimated') {
-    const g = options.granularity ?? 'sentence';
-    assertAlignmentGranularityForMode('estimated', g);
-    const { chunks } = options;
-    const segs = segmentsForGranularity(text, g);
-    if (segs.length === 0) {
-      return { subtitles: [], timingMode: 'estimated' };
-    }
-
-    const alignedCounts = alignChunkCountsToSegments(segs, [
-      ...chunks.segmentSampleCounts,
-    ]);
+    const segmentSampleCounts = options.chunks.segmentSampleCounts.map(
+      (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) {
+          return 0;
+        }
+        return Math.max(0, Math.round(n));
+      }
+    );
 
     return {
-      subtitles: buildSubtitlesFromChunks(
-        segs,
-        alignedCounts,
-        chunks.sampleRate
-      ),
-      timingMode: 'estimated',
+      segmentSampleCounts,
+      chunks: {
+        sampleRate: options.chunks.sampleRate,
+        segmentSampleCounts,
+      },
     };
   }
 
-  if (options.mode !== 'proportional') {
-    throw new Error('alignTextToAudio: unreachable mode');
+  return {};
+}
+
+function normalizeAlignmentResult(
+  mode: NativeAlignmentMode,
+  raw: {
+    subtitles?: Array<{ text: string; start: number; end: number }>;
+    timingMode?: unknown;
   }
-
-  const g = options.granularity ?? 'sentence';
-  assertAlignmentGranularityForMode('proportional', g);
-  const segments = segmentsForGranularity(text, g);
-  if (segments.length === 0) {
-    return { subtitles: [], timingMode: 'proportional' };
-  }
-
-  let totalSamples = 0;
-  let sampleRate = 0;
-
-  if (typeof audioPathOrSamples === 'string') {
-    if (isLikelyWavPath(audioPathOrSamples)) {
-      try {
-        const m = await SherpaOnnx.getAlignmentAudioMetrics(audioPathOrSamples);
-        totalSamples = m.totalSamples;
-        sampleRate = m.sampleRate;
-      } catch {
-        const decoded = await decodeAudioFileToFloatSamples(audioPathOrSamples);
-        totalSamples = decoded.samples.length;
-        sampleRate = decoded.sampleRate;
-      }
-    } else {
-      const decoded = await decodeAudioFileToFloatSamples(audioPathOrSamples);
-      totalSamples = decoded.samples.length;
-      sampleRate = decoded.sampleRate;
-    }
-  } else {
-    totalSamples = audioPathOrSamples.samples.length;
-    sampleRate = audioPathOrSamples.sampleRate;
-  }
-
-  if (!Number.isFinite(sampleRate) || sampleRate <= 0 || totalSamples <= 0) {
-    return { subtitles: [], timingMode: 'proportional' };
-  }
-
-  const chunkSampleCounts = distributeSamplesByTextWeight(
-    totalSamples,
-    segments
-  );
-
+): AlignTextToAudioResult {
   return {
-    subtitles: buildSubtitlesFromChunks(
-      segments,
-      chunkSampleCounts,
-      sampleRate
-    ),
-    timingMode: 'proportional',
+    subtitles: normalizeAlignmentItems(raw.subtitles),
+    timingMode: normalizeTimingMode(mode, raw.timingMode),
   };
 }
+
+function toSamplesArray(audio: AlignAudioInput): number[] {
+  if (typeof audio === 'string') {
+    return [];
+  }
+
+  const { samples } = audio;
+  if (samples instanceof Float32Array) {
+    return Array.from(samples);
+  }
+
+  // Runtime fallback for callers still passing number[].
+  return Array.from(samples as unknown as ArrayLike<number>);
+}
+
+/**
+ * Build subtitle timelines from transcript + audio by delegating all modes to native.
+ */
+export const alignTextToAudio: AlignTextToAudioFn = async (
+  text,
+  audio,
+  options
+) => {
+  const mode = toNativeMode(options.mode);
+  const granularity = normalizeGranularity(options.granularity);
+  assertAlignmentGranularityForMode(
+    mode === 'accurate' ? 'aligned' : mode,
+    granularity
+  );
+
+  const nativeOptions = buildNativeOptions(options);
+
+  if (typeof audio === 'string') {
+    const raw = await SherpaOnnx.alignTextToAudioFromPath(
+      text,
+      audio,
+      mode,
+      granularity,
+      nativeOptions
+    );
+    return normalizeAlignmentResult(mode, raw);
+  }
+
+  const raw = await SherpaOnnx.alignTextToAudioFromPcm(
+    text,
+    toSamplesArray(audio),
+    audio.sampleRate,
+    mode,
+    granularity,
+    nativeOptions
+  );
+
+  return normalizeAlignmentResult(mode, raw);
+};
+
+/**
+ * Align directly from native TTS sink data (no PCM round-trip through JS).
+ */
+export const alignTextToTtsSink: AlignTextToTtsSinkFn = async (
+  text,
+  generatedAudio,
+  options
+) => {
+  const mode = toNativeMode(options.mode);
+  const granularity = normalizeGranularity(options.granularity);
+  assertAlignmentGranularityForMode(
+    mode === 'accurate' ? 'aligned' : mode,
+    granularity
+  );
+
+  const nativeOptions = buildNativeOptions(options);
+  const source = generatedAudio as unknown as NativeTtsSinkHandle;
+  const privateId =
+    typeof source._instanceId === 'string' ? source._instanceId.trim() : '';
+  const publicId =
+    typeof source.instanceId === 'string' ? source.instanceId.trim() : '';
+  const instanceId = privateId.length > 0 ? privateId : publicId || null;
+  if (instanceId == null) {
+    throw new Error(
+      'ALIGNMENT_TTS_HANDLE_MISSING: alignTextToTtsSink expects GeneratedAudio returned by createTTS.generateSpeech().'
+    );
+  }
+
+  const handle: NativeTtsSinkHandle = {
+    generation: generatedAudio.generation,
+    _instanceId: instanceId,
+  };
+
+  const raw = await SherpaOnnx.alignTextToTtsSink(
+    handle,
+    text,
+    mode,
+    granularity,
+    nativeOptions
+  );
+
+  return normalizeAlignmentResult(mode, raw);
+};

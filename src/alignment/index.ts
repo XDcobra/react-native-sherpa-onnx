@@ -4,37 +4,27 @@ import { resolveModelPath } from '../utils';
 import type { AlignmentDetectResult, AlignmentModelType } from './types';
 
 export {
-  WAV2VEC2_BLANK_ID,
-  WAV2VEC2_FRAME_DURATION_S,
-  WAV2VEC2_VOCAB,
-  WAV2VEC2_WORD_BOUNDARY_ID,
-} from './vocab';
-
-export {
   alignTextToAudio,
+  alignTextToTtsSink,
   assertAlignmentGranularityForMode,
 } from './alignTextToAudio';
 
-export {
-  splitTextIntoSentences,
-  splitTextIntoWords,
-  buildSubtitlesFromChunks,
-} from './textSegments';
-
 export type {
+  AlignAudioInput,
+  AlignTextToAudioFn,
   AlignTextToAudioOptions,
   AlignTextToAudioOptionsAccurate,
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioResult,
+  AlignTextToTtsSinkFn,
+  AlignTextToTtsSinkInput,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
   AlignmentGranularity,
   AlignmentModelType,
-  AlignmentResult,
   AlignmentTimestamp,
   AlignmentTimingMode,
-  CtcAlignmentNativeResult,
   SubtitleTimingItem,
 } from './types';
 

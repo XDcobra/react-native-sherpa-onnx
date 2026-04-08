@@ -24,9 +24,9 @@ import {
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
-  alignTextToAudio,
+  alignTextToTtsSink,
   assertAlignmentGranularityForMode,
-} from '../alignment/alignTextToAudio';
+} from '../alignment';
 import {
   expandTtsInitializeOptions,
   expandTtsUpdateOptions,
@@ -321,116 +321,82 @@ export async function createTTS(
         return { ...buildAudio(raw), subtitles: [], timingMode: 'off' };
       }
 
-      if (subs?.mode === 'accurate') {
-        const alignmentModelPath = subs.alignmentModelPath.trim();
+      const nonAccurateGranularity =
+        subtitleGranularity === 'character' ? 'sentence' : subtitleGranularity;
+
+      if (subtitleMode === 'estimated') {
+        const raw = await SherpaOnnx.generateTtsWithTimestamps(
+          instanceId,
+          text,
+          toNativeTtsGenerationOptions({
+            ...(opts ?? {}),
+            subtitles: {
+              mode: 'estimated',
+              granularity: nonAccurateGranularity,
+            },
+          })
+        );
+        const counts = raw.segmentSampleCounts?.map((n) => Number(n));
+        if (!counts || counts.length === 0) {
+          throw new Error(
+            'TTS_CHUNK_TIMELINE: native did not return segmentSampleCounts for estimated subtitle mode.'
+          );
+        }
+
+        const audio = buildAudio(raw);
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'estimated',
+          chunks: {
+            sampleRate: raw.sampleRate,
+            segmentSampleCounts: counts,
+          },
+          granularity: nonAccurateGranularity,
+        });
+        return {
+          ...audio,
+          subtitles: subtitleResult.subtitles,
+          timingMode: subtitleResult.timingMode,
+        };
+      }
+
+      const raw = await SherpaOnnx.generateTts(
+        instanceId,
+        text,
+        toNativeTtsGenerationOptions({
+          ...(opts ?? {}),
+          subtitles: { mode: 'off' },
+        })
+      );
+      const audio = buildAudio(raw);
+
+      if (subtitleMode === 'accurate') {
+        const alignmentModelPath = subs?.alignmentModelPath?.trim() ?? '';
         if (!alignmentModelPath) {
           throw new Error(
             'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
           );
         }
 
-        const optionsWithSubtitlesOff: TtsGenerationOptions = {
-          ...(opts ?? {}),
-          subtitles: { mode: 'off' },
-        };
-
-        const raw = await SherpaOnnx.generateTts(
-          instanceId,
-          text,
-          toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
-        );
-
-        // Materialize samples for alignment (existing alignTextToAudio API)
-        const samplesResult = await SherpaOnnx.getTtsSamples(
-          instanceId,
-          raw.generation
-        );
-
-        const subtitleResult = await alignTextToAudio(
-          text,
-          {
-            samples: samplesResult.samples,
-            sampleRate: raw.sampleRate,
-          },
-          {
-            mode: 'accurate',
-            granularity: subtitleGranularity,
-            alignmentModelPath,
-          }
-        );
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'accurate',
+          granularity: subtitleGranularity,
+          alignmentModelPath,
+        });
 
         return {
-          ...buildAudio(raw),
-          subtitles: subtitleResult.subtitles,
-          timingMode: 'aligned',
-        };
-      }
-
-      const gran =
-        subtitleGranularity === 'character' ? 'sentence' : subtitleGranularity;
-
-      if (subtitleMode === 'proportional') {
-        const raw = await SherpaOnnx.generateTts(
-          instanceId,
-          text,
-          toNativeTtsGenerationOptions({
-            ...(opts ?? {}),
-            subtitles: { mode: 'off' },
-          })
-        );
-
-        // Proportional alignment only needs totalSamples + sampleRate
-        // Use numSamples from metadata to avoid materializing full PCM
-        const subtitleResult = await alignTextToAudio(
-          text,
-          {
-            samples: new Array(raw.numSamples) as number[],
-            sampleRate: raw.sampleRate,
-          },
-          { mode: 'proportional', granularity: gran }
-        );
-        return {
-          ...buildAudio(raw),
+          ...audio,
           subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
       }
 
-      if (subtitleMode === 'estimated') {
-        const raw = await SherpaOnnx.generateTtsWithTimestamps(
-          instanceId,
-          text,
-          toNativeTtsGenerationOptions(opts ?? {}, {
-            exportChunkTimelineOnly: true,
-            subtitleMode: 'estimated',
-            subtitleGranularity: gran,
-          })
-        );
-        const counts = raw.segmentSampleCounts;
-        if (!counts || !Array.isArray(counts)) {
-          throw new Error(
-            'TTS_CHUNK_TIMELINE: native did not return segmentSampleCounts; ensure exportChunkTimelineOnly is supported.'
-          );
-        }
-
-        // Estimated mode: uses segmentSampleCounts, not raw PCM samples
-        const subtitleResult = await alignTextToAudio(
-          text,
-          {
-            samples: new Array(raw.numSamples) as number[],
-            sampleRate: raw.sampleRate,
-          },
-          {
-            mode: 'estimated',
-            chunks: {
-              sampleRate: raw.sampleRate,
-              segmentSampleCounts: counts.map((n) => Number(n)),
-            },
-            granularity: gran,
-          }
-        );
+      if (subtitleMode === 'proportional') {
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'proportional',
+          granularity: nonAccurateGranularity,
+        });
         return {
-          ...buildAudio(raw),
+          ...audio,
           subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
@@ -652,11 +618,15 @@ export type { StreamingTtsEngine } from './streamingTypes';
 
 export {
   alignTextToAudio,
+  alignTextToTtsSink,
   assertAlignmentGranularityForMode,
-} from '../alignment/alignTextToAudio';
+} from '../alignment';
 export type {
+  AlignAudioInput,
   AlignTextToAudioOptions,
   AlignTextToAudioResult,
+  AlignTextToTtsSinkFn,
+  AlignTextToTtsSinkInput,
   AlignmentChunkTimeline,
   SubtitleTimingItem,
 } from '../alignment/types';

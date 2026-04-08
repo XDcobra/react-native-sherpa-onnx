@@ -381,7 +381,7 @@ export interface Spec extends TurboModule {
     generation: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
     timingMode: string;
-    /** Present when `exportChunkTimelineOnly` is set (synthesis chunk sample counts). */
+    /** Present for estimated subtitle mode (one sample-count per sentence chunk). */
     segmentSampleCounts?: number[];
   }>;
 
@@ -434,39 +434,54 @@ export interface Spec extends TurboModule {
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
-   * Wav2vec2 CTC forced alignment from a **file path** (no temp file on the JS side).
+   * Read audio duration/sample metrics for common formats (WAV fast path + decoder/metadata fallback).
    */
-  alignAccurateFromPath(
-    modelPath: string,
-    audioPath: string,
-    text: string,
-    vocabJson: string
-  ): Promise<{
-    words: Array<{ text: string; start: number; end: number }>;
-    chars: Array<{ text: string; start: number; end: number }>;
-  }>;
-
-  /**
-   * Same as [alignAccurateFromPath] but with mono float PCM already in memory (avoids temp WAV).
-   */
-  alignAccurateFromFloat32(
-    modelPath: string,
-    samples: number[],
-    sampleRate: number,
-    text: string,
-    vocabJson: string
-  ): Promise<{
-    words: Array<{ text: string; start: number; end: number }>;
-    chars: Array<{ text: string; start: number; end: number }>;
-  }>;
-
-  /**
-   * Fast **16-bit mono PCM WAV** metrics without decoding samples (for proportional alignment).
-   * Rejects non-WAV or unsupported WAV layouts; use `decodeAudioFileToFloatSamples` + in-memory path instead.
-   */
-  getAlignmentAudioMetrics(audioPath: string): Promise<{
+  getAudioDuration(audioPath: string): Promise<{
     sampleRate: number;
     totalSamples: number;
+  }>;
+
+  /**
+   * Standalone alignment from audio path (all modes).
+   */
+  alignTextToAudioFromPath(
+    text: string,
+    audioPath: string,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
+  ): Promise<{
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Standalone alignment from in-memory PCM (all modes).
+   */
+  alignTextToAudioFromPcm(
+    text: string,
+    samples: number[],
+    sampleRate: number,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
+  ): Promise<{
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Sink-based alignment from generated TTS audio (zero PCM round-trip for accurate mode).
+   */
+  alignTextToTtsSink(
+    generatedAudio: Object,
+    text: string,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
+  ): Promise<{
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
   }>;
 
   detectAlignmentModel(
