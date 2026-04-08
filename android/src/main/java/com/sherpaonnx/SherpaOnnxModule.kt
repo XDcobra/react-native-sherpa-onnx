@@ -10,6 +10,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
+import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
@@ -54,6 +55,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val pcmPlayerService = PcmPlayerService()
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
@@ -64,7 +66,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, cancelled, path, bytesWritten, sampleRate -> emitTtsStreamFileEnd(instanceId, requestId, cancelled, path, bytesWritten, sampleRate) },
     { rawPath, pcmSr, outPath, fmt, outHz ->
       Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
-    }
+    },
+    pcmPlayerService
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
@@ -90,6 +93,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    pcmPlayerService.shutdown()
   }
 
   /**
@@ -931,6 +935,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
+    offlineTtsHelper.playTtsFromSink(instanceId, generation, sampleRate, promise)
+  }
+
   override fun alignAccurateFromPath(
     modelPath: String,
     audioPath: String,
@@ -991,25 +999,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineTtsHelper.cancelTtsStream(instanceId, promise)
   }
 
-  /**
-   * Start PCM playback for streaming TTS.
-   */
-  override fun startTtsPcmPlayer(instanceId: String, sampleRate: Double, channels: Double, promise: Promise) {
-    onlineTtsHelper.startTtsPcmPlayer(instanceId, sampleRate, channels, promise)
+  override fun createPcmPlayer(
+    playerId: String,
+    sampleRate: Double,
+    channels: Double,
+    feed: String,
+    ttsInstanceId: String?,
+    promise: Promise
+  ) {
+    pcmPlayerService.create(playerId, sampleRate, channels, feed, ttsInstanceId, promise)
   }
 
-  /**
-   * Write PCM samples to the streaming TTS player.
-   */
-  override fun writeTtsPcmChunk(instanceId: String, samples: ReadableArray, promise: Promise) {
-    onlineTtsHelper.writeTtsPcmChunk(instanceId, samples, promise)
+  override fun writePcmChunk(playerId: String, samples: ReadableArray, promise: Promise) {
+    pcmPlayerService.write(playerId, samples, promise)
   }
 
-  /**
-   * Stop PCM playback for streaming TTS.
-   */
-  override fun stopTtsPcmPlayer(instanceId: String, promise: Promise) {
-    onlineTtsHelper.stopTtsPcmPlayer(instanceId, promise)
+  override fun pausePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.pause(playerId, promise)
+  }
+
+  override fun resumePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.resume(playerId, promise)
+  }
+
+  override fun destroyPcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.destroy(playerId, promise)
   }
 
   private fun emitTtsStreamChunk(

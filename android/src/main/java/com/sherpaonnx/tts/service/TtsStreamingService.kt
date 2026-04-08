@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.k2fsa.sherpa.onnx.GenerationConfig
+import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.TtsJniCallbackFactory
@@ -55,7 +56,8 @@ internal class TtsStreamingService(
   private val emitError: (String, String, String) -> Unit,
   private val emitEnd: (String, String, Boolean) -> Unit,
   private val emitFileError: (String, String, String, String?) -> Unit,
-  private val emitFileEnd: (String, String, Boolean, String, Long, Int) -> Unit
+  private val emitFileEnd: (String, String, Boolean, String, Long, Int) -> Unit,
+  private val pcmPlayerService: PcmPlayerService
 ) {
   private companion object {
     /** Flush coalescing buffer when accumulated samples reach this count. */
@@ -92,6 +94,8 @@ internal class TtsStreamingService(
     } else {
       false
     }
+    val playback = options?.hasKey("playback") == true && options.getBoolean("playback")
+    val autoDestroy = if (options?.hasKey("autoDestroy") == true) options.getBoolean("autoDestroy") else true
 
     val inst = repository[instanceId] ?: run {
       promise.reject("TTS_STREAM_FILE_ERROR", "TTS instance not found: $instanceId")
@@ -116,7 +120,11 @@ internal class TtsStreamingService(
       val coalescer = if (emitChunks) ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
         emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
       } else null
+      val playbackPlayerId = if (playback) "tts_playback_${instanceId}_${requestId}" else null
       try {
+        if (playbackPlayerId != null) {
+          pcmPlayerService.createInternal(playbackPlayerId, sampleRate, 1, instanceId)
+        }
         sink = TtsStreamingWavSink(outputPath, sampleRate)
         inst.tts!!.generateWithCallback(
           text,
@@ -124,11 +132,13 @@ internal class TtsStreamingService(
           speed,
           TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
             sink.writeChunk(chunk)
+            if (playbackPlayerId != null) pcmPlayerService.enqueueFromNative(playbackPlayerId, chunk)
             coalescer?.add(chunk)
           }
         )
 
         val cancelled = inst.ttsStreamCancelled.get()
+        if (playbackPlayerId != null && (autoDestroy || cancelled)) pcmPlayerService.destroyInternal(playbackPlayerId)
         if (cancelled && !keepPartial) {
           sink.abort(true)
           emitFileEnd(instanceId, requestId, true, outputPath, 0L, sampleRate)
@@ -141,6 +151,7 @@ internal class TtsStreamingService(
           emitFileEnd(instanceId, requestId, cancelled, outputPath, bytesWritten, sampleRate)
         }
       } catch (e: Exception) {
+        if (playbackPlayerId != null) pcmPlayerService.destroyInternal(playbackPlayerId)
         sink?.abort(!keepPartial)
         emitFileError(instanceId, requestId, "TTS stream-to-file failed: ${e.message}", outputPath)
       } finally {
@@ -153,6 +164,15 @@ internal class TtsStreamingService(
   }
 
   fun generateTtsStream(instanceId: String, requestId: String, text: String, options: ReadableMap?, promise: Promise) {
+    val playback = options?.hasKey("playback") == true && options.getBoolean("playback")
+    val emitChunks = if (options?.hasKey("emitChunks") == true) options.getBoolean("emitChunks") else true
+    val autoDestroy = if (options?.hasKey("autoDestroy") == true) options.getBoolean("autoDestroy") else true
+
+    if (!playback && !emitChunks) {
+      promise.reject("TTS_STREAM_ERROR", "emitChunks=false + playback=false is a no-op")
+      return
+    }
+
     val inst = repository[instanceId] ?: run {
       Log.e("SherpaOnnxTts", "TTS_STREAM_ERROR: TTS instance not found: $instanceId")
       promise.reject("TTS_STREAM_ERROR", "TTS instance not found: $instanceId")
@@ -194,20 +214,28 @@ internal class TtsStreamingService(
     inst.ttsStreamCancelled.set(false)
     inst.ttsStreamRunning.set(true)
     inst.ttsStreamThread = Thread {
+      val playbackPlayerId = if (playback) "tts_playback_${instanceId}_${requestId}" else null
       try {
         val sampleRate = inst.dispatchSampleRate()
-        val coalescer = ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
-          emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+        if (playbackPlayerId != null) {
+          pcmPlayerService.createInternal(playbackPlayerId, sampleRate, 1, instanceId)
         }
+        val coalescer = if (emitChunks) ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
+          emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+        } else null
+
+        val chunkHandler: (FloatArray) -> Unit = { chunk ->
+          if (playbackPlayerId != null) pcmPlayerService.enqueueFromNative(playbackPlayerId, chunk)
+          coalescer?.add(chunk)
+        }
+
         when {
           TtsGenerationOptionsParser.hasReferenceAudio(options) && inst.isPocket -> {
             val config = TtsGenerationOptionsParser.parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
             inst.tts!!.generateWithConfigAndCallback(
               text,
               config,
-              TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
-                coalescer.add(chunk)
-              }
+              TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled, chunkHandler)
             )
           }
           else -> {
@@ -215,17 +243,18 @@ internal class TtsStreamingService(
               text,
               sid,
               speed,
-              TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
-                coalescer.add(chunk)
-              }
+              TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled, chunkHandler)
             )
           }
         }
-        if (!inst.ttsStreamCancelled.get()) {
-          coalescer.flush()
+        val cancelled = inst.ttsStreamCancelled.get()
+        if (playbackPlayerId != null && (autoDestroy || cancelled)) pcmPlayerService.destroyInternal(playbackPlayerId)
+        if (!cancelled && emitChunks) {
+          coalescer?.flush()
           emitChunk(instanceId, requestId, FloatArray(0), sampleRate, 1f, true)
         }
       } catch (e: Exception) {
+        if (playbackPlayerId != null) pcmPlayerService.destroyInternal(playbackPlayerId)
         if (!inst.ttsStreamCancelled.get()) {
           emitError(instanceId, requestId, "TTS streaming failed: ${e.message}")
         }

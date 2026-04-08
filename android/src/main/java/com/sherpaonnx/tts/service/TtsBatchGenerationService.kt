@@ -11,10 +11,12 @@ import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.TtsJniCallbackFactory
 import com.sherpaonnx.tts.core.dispatchGenerate
+import com.sherpaonnx.pcm.PcmPlayerService
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
-  private val exportService: TtsAudioExportService
+  private val exportService: TtsAudioExportService,
+  private val pcmPlayerService: PcmPlayerService
 ) {
   fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
     try {
@@ -340,6 +342,46 @@ internal class TtsBatchGenerationService(
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "saveTtsAudioFromSink error: ${e.message}", e)
       promise.reject("TTS_SAVE_ERROR", e.message ?: "Failed to save TTS audio from sink", e)
+    }
+  }
+
+  fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
+    try {
+      val inst = repository[instanceId] ?: run {
+        promise.reject("TTS_INSTANCE_NOT_FOUND", "TTS instance not found: $instanceId")
+        return
+      }
+      val requestedGen = generation.toLong()
+      val pcmCopy: FloatArray
+      val rate: Int
+      synchronized(inst.sinkLock) {
+        val currentGen = inst.sink.generation.get()
+        if (currentGen == 0L || inst.sink.samples == null) {
+          promise.reject("TTS_SINK_EMPTY", "No batch synthesis result available for instance $instanceId")
+          return
+        }
+        if (requestedGen != currentGen) {
+          promise.reject("TTS_SINK_STALE", "Generation $requestedGen is stale; current is $currentGen")
+          return
+        }
+        pcmCopy = inst.sink.samples!!.copyOf()
+        rate = if (sampleRate.toInt() > 0) sampleRate.toInt() else inst.sink.sampleRate
+      }
+      val playerId = "batch_play_${instanceId}_${requestedGen}"
+      // Auto-destroy any previous batch playback player for this instance
+      val prevPlayerId = inst.batchPlaybackPlayerId
+      if (prevPlayerId != null) {
+        pcmPlayerService.destroyInternal(prevPlayerId)
+      }
+      inst.batchPlaybackPlayerId = playerId
+      pcmPlayerService.createInternal(playerId, rate, 1, instanceId)
+      pcmPlayerService.enqueueFromNative(playerId, pcmCopy)
+      val result = Arguments.createMap()
+      result.putString("playerId", playerId)
+      promise.resolve(result)
+    } catch (e: Exception) {
+      Log.e("SherpaOnnxTts", "playTtsFromSink error: ${e.message}", e)
+      promise.reject("TTS_PLAY_ERROR", e.message ?: "Failed to play TTS audio from sink", e)
     }
   }
 }

@@ -1,6 +1,5 @@
 package com.sherpaonnx.tts.core
 
-import android.media.AudioTrack
 import com.k2fsa.sherpa.onnx.OfflineTts
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -52,14 +51,16 @@ internal class TtsEngineInstance(
   @Volatile var ttsInitState: TtsInitState? = null,
   val ttsStreamRunning: AtomicBoolean = AtomicBoolean(false),
   val ttsStreamCancelled: AtomicBoolean = AtomicBoolean(false),
-  var ttsStreamThread: Thread? = null,
-  var ttsPcmTrack: AudioTrack? = null
+  var ttsStreamThread: Thread? = null
 ) {
   private val lock = Any()
 
   /** PCM sink for the last batch synthesis (Sub-plan 01). */
   val sink = BatchPcmSink()
   val sinkLock = Any()
+
+  /** Player ID of the auto-created batch playback player, if any (Sub-plan 04). */
+  @Volatile var batchPlaybackPlayerId: String? = null
 
   fun hasEngine(): Boolean = synchronized(lock) { tts != null }
   val isZipvoice: Boolean get() = ttsInitState?.modelType == "zipvoice"
@@ -73,20 +74,6 @@ internal class TtsEngineInstance(
     }
     synchronized(sinkLock) {
       sink.clear()
-    }
-  }
-
-  fun stopPcmPlayer() {
-    synchronized(lock) {
-      ttsPcmTrack?.apply {
-        try {
-          stop()
-        } catch (_: IllegalStateException) {
-        }
-        flush()
-        release()
-      }
-      ttsPcmTrack = null
     }
   }
 }

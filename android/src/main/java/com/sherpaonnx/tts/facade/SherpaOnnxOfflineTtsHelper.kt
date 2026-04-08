@@ -53,6 +53,13 @@ internal class SherpaOnnxOfflineTtsHelper(
     filename, format, outputSampleRateHz, promise
   )
 
+  fun playTtsFromSink(
+    instanceId: String,
+    generation: Double,
+    sampleRate: Double,
+    promise: Promise
+  ) = core.playTtsFromSink(instanceId, generation, sampleRate, promise)
+
   fun saveTtsAudioFromPCM(
     samples: com.facebook.react.bridge.ReadableArray,
     sampleRate: Double,

@@ -31,7 +31,6 @@ internal class TtsLifecycleService(
     }
     repository.forEachInstance { inst ->
       inst.releaseEngines()
-      inst.stopPcmPlayer()
     }
     repository.clear()
   }
@@ -78,7 +77,6 @@ internal class TtsLifecycleService(
     try {
       val inst = repository.remove(instanceId)
       if (inst != null) {
-        inst.stopPcmPlayer()
         inst.releaseEngines()
       }
       promise.resolve(null)

@@ -69,7 +69,6 @@ internal class TtsInitializationService(
         val detectedModels = result["detectedModels"] as? ArrayList<*>
 
         val inst = repository.getOrPut(instanceId) { TtsEngineInstance() }
-        inst.stopPcmPlayer()
         inst.releaseEngines()
 
         val sampleRate: Int
