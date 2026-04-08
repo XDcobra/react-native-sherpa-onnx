@@ -120,6 +120,41 @@ await tts.generateSpeechStreamToFile(
 
 Set `emitChunks: true` only when you also need live playback during export.
 
+## Alignment API (native-first restructure)
+
+Alignment was restructured to be standalone and native-first across all modes.
+
+### Breaking / behavioral changes
+
+| Before | After |
+| --- | --- |
+| `alignTextToAudio(..., { samples: number[], sampleRate }, ...)` | `alignTextToAudio(..., { samples: Float32Array, sampleRate }, ...)` |
+| TTS accurate flow pulled PCM to JS and sent it back to native | TTS accurate flow aligns directly from native sink (`alignTextToTtsSink`) |
+| Estimated timestamp integration relied on `exportChunkTimelineOnly` workaround | Estimated path uses native timeline output + alignment engine; `exportChunkTimelineOnly` is removed |
+
+### New standalone sink helper
+
+Use `alignTextToTtsSink` when you already have `GeneratedAudio` from TTS and want subtitle alignment without JS PCM round-trip:
+
+```ts
+import { alignTextToTtsSink } from 'react-native-sherpa-onnx/alignment';
+
+const aligned = await alignTextToTtsSink(text, audio, {
+  mode: 'accurate',
+  alignmentModelPath: '/absolute/path/to/alignment.onnx',
+  granularity: 'word',
+});
+```
+
+### Native methods (direct TurboModule callers)
+
+If you call `NativeSherpaOnnx` directly, prefer these methods:
+
+- `alignTextToAudioFromPath`
+- `alignTextToAudioFromPcm`
+- `alignTextToTtsSink`
+- `getAudioDuration`
+
 ## TTS release catalog metadata (native)
 
 For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`detectTtsModel`** with an empty directory and the release **asset id** as **`assetName`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
@@ -403,9 +438,8 @@ A future **major** release will replace the current alignment stack with a nativ
 
 | Topic | Policy |
 | --- | --- |
-| TurboModule | **`runCTCForcedAlignment`** was removed. Use **`alignAccurateFromPath(modelPath, audioPath, text, vocabJson)`** for file-based CTC, or **`alignAccurateFromFloat32(modelPath, samples, sampleRate, text, vocabJson)`** when PCM is already in JS. For fast proportional duration on **16-bit mono WAV**, use **`getAlignmentAudioMetrics(audioPath)`**; see [alignment.md](./alignment.md). |
+| TurboModule | **Removed:** `runCTCForcedAlignment`, `alignAccurateFromPath`, `alignAccurateFromFloat32`, `getAlignmentAudioMetrics`. **Use:** `alignTextToAudioFromPath`, `alignTextToAudioFromPcm`, `alignTextToTtsSink`, and `getAudioDuration`; see [alignment.md](./alignment.md). |
 | Public JS | Prefer **`alignTextToAudio`** (and related types) from **`react-native-sherpa-onnx/alignment`** as the stable app-facing API. Its surface may change in the same major; there will be **no** parallel deprecated export set. |
 | Docs | [alignment.md](./alignment.md) will describe the final APIs and performance expectations; this section will be tightened with **concrete** removed symbols at ship time. |
 
 **At release time:** maintainers should (1) list every removed export and TurboModule method in **CHANGELOG**, (2) replace the placeholders in the table above with exact names, and (3) keep this guide in sync.
-

@@ -97,7 +97,7 @@ const tts = await createTTS({
   },
 });
 
-// Proportional timing (default subtitle mode): duration × text weight in JS.
+// Proportional timing (default subtitle mode): duration × text weight (native alignment path).
 const est: GeneratedAudioWithTimestamps = await tts.generateSpeechWithTimestamps(
   'Hello.',
   { subtitles: { mode: 'proportional', granularity: 'sentence' } }
@@ -208,7 +208,10 @@ generateSpeechWithTimestamps(
 ): Promise<GeneratedAudioWithTimestamps>;
 ```
 
-Synthesizes with subtitle metadata; `subtitles.mode` **`proportional`**, **`estimated`** (synthesis chunk timeline), or **`accurate`** (alignment ONNX on `subtitles`).
+Synthesizes with subtitle metadata using native alignment paths:
+- `proportional`: timing from text weight + generated duration
+- `estimated`: timing from native synthesis chunk timeline + alignment engine
+- `accurate`: wav2vec2 ONNX forced alignment on native sink audio (no JS PCM round-trip)
 
 ```ts
 const out = await tts.generateSpeechWithTimestamps('Test.', {
@@ -360,7 +363,7 @@ For playback, prefer the built-in PCM player (`tts.playFromSink(...)`): it plays
 
 ## Subtitles (standalone audio)
 
-Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** (see [alignment.md](alignment.md)). Modes: `proportional`, `estimated` (requires `AlignmentChunkTimeline`), `accurate` (CTC).
+Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** for file/PCM inputs, or **`alignTextToTtsSink`** for generated sink audio (see [alignment.md](alignment.md)). Modes: `proportional`, `estimated` (requires `AlignmentChunkTimeline`), `accurate` (CTC).
 
 ## Types
 
@@ -428,7 +431,7 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTT
 ## See also
 
 - [tts-streaming.md](tts-streaming.md) — incremental synthesis, PCM player, `generateSpeechStream`  
-- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models  
+- [alignment.md](alignment.md) — `alignTextToAudio`, `alignTextToTtsSink`, modes, alignment models  
 - [execution-providers.md](execution-providers.md) — ORT execution providers  
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
 - [audio-conversion.md](audio-conversion.md) — WAV → MP3/FLAC for Android save flows  

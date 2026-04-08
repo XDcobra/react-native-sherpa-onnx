@@ -320,7 +320,7 @@ For estimated mode integration in TTS, we explicitly implement **Option A**:
 | Remove `exportChunkTimelineOnly` from TTS options | **Breaking** | Use `alignTextToTtsSink(estimated)` with `segmentSampleCounts` |
 | `vocabJson` parameter removed from native methods | **Internal** | No public API change |
 | Text segmentation may have minor behavioral differences | **Minor** | C++ rewrite tested against JS golden outputs |
-| `getAlignmentAudioMetrics` → replaced by `getAudioDuration` (all formats) | **Enhancement** | Old method can be kept as alias |
+| `getAlignmentAudioMetrics` → replaced by `getAudioDuration` (all formats) | **Breaking** | Remove the old method; no compatibility alias |
 
 ---
 
