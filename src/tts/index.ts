@@ -15,6 +15,7 @@ import {
   type TtsDetectedModelEntry,
   type SaveAudioTarget,
   type SaveAudioOptions,
+  type SaveAudioFromPcmInput,
   type TtsDetectionSource,
 } from './types';
 import type { ModelPathConfig } from '../types';
@@ -501,14 +502,8 @@ export async function createTTS(
 
 // ========== Module-level utilities (stateless, no instance required) ==========
 
-/**
- * Save generated TTS audio to a file or (Android) SAF tree. Default format is `wav`.
- * Prefers native sink-based save (no JS PCM round-trip) when generation info is available.
- * For non-WAV formats, native encodes from float PCM without requiring the app to write a WAV first.
- *
- * @returns Absolute file path, or on Android SAF a `content://` URI string.
- */
-export function saveAudio(
+/** Save TTS audio by generation directly from native sink. */
+export function saveAudioFromGeneration(
   audio: GeneratedAudio,
   target: SaveAudioTarget,
   options?: SaveAudioOptions
@@ -516,80 +511,88 @@ export function saveAudio(
   const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
 
-  // Sink-native path: use instanceId + generation to save from native without JS PCM
-  // GeneratedAudio from generateSpeech carries generation; we need the instanceId
-  // which is available via the closure. For module-level saveAudio, we pass through
-  // saveTtsAudioFromSink if generation is present (non-zero).
   if (
-    audio.generation != null &&
-    audio.generation > 0 &&
-    '_instanceId' in audio &&
-    typeof (audio as any)._instanceId === 'string'
+    audio.generation == null ||
+    audio.generation <= 0 ||
+    !('_instanceId' in audio) ||
+    typeof (audio as any)._instanceId !== 'string'
   ) {
-    const iid = (audio as any)._instanceId as string;
+    return Promise.reject(
+      new Error(
+        'saveAudioFromGeneration: missing valid generation/_instanceId. Use saveAudioFromPCM for raw samples.'
+      )
+    );
+  }
 
-    if (target.kind === 'androidContent') {
-      if (Platform.OS !== 'android') {
-        return Promise.reject(
-          new Error(
-            'saveAudio: kind "androidContent" is only supported on Android.'
-          )
-        );
-      }
-      return SherpaOnnx.saveTtsAudioFromSink(
-        iid,
-        audio.generation,
-        'androidContent',
-        target.directoryUri,
-        target.filename,
-        format,
-        outputSampleRateHz
+  const iid = (audio as any)._instanceId as string;
+  if (target.kind === 'androidContent') {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(
+        new Error(
+          'saveAudioFromGeneration: kind "androidContent" is only supported on Android.'
+        )
       );
     }
-
     return SherpaOnnx.saveTtsAudioFromSink(
       iid,
       audio.generation,
-      'file',
-      target.path,
-      '',
+      'androidContent',
+      target.directoryUri,
+      target.filename,
       format,
       outputSampleRateHz
     );
   }
 
-  // Fallback: materialize samples and use legacy path
-  return (async () => {
-    const samples = await audio.getSamples();
-    const samplesArray = Array.from(samples);
+  return SherpaOnnx.saveTtsAudioFromSink(
+    iid,
+    audio.generation,
+    'file',
+    target.path,
+    '',
+    format,
+    outputSampleRateHz
+  );
+}
 
-    if (target.kind === 'androidContent') {
-      if (Platform.OS !== 'android') {
-        throw new Error(
-          'saveAudio: kind "androidContent" is only supported on Android.'
-        );
-      }
-      return SherpaOnnx.saveTtsAudioFromPCM(
-        samplesArray,
-        audio.sampleRate,
-        'androidContent',
-        target.directoryUri,
-        target.filename,
-        format,
-        outputSampleRateHz
+/** Save explicit PCM payload (`samples` + `sampleRate`) to file/SAF. */
+export function saveAudioFromPCM(
+  audio: SaveAudioFromPcmInput,
+  target: SaveAudioTarget,
+  options?: SaveAudioOptions
+): Promise<string> {
+  const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
+  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+  const samplesArray = Array.from(audio.samples);
+
+  if (target.kind === 'androidContent') {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(
+        new Error(
+          'saveAudioFromPCM: kind "androidContent" is only supported on Android.'
+        )
       );
     }
-
     return SherpaOnnx.saveTtsAudioFromPCM(
       samplesArray,
       audio.sampleRate,
-      'file',
-      target.path,
-      '',
+      'androidContent',
+      target.directoryUri,
+      target.filename,
       format,
       outputSampleRateHz
     );
-  })();
+  }
+
+  return SherpaOnnx.saveTtsAudioFromPCM(
+    samplesArray,
+    audio.sampleRate,
+    'file',
+    target.path,
+    '',
+    format,
+    outputSampleRateHz
+  );
 }
 
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
@@ -649,6 +652,7 @@ export type {
   SaveAudioTarget,
   SaveAudioTargetFile,
   SaveAudioTargetAndroidContent,
+  SaveAudioFromPcmInput,
   SaveAudioOptions,
   TtsEngine,
   TtsStreamController,

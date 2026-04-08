@@ -15,7 +15,8 @@ import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudio,
+  saveAudioFromGeneration,
+  saveAudioFromPCM,
   type TTSModelType,
   type TtsGenerationOptions,
   type TtsMatchaModelOptions,
@@ -1159,16 +1160,32 @@ export default function TTSScreen() {
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      if (directoryUri) {
-        const savedUri = await saveAudio(
-          audio,
-          {
-            kind: 'androidContent',
-            directoryUri,
-            filename,
-          },
+      const saveWithTarget = async (
+        target:
+          | { kind: 'file'; path: string }
+          | { kind: 'androidContent'; directoryUri: string; filename: string }
+      ) => {
+        if (
+          audio.generation > 0 &&
+          '_instanceId' in audio &&
+          typeof (audio as any)._instanceId === 'string'
+        ) {
+          return saveAudioFromGeneration(audio, target, { format });
+        }
+        const pcm = await audio.getSamples();
+        return saveAudioFromPCM(
+          { samples: pcm, sampleRate: audio.sampleRate },
+          target,
           { format }
         );
+      };
+
+      if (directoryUri) {
+        const savedUri = await saveWithTarget({
+          kind: 'androidContent',
+          directoryUri,
+          filename,
+        });
         setSavedAudioPath(savedUri);
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
@@ -1184,11 +1201,10 @@ export default function TTSScreen() {
 
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      const savedPath = await saveAudio(
-        audio,
-        { kind: 'file', path: filePath },
-        { format }
-      );
+      const savedPath = await saveWithTarget({
+        kind: 'file',
+        path: filePath,
+      });
       setSavedAudioPath(savedPath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
@@ -1230,11 +1246,23 @@ export default function TTSScreen() {
 
       const filename = `tts_${timestamp}.wav`;
       const filePath = `${directoryPath}/${filename}`;
-      const savedPath = await saveAudio(
-        generatedAudio,
-        { kind: 'file', path: filePath },
-        { format }
-      );
+      const savedPath =
+        generatedAudio.generation > 0 &&
+        '_instanceId' in generatedAudio &&
+        typeof (generatedAudio as any)._instanceId === 'string'
+          ? await saveAudioFromGeneration(
+              generatedAudio,
+              { kind: 'file', path: filePath },
+              { format }
+            )
+          : await saveAudioFromPCM(
+              {
+                samples: await generatedAudio.getSamples(),
+                sampleRate: generatedAudio.sampleRate,
+              },
+              { kind: 'file', path: filePath },
+              { format }
+            );
       setSavedAudioPath(savedPath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);

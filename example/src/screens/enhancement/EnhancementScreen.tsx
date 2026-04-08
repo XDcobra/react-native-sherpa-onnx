@@ -31,7 +31,10 @@ import {
   type EnhancementEngine,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
-import { saveAudio, type GeneratedAudio } from 'react-native-sherpa-onnx/tts';
+import {
+  saveAudioFromPCM,
+  type GeneratedAudio,
+} from 'react-native-sherpa-onnx/tts';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -177,8 +180,11 @@ export default function EnhancementScreen() {
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
-        const savedUri = await saveAudio(
-          lastEnhancedAudio,
+        const savedUri = await saveAudioFromPCM(
+          {
+            samples: await lastEnhancedAudio.getSamples(),
+            sampleRate: lastEnhancedAudio.sampleRate,
+          },
           {
             kind: 'androidContent',
             directoryUri,
@@ -199,8 +205,11 @@ export default function EnhancementScreen() {
       }
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      await saveAudio(
-        lastEnhancedAudio,
+      await saveAudioFromPCM(
+        {
+          samples: await lastEnhancedAudio.getSamples(),
+          sampleRate: lastEnhancedAudio.sampleRate,
+        },
         { kind: 'file', path: filePath },
         { format: 'wav' }
       );
@@ -465,8 +474,11 @@ export default function EnhancementScreen() {
         Array.from(enhanced.samples),
         sr
       );
-      await saveAudio(
-        audioForFile,
+      await saveAudioFromPCM(
+        {
+          samples: await audioForFile.getSamples(),
+          sampleRate: audioForFile.sampleRate,
+        },
         { kind: 'file', path: outPath },
         { format: 'wav' }
       );

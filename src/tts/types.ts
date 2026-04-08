@@ -416,7 +416,7 @@ export interface GeneratedAudio {
   /**
    * Retrieve raw PCM samples from the native sink as Float32Array.
    * Allocates memory in JS — call only when you need raw PCM (e.g. custom playback).
-   * Prefer `saveAudio()` for saving to file (avoids JS round-trip).
+   * Prefer `saveAudioFromGeneration()` for saving to file (avoids JS round-trip).
    *
    * @throws if the generation is stale (a new generateSpeech was called on the same engine)
    * @throws if the engine instance has been destroyed
@@ -613,8 +613,15 @@ export type SaveAudioTarget =
   | SaveAudioTargetFile
   | SaveAudioTargetAndroidContent;
 
+/** Explicit PCM payload for `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`. */
+export type SaveAudioFromPcmInput = {
+  samples: number[] | Float32Array;
+  sampleRate: number;
+};
+
 /**
- * Options for `saveAudio()` in `react-native-sherpa-onnx/tts`. `format` defaults to `'wav'`.
+ * Options for `saveAudioFromGeneration()` / `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`.
+ * `format` defaults to `'wav'`.
  * Non-WAV formats require native FFmpeg; see docs/disable-ffmpeg.md.
  */
 export type SaveAudioOptions = {

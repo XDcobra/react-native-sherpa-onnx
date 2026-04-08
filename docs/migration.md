@@ -8,7 +8,7 @@
 | --- | --- |
 | `audio.samples.length` | `audio.numSamples` |
 | `audio.samples` | `await audio.getSamples()` (`Float32Array`) |
-| JS-side export from `saveAudio` call path | `saveAudio(audio, ...)` (sink-native path) |
+| JS-side save helper | `saveAudioFromGeneration(audio, ...)` or `saveAudioFromPCM({ samples, sampleRate }, ...)` |
 
 ## TTS release catalog metadata (native)
 
@@ -22,14 +22,20 @@ The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogH
 
 Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly TtsDetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isTtsDetectionSource`** when parsing unknown payloads.
 
-## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
+## TTS save helpers (`saveAudio` removed)
 
-The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:
+The module-level helpers **`saveAudioToFile`**, **`saveAudioToContentUri`**, and **`saveAudio`**
+are removed. Use explicit helpers with an explicit source:
+
+- **`saveAudioFromGeneration(audio, target, options?)`** for `GeneratedAudio` from TTS generation
+- **`saveAudioFromPCM({ samples, sampleRate }, target, options?)`** for raw PCM buffers
 
 | Before | After |
 | --- | --- |
-| `saveAudioToFile(audio, path)` | `saveAudio(audio, { kind: 'file', path })` |
-| `saveAudioToContentUri(audio, directoryUri, filename)` | `saveAudio(audio, { kind: 'androidContent', directoryUri, filename })` (Android only) |
+| `saveAudioToFile(audio, path)` | `saveAudioFromGeneration(audio, { kind: 'file', path })` |
+| `saveAudioToContentUri(audio, directoryUri, filename)` | `saveAudioFromGeneration(audio, { kind: 'androidContent', directoryUri, filename })` (Android only) |
+| `saveAudio(audio, target, options?)` | `saveAudioFromGeneration(audio, target, options?)` |
+| `saveAudio(audioLike, target, options?)` with raw PCM object | `saveAudioFromPCM({ samples, sampleRate }, target, options?)` |
 
 Optional third argument: **`{ format?: string; outputSampleRateHz?: number }`** — default `format` is `'wav'`. Non-WAV formats require FFmpeg (see [disable-ffmpeg.md](./disable-ffmpeg.md)).
 
@@ -46,7 +52,8 @@ The following are **no longer** exported from **`react-native-sherpa-onnx/tts`**
 | `import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts'` | `import { copyContentUriToCache } from 'react-native-sherpa-onnx/files'` |
 | `import { shareAudioFile } from 'react-native-sherpa-onnx/tts'` | `import { shareAudioFile } from 'react-native-sherpa-onnx/files'` |
 
-**`saveAudio`** stays on **`react-native-sherpa-onnx/tts`** (unchanged).
+**`saveAudio`** is removed from **`react-native-sherpa-onnx/tts`**.
+Use **`saveAudioFromGeneration`** or **`saveAudioFromPCM`**.
 
 ### TurboModule (`NativeSherpaOnnx` / `SherpaOnnx`)
 

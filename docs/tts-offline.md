@@ -19,7 +19,7 @@ On-device **batch** synthesis: full-buffer `generateSpeech`, optional subtitle t
 ```ts
 import {
   createTTS,
-  saveAudio,
+  saveAudioFromGeneration,
   detectTtsModel,
   type GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
@@ -50,11 +50,11 @@ const audio: GeneratedAudio = await tts.generateSpeech('Hello, world.', {
   speed: 1.0,
 });
 console.log(audio.sampleRate, audio.numSamples);
-const pcm = await audio.getSamples(); // Float32Array
+const pcm = await audio.getSamples(); // Float32Array - only call if you really need samples
 
-// saveAudio — `target.kind`: `'file'` = absolute filesystem path; `'androidContent'` = SAF directory URI + filename (Android only).
+// saveAudioFromGeneration — `target.kind`: `'file'` = absolute filesystem path; `'androidContent'` = SAF directory URI + filename (Android only).
 // If you omit `options` or do not pass `format`, output defaults to WAV (`'wav'`). Non-WAV (e.g. mp3) needs FFmpeg; see disable-ffmpeg.md.
-const mp3Path = await saveAudio(
+const mp3Path = await saveAudioFromGeneration(
   audio,
   { kind: 'file', path: '/path/to/hello.mp3' },
   { format: 'mp3' }
@@ -272,48 +272,55 @@ await tts.destroy();
 
 ## Persistence & sharing
 
-**`saveAudio`** (below) takes `GeneratedAudio` and writes **WAV by default** or another format when FFmpeg is enabled (same format strings as [`convertAudioToFormat`](audio-conversion.md)). Additional file-related helpers ship under **`react-native-sherpa-onnx/files`**; see [Files (persistence & sharing)](files.md).
-
-### File path vs `content://` directory URI
-
-| Use | When |
-| --- | --- |
-| **Absolute file path** (`saveAudio` with `{ kind: 'file', path }`, or paths from your app cache/documents) | iOS and Android: you control the destination (app sandbox, temp files, RNFS paths). No user-picked folder. |
-| **Directory `content://` URI** (`saveAudio` with `{ kind: 'androidContent', ... }`) | **Android:** user (or your app) granted access to a folder via SAF; you write **into** that tree. `androidContent` is rejected on iOS. |
-
-Rule of thumb: need **Files** / **Downloads** / a user-chosen folder on Android → obtain a **tree** or document URI, then use **`saveAudio`** for PCM from TTS into that tree. Everything else (playback, file-based conversion, sharing from a temp file) → **normal path** first, then optionally copy or share.
-
-### `saveAudio(audio, target, options?)`
+### `saveAudioFromGeneration(audio, target, options?)`
 
 ```ts
-function saveAudio(
+function saveAudioFromGeneration(
   audio: GeneratedAudio,
   target: SaveAudioTarget,
   options?: SaveAudioOptions
 ): Promise<string>;
 ```
 
-`SaveAudioTarget` is a discriminated union:
-
-- `{ kind: 'file'; path: string }` — absolute path including filename and extension (should match `options.format`, e.g. `.mp3` when `format: 'mp3'`).
-- `{ kind: 'androidContent'; directoryUri: string; filename: string }` — **Android only**; writes into a SAF directory.
-
-`SaveAudioOptions`:
-
-- `format` — default `'wav'`. Other values need native FFmpeg (see [disable-ffmpeg.md](disable-ffmpeg.md)).
-- `outputSampleRateHz` — optional encoder hint; `0` uses native defaults. MP3/Opus allow only specific rates (see [audio-conversion.md](audio-conversion.md)).
-
-Returns the absolute file path, or on Android SAF a `content://` URI string.
+Use this for `GeneratedAudio` from `generateSpeech(...)` / `generateSpeechWithTimestamps(...)`.
+This is the preferred path because it writes from the native sink and avoids JS PCM round-trips.
 
 ```ts
-await saveAudio(audio, { kind: 'file', path: '/tmp/out.wav' });
-await saveAudio(audio, { kind: 'file', path: '/tmp/out.mp3' }, { format: 'mp3' });
-const uri = await saveAudio(
+await saveAudioFromGeneration(audio, { kind: 'file', path: '/tmp/out.wav' });
+await saveAudioFromGeneration(audio, { kind: 'file', path: '/tmp/out.mp3' }, { format: 'mp3' });
+const uri = await saveAudioFromGeneration(
   audio,
   { kind: 'androidContent', directoryUri: dirUri, filename: 'speech.mp3' },
   { format: 'mp3' }
 );
 ```
+
+### `saveAudioFromPCM(audio, target, options?)`
+
+```ts
+function saveAudioFromPCM(
+  audio: { samples: number[] | Float32Array; sampleRate: number },
+  target: SaveAudioTarget,
+  options?: SaveAudioOptions
+): Promise<string>;
+```
+
+Use this when you already have raw PCM samples in JS and want to save them.
+This path is less preferred than `saveAudioFromGeneration` for TTS output, because PCM must exist in JS first.
+
+```ts
+await saveAudioFromPCM(
+  { samples, sampleRate },
+  { kind: 'file', path: '/tmp/out.wav' }
+);
+```
+
+### File path vs `content://` directory URI
+
+| Use | When |
+| --- | --- |
+| **Absolute file path** (`{ kind: 'file', path }`) | iOS and Android: app-controlled destination (sandbox, cache, documents). |
+| **Directory `content://` URI** (`{ kind: 'androidContent', directoryUri, filename }`) | Android only: write into user-selected SAF directory. |
 
 See also [TTS save example](audio-conversion.md#tts-save-example).
 
