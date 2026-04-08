@@ -17,18 +17,26 @@
 - (void)so_cancelTtsStream:(NSString *)instanceId
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject;
-- (void)so_startTtsPcmPlayer:(NSString *)instanceId
-                   sampleRate:(double)sampleRate
-                     channels:(double)channels
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject;
-- (void)so_writeTtsPcmChunk:(NSString *)instanceId
-                     samples:(NSArray<NSNumber *> *)samples
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject;
-- (void)so_stopTtsPcmPlayer:(NSString *)instanceId
+- (void)so_createPcmPlayer:(NSString *)playerId
+                 sampleRate:(double)sampleRate
+                   channels:(double)channels
+                       feed:(NSString *)feed
+              ttsInstanceId:(NSString *)ttsInstanceId
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject;
+- (void)so_writePcmChunk:(NSString *)playerId
+                  samples:(NSArray<NSNumber *> *)samples
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject;
+- (void)so_pausePcmPlayer:(NSString *)playerId
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject;
+- (void)so_resumePcmPlayer:(NSString *)playerId
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject;
+- (void)so_destroyPcmPlayer:(NSString *)playerId
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation SherpaOnnx (TTSOnline)
@@ -69,29 +77,45 @@
   [self so_cancelTtsStream:instanceId resolve:resolve reject:reject];
 }
 
-- (void)startTtsPcmPlayer:(NSString *)instanceId
-                sampleRate:(double)sampleRate
-                  channels:(double)channels
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject {
-  [self so_startTtsPcmPlayer:instanceId
-                  sampleRate:sampleRate
-                    channels:channels
-                     resolve:resolve
-                      reject:reject];
-}
-
-- (void)writeTtsPcmChunk:(NSString *)instanceId
-                  samples:(NSArray<NSNumber *> *)samples
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject {
-  [self so_writeTtsPcmChunk:instanceId samples:samples resolve:resolve reject:reject];
-}
-
-- (void)stopTtsPcmPlayer:(NSString *)instanceId
+- (void)createPcmPlayer:(NSString *)playerId
+              sampleRate:(double)sampleRate
+                channels:(double)channels
+                    feed:(NSString *)feed
+           ttsInstanceId:(NSString *)ttsInstanceId
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject {
-  [self so_stopTtsPcmPlayer:instanceId resolve:resolve reject:reject];
+  [self so_createPcmPlayer:playerId
+                sampleRate:sampleRate
+                  channels:channels
+                      feed:feed
+             ttsInstanceId:ttsInstanceId
+                   resolve:resolve
+                    reject:reject];
+}
+
+- (void)writePcmChunk:(NSString *)playerId
+              samples:(NSArray<NSNumber *> *)samples
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject {
+  [self so_writePcmChunk:playerId samples:samples resolve:resolve reject:reject];
+}
+
+- (void)pausePcmPlayer:(NSString *)playerId
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject {
+  [self so_pausePcmPlayer:playerId resolve:resolve reject:reject];
+}
+
+- (void)resumePcmPlayer:(NSString *)playerId
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject {
+  [self so_resumePcmPlayer:playerId resolve:resolve reject:reject];
+}
+
+- (void)destroyPcmPlayer:(NSString *)playerId
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject {
+  [self so_destroyPcmPlayer:playerId resolve:resolve reject:reject];
 }
 
 @end

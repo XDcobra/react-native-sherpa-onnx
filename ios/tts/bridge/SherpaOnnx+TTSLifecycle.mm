@@ -76,14 +76,6 @@
                     return;
                 }
                 inst = it->second.get();
-                if (inst->player != nil) [inst->player stop];
-                if (inst->engine != nil) {
-                    [inst->engine stop];
-                    [inst->engine reset];
-                }
-                inst->player = nil;
-                inst->engine = nil;
-                inst->format = nil;
                 inst->streamCancelled.store(true);
             }
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{

@@ -9,6 +9,7 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "subtitle/TtsSubtitleSegmentation.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
+#include "../pcm/PcmPlayerRegistry.h"
 
 #include <memory>
 #include <optional>
@@ -371,6 +372,91 @@
        outputSampleRateHz:outputSampleRateHz
                   resolve:resolve
                    reject:reject];
+}
+
+- (void)so_playTtsFromSink:(NSString *)instanceId
+             generation:(double)generation
+             sampleRate:(double)sampleRate
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+
+    std::vector<float> pcmCopy;
+    int32_t rate = 0;
+    std::string instanceIdStr = [instanceId UTF8String];
+
+    {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end() || it->second->wrapper == nullptr) {
+            reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+            return;
+        }
+        auto &sink = it->second->sink;
+        if (sink.generation == 0 || sink.samples.empty()) {
+            reject(@"TTS_SINK_EMPTY", @"No batch synthesis result available", nil);
+            return;
+        }
+        uint64_t requestedGen = static_cast<uint64_t>(generation);
+        if (requestedGen != sink.generation) {
+            reject(@"TTS_SINK_STALE",
+                   [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                    requestedGen, sink.generation], nil);
+            return;
+        }
+        pcmCopy = sink.samples;
+        rate = (sampleRate > 0) ? static_cast<int32_t>(sampleRate) : sink.sampleRate;
+    }
+
+    // Auto-destroy previous batch playback player for this instance
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+        for (auto it = g_pcm_players.begin(); it != g_pcm_players.end(); ) {
+            if (it->second && it->second->ttsInstanceId == instanceIdStr &&
+                it->first.find("batch_play_") == 0) {
+                it->second->destroy();
+                it = g_pcm_players.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    uint64_t requestedGen = static_cast<uint64_t>(generation);
+    std::string playerId = "batch_play_" + instanceIdStr + "_" + std::to_string(requestedGen);
+
+    auto session = std::make_shared<PcmPlayerSession>();
+    session->playerId = playerId;
+    session->sampleRate = rate;
+    session->channels = 1;
+    session->feed = PcmPlayerFeed::NATIVE;
+    session->ttsInstanceId = instanceIdStr;
+
+    AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+    [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
+    [audioSession setActive:YES error:nil];
+
+    session->audioEngine = [[AVAudioEngine alloc] init];
+    session->playerNode = [[AVAudioPlayerNode alloc] init];
+    session->audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:(double)rate channels:1];
+    [session->audioEngine attachNode:session->playerNode];
+    [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
+    NSError *startError = nil;
+    [session->audioEngine startAndReturnError:&startError];
+    [session->playerNode play];
+
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+        g_pcm_players[playerId] = session;
+    }
+
+    session->enqueueMonoFloat32(pcmCopy.data(), static_cast<int32_t>(pcmCopy.size()));
+    NSString *playerIdStr = [NSString stringWithUTF8String:playerId.c_str()];
+    resolve(@{ @"playerId": playerIdStr });
 }
 
 @end

@@ -39,6 +39,11 @@
       outputSampleRateHz:(double)outputSampleRateHz
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject;
+- (void)so_playTtsFromSink:(NSString *)instanceId
+                generation:(double)generation
+                sampleRate:(double)sampleRate
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation SherpaOnnx (TTSOffline)
@@ -122,6 +127,14 @@
              outputSampleRateHz:outputSampleRateHz
                         resolve:resolve
                          reject:reject];
+}
+
+- (void)playTtsFromSink:(NSString *)instanceId
+             generation:(double)generation
+             sampleRate:(double)sampleRate
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject {
+  [self so_playTtsFromSink:instanceId generation:generation sampleRate:sampleRate resolve:resolve reject:reject];
 }
 
 @end

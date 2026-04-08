@@ -53,9 +53,6 @@ struct TtsInstanceState {
     std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
     std::atomic<bool> streamRunning{false};
     std::atomic<bool> streamCancelled{false};
-    __strong AVAudioEngine *engine = nil;
-    __strong AVAudioPlayerNode *player = nil;
-    __strong AVAudioFormat *format = nil;
     __strong NSString *modelDir = nil;
     __strong NSString *modelType = nil;
     int32_t numThreads = 2;
