@@ -98,6 +98,8 @@ Use this document to split work into sub-plans and implement them incrementally.
 **Deliverable:** no **required** large `number[]` on the **default** offline TTS + save + alignment flows.
 
 **Detailed sub-plan:** [tts-native-sink-subplan-04.md](./tts-native-sink-subplan-04.md)
+  
+**Streaming follow-up plan:** [tts-streaming-performance-migration.md](./tts-streaming-performance-migration.md)
 
 ---
 
