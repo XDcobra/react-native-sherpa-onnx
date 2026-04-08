@@ -29,6 +29,7 @@ import type {
   TtsEngine,
   StreamingTtsEngine,
   TtsStreamController,
+  GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
@@ -85,10 +86,9 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [generatedAudio, setGeneratedAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [generatedAudio, setGeneratedAudio] = useState<GeneratedAudio | null>(
+    null
+  );
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -387,7 +387,7 @@ export default function TTSScreen() {
     []
   );
 
-  const buildStreamedAudio = useCallback(() => {
+  const buildStreamedAudio = useCallback((): GeneratedAudio | null => {
     const chunks = streamChunksRef.current;
     if (chunks.length === 0) {
       return null;
@@ -403,7 +403,14 @@ export default function TTSScreen() {
     }
     const sampleRate =
       streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-    return { samples: combined, sampleRate };
+    return {
+      sampleRate,
+      numSamples: combined.length,
+      generation: 0,
+      async getSamples(): Promise<Float32Array> {
+        return Float32Array.from(combined);
+      },
+    };
   }, [modelInfo?.sampleRate]);
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
@@ -929,7 +936,7 @@ export default function TTSScreen() {
       setGeneratedAudio(result);
       Alert.alert(
         'Success',
-        `Generated ${result.samples.length} samples at ${result.sampleRate} Hz`
+        `Generated ${result.numSamples} samples at ${result.sampleRate} Hz`
       );
     } catch (err) {
       console.error('TTS Generation error:', err);
@@ -1136,11 +1143,8 @@ export default function TTSScreen() {
     );
   };
 
-  const saveAudioWithData = async (audio: {
-    samples: number[];
-    sampleRate: number;
-  }) => {
-    if (!audio.samples.length) {
+  const saveAudioWithData = async (audio: GeneratedAudio) => {
+    if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
       return;
     }
@@ -1825,7 +1829,7 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Generated Audio</Text>
               <View style={styles.resultContainer}>
                 <Text style={styles.resultText}>
-                  Samples: {generatedAudio.samples.length.toLocaleString()}
+                  Samples: {generatedAudio.numSamples.toLocaleString()}
                 </Text>
                 <Text style={styles.resultText}>
                   Sample Rate: {generatedAudio.sampleRate} Hz
@@ -1833,7 +1837,7 @@ export default function TTSScreen() {
                 <Text style={styles.resultText}>
                   Duration:{' '}
                   {(
-                    generatedAudio.samples.length / generatedAudio.sampleRate
+                    generatedAudio.numSamples / generatedAudio.sampleRate
                   ).toFixed(2)}{' '}
                   seconds
                 </Text>

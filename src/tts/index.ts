@@ -249,11 +249,24 @@ export async function createTTS(
         ...(opts ?? {}),
         subtitles: { mode: 'off' },
       };
-      return SherpaOnnx.generateTts(
+      const raw = await SherpaOnnx.generateTts(
         instanceId,
         text,
         toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
       );
+      return {
+        sampleRate: raw.sampleRate,
+        numSamples: raw.numSamples,
+        generation: raw.generation,
+        _instanceId: instanceId,
+        async getSamples(): Promise<Float32Array> {
+          const samplesResult = await SherpaOnnx.getTtsSamples(
+            instanceId,
+            raw.generation
+          );
+          return new Float32Array(samplesResult.samples);
+        },
+      } as GeneratedAudio;
     },
 
     async generateSpeechWithTimestamps(
@@ -272,8 +285,28 @@ export async function createTTS(
         );
       }
 
+      // Helper to build a GeneratedAudio object from native metadata
+      const buildAudio = (raw: {
+        sampleRate: number;
+        numSamples: number;
+        generation: number;
+      }): GeneratedAudio =>
+        ({
+          sampleRate: raw.sampleRate,
+          numSamples: raw.numSamples,
+          generation: raw.generation,
+          _instanceId: instanceId,
+          async getSamples(): Promise<Float32Array> {
+            const samplesResult = await SherpaOnnx.getTtsSamples(
+              instanceId,
+              raw.generation
+            );
+            return new Float32Array(samplesResult.samples);
+          },
+        } as GeneratedAudio);
+
       if (subtitleMode === 'off') {
-        const audio = await SherpaOnnx.generateTts(
+        const raw = await SherpaOnnx.generateTts(
           instanceId,
           text,
           toNativeTtsGenerationOptions({
@@ -281,7 +314,7 @@ export async function createTTS(
             subtitles: { mode: 'off' },
           })
         );
-        return { ...audio, subtitles: [], timingMode: 'off' };
+        return { ...buildAudio(raw), subtitles: [], timingMode: 'off' };
       }
 
       if (subs?.mode === 'accurate') {
@@ -297,15 +330,24 @@ export async function createTTS(
           subtitles: { mode: 'off' },
         };
 
-        const generated = await SherpaOnnx.generateTts(
+        const raw = await SherpaOnnx.generateTts(
           instanceId,
           text,
           toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
         );
 
+        // Materialize samples for alignment (existing alignTextToAudio API)
+        const samplesResult = await SherpaOnnx.getTtsSamples(
+          instanceId,
+          raw.generation
+        );
+
         const subtitleResult = await alignTextToAudio(
           text,
-          { samples: generated.samples, sampleRate: generated.sampleRate },
+          {
+            samples: Array.from(samplesResult.samples),
+            sampleRate: raw.sampleRate,
+          },
           {
             mode: 'accurate',
             granularity: subtitleGranularity,
@@ -314,7 +356,7 @@ export async function createTTS(
         );
 
         return {
-          ...generated,
+          ...buildAudio(raw),
           subtitles: subtitleResult.subtitles,
           timingMode: 'aligned',
         };
@@ -324,7 +366,7 @@ export async function createTTS(
         subtitleGranularity === 'character' ? 'sentence' : subtitleGranularity;
 
       if (subtitleMode === 'proportional') {
-        const generated = await SherpaOnnx.generateTts(
+        const raw = await SherpaOnnx.generateTts(
           instanceId,
           text,
           toNativeTtsGenerationOptions({
@@ -332,13 +374,19 @@ export async function createTTS(
             subtitles: { mode: 'off' },
           })
         );
+
+        // Proportional alignment only needs totalSamples + sampleRate
+        // Use numSamples from metadata to avoid materializing full PCM
         const subtitleResult = await alignTextToAudio(
           text,
-          { samples: generated.samples, sampleRate: generated.sampleRate },
+          {
+            samples: new Array(raw.numSamples) as number[],
+            sampleRate: raw.sampleRate,
+          },
           { mode: 'proportional', granularity: gran }
         );
         return {
-          ...generated,
+          ...buildAudio(raw),
           subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
@@ -360,9 +408,14 @@ export async function createTTS(
             'TTS_CHUNK_TIMELINE: native did not return segmentSampleCounts; ensure exportChunkTimelineOnly is supported.'
           );
         }
+
+        // Estimated mode: uses segmentSampleCounts, not raw PCM samples
         const subtitleResult = await alignTextToAudio(
           text,
-          { samples: raw.samples, sampleRate: raw.sampleRate },
+          {
+            samples: new Array(raw.numSamples) as number[],
+            sampleRate: raw.sampleRate,
+          },
           {
             mode: 'estimated',
             chunks: {
@@ -373,8 +426,7 @@ export async function createTTS(
           }
         );
         return {
-          samples: raw.samples,
-          sampleRate: raw.sampleRate,
+          ...buildAudio(raw),
           subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
@@ -451,6 +503,7 @@ export async function createTTS(
 
 /**
  * Save generated TTS audio to a file or (Android) SAF tree. Default format is `wav`.
+ * Prefers native sink-based save (no JS PCM round-trip) when generation info is available.
  * For non-WAV formats, native encodes from float PCM without requiring the app to write a WAV first.
  *
  * @returns Absolute file path, or on Android SAF a `content://` URI string.
@@ -463,34 +516,80 @@ export function saveAudio(
   const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
 
-  if (target.kind === 'androidContent') {
-    if (Platform.OS !== 'android') {
-      return Promise.reject(
-        new Error(
-          'saveAudio: kind "androidContent" is only supported on Android.'
-        )
+  // Sink-native path: use instanceId + generation to save from native without JS PCM
+  // GeneratedAudio from generateSpeech carries generation; we need the instanceId
+  // which is available via the closure. For module-level saveAudio, we pass through
+  // saveTtsAudioFromSink if generation is present (non-zero).
+  if (
+    audio.generation != null &&
+    audio.generation > 0 &&
+    '_instanceId' in audio &&
+    typeof (audio as any)._instanceId === 'string'
+  ) {
+    const iid = (audio as any)._instanceId as string;
+
+    if (target.kind === 'androidContent') {
+      if (Platform.OS !== 'android') {
+        return Promise.reject(
+          new Error(
+            'saveAudio: kind "androidContent" is only supported on Android.'
+          )
+        );
+      }
+      return SherpaOnnx.saveTtsAudioFromSink(
+        iid,
+        audio.generation,
+        'androidContent',
+        target.directoryUri,
+        target.filename,
+        format,
+        outputSampleRateHz
       );
     }
-    return SherpaOnnx.saveTtsAudio(
-      audio.samples,
-      audio.sampleRate,
-      'androidContent',
-      target.directoryUri,
-      target.filename,
+
+    return SherpaOnnx.saveTtsAudioFromSink(
+      iid,
+      audio.generation,
+      'file',
+      target.path,
+      '',
       format,
       outputSampleRateHz
     );
   }
 
-  return SherpaOnnx.saveTtsAudio(
-    audio.samples,
-    audio.sampleRate,
-    'file',
-    target.path,
-    '',
-    format,
-    outputSampleRateHz
-  );
+  // Fallback: materialize samples and use legacy path
+  return (async () => {
+    const samples = await audio.getSamples();
+    const samplesArray = Array.from(samples);
+
+    if (target.kind === 'androidContent') {
+      if (Platform.OS !== 'android') {
+        throw new Error(
+          'saveAudio: kind "androidContent" is only supported on Android.'
+        );
+      }
+      return SherpaOnnx.saveTtsAudioFromPCM(
+        samplesArray,
+        audio.sampleRate,
+        'androidContent',
+        target.directoryUri,
+        target.filename,
+        format,
+        outputSampleRateHz
+      );
+    }
+
+    return SherpaOnnx.saveTtsAudioFromPCM(
+      samplesArray,
+      audio.sampleRate,
+      'file',
+      target.path,
+      '',
+      format,
+      outputSampleRateHz
+    );
+  })();
 }
 
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)

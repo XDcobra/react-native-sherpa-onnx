@@ -107,6 +107,8 @@
                         i->wrapper->release();
                         i->wrapper.reset();
                     }
+                    // Sub-plan 01: clear PCM sink on unload
+                    i->sink.clear();
                     i->modelDir = nil;
                     i->modelType = nil;
                     i->provider = nil;

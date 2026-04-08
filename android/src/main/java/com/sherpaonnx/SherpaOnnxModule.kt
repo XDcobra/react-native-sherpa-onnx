@@ -904,6 +904,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
   }
 
+  /**
+   * Retrieve PCM samples from the native sink for a given generation.
+   */
+  override fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
+    offlineTtsHelper.getTtsSamples(instanceId, generation, promise)
+  }
+
+  /**
+   * Save TTS audio directly from the native sink (no JS PCM round-trip).
+   */
+  override fun saveTtsAudioFromSink(
+    instanceId: String,
+    generation: Double,
+    destinationType: String,
+    pathOrDirectoryUri: String,
+    filename: String,
+    format: String,
+    outputSampleRateHz: Double,
+    promise: Promise
+  ) {
+    offlineTtsHelper.saveTtsAudioFromSink(
+      instanceId, generation, destinationType, pathOrDirectoryUri,
+      filename, format, outputSampleRateHz, promise
+    )
+  }
+
   override fun alignAccurateFromPath(
     modelPath: String,
     audioPath: String,
@@ -1238,7 +1264,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.unloadOnline(instanceId, promise)
   }
 
-  override fun saveTtsAudio(
+  override fun saveTtsAudioFromPCM(
     samples: ReadableArray,
     sampleRate: Double,
     destinationType: String,
@@ -1248,7 +1274,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     outputSampleRateHz: Double,
     promise: Promise
   ) {
-    offlineTtsHelper.saveTtsAudio(
+    offlineTtsHelper.saveTtsAudioFromPCM(
       samples,
       sampleRate,
       destinationType,

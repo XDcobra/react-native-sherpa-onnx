@@ -40,7 +40,9 @@ internal class SherpaOnnxTtsCoordinator(
     ttsInitExecutor
   )
 
-  private val batchGenerationService = TtsBatchGenerationService(repository)
+  private val audioExportService = TtsAudioExportService(context, encodeMonoFromRawFile)
+
+  private val batchGenerationService = TtsBatchGenerationService(repository, audioExportService)
 
   private val streamingService = TtsStreamingService(
     repository,
@@ -58,8 +60,6 @@ internal class SherpaOnnxTtsCoordinator(
     ttsInitExecutor,
     detectTtsModel
   )
-
-  private val audioExportService = TtsAudioExportService(context, encodeMonoFromRawFile)
 
   fun shutdown() = lifecycleService.shutdown()
 
@@ -109,6 +109,22 @@ internal class SherpaOnnxTtsCoordinator(
   fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) =
     batchGenerationService.generateTtsWithTimestamps(instanceId, text, options, promise)
 
+  fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) =
+    batchGenerationService.getTtsSamples(instanceId, generation, promise)
+
+  fun saveTtsAudioFromSink(
+    instanceId: String,
+    generation: Double,
+    destinationType: String,
+    pathOrDirectoryUri: String,
+    filename: String,
+    format: String,
+    outputSampleRateHz: Double,
+    promise: Promise
+  ) = batchGenerationService.saveTtsAudioFromSink(
+    instanceId, generation, destinationType, pathOrDirectoryUri, filename, format, outputSampleRateHz, promise
+  )
+
   fun generateTtsStreamToFile(
     instanceId: String,
     requestId: String,
@@ -142,7 +158,7 @@ internal class SherpaOnnxTtsCoordinator(
   fun unloadTts(instanceId: String, promise: Promise) =
     lifecycleService.unloadTts(instanceId, promise)
 
-  fun saveTtsAudio(
+  fun saveTtsAudioFromPCM(
     samples: ReadableArray,
     sampleRate: Double,
     destinationType: String,
@@ -151,7 +167,7 @@ internal class SherpaOnnxTtsCoordinator(
     format: String,
     outputSampleRateHz: Double,
     promise: Promise
-  ) = audioExportService.saveTtsAudio(
+  ) = audioExportService.saveTtsAudioFromPCM(
     samples,
     sampleRate,
     destinationType,

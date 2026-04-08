@@ -84,18 +84,19 @@
             return;
         }
 
-        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:result.samples.size()];
-        for (float sample : result.samples) {
-            [samplesArray addObject:@(sample)];
-        }
+        // Sub-plan 01: store PCM in native sink
+        it->second->sink.update(result.samples, result.sampleRate);
+        uint64_t generation = it->second->sink.generation;
 
+        // Sub-plan 02: metadata-only — no samples array over the bridge
         NSDictionary *resultDict = @{
-            @"samples": samplesArray,
-            @"sampleRate": @(result.sampleRate)
+            @"sampleRate": @(result.sampleRate),
+            @"numSamples": @(static_cast<int32_t>(result.samples.size())),
+            @"generation": @(static_cast<double>(generation))
         };
 
-        RCTLogInfo(@"TTS: Generated %lu samples at %d Hz",
-                   (unsigned long)result.samples.size(), result.sampleRate);
+        RCTLogInfo(@"TTS: Generated %lu samples at %d Hz (generation %llu)",
+                   (unsigned long)result.samples.size(), result.sampleRate, generation);
 
         resolve(resultDict);
     } @catch (NSException *exception) {
@@ -228,19 +229,20 @@
             }
         }
 
-        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:generatedSamples.size()];
-        for (float sample : generatedSamples) {
-            [samplesArray addObject:@(sample)];
-        }
+        // Sub-plan 01: store PCM in native sink
+        it->second->sink.update(generatedSamples.data(), generatedSamples.size(), sampleRate);
+        uint64_t generation = it->second->sink.generation;
 
+        // Sub-plan 02: metadata-only — no samples array over the bridge
         if (exportChunkOnly) {
             NSMutableArray *counts = [NSMutableArray arrayWithCapacity:sentenceChunkSizes.size()];
             for (int32_t c : sentenceChunkSizes) {
                 [counts addObject:@(c)];
             }
             NSDictionary *resultDict = @{
-                @"samples": samplesArray,
                 @"sampleRate": @(sampleRate),
+                @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
+                @"generation": @(static_cast<double>(generation)),
                 @"segmentSampleCounts": counts,
                 @"subtitles": @[],
                 @"timingMode": @"estimated"
@@ -263,8 +265,9 @@
         }
 
         NSDictionary *resultDict = @{
-            @"samples": samplesArray,
             @"sampleRate": @(sampleRate),
+            @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
+            @"generation": @(static_cast<double>(generation)),
             @"subtitles": subtitlesArray,
             @"timingMode": timingMode
         };
@@ -275,6 +278,99 @@
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
     }
+}
+
+- (void)so_getTtsSamples:(NSString *)instanceId
+              generation:(double)generation
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end()) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"TTS instance not found", nil);
+        return;
+    }
+    auto &sink = it->second->sink;
+    uint64_t requestedGen = static_cast<uint64_t>(generation);
+    if (sink.generation == 0 || sink.samples.empty()) {
+        reject(@"TTS_NO_SAMPLES", @"No batch synthesis result available", nil);
+        return;
+    }
+    if (requestedGen != sink.generation) {
+        NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                         (unsigned long long)requestedGen, (unsigned long long)sink.generation];
+        reject(@"TTS_STALE_GENERATION", msg, nil);
+        return;
+    }
+    NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:sink.samples.size()];
+    for (float s : sink.samples) {
+        [samplesArray addObject:@(s)];
+    }
+    NSDictionary *result = @{
+        @"samples": samplesArray,
+        @"sampleRate": @(sink.sampleRate)
+    };
+    resolve(result);
+}
+
+- (void)so_saveTtsAudioFromSink:(NSString *)instanceId
+                     generation:(double)generation
+                destinationType:(NSString *)destinationType
+             pathOrDirectoryUri:(NSString *)pathOrDirectoryUri
+                       filename:(NSString *)filename
+                         format:(NSString *)format
+             outputSampleRateHz:(double)outputSampleRateHz
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    NSMutableArray<NSNumber *> *samplesCopy;
+    double sampleRate;
+    {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end()) {
+            reject(@"TTS_INSTANCE_NOT_FOUND", @"TTS instance not found", nil);
+            return;
+        }
+        auto &sink = it->second->sink;
+        uint64_t requestedGen = static_cast<uint64_t>(generation);
+        if (sink.generation == 0 || sink.samples.empty()) {
+            reject(@"TTS_NO_SAMPLES", @"No batch synthesis result available", nil);
+            return;
+        }
+        if (requestedGen != sink.generation) {
+            NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                             (unsigned long long)requestedGen, (unsigned long long)sink.generation];
+            reject(@"TTS_STALE_GENERATION", msg, nil);
+            return;
+        }
+        samplesCopy = [NSMutableArray arrayWithCapacity:sink.samples.size()];
+        for (float s : sink.samples) {
+            [samplesCopy addObject:@(s)];
+        }
+        sampleRate = static_cast<double>(sink.sampleRate);
+    }
+    // Delegate to existing save implementation
+    [self so_saveTtsAudioFromPCM:samplesCopy
+               sampleRate:sampleRate
+          destinationType:destinationType
+       pathOrDirectoryUri:pathOrDirectoryUri
+                 filename:filename
+                   format:format
+       outputSampleRateHz:outputSampleRateHz
+                  resolve:resolve
+                   reject:reject];
 }
 
 @end

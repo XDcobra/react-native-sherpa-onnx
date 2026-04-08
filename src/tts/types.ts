@@ -392,22 +392,36 @@ export type TtsGenerationOptions = TtsGenerationBase &
 /**
  * Generated audio data from TTS synthesis.
  *
- * The samples are normalized float values in the range [-1.0, 1.0].
- * To save as a WAV file or play the audio, you'll need to convert
- * these samples to the appropriate format for your use case.
+ * PCM samples are held in a native sink and not transferred to JS by default.
+ * Use `getSamples()` to retrieve the PCM data when needed.
  */
 export interface GeneratedAudio {
-  /**
-   * Audio samples as an array of float values in range [-1.0, 1.0].
-   * This is raw PCM audio data.
-   */
-  samples: number[];
-
   /**
    * Sample rate of the generated audio in Hz.
    * Common values: 16000, 22050, 44100, 48000
    */
   sampleRate: number;
+
+  /**
+   * Number of mono float PCM samples in the generated audio.
+   */
+  numSamples: number;
+
+  /**
+   * Monotonic generation ID (matches native sink).
+   * Used internally for stale-detection; may also be useful for debugging.
+   */
+  generation: number;
+
+  /**
+   * Retrieve raw PCM samples from the native sink as Float32Array.
+   * Allocates memory in JS — call only when you need raw PCM (e.g. custom playback).
+   * Prefer `saveAudio()` for saving to file (avoids JS round-trip).
+   *
+   * @throws if the generation is stale (a new generateSpeech was called on the same engine)
+   * @throws if the engine instance has been destroyed
+   */
+  getSamples(): Promise<Float32Array>;
 }
 
 /**

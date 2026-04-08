@@ -345,41 +345,79 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Generate speech from text.
+   * Generate speech from text. Returns metadata only (no PCM samples).
+   * Use getTtsSamples() to retrieve PCM from the native sink.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
    *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
-   * @returns Object with { samples: number[], sampleRate: number }
+   * @returns Object with { sampleRate, numSamples, generation }
    */
   generateTts(
     instanceId: string,
     text: string,
     options: Object
   ): Promise<{
-    samples: number[];
     sampleRate: number;
+    numSamples: number;
+    generation: number;
   }>;
 
   /**
-   * Generate speech with subtitle/timestamp metadata.
+   * Generate speech with subtitle/timestamp metadata. Returns metadata only (no PCM samples).
+   * Use getTtsSamples() to retrieve PCM from the native sink.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
-   * @returns Object with samples, sampleRate, subtitles, and timingMode
+   * @returns Object with sampleRate, numSamples, generation, subtitles, and timingMode
    */
   generateTtsWithTimestamps(
     instanceId: string,
     text: string,
     options: Object
   ): Promise<{
-    samples: number[];
     sampleRate: number;
+    numSamples: number;
+    generation: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
     timingMode: string;
     /** Present when `exportChunkTimelineOnly` is set (synthesis chunk sample counts). */
     segmentSampleCounts?: number[];
   }>;
+
+  /**
+   * Retrieve PCM samples from the native sink for a given TTS generation.
+   * @param instanceId - TTS engine instance ID
+   * @param generation - Generation number from generateTts/generateTtsWithTimestamps
+   * @returns Object with { samples: number[], sampleRate: number }
+   */
+  getTtsSamples(
+    instanceId: string,
+    generation: number
+  ): Promise<{
+    samples: number[];
+    sampleRate: number;
+  }>;
+
+  /**
+   * Save TTS audio directly from the native sink (no JS PCM round-trip).
+   * @param instanceId - TTS engine instance ID
+   * @param generation - Generation number from generateTts
+   * @param destinationType - 'file' or 'androidContent'
+   * @param pathOrDirectoryUri - Output path or SAF directory URI
+   * @param filename - Filename for androidContent destination
+   * @param format - Output format (wav, mp3, flac, etc.)
+   * @param outputSampleRateHz - Encoder sample rate hint; 0 for defaults
+   */
+  saveTtsAudioFromSink(
+    instanceId: string,
+    generation: number,
+    destinationType: string,
+    pathOrDirectoryUri: string,
+    filename: string,
+    format: string,
+    outputSampleRateHz: number
+  ): Promise<string>;
 
   // ==================== Alignment / Subtitle Methods ====================
 
@@ -590,7 +628,7 @@ export interface Spec extends TurboModule {
    * @param format - Output container/codec hint: `wav` (default behavior), `mp3`, `flac`, `m4a`, `opus`, … (same as convertAudioToFormat; requires FFmpeg when not WAV)
    * @param outputSampleRateHz - Encoder hint (e.g. MP3 32000/44100/48000); use 0 for defaults
    */
-  saveTtsAudio(
+  saveTtsAudioFromPCM(
     samples: number[],
     sampleRate: number,
     destinationType: string,

@@ -22,7 +22,7 @@ internal class TtsAudioExportService(
   /** FFmpeg: mono f32le raw file → encoded output path. Returns empty string on success. */
   private val encodeMonoFromRawFile: (rawPath: String, pcmSampleRate: Int, outputPath: String, format: String, outputSampleRateHz: Int) -> String
 ) {
-  fun saveTtsAudio(
+  fun saveTtsAudioFromPCM(
     samples: ReadableArray,
     sampleRate: Double,
     destinationType: String,
@@ -32,9 +32,35 @@ internal class TtsAudioExportService(
     outputSampleRateHz: Double,
     promise: Promise
   ) {
+    saveTtsAudioDirect(
+      readableArrayToFloatArray(samples),
+      sampleRate.toInt(),
+      destinationType,
+      pathOrDirectoryUri,
+      filename,
+      format,
+      outputSampleRateHz.toInt(),
+      promise
+    )
+  }
+
+  /**
+   * Save TTS audio from a native FloatArray (no ReadableArray conversion needed).
+   * This is the preferred path for sink-based saves.
+   */
+  fun saveTtsAudioDirect(
+    samples: FloatArray,
+    sampleRate: Int,
+    destinationType: String,
+    pathOrDirectoryUri: String,
+    filename: String,
+    format: String,
+    outputSampleRateHz: Int,
+    promise: Promise
+  ) {
     try {
       val fmt = format.trim().lowercase().ifEmpty { "wav" }
-      val outHz = outputSampleRateHz.toInt()
+      val outHz = outputSampleRateHz
       val rateErr = validateTtsEncodeOutputSampleRate(fmt, outHz)
       if (rateErr != null) {
         promise.reject("TTS_SAVE_ERROR", rateErr)
@@ -44,10 +70,10 @@ internal class TtsAudioExportService(
       when (destinationType) {
         "file" -> {
           if (fmt == "wav" || fmt == "wav16k") {
-            saveTtsAudioToFile(samples, sampleRate, pathOrDirectoryUri, promise)
+            saveTtsAudioToFileDirect(samples, sampleRate, pathOrDirectoryUri, promise)
             return
           }
-          encodeToFileThenResolve(samples, sampleRate, pathOrDirectoryUri, fmt, outHz, promise)
+          encodeToFileThenResolveDirect(samples, sampleRate, pathOrDirectoryUri, fmt, outHz, promise)
         }
         "androidContent" -> {
           if (filename.isBlank()) {
@@ -55,12 +81,12 @@ internal class TtsAudioExportService(
             return
           }
           if (fmt == "wav" || fmt == "wav16k") {
-            saveTtsAudioToContentUri(samples, sampleRate, pathOrDirectoryUri, filename, promise)
+            saveTtsAudioToContentUriDirect(samples, sampleRate, pathOrDirectoryUri, filename, promise)
             return
           }
           val ext = fileExtensionForFormat(fmt)
           val cacheOut = File(context.cacheDir, "tts_save_${System.nanoTime()}.$ext")
-          encodeToFileThenCopyToContentUri(
+          encodeToFileThenCopyToContentUriDirect(
             samples,
             sampleRate,
             cacheOut.absolutePath,
@@ -75,7 +101,7 @@ internal class TtsAudioExportService(
         else -> promise.reject("TTS_SAVE_ERROR", "Invalid destinationType: use 'file' or 'androidContent'")
       }
     } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: saveTtsAudio failed", e)
+      Log.e("SherpaOnnxTts", "TTS_SAVE_ERROR: saveTtsAudioFromPCM failed", e)
       promise.reject("TTS_SAVE_ERROR", "Failed to save TTS audio: ${e.message}", e)
     }
   }
@@ -145,11 +171,21 @@ internal class TtsAudioExportService(
     outputSampleRateHz: Int,
     promise: Promise
   ) {
-    val floats = readableArrayToFloatArray(samples)
+    encodeToFileThenResolveDirect(readableArrayToFloatArray(samples), sampleRate.toInt(), outputPath, format, outputSampleRateHz, promise)
+  }
+
+  private fun encodeToFileThenResolveDirect(
+    floats: FloatArray,
+    sampleRate: Int,
+    outputPath: String,
+    format: String,
+    outputSampleRateHz: Int,
+    promise: Promise
+  ) {
     val raw = File(context.cacheDir, "tts_pcm_${System.nanoTime()}.raw")
     try {
       writeMonoF32LeRawFile(floats, raw)
-      val err = encodeMonoFromRawFile(raw.absolutePath, sampleRate.toInt(), outputPath, format, outputSampleRateHz)
+      val err = encodeMonoFromRawFile(raw.absolutePath, sampleRate, outputPath, format, outputSampleRateHz)
       if (err.isNotEmpty()) {
         promise.reject("TTS_SAVE_ERROR", err)
         return
@@ -171,12 +207,28 @@ internal class TtsAudioExportService(
     mimeType: String,
     promise: Promise
   ) {
-    val floats = readableArrayToFloatArray(samples)
+    encodeToFileThenCopyToContentUriDirect(
+      readableArrayToFloatArray(samples), sampleRate.toInt(), cacheOutputPath,
+      format, outputSampleRateHz, directoryUri, filename, mimeType, promise
+    )
+  }
+
+  private fun encodeToFileThenCopyToContentUriDirect(
+    floats: FloatArray,
+    sampleRate: Int,
+    cacheOutputPath: String,
+    format: String,
+    outputSampleRateHz: Int,
+    directoryUri: String,
+    filename: String,
+    mimeType: String,
+    promise: Promise
+  ) {
     val raw = File(context.cacheDir, "tts_pcm_${System.nanoTime()}.raw")
     val cacheFile = File(cacheOutputPath)
     try {
       writeMonoF32LeRawFile(floats, raw)
-      val err = encodeMonoFromRawFile(raw.absolutePath, sampleRate.toInt(), cacheOutputPath, format, outputSampleRateHz)
+      val err = encodeMonoFromRawFile(raw.absolutePath, sampleRate, cacheOutputPath, format, outputSampleRateHz)
       if (err.isNotEmpty()) {
         promise.reject("TTS_SAVE_ERROR", err)
         return
@@ -210,12 +262,17 @@ internal class TtsAudioExportService(
     filePath: String,
     promise: Promise
   ) {
+    saveTtsAudioToFileDirect(readableArrayToFloatArray(samples), sampleRate.toInt(), filePath, promise)
+  }
+
+  private fun saveTtsAudioToFileDirect(
+    samples: FloatArray,
+    sampleRate: Int,
+    filePath: String,
+    promise: Promise
+  ) {
     try {
-      val samplesArray = FloatArray(samples.size())
-      for (i in 0 until samples.size()) {
-        samplesArray[i] = samples.getDouble(i).toFloat()
-      }
-      val success = GeneratedAudio(samplesArray, sampleRate.toInt()).save(filePath)
+      val success = GeneratedAudio(samples, sampleRate).save(filePath)
       if (success) {
         promise.resolve(filePath)
       } else {
@@ -235,16 +292,22 @@ internal class TtsAudioExportService(
     filename: String,
     promise: Promise
   ) {
+    saveTtsAudioToContentUriDirect(readableArrayToFloatArray(samples), sampleRate.toInt(), directoryUri, filename, promise)
+  }
+
+  private fun saveTtsAudioToContentUriDirect(
+    samples: FloatArray,
+    sampleRate: Int,
+    directoryUri: String,
+    filename: String,
+    promise: Promise
+  ) {
     try {
-      val samplesArray = FloatArray(samples.size())
-      for (i in 0 until samples.size()) {
-        samplesArray[i] = samples.getDouble(i).toFloat()
-      }
       val resolver = context.contentResolver
       val dirUri = Uri.parse(directoryUri)
       val fileUri = SherpaOnnxContentUriUtils.createDocumentInDirectory(resolver, dirUri, filename, "audio/wav")
       resolver.openOutputStream(fileUri, "w")?.use { outputStream ->
-        writeWavToStream(samplesArray, sampleRate.toInt(), outputStream)
+        writeWavToStream(samples, sampleRate, outputStream)
       } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
