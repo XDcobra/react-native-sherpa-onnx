@@ -50,7 +50,15 @@ const audio: GeneratedAudio = await tts.generateSpeech('Hello, world.', {
   speed: 1.0,
 });
 console.log(audio.sampleRate, audio.numSamples);
-const pcm = await audio.getSamples(); // Float32Array - only call if you really need samples
+
+// Optional: play directly from native sink (no getSamples() round-trip)
+// Returns a controller — use .player.pause() / .resume() / .destroy()
+const playback = await tts.playFromSink(audio.generation);
+// await playback.player.pause();
+// await playback.player.resume();
+
+// Only call this when you really need raw PCM in JS:
+const pcm = await audio.getSamples(); // Float32Array
 
 // saveAudioFromGeneration — `target.kind`: `'file'` = absolute filesystem path; `'androidContent'` = SAF directory URI + filename (Android only).
 // If you omit `options` or do not pass `format`, output defaults to WAV (`'wav'`). Non-WAV (e.g. mp3) needs FFmpeg; see disable-ffmpeg.md.
@@ -208,6 +216,29 @@ const out = await tts.generateSpeechWithTimestamps('Test.', {
 });
 ```
 
+### `tts.playFromSink(generation, options?)`
+
+```ts
+playFromSink(generation: number, options?: { sampleRate?: number }): Promise<TtsBatchPlaybackController>;
+```
+
+Play the latest batch result directly from the native sink (speaker playback without `getSamples()` in JS).
+`generation` should come from `GeneratedAudio.generation`.
+Returns a `TtsBatchPlaybackController` with a `player` handle for pause/resume/destroy.
+See [pcm-player.md](pcm-player.md) for full player API.
+
+```ts
+const audio = await tts.generateSpeech('Hello from sink playback');
+const playback = await tts.playFromSink(audio.generation);
+
+// Pause and resume
+await playback.player.pause();
+await playback.player.resume();
+
+// Stop early
+await playback.player.destroy();
+```
+
 ### `tts.updateParams(options)`
 
 ```ts
@@ -323,6 +354,9 @@ await saveAudioFromPCM(
 | **Directory `content://` URI** (`{ kind: 'androidContent', directoryUri, filename }`) | Android only: write into user-selected SAF directory. |
 
 See also [TTS save example](audio-conversion.md#tts-save-example).
+
+## Built-in TTS Player
+For playback, prefer the built-in PCM player (`tts.playFromSink(...)`): it plays the generated audio directly from the native sink without saving to a file first, which reduces overhead and usually improves performance. See [pcm-player.md](pcm-player.md) for more information on how to pause/stop/start/use the player.
 
 ## Subtitles (standalone audio)
 
