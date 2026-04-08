@@ -149,7 +149,7 @@ export default function TTSScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
-  const streamChunksRef = useRef<number[][]>([]);
+  const streamChunksRef = useRef<Float32Array[]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
   const streamControllerRef = useRef<TtsStreamController | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
@@ -394,12 +394,10 @@ export default function TTSScreen() {
       return null;
     }
     const total = chunks.reduce((sum, part) => sum + part.length, 0);
-    const combined = new Array<number>(total);
+    const combined = new Float32Array(total);
     let offset = 0;
     for (const part of chunks) {
-      for (let i = 0; i < part.length; i += 1) {
-        combined[offset + i] = part[i] as number;
-      }
+      combined.set(part, offset);
       offset += part.length;
     }
     const sampleRate =
@@ -409,7 +407,7 @@ export default function TTSScreen() {
       numSamples: combined.length,
       generation: 0,
       async getSamples(): Promise<Float32Array> {
-        return Float32Array.from(combined);
+        return combined;
       },
     };
   }, [modelInfo?.sampleRate]);

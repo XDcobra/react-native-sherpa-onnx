@@ -10,6 +10,45 @@ import com.sherpaonnx.tts.core.TtsJniCallbackFactory
 import com.sherpaonnx.tts.core.dispatchSampleRate
 import com.sherpaonnx.tts.sink.TtsStreamingWavSink
 
+/**
+ * Buffer that coalesces many small native PCM chunks into fewer, larger emits.
+ * Flushes when accumulated frames >= [maxFrames] or when the first buffered
+ * frame has been waiting longer than [maxLatencyMs].
+ */
+private class ChunkCoalescer(
+  private val maxFrames: Int,
+  private val maxLatencyMs: Long,
+  private val onFlush: (FloatArray) -> Unit
+) {
+  private val parts = mutableListOf<FloatArray>()
+  private var totalFrames = 0
+  private var firstBufferedNs = 0L
+
+  fun add(chunk: FloatArray) {
+    if (totalFrames == 0) firstBufferedNs = System.nanoTime()
+    parts.add(chunk)
+    totalFrames += chunk.size
+    if (totalFrames >= maxFrames ||
+        (System.nanoTime() - firstBufferedNs) / 1_000_000 >= maxLatencyMs) {
+      flush()
+    }
+  }
+
+  fun flush() {
+    if (totalFrames == 0) return
+    val merged = FloatArray(totalFrames)
+    var offset = 0
+    for (p in parts) {
+      p.copyInto(merged, offset)
+      offset += p.size
+    }
+    parts.clear()
+    totalFrames = 0
+    firstBufferedNs = 0L
+    onFlush(merged)
+  }
+}
+
 internal class TtsStreamingService(
   private val repository: TtsEngineRepository,
   private val emitChunk: (String, String, FloatArray, Int, Float, Boolean) -> Unit,
@@ -18,6 +57,13 @@ internal class TtsStreamingService(
   private val emitFileError: (String, String, String, String?) -> Unit,
   private val emitFileEnd: (String, String, Boolean, String, Long, Int) -> Unit
 ) {
+  private companion object {
+    /** Flush coalescing buffer when accumulated samples reach this count. */
+    const val MAX_FRAMES_PER_CHUNK = 16384
+    /** Flush coalescing buffer when first buffered sample is older than this (ms). */
+    const val MAX_CHUNK_LATENCY_MS = 500L
+  }
+
   fun generateTtsStreamToFile(
     instanceId: String,
     requestId: String,
@@ -67,6 +113,9 @@ internal class TtsStreamingService(
     inst.ttsStreamRunning.set(true)
     inst.ttsStreamThread = Thread {
       var sink: TtsStreamingWavSink? = null
+      val coalescer = if (emitChunks) ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
+        emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+      } else null
       try {
         sink = TtsStreamingWavSink(outputPath, sampleRate)
         inst.tts!!.generateWithCallback(
@@ -75,9 +124,7 @@ internal class TtsStreamingService(
           speed,
           TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
             sink.writeChunk(chunk)
-            if (emitChunks) {
-              emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
-            }
+            coalescer?.add(chunk)
           }
         )
 
@@ -88,6 +135,7 @@ internal class TtsStreamingService(
         } else {
           val bytesWritten = sink.finalizeFile()
           if (emitChunks && !cancelled) {
+            coalescer?.flush()
             emitChunk(instanceId, requestId, FloatArray(0), sampleRate, 1f, true)
           }
           emitFileEnd(instanceId, requestId, cancelled, outputPath, bytesWritten, sampleRate)
@@ -148,6 +196,9 @@ internal class TtsStreamingService(
     inst.ttsStreamThread = Thread {
       try {
         val sampleRate = inst.dispatchSampleRate()
+        val coalescer = ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
+          emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+        }
         when {
           TtsGenerationOptionsParser.hasReferenceAudio(options) && inst.isPocket -> {
             val config = TtsGenerationOptionsParser.parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
@@ -155,7 +206,7 @@ internal class TtsStreamingService(
               text,
               config,
               TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
-                emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
+                coalescer.add(chunk)
               }
             )
           }
@@ -165,12 +216,13 @@ internal class TtsStreamingService(
               sid,
               speed,
               TtsJniCallbackFactory.ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
-                emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
+                coalescer.add(chunk)
               }
             )
           }
         }
         if (!inst.ttsStreamCancelled.get()) {
+          coalescer.flush()
           emitChunk(instanceId, requestId, FloatArray(0), sampleRate, 1f, true)
         }
       } catch (e: Exception) {

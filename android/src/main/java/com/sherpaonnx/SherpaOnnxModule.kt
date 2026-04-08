@@ -1,6 +1,7 @@
 package com.sherpaonnx
 
 import android.net.Uri
+import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
@@ -1021,14 +1022,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val samplesArray = Arguments.createArray()
-    for (sample in samples) {
-      samplesArray.pushDouble(sample.toDouble())
+    // Encode float PCM as base64 little-endian bytes (4 bytes per sample).
+    // This replaces per-element pushDouble and avoids O(n) bridge marshalling.
+    val pcmBase64 = if (samples.isNotEmpty()) {
+      val bb = java.nio.ByteBuffer.allocate(samples.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+      bb.asFloatBuffer().put(samples)
+      Base64.encodeToString(bb.array(), Base64.NO_WRAP)
+    } else {
+      ""
     }
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
     payload.putString("requestId", requestId)
-    payload.putArray("samples", samplesArray)
+    payload.putString("pcmBase64", pcmBase64)
     payload.putInt("sampleRate", sampleRate)
     payload.putDouble("progress", progress.toDouble())
     payload.putBoolean("isFinal", isFinal)

@@ -447,15 +447,19 @@ export type TtsDetectedModelEntry = {
 
 /**
  * Streaming chunk event payload for TTS generation.
+ *
+ * PCM data is delivered as `Float32Array` (binary transfer from native).
+ * Internal routing IDs (`instanceId`, `requestId`) are stripped before
+ * the chunk reaches public handlers.
  */
 export interface TtsStreamChunk {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation (distinguishes concurrent streams on same instance). */
-  requestId?: string;
-  samples: number[];
+  /** Mono float PCM samples in [-1, 1]. */
+  samples: Float32Array;
+  /** Sample rate of the generated audio in Hz. */
   sampleRate: number;
+  /** Synthesis progress in [0, 1]. 1.0 on the final chunk. */
   progress: number;
+  /** True for the last chunk of a generation. */
   isFinal: boolean;
 }
 
@@ -463,10 +467,6 @@ export interface TtsStreamChunk {
  * Streaming end event payload.
  */
 export interface TtsStreamEnd {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   cancelled: boolean;
 }
 
@@ -474,10 +474,6 @@ export interface TtsStreamEnd {
  * Streaming error event payload.
  */
 export interface TtsStreamError {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   message: string;
 }
 
@@ -510,8 +506,6 @@ export type TtsStreamFileOutput = {
 
 /** Event payload emitted when stream-to-file finishes. */
 export interface TtsStreamFileEnd {
-  instanceId?: string;
-  requestId?: string;
   cancelled: boolean;
   path: string;
   bytesWritten: number;
@@ -520,8 +514,6 @@ export interface TtsStreamFileEnd {
 
 /** Event payload emitted when stream-to-file fails. */
 export interface TtsStreamFileError {
-  instanceId?: string;
-  requestId?: string;
   message: string;
   path?: string;
 }

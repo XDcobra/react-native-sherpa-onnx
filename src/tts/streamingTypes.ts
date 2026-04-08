@@ -54,7 +54,7 @@ export interface StreamingTtsEngine {
   startPcmPlayer(sampleRate: number, channels: number): Promise<void>;
 
   /** Write float PCM samples to the player. Use from onChunk. */
-  writePcmChunk(samples: number[]): Promise<void>;
+  writePcmChunk(samples: Float32Array | number[]): Promise<void>;
 
   /** Stop and release the PCM player. */
   stopPcmPlayer(): Promise<void>;

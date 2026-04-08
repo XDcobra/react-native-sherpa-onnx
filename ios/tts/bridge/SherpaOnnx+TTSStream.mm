@@ -15,6 +15,18 @@
 #include <optional>
 #include <string>
 
+// Helper: encode float PCM as base64 (little-endian, 4 bytes per sample).
+// Replaces per-element NSNumber boxing with a single NSData→base64 call.
+static NSString *pcmToBase64(const float *samples, int32_t numSamples) {
+    if (samples == nullptr || numSamples <= 0) return @"";
+    NSData *data = [NSData dataWithBytes:samples length:(NSUInteger)(numSamples * sizeof(float))];
+    return [data base64EncodedStringWithOptions:0];
+}
+
+// Chunk coalescing thresholds — fewer, larger JS callbacks for long text.
+static const int32_t kMaxFramesPerChunk = 16384;
+static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
+
 @implementation SherpaOnnx (TTSStream)
 
 - (void)so_generateTtsStream:(NSString *)instanceId
@@ -97,35 +109,47 @@
     __weak SherpaOnnx *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool success = false;
+
+        // Coalescing buffer — accumulates native ticks and flushes as fewer, larger chunks.
+        __block std::vector<float> coalesceBuffer;
+        __block int64_t coalesceFirstNs = 0;
+
+        auto flushCoalesceBuffer = [&coalesceBuffer, &coalesceFirstNs, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+            if (coalesceBuffer.empty()) return;
+            NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"instanceId": instanceIdCopy,
+                @"pcmBase64": pcmB64,
+                @"sampleRate": @(sampleRate),
+                @"progress": @(0.0f),
+                @"isFinal": @NO
+            }];
+            if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                }
+            });
+            coalesceBuffer.clear();
+            coalesceFirstNs = 0;
+        };
+
         @try {
             success = instRef->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &flushCoalesceBuffer, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
 
-                    NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:numSamples];
-                    for (int32_t i = 0; i < numSamples; i++) {
-                        [samplesArray addObject:@(samples[i])];
+                    if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+                    coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
+                    if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||
+                        (clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) - coalesceFirstNs) >= (uint64_t)kMaxChunkLatencyNs) {
+                        flushCoalesceBuffer();
                     }
-
-                    NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
-                        @"instanceId": instanceIdCopy,
-                        @"samples": samplesArray,
-                        @"sampleRate": @(sampleRate),
-                        @"progress": @(progress),
-                        @"isFinal": @NO
-                    }];
-                    if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
-
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (weakSelf) {
-                            [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
-                        }
-                    });
 
                     return instRef->streamCancelled.load() ? 0 : 1;
                 },
@@ -154,9 +178,10 @@
         }
 
         if (!cancelled) {
+            flushCoalesceBuffer();
             NSMutableDictionary *finalPayload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
-                @"samples": @[],
+                @"pcmBase64": @"",
                 @"sampleRate": @(sampleRate),
                 @"progress": @1.0f,
                 @"isFinal": @YES
@@ -246,35 +271,48 @@
         bool success = false;
         bool cancelled = false;
         int64_t bytesWritten = 0;
+
+        // Coalescing buffer for chunk emission (only used when emitChunks == true).
+        __block std::vector<float> coalesceBuffer;
+        __block int64_t coalesceFirstNs = 0;
+        auto flushFileCoalesce = [&coalesceBuffer, &coalesceFirstNs, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+            if (coalesceBuffer.empty()) return;
+            NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"instanceId": instanceIdCopy,
+                @"pcmBase64": pcmB64,
+                @"sampleRate": @(sampleRate),
+                @"progress": @(0.0f),
+                @"isFinal": @NO
+            }];
+            if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                }
+            });
+            coalesceBuffer.clear();
+            coalesceFirstNs = 0;
+        };
+
         @try {
             sink = std::make_unique<StreamingWavSink>(std::string([pathCopy UTF8String]), sampleRate);
             success = instRef->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, emitChunks, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &flushFileCoalesce, emitChunks, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
                     sinkPtr->writeChunk(samples, numSamples);
                     if (emitChunks) {
-                        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:numSamples];
-                        for (int32_t i = 0; i < numSamples; i++) {
-                            [samplesArray addObject:@(samples[i])];
+                        if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+                        coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
+                        if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||
+                            (clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) - coalesceFirstNs) >= (uint64_t)kMaxChunkLatencyNs) {
+                            flushFileCoalesce();
                         }
-                        NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
-                            @"instanceId": instanceIdCopy,
-                            @"samples": samplesArray,
-                            @"sampleRate": @(sampleRate),
-                            @"progress": @(progress),
-                            @"isFinal": @NO
-                        }];
-                        if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            if (weakSelf) {
-                                [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
-                            }
-                        });
                     }
                     return instRef->streamCancelled.load() ? 0 : 1;
                 }
@@ -316,9 +354,10 @@
         }
 
         if (emitChunks && !cancelled) {
+            flushFileCoalesce();
             NSMutableDictionary *finalPayload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
-                @"samples": @[],
+                @"pcmBase64": @"",
                 @"sampleRate": @(sampleRate),
                 @"progress": @1.0f,
                 @"isFinal": @YES
