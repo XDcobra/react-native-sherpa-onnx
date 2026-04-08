@@ -1,10 +1,12 @@
 #import "SherpaOnnx.h"
-#import <React/RCTLog.h>
+#import <AVFoundation/AVFoundation.h>
 
-#include "sherpa-onnx/c-api/cxx-api.h"
 #include "sherpa-onnx-model-detect.h"
-#include "sherpa_onnx_ctc_alignment.hpp"
+#include "sherpa_onnx_alignment_engine.hpp"
+#include "tts/engine/TtsEngineStore.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -13,6 +15,12 @@
 #include <vector>
 
 namespace {
+
+struct TtsSinkSnapshot {
+  std::vector<float> samples;
+  int32_t sampleRate = 0;
+  int32_t numSamples = 0;
+};
 
 static NSString *alignmentKindToNSString(sherpaonnx::AlignmentModelKind kind) {
   using K = sherpaonnx::AlignmentModelKind;
@@ -50,8 +58,8 @@ static NSDictionary *alignmentDetectResultToDict(
   return dict;
 }
 
-static NSArray *AlignmentIntervalsToNSArray(
-    const std::vector<sherpa_onnx::ctc_alignment::AlignmentInterval> &items) {
+static NSArray *SubtitleItemsToNSArray(
+    const std::vector<sherpa_onnx::alignment::SubtitleItem> &items) {
   NSMutableArray *array = [NSMutableArray arrayWithCapacity:items.size()];
   for (const auto &item : items) {
     [array addObject:@{
@@ -63,10 +71,11 @@ static NSArray *AlignmentIntervalsToNSArray(
   return array;
 }
 
-static NSDictionary *CtcResultToNSDictionary(const sherpa_onnx::ctc_alignment::CtcAlignmentResult &r) {
+static NSDictionary *AlignmentResultToNSDictionary(
+    const sherpa_onnx::alignment::AlignmentResult &r) {
   return @{
-    @"words": AlignmentIntervalsToNSArray(r.words),
-    @"chars": AlignmentIntervalsToNSArray(r.chars),
+    @"subtitles": SubtitleItemsToNSArray(r.subtitles),
+    @"timingMode": [NSString stringWithUTF8String:r.timing_mode.c_str()] ?: @"",
   };
 }
 
@@ -154,24 +163,179 @@ static bool ReadPcmWavFileMetrics(const std::string &path, int32_t *outRate, int
   return true;
 }
 
-static NSDictionary *TryRunCtcAlignmentFromRawPcm(
-    const std::string &modelPathStr,
-    const std::string &textStr,
-    NSString *vocabJson,
-    std::vector<float> rawSamples,
-    int32_t sourceSampleRate) {
-  if (vocabJson == nil || vocabJson.length == 0) {
-    throw std::runtime_error("Vocabulary JSON is empty");
+static std::string NormalizeAudioPathToLocalFile(NSString *audioPath) {
+  if (audioPath == nil) {
+    return "";
   }
-  std::string vocabUtf8([vocabJson UTF8String] ?: "");
-  auto result = sherpa_onnx::ctc_alignment::RunCtcAlignmentFromFloatPcm(
-      modelPathStr,
-      textStr,
-      vocabUtf8,
-      rawSamples.data(),
-      rawSamples.size(),
-      sourceSampleRate);
-  return CtcResultToNSDictionary(result);
+  NSString *trimmed = [audioPath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (trimmed == nil || trimmed.length == 0) {
+    return "";
+  }
+  if ([trimmed hasPrefix:@"file://"]) {
+    NSURL *url = [NSURL URLWithString:trimmed];
+    NSString *p = url.path;
+    if (p != nil && p.length > 0) {
+      return std::string([p UTF8String]);
+    }
+  }
+  return std::string([trimmed UTF8String]);
+}
+
+static bool ReadAudioDurationAny(
+    const std::string &path,
+    int32_t *outRate,
+    int32_t *outTotalSamples) {
+  if (ReadPcmWavFileMetrics(path, outRate, outTotalSamples)) {
+    return true;
+  }
+
+  @autoreleasepool {
+    NSString *nsPath = [NSString stringWithUTF8String:path.c_str()];
+    if (nsPath == nil || nsPath.length == 0) {
+      return false;
+    }
+    NSURL *url = [NSURL fileURLWithPath:nsPath];
+    NSError *err = nil;
+    AVAudioFile *audioFile = [[AVAudioFile alloc] initForReading:url error:&err];
+    if (audioFile == nil || err != nil) {
+      return false;
+    }
+    double sr = audioFile.fileFormat.sampleRate;
+    if (sr <= 0) {
+      sr = audioFile.processingFormat.sampleRate;
+    }
+    AVAudioFramePosition frameLength = audioFile.length;
+    if (sr <= 0 || frameLength <= 0) {
+      return false;
+    }
+    *outRate = static_cast<int32_t>(llround(sr));
+    *outTotalSamples = static_cast<int32_t>(std::max<int64_t>(0, static_cast<int64_t>(frameLength)));
+    return *outRate > 0 && *outTotalSamples >= 0;
+  }
+}
+
+static std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
+  if (options == nil) {
+    throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");
+  }
+
+  id raw = options[@"segmentSampleCounts"];
+  if (raw == nil) {
+    id chunks = options[@"chunks"];
+    if ([chunks isKindOfClass:[NSDictionary class]]) {
+      raw = ((NSDictionary *)chunks)[@"segmentSampleCounts"];
+    }
+  }
+
+  if (![raw isKindOfClass:[NSArray class]]) {
+    throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");
+  }
+
+  NSArray *arr = (NSArray *)raw;
+  std::vector<int32_t> out;
+  out.reserve(arr.count);
+  for (id v in arr) {
+    if (![v isKindOfClass:[NSNumber class]]) {
+      out.push_back(0);
+      continue;
+    }
+    double x = [(NSNumber *)v doubleValue];
+    if (!std::isfinite(x)) {
+      out.push_back(0);
+      continue;
+    }
+    int32_t n = static_cast<int32_t>(x);
+    out.push_back(std::max<int32_t>(0, n));
+  }
+  return out;
+}
+
+static int32_t ParseEstimatedSampleRate(
+    NSDictionary *options,
+    int32_t fallbackSampleRate) {
+  if (options != nil) {
+    id direct = options[@"sampleRate"];
+    if ([direct isKindOfClass:[NSNumber class]]) {
+      double v = [(NSNumber *)direct doubleValue];
+      if (std::isfinite(v) && v > 0) {
+        return static_cast<int32_t>(v);
+      }
+    }
+
+    id chunks = options[@"chunks"];
+    if ([chunks isKindOfClass:[NSDictionary class]]) {
+      id nested = ((NSDictionary *)chunks)[@"sampleRate"];
+      if ([nested isKindOfClass:[NSNumber class]]) {
+        double v = [(NSNumber *)nested doubleValue];
+        if (std::isfinite(v) && v > 0) {
+          return static_cast<int32_t>(v);
+        }
+      }
+    }
+  }
+
+  return fallbackSampleRate;
+}
+
+static std::string ParseAlignmentModelPath(NSDictionary *options) {
+  NSString *path = [options[@"alignmentModelPath"] isKindOfClass:[NSString class]]
+      ? options[@"alignmentModelPath"]
+      : nil;
+  NSString *trimmed = path != nil
+      ? [path stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmed == nil || trimmed.length == 0) {
+    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.");
+  }
+  return std::string([trimmed UTF8String]);
+}
+
+static std::string NormalizeMode(NSString *mode) {
+  NSString *m = [mode isKindOfClass:[NSString class]]
+      ? [[mode lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if ([m isEqualToString:@"proportional"]) return "proportional";
+  if ([m isEqualToString:@"estimated"]) return "estimated";
+  if ([m isEqualToString:@"accurate"]) return "accurate";
+  throw std::runtime_error("Unsupported alignment mode");
+}
+
+static std::string NormalizeGranularity(NSString *granularity) {
+  NSString *g = [granularity isKindOfClass:[NSString class]]
+      ? [[granularity lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (g == nil || g.length == 0 || [g isEqualToString:@"sentence"]) return "sentence";
+  if ([g isEqualToString:@"word"]) return "word";
+  if ([g isEqualToString:@"character"]) return "character";
+  throw std::runtime_error("Unsupported alignment granularity");
+}
+
+static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generation) {
+  if (instanceId == nil || instanceId.length == 0) {
+    throw std::runtime_error("generatedAudio._instanceId is required");
+  }
+
+  std::string instanceIdStr([instanceId UTF8String]);
+  std::lock_guard<std::mutex> lock(g_tts_mutex);
+  auto it = g_tts_instances.find(instanceIdStr);
+  if (it == g_tts_instances.end()) {
+    throw std::runtime_error("TTS instance not found");
+  }
+
+  auto &sink = it->second->sink;
+  uint64_t requestedGen = static_cast<uint64_t>(generation);
+  if (sink.generation == 0 || sink.samples.empty()) {
+    throw std::runtime_error("No batch synthesis result available for this TTS instance");
+  }
+  if (requestedGen != sink.generation) {
+    throw std::runtime_error("TTS generation is stale");
+  }
+
+  TtsSinkSnapshot out;
+  out.samples = sink.samples;
+  out.sampleRate = sink.sampleRate;
+  out.numSamples = sink.numSamples;
+  return out;
 }
 
 }  // namespace
@@ -198,67 +362,85 @@ static NSDictionary *TryRunCtcAlignmentFromRawPcm(
   }
 }
 
-- (void)alignAccurateFromPath:(NSString *)modelPath
-                    audioPath:(NSString *)audioPath
-                         text:(NSString *)text
-                    vocabJson:(NSString *)vocabJson
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
+- (void)alignTextToAudioFromPath:(NSString *)text
+                        audioPath:(NSString *)audioPath
+                             mode:(NSString *)mode
+                      granularity:(NSString *)granularity
+                          options:(NSDictionary *)options
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
 {
-  if (modelPath == nil || [modelPath length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"modelPath is required", nil);
+  if (text == nil || [text length] == 0) {
+    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
     return;
   }
   if (audioPath == nil || [audioPath length] == 0) {
     reject(@"ALIGNMENT_ERROR", @"audioPath is required", nil);
     return;
   }
-  if (text == nil || [text length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
-    return;
-  }
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
-      std::string modelPathStr([modelPath UTF8String]);
-      std::string audioPathStr([audioPath UTF8String]);
       std::string textStr([text UTF8String]);
+      std::string audioPathStr = NormalizeAudioPathToLocalFile(audioPath);
+      std::string modeStr = NormalizeMode(mode);
+      std::string granularityStr = NormalizeGranularity(granularity);
 
-      sherpa_onnx::cxx::Wave wave = sherpa_onnx::cxx::ReadWave(audioPathStr);
-      if (wave.samples.empty() || wave.sample_rate <= 0) {
-        reject(@"ALIGNMENT_ERROR", @"Failed to read WAV audio for alignment", nil);
-        return;
+      sherpa_onnx::alignment::AlignmentResult result;
+
+      if (modeStr == "proportional") {
+        int32_t sr = 0;
+        int32_t total = 0;
+        if (!ReadAudioDurationAny(audioPathStr, &sr, &total)) {
+          throw std::runtime_error("Could not read audio duration");
+        }
+        result = sherpa_onnx::alignment::AlignProportional(textStr, total, sr, granularityStr);
+      } else if (modeStr == "estimated") {
+        int32_t sr = 0;
+        int32_t total = 0;
+        if (!ReadAudioDurationAny(audioPathStr, &sr, &total)) {
+          throw std::runtime_error("Could not read audio duration");
+        }
+        (void)total;
+        sr = ParseEstimatedSampleRate(options, sr);
+        auto counts = ParseSegmentSampleCounts(options);
+        result = sherpa_onnx::alignment::AlignEstimated(textStr, counts, sr, granularityStr);
+      } else if (modeStr == "accurate") {
+        std::string modelPathStr = ParseAlignmentModelPath(options);
+        result = sherpa_onnx::alignment::AlignAccurateFromFile(
+            modelPathStr,
+            textStr,
+            audioPathStr,
+            granularityStr);
+      } else {
+        throw std::runtime_error("Unsupported alignment mode");
       }
 
-      NSDictionary *result = TryRunCtcAlignmentFromRawPcm(modelPathStr, textStr, vocabJson, wave.samples, wave.sample_rate);
-      resolve(result);
+      resolve(AlignmentResultToNSDictionary(result));
     } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"CTC alignment failed";
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
       reject(@"ALIGNMENT_ERROR", errorMsg, nil);
     } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"CTC alignment failed", nil);
+      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
     }
   });
 }
 
-- (void)alignAccurateFromFloat32:(NSString *)modelPath
+- (void)alignTextToAudioFromPcm:(NSString *)text
                          samples:(NSArray *)samples
                       sampleRate:(double)sampleRate
-                            text:(NSString *)text
-                       vocabJson:(NSString *)vocabJson
+                            mode:(NSString *)mode
+                     granularity:(NSString *)granularity
+                         options:(NSDictionary *)options
                          resolve:(RCTPromiseResolveBlock)resolve
                           reject:(RCTPromiseRejectBlock)reject
 {
-  if (modelPath == nil || [modelPath length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"modelPath is required", nil);
+  if (text == nil || [text length] == 0) {
+    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
     return;
   }
   if (samples == nil || [samples count] == 0) {
     reject(@"ALIGNMENT_ERROR", @"samples is required", nil);
-    return;
-  }
-  if (text == nil || [text length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
     return;
   }
   if (sampleRate <= 0.0) {
@@ -268,53 +450,151 @@ static NSDictionary *TryRunCtcAlignmentFromRawPcm(
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
-      std::string modelPathStr([modelPath UTF8String]);
       std::string textStr([text UTF8String]);
+      std::string modeStr = NormalizeMode(mode);
+      std::string granularityStr = NormalizeGranularity(granularity);
+
       std::vector<float> raw;
       raw.reserve([samples count]);
       for (id x in samples) {
         raw.push_back(static_cast<float>([x doubleValue]));
       }
+
       int32_t sr = static_cast<int32_t>(sampleRate);
-      NSDictionary *result = TryRunCtcAlignmentFromRawPcm(modelPathStr, textStr, vocabJson, raw, sr);
-      resolve(result);
+      sherpa_onnx::alignment::AlignmentResult result;
+
+      if (modeStr == "proportional") {
+        result = sherpa_onnx::alignment::AlignProportional(
+            textStr,
+            static_cast<int32_t>(raw.size()),
+            sr,
+            granularityStr);
+      } else if (modeStr == "estimated") {
+        sr = ParseEstimatedSampleRate(options, sr);
+        auto counts = ParseSegmentSampleCounts(options);
+        result = sherpa_onnx::alignment::AlignEstimated(textStr, counts, sr, granularityStr);
+      } else if (modeStr == "accurate") {
+        std::string modelPathStr = ParseAlignmentModelPath(options);
+        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+            modelPathStr,
+            textStr,
+            raw.data(),
+            raw.size(),
+            sr,
+            granularityStr);
+      } else {
+        throw std::runtime_error("Unsupported alignment mode");
+      }
+
+      resolve(AlignmentResultToNSDictionary(result));
     } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"CTC alignment failed";
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
       reject(@"ALIGNMENT_ERROR", errorMsg, nil);
     } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"CTC alignment failed", nil);
+      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
     }
   });
 }
 
-- (void)getAlignmentAudioMetrics:(NSString *)audioPath
-                         resolve:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject
+- (void)alignTextToTtsSink:(NSDictionary *)generatedAudio
+                      text:(NSString *)text
+                      mode:(NSString *)mode
+               granularity:(NSString *)granularity
+                   options:(NSDictionary *)options
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+{
+  if (text == nil || [text length] == 0) {
+    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
+    return;
+  }
+  if (generatedAudio == nil || ![generatedAudio isKindOfClass:[NSDictionary class]]) {
+    reject(@"ALIGNMENT_ERROR", @"generatedAudio is required", nil);
+    return;
+  }
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    try {
+      NSString *instanceId = [generatedAudio[@"_instanceId"] isKindOfClass:[NSString class]]
+          ? generatedAudio[@"_instanceId"]
+          : ([generatedAudio[@"instanceId"] isKindOfClass:[NSString class]] ? generatedAudio[@"instanceId"] : nil);
+      NSNumber *generationNum = [generatedAudio[@"generation"] isKindOfClass:[NSNumber class]]
+          ? generatedAudio[@"generation"]
+          : nil;
+      if (instanceId == nil || generationNum == nil) {
+        throw std::runtime_error("generatedAudio._instanceId and generatedAudio.generation are required");
+      }
+
+      std::string textStr([text UTF8String]);
+      std::string modeStr = NormalizeMode(mode);
+      std::string granularityStr = NormalizeGranularity(granularity);
+      TtsSinkSnapshot sink = ReadTtsSinkSnapshot(instanceId, [generationNum doubleValue]);
+
+      sherpa_onnx::alignment::AlignmentResult result;
+      if (modeStr == "proportional") {
+        result = sherpa_onnx::alignment::AlignProportional(
+            textStr,
+            sink.numSamples,
+            sink.sampleRate,
+            granularityStr);
+      } else if (modeStr == "estimated") {
+        const int32_t estimatedRate =
+            ParseEstimatedSampleRate(options, sink.sampleRate);
+        auto counts = ParseSegmentSampleCounts(options);
+        result = sherpa_onnx::alignment::AlignEstimated(
+            textStr,
+            counts,
+            estimatedRate,
+            granularityStr);
+      } else if (modeStr == "accurate") {
+        std::string modelPathStr = ParseAlignmentModelPath(options);
+        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+            modelPathStr,
+            textStr,
+            sink.samples.data(),
+            sink.samples.size(),
+            sink.sampleRate,
+            granularityStr);
+      } else {
+        throw std::runtime_error("Unsupported alignment mode");
+      }
+
+      resolve(AlignmentResultToNSDictionary(result));
+    } catch (const std::exception &e) {
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
+      reject(@"ALIGNMENT_ERROR", errorMsg, nil);
+    } catch (...) {
+      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
+    }
+  });
+}
+
+- (void)getAudioDuration:(NSString *)audioPath
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
   if (audioPath == nil || [audioPath length] == 0) {
     reject(@"ALIGNMENT_ERROR", @"audioPath is required", nil);
     return;
   }
+
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
-      std::string pathStr([audioPath UTF8String]);
+      std::string pathStr = NormalizeAudioPathToLocalFile(audioPath);
       int32_t rate = 0;
       int32_t total = 0;
-      if (!ReadPcmWavFileMetrics(pathStr, &rate, &total)) {
-        reject(@"ALIGNMENT_ERROR",
-               @"Fast metrics require 16-bit mono PCM WAV. For other formats, decode in app code first.",
-               nil);
-        return;
+      if (!ReadAudioDurationAny(pathStr, &rate, &total)) {
+        throw std::runtime_error("Could not read audio duration");
       }
       resolve(@{
         @"sampleRate": @(rate),
         @"totalSamples": @(total),
       });
     } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"WAV metrics failed";
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Audio duration failed";
       reject(@"ALIGNMENT_ERROR", errorMsg, nil);
     } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"WAV metrics failed", nil);
+      reject(@"ALIGNMENT_ERROR", @"Audio duration failed", nil);
     }
   });
 }

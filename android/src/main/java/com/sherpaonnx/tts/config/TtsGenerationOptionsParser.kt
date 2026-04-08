@@ -1,11 +1,8 @@
 package com.sherpaonnx.tts.config
 
-import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.WritableArray
 import com.k2fsa.sherpa.onnx.GenerationConfig
-import com.sherpaonnx.SubtitleTimingItem
 
 /**
  * ReadableMap options and subtitle helpers for TTS generation.
@@ -41,30 +38,9 @@ internal object TtsGenerationOptionsParser {
     }
   }
 
-  fun isExportChunkTimelineOnly(options: ReadableMap?): Boolean =
-    options != null && options.hasKey("exportChunkTimelineOnly") && options.getBoolean("exportChunkTimelineOnly")
-
-  fun getSubtitleGranularity(options: ReadableMap?): String {
-    val raw = options?.getString("subtitleGranularity")?.trim()?.lowercase()
-    return when (raw) {
-      "word", "sentence" -> raw
-      else -> "sentence"
-    }
-  }
-
   fun isCharacterGranularityRequested(options: ReadableMap?): Boolean {
     val raw = options?.getString("subtitleGranularity")?.trim()?.lowercase()
     return raw == "character"
-  }
-
-  fun toSubtitleWritableArray(items: List<SubtitleTimingItem>): WritableArray = Arguments.createArray().apply {
-    for (item in items) {
-      val subtitleMap = Arguments.createMap()
-      subtitleMap.putString("text", item.text)
-      subtitleMap.putDouble("start", item.start)
-      subtitleMap.putDouble("end", item.end)
-      pushMap(subtitleMap)
-    }
   }
 
   /** Build Kotlin GenerationConfig from ReadableMap. Returns null only when options is null. */

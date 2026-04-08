@@ -73,7 +73,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val filesHelper = SherpaOnnxFilesHelper(reactApplicationContext)
-  private val alignmentHelper = SherpaOnnxAlignmentHelper(reactApplicationContext)
+  private val alignmentHelper = SherpaOnnxAlignmentHelper(
+    reactApplicationContext,
+    { instanceId, generation -> ttsHelper.getBatchSinkSnapshot(instanceId, generation) }
+  )
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
@@ -939,32 +942,67 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.playTtsFromSink(instanceId, generation, sampleRate, promise)
   }
 
-  override fun alignAccurateFromPath(
-    modelPath: String,
+  override fun getAudioDuration(
     audioPath: String,
-    text: String,
-    vocabJson: String,
     promise: Promise,
   ) {
-    alignmentHelper.alignAccurateFromPath(modelPath, audioPath, text, vocabJson, promise)
+    alignmentHelper.getAudioDuration(audioPath, promise)
   }
 
-  override fun alignAccurateFromFloat32(
-    modelPath: String,
+  override fun alignTextToAudioFromPath(
+    text: String,
+    audioPath: String,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignTextToAudioFromPath(
+      text,
+      audioPath,
+      mode,
+      granularity,
+      options,
+      promise
+    )
+  }
+
+  override fun alignTextToAudioFromPcm(
+    text: String,
     samples: ReadableArray,
     sampleRate: Double,
-    text: String,
-    vocabJson: String,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
     promise: Promise,
   ) {
-    alignmentHelper.alignAccurateFromFloat32(modelPath, samples, sampleRate, text, vocabJson, promise)
+    alignmentHelper.alignTextToAudioFromPcm(
+      text,
+      samples,
+      sampleRate,
+      mode,
+      granularity,
+      options,
+      promise
+    )
   }
 
-  override fun getAlignmentAudioMetrics(
-    audioPath: String,
+  override fun alignTextToTtsSink(
+    generatedAudio: ReadableMap,
+    text: String,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
     promise: Promise,
   ) {
-    alignmentHelper.getAlignmentAudioMetrics(audioPath, promise)
+    alignmentHelper.alignTextToTtsSink(
+      generatedAudio,
+      text,
+      mode,
+      granularity,
+      options,
+      promise
+    )
   }
 
   /**

@@ -79,14 +79,6 @@ NSString *SubtitleModeFromOptions(NSDictionary *options) {
     return @"proportional";
 }
 
-BOOL ExportChunkTimelineOnly(NSDictionary *options) {
-    if (options == nil) {
-        return NO;
-    }
-    NSNumber *n = options[@"exportChunkTimelineOnly"];
-    return [n isKindOfClass:[NSNumber class]] && [n boolValue];
-}
-
 NSString *SubtitleGranularityFromOptions(NSDictionary *options) {
     NSString *raw = [options[@"subtitleGranularity"] isKindOfClass:[NSString class]] ? options[@"subtitleGranularity"] : nil;
     NSString *normalized = raw != nil

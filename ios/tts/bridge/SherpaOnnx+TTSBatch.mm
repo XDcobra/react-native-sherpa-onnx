@@ -7,7 +7,6 @@
 
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
-#include "subtitle/TtsSubtitleSegmentation.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
 #include "../pcm/PcmPlayerRegistry.h"
 
@@ -118,13 +117,14 @@
         return;
     }
 
-    BOOL exportChunkOnly = ExportChunkTimelineOnly(options);
     NSString *subtitleMode = SubtitleModeFromOptions(options);
-    if (exportChunkOnly) {
-        subtitleMode = @"estimated";
+    if ([subtitleMode isEqualToString:@"accurate"]) {
+        reject(@"TTS_SUBTITLE_ERROR",
+               @"subtitleMode 'accurate' is handled via alignment.alignTextToTtsSink; generate audio and align from sink.",
+               nil);
+        return;
     }
-    NSString *subtitleGranularity = SubtitleGranularityFromOptions(options);
-    if (!exportChunkOnly && IsCharacterGranularityRequested(options) && ![subtitleMode isEqualToString:@"accurate"]) {
+    if (IsCharacterGranularityRequested(options) && ![subtitleMode isEqualToString:@"accurate"]) {
         reject(@"TTS_SUBTITLE_ERROR", @"Character granularity is only supported when subtitleMode is 'accurate'.", nil);
         return;
     }
@@ -234,44 +234,27 @@
         it->second->sink.update(generatedSamples.data(), generatedSamples.size(), sampleRate);
         uint64_t generation = it->second->sink.generation;
 
-        // Sub-plan 02: metadata-only — no samples array over the bridge
-        if (exportChunkOnly) {
+        NSMutableDictionary *resultDict = [@{
+            @"sampleRate": @(sampleRate),
+            @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
+            @"generation": @(static_cast<double>(generation)),
+            @"subtitles": @[],
+        } mutableCopy];
+
+        if ([subtitleMode isEqualToString:@"estimated"]) {
             NSMutableArray *counts = [NSMutableArray arrayWithCapacity:sentenceChunkSizes.size()];
             for (int32_t c : sentenceChunkSizes) {
                 [counts addObject:@(c)];
             }
-            NSDictionary *resultDict = @{
-                @"sampleRate": @(sampleRate),
-                @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
-                @"generation": @(static_cast<double>(generation)),
-                @"segmentSampleCounts": counts,
-                @"subtitles": @[],
-                @"timingMode": @"estimated"
-            };
-            resolve(resultDict);
-            return;
+            resultDict[@"segmentSampleCounts"] = counts;
         }
-
-        NSMutableArray *subtitlesArray = [NSMutableArray array];
-        NSString *timingMode = @"off";
-
-        if (![subtitleMode isEqualToString:@"off"]) {
-            std::vector<std::string> sentences = tts_subtitle::SplitTextIntoSentences(textStr);
-            std::vector<tts_subtitle::SubtitleTimingItem> subtitleItems = [subtitleGranularity isEqualToString:@"word"]
-                ? tts_subtitle::BuildWordSubtitlesFromSentenceChunks(sentences, sentenceChunkSizes, sampleRate)
-                : tts_subtitle::BuildSubtitlesFromChunks(sentences, sentenceChunkSizes, sampleRate);
-
-            subtitlesArray = tts_subtitle::SubtitleTimingsToNSArray(subtitleItems);
-            timingMode = @"estimated";
+        if ([subtitleMode isEqualToString:@"off"]) {
+            resultDict[@"timingMode"] = @"off";
+        } else if ([subtitleMode isEqualToString:@"proportional"]) {
+            resultDict[@"timingMode"] = @"proportional";
+        } else {
+            resultDict[@"timingMode"] = @"estimated";
         }
-
-        NSDictionary *resultDict = @{
-            @"sampleRate": @(sampleRate),
-            @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
-            @"generation": @(static_cast<double>(generation)),
-            @"subtitles": subtitlesArray,
-            @"timingMode": timingMode
-        };
 
         resolve(resultDict);
     } @catch (NSException *exception) {

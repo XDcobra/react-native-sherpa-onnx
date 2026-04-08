@@ -6,7 +6,6 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.GeneratedAudio
-import com.sherpaonnx.SherpaOnnxTextSegmenter
 import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.TtsJniCallbackFactory
@@ -100,13 +99,19 @@ internal class TtsBatchGenerationService(
         return
       }
 
-      val exportChunkOnly = TtsGenerationOptionsParser.isExportChunkTimelineOnly(options)
-      var subtitleMode = TtsGenerationOptionsParser.getSubtitleMode(options)
-      if (exportChunkOnly) {
-        subtitleMode = "estimated"
+      val subtitleMode = TtsGenerationOptionsParser.getSubtitleMode(options)
+      if (subtitleMode == "accurate") {
+        Log.e(
+          "SherpaOnnxTts",
+          "TTS_SUBTITLE_ERROR: subtitleMode 'accurate' is handled by alignment.alignTextToTtsSink",
+        )
+        promise.reject(
+          "TTS_SUBTITLE_ERROR",
+          "subtitleMode 'accurate' is handled via alignment.alignTextToTtsSink; generate audio and align from sink.",
+        )
+        return
       }
-      val subtitleGranularity = TtsGenerationOptionsParser.getSubtitleGranularity(options)
-      if (!exportChunkOnly && TtsGenerationOptionsParser.isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
+      if (TtsGenerationOptionsParser.isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
         Log.e(
           "SherpaOnnxTts",
           "TTS_SUBTITLE_ERROR: Character granularity is only supported when subtitleMode is 'accurate'"
@@ -225,39 +230,22 @@ internal class TtsBatchGenerationService(
       map.putInt("numSamples", audio.samples.size)
       map.putDouble("generation", generation.toDouble())
 
-      if (exportChunkOnly) {
+      if (subtitleMode == "estimated") {
         val counts = Arguments.createArray()
         for (c in sentenceChunkSizes) {
           counts.pushInt(c)
         }
         map.putArray("segmentSampleCounts", counts)
-        map.putArray("subtitles", Arguments.createArray())
-        map.putString("timingMode", "estimated")
-        promise.resolve(map)
-        return
       }
 
-      val subtitleItems = if (subtitleMode == "off") {
-        emptyList()
-      } else {
-        val sentenceSegments = SherpaOnnxTextSegmenter.splitIntoSentences(text)
-        if (subtitleGranularity == "word") {
-          SherpaOnnxTextSegmenter.buildWordSubtitlesFromSentenceChunks(
-            sentenceSegments,
-            sentenceChunkSizes,
-            audio.sampleRate
-          )
-        } else {
-          SherpaOnnxTextSegmenter.buildSubtitlesFromChunks(
-            sentenceSegments,
-            sentenceChunkSizes,
-            audio.sampleRate
-          )
-        }
+      // Subtitles are now produced by alignment.alignTextToTtsSink(...), not here.
+      // Keep return shape for backwards compatibility.
+      map.putArray("subtitles", Arguments.createArray())
+      val timingMode = when (subtitleMode) {
+        "off" -> "off"
+        "proportional" -> "proportional"
+        else -> "estimated"
       }
-
-      map.putArray("subtitles", TtsGenerationOptionsParser.toSubtitleWritableArray(subtitleItems))
-      val timingMode = if (subtitleMode == "off") "off" else "estimated"
       map.putString("timingMode", timingMode)
       promise.resolve(map)
     } catch (e: Exception) {
