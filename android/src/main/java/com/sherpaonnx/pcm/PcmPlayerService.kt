@@ -136,6 +136,14 @@ internal class PcmPlayerService {
 
   /** Create a native-feed player programmatically (called from TtsStreamingService). */
   fun createInternal(playerId: String, sampleRate: Int, channels: Int, ttsInstanceId: String?) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+      Log.w(TAG, "createInternal: PCM playback requires API 21+; skipping player $playerId")
+      return
+    }
+    if (sampleRate <= 0) {
+      Log.w(TAG, "createInternal: invalid sampleRate $sampleRate; skipping player $playerId")
+      return
+    }
     val channelConfig = AudioFormat.CHANNEL_OUT_MONO
     val audioFormat = AudioFormat.Builder()
       .setSampleRate(sampleRate)
@@ -143,17 +151,25 @@ internal class PcmPlayerService {
       .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
       .build()
     val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, AudioFormat.ENCODING_PCM_FLOAT)
+    if (minBufferSize == AudioTrack.ERROR || minBufferSize == AudioTrack.ERROR_BAD_VALUE) {
+      Log.w(TAG, "createInternal: invalid buffer size for sampleRate $sampleRate; skipping player $playerId")
+      return
+    }
     val attributes = AudioAttributes.Builder()
       .setUsage(AudioAttributes.USAGE_MEDIA)
       .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
       .build()
-    val track = AudioTrack(
-      attributes, audioFormat, minBufferSize,
-      AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
-    )
-    val session = PcmPlayerSession(playerId, sampleRate, channels, PcmPlayerFeed.NATIVE, ttsInstanceId, track)
-    registry.put(session)
-    track.play()
+    try {
+      val track = AudioTrack(
+        attributes, audioFormat, minBufferSize,
+        AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
+      )
+      val session = PcmPlayerSession(playerId, sampleRate, channels, PcmPlayerFeed.NATIVE, ttsInstanceId, track)
+      registry.put(session)
+      track.play()
+    } catch (e: Exception) {
+      Log.e(TAG, "createInternal: failed to create AudioTrack for player $playerId", e)
+    }
   }
 
   /** Enqueue samples from native code (TTS synthesis callback). No promise, best-effort. */

@@ -117,8 +117,12 @@ internal class TtsStreamingService(
     inst.ttsStreamRunning.set(true)
     inst.ttsStreamThread = Thread {
       var sink: TtsStreamingWavSink? = null
+      var emittedFrames = 0L
       val coalescer = if (emitChunks) ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
-        emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+        emittedFrames += merged.size.toLong()
+        val progress = (emittedFrames.toFloat() / (emittedFrames + MAX_FRAMES_PER_CHUNK).toFloat())
+          .coerceIn(0f, 0.999f)
+        emitChunk(instanceId, requestId, merged, sampleRate, progress, false)
       } else null
       val playbackPlayerId = if (playback) "tts_playback_${instanceId}_${requestId}" else null
       try {
@@ -220,8 +224,12 @@ internal class TtsStreamingService(
         if (playbackPlayerId != null) {
           pcmPlayerService.createInternal(playbackPlayerId, sampleRate, 1, instanceId)
         }
+        var emittedFrames = 0L
         val coalescer = if (emitChunks) ChunkCoalescer(MAX_FRAMES_PER_CHUNK, MAX_CHUNK_LATENCY_MS) { merged ->
-          emitChunk(instanceId, requestId, merged, sampleRate, 0f, false)
+          emittedFrames += merged.size.toLong()
+          val progress = (emittedFrames.toFloat() / (emittedFrames + MAX_FRAMES_PER_CHUNK).toFloat())
+            .coerceIn(0f, 0.999f)
+          emitChunk(instanceId, requestId, merged, sampleRate, progress, false)
         } else null
 
         val chunkHandler: (FloatArray) -> Unit = { chunk ->

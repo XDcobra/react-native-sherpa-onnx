@@ -145,28 +145,35 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
             [session->audioEngine attachNode:session->playerNode];
             [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
             NSError *startError = nil;
-            [session->audioEngine startAndReturnError:&startError];
-            [session->playerNode play];
-
-            {
-                std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
-                g_pcm_players[session->playerId] = session;
+            BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+            if (!engineStarted || startError) {
+                NSLog(@"[SherpaOnnx] TTS stream playback: failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error");
+                // Proceed without playback — stream will still emit chunks if emitChunks is set
+                playbackPlayerId = "";
+            } else {
+                [session->playerNode play];
+                {
+                    std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                    g_pcm_players[session->playerId] = session;
+                }
+                playbackSession = session;
             }
-            playbackSession = session;
         }
 
         // Coalescing buffer — accumulates native ticks and flushes as fewer, larger chunks.
         __block std::vector<float> coalesceBuffer;
         __block int64_t coalesceFirstNs = 0;
+        __block float lastProgress = 0.0f;
 
-        auto flushCoalesceBuffer = [&coalesceBuffer, &coalesceFirstNs, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+        auto flushCoalesceBuffer = [&coalesceBuffer, &coalesceFirstNs, &lastProgress, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
             if (coalesceBuffer.empty()) return;
             NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            float progressSnapshot = lastProgress;
             NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
                 @"pcmBase64": pcmB64,
                 @"sampleRate": @(sampleRate),
-                @"progress": @(0.0f),
+                @"progress": @(progressSnapshot),
                 @"isFinal": @NO
             }];
             if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
@@ -184,7 +191,7 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [&coalesceBuffer, &coalesceFirstNs, &flushCoalesceBuffer, emitChunks, &playbackSession, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &lastProgress, &flushCoalesceBuffer, emitChunks, &playbackSession, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
@@ -192,6 +199,7 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
                     if (playbackSession) playbackSession->enqueueMonoFloat32(samples, numSamples);
 
                     if (emitChunks) {
+                        lastProgress = progress;
                         if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
                         coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
                         if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||
@@ -360,27 +368,34 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
             [session->audioEngine attachNode:session->playerNode];
             [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
             NSError *startError = nil;
-            [session->audioEngine startAndReturnError:&startError];
-            [session->playerNode play];
-
-            {
-                std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
-                g_pcm_players[session->playerId] = session;
+            BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+            if (!engineStarted || startError) {
+                NSLog(@"[SherpaOnnx] TTS stream-to-file playback: failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error");
+                // Proceed without playback — file will still be written
+                playbackPlayerId = "";
+            } else {
+                [session->playerNode play];
+                {
+                    std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                    g_pcm_players[session->playerId] = session;
+                }
+                playbackSession = session;
             }
-            playbackSession = session;
         }
 
         // Coalescing buffer for chunk emission (only used when emitChunks == true).
         __block std::vector<float> coalesceBuffer;
         __block int64_t coalesceFirstNs = 0;
-        auto flushFileCoalesce = [&coalesceBuffer, &coalesceFirstNs, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+        __block float lastFileProgress = 0.0f;
+        auto flushFileCoalesce = [&coalesceBuffer, &coalesceFirstNs, &lastFileProgress, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
             if (coalesceBuffer.empty()) return;
             NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            float progressSnapshot = lastFileProgress;
             NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
                 @"pcmBase64": pcmB64,
                 @"sampleRate": @(sampleRate),
-                @"progress": @(0.0f),
+                @"progress": @(progressSnapshot),
                 @"isFinal": @NO
             }];
             if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
@@ -399,13 +414,14 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [&coalesceBuffer, &coalesceFirstNs, &flushFileCoalesce, emitChunks, &playbackSession, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &lastFileProgress, &flushFileCoalesce, emitChunks, &playbackSession, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
                     sinkPtr->writeChunk(samples, numSamples);
                     if (playbackSession) playbackSession->enqueueMonoFloat32(samples, numSamples);
                     if (emitChunks) {
+                        lastFileProgress = progress;
                         if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
                         coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
                         if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||

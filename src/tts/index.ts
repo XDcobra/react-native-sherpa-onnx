@@ -349,7 +349,7 @@ export async function createTTS(
         const subtitleResult = await alignTextToAudio(
           text,
           {
-            samples: Array.from(samplesResult.samples),
+            samples: samplesResult.samples,
             sampleRate: raw.sampleRate,
           },
           {
@@ -611,7 +611,10 @@ export function saveAudioFromPCM(
 ): Promise<string> {
   const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
-  const samplesArray = Array.from(audio.samples);
+  const samplesArray =
+    audio.samples instanceof Float32Array
+      ? Array.from(audio.samples)
+      : (audio.samples as number[]);
 
   if (target.kind === 'androidContent') {
     if (Platform.OS !== 'android') {

@@ -449,7 +449,8 @@ export type TtsDetectedModelEntry = {
 /**
  * Streaming chunk event payload for TTS generation.
  *
- * PCM data is delivered as `Float32Array` (binary transfer from native).
+ * PCM data is delivered as `Float32Array` (base64-decoded from native into a
+ * typed array in JS; not a zero-copy binary transfer).
  * Internal routing IDs (`instanceId`, `requestId`) are stripped before
  * the chunk reaches public handlers.
  */

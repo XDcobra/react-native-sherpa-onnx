@@ -161,7 +161,7 @@ await tts.destroy();
 | `emitChunks` | `boolean` | `true` | Deliver `onChunk` callbacks with binary PCM |
 | `autoDestroy` | `boolean` | `true` | Auto-destroy the internal player after `onEnd` fires |
 
-**Invalid combination:** `playback: false` + `emitChunks: false` is rejected as a no-op.
+**Invalid combination:** `playback: false` + `emitChunks: false` is a no-op. The current JS wrapper does **not** reject; it logs a warning and returns a no-op controller. Enable at least one of `playback` or `emitChunks`.
 
 When `playback: true`, the streaming controller exposes `ctrl.player` — a `PcmPlayer` with `pause()`, `resume()`, and `destroy()`. See [pcm-player.md](pcm-player.md) for standalone player usage.
 

@@ -95,19 +95,24 @@ const B64_LOOKUP = new Uint8Array(128);
  */
 function base64ToBytes(b64: string): Uint8Array {
   /* eslint-disable no-bitwise */
-  // Strip padding
-  let len = b64.length;
-  if (b64.charCodeAt(len - 1) === 61 /* '=' */) len--;
-  if (b64.charCodeAt(len - 1) === 61) len--;
-  const byteLen = (len * 3) >> 2;
+  const fullLen = b64.length;
+  // Count padding characters to compute actual byte length
+  let padCount = 0;
+  if (fullLen > 0 && b64.charCodeAt(fullLen - 1) === 61 /* '=' */) padCount++;
+  if (fullLen > 1 && b64.charCodeAt(fullLen - 2) === 61) padCount++;
+  const byteLen = (fullLen * 3) / 4 - padCount;
   const bytes = new Uint8Array(byteLen);
   let p = 0;
-  for (let i = 0; i < len; i += 4) {
+  // Iterate over all full 4-character quanta (including padding chars)
+  for (let i = 0; i < fullLen; i += 4) {
     const a = B64_LOOKUP[b64.charCodeAt(i)]!;
     const b = B64_LOOKUP[b64.charCodeAt(i + 1)]!;
-    const c = B64_LOOKUP[b64.charCodeAt(i + 2)]!;
-    const d = B64_LOOKUP[b64.charCodeAt(i + 3)]!;
-    bytes[p++] = (a << 2) | (b >> 4);
+    // Treat '=' (61) as 0 so partial bytes decode correctly
+    const cCode = b64.charCodeAt(i + 2);
+    const c = cCode === 61 ? 0 : B64_LOOKUP[cCode]!;
+    const dCode = b64.charCodeAt(i + 3);
+    const d = dCode === 61 ? 0 : B64_LOOKUP[dCode]!;
+    if (p < byteLen) bytes[p++] = (a << 2) | (b >> 4);
     if (p < byteLen) bytes[p++] = ((b & 0xf) << 4) | (c >> 2);
     if (p < byteLen) bytes[p++] = ((c & 0x3) << 6) | d;
   }

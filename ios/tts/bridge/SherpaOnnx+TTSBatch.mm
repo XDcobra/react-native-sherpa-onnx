@@ -446,7 +446,13 @@
     [session->audioEngine attachNode:session->playerNode];
     [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
     NSError *startError = nil;
-    [session->audioEngine startAndReturnError:&startError];
+    BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+    if (!engineStarted || startError) {
+        reject(@"PCM_PLAYER_ERROR",
+               [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error"],
+               startError);
+        return;
+    }
     [session->playerNode play];
 
     {
