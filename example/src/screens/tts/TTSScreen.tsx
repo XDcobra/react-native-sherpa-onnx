@@ -15,7 +15,8 @@ import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudio,
+  saveAudioFromGeneration,
+  saveAudioFromPCM,
   type TTSModelType,
   type TtsGenerationOptions,
   type TtsMatchaModelOptions,
@@ -29,6 +30,7 @@ import type {
   TtsEngine,
   StreamingTtsEngine,
   TtsStreamController,
+  GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
@@ -85,10 +87,9 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [generatedAudio, setGeneratedAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [generatedAudio, setGeneratedAudio] = useState<GeneratedAudio | null>(
+    null
+  );
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -148,7 +149,7 @@ export default function TTSScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
-  const streamChunksRef = useRef<number[][]>([]);
+  const streamChunksRef = useRef<Float32Array[]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
   const streamControllerRef = useRef<TtsStreamController | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
@@ -345,7 +346,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -361,7 +361,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -387,23 +386,28 @@ export default function TTSScreen() {
     []
   );
 
-  const buildStreamedAudio = useCallback(() => {
+  const buildStreamedAudio = useCallback((): GeneratedAudio | null => {
     const chunks = streamChunksRef.current;
     if (chunks.length === 0) {
       return null;
     }
     const total = chunks.reduce((sum, part) => sum + part.length, 0);
-    const combined = new Array<number>(total);
+    const combined = new Float32Array(total);
     let offset = 0;
     for (const part of chunks) {
-      for (let i = 0; i < part.length; i += 1) {
-        combined[offset + i] = part[i] as number;
-      }
+      combined.set(part, offset);
       offset += part.length;
     }
     const sampleRate =
       streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-    return { samples: combined, sampleRate };
+    return {
+      sampleRate,
+      numSamples: combined.length,
+      generation: 0,
+      async getSamples(): Promise<Float32Array> {
+        return combined;
+      },
+    };
   }, [modelInfo?.sampleRate]);
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
@@ -571,52 +575,52 @@ export default function TTSScreen() {
     }
 
     try {
-      const controller = await engine.generateSpeechStream(nextText, options, {
-        onChunk: (chunk) => {
-          streamSampleRateRef.current = chunk.sampleRate;
-          if (chunk.samples.length > 0) {
-            streamingTtsEngineRef.current?.writePcmChunk(chunk.samples);
-          }
-          streamChunksRef.current.push(chunk.samples);
-          setStreamSampleCount((prev) => prev + chunk.samples.length);
-          setStreamProgress(chunk.progress);
-        },
-        onEnd: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          if (event.cancelled) {
+      const controller = await engine.generateSpeechStream(
+        nextText,
+        options,
+        {
+          onChunk: (chunk) => {
+            streamSampleRateRef.current = chunk.sampleRate;
+            streamChunksRef.current.push(chunk.samples);
+            setStreamSampleCount((prev) => prev + chunk.samples.length);
+            setStreamProgress(chunk.progress);
+          },
+          onEnd: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
+            if (event.cancelled) {
+              const eng = streamingTtsEngineRef.current;
+              if (eng) {
+                eng.destroy().catch(() => {});
+              }
+              streamingTtsEngineRef.current = null;
+              setStreamProgress(null);
+              setStreaming(false);
+              const audio = buildStreamedAudio();
+              if (audio) setGeneratedAudio(audio);
+            } else {
+              setStreamProgress(null);
+              streamProcessCallSourceRef.current = 'onEnd';
+              processStreamQueue().catch((err) => {
+                console.warn('processStreamQueue:', err);
+              });
+            }
+          },
+          onError: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
             const eng = streamingTtsEngineRef.current;
             if (eng) {
-              eng.stopPcmPlayer().catch(() => {});
               eng.destroy().catch(() => {});
             }
             streamingTtsEngineRef.current = null;
+            setError(event.message);
             setStreamProgress(null);
             setStreaming(false);
-            const audio = buildStreamedAudio();
-            if (audio) setGeneratedAudio(audio);
-          } else {
-            setStreamProgress(null);
-            streamProcessCallSourceRef.current = 'onEnd';
-            processStreamQueue().catch((err) => {
-              console.warn('processStreamQueue:', err);
-            });
-          }
+          },
         },
-        onError: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          const eng = streamingTtsEngineRef.current;
-          if (eng) {
-            eng.stopPcmPlayer().catch(() => {});
-            eng.destroy().catch(() => {});
-          }
-          streamingTtsEngineRef.current = null;
-          setError(event.message);
-          setStreamProgress(null);
-          setStreaming(false);
-        },
-      });
+        { playback: true }
+      );
       streamControllerRef.current = controller;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -929,7 +933,7 @@ export default function TTSScreen() {
       setGeneratedAudio(result);
       Alert.alert(
         'Success',
-        `Generated ${result.samples.length} samples at ${result.sampleRate} Hz`
+        `Generated ${result.numSamples} samples at ${result.sampleRate} Hz`
       );
     } catch (err) {
       console.error('TTS Generation error:', err);
@@ -1046,8 +1050,6 @@ export default function TTSScreen() {
       }
 
       streamingTtsEngineRef.current = streamingEngine;
-      const sampleRate = await streamingEngine.getSampleRate();
-      await streamingEngine.startPcmPlayer(sampleRate, 1);
 
       streamChunksRef.current = [];
       streamSampleRateRef.current = null;
@@ -1136,11 +1138,8 @@ export default function TTSScreen() {
     );
   };
 
-  const saveAudioWithData = async (audio: {
-    samples: number[];
-    sampleRate: number;
-  }) => {
-    if (!audio.samples.length) {
+  const saveAudioWithData = async (audio: GeneratedAudio) => {
+    if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
       return;
     }
@@ -1155,16 +1154,32 @@ export default function TTSScreen() {
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      if (directoryUri) {
-        const savedUri = await saveAudio(
-          audio,
-          {
-            kind: 'androidContent',
-            directoryUri,
-            filename,
-          },
+      const saveWithTarget = async (
+        target:
+          | { kind: 'file'; path: string }
+          | { kind: 'androidContent'; directoryUri: string; filename: string }
+      ) => {
+        if (
+          audio.generation > 0 &&
+          '_instanceId' in audio &&
+          typeof (audio as any)._instanceId === 'string'
+        ) {
+          return saveAudioFromGeneration(audio, target, { format });
+        }
+        const pcm = await audio.getSamples();
+        return saveAudioFromPCM(
+          { samples: pcm, sampleRate: audio.sampleRate },
+          target,
           { format }
         );
+      };
+
+      if (directoryUri) {
+        const savedUri = await saveWithTarget({
+          kind: 'androidContent',
+          directoryUri,
+          filename,
+        });
         setSavedAudioPath(savedUri);
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
@@ -1180,11 +1195,10 @@ export default function TTSScreen() {
 
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      const savedPath = await saveAudio(
-        audio,
-        { kind: 'file', path: filePath },
-        { format }
-      );
+      const savedPath = await saveWithTarget({
+        kind: 'file',
+        path: filePath,
+      });
       setSavedAudioPath(savedPath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
@@ -1226,11 +1240,23 @@ export default function TTSScreen() {
 
       const filename = `tts_${timestamp}.wav`;
       const filePath = `${directoryPath}/${filename}`;
-      const savedPath = await saveAudio(
-        generatedAudio,
-        { kind: 'file', path: filePath },
-        { format }
-      );
+      const savedPath =
+        generatedAudio.generation > 0 &&
+        '_instanceId' in generatedAudio &&
+        typeof (generatedAudio as any)._instanceId === 'string'
+          ? await saveAudioFromGeneration(
+              generatedAudio,
+              { kind: 'file', path: filePath },
+              { format }
+            )
+          : await saveAudioFromPCM(
+              {
+                samples: await generatedAudio.getSamples(),
+                sampleRate: generatedAudio.sampleRate,
+              },
+              { kind: 'file', path: filePath },
+              { format }
+            );
       setSavedAudioPath(savedPath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
@@ -1825,7 +1851,7 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Generated Audio</Text>
               <View style={styles.resultContainer}>
                 <Text style={styles.resultText}>
-                  Samples: {generatedAudio.samples.length.toLocaleString()}
+                  Samples: {generatedAudio.numSamples.toLocaleString()}
                 </Text>
                 <Text style={styles.resultText}>
                   Sample Rate: {generatedAudio.sampleRate} Hz
@@ -1833,7 +1859,7 @@ export default function TTSScreen() {
                 <Text style={styles.resultText}>
                   Duration:{' '}
                   {(
-                    generatedAudio.samples.length / generatedAudio.sampleRate
+                    generatedAudio.numSamples / generatedAudio.sampleRate
                   ).toFixed(2)}{' '}
                   seconds
                 </Text>

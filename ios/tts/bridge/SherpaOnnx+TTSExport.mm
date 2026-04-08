@@ -14,7 +14,7 @@
 
 @implementation SherpaOnnx (TTSExport)
 
-- (void)so_saveTtsAudio:(NSArray<NSNumber *> *)samples
+- (void)so_saveTtsAudioFromPCM:(NSArray<NSNumber *> *)samples
           sampleRate:(double)sampleRate
    destinationType:(NSString *)destinationType
 pathOrDirectoryUri:(NSString *)pathOrDirectoryUri

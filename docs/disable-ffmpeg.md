@@ -48,9 +48,9 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 | **`convertAudioToWav16k(inputPath, outputPath)`** | Converts an audio file to WAV 16 kHz mono 16-bit PCM (sherpa-onnx input format). Implemented in native code via FFmpeg; when disabled, the native implementation is not linked and the call returns an error string. |
 | **`convertAudioToFormat(inputPath, outputPath, format, outputSampleRateHz?)`** | Converts an audio file to a given format (e.g. `"wav"`, `"mp3"`, `"flac"`, `"m4a"`). When FFmpeg is disabled, the call returns an error. |
 | **`decodeAudioFileToFloatSamples(inputPath, targetSampleRateHz?)`** | Decodes to mono float PCM. **Android:** without FFmpeg, only the WAV `WaveReader` fast path works when no resampling is requested; other formats fail. **iOS:** requires FFmpeg; fails when disabled. |
-| **`saveAudio` with non-WAV `format`** (`react-native-sherpa-onnx/tts`) | TTS export uses native encoding from float PCM. Without FFmpeg, only **`format: 'wav'`** (default) succeeds; other formats fail at runtime (same as file conversion). |
+| **`saveAudioFromGeneration` / `saveAudioFromPCM` with non-WAV `format`** (`react-native-sherpa-onnx/tts`) | TTS export uses native encoding from float PCM. Without FFmpeg, only **`format: 'wav'`** (default) succeeds; other formats fail at runtime (same as file conversion). |
 
-The **`audio`** helpers above are exposed from **`react-native-sherpa-onnx/audio`**. **`saveAudio`** is on **`tts`**. STT, archive extraction, model detection, and **TTS WAV export** do **not** depend on FFmpeg and continue to work when FFmpeg is disabled.
+The **`audio`** helpers above are exposed from **`react-native-sherpa-onnx/audio`**. **`saveAudioFromGeneration`** / **`saveAudioFromPCM`** are on **`tts`**. STT, archive extraction, model detection, and **TTS WAV export** do **not** depend on FFmpeg and continue to work when FFmpeg is disabled.
 
 ## Risks and limitations of disabling FFmpeg
 

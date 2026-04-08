@@ -9,11 +9,24 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "wav/TtsStreamingWavSink.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
+#include "../pcm/PcmPlayerRegistry.h"
 
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+
+// Helper: encode float PCM as base64 (little-endian, 4 bytes per sample).
+// Replaces per-element NSNumber boxing with a single NSData→base64 call.
+static NSString *pcmToBase64(const float *samples, int32_t numSamples) {
+    if (samples == nullptr || numSamples <= 0) return @"";
+    NSData *data = [NSData dataWithBytes:samples length:(NSUInteger)(numSamples * sizeof(float))];
+    return [data base64EncodedStringWithOptions:0];
+}
+
+// Chunk coalescing thresholds — fewer, larger JS callbacks for long text.
+static const int32_t kMaxFramesPerChunk = 16384;
+static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
 
 @implementation SherpaOnnx (TTSStream)
 
@@ -30,9 +43,19 @@
     }
     double sid = 0;
     double speed = 1.0;
+    BOOL playback = NO;
+    BOOL emitChunks = YES;
+    BOOL autoDestroy = YES;
     if (options != nil) {
         if (options[@"sid"] != nil) sid = [options[@"sid"] doubleValue];
         if (options[@"speed"] != nil) speed = [options[@"speed"] doubleValue];
+        if (options[@"playback"] != nil) playback = [options[@"playback"] boolValue];
+        if (options[@"emitChunks"] != nil) emitChunks = [options[@"emitChunks"] boolValue];
+        if (options[@"autoDestroy"] != nil) autoDestroy = [options[@"autoDestroy"] boolValue];
+    }
+    if (!playback && !emitChunks) {
+        reject(@"TTS_STREAM_ERROR", @"emitChunks=false + playback=false is a no-op", nil);
+        return;
     }
     std::string instanceIdStr = [instanceId UTF8String];
     std::shared_ptr<TtsInstanceState> instRef;
@@ -97,35 +120,93 @@
     __weak SherpaOnnx *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool success = false;
+
+        // Native playback player (if playback == YES)
+        std::shared_ptr<PcmPlayerSession> playbackSession = nullptr;
+        std::string playbackPlayerId;
+        if (playback) {
+            playbackPlayerId = std::string([instanceIdCopy UTF8String]) + "_" + (requestIdCopy ? [requestIdCopy UTF8String] : "anon");
+            playbackPlayerId = "tts_playback_" + playbackPlayerId;
+
+            auto session = std::make_shared<PcmPlayerSession>();
+            session->playerId = playbackPlayerId;
+            session->sampleRate = sampleRate;
+            session->channels = 1;
+            session->feed = PcmPlayerFeed::NATIVE;
+            session->ttsInstanceId = [instanceIdCopy UTF8String];
+
+            AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+            [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
+            [audioSession setActive:YES error:nil];
+
+            session->audioEngine = [[AVAudioEngine alloc] init];
+            session->playerNode = [[AVAudioPlayerNode alloc] init];
+            session->audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:(double)sampleRate channels:1];
+            [session->audioEngine attachNode:session->playerNode];
+            [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
+            NSError *startError = nil;
+            BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+            if (!engineStarted || startError) {
+                NSLog(@"[SherpaOnnx] TTS stream playback: failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error");
+                // Proceed without playback — stream will still emit chunks if emitChunks is set
+                playbackPlayerId = "";
+            } else {
+                [session->playerNode play];
+                {
+                    std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                    g_pcm_players[session->playerId] = session;
+                }
+                playbackSession = session;
+            }
+        }
+
+        // Coalescing buffer — accumulates native ticks and flushes as fewer, larger chunks.
+        __block std::vector<float> coalesceBuffer;
+        __block int64_t coalesceFirstNs = 0;
+        __block float lastProgress = 0.0f;
+
+        auto flushCoalesceBuffer = [&coalesceBuffer, &coalesceFirstNs, &lastProgress, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+            if (coalesceBuffer.empty()) return;
+            NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            float progressSnapshot = lastProgress;
+            NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"instanceId": instanceIdCopy,
+                @"pcmBase64": pcmB64,
+                @"sampleRate": @(sampleRate),
+                @"progress": @(progressSnapshot),
+                @"isFinal": @NO
+            }];
+            if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                }
+            });
+            coalesceBuffer.clear();
+            coalesceFirstNs = 0;
+        };
+
         @try {
             success = instRef->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &lastProgress, &flushCoalesceBuffer, emitChunks, &playbackSession, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
 
-                    NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:numSamples];
-                    for (int32_t i = 0; i < numSamples; i++) {
-                        [samplesArray addObject:@(samples[i])];
-                    }
+                    if (playbackSession) playbackSession->enqueueMonoFloat32(samples, numSamples);
 
-                    NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
-                        @"instanceId": instanceIdCopy,
-                        @"samples": samplesArray,
-                        @"sampleRate": @(sampleRate),
-                        @"progress": @(progress),
-                        @"isFinal": @NO
-                    }];
-                    if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
-
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (weakSelf) {
-                            [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                    if (emitChunks) {
+                        lastProgress = progress;
+                        if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+                        coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
+                        if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||
+                            (clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) - coalesceFirstNs) >= (uint64_t)kMaxChunkLatencyNs) {
+                            flushCoalesceBuffer();
                         }
-                    });
+                    }
 
                     return instRef->streamCancelled.load() ? 0 : 1;
                 },
@@ -135,6 +216,11 @@
             NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];
             NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"message": errorMsg }];
             if (requestIdCopy != nil) errPayload[@"requestId"] = requestIdCopy;
+            if (playbackSession) {
+                std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                g_pcm_players.erase(playbackSession->playerId);
+                playbackSession->destroy();
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (weakSelf) {
                     [weakSelf sendEventWithName:@"ttsStreamError" body:errPayload];
@@ -143,6 +229,14 @@
         }
 
         bool cancelled = instRef->streamCancelled.load();
+
+        // Destroy playback player if autoDestroy or cancelled
+        if (playbackSession && (autoDestroy || cancelled)) {
+            std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+            g_pcm_players.erase(playbackSession->playerId);
+            playbackSession->destroy();
+        }
+
         if (!success && !cancelled) {
             NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"message": @"TTS streaming generation failed" }];
             if (requestIdCopy != nil) errPayload[@"requestId"] = requestIdCopy;
@@ -153,10 +247,11 @@
             });
         }
 
-        if (!cancelled) {
+        if (!cancelled && emitChunks) {
+            flushCoalesceBuffer();
             NSMutableDictionary *finalPayload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
-                @"samples": @[],
+                @"pcmBase64": @"",
                 @"sampleRate": @(sampleRate),
                 @"progress": @1.0f,
                 @"isFinal": @YES
@@ -215,6 +310,8 @@
 
     double sid = options[@"sid"] != nil ? [options[@"sid"] doubleValue] : 0;
     double speed = options[@"speed"] != nil ? [options[@"speed"] doubleValue] : 1.0;
+    BOOL playback = options[@"playback"] != nil ? [options[@"playback"] boolValue] : NO;
+    BOOL autoDestroy = options[@"autoDestroy"] != nil ? [options[@"autoDestroy"] boolValue] : YES;
 
     std::string instanceIdStr = [instanceId UTF8String];
     std::shared_ptr<TtsInstanceState> instRef;
@@ -246,35 +343,91 @@
         bool success = false;
         bool cancelled = false;
         int64_t bytesWritten = 0;
+
+        // Native playback player (if playback == YES)
+        std::shared_ptr<PcmPlayerSession> playbackSession = nullptr;
+        std::string playbackPlayerId;
+        if (playback) {
+            playbackPlayerId = std::string([instanceIdCopy UTF8String]) + "_file_" + (requestIdCopy ? [requestIdCopy UTF8String] : "anon");
+            playbackPlayerId = "tts_playback_" + playbackPlayerId;
+
+            auto session = std::make_shared<PcmPlayerSession>();
+            session->playerId = playbackPlayerId;
+            session->sampleRate = sampleRate;
+            session->channels = 1;
+            session->feed = PcmPlayerFeed::NATIVE;
+            session->ttsInstanceId = [instanceIdCopy UTF8String];
+
+            AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+            [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
+            [audioSession setActive:YES error:nil];
+
+            session->audioEngine = [[AVAudioEngine alloc] init];
+            session->playerNode = [[AVAudioPlayerNode alloc] init];
+            session->audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:(double)sampleRate channels:1];
+            [session->audioEngine attachNode:session->playerNode];
+            [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
+            NSError *startError = nil;
+            BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+            if (!engineStarted || startError) {
+                NSLog(@"[SherpaOnnx] TTS stream-to-file playback: failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error");
+                // Proceed without playback — file will still be written
+                playbackPlayerId = "";
+            } else {
+                [session->playerNode play];
+                {
+                    std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                    g_pcm_players[session->playerId] = session;
+                }
+                playbackSession = session;
+            }
+        }
+
+        // Coalescing buffer for chunk emission (only used when emitChunks == true).
+        __block std::vector<float> coalesceBuffer;
+        __block int64_t coalesceFirstNs = 0;
+        __block float lastFileProgress = 0.0f;
+        auto flushFileCoalesce = [&coalesceBuffer, &coalesceFirstNs, &lastFileProgress, sampleRate, instanceIdCopy, requestIdCopy, weakSelf]() {
+            if (coalesceBuffer.empty()) return;
+            NSString *pcmB64 = pcmToBase64(coalesceBuffer.data(), (int32_t)coalesceBuffer.size());
+            float progressSnapshot = lastFileProgress;
+            NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"instanceId": instanceIdCopy,
+                @"pcmBase64": pcmB64,
+                @"sampleRate": @(sampleRate),
+                @"progress": @(progressSnapshot),
+                @"isFinal": @NO
+            }];
+            if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (weakSelf) {
+                    [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
+                }
+            });
+            coalesceBuffer.clear();
+            coalesceFirstNs = 0;
+        };
+
         @try {
             sink = std::make_unique<StreamingWavSink>(std::string([pathCopy UTF8String]), sampleRate);
             success = instRef->wrapper->generateStream(
                 textStr,
                 static_cast<int32_t>(sid),
                 static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, emitChunks, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
+                [&coalesceBuffer, &coalesceFirstNs, &lastFileProgress, &flushFileCoalesce, emitChunks, &playbackSession, instRef, sinkPtr = sink.get()](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
                     sinkPtr->writeChunk(samples, numSamples);
+                    if (playbackSession) playbackSession->enqueueMonoFloat32(samples, numSamples);
                     if (emitChunks) {
-                        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:numSamples];
-                        for (int32_t i = 0; i < numSamples; i++) {
-                            [samplesArray addObject:@(samples[i])];
+                        lastFileProgress = progress;
+                        if (coalesceBuffer.empty()) coalesceFirstNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+                        coalesceBuffer.insert(coalesceBuffer.end(), samples, samples + numSamples);
+                        if ((int32_t)coalesceBuffer.size() >= kMaxFramesPerChunk ||
+                            (clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) - coalesceFirstNs) >= (uint64_t)kMaxChunkLatencyNs) {
+                            flushFileCoalesce();
                         }
-                        NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:@{
-                            @"instanceId": instanceIdCopy,
-                            @"samples": samplesArray,
-                            @"sampleRate": @(sampleRate),
-                            @"progress": @(progress),
-                            @"isFinal": @NO
-                        }];
-                        if (requestIdCopy != nil) payload[@"requestId"] = requestIdCopy;
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            if (weakSelf) {
-                                [weakSelf sendEventWithName:@"ttsStreamChunk" body:payload];
-                            }
-                        });
                     }
                     return instRef->streamCancelled.load() ? 0 : 1;
                 }
@@ -288,6 +441,11 @@
         } @catch (NSException *exception) {
             cancelled = instRef->streamCancelled.load();
             if (sink) sink->abort(!keepPartialOnCancel);
+            if (playbackSession) {
+                std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                g_pcm_players.erase(playbackSession->playerId);
+                playbackSession->destroy();
+            }
             NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
                 @"message": [NSString stringWithFormat:@"TTS stream-to-file failed: %@", exception.reason ?: @"unknown error"]
@@ -299,6 +457,13 @@
                     [weakSelf sendEventWithName:@"ttsStreamFileError" body:errPayload];
                 }
             });
+        }
+
+        // Destroy playback player if autoDestroy or cancelled
+        if (playbackSession && (autoDestroy || cancelled)) {
+            std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+            g_pcm_players.erase(playbackSession->playerId);
+            playbackSession->destroy();
         }
 
         if (!success && !cancelled) {
@@ -316,9 +481,10 @@
         }
 
         if (emitChunks && !cancelled) {
+            flushFileCoalesce();
             NSMutableDictionary *finalPayload = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"instanceId": instanceIdCopy,
-                @"samples": @[],
+                @"pcmBase64": @"",
                 @"sampleRate": @(sampleRate),
                 @"progress": @1.0f,
                 @"isFinal": @YES

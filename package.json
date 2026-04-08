@@ -65,6 +65,11 @@
       "types": "./lib/typescript/src/files/index.d.ts",
       "default": "./lib/module/files/index.js"
     },
+    "./pcm": {
+      "source": "./src/pcm/index.ts",
+      "types": "./lib/typescript/src/pcm/index.d.ts",
+      "default": "./lib/module/pcm/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

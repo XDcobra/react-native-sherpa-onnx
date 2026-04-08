@@ -14,7 +14,8 @@
       "react-native-sherpa-onnx/enhancement": ["../src/enhancement/index.ts"],
       "react-native-sherpa-onnx/separation": ["../src/separation/index.ts"],
       "react-native-sherpa-onnx/extraction": ["../src/extraction/index.ts"],
-      "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"]
+      "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"],
+      "react-native-sherpa-onnx/files": ["../src/files/index.ts"]
     }
   },
   "include": ["src/**/*"]

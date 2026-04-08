@@ -1,6 +1,7 @@
 import type {
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamOptions,
   TtsStreamToFileHandlers,
   TtsStreamFileController,
   TtsStreamToFileOptions,
@@ -15,6 +16,7 @@ export type {
   TtsStreamError,
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamOptions,
   TtsStreamToFileHandlers,
   TtsStreamFileController,
   TtsStreamToFileOptions,
@@ -26,7 +28,7 @@ export type {
 
 /**
  * Streaming-only TTS engine returned by createStreamingTTS().
- * Use for incremental generation with chunk callbacks and PCM playback.
+ * Use for incremental generation with chunk callbacks and native playback.
  * Call destroy() when done to free native resources.
  */
 export interface StreamingTtsEngine {
@@ -36,7 +38,8 @@ export interface StreamingTtsEngine {
   generateSpeechStream(
     text: string,
     options: TtsGenerationOptions | undefined,
-    handlers: TtsStreamHandlers
+    handlers: TtsStreamHandlers,
+    streamOptions?: TtsStreamOptions
   ): Promise<TtsStreamController>;
 
   /** Generate speech in streaming mode and write directly to a file sink. */
@@ -49,15 +52,6 @@ export interface StreamingTtsEngine {
 
   /** Cancel the current streaming generation. */
   cancelSpeechStream(): Promise<void>;
-
-  /** Start built-in PCM playback (e.g. for play-while-generating). */
-  startPcmPlayer(sampleRate: number, channels: number): Promise<void>;
-
-  /** Write float PCM samples to the player. Use from onChunk. */
-  writePcmChunk(samples: number[]): Promise<void>;
-
-  /** Stop and release the PCM player. */
-  stopPcmPlayer(): Promise<void>;
 
   /** Model sample rate and number of speakers. */
   getModelInfo(): Promise<TTSModelInfo>;

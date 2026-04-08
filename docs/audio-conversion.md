@@ -136,21 +136,21 @@ try {
 
 ## TTS save example
 
-**Recommended:** encode and write in one step with **`saveAudio`** (native PCM → codec; no app-managed WAV temp file).
+**Recommended:** encode and write in one step with **`saveAudioFromGeneration`** (native PCM → codec; no app-managed WAV temp file).
 
 ```ts
 import { CachesDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { saveAudio } from 'react-native-sherpa-onnx/tts';
+import { saveAudioFromGeneration } from 'react-native-sherpa-onnx/tts';
 
 // Android SAF — MP3 (requires FFmpeg)
-const savedUri = await saveAudio(
+const savedUri = await saveAudioFromGeneration(
   audio,
   { kind: 'androidContent', directoryUri, filename: 'output.mp3' },
   { format: 'mp3' }
 );
 
 // Local file — FLAC
-const path = await saveAudio(
+const path = await saveAudioFromGeneration(
   audio,
   { kind: 'file', path: `${CachesDirectoryPath}/out.flac` },
   { format: 'flac' }

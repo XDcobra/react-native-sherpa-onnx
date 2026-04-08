@@ -1,5 +1,6 @@
 import type { ModelPathConfig } from '../types';
 import type { SubtitleTimingItem } from '../alignment/types';
+import type { PcmPlayer } from '../pcm/types';
 
 /** @deprecated Import `SubtitleTimingItem` from `react-native-sherpa-onnx/alignment`. */
 export type TtsSubtitleItem = SubtitleTimingItem;
@@ -392,22 +393,36 @@ export type TtsGenerationOptions = TtsGenerationBase &
 /**
  * Generated audio data from TTS synthesis.
  *
- * The samples are normalized float values in the range [-1.0, 1.0].
- * To save as a WAV file or play the audio, you'll need to convert
- * these samples to the appropriate format for your use case.
+ * PCM samples are held in a native sink and not transferred to JS by default.
+ * Use `getSamples()` to retrieve the PCM data when needed.
  */
 export interface GeneratedAudio {
-  /**
-   * Audio samples as an array of float values in range [-1.0, 1.0].
-   * This is raw PCM audio data.
-   */
-  samples: number[];
-
   /**
    * Sample rate of the generated audio in Hz.
    * Common values: 16000, 22050, 44100, 48000
    */
   sampleRate: number;
+
+  /**
+   * Number of mono float PCM samples in the generated audio.
+   */
+  numSamples: number;
+
+  /**
+   * Monotonic generation ID (matches native sink).
+   * Used internally for stale-detection; may also be useful for debugging.
+   */
+  generation: number;
+
+  /**
+   * Retrieve raw PCM samples from the native sink as Float32Array.
+   * Allocates memory in JS — call only when you need raw PCM (e.g. custom playback).
+   * Prefer `saveAudioFromGeneration()` for saving to file (avoids JS round-trip).
+   *
+   * @throws if the generation is stale (a new generateSpeech was called on the same engine)
+   * @throws if the engine instance has been destroyed
+   */
+  getSamples(): Promise<Float32Array>;
 }
 
 /**
@@ -433,15 +448,20 @@ export type TtsDetectedModelEntry = {
 
 /**
  * Streaming chunk event payload for TTS generation.
+ *
+ * PCM data is delivered as `Float32Array` (base64-decoded from native into a
+ * typed array in JS; not a zero-copy binary transfer).
+ * Internal routing IDs (`instanceId`, `requestId`) are stripped before
+ * the chunk reaches public handlers.
  */
 export interface TtsStreamChunk {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation (distinguishes concurrent streams on same instance). */
-  requestId?: string;
-  samples: number[];
+  /** Mono float PCM samples in [-1, 1]. */
+  samples: Float32Array;
+  /** Sample rate of the generated audio in Hz. */
   sampleRate: number;
+  /** Synthesis progress in [0, 1]. 1.0 on the final chunk. */
   progress: number;
+  /** True for the last chunk of a generation. */
   isFinal: boolean;
 }
 
@@ -449,10 +469,6 @@ export interface TtsStreamChunk {
  * Streaming end event payload.
  */
 export interface TtsStreamEnd {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   cancelled: boolean;
 }
 
@@ -460,10 +476,6 @@ export interface TtsStreamEnd {
  * Streaming error event payload.
  */
 export interface TtsStreamError {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   message: string;
 }
 
@@ -472,10 +484,15 @@ export interface TtsStreamError {
  * Use cancel() to stop generation, unsubscribe() to remove event listeners.
  */
 export interface TtsStreamController {
-  /** Cancel the ongoing TTS generation. */
+  /** Cancel the ongoing TTS generation (and destroy the player if playback was active). */
   cancel(): Promise<void>;
   /** Remove event listeners (called automatically on end/error, or manually). */
   unsubscribe(): void;
+  /**
+   * The player managing native playback for this stream run.
+   * Non-null only when streamOptions.playback was true.
+   */
+  readonly player: PcmPlayer | null;
 }
 
 /**
@@ -487,6 +504,27 @@ export interface TtsStreamHandlers {
   onError?: (event: TtsStreamError) => void;
 }
 
+/** Options controlling stream behavior (playback, chunk emission). */
+export interface TtsStreamOptions {
+  /**
+   * When true, synthesis enqueues PCM into a native player automatically.
+   * No writePcmChunk() needed. Default: false.
+   */
+  playback?: boolean;
+  /**
+   * When true, onChunk callbacks deliver binary PCM to JS.
+   * When false, no chunk events are emitted (only onEnd / onError).
+   * Default: true.
+   */
+  emitChunks?: boolean;
+  /**
+   * When true, the internally created player (used when playback: true) is automatically
+   * destroyed after onEnd fires. Default: true.
+   * Set to false to retain the player for deferred destroy() or final draining.
+   */
+  autoDestroy?: boolean;
+}
+
 /** File output target for streaming-to-file generation. */
 export type TtsStreamFileOutput = {
   kind: 'file';
@@ -496,8 +534,6 @@ export type TtsStreamFileOutput = {
 
 /** Event payload emitted when stream-to-file finishes. */
 export interface TtsStreamFileEnd {
-  instanceId?: string;
-  requestId?: string;
   cancelled: boolean;
   path: string;
   bytesWritten: number;
@@ -506,8 +542,6 @@ export interface TtsStreamFileEnd {
 
 /** Event payload emitted when stream-to-file fails. */
 export interface TtsStreamFileError {
-  instanceId?: string;
-  requestId?: string;
   message: string;
   path?: string;
 }
@@ -524,6 +558,11 @@ export type TtsStreamToFileOptions = {
   keepPartialOnCancel?: boolean;
   /** Emit normal chunk events while writing to file. Default: false. */
   emitChunks?: boolean;
+  /**
+   * When true, also play audio through a native player while writing to file.
+   * Default: false.
+   */
+  playback?: boolean;
 };
 
 /** Handlers for stream-to-file generation. */
@@ -555,6 +594,18 @@ export interface TtsEngine {
     text: string,
     options?: TtsGenerationOptions
   ): Promise<GeneratedAudioWithTimestamps>;
+  /**
+   * Play the most recent batch synthesis result through the device speaker.
+   * Reads PCM directly from the native sink — no JS memory allocation.
+   *
+   * @param generation - The generation number from GeneratedAudio.generation.
+   *                     Must match the current sink to prevent playing stale audio.
+   * @param options - Optional player configuration.
+   */
+  playFromSink(
+    generation: number,
+    options?: PlayFromSinkOptions
+  ): Promise<TtsBatchPlaybackController>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: TtsDetectedModelEntry[];
@@ -563,6 +614,21 @@ export interface TtsEngine {
   getSampleRate(): Promise<number>;
   getNumSpeakers(): Promise<number>;
   destroy(): Promise<void>;
+}
+
+/**
+ * Controller returned by TtsEngine.playFromSink().
+ * Provides pause/resume/destroy controls over the batch playback player.
+ */
+export interface TtsBatchPlaybackController {
+  /** The underlying PCM player (feed: 'native'). Use for pause/resume/destroy. */
+  readonly player: PcmPlayer;
+}
+
+/** Options for TtsEngine.playFromSink(). */
+export interface PlayFromSinkOptions {
+  /** Sample rate override. If omitted, uses the sink's sample rate. */
+  sampleRate?: number;
 }
 
 /**
@@ -599,8 +665,15 @@ export type SaveAudioTarget =
   | SaveAudioTargetFile
   | SaveAudioTargetAndroidContent;
 
+/** Explicit PCM payload for `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`. */
+export type SaveAudioFromPcmInput = {
+  samples: number[] | Float32Array;
+  sampleRate: number;
+};
+
 /**
- * Options for `saveAudio()` in `react-native-sherpa-onnx/tts`. `format` defaults to `'wav'`.
+ * Options for `saveAudioFromGeneration()` / `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`.
+ * `format` defaults to `'wav'`.
  * Non-WAV formats require native FFmpeg; see docs/disable-ffmpeg.md.
  */
 export type SaveAudioOptions = {

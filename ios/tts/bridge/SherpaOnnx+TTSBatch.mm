@@ -9,6 +9,7 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "subtitle/TtsSubtitleSegmentation.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
+#include "../pcm/PcmPlayerRegistry.h"
 
 #include <memory>
 #include <optional>
@@ -84,18 +85,19 @@
             return;
         }
 
-        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:result.samples.size()];
-        for (float sample : result.samples) {
-            [samplesArray addObject:@(sample)];
-        }
+        // Sub-plan 01: store PCM in native sink
+        it->second->sink.update(result.samples, result.sampleRate);
+        uint64_t generation = it->second->sink.generation;
 
+        // Sub-plan 02: metadata-only — no samples array over the bridge
         NSDictionary *resultDict = @{
-            @"samples": samplesArray,
-            @"sampleRate": @(result.sampleRate)
+            @"sampleRate": @(result.sampleRate),
+            @"numSamples": @(static_cast<int32_t>(result.samples.size())),
+            @"generation": @(static_cast<double>(generation))
         };
 
-        RCTLogInfo(@"TTS: Generated %lu samples at %d Hz",
-                   (unsigned long)result.samples.size(), result.sampleRate);
+        RCTLogInfo(@"TTS: Generated %lu samples at %d Hz (generation %llu)",
+                   (unsigned long)result.samples.size(), result.sampleRate, generation);
 
         resolve(resultDict);
     } @catch (NSException *exception) {
@@ -228,19 +230,20 @@
             }
         }
 
-        NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:generatedSamples.size()];
-        for (float sample : generatedSamples) {
-            [samplesArray addObject:@(sample)];
-        }
+        // Sub-plan 01: store PCM in native sink
+        it->second->sink.update(generatedSamples.data(), generatedSamples.size(), sampleRate);
+        uint64_t generation = it->second->sink.generation;
 
+        // Sub-plan 02: metadata-only — no samples array over the bridge
         if (exportChunkOnly) {
             NSMutableArray *counts = [NSMutableArray arrayWithCapacity:sentenceChunkSizes.size()];
             for (int32_t c : sentenceChunkSizes) {
                 [counts addObject:@(c)];
             }
             NSDictionary *resultDict = @{
-                @"samples": samplesArray,
                 @"sampleRate": @(sampleRate),
+                @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
+                @"generation": @(static_cast<double>(generation)),
                 @"segmentSampleCounts": counts,
                 @"subtitles": @[],
                 @"timingMode": @"estimated"
@@ -263,8 +266,9 @@
         }
 
         NSDictionary *resultDict = @{
-            @"samples": samplesArray,
             @"sampleRate": @(sampleRate),
+            @"numSamples": @(static_cast<int32_t>(generatedSamples.size())),
+            @"generation": @(static_cast<double>(generation)),
             @"subtitles": subtitlesArray,
             @"timingMode": timingMode
         };
@@ -275,6 +279,190 @@
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_GENERATE_ERROR", errorMsg, nil);
     }
+}
+
+- (void)so_getTtsSamples:(NSString *)instanceId
+              generation:(double)generation
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::lock_guard<std::mutex> lock(g_tts_mutex);
+    auto it = g_tts_instances.find(instanceIdStr);
+    if (it == g_tts_instances.end()) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"TTS instance not found", nil);
+        return;
+    }
+    auto &sink = it->second->sink;
+    uint64_t requestedGen = static_cast<uint64_t>(generation);
+    if (sink.generation == 0 || sink.samples.empty()) {
+        reject(@"TTS_NO_SAMPLES", @"No batch synthesis result available", nil);
+        return;
+    }
+    if (requestedGen != sink.generation) {
+        NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                         (unsigned long long)requestedGen, (unsigned long long)sink.generation];
+        reject(@"TTS_STALE_GENERATION", msg, nil);
+        return;
+    }
+    NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:sink.samples.size()];
+    for (float s : sink.samples) {
+        [samplesArray addObject:@(s)];
+    }
+    NSDictionary *result = @{
+        @"samples": samplesArray,
+        @"sampleRate": @(sink.sampleRate)
+    };
+    resolve(result);
+}
+
+- (void)so_saveTtsAudioFromSink:(NSString *)instanceId
+                     generation:(double)generation
+                destinationType:(NSString *)destinationType
+             pathOrDirectoryUri:(NSString *)pathOrDirectoryUri
+                       filename:(NSString *)filename
+                         format:(NSString *)format
+             outputSampleRateHz:(double)outputSampleRateHz
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+    std::string instanceIdStr = [instanceId UTF8String];
+    NSMutableArray<NSNumber *> *samplesCopy;
+    double sampleRate;
+    {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end()) {
+            reject(@"TTS_INSTANCE_NOT_FOUND", @"TTS instance not found", nil);
+            return;
+        }
+        auto &sink = it->second->sink;
+        uint64_t requestedGen = static_cast<uint64_t>(generation);
+        if (sink.generation == 0 || sink.samples.empty()) {
+            reject(@"TTS_NO_SAMPLES", @"No batch synthesis result available", nil);
+            return;
+        }
+        if (requestedGen != sink.generation) {
+            NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                             (unsigned long long)requestedGen, (unsigned long long)sink.generation];
+            reject(@"TTS_STALE_GENERATION", msg, nil);
+            return;
+        }
+        samplesCopy = [NSMutableArray arrayWithCapacity:sink.samples.size()];
+        for (float s : sink.samples) {
+            [samplesCopy addObject:@(s)];
+        }
+        sampleRate = static_cast<double>(sink.sampleRate);
+    }
+    // Delegate to existing save implementation
+    [self so_saveTtsAudioFromPCM:samplesCopy
+               sampleRate:sampleRate
+          destinationType:destinationType
+       pathOrDirectoryUri:pathOrDirectoryUri
+                 filename:filename
+                   format:format
+       outputSampleRateHz:outputSampleRateHz
+                  resolve:resolve
+                   reject:reject];
+}
+
+- (void)so_playTtsFromSink:(NSString *)instanceId
+             generation:(double)generation
+             sampleRate:(double)sampleRate
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"TTS_INSTANCE_NOT_FOUND", @"instanceId is required", nil);
+        return;
+    }
+
+    std::vector<float> pcmCopy;
+    int32_t rate = 0;
+    std::string instanceIdStr = [instanceId UTF8String];
+
+    {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it = g_tts_instances.find(instanceIdStr);
+        if (it == g_tts_instances.end() || it->second->wrapper == nullptr) {
+            reject(@"TTS_NOT_INITIALIZED", @"TTS not initialized. Call initializeTts() first.", nil);
+            return;
+        }
+        auto &sink = it->second->sink;
+        if (sink.generation == 0 || sink.samples.empty()) {
+            reject(@"TTS_SINK_EMPTY", @"No batch synthesis result available", nil);
+            return;
+        }
+        uint64_t requestedGen = static_cast<uint64_t>(generation);
+        if (requestedGen != sink.generation) {
+            reject(@"TTS_SINK_STALE",
+                   [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
+                    requestedGen, sink.generation], nil);
+            return;
+        }
+        pcmCopy = sink.samples;
+        rate = (sampleRate > 0) ? static_cast<int32_t>(sampleRate) : sink.sampleRate;
+    }
+
+    // Auto-destroy previous batch playback player for this instance
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+        for (auto it = g_pcm_players.begin(); it != g_pcm_players.end(); ) {
+            if (it->second && it->second->ttsInstanceId == instanceIdStr &&
+                it->first.find("batch_play_") == 0) {
+                it->second->destroy();
+                it = g_pcm_players.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    uint64_t requestedGen = static_cast<uint64_t>(generation);
+    std::string playerId = "batch_play_" + instanceIdStr + "_" + std::to_string(requestedGen);
+
+    auto session = std::make_shared<PcmPlayerSession>();
+    session->playerId = playerId;
+    session->sampleRate = rate;
+    session->channels = 1;
+    session->feed = PcmPlayerFeed::NATIVE;
+    session->ttsInstanceId = instanceIdStr;
+
+    AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+    [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
+    [audioSession setActive:YES error:nil];
+
+    session->audioEngine = [[AVAudioEngine alloc] init];
+    session->playerNode = [[AVAudioPlayerNode alloc] init];
+    session->audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:(double)rate channels:1];
+    [session->audioEngine attachNode:session->playerNode];
+    [session->audioEngine connect:session->playerNode to:session->audioEngine.mainMixerNode format:session->audioFormat];
+    NSError *startError = nil;
+    BOOL engineStarted = [session->audioEngine startAndReturnError:&startError];
+    if (!engineStarted || startError) {
+        reject(@"PCM_PLAYER_ERROR",
+               [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription ?: @"unknown error"],
+               startError);
+        return;
+    }
+    [session->playerNode play];
+
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+        g_pcm_players[playerId] = session;
+    }
+
+    session->enqueueMonoFloat32(pcmCopy.data(), static_cast<int32_t>(pcmCopy.size()));
+    NSString *playerIdStr = [NSString stringWithUTF8String:playerId.c_str()];
+    resolve(@{ @"playerId": playerIdStr });
 }
 
 @end

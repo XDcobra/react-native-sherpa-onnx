@@ -1,6 +1,7 @@
 package com.sherpaonnx
 
 import android.net.Uri
+import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
@@ -9,6 +10,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
+import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
@@ -53,6 +55,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val pcmPlayerService = PcmPlayerService()
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
@@ -63,7 +66,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, cancelled, path, bytesWritten, sampleRate -> emitTtsStreamFileEnd(instanceId, requestId, cancelled, path, bytesWritten, sampleRate) },
     { rawPath, pcmSr, outPath, fmt, outHz ->
       Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
-    }
+    },
+    pcmPlayerService
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
@@ -89,6 +93,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    pcmPlayerService.shutdown()
   }
 
   /**
@@ -904,6 +909,36 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
   }
 
+  /**
+   * Retrieve PCM samples from the native sink for a given generation.
+   */
+  override fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
+    offlineTtsHelper.getTtsSamples(instanceId, generation, promise)
+  }
+
+  /**
+   * Save TTS audio directly from the native sink (no JS PCM round-trip).
+   */
+  override fun saveTtsAudioFromSink(
+    instanceId: String,
+    generation: Double,
+    destinationType: String,
+    pathOrDirectoryUri: String,
+    filename: String,
+    format: String,
+    outputSampleRateHz: Double,
+    promise: Promise
+  ) {
+    offlineTtsHelper.saveTtsAudioFromSink(
+      instanceId, generation, destinationType, pathOrDirectoryUri,
+      filename, format, outputSampleRateHz, promise
+    )
+  }
+
+  override fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
+    offlineTtsHelper.playTtsFromSink(instanceId, generation, sampleRate, promise)
+  }
+
   override fun alignAccurateFromPath(
     modelPath: String,
     audioPath: String,
@@ -964,25 +999,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineTtsHelper.cancelTtsStream(instanceId, promise)
   }
 
-  /**
-   * Start PCM playback for streaming TTS.
-   */
-  override fun startTtsPcmPlayer(instanceId: String, sampleRate: Double, channels: Double, promise: Promise) {
-    onlineTtsHelper.startTtsPcmPlayer(instanceId, sampleRate, channels, promise)
+  override fun createPcmPlayer(
+    playerId: String,
+    sampleRate: Double,
+    channels: Double,
+    feed: String,
+    ttsInstanceId: String?,
+    promise: Promise
+  ) {
+    pcmPlayerService.create(playerId, sampleRate, channels, feed, ttsInstanceId, promise)
   }
 
-  /**
-   * Write PCM samples to the streaming TTS player.
-   */
-  override fun writeTtsPcmChunk(instanceId: String, samples: ReadableArray, promise: Promise) {
-    onlineTtsHelper.writeTtsPcmChunk(instanceId, samples, promise)
+  override fun writePcmChunk(playerId: String, samples: ReadableArray, promise: Promise) {
+    pcmPlayerService.write(playerId, samples, promise)
   }
 
-  /**
-   * Stop PCM playback for streaming TTS.
-   */
-  override fun stopTtsPcmPlayer(instanceId: String, promise: Promise) {
-    onlineTtsHelper.stopTtsPcmPlayer(instanceId, promise)
+  override fun pausePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.pause(playerId, promise)
+  }
+
+  override fun resumePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.resume(playerId, promise)
+  }
+
+  override fun destroyPcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.destroy(playerId, promise)
   }
 
   private fun emitTtsStreamChunk(
@@ -995,14 +1036,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val samplesArray = Arguments.createArray()
-    for (sample in samples) {
-      samplesArray.pushDouble(sample.toDouble())
+    // Encode float PCM as base64 little-endian bytes (4 bytes per sample).
+    // This replaces per-element pushDouble and avoids O(n) bridge marshalling.
+    val pcmBase64 = if (samples.isNotEmpty()) {
+      val bb = java.nio.ByteBuffer.allocate(samples.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+      bb.asFloatBuffer().put(samples)
+      Base64.encodeToString(bb.array(), Base64.NO_WRAP)
+    } else {
+      ""
     }
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
     payload.putString("requestId", requestId)
-    payload.putArray("samples", samplesArray)
+    payload.putString("pcmBase64", pcmBase64)
     payload.putInt("sampleRate", sampleRate)
     payload.putDouble("progress", progress.toDouble())
     payload.putBoolean("isFinal", isFinal)
@@ -1238,7 +1284,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.unloadOnline(instanceId, promise)
   }
 
-  override fun saveTtsAudio(
+  override fun saveTtsAudioFromPCM(
     samples: ReadableArray,
     sampleRate: Double,
     destinationType: String,
@@ -1248,7 +1294,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     outputSampleRateHz: Double,
     promise: Promise
   ) {
-    offlineTtsHelper.saveTtsAudio(
+    offlineTtsHelper.saveTtsAudioFromPCM(
       samples,
       sampleRate,
       destinationType,

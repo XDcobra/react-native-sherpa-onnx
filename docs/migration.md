@@ -1,5 +1,125 @@
 # Migration Guides
 
+## Standalone PCM player (replacing TTS-bound player)
+
+The PCM player is no longer attached to `StreamingTtsEngine`. Use `createPcmPlayer` from `react-native-sherpa-onnx/pcm` for manual feed, or `playback: true` on streaming options for native playback.
+
+### Removed methods
+
+| Removed from `StreamingTtsEngine` | Replacement |
+|-----------------------------------|-------------|
+| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer({ sampleRate, feed: 'js' })` or `{ playback: true }` stream option |
+| `writePcmChunk(samples)` | `player.writePcmChunk(samples)` |
+| `stopPcmPlayer()` | `player.destroy()` |
+
+### TurboModule renames
+
+| Before | After |
+|--------|-------|
+| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, sampleRate, channels, feed, ttsInstanceId)` |
+| `writeTtsPcmChunk(instanceId, samples)` | `writePcmChunk(playerId, samples)` |
+| `stopTtsPcmPlayer(instanceId)` | `destroyPcmPlayer(playerId)` |
+
+### Before / After
+
+**Streaming + playback (preferred: native playback):**
+
+```ts
+// Before
+await tts.startPcmPlayer(22050, 1);
+await tts.generateSpeechStream(text, opts, {
+  onChunk: (c) => tts.writePcmChunk(c.samples),
+  onEnd: () => tts.stopPcmPlayer(),
+});
+
+// After (native playback)
+const ctrl = await tts.generateSpeechStream(text, opts, {
+  onEnd: () => { /* done */ },
+}, { playback: true, emitChunks: false });
+
+// Pause / resume during playback:
+await ctrl.player?.pause();
+await ctrl.player?.resume();
+// ctrl.cancel() stops synthesis + destroys player
+```
+
+**Manual JS feed (non-TTS audio):**
+
+```ts
+// Before: not possible (PCM player was TTS-only)
+
+// After
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+const player = await createPcmPlayer({ sampleRate: 16000, feed: 'js' });
+await player.writePcmChunk(someFloat32Samples);
+await player.destroy();
+```
+
+**Batch TTS playback (new):**
+
+```ts
+const audio = await tts.generateSpeech('Hello');
+const playback = await tts.playFromSink(audio.generation);
+// playback.player gives pause/resume/destroy control
+await playback.player.pause();
+await playback.player.resume();
+await playback.player.destroy();
+```
+
+See [pcm-player.md](pcm-player.md) for standalone player details.
+
+## Streaming TTS: binary chunks (`Float32Array` replaces `number[]`)
+
+Streaming chunk payloads now deliver PCM as **`Float32Array`** instead of `number[]`. This eliminates per-element bridge marshalling and significantly reduces CPU/GC overhead for long text.
+
+### Breaking changes
+
+| Before | After |
+| --- | --- |
+| `chunk.samples` is `number[]` | `chunk.samples` is `Float32Array` |
+| `writePcmChunk(samples: number[])` | `writePcmChunk(samples: Float32Array \| number[])` |
+
+### Migration
+
+**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to `writePcmChunk` or another consumer that accepts `Float32Array`:
+
+```ts
+onChunk: (chunk) => {
+  // chunk.samples is now Float32Array — works directly
+  void tts.writePcmChunk(chunk.samples);
+},
+```
+
+**If you index into samples or use Array methods**, `Float32Array` supports `[]` indexing and `.length` but not `.push()`, `.map()`, etc. Convert explicitly when needed:
+
+```ts
+// Before
+const doubled = chunk.samples.map(s => s * 2);
+
+// After
+const doubled = Array.from(chunk.samples).map(s => s * 2);
+// Or use Float32Array methods:
+const doubled = chunk.samples.map(s => s * 2); // Float32Array.prototype.map returns Float32Array
+```
+
+### Preferred path for long-text export
+
+Use **`generateSpeechStreamToFile`** for file export workflows. This writes audio incrementally in native code without routing PCM through JS:
+
+```ts
+await tts.generateSpeechStreamToFile(
+  longText,
+  undefined,
+  { output: { kind: 'file', path: outputPath }, format: 'wav' },
+  {
+    onEnd: (e) => console.log(`Saved ${e.bytesWritten} bytes to ${e.path}`),
+    onError: (e) => console.error(e.message),
+  }
+);
+```
+
+Set `emitChunks: true` only when you also need live playback during export.
+
 ## TTS release catalog metadata (native)
 
 For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`detectTtsModel`** with an empty directory and the release **asset id** as **`assetName`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.

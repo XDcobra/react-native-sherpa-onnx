@@ -27,7 +27,7 @@ export async function saveAlignmentAudioToTempWav(
   await mkdir(cacheDir);
 
   const tempPath = createTempAlignmentWavPath(instanceId);
-  await SherpaOnnx.saveTtsAudio(
+  await SherpaOnnx.saveTtsAudioFromPCM(
     audio.samples,
     audio.sampleRate,
     'file',
