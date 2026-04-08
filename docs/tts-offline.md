@@ -49,7 +49,8 @@ const audio: GeneratedAudio = await tts.generateSpeech('Hello, world.', {
   sid: 0,
   speed: 1.0,
 });
-console.log(audio.sampleRate, audio.samples.length);
+console.log(audio.sampleRate, audio.numSamples);
+const pcm = await audio.getSamples(); // Float32Array
 
 // saveAudio — `target.kind`: `'file'` = absolute filesystem path; `'androidContent'` = SAF directory URI + filename (Android only).
 // If you omit `options` or do not pass `format`, output defaults to WAV (`'wav'`). Non-WAV (e.g. mp3) needs FFmpeg; see disable-ffmpeg.md.
@@ -330,7 +331,7 @@ Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** (see [a
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
 | `TtsEngine` | Batch engine interface |
 | `StreamingTtsEngine` | Streaming engine interface |
-| `GeneratedAudio` | `{ samples: number[]; sampleRate: number }` |
+| `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
 | `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
 | `TtsSubtitleItem` | `{ text, start, end }` (seconds) |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |

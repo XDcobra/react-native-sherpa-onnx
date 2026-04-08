@@ -1,5 +1,15 @@
 # Migration Guides
 
+## TTS batch audio API update (`GeneratedAudio`)
+
+`GeneratedAudio.samples` has been removed from the immediate return value.
+
+| Before | After |
+| --- | --- |
+| `audio.samples.length` | `audio.numSamples` |
+| `audio.samples` | `await audio.getSamples()` (`Float32Array`) |
+| JS-side export from `saveAudio` call path | `saveAudio(audio, ...)` (sink-native path) |
+
 ## TTS release catalog metadata (native)
 
 For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`detectTtsModel`** with an empty directory and the release **asset id** as **`assetName`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
@@ -23,7 +33,7 @@ The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** a
 
 Optional third argument: **`{ format?: string; outputSampleRateHz?: number }`** — default `format` is `'wav'`. Non-WAV formats require FFmpeg (see [disable-ffmpeg.md](./disable-ffmpeg.md)).
 
-TurboModule consumers: call **`saveTtsAudio`** with flat arguments (`destinationType`: `'file'` | `'androidContent'`, `pathOrDirectoryUri`, `filename`, `format`, `outputSampleRateHz`).
+TurboModule consumers: call **`saveTtsAudioFromPCM`** with flat arguments (`destinationType`: `'file'` | `'androidContent'`, `pathOrDirectoryUri`, `filename`, `format`, `outputSampleRateHz`).
 
 ## Files API (persistence & sharing helpers)
 
@@ -48,7 +58,7 @@ If you call the native module directly (bypassing the JS helpers), method names 
 | `copyTtsContentUriToCache` | `copyContentUriToCache` |
 | `shareTtsAudio` | `shareAudioFile` |
 | `copyFileToContentUri` | *(unchanged)* |
-| `saveTtsAudio` | *(unchanged; TTS PCM export)* |
+| `saveTtsAudio` | `saveTtsAudioFromPCM` |
 
 See [docs/files.md](./files.md).
 

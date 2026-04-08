@@ -312,7 +312,7 @@ controller.unsubscribe();
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
 | `TtsEngine` | Batch engine interface |
 | `StreamingTtsEngine` | Streaming engine interface |
-| `GeneratedAudio` | `{ samples: number[]; sampleRate: number }` |
+| `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
 | `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
 | `TtsSubtitleItem` | `{ text, start, end }` (seconds) |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
