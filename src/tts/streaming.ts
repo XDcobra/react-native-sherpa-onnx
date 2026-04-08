@@ -10,6 +10,7 @@ import type {
   TtsStreamError,
   TtsStreamHandlers,
   TtsStreamController,
+  TtsStreamOptions,
   TtsStreamToFileOptions,
   TtsStreamToFileHandlers,
   TtsStreamFileController,
@@ -18,6 +19,7 @@ import type {
   TTSModelInfo,
 } from './types';
 import type { StreamingTtsEngine } from './streamingTypes';
+import type { PcmPlayer } from '../pcm/types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
@@ -92,6 +94,7 @@ const B64_LOOKUP = new Uint8Array(128);
  * in all RN JS engines). Falls back to a pure-JS decoder.
  */
 function base64ToBytes(b64: string): Uint8Array {
+  /* eslint-disable no-bitwise */
   // Strip padding
   let len = b64.length;
   if (b64.charCodeAt(len - 1) === 61 /* '=' */) len--;
@@ -108,6 +111,7 @@ function base64ToBytes(b64: string): Uint8Array {
     if (p < byteLen) bytes[p++] = ((b & 0xf) << 4) | (c >> 2);
     if (p < byteLen) bytes[p++] = ((c & 0x3) << 6) | d;
   }
+  /* eslint-enable no-bitwise */
   return bytes;
 }
 
@@ -277,12 +281,90 @@ export async function createStreamingTTS(
     async generateSpeechStream(
       text: string,
       opts: TtsGenerationOptions | undefined,
-      handlers: TtsStreamHandlers
+      handlers: TtsStreamHandlers,
+      streamOptions?: TtsStreamOptions
     ): Promise<TtsStreamController> {
       guard();
+
+      const playback = streamOptions?.playback ?? false;
+      const emitChunks = streamOptions?.emitChunks ?? true;
+      const autoDestroy = streamOptions?.autoDestroy ?? true;
+
+      if (!playback && !emitChunks) {
+        console.warn(
+          'generateSpeechStream: emitChunks=false + playback=false is a no-op. ' +
+            'Set playback=true or emitChunks=true.'
+        );
+        return {
+          async cancel() {},
+          unsubscribe() {},
+          player: null,
+        };
+      }
+
       const requestId = `tts_req_${++ttsRequestIdCounter}`;
       const subscriptions: Array<{ remove: () => void }> = [];
       let unsubscribed = false;
+
+      // --- Player proxy for playback: true ---
+      const playbackPlayerId = playback
+        ? `tts_playback_${instanceId}_${requestId}`
+        : null;
+
+      let playerProxy: PcmPlayer | null = null;
+      let playerDestroyed = false;
+
+      if (playbackPlayerId) {
+        const pid = playbackPlayerId;
+        playerProxy = {
+          get playerId() {
+            return pid;
+          },
+          get feed() {
+            return 'native' as const;
+          },
+          async writePcmChunk(): Promise<void> {
+            throw new Error(
+              `PcmPlayer ${pid} has feed 'native'; writePcmChunk() is not allowed from JS.`
+            );
+          },
+          async pause(): Promise<void> {
+            if (playerDestroyed) return;
+            return SherpaOnnx.pausePcmPlayer(pid);
+          },
+          async resume(): Promise<void> {
+            if (playerDestroyed) return;
+            return SherpaOnnx.resumePcmPlayer(pid);
+          },
+          async destroy(): Promise<void> {
+            if (playerDestroyed) return;
+            playerDestroyed = true;
+            // Linked lifecycle: destroying the player also cancels synthesis
+            try {
+              await SherpaOnnx.cancelTtsStream(instanceId);
+            } catch {
+              // ignore — synthesis may already have ended
+            }
+            try {
+              await SherpaOnnx.destroyPcmPlayer(pid);
+            } catch {
+              // ignore — player may already be destroyed by autoDestroy
+            }
+            unsubscribe();
+          },
+        };
+      }
+
+      const destroyPlayerIfNeeded = async () => {
+        if (playbackPlayerId && !playerDestroyed) {
+          playerDestroyed = true;
+          try {
+            await SherpaOnnx.destroyPcmPlayer(playbackPlayerId);
+          } catch {
+            // ignore
+          }
+        }
+      };
 
       const unsubscribe = () => {
         if (unsubscribed) return;
@@ -308,6 +390,9 @@ export async function createStreamingTTS(
             return;
           }
           try {
+            if (autoDestroy) {
+              destroyPlayerIfNeeded();
+            }
             handlers.onEnd?.(toPublicStreamEnd(e));
           } finally {
             unsubscribe();
@@ -319,6 +404,8 @@ export async function createStreamingTTS(
             return;
           }
           try {
+            // Always destroy player on error
+            destroyPlayerIfNeeded();
             handlers.onError?.(toPublicStreamError(e));
           } finally {
             unsubscribe();
@@ -335,14 +422,22 @@ export async function createStreamingTTS(
         }
       });
 
+      const nativeOpts = {
+        ...toNativeTtsGenerationOptions(opts),
+        playback,
+        emitChunks,
+        autoDestroy,
+      };
+
       try {
         await SherpaOnnx.generateTtsStream(
           instanceId,
           requestId,
           text,
-          toNativeTtsGenerationOptions(opts)
+          nativeOpts
         );
       } catch (error) {
+        await destroyPlayerIfNeeded();
         unsubscribe();
         throw error;
       }
@@ -350,10 +445,14 @@ export async function createStreamingTTS(
       const controller: TtsStreamController = {
         async cancel(): Promise<void> {
           guard();
+          await destroyPlayerIfNeeded();
           await SherpaOnnx.cancelTtsStream(instanceId);
           unsubscribe();
         },
         unsubscribe,
+        get player() {
+          return playerProxy;
+        },
       };
       return controller;
     },
@@ -443,23 +542,6 @@ export async function createStreamingTTS(
     async cancelSpeechStream(): Promise<void> {
       guard();
       return SherpaOnnx.cancelTtsStream(instanceId);
-    },
-
-    async startPcmPlayer(sampleRate: number, channels: number): Promise<void> {
-      guard();
-      return SherpaOnnx.startTtsPcmPlayer(instanceId, sampleRate, channels);
-    },
-
-    async writePcmChunk(samples: Float32Array | number[]): Promise<void> {
-      guard();
-      const arr =
-        samples instanceof Float32Array ? Array.from(samples) : samples;
-      return SherpaOnnx.writeTtsPcmChunk(instanceId, arr);
-    },
-
-    async stopPcmPlayer(): Promise<void> {
-      guard();
-      return SherpaOnnx.stopTtsPcmPlayer(instanceId);
     },
 
     async getModelInfo(): Promise<TTSModelInfo> {

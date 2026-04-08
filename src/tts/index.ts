@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import type { PcmPlayer } from '../pcm/types';
 import {
   isTtsDetectionSource,
   isTtsModelType,
@@ -17,6 +18,8 @@ import {
   type SaveAudioOptions,
   type SaveAudioFromPcmInput,
   type TtsDetectionSource,
+  type PlayFromSinkOptions,
+  type TtsBatchPlaybackController,
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
@@ -490,6 +493,51 @@ export async function createTTS(
       return SherpaOnnx.getTtsNumSpeakers(instanceId);
     },
 
+    async playFromSink(
+      generation: number,
+      playOptions?: PlayFromSinkOptions
+    ): Promise<TtsBatchPlaybackController> {
+      guard();
+      const { playerId } = await SherpaOnnx.playTtsFromSink(
+        instanceId,
+        generation,
+        playOptions?.sampleRate ?? 0
+      );
+      let playerDestroyed = false;
+      const pid = playerId;
+      const player: PcmPlayer = {
+        get playerId() {
+          return pid;
+        },
+        get feed() {
+          return 'native' as const;
+        },
+        async writePcmChunk(): Promise<void> {
+          throw new Error(
+            `PcmPlayer ${pid} has feed 'native'; writePcmChunk() is not allowed from JS.`
+          );
+        },
+        async pause(): Promise<void> {
+          if (playerDestroyed) return;
+          return SherpaOnnx.pausePcmPlayer(pid);
+        },
+        async resume(): Promise<void> {
+          if (playerDestroyed) return;
+          return SherpaOnnx.resumePcmPlayer(pid);
+        },
+        async destroy(): Promise<void> {
+          if (playerDestroyed) return;
+          playerDestroyed = true;
+          try {
+            await SherpaOnnx.destroyPcmPlayer(pid);
+          } catch {
+            // ignore — player may already be destroyed
+          }
+        },
+      };
+      return { player };
+    },
+
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
@@ -654,9 +702,12 @@ export type {
   SaveAudioTargetAndroidContent,
   SaveAudioFromPcmInput,
   SaveAudioOptions,
+  PlayFromSinkOptions,
+  TtsBatchPlaybackController,
   TtsEngine,
   TtsStreamController,
   TtsStreamHandlers,
+  TtsStreamOptions,
   TtsStreamChunk,
   TtsStreamEnd,
   TtsStreamError,

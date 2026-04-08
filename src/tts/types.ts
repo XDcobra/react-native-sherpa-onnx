@@ -1,5 +1,6 @@
 import type { ModelPathConfig } from '../types';
 import type { SubtitleTimingItem } from '../alignment/types';
+import type { PcmPlayer } from '../pcm/types';
 
 /** @deprecated Import `SubtitleTimingItem` from `react-native-sherpa-onnx/alignment`. */
 export type TtsSubtitleItem = SubtitleTimingItem;
@@ -482,10 +483,15 @@ export interface TtsStreamError {
  * Use cancel() to stop generation, unsubscribe() to remove event listeners.
  */
 export interface TtsStreamController {
-  /** Cancel the ongoing TTS generation. */
+  /** Cancel the ongoing TTS generation (and destroy the player if playback was active). */
   cancel(): Promise<void>;
   /** Remove event listeners (called automatically on end/error, or manually). */
   unsubscribe(): void;
+  /**
+   * The player managing native playback for this stream run.
+   * Non-null only when streamOptions.playback was true.
+   */
+  readonly player: PcmPlayer | null;
 }
 
 /**
@@ -495,6 +501,27 @@ export interface TtsStreamHandlers {
   onChunk?: (chunk: TtsStreamChunk) => void;
   onEnd?: (event: TtsStreamEnd) => void;
   onError?: (event: TtsStreamError) => void;
+}
+
+/** Options controlling stream behavior (playback, chunk emission). */
+export interface TtsStreamOptions {
+  /**
+   * When true, synthesis enqueues PCM into a native player automatically.
+   * No writePcmChunk() needed. Default: false.
+   */
+  playback?: boolean;
+  /**
+   * When true, onChunk callbacks deliver binary PCM to JS.
+   * When false, no chunk events are emitted (only onEnd / onError).
+   * Default: true.
+   */
+  emitChunks?: boolean;
+  /**
+   * When true, the internally created player (used when playback: true) is automatically
+   * destroyed after onEnd fires. Default: true.
+   * Set to false to retain the player for deferred destroy() or final draining.
+   */
+  autoDestroy?: boolean;
 }
 
 /** File output target for streaming-to-file generation. */
@@ -530,6 +557,11 @@ export type TtsStreamToFileOptions = {
   keepPartialOnCancel?: boolean;
   /** Emit normal chunk events while writing to file. Default: false. */
   emitChunks?: boolean;
+  /**
+   * When true, also play audio through a native player while writing to file.
+   * Default: false.
+   */
+  playback?: boolean;
 };
 
 /** Handlers for stream-to-file generation. */
@@ -561,6 +593,18 @@ export interface TtsEngine {
     text: string,
     options?: TtsGenerationOptions
   ): Promise<GeneratedAudioWithTimestamps>;
+  /**
+   * Play the most recent batch synthesis result through the device speaker.
+   * Reads PCM directly from the native sink — no JS memory allocation.
+   *
+   * @param generation - The generation number from GeneratedAudio.generation.
+   *                     Must match the current sink to prevent playing stale audio.
+   * @param options - Optional player configuration.
+   */
+  playFromSink(
+    generation: number,
+    options?: PlayFromSinkOptions
+  ): Promise<TtsBatchPlaybackController>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: TtsDetectedModelEntry[];
@@ -569,6 +613,21 @@ export interface TtsEngine {
   getSampleRate(): Promise<number>;
   getNumSpeakers(): Promise<number>;
   destroy(): Promise<void>;
+}
+
+/**
+ * Controller returned by TtsEngine.playFromSink().
+ * Provides pause/resume/destroy controls over the batch playback player.
+ */
+export interface TtsBatchPlaybackController {
+  /** The underlying PCM player (feed: 'native'). Use for pause/resume/destroy. */
+  readonly player: PcmPlayer;
+}
+
+/** Options for TtsEngine.playFromSink(). */
+export interface PlayFromSinkOptions {
+  /** Sample rate override. If omitted, uses the sink's sample rate. */
+  sampleRate?: number;
 }
 
 /**
