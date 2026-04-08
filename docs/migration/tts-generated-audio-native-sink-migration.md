@@ -91,7 +91,8 @@ Use this document to split work into sub-plans and implement them incrementally.
 ### 3.4 Dependent features
 
 - **`saveAudio` / `saveTtsAudio`:** prefer a path that **reads PCM from the native sink** (instance + generation) **inside native**, given only **small** arguments from JS (paths, format, options). Fall back to **materialized** `Float32Array` only if you keep a legacy path.
-- **`alignTextToAudio` / `generateSpeechWithTimestamps`:** eventual goal is **alignment-from-instance** / **from-path** / **`getSamples()`** with **no** huge **`number[]`** — tracked under this section and a **future alignment sub-plan**. **Do not** refactor or extend the **alignment module API** (`src/alignment/**`) until that plan; **`src/tts/index.ts`** may **only** adapt call sites (e.g. materialize **`number[]`** from **`getSamples()`** for the **unchanged** **`alignTextToAudio`** signature).
+- **`alignTextToAudio` / `generateSpeechWithTimestamps`:** eventual goal is **alignment-from-sink** / **from-path** / **from-PCM** with **no** huge **`number[]`**. For TTS sink integration, use a user-facing convenience API that takes **`GeneratedAudio`** directly (not raw `instanceId` + `generation`) so callers stay on public types. No extra low-level public variant is required for this plan.
+- **Estimated mode integration choice:** implement **Option A** explicitly — TTS exposes timeline data, and alignment runs via standalone alignment entry points (decoupled orchestration), instead of adding a monolithic `generateTtsWithTimestampsAndAlign` call.
 - **`src/tts/tempAudio.ts`**, **`src/alignment/tempAudio.ts`**, **`textSegments`**: update any **“same shape as GeneratedAudio”** assumptions.
 - **Streaming (`TtsStreamChunk`):** optional follow-up; chunks may still be large — consider **chunked binary** or **smaller** payloads in a separate sub-plan.
 
@@ -143,7 +144,7 @@ Use this document to split work into sub-plans and implement them incrementally.
 1. **Native sink + lifecycle** (3.1) — foundation.
 2. **Narrow generateTts return** + **metadata-only** to JS (3.2 + partial 3.3 types).
 3. **JSI `getSamples` / TurboModule method** (3.2 + 3.3 implementation).
-4. **Refactor `saveAudio` / alignment** to prefer sink (3.4).
+4. **Refactor `saveAudio` / alignment** to prefer sink (3.4), with TTS alignment convenience based on `GeneratedAudio` and estimated-mode **Option A**.
 5. **Docs + migration + CHANGELOG** (3.5).
 6. **Example + tests** (3.6).
 7. **Optional:** streaming chunk binary (separate doc).
