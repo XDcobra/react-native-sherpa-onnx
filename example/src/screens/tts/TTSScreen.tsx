@@ -346,7 +346,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -362,7 +361,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -577,52 +575,52 @@ export default function TTSScreen() {
     }
 
     try {
-      const controller = await engine.generateSpeechStream(nextText, options, {
-        onChunk: (chunk) => {
-          streamSampleRateRef.current = chunk.sampleRate;
-          if (chunk.samples.length > 0) {
-            streamingTtsEngineRef.current?.writePcmChunk(chunk.samples);
-          }
-          streamChunksRef.current.push(chunk.samples);
-          setStreamSampleCount((prev) => prev + chunk.samples.length);
-          setStreamProgress(chunk.progress);
-        },
-        onEnd: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          if (event.cancelled) {
+      const controller = await engine.generateSpeechStream(
+        nextText,
+        options,
+        {
+          onChunk: (chunk) => {
+            streamSampleRateRef.current = chunk.sampleRate;
+            streamChunksRef.current.push(chunk.samples);
+            setStreamSampleCount((prev) => prev + chunk.samples.length);
+            setStreamProgress(chunk.progress);
+          },
+          onEnd: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
+            if (event.cancelled) {
+              const eng = streamingTtsEngineRef.current;
+              if (eng) {
+                eng.destroy().catch(() => {});
+              }
+              streamingTtsEngineRef.current = null;
+              setStreamProgress(null);
+              setStreaming(false);
+              const audio = buildStreamedAudio();
+              if (audio) setGeneratedAudio(audio);
+            } else {
+              setStreamProgress(null);
+              streamProcessCallSourceRef.current = 'onEnd';
+              processStreamQueue().catch((err) => {
+                console.warn('processStreamQueue:', err);
+              });
+            }
+          },
+          onError: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
             const eng = streamingTtsEngineRef.current;
             if (eng) {
-              eng.stopPcmPlayer().catch(() => {});
               eng.destroy().catch(() => {});
             }
             streamingTtsEngineRef.current = null;
+            setError(event.message);
             setStreamProgress(null);
             setStreaming(false);
-            const audio = buildStreamedAudio();
-            if (audio) setGeneratedAudio(audio);
-          } else {
-            setStreamProgress(null);
-            streamProcessCallSourceRef.current = 'onEnd';
-            processStreamQueue().catch((err) => {
-              console.warn('processStreamQueue:', err);
-            });
-          }
+          },
         },
-        onError: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          const eng = streamingTtsEngineRef.current;
-          if (eng) {
-            eng.stopPcmPlayer().catch(() => {});
-            eng.destroy().catch(() => {});
-          }
-          streamingTtsEngineRef.current = null;
-          setError(event.message);
-          setStreamProgress(null);
-          setStreaming(false);
-        },
-      });
+        { playback: true }
+      );
       streamControllerRef.current = controller;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -1052,8 +1050,6 @@ export default function TTSScreen() {
       }
 
       streamingTtsEngineRef.current = streamingEngine;
-      const sampleRate = await streamingEngine.getSampleRate();
-      await streamingEngine.startPcmPlayer(sampleRate, 1);
 
       streamChunksRef.current = [];
       streamSampleRateRef.current = null;
