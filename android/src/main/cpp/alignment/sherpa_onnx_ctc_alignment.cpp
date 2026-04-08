@@ -15,7 +15,10 @@
 #include <cstdint>
 #include <cstring>
 #include <cwctype>
+#include <filesystem>
+#include <fstream>
 #include <locale.h>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -294,6 +297,83 @@ static std::unordered_map<std::string, int32_t> ParseVocabJson(const std::string
   return vocab;
 }
 
+static std::unordered_map<std::string, int32_t> DefaultWav2Vec2Vocab() {
+  return {
+      {"<pad>", 0}, {"<s>", 1}, {"</s>", 2}, {"<unk>", 3}, {"|", 4},
+      {"E", 5},     {"T", 6},   {"A", 7},    {"O", 8},    {"N", 9},
+      {"I", 10},    {"H", 11},  {"S", 12},   {"R", 13},   {"D", 14},
+      {"L", 15},    {"U", 16},  {"W", 17},   {"M", 18},   {"C", 19},
+      {"F", 20},    {"G", 21},  {"Y", 22},   {"P", 23},   {"B", 24},
+      {"V", 25},    {"K", 26},  {"'", 27},   {"X", 28},   {"J", 29},
+      {"Q", 30},    {"Z", 31},
+  };
+}
+
+static bool TryReadTextFile(const std::filesystem::path& path, std::string* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  std::ifstream ifs(path, std::ios::in | std::ios::binary);
+  if (!ifs.is_open()) {
+    return false;
+  }
+  std::ostringstream oss;
+  oss << ifs.rdbuf();
+  *out = oss.str();
+  return true;
+}
+
+static std::unordered_map<std::string, int32_t> ResolveVocabulary(
+    const std::string& model_path,
+    const std::string& vocab_json_utf8) {
+  static std::mutex g_vocab_mutex;
+  static std::string g_cache_key;
+  static std::unordered_map<std::string, int32_t> g_cached_vocab;
+
+  const std::string cache_key = model_path + "|" + vocab_json_utf8;
+  {
+    std::lock_guard<std::mutex> lock(g_vocab_mutex);
+    if (!g_cached_vocab.empty() && g_cache_key == cache_key) {
+      return g_cached_vocab;
+    }
+  }
+
+  std::unordered_map<std::string, int32_t> vocab;
+  if (!vocab_json_utf8.empty()) {
+    vocab = ParseVocabJson(vocab_json_utf8);
+  } else {
+    vocab = DefaultWav2Vec2Vocab();
+
+    try {
+      namespace fs = std::filesystem;
+      fs::path model_p(model_path);
+      fs::path model_dir = model_p.parent_path();
+      if (model_dir.empty() && fs::is_directory(model_p)) {
+        model_dir = model_p;
+      }
+      const fs::path vocab_path = model_dir / "vocab.json";
+      if (!model_dir.empty() && fs::exists(vocab_path) && fs::is_regular_file(vocab_path)) {
+        std::string content;
+        if (TryReadTextFile(vocab_path, &content)) {
+          auto parsed = ParseVocabJson(content);
+          if (!parsed.empty()) {
+            vocab = std::move(parsed);
+          }
+        }
+      }
+    } catch (...) {
+      // Ignore optional vocab loading failures and keep baked defaults.
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_vocab_mutex);
+    g_cache_key = cache_key;
+    g_cached_vocab = vocab;
+    return g_cached_vocab;
+  }
+}
+
 static std::vector<std::string> BuildTokenTexts(
     const std::string& text,
     const std::unordered_map<std::string, int32_t>& vocab,
@@ -413,20 +493,117 @@ static std::vector<std::vector<float>> LogSoftmax(
 
 #if defined(SHERPA_ONNX_HAS_ORT_C_API)
 
+struct OrtSessionCache {
+  const OrtApi* api = nullptr;
+  OrtEnv* env = nullptr;
+  OrtSessionOptions* session_options = nullptr;
+  OrtSession* session = nullptr;
+  OrtAllocator* allocator = nullptr;
+  std::string model_path;
+  std::string input_name;
+  std::string output_name;
+};
+
+static std::mutex g_ort_cache_mutex;
+static OrtSessionCache g_ort_cache;
+
+static void EnsureOrtSessionCacheLocked(const std::string& model_path) {
+  if (g_ort_cache.api == nullptr) {
+    g_ort_cache.api = ResolveOrtApiForAlignment();
+    CheckOrtStatus(
+        g_ort_cache.api,
+        g_ort_cache.api->CreateEnv(
+            ORT_LOGGING_LEVEL_WARNING,
+            "sherpa-onnx-ctc-align",
+            &g_ort_cache.env),
+        "CreateEnv failed");
+    CheckOrtStatus(
+        g_ort_cache.api,
+        g_ort_cache.api->CreateSessionOptions(&g_ort_cache.session_options),
+        "CreateSessionOptions failed");
+    CheckOrtStatus(
+        g_ort_cache.api,
+        g_ort_cache.api->GetAllocatorWithDefaultOptions(&g_ort_cache.allocator),
+        "GetAllocatorWithDefaultOptions failed");
+  }
+
+  if (g_ort_cache.session != nullptr && g_ort_cache.model_path == model_path) {
+    return;
+  }
+
+  if (g_ort_cache.session != nullptr) {
+    g_ort_cache.api->ReleaseSession(g_ort_cache.session);
+    g_ort_cache.session = nullptr;
+    g_ort_cache.input_name.clear();
+    g_ort_cache.output_name.clear();
+  }
+
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->CreateSession(
+          g_ort_cache.env,
+          model_path.c_str(),
+          g_ort_cache.session_options,
+          &g_ort_cache.session),
+      "CreateSession failed");
+
+  size_t input_count = 0;
+  size_t output_count = 0;
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->SessionGetInputCount(g_ort_cache.session, &input_count),
+      "SessionGetInputCount failed");
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->SessionGetOutputCount(g_ort_cache.session, &output_count),
+      "SessionGetOutputCount failed");
+  if (input_count == 0 || output_count == 0) {
+    throw std::runtime_error("Alignment model has no inputs/outputs");
+  }
+
+  char* input_name = nullptr;
+  char* output_name = nullptr;
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->SessionGetInputName(
+          g_ort_cache.session, 0, g_ort_cache.allocator, &input_name),
+      "SessionGetInputName failed");
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->SessionGetOutputName(
+          g_ort_cache.session, 0, g_ort_cache.allocator, &output_name),
+      "SessionGetOutputName failed");
+
+  g_ort_cache.input_name = input_name != nullptr ? input_name : "";
+  g_ort_cache.output_name = output_name != nullptr ? output_name : "";
+  if (input_name != nullptr) {
+    (void)g_ort_cache.api->AllocatorFree(g_ort_cache.allocator, input_name);
+  }
+  if (output_name != nullptr) {
+    (void)g_ort_cache.api->AllocatorFree(g_ort_cache.allocator, output_name);
+  }
+  if (g_ort_cache.input_name.empty() || g_ort_cache.output_name.empty()) {
+    throw std::runtime_error("Alignment model has empty input/output names");
+  }
+
+  g_ort_cache.model_path = model_path;
+}
+
 static std::vector<std::vector<float>> RunOrtInference(
     const std::string& modelPath,
     const std::vector<float>& samples) {
-  const OrtApi* api = ResolveOrtApiForAlignment();
-  OrtEnv* env = nullptr;
-  OrtSessionOptions* sessionOptions = nullptr;
-  OrtSession* session = nullptr;
-  OrtAllocator* allocator = nullptr;
+  if (samples.empty()) {
+    return {};
+  }
+
+  std::lock_guard<std::mutex> lock(g_ort_cache_mutex);
+  EnsureOrtSessionCacheLocked(modelPath);
+  const OrtApi* api = g_ort_cache.api;
+
   OrtMemoryInfo* memoryInfo = nullptr;
   OrtValue* inputTensor = nullptr;
   OrtValue* outputTensor = nullptr;
   OrtTensorTypeAndShapeInfo* shapeInfo = nullptr;
-  char* inputName = nullptr;
-  char* outputName = nullptr;
 
   auto cleanup = [&]() {
     if (shapeInfo != nullptr) {
@@ -445,43 +622,9 @@ static std::vector<std::vector<float>> RunOrtInference(
       api->ReleaseMemoryInfo(memoryInfo);
     }
     memoryInfo = nullptr;
-    if (inputName != nullptr && allocator != nullptr) {
-      (void)api->AllocatorFree(allocator, inputName);
-    }
-    inputName = nullptr;
-    if (outputName != nullptr && allocator != nullptr) {
-      (void)api->AllocatorFree(allocator, outputName);
-    }
-    outputName = nullptr;
-    if (session != nullptr) {
-      api->ReleaseSession(session);
-    }
-    session = nullptr;
-    if (sessionOptions != nullptr) {
-      api->ReleaseSessionOptions(sessionOptions);
-    }
-    sessionOptions = nullptr;
-    if (env != nullptr) {
-      api->ReleaseEnv(env);
-    }
-    env = nullptr;
   };
 
   try {
-    CheckOrtStatus(api, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "sherpa-onnx-ctc-align", &env), "CreateEnv failed");
-    CheckOrtStatus(api, api->CreateSessionOptions(&sessionOptions), "CreateSessionOptions failed");
-    CheckOrtStatus(api, api->CreateSession(env, modelPath.c_str(), sessionOptions, &session), "CreateSession failed");
-    CheckOrtStatus(api, api->GetAllocatorWithDefaultOptions(&allocator), "GetAllocatorWithDefaultOptions failed");
-
-    size_t inputCount = 0;
-    size_t outputCount = 0;
-    CheckOrtStatus(api, api->SessionGetInputCount(session, &inputCount), "SessionGetInputCount failed");
-    CheckOrtStatus(api, api->SessionGetOutputCount(session, &outputCount), "SessionGetOutputCount failed");
-    if (inputCount == 0 || outputCount == 0) {
-      throw std::runtime_error("Alignment model has no inputs/outputs");
-    }
-    CheckOrtStatus(api, api->SessionGetInputName(session, 0, allocator, &inputName), "SessionGetInputName failed");
-    CheckOrtStatus(api, api->SessionGetOutputName(session, 0, allocator, &outputName), "SessionGetOutputName failed");
     CheckOrtStatus(
         api,
         api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memoryInfo),
@@ -500,12 +643,20 @@ static std::vector<std::vector<float>> RunOrtInference(
             &inputTensor),
         "CreateTensorWithDataAsOrtValue failed");
 
-    const char* inputNames[] = {inputName};
-    const char* outputNames[] = {outputName};
+    const char* inputNames[] = {g_ort_cache.input_name.c_str()};
+    const char* outputNames[] = {g_ort_cache.output_name.c_str()};
     const OrtValue* inputValues[] = {inputTensor};
     CheckOrtStatus(
         api,
-        api->Run(session, nullptr, inputNames, inputValues, 1, outputNames, 1, &outputTensor),
+        api->Run(
+            g_ort_cache.session,
+            nullptr,
+            inputNames,
+            inputValues,
+            1,
+            outputNames,
+            1,
+            &outputTensor),
         "Run failed");
 
     CheckOrtStatus(api, api->GetTensorTypeAndShape(outputTensor, &shapeInfo), "GetTensorTypeAndShape failed");
@@ -645,7 +796,7 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
   throw std::runtime_error(
       "Accurate alignment requires ONNX Runtime C API headers at build time (onnxruntime_c_api.h).");
 #else
-  auto vocab = ParseVocabJson(vocab_json_utf8);
+  auto vocab = ResolveVocabulary(model_path, vocab_json_utf8);
   int32_t blankId = 0;
   auto blankIt = vocab.find("<pad>");
   if (blankIt != vocab.end()) {

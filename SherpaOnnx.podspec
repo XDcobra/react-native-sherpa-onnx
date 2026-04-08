@@ -30,8 +30,9 @@ Pod::Spec.new do |s|
     "ios/**/*.{h,m,mm,swift,cpp}",
     # Shared with Android NDK: all model_detect (STT/TTS/enhancement/alignment + JNI wrappers).
     "android/src/main/cpp/jni/model_detect/**/*.cpp",
-    # Shared CTC alignment core (ORT C API).
-    "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp"
+    # Shared alignment core (segmenter + proportional/estimated/accurate CTC).
+    "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp",
+    "android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.

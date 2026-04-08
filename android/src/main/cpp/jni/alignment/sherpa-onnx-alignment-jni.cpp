@@ -1,12 +1,14 @@
 /**
- * JNI bridge for wav2vec2 CTC alignment (shared C++ core).
+ * JNI bridge for shared alignment engine (proportional / estimated / accurate).
  */
 
 #include <jni.h>
+
+#include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "sherpa_onnx_ctc_alignment.hpp"
+#include "sherpa_onnx_alignment_engine.hpp"
 #include "sherpa-onnx-detect-jni-common.h"
 
 namespace {
@@ -37,9 +39,40 @@ bool PutDouble(JNIEnv* env, jobject map, jmethodID putId, const char* key, doubl
   return true;
 }
 
-jobject BuildAlignmentIntervalsList(
+std::string JStringToUtf8(JNIEnv* env, jstring value) {
+  if (value == nullptr) {
+    return "";
+  }
+  const char* chars = env->GetStringUTFChars(value, nullptr);
+  if (chars == nullptr) {
+    throw std::runtime_error("Failed to read UTF-8 string from JNI");
+  }
+  std::string out(chars);
+  env->ReleaseStringUTFChars(value, chars);
+  return out;
+}
+
+std::vector<int32_t> JIntArrayToVector(JNIEnv* env, jintArray array) {
+  if (array == nullptr) {
+    return {};
+  }
+  const jsize n = env->GetArrayLength(array);
+  if (n <= 0) {
+    return {};
+  }
+  std::vector<jint> tmp(static_cast<size_t>(n));
+  env->GetIntArrayRegion(array, 0, n, tmp.data());
+  std::vector<int32_t> out;
+  out.reserve(static_cast<size_t>(n));
+  for (jint v : tmp) {
+    out.push_back(static_cast<int32_t>(v));
+  }
+  return out;
+}
+
+jobject BuildSubtitleList(
     JNIEnv* env,
-    const std::vector<sherpa_onnx::ctc_alignment::AlignmentInterval>& items) {
+    const std::vector<sherpa_onnx::alignment::SubtitleItem>& items) {
   jclass listClass = env->FindClass("java/util/ArrayList");
   if (!listClass) {
     return nullptr;
@@ -84,7 +117,9 @@ jobject BuildAlignmentIntervalsList(
   return list;
 }
 
-jobject CtcResultToJavaHashMap(JNIEnv* env, const sherpa_onnx::ctc_alignment::CtcAlignmentResult& result) {
+jobject AlignmentResultToJavaHashMap(
+    JNIEnv* env,
+    const sherpa_onnx::alignment::AlignmentResult& result) {
   jclass mapClass = env->FindClass("java/util/HashMap");
   if (!mapClass) {
     return nullptr;
@@ -101,62 +136,98 @@ jobject CtcResultToJavaHashMap(JNIEnv* env, const sherpa_onnx::ctc_alignment::Ct
     return nullptr;
   }
 
-  jobject words = BuildAlignmentIntervalsList(env, result.words);
-  if (words) {
-    jstring k = env->NewStringUTF("words");
-    if (k) {
-      env->CallObjectMethod(map, mapPut, k, words);
-      env->DeleteLocalRef(k);
+  jobject subtitles = BuildSubtitleList(env, result.subtitles);
+  if (subtitles) {
+    jstring key = env->NewStringUTF("subtitles");
+    if (key) {
+      env->CallObjectMethod(map, mapPut, key, subtitles);
+      env->DeleteLocalRef(key);
     }
-    env->DeleteLocalRef(words);
+    env->DeleteLocalRef(subtitles);
   }
-  jobject chars = BuildAlignmentIntervalsList(env, result.chars);
-  if (chars) {
-    jstring k = env->NewStringUTF("chars");
-    if (k) {
-      env->CallObjectMethod(map, mapPut, k, chars);
-      env->DeleteLocalRef(k);
-    }
-    env->DeleteLocalRef(chars);
-  }
+
+  sherpaonnx::PutString(env, map, mapPut, "timingMode", result.timing_mode);
   return map;
+}
+
+void ThrowRuntimeException(JNIEnv* env, const char* message) {
+  jclass ex = env->FindClass("java/lang/RuntimeException");
+  if (ex) {
+    env->ThrowNew(ex, message != nullptr ? message : "Alignment JNI error");
+    env->DeleteLocalRef(ex);
+  }
 }
 
 }  // namespace
 
-extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeCtcAlignAccurate(
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignProportional(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jText,
+    jint jTotalSamples,
+    jint jSampleRate,
+    jstring jGranularity) {
+  try {
+    const std::string text = JStringToUtf8(env, jText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+    auto result = sherpa_onnx::alignment::AlignProportional(
+        text,
+        static_cast<int32_t>(jTotalSamples),
+        static_cast<int32_t>(jSampleRate),
+        granularity);
+    return AlignmentResultToJavaHashMap(env, result);
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(env, e.what());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "Proportional alignment failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignEstimated(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jText,
+    jintArray jSegmentSampleCounts,
+    jint jSampleRate,
+    jstring jGranularity) {
+  try {
+    const std::string text = JStringToUtf8(env, jText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+    const std::vector<int32_t> counts = JIntArrayToVector(env, jSegmentSampleCounts);
+
+    auto result = sherpa_onnx::alignment::AlignEstimated(
+        text,
+        counts,
+        static_cast<int32_t>(jSampleRate),
+        granularity);
+    return AlignmentResultToJavaHashMap(env, result);
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(env, e.what());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "Estimated alignment failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFloatPcm(
     JNIEnv* env,
     jobject /* this */,
     jstring jModelPath,
     jstring jText,
-    jstring jVocabJson,
     jfloatArray jSamples,
-    jint jSampleRate) {
+    jint jSampleRate,
+    jstring jGranularity) {
   try {
-    if (!jModelPath || !jText || !jVocabJson || !jSamples) {
-      throw std::runtime_error("nativeCtcAlignAccurate: null argument");
+    if (!jModelPath || !jText || !jSamples) {
+      throw std::runtime_error("nativeAlignAccurateFromFloatPcm: null argument");
     }
-    const char* modelPathChars = env->GetStringUTFChars(jModelPath, nullptr);
-    const char* textChars = env->GetStringUTFChars(jText, nullptr);
-    const char* vocabChars = env->GetStringUTFChars(jVocabJson, nullptr);
-    if (!modelPathChars || !textChars || !vocabChars) {
-      if (modelPathChars) {
-        env->ReleaseStringUTFChars(jModelPath, modelPathChars);
-      }
-      if (textChars) {
-        env->ReleaseStringUTFChars(jText, textChars);
-      }
-      if (vocabChars) {
-        env->ReleaseStringUTFChars(jVocabJson, vocabChars);
-      }
-      throw std::runtime_error("nativeCtcAlignAccurate: failed to read JNI strings");
-    }
-    std::string modelPath(modelPathChars);
-    std::string textUtf8(textChars);
-    std::string vocabJson(vocabChars);
-    env->ReleaseStringUTFChars(jModelPath, modelPathChars);
-    env->ReleaseStringUTFChars(jText, textChars);
-    env->ReleaseStringUTFChars(jVocabJson, vocabChars);
+
+    const std::string modelPath = JStringToUtf8(env, jModelPath);
+    const std::string text = JStringToUtf8(env, jText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
 
     const jsize n = env->GetArrayLength(jSamples);
     if (n <= 0) {
@@ -165,32 +236,53 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelp
     std::vector<float> samples(static_cast<size_t>(n));
     env->GetFloatArrayRegion(jSamples, 0, n, samples.data());
 
-    auto result = sherpa_onnx::ctc_alignment::RunCtcAlignmentFromFloatPcm(
+    auto result = sherpa_onnx::alignment::AlignAccurateFromPcm(
         modelPath,
-        textUtf8,
-        vocabJson,
+        text,
         samples.data(),
         samples.size(),
-        static_cast<int32_t>(jSampleRate));
+        static_cast<int32_t>(jSampleRate),
+        granularity);
 
-    jobject out = CtcResultToJavaHashMap(env, result);
-    if (!out) {
-      throw std::runtime_error("failed to build Java alignment result");
-    }
-    return out;
+    return AlignmentResultToJavaHashMap(env, result);
   } catch (const std::exception& e) {
-    jclass ex = env->FindClass("java/lang/RuntimeException");
-    if (ex) {
-      env->ThrowNew(ex, e.what());
-      env->DeleteLocalRef(ex);
-    }
+    ThrowRuntimeException(env, e.what());
     return nullptr;
   } catch (...) {
-    jclass ex = env->FindClass("java/lang/RuntimeException");
-    if (ex) {
-      env->ThrowNew(ex, "CTC alignment failed");
-      env->DeleteLocalRef(ex);
+    ThrowRuntimeException(env, "Accurate alignment (PCM) failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFile(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jModelPath,
+    jstring jText,
+    jstring jAudioPath,
+    jstring jGranularity) {
+  try {
+    if (!jModelPath || !jText || !jAudioPath) {
+      throw std::runtime_error("nativeAlignAccurateFromFile: null argument");
     }
+
+    const std::string modelPath = JStringToUtf8(env, jModelPath);
+    const std::string text = JStringToUtf8(env, jText);
+    const std::string audioPath = JStringToUtf8(env, jAudioPath);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+
+    auto result = sherpa_onnx::alignment::AlignAccurateFromFile(
+        modelPath,
+        text,
+        audioPath,
+        granularity);
+
+    return AlignmentResultToJavaHashMap(env, result);
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(env, e.what());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "Accurate alignment (file) failed");
     return nullptr;
   }
 }
