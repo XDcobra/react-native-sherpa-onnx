@@ -179,7 +179,7 @@ The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogH
 
 ## TTS `detectTtsModel` — `detectionSources` (additive)
 
-Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly TtsDetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isTtsDetectionSource`** when parsing unknown payloads.
+Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly DetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isDetectionSource`** when parsing unknown payloads.
 
 ## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
 

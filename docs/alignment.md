@@ -116,10 +116,21 @@ Align directly from the native TTS sink (best path for TTS-generated audio).
 function detectAlignmentModel(
   modelPath: ModelPathConfig,
   options?: { modelType?: AlignmentModelType }
-): Promise<AlignmentDetectResult>;
+): Promise<AlignmentDetectModelResult>;
 ```
 
-Inspects model folders and returns `paths.model` for `alignmentModelPath`.
+Inspects model folders and returns detection metadata following the unified detect shape:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | `boolean` | Whether at least one model was detected |
+| `error` | `string?` | Error message on failure |
+| `detectedModels` | `DetectedModelEntry[]?` | All candidate models found |
+| `modelType` | `string?` | Resolved model type (e.g. `wav2vec2ctc`) |
+| `paths` | `object?` | Resolved `model` path for `alignmentModelPath` |
+| `languages` | `string[]?` | ISO 639-1 language codes derived from model ID |
+| `quantization` | `string?` | Quantization level (e.g. `int8`) |
+| `detectionSources` | `DetectionSource[]?` | How detection was performed (`fileListing`, `nameOnly`, …) |
 
 ## Notes
 

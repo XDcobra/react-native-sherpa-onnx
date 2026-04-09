@@ -188,7 +188,7 @@ function detectTtsModel(
 ): Promise<{
   success: boolean;
   error?: string;
-  detectedModels: TtsDetectedModelEntry[];
+  detectedModels: { type: string; modelDir: string }[];
   modelType?: TTSModelType;
   // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
@@ -196,13 +196,13 @@ function detectTtsModel(
   quantization?: string;
   sizeTier?: string;
   /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
-  detectionSources?: readonly TtsDetectionSource[];
+  detectionSources?: readonly DetectionSource[];
 }>;
 ```
 
 File-based detection and validation **without** initializing the TTS engine: no native synthesizer is created, so this call is comparatively cheap and suitable as a **pre-check** before **`createStreamingTTS`** or **`createTTS`** — for example to obtain a concrete `modelType` (and Kokoro/Kitten `lexiconLanguageCandidates`) so you can pass the right `modelOptions` on init.
 
-**`detectionSources`** is an optional, ordered trace of mechanisms used (stable string literals; see `TtsDetectionSource` in `react-native-sherpa-onnx/tts`). The host-only **name-only** path (empty file list in C++ tests) never validates paths and is not used by production `detectTtsModel` after a real directory scan.
+**`detectionSources`** is an optional, ordered trace of mechanisms used (stable string literals; see `DetectionSource` in `react-native-sherpa-onnx/tts`). The host-only **name-only** path (empty file list in C++ tests) never validates paths and is not used by production `detectTtsModel` after a real directory scan.
 
 ```ts
 const result = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
@@ -368,9 +368,9 @@ controller.unsubscribe();
 | `StreamingTtsEngine` | Streaming engine interface |
 | `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
 | `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
-| `TtsSubtitleItem` | `{ text, start, end }` (seconds) |
+| `SubtitleTimingItem` | `{ text, start, end }` (seconds) |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
-| `TtsDetectedModelEntry` | `{ type: TTSModelType \| string; modelDir: string }` |
+| `DetectedModelEntry` | `{ type: string; modelDir: string }` |
 | `TtsStreamChunk` | `{ samples, sampleRate, progress, isFinal }` + optional `instanceId`, `requestId` |
 | `TtsStreamEnd` | `{ cancelled: boolean }` + optional `instanceId`, `requestId` |
 | `TtsStreamError` | `{ message: string }` + optional `instanceId`, `requestId` |
