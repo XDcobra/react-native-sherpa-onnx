@@ -4,6 +4,7 @@ import {
   sttModelOptionIdForPublicHint,
 } from './stt/hints';
 import { iso6391HintsForTtsModelType } from './tts/hints';
+import { iso6391HintsForAlignmentModelType } from './alignment/hints';
 import { ModelCategory } from '../download/types';
 
 export type ResolvePublicLanguageHintsInput = {
@@ -45,8 +46,9 @@ function resolvePublicLanguageHintStrings(
       return iso6391HintsForTtsModelType(input.modelType) ?? [];
     case ModelCategory.Stt:
       return iso6391HintsForSttModelType(input.modelType) ?? [];
-    case ModelCategory.Vad:
     case ModelCategory.Alignment:
+      return iso6391HintsForAlignmentModelType(input.modelType) ?? [];
+    case ModelCategory.Vad:
       return [];
     default: {
       return [];

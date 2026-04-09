@@ -62,8 +62,8 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
 
   std::vector<std::string> detectionSourceStrings;
   detectionSourceStrings.reserve(result.detectionSources.size());
-  for (TtsDetectionSource s : result.detectionSources) {
-    detectionSourceStrings.emplace_back(TtsDetectionSourceToLiteral(s));
+  for (DetectionSource s : result.detectionSources) {
+    detectionSourceStrings.emplace_back(DetectionSourceToLiteral(s));
   }
   jobject detectionSourcesList = BuildStringList(env, detectionSourceStrings);
   if (detectionSourcesList) {

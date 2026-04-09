@@ -473,10 +473,10 @@ TEST(ModelDetectValidation, TtsNameOnlyEmptyFilesAutoUsesDirName) {
     EXPECT_FALSE(result.ok) << "Name-only mode must not validate without a file listing";
     EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kVits);
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kNameOnly),
+                        sherpaonnx::DetectionSource::kNameOnly),
               result.detectionSources.end());
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kDirName),
+                        sherpaonnx::DetectionSource::kDirName),
               result.detectionSources.end());
 }
 
@@ -487,10 +487,10 @@ TEST(ModelDetectValidation, TtsNameOnlyEmptyFilesExplicit) {
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kMatcha);
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kNameOnly),
+                        sherpaonnx::DetectionSource::kNameOnly),
               result.detectionSources.end());
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kExplicitModelType),
+                        sherpaonnx::DetectionSource::kExplicitModelType),
               result.detectionSources.end());
 }
 
@@ -512,10 +512,10 @@ TEST(ModelDetectValidation, TtsFullScanDetectionSourcesExplicit) {
     auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kFileListing),
+                        sherpaonnx::DetectionSource::kFileListing),
               result.detectionSources.end());
     EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
-                        sherpaonnx::TtsDetectionSource::kExplicitModelType),
+                        sherpaonnx::DetectionSource::kExplicitModelType),
               result.detectionSources.end());
 }
 

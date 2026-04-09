@@ -206,7 +206,7 @@
         if (!result.detectionSources.empty()) {
             NSMutableArray *sources = [NSMutableArray array];
             for (const auto s : result.detectionSources) {
-                [sources addObject:[NSString stringWithUTF8String:sherpaonnx::TtsDetectionSourceToLiteral(s)]];
+                [sources addObject:[NSString stringWithUTF8String:sherpaonnx::DetectionSourceToLiteral(s)]];
             }
             resultDict[@"detectionSources"] = sources;
         }

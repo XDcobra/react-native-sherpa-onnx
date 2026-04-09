@@ -1,9 +1,7 @@
 import type { ModelPathConfig } from '../types';
 import type { SubtitleTimingItem } from '../alignment/types';
 import type { PcmPlayer } from '../pcm/types';
-
-/** @deprecated Import `SubtitleTimingItem` from `react-native-sherpa-onnx/alignment`. */
-export type TtsSubtitleItem = SubtitleTimingItem;
+import type { DetectedModelEntry } from '../types/modelDetect';
 
 /**
  * Supported TTS model types.
@@ -27,20 +25,15 @@ export type TTSModelType =
   | 'supertonic'
   | 'auto';
 
-/** How native TTS detection chose the model kind (mirrors C++ TtsDetectionSource). */
-export const TTS_DETECTION_SOURCES = [
-  'fileListing',
-  'dirName',
-  'fallbackOrder',
-  'explicitModelType',
-  'nameOnly',
-] as const;
-
-export type TtsDetectionSource = (typeof TTS_DETECTION_SOURCES)[number];
-
-export function isTtsDetectionSource(s: string): s is TtsDetectionSource {
-  return (TTS_DETECTION_SOURCES as readonly string[]).includes(s);
-}
+export {
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type TtsDetectModelResult,
+  type AlignmentDetectModelResult,
+  type ModelDetectResultBase,
+} from '../types/modelDetect';
 
 /** Runtime list of supported TTS model types. */
 export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
@@ -440,12 +433,6 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
   timingMode: 'off' | 'proportional' | 'estimated' | 'aligned';
 }
 
-/** One detected TTS stack under a model directory (native may return unknown `type` strings). */
-export type TtsDetectedModelEntry = {
-  type: TTSModelType | string;
-  modelDir: string;
-};
-
 /**
  * Streaming chunk event payload for TTS generation.
  *
@@ -608,7 +595,7 @@ export interface TtsEngine {
   ): Promise<TtsBatchPlaybackController>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
-    detectedModels: TtsDetectedModelEntry[];
+    detectedModels: DetectedModelEntry[];
   }>;
   getModelInfo(): Promise<TTSModelInfo>;
   getSampleRate(): Promise<number>;

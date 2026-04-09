@@ -6,3 +6,4 @@ export type {
 export { resolvePublicLanguageHints } from './resolvePublicLanguageHints';
 export * from './stt';
 export * from './tts';
+export * from './alignment';

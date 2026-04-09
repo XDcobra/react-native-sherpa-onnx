@@ -318,7 +318,7 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** tiny, small, medium, large, unknown — from name heuristics. */
     sizeTier?: string;
-    /** Optional trace strings from native (see TtsDetectionSource in src/tts/types.ts). */
+    /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
   }>;
 
@@ -495,6 +495,12 @@ export interface Spec extends TurboModule {
     paths?: {
       model?: string;
     };
+    /** Raw heuristic language tags from folder name (catalog). */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** Optional trace strings from native (see DetectionSource). */
+    detectionSources?: string[];
   }>;
 
   // ==================== Online (streaming) TTS Methods ====================

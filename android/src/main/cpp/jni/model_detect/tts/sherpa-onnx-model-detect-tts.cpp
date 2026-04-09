@@ -139,7 +139,7 @@ static std::vector<TtsModelKind> GetKindsFromDirNameTts(const std::string& model
     return out;
 }
 
-static void AppendUniqueDetectionSource(std::vector<TtsDetectionSource>& out, TtsDetectionSource s) {
+static void AppendUniqueDetectionSource(std::vector<DetectionSource>& out, DetectionSource s) {
     if (std::find(out.begin(), out.end(), s) == out.end()) {
         out.push_back(s);
     }
@@ -169,7 +169,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
     TtsDetectResult result;
 
     if (files.empty()) {
-        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kNameOnly);
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kNameOnly);
         std::vector<TtsModelKind> nameKinds = GetKindsFromDirNameTts(modelDir);
         for (TtsModelKind k : nameKinds) {
             result.detectedModels.push_back({TtsModelKindTag(k), modelDir});
@@ -182,7 +182,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
                 result.error = "TTS: Unknown model type: " + modelType;
                 return result;
             }
-            AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kExplicitModelType);
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
             result.selectedKind = sel;
             result.detectedModels.clear();
             result.detectedModels.push_back({TtsModelKindTag(sel), modelDir});
@@ -195,13 +195,13 @@ static TtsDetectResult DetectTtsModelFromFiles(
             return result;
         }
         result.selectedKind = nameKinds[0];
-        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kDirName);
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
         return result;
     }
 
-    AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kFileListing);
+    AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFileListing);
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
@@ -294,7 +294,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
             result.error = "TTS: Unknown model type: " + modelType;
             return result;
         }
-        AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kExplicitModelType);
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
     } else {
         std::vector<TtsModelKind> nameCandidates = GetKindsFromDirNameTts(modelDir);
         bool pickedFromDir = false;
@@ -309,7 +309,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
             }
         }
         if (pickedFromDir) {
-            AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kDirName);
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
         } else if (selected == TtsModelKind::kUnknown) {
             if (hasMatcha) selected = TtsModelKind::kMatcha;
             else if (hasPocket) selected = TtsModelKind::kPocket;
@@ -321,7 +321,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
                 else selected = TtsModelKind::kKokoro;
             } else if (hasVits) selected = TtsModelKind::kVits;
             if (selected != TtsModelKind::kUnknown) {
-                AppendUniqueDetectionSource(result.detectionSources, TtsDetectionSource::kFallbackOrder);
+                AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFallbackOrder);
             }
         }
     }

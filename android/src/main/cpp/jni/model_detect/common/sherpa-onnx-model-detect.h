@@ -44,13 +44,14 @@ enum class TtsModelKind {
     kSupertonic
 };
 
-/** Traces how TTS model kind was chosen; serialized to JS as stable string literals (see TtsDetectionSourceToLiteral). */
-enum class TtsDetectionSource {
+/** Traces how model kind was chosen; shared across all features (TTS, Alignment, etc.).
+ *  Serialized to JS as stable string literals (see DetectionSourceToLiteral). */
+enum class DetectionSource {
     /** Recursive file listing was used (non-empty file vector). */
     kFileListing,
-    /** Directory basename contained a known type token (GetKindsFromDirNameTts) and that drove selection in auto mode. */
+    /** Directory basename contained a known type token and that drove selection in auto mode. */
     kDirName,
-    /** Default priority order among capabilities (matcha → pocket → zipvoice → …) when folder name did not resolve. */
+    /** Default priority order among capabilities when folder name did not resolve. */
     kFallbackOrder,
     /** Caller passed an explicit modelType string (not "auto"). */
     kExplicitModelType,
@@ -58,14 +59,14 @@ enum class TtsDetectionSource {
     kNameOnly,
 };
 
-/** Stable literals for JNI / NSDictionary / TypeScript (must match src/tts/types.ts). */
-inline const char* TtsDetectionSourceToLiteral(TtsDetectionSource s) {
+/** Stable literals for JNI / NSDictionary / TypeScript (must match src/types/modelDetect.ts). */
+inline const char* DetectionSourceToLiteral(DetectionSource s) {
     switch (s) {
-        case TtsDetectionSource::kFileListing: return "fileListing";
-        case TtsDetectionSource::kDirName: return "dirName";
-        case TtsDetectionSource::kFallbackOrder: return "fallbackOrder";
-        case TtsDetectionSource::kExplicitModelType: return "explicitModelType";
-        case TtsDetectionSource::kNameOnly: return "nameOnly";
+        case DetectionSource::kFileListing: return "fileListing";
+        case DetectionSource::kDirName: return "dirName";
+        case DetectionSource::kFallbackOrder: return "fallbackOrder";
+        case DetectionSource::kExplicitModelType: return "explicitModelType";
+        case DetectionSource::kNameOnly: return "nameOnly";
     }
     return "fileListing";
 }
@@ -248,8 +249,8 @@ struct TtsDetectResult {
     TtsModelPaths paths;
     /** Language ids from detected lexicon files (e.g. "default", "us-en", "zh") for multi-lang Kokoro/Kitten. Empty when not applicable. */
     std::vector<std::string> lexiconLanguageCandidates;
-    /** Ordered trace of detection mechanisms (see TtsDetectionSource). */
-    std::vector<TtsDetectionSource> detectionSources;
+    /** Ordered trace of detection mechanisms (see DetectionSource). */
+    std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name (release id stem); not from lexicon files. */
     std::vector<std::string> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
@@ -272,6 +273,12 @@ struct AlignmentDetectResult {
     std::vector<DetectedModel> detectedModels;
     AlignmentModelKind selectedKind = AlignmentModelKind::kUnknown;
     AlignmentModelPaths paths;
+    /** Ordered trace of detection mechanisms (see DetectionSource). */
+    std::vector<DetectionSource> detectionSources;
+    /** Heuristic languages from folder name; currently empty for alignment. */
+    std::vector<std::string> derivedLanguages;
+    /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
+    std::string quantization;
 };
 
 SttDetectResult DetectSttModel(

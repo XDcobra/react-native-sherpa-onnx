@@ -6,15 +6,7 @@ export interface AlignmentTimestamp {
 
 export type AlignmentModelType = 'wav2vec2' | 'auto';
 
-export interface AlignmentDetectResult {
-  success: boolean;
-  error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-  paths?: {
-    model?: string;
-  };
-}
+export type { AlignmentDetectModelResult as AlignmentDetectResult } from '../types/modelDetect';
 
 /** One subtitle cue with times in seconds. */
 export interface SubtitleTimingItem {

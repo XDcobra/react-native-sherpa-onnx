@@ -1,7 +1,9 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-alignment.h"
+#include "sherpa-onnx-catalog-metadata.h"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,12 +17,26 @@ sherpaonnx::AlignmentModelKind ParseAlignmentModelType(const std::string& modelT
     return sherpaonnx::AlignmentModelKind::kUnknown;
 }
 
+static void AppendUniqueDetectionSource(std::vector<sherpaonnx::DetectionSource>& out, sherpaonnx::DetectionSource s) {
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+        out.push_back(s);
+    }
+}
+
 sherpaonnx::AlignmentDetectResult DetectAlignmentModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType
 ) {
     sherpaonnx::AlignmentDetectResult result;
+
+    if (files.empty()) {
+        AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kNameOnly);
+        result.error = "Alignment: no files to scan in " + modelDir;
+        return result;
+    }
+
+    AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
     const std::string wav2vec2Model =
         FindOnnxByAnyToken(files, {"wav2vec2", "model"}, std::nullopt);
@@ -40,6 +56,7 @@ sherpaonnx::AlignmentDetectResult DetectAlignmentModelFromFiles(
             result.error = "Alignment: unknown model type: " + modelType;
             return result;
         }
+        AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
     }
 
     switch (selected) {
@@ -88,7 +105,13 @@ AlignmentDetectResult DetectAlignmentModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    return DetectAlignmentModelFromFiles(files, modelDir, modelType);
+    result = DetectAlignmentModelFromFiles(files, modelDir, modelType);
+
+    // Fill catalog heuristics from directory basename (languages + quantization; alignment has no sizeTier)
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadataFromBasename(result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+
+    return result;
 }
 
 // Test-only: used by host-side model_detect_test; not used in production.

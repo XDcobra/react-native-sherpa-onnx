@@ -1,2 +1,1 @@
-/** Placeholder: add alignment model language hints when applicable. */
-export {};
+export { iso6391HintsForAlignmentModelType } from './hints';

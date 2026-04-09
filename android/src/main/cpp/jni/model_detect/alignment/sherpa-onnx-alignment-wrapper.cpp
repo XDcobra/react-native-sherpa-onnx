@@ -1,6 +1,7 @@
 #include "sherpa-onnx-alignment-wrapper.h"
 
 #include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-model-detect.h"
 
 namespace sherpaonnx {
 namespace {
@@ -47,6 +48,33 @@ jobject AlignmentDetectResultToJava(
     env->DeleteLocalRef(detectedList);
   }
 
+  // Detection sources
+  std::vector<std::string> detectionSourceStrings;
+  detectionSourceStrings.reserve(result.detectionSources.size());
+  for (DetectionSource s : result.detectionSources) {
+    detectionSourceStrings.emplace_back(DetectionSourceToLiteral(s));
+  }
+  jobject detectionSourcesList = BuildStringList(env, detectionSourceStrings);
+  if (detectionSourcesList) {
+    jstring keyDetectionSources = env->NewStringUTF("detectionSources");
+    env->CallObjectMethod(map, mapPut, keyDetectionSources, detectionSourcesList);
+    env->DeleteLocalRef(keyDetectionSources);
+    env->DeleteLocalRef(detectionSourcesList);
+  }
+
+  // Derived languages
+  jobject derivedLangs = BuildStringList(env, result.derivedLanguages);
+  if (derivedLangs) {
+    jstring keyLang = env->NewStringUTF("languages");
+    env->CallObjectMethod(map, mapPut, keyLang, derivedLangs);
+    env->DeleteLocalRef(keyLang);
+    env->DeleteLocalRef(derivedLangs);
+  }
+
+  // Quantization
+  PutString(env, map, mapPut, "quantization", result.quantization);
+
+  // Paths
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {
     jobject pathsMap = env->NewObject(hashMapClass, mapInit);

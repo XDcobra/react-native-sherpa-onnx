@@ -14,6 +14,7 @@ set(JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni")
 
 set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-helper.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-model-detect-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-tts-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-model-detect-tts.cpp"

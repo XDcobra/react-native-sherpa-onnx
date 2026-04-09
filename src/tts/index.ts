@@ -2,7 +2,6 @@ import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { PcmPlayer } from '../pcm/types';
 import {
-  isTtsDetectionSource,
   isTtsModelType,
   type TTSInitializeOptions,
   type TTSModelType,
@@ -13,14 +12,18 @@ import {
   type GeneratedAudioWithTimestamps,
   type TTSModelInfo,
   type TtsEngine,
-  type TtsDetectedModelEntry,
   type SaveAudioTarget,
   type SaveAudioOptions,
   type SaveAudioFromPcmInput,
-  type TtsDetectionSource,
   type PlayFromSinkOptions,
   type TtsBatchPlaybackController,
 } from './types';
+import {
+  isDetectionSource,
+  type DetectionSource,
+  type TtsDetectModelResult,
+  type DetectedModelEntry,
+} from '../types/modelDetect';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
@@ -33,10 +36,7 @@ import {
   flattenTtsModelOptionsForNative,
   toNativeTtsGenerationOptions,
 } from './ttsNativeBridge';
-import {
-  resolvePublicLanguageHints,
-  type PublicLanguageHint,
-} from '../model-languages';
+import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 
 let ttsInstanceCounter = 0;
@@ -65,24 +65,7 @@ let ttsInstanceCounter = 0;
 export async function detectTtsModel(
   modelPath: ModelPathConfig,
   options?: { modelType?: TTSModelType }
-): Promise<{
-  success: boolean;
-  /** Native validation/detect failure (e.g. missing lexicon for Zipvoice). */
-  error?: string;
-  detectedModels: TtsDetectedModelEntry[];
-  /** Primary detected kind, narrowed to known SDK literals. */
-  modelType?: TTSModelType;
-  /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
-  lexiconLanguageCandidates?: string[];
-  /** Normalized primary hints (**`iso6391Hint`**); **`id`** matches hint for TTS (use **lexiconLanguageCandidates** for Kokoro/Kitten UI keys). */
-  languages?: PublicLanguageHint[];
-  /** fp16, int8, int8-quantized, unknown — from name heuristics. */
-  quantization?: string;
-  /** tiny, small, medium, large, unknown — from name heuristics. */
-  sizeTier?: string;
-  /** Trace of how native detection chose the model kind (omitted if native returned nothing). */
-  detectionSources?: readonly TtsDetectionSource[];
-}> {
+): Promise<TtsDetectModelResult> {
   const resolvedPath = await resolveModelPath(modelPath);
   const raw = await SherpaOnnx.detectTtsModel(
     resolvedPath,
@@ -90,17 +73,17 @@ export async function detectTtsModel(
     options?.modelType ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
-  const detectedModels: TtsDetectedModelEntry[] = (
-    raw.detectedModels ?? []
-  ).map((m) => ({
-    type: m.type,
-    modelDir: m.modelDir,
-  }));
-  const detectionSources: TtsDetectionSource[] = [];
+  const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
+    (m) => ({
+      type: m.type,
+      modelDir: m.modelDir,
+    })
+  );
+  const detectionSources: DetectionSource[] = [];
   const rawSources = raw.detectionSources;
   if (Array.isArray(rawSources)) {
     for (const s of rawSources) {
-      if (typeof s === 'string' && isTtsDetectionSource(s)) {
+      if (typeof s === 'string' && isDetectionSource(s)) {
         detectionSources.push(s);
       }
     }
@@ -415,7 +398,7 @@ export async function createTTS(
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
       success: boolean;
-      detectedModels: TtsDetectedModelEntry[];
+      detectedModels: DetectedModelEntry[];
     }> {
       guard();
       const expanded = expandTtsUpdateOptions(opts);
@@ -667,8 +650,6 @@ export type {
   TtsVoiceClone,
   TtsVoiceCloneZipvoice,
   TtsVoiceClonePocket,
-  TtsDetectedModelEntry,
-  TtsDetectionSource,
   SubtitleMode,
   SubtitleGranularity,
   SubtitleOptions,
@@ -676,7 +657,6 @@ export type {
   SubtitleOptionsProportionalOrEstimated,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
-  TtsSubtitleItem,
   TTSModelInfo,
   SaveAudioTarget,
   SaveAudioTargetFile,
@@ -699,9 +679,13 @@ export type {
   TtsStreamFileEnd,
   TtsStreamFileError,
 } from './types';
+export { TTS_MODEL_TYPES, isTtsModelType } from './types';
 export {
-  TTS_MODEL_TYPES,
-  TTS_DETECTION_SOURCES,
-  isTtsDetectionSource,
-  isTtsModelType,
-} from './types';
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type ModelDetectResultBase,
+  type TtsDetectModelResult,
+  type AlignmentDetectModelResult,
+} from '../types/modelDetect';

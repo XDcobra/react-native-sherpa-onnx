@@ -55,6 +55,30 @@ static NSDictionary *alignmentDetectResultToDict(
   if (!result.ok && !result.error.empty()) {
     dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Alignment model detection failed";
   }
+
+  // Detection sources
+  if (!result.detectionSources.empty()) {
+    NSMutableArray *sources = [NSMutableArray arrayWithCapacity:result.detectionSources.size()];
+    for (auto s : result.detectionSources) {
+      [sources addObject:[NSString stringWithUTF8String:sherpaonnx::DetectionSourceToLiteral(s)]];
+    }
+    dict[@"detectionSources"] = sources;
+  }
+
+  // Derived languages
+  if (!result.derivedLanguages.empty()) {
+    NSMutableArray *langs = [NSMutableArray arrayWithCapacity:result.derivedLanguages.size()];
+    for (const auto &lang : result.derivedLanguages) {
+      [langs addObject:[NSString stringWithUTF8String:lang.c_str()] ?: @""];
+    }
+    dict[@"languages"] = langs;
+  }
+
+  // Quantization
+  if (!result.quantization.empty()) {
+    dict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()] ?: @"";
+  }
+
   return dict;
 }
 
