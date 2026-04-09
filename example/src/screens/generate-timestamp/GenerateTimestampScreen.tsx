@@ -477,6 +477,8 @@ export default function GenerateTimestampScreen() {
         cleanupPath = audioPath;
       }
 
+      const proportionalGranularity: 'sentence' | 'word' =
+        granularity === 'character' ? 'sentence' : granularity;
       const subtitleResult =
         mode === 'accurate'
           ? await alignTextToAudio(text, audioPath, {
@@ -486,7 +488,7 @@ export default function GenerateTimestampScreen() {
             })
           : await alignTextToAudio(text, audioPath, {
               mode: 'proportional',
-              granularity,
+              granularity: proportionalGranularity,
             });
       setResult(subtitleResult);
     } catch (err) {

@@ -367,25 +367,28 @@ Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** for fil
 
 ## Types
 
-### Core
+Listed types are those used by **batch TTS** in this document (`detectTtsModel`, `createTTS`, `generateSpeech*`, `playFromSink`, save helpers, and `SubtitleOptions` on `generateSpeechWithTimestamps`). For **streaming-only** types (`TtsStream*`, incremental controllers, …), see [tts-streaming.md](tts-streaming.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
+
+### Detection & model path
 
 | Type | Notes |
 | --- | --- |
+| `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto'; path: string }` |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
-| `TtsEngine` | Batch engine interface |
-| `StreamingTtsEngine` | Streaming engine interface |
-| `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
-| `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
-| `SubtitleTimingItem` | `{ text, start, end }` (seconds) |
-| `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
+| `isTtsModelType` | Runtime guard for `TTSModelType` |
+| `TtsDetectModelResult` | Return type of `detectTtsModel()` |
 | `DetectedModelEntry` | `{ type: string; modelDir: string }` |
-| `TtsStreamChunk` | Streaming chunk payload |
-| `TtsStreamEnd` | `{ cancelled: boolean }` + optional ids |
-| `TtsStreamError` | `{ message: string }` + optional ids |
-| `TtsStreamHandlers` | `{ onChunk?, onEnd?, onError? }` |
-| `TtsStreamController` | `cancel()`, `unsubscribe()` |
-| `ModelPathConfig` | From `react-native-sherpa-onnx` |
+| `DetectionSource` | Trace literals from native detection |
+
+### Batch engine & audio results
+
+| Type | Notes |
+| --- | --- |
+| `TtsEngine` | `createTTS()` instance: `generateSpeech`, `generateSpeechWithTimestamps`, `playFromSink`, `updateParams`, … |
+| `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
+| `GeneratedAudio` | `{ sampleRate, numSamples, generation, getSamples() }` |
+| `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
 
 ### Init, update, generation
 
@@ -393,24 +396,36 @@ Use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`** for fil
 | --- | --- |
 | `TTSInitializeOptions` | Discriminated union: with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed**; otherwise only the matching `modelOptions` key (`vits`, `matcha`, …) |
 | `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
-| `TtsUpdateOptions` | Union including `{}` and per-`modelType` variants (same coupling rules as init) |
-| `TtsGenerationOptions` | Base fields + optional **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }` |
+| `TtsUpdateOptions` | Argument to `tts.updateParams()` — per-`modelType` variants (same coupling rules as init) |
+| `TtsGenerationOptions` | `generateSpeech` / `generateSpeechWithTimestamps` — base fields + optional **`voiceClone`** |
 | `TtsReferenceAudio` | `{ samples: number[]; sampleRate: number }` |
 | `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
 | `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
 | `TtsModelOptions` | Internal aggregate for native flattening; prefer init/update unions in app code |
 | `TtsVitsModelOptions`, `TtsMatchaModelOptions`, … | Per-architecture scale options |
 
-### Subtitles
+### Playback & save
+
+| Type | Notes |
+| --- | --- |
+| `PlayFromSinkOptions` | Optional args for `playFromSink(generation, options?)` |
+| `TtsBatchPlaybackController` | `{ player: PcmPlayer }` — see [pcm-player.md](pcm-player.md) |
+| `PcmPlayer` | Exposed on batch playback controller (`feed: 'native'`) |
+| `SaveAudioTarget` | `SaveAudioTargetFile` \| `SaveAudioTargetAndroidContent` |
+| `SaveAudioFromPcmInput` | PCM payload for `saveAudioFromPCM()` |
+| `SaveAudioOptions` | `format?`, `outputSampleRateHz?` for save helpers |
+
+### Subtitles (batch path + alignment re-exports)
 
 | Type | Notes |
 | --- | --- |
 | `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` |
 | `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (character only with accurate) |
-| `SubtitleOptions` | Proportional/estimated vs accurate (see TypeScript unions) |
-| Alignment standalone | `alignTextToAudio`, types in `react-native-sherpa-onnx/alignment` |
+| `SubtitleOptions` / `SubtitleOptionsAccurate` / `SubtitleOptionsProportionalOrEstimated` | Passed inside `generateSpeechWithTimestamps` options |
+| `SubtitleTimingItem` | `{ text, start, end }` (seconds) — also returned by alignment APIs |
+| `AlignTextToAudioOptions`, `AlignTextToAudioResult`, `AlignAudioInput`, `AlignmentChunkTimeline`, `AlignTextToTtsSinkInput`, … | Re-exported from `react-native-sherpa-onnx/tts`; usage in [alignment.md](alignment.md) |
 
-Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
+**Breaking type history:** [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
 
 ## Troubleshooting
 

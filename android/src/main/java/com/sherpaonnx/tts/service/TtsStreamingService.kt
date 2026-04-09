@@ -159,7 +159,6 @@ internal class TtsStreamingService(
         sink?.abort(!keepPartial)
         emitFileError(instanceId, requestId, "TTS stream-to-file failed: ${e.message}", outputPath)
       } finally {
-        emitEnd(instanceId, requestId, inst.ttsStreamCancelled.get())
         inst.ttsStreamRunning.set(false)
       }
     }
