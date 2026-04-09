@@ -13,7 +13,7 @@ Incremental speech generation with chunk callbacks: lower time-to-first-byte, pl
 | **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
 | **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
 | **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
-| **Incremental text feeding** (progressive input) | `createIncrementalStreamingTTS` | `playback: false, emitChunks: true` (default) |
+| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: false, emitChunks: true` (default) |
 | **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
 | **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
 
@@ -166,39 +166,51 @@ const inc = await createIncrementalStreamingTTS({
       modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' },
     },
   },
-  // Override defaults for native playback with minimal bridge traffic
-  streamOptions: { playback: true, emitChunks: false },
   segmentation: {
     maxCharsPerSegment: 220,
     minCharsPerSegment: 24,
     maxWaitMs: 900,
   },
-  onSessionEvent: (e) => {
-    // session:started | session:draining | session:idle | session:cancelled | session:error
-    console.log(e.type);
-  },
-  onSegmentEvent: (e) => {
-    // segment:queued | segment:started | segment:chunk | segment:ended | segment:dropped
-    if (e.type === 'segment:dropped') console.warn(e.reason);
-  },
 });
 
-// Push progressive text chunks
-inc.pushText('Hallo Michael. ');
-inc.pushText('Today, the weather was amazing. But tomorrow, I think it will rain instead. ');
+// Start one incremental request (request-centric API).
+const ctrl = inc.generateIncrementalSpeechStream(
+  { sid: 0, speed: 1.0 },
+  {
+    onSessionEvent: (e) => {
+      // session:started | session:draining | session:idle | session:cancelled | session:error
+      console.log(e.type);
+    },
+    onSegmentEvent: (e) => {
+      // segment:queued | segment:started | segment:chunk | segment:ended | segment:dropped
+      if (e.type === 'segment:dropped') console.warn(e.reason);
+    },
+    onError: (e) => {
+      console.error('Incremental stream error:', e.message);
+    },
+  },
+  // Native playback with minimal bridge traffic
+  { playback: true, emitChunks: false }
+);
 
-// Force-commit current buffer now
-inc.commit();
+// Push progressive text chunks
+ctrl.pushText('Hallo Michael. ');
+ctrl.pushText('Today, the weather was amazing. But tomorrow, I think it will rain instead. ');
+
+// commit() is done automatically internally if auto-segmentation finds a boundary
+// commit() is a force trigger: it enqueues the current buffer now, even without punctuation/timeout boundary.
+// so use it only if you need to force enqueing
+ctrl.commit();
 
 // Wait until queue is drained
-await inc.flush();
+await ctrl.flush();
 
 // Pause / resume during playback:
-// Incremental engine currently does not expose a per-segment controller/player handle.
-// Use createStreamingTTS + generateSpeechStream directly when runtime pause/resume is required.
+await ctrl.player?.pause();
+await ctrl.player?.resume();
 
 // Optional: cancel active + queued work
-await inc.cancel({ scope: 'all' });
+await ctrl.cancel({ scope: 'all' });
 await inc.destroy();
 ```
 
@@ -278,7 +290,7 @@ const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/t
 
 ```ts
 function createIncrementalStreamingTTS(
-  options: IncrementalStreamingTtsOptions
+  options: IncrementalStreamingTtsFactoryOptions
 ): Promise<IncrementalStreamingTtsEngine>;
 ```
 
@@ -400,23 +412,63 @@ destroy(): Promise<void>;
 
 ## Incremental engine (`IncrementalStreamingTtsEngine`)
 
-### `inc.pushText(text)`
+### `inc.generateIncrementalSpeechStream(options, handlers, streamOptions?, incrementalOptions?)`
+
+```ts
+generateIncrementalSpeechStream(
+  options: TtsGenerationOptions | undefined,
+  handlers: IncrementalStreamHandlers,
+  streamOptions?: TtsStreamOptions,
+  incrementalOptions?: IncrementalRequestOptions
+): IncrementalStreamController;
+```
+
+Starts one incremental request with chunk/playback behavior analogous to `generateSpeechStream`.  
+Only one active request per engine instance at a time.
+
+### `inc.generateIncrementalSpeechStreamToFile(options, fileOptions, handlers, incrementalOptions?)`
+
+```ts
+generateIncrementalSpeechStreamToFile(
+  options: TtsGenerationOptions | undefined,
+  fileOptions: TtsStreamToFileOptions,
+  handlers: IncrementalStreamToFileHandlers,
+  incrementalOptions?: IncrementalRequestOptions
+): IncrementalStreamFileController;
+```
+
+Starts one incremental request writing to file (internally segmented and serialized).
+
+### `inc.getModelInfo()`, `inc.getSampleRate()`, `inc.getNumSpeakers()`, `inc.destroy()`
+
+Same semantics as `StreamingTtsEngine`.
+
+## Incremental stream controller (`IncrementalStreamController`)
+
+### `ctrl.pushText(text)`
 
 ```ts
 pushText(text: string): void;
 ```
 
-Adds incremental input text to the internal buffer. Auto-segmentation may enqueue new segments.
+Adds incremental input text to the active request buffer. Auto-segmentation may enqueue new segments.
 
-### `inc.commit(options?)`
+### `ctrl.commit(options?)`
 
 ```ts
 commit(options?: CommitOptions): void;
 ```
 
-Force-commits current buffer as one segment and enqueues it immediately.
+`commit()` is a force trigger, not a required step for normal generation.
 
-### `inc.flush(options?)`
+Behavior matrix:
+
+- Only `pushText()` with detectable boundaries -> speech is generated automatically.
+- `pushText()` without boundaries, but timeout enabled -> speech starts when timeout triggers forced segmentation.
+- `pushText()` without boundaries and no timeout -> no generation until `commit()` or `flush()`.
+- `commit()` -> immediate enqueue/start path for current buffered text.
+
+### `ctrl.flush(options?)`
 
 ```ts
 flush(options?: FlushOptions): Promise<void>;
@@ -424,7 +476,7 @@ flush(options?: FlushOptions): Promise<void>;
 
 Commits remaining buffer and resolves when queue + active segment are finished.
 
-### `inc.cancel(options?)`
+### `ctrl.cancel(options?)`
 
 ```ts
 cancel(options?: CancelOptions): Promise<void>;
@@ -436,7 +488,7 @@ Cancels by scope:
 - `active`: active only
 - `queued`: queued only
 
-### `inc.getMetrics()`
+### `ctrl.getMetrics()`
 
 ```ts
 getMetrics(): IncrementalMetrics;
@@ -444,13 +496,13 @@ getMetrics(): IncrementalMetrics;
 
 Returns a snapshot: queue depth, totals, and current active segment id.
 
-### `inc.destroy()`
+### `ctrl.player`
 
-```ts
-destroy(): Promise<void>;
-```
+`PcmPlayer | null` (non-null only when `streamOptions.playback === true`).
 
-Cancels work, clears timers/listeners, marks the session destroyed.
+### `ctrl.state`
+
+Current session state for this request.
 
 ## Stream controller (`TtsStreamController`)
 
@@ -512,9 +564,14 @@ controller.unsubscribe();
 
 | Type | Notes |
 | --- | --- |
-| `IncrementalStreamingTtsEngine` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `destroy` |
-| `IncrementalStreamingTtsOptions` | `{ source, segmentation?, queue?, streamOptions?, generationOptions?, onSessionEvent?, onSegmentEvent?, onMetrics? }` |
+| `IncrementalStreamingTtsEngine` | `generateIncrementalSpeechStream`, `generateIncrementalSpeechStreamToFile`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
+| `IncrementalStreamingTtsFactoryOptions` | `{ source, segmentation?, queue? }` |
 | `IncrementalStreamingTtsSource` | `{ engine: StreamingTtsEngine }` or `{ engineOptions: TTSInitializeOptions \| ModelPathConfig }` |
+| `IncrementalRequestOptions` | `{ segmentation?, queue? }` |
+| `IncrementalStreamHandlers` | `TtsStreamHandlers` + `onSessionEvent?`, `onSegmentEvent?`, `onMetrics?` |
+| `IncrementalStreamToFileHandlers` | `TtsStreamToFileHandlers` + `onSessionEvent?`, `onSegmentEvent?`, `onMetrics?` |
+| `IncrementalStreamController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `player`, `state` |
+| `IncrementalStreamFileController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `state` |
 | `SegmentationPolicy` | `boundaryChars?`, `maxCharsPerSegment?`, `maxWaitMs?`, `minCharsPerSegment?`, `debounceMs?` |
 | `QueuePolicy` | `mode?`, `maxSegments?`, `maxBufferedChars?`, `overflowStrategy?` |
 | `QueueMode` | `'fifo' \| 'replace-tail' \| 'latest-wins'` |
