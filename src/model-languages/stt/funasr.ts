@@ -1,7 +1,9 @@
 import type { ModelLanguage } from '../types';
 
-// FunASR: ids are values passed to model.generate(..., language="中文").
-
+/**
+ * FunASR: ids are values passed to model.generate(..., language="中文").
+ * https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512#using-funasr-for-inference
+ */
 export const FUNASR_NANO_LANGUAGES: readonly ModelLanguage[] = [
   { id: '中文', name: 'chinese' },
   { id: '英文', name: 'english' },

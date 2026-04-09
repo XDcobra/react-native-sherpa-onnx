@@ -1,5 +1,9 @@
 import type { ModelLanguage } from '../types';
 
+/**
+ * Cohere Transcribe: ids are values passed to model.transcribe(..., language="en").
+ * https://docs.cohere.com/reference/transcribe
+ */
 export const COHERE_TRANSCRIBE_LANGUAGES: readonly ModelLanguage[] = [
   { id: 'en', name: 'english' },
   { id: 'fr', name: 'french' },

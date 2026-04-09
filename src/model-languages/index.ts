@@ -5,3 +5,4 @@ export type {
 } from './resolvePublicLanguageHints';
 export { resolvePublicLanguageHints } from './resolvePublicLanguageHints';
 export * from './stt';
+export * from './tts';

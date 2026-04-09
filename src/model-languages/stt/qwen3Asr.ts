@@ -1,6 +1,9 @@
 import type { ModelLanguage } from '../types';
 
-/** Display hints only — SttQwen3AsrModelOptions has no language field in this SDK. */
+/**
+ * Display hints only — SttQwen3AsrModelOptions has no language field in this SDK.
+ * https://huggingface.co/Qwen/Qwen3-ASR-0.6B#released-models-description-and-download
+ */
 export const QWEN3_ASR_LANGUAGES: readonly ModelLanguage[] = [
   { id: 'zh', name: 'chinese' },
   { id: 'en', name: 'english' },

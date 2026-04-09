@@ -1,6 +1,9 @@
 import type { ModelLanguage } from '../types';
 
-/** Dolphin locale tags — informational; no language API in sherpa-onnx Dolphin. */
+/**
+ * Dolphin locale tags — informational; no language API in sherpa-onnx Dolphin.
+ * https://arxiv.org/pdf/2503.20212
+ */
 export const DOLPHIN_INFO_LANGUAGES: readonly ModelLanguage[] = [
   { id: 'zh-cn', name: 'chinese (mandarin)' },
   { id: 'zh-tw', name: 'chinese (taiwan)' },
