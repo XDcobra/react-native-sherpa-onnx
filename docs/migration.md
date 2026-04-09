@@ -1,5 +1,19 @@
 # Migration Guides
 
+## STT/TTS model language lists (`ModelLanguage`)
+
+All model-language data and helpers live under **`react-native-sherpa-onnx/model-languages`**: **`ModelLanguage`**, per-model lists (e.g. `getWhisperLanguages`, `WHISPER_LANGUAGES`), and **`resolvePublicLanguageHints`**. Nothing in this area is re-exported from **`react-native-sherpa-onnx/stt`**. See **[model-languages.md](model-languages.md)** for usage and limitations (helpers are not authoritative for every checkpoint).
+
+### Breaking changes
+
+| Before | After |
+|--------|--------|
+| `SttModelLanguage`, `WhisperLanguage` | `ModelLanguage` from `react-native-sherpa-onnx/model-languages` |
+| Lists / getters from `…/stt` | `react-native-sherpa-onnx/model-languages` |
+| Deep import `…/stt/sttModelLanguages` | `react-native-sherpa-onnx/model-languages` |
+
+`detectTtsModel()` and `detectSttModel().languages` expose **`{ iso6391Hint, id }[]`** (see **`PublicLanguageHint`** in `react-native-sherpa-onnx/model-languages`). Download **`ModelMeta.languages`** remains **`string[]`** (hint tags only). For custom flows, call `resolvePublicLanguageHints({ domain: 'tts' \| 'stt' \| 'vad' \| 'alignment', modelType?, rawFromNative? })`.
+
 ## Standalone PCM player (replacing TTS-bound player)
 
 The PCM player is no longer attached to `StreamingTtsEngine`. Use `createPcmPlayer` from `react-native-sherpa-onnx/pcm` for manual feed, or `playback: true` on streaming options for native playback.

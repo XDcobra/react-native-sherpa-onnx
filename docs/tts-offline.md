@@ -148,7 +148,7 @@ function detectTtsModel(
   modelType?: TTSModelType;
   // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
-  languages?: string[];
+  languages?: { iso6391Hint: string; id: string }[];
   quantization?: string;
   sizeTier?: string;
   /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
@@ -430,6 +430,7 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTT
 
 ## See also
 
+- [model-languages.md](model-languages.md) — language hint helpers and `detectTtsModel(...).languages`
 - [tts-streaming.md](tts-streaming.md) — incremental synthesis, PCM player, `generateSpeechStream`  
 - [alignment.md](alignment.md) — `alignTextToAudio`, `alignTextToTtsSink`, modes, alignment models  
 - [execution-providers.md](execution-providers.md) — ORT execution providers  
