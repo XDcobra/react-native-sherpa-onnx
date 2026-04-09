@@ -607,6 +607,28 @@ export function saveAudioFromPCM(
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';
 
+// Incremental streaming TTS (higher-level: progressive text feeding + auto-segmentation)
+export { createIncrementalStreamingTTS } from './incremental';
+export type {
+  IncrementalStreamingTtsEngine,
+  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsSource,
+  IncrementalMetrics,
+  SessionId,
+  SegmentId,
+  SessionState,
+  SegmentationPolicy,
+  QueuePolicy,
+  QueueMode,
+  OverflowStrategy,
+  CommitOptions,
+  FlushOptions,
+  CancelOptions,
+  CancelScope,
+  SessionEvent,
+  SegmentEvent,
+} from './incremental';
+
 export {
   alignTextToAudio,
   alignTextToTtsSink,
