@@ -511,14 +511,6 @@ static const int64_t kMaxChunkLatencyNs = 500LL * 1000000LL; // 500 ms
             }
         });
 
-        NSMutableDictionary *endPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"cancelled": @(cancelled) }];
-        if (requestIdCopy != nil) endPayload[@"requestId"] = requestIdCopy;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (weakSelf) {
-                [weakSelf sendEventWithName:@"ttsStreamEnd" body:endPayload];
-            }
-        });
-
         instRef->streamRunning.store(false);
         {
             std::lock_guard<std::mutex> lock(g_tts_mutex);
