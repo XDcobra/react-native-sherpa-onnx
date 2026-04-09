@@ -33,6 +33,11 @@ import {
   flattenTtsModelOptionsForNative,
   toNativeTtsGenerationOptions,
 } from './ttsNativeBridge';
+import {
+  resolvePublicLanguageHints,
+  type PublicLanguageHint,
+} from '../model-languages';
+import { ModelCategory } from '../download/types';
 
 let ttsInstanceCounter = 0;
 
@@ -47,7 +52,7 @@ let ttsInstanceCounter = 0;
  * modelType (primary detected type, narrowed to known `TTSModelType` literals),
  * optional error when success is false, optionally lexiconLanguageCandidates
  * (from lexicon files for Kokoro/Kitten), and optionally **languages**, **quantization**, **sizeTier**
- * (name-based heuristics from the folder/asset stem — same keys as native / download catalog metadata)
+ * (`languages`: normalized primary tags, mostly ISO 639-1 from folder/catalog heuristics plus optional SDK hints when empty — not lexicon keys)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
@@ -69,8 +74,8 @@ export async function detectTtsModel(
   modelType?: TTSModelType;
   /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
   lexiconLanguageCandidates?: string[];
-  /** Heuristic language tags from the folder / asset basename (catalog-style); not from lexicon files. */
-  languages?: string[];
+  /** Normalized primary hints (**`iso6391Hint`**); **`id`** matches hint for TTS (use **lexiconLanguageCandidates** for Kokoro/Kitten UI keys). */
+  languages?: PublicLanguageHint[];
   /** fp16, int8, int8-quantized, unknown — from name heuristics. */
   quantization?: string;
   /** tiny, small, medium, large, unknown — from name heuristics. */
@@ -104,10 +109,15 @@ export async function detectTtsModel(
     typeof raw.modelType === 'string' && isTtsModelType(raw.modelType)
       ? raw.modelType
       : undefined;
-  const derivedLanguages =
+  const rawLanguageStrings =
     Array.isArray(raw.languages) && raw.languages.length > 0
       ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : undefined;
+      : [];
+  const resolvedLanguages = resolvePublicLanguageHints({
+    domain: ModelCategory.Tts,
+    modelType,
+    rawFromNative: rawLanguageStrings,
+  });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
@@ -125,9 +135,7 @@ export async function detectTtsModel(
     raw.lexiconLanguageCandidates.length > 0
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
       : {}),
-    ...(derivedLanguages != null && derivedLanguages.length > 0
-      ? { languages: derivedLanguages }
-      : {}),
+    ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(sizeTier != null ? { sizeTier } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),

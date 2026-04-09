@@ -29,6 +29,7 @@ import {
 } from './types';
 import { parseChecksumFile } from './validation';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { resolvePublicLanguageHints } from '../model-languages';
 
 export type RefreshModelsOptions = {
   forceRefresh?: boolean;
@@ -145,9 +146,15 @@ async function buildTtsCatalogHintsMap(
       typeof raw.modelType === 'string' && raw.modelType.length > 0
         ? raw.modelType
         : 'unknown';
-    const languages = Array.isArray(raw.languages)
+    const rawLangs = Array.isArray(raw.languages)
       ? raw.languages.filter((x): x is string => typeof x === 'string')
       : [];
+    const languageRows = resolvePublicLanguageHints({
+      domain: ModelCategory.Tts,
+      modelType: modelType !== 'unknown' ? modelType : undefined,
+      rawFromNative: rawLangs,
+    });
+    const languages = languageRows.map((r) => r.iso6391Hint);
     const quantization =
       typeof raw.quantization === 'string' && raw.quantization.length > 0
         ? raw.quantization

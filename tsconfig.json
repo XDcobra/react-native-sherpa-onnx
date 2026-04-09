@@ -10,6 +10,7 @@
       "react-native-sherpa-onnx/audio": ["./src/audio/index.ts"],
       "react-native-sherpa-onnx/files": ["./src/files/index.ts"],
       "react-native-sherpa-onnx/stt": ["./src/stt/index.ts"],
+      "react-native-sherpa-onnx/model-languages": ["./src/model-languages/index.ts"],
       "react-native-sherpa-onnx/tts": ["./src/tts/index.ts"],
       "react-native-sherpa-onnx/vad": ["./src/vad/index.ts"],
       "react-native-sherpa-onnx/diarization": ["./src/diarization/index.ts"],

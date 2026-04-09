@@ -312,7 +312,7 @@ export interface Spec extends TurboModule {
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
     lexiconLanguageCandidates?: string[];
-    /** Heuristic languages from asset/folder name (catalog); not from lexicon files. */
+    /** Raw heuristic language tags from asset/folder name (catalog); not from lexicon files. JS `detectTtsModel` / download catalog normalize these for the public API. */
     languages?: string[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */
     quantization?: string;

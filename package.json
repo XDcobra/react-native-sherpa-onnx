@@ -15,6 +15,11 @@
       "types": "./lib/typescript/src/stt/index.d.ts",
       "default": "./lib/module/stt/index.js"
     },
+    "./model-languages": {
+      "source": "./src/model-languages/index.ts",
+      "types": "./lib/typescript/src/model-languages/index.d.ts",
+      "default": "./lib/module/model-languages/index.js"
+    },
     "./tts": {
       "source": "./src/tts/index.ts",
       "types": "./lib/typescript/src/tts/index.d.ts",

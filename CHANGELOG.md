@@ -1,5 +1,57 @@
 # Changelog
 
+## [Unreleased]
+
+### BREAKING CHANGES
+
+* **tts:** `startPcmPlayer`, `writePcmChunk`, `stopPcmPlayer` removed from `StreamingTtsEngine`. Use standalone `createPcmPlayer` from `react-native-sherpa-onnx/pcm` or `playback: true` on streaming options.
+* **turbo-module:** `startTtsPcmPlayer`, `writeTtsPcmChunk`, `stopTtsPcmPlayer` replaced by `createPcmPlayer`, `writePcmChunk`, `pausePcmPlayer`, `resumePcmPlayer`, `destroyPcmPlayer` with `playerId`.
+* **tts:** `GeneratedAudio.samples` (number[]) has been removed. PCM data is now held in a native sink and not transferred over the bridge by default.
+  - Use `audio.numSamples` instead of `audio.samples.length` for sample count.
+  - Use `await audio.getSamples()` to retrieve PCM as `Float32Array` (lazy, on-demand).
+  - Use `saveAudio()` for file export — it now uses a sink-native path (no JS round-trip).
+  - `audio.generation` is a monotonic ID for stale-detection (throws if a new synthesis was run on the same engine).
+* **alignment:** `alignTextToAudio` in-memory input now requires `Float32Array` (`{ samples: Float32Array; sampleRate }`) instead of `number[]`.
+* **tts/alignment:** estimated subtitle integration no longer uses `exportChunkTimelineOnly`; alignment now runs through native-first standalone APIs.
+* **alignment/turbo-module:** removed legacy low-level methods `alignAccurateFromPath`, `alignAccurateFromFloat32`, and compatibility alias `getAlignmentAudioMetrics`.
+
+### Features
+
+* **pcm:** Standalone PCM player: `createPcmPlayer({ sampleRate, feed, ttsInstanceId? })` — play any mono float PCM, not just TTS output. Import from `react-native-sherpa-onnx/pcm`.
+* **pcm:** Player controls: `pause()`, `resume()`, `destroy()` on `PcmPlayer`.
+* **tts:** Native streaming playback: `generateSpeechStream(text, opts, handlers, { playback: true })` — zero-bridge-PCM playback.
+* **tts:** `emitChunks` option on `generateSpeechStream`: opt out of chunk callbacks when only playback is needed.
+* **tts:** `autoDestroy` option on `generateSpeechStream`: auto-destroy the internal player after stream ends (default `true`).
+* **tts:** `TtsStreamController.player` — access the native playback player for pause/resume during streaming.
+* **tts:** Batch playback: `tts.playFromSink(generation)` — play last synthesis result directly from native sink; now returns `TtsBatchPlaybackController` with a `player` handle for `pause()`/`resume()`/`destroy()`. *(breaking: return type changed from `void`)*
+* **tts:** Native PCM sink architecture — batch synthesis results stay in native memory (Android `FloatArray`, iOS `std::vector<float>`) until explicitly requested.
+* **tts:** `getTtsSamples(instanceId, generation)` — new native method to retrieve PCM from the sink on demand.
+* **tts:** `saveTtsAudioFromSink(instanceId, generation, ...)` — save audio directly from native sink to file/SAF without JS PCM round-trip.
+* **tts:** `GeneratedAudio.getSamples()` — async method returning `Float32Array` from native sink.
+* **tts:** `GeneratedAudio.numSamples` / `GeneratedAudio.generation` — metadata fields available synchronously after synthesis.
+* **alignment:** native-first standalone APIs: `alignTextToAudioFromPath`, `alignTextToAudioFromPcm`, `alignTextToTtsSink`, and `getAudioDuration`.
+* **alignment:** new JS helper `alignTextToTtsSink(text, generatedAudio, options)` for zero PCM bridge round-trip when aligning TTS output.
+* **alignment:** unified shared C++ alignment engine for proportional, estimated, and accurate modes (single segmentation/timing implementation across Android and iOS).
+
+### Migration Guide
+
+```diff
+ // Before
+-const audio = await tts.generateSpeech('Hello');
+-console.log(audio.samples.length); // number[]
+-const pcm = audio.samples;
+
+ // After
++const audio = await tts.generateSpeech('Hello');
++console.log(audio.numSamples);           // number (immediate)
++const pcm = await audio.getSamples();    // Float32Array (lazy)
+```
+
+For file saving, prefer `saveAudio()` which now avoids the JS round-trip entirely:
+```ts
+await tts.saveAudio(audio, '/path/to/output.wav');
+```
+
 ## [0.4.2](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.1...v0.4.2) (2026-04-04)
 
 

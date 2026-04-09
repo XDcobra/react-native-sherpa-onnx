@@ -363,12 +363,12 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
 }
 
 - (void)alignTextToAudioFromPath:(NSString *)text
-                        audioPath:(NSString *)audioPath
+                    audioPath:(NSString *)audioPath
                              mode:(NSString *)mode
                       granularity:(NSString *)granularity
                           options:(NSDictionary *)options
-                          resolve:(RCTPromiseResolveBlock)resolve
-                           reject:(RCTPromiseRejectBlock)reject
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
 {
   if (text == nil || [text length] == 0) {
     reject(@"ALIGNMENT_ERROR", @"text is required", nil);
@@ -482,7 +482,7 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
             raw.size(),
             sr,
             granularityStr);
-      } else {
+        } else {
         throw std::runtime_error("Unsupported alignment mode");
       }
 
@@ -506,12 +506,12 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
 {
   if (text == nil || [text length] == 0) {
     reject(@"ALIGNMENT_ERROR", @"text is required", nil);
-    return;
-  }
+        return;
+      }
   if (generatedAudio == nil || ![generatedAudio isKindOfClass:[NSDictionary class]]) {
     reject(@"ALIGNMENT_ERROR", @"generatedAudio is required", nil);
-    return;
-  }
+        return;
+      }
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
