@@ -262,6 +262,32 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
         })
       ).toThrow(/destroyed/);
     });
+
+    it('destroy cancels active request and releases activeRequest', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        handlers,
+        { playback: false, emitChunks: false }
+      );
+
+      ctrl.pushText('Some text here to process.');
+      ctrl.commit();
+      await tick();
+
+      // Destroy while request is active
+      await engine.destroy();
+
+      // The active request should have been cancelled
+      expect(ctrl.state).toBe('cancelled');
+      expect(handlers.ended).toBe(true);
+      expect(handlers.endCancelled).toBe(true);
+    });
   });
 
   describe('controller lifecycle', () => {
@@ -361,6 +387,38 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
 
       ctrl.commit();
       expect(handlers.segmentEvents).toHaveLength(0);
+    });
+
+    it('commit({ force: false }) respects min-length threshold', () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions({
+          segmentation: {
+            debounceMs: 0,
+            maxWaitMs: 0,
+            minCharsPerSegment: 50, // high threshold
+          },
+        }),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
+
+      // Short text — below minCharsPerSegment, no boundary char → nothing committed
+      ctrl.pushText('Short text');
+      ctrl.commit({ force: false });
+      expect(handlers.segmentEvents).toHaveLength(0);
+
+      // force=true (default) commits regardless
+      ctrl.commit();
+      expect(
+        handlers.segmentEvents.some(
+          (e: SegmentEvent) => e.type === 'segment:queued'
+        )
+      ).toBe(true);
     });
 
     it('preserves FIFO ordering', async () => {
@@ -508,9 +566,10 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
         source: { engine: mock },
         ...createFactoryOptions(),
       });
+      const handlers = createHandlers();
       const ctrl = engine.generateIncrementalSpeechStream(
         undefined,
-        createHandlers(),
+        handlers,
         { playback: false, emitChunks: false }
       );
 
@@ -522,8 +581,11 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
       await tick();
 
       await ctrl.cancel({ scope: 'queued' });
-      // Active segment still running
+      // Active segment still running — state must not be 'cancelled'
       expect(mock.pendingStreams).toHaveLength(1);
+      expect(ctrl.state).not.toBe('cancelled');
+      // The request itself is not ended: no onEnd should have fired
+      expect(handlers.ended).toBe(false);
     });
 
     it('resolves pending flush on cancel', async () => {
@@ -550,6 +612,39 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
       await ctrl.cancel();
       await tick();
       expect(resolved).toBe(true);
+    });
+
+    it('flush after cancel is a no-op (no double onEnd)', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+
+      let endCount = 0;
+      const handlers: IncrementalStreamHandlers = {
+        onEnd: () => {
+          endCount++;
+        },
+      };
+
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        handlers,
+        { playback: false, emitChunks: false }
+      );
+
+      ctrl.pushText('Some text here.');
+      ctrl.commit();
+      await tick();
+      await ctrl.cancel();
+
+      // onEnd fired exactly once (from cancel)
+      expect(endCount).toBe(1);
+
+      // flush on an already-cancelled request must not fire onEnd again
+      await ctrl.flush();
+      expect(endCount).toBe(1);
     });
   });
 

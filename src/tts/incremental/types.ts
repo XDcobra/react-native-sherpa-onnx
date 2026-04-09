@@ -5,6 +5,7 @@ import type {
   TtsStreamHandlers,
   TtsStreamToFileOptions,
   TtsStreamToFileHandlers,
+  TtsStreamFileEnd,
   TTSInitializeOptions,
   TTSModelInfo,
 } from '../types';
@@ -209,6 +210,14 @@ export interface IncrementalStreamToFileHandlers
   onSessionEvent?: (event: SessionEvent) => void;
   onSegmentEvent?: (event: SegmentEvent) => void;
   onMetrics?: (metrics: IncrementalMetrics) => void;
+  /**
+   * Called for each segment after it has been written to its own file.
+   * Because each segment is written to a unique path, use this to collect
+   * the per-segment file paths (e.g. for later concatenation).
+   */
+  onSegmentFileEnd?: (
+    event: TtsStreamFileEnd & { segmentId: SegmentId }
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,7 @@ export function createEngine(
 ): IncrementalStreamingTtsEngine {
   let destroyed = false;
   let activeRequest = false;
+  let activeSessionCancel: (() => Promise<void>) | null = null;
 
   const guard = () => {
     if (destroyed) {
@@ -123,9 +124,11 @@ export function createEngine(
         undefined,
         () => {
           activeRequest = false;
+          activeSessionCancel = null;
         }
       );
 
+      activeSessionCancel = session.cancel;
       return session.controller as IncrementalStreamController;
     },
 
@@ -162,9 +165,11 @@ export function createEngine(
         fileOptions,
         () => {
           activeRequest = false;
+          activeSessionCancel = null;
         }
       );
 
+      activeSessionCancel = session.cancel;
       return session.controller as IncrementalStreamFileController;
     },
 
@@ -186,6 +191,14 @@ export function createEngine(
     async destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (activeSessionCancel) {
+        try {
+          await activeSessionCancel();
+        } catch {
+          /* ignore */
+        }
+        activeSessionCancel = null;
+      }
     },
   };
 
@@ -198,6 +211,7 @@ export function createEngine(
 
 interface RequestSession {
   controller: IncrementalStreamController | IncrementalStreamFileController;
+  cancel: () => Promise<void>;
 }
 
 function createRequestSession(
@@ -237,6 +251,9 @@ function createRequestSession(
   let totalCompleted = 0;
   let totalDropped = 0;
   let totalReplaced = 0;
+
+  // File-mode: sequential index for per-segment output paths
+  let segmentFileIndex = 0;
 
   // Player proxy state (only for stream mode with playback)
   let isPaused = false;
@@ -365,7 +382,7 @@ function createRequestSession(
 
     for (const d of result.dropped) {
       const reason =
-        qPolicy.mode === 'replace-tail'
+        qPolicy.mode === 'replace-tail' || qPolicy.mode === 'latest-wins'
           ? ('replaced' as const)
           : ('overflow' as const);
       if (reason === 'replaced') {
@@ -466,12 +483,47 @@ function createRequestSession(
       let controller: TtsStreamController;
 
       if (mode === 'file' && fileOptions) {
-        // File mode: dispatch via generateSpeechStreamToFile
+        // File mode: use a unique per-segment path to avoid overwriting.
+        // Insert the segment index before the file extension so each segment
+        // is written to its own file (e.g. "out.wav" → "out_0.wav", "out_1.wav").
+        const basePath = fileOptions.output.path;
+        const dotIdx = basePath.lastIndexOf('.');
+        const segIdx = segmentFileIndex++;
+        const segPath =
+          dotIdx >= 0
+            ? `${basePath.slice(0, dotIdx)}_${segIdx}${basePath.slice(dotIdx)}`
+            : `${basePath}_${segIdx}`;
+        const segFileOptions: TtsStreamToFileOptions = {
+          ...fileOptions,
+          output: { ...fileOptions.output, path: segPath },
+        };
+
+        // Intercept file-level onEnd to forward per-segment file info.
+        const fileSegHandlers = {
+          ...segHandlers,
+          onEnd(event: Parameters<NonNullable<typeof segHandlers.onEnd>>[0]) {
+            // Notify caller about this segment's output file.
+            if (activeSegment?.id === seg.id) {
+              try {
+                (
+                  handlers as IncrementalStreamToFileHandlers
+                ).onSegmentFileEnd?.({
+                  ...(event as { cancelled: boolean; path: string; bytesWritten: number; sampleRate: number }),
+                  segmentId: seg.id,
+                });
+              } catch {
+                /* ignore */
+              }
+            }
+            segHandlers.onEnd(event);
+          },
+        };
+
         const fileCtrl = await streamingEngine.generateSpeechStreamToFile(
           seg.text,
           genOptions,
-          fileOptions,
-          segHandlers as never
+          segFileOptions,
+          fileSegHandlers as never
         );
         // Wrap into TtsStreamController shape for uniform handling
         controller = {
@@ -603,27 +655,51 @@ function createRequestSession(
     resetDebounceTimer();
   }
 
-  function commitImpl(_opts?: CommitOptions): void {
+  function commitImpl(opts?: CommitOptions): void {
     if (state === 'destroyed') {
       throw new Error('Cannot commit: request has been destroyed.');
+    }
+    if (state === 'cancelled') {
+      throw new Error('Cannot commit: request has been cancelled.');
     }
 
     clearTimers();
     if (textBuffer.length === 0) return;
 
-    const boundaries = detectBoundaries(textBuffer, segPolicy, {
-      forced: true,
-    });
-    for (const b of boundaries) {
-      enqueueText(b.text);
+    // Default: force=true (always commit the full buffer).
+    // force=false: honour the segmentation policy — only commit segments that
+    // satisfy minCharsPerSegment and other boundaries; remainder stays buffered.
+    const force = opts?.force !== false;
+    if (force) {
+      const boundaries = detectBoundaries(textBuffer, segPolicy, {
+        forced: true,
+      });
+      for (const b of boundaries) {
+        enqueueText(b.text);
+      }
+      textBuffer = '';
+    } else {
+      const boundaries = detectBoundaries(textBuffer, segPolicy);
+      for (const b of boundaries) {
+        enqueueText(b.text);
+      }
+      if (boundaries.length > 0) {
+        const last = boundaries[boundaries.length - 1];
+        if (last) {
+          textBuffer = last.remainder;
+        }
+      }
     }
-    textBuffer = '';
     scheduleDispatch();
   }
 
   async function flushImpl(): Promise<void> {
     if (state === 'destroyed') {
       throw new Error('Cannot flush: request has been destroyed.');
+    }
+    if (state === 'cancelled') {
+      // Request was already cancelled; suppress duplicate end events.
+      return;
     }
 
     clearTimers();
@@ -671,11 +747,31 @@ function createRequestSession(
     if (state === 'destroyed') return;
 
     const scope = opts?.scope ?? 'all';
+
+    // scope='queued': only drop queued segments and clear the text buffer.
+    // The active segment is intentionally left running so the native stream
+    // finishes cleanly. The request itself is NOT ended here — a subsequent
+    // flush() or cancel({ scope: 'all' }) is required to terminate it.
+    if (scope === 'queued') {
+      if (state === 'cancelled') return;
+      clearTimers();
+      textBuffer = '';
+      for (const seg of queue) {
+        emitSegment(segmentDropped(sessionId, seg.id, 'cancelled'));
+        totalDropped++;
+      }
+      queue.length = 0;
+      emitMetrics();
+      return;
+    }
+
+    // scope='active' or scope='all': end the request.
+    if (state === 'cancelled') return;
     clearTimers();
 
     let droppedCount = 0;
 
-    if (scope === 'all' || scope === 'queued') {
+    if (scope === 'all') {
       for (const seg of queue) {
         emitSegment(segmentDropped(sessionId, seg.id, 'cancelled'));
         droppedCount++;
@@ -746,7 +842,7 @@ function createRequestSession(
         return playerProxy;
       },
     };
-    return { controller };
+    return { controller, cancel: () => cancelImpl({ scope: 'all' }) };
   }
 
   const controller: IncrementalStreamFileController = {
@@ -759,5 +855,5 @@ function createRequestSession(
       return state;
     },
   };
-  return { controller };
+  return { controller, cancel: () => cancelImpl({ scope: 'all' }) };
 }

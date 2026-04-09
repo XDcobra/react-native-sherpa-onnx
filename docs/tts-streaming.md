@@ -13,7 +13,7 @@ Incremental speech generation with chunk callbacks: lower time-to-first-byte, pl
 | **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
 | **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
 | **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
-| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: false, emitChunks: true` (default) |
+| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: true, emitChunks: false` (default) |
 | **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
 | **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
 
@@ -199,7 +199,7 @@ ctrl.pushText('Today, the weather was amazing. But tomorrow, I think it will rai
 
 // commit() is done automatically internally if auto-segmentation finds a boundary
 // commit() is a force trigger: it enqueues the current buffer now, even without punctuation/timeout boundary.
-// so use it only if you need to force enqueing
+// so use it only if you need to force enqueueing
 ctrl.commit();
 
 // Wait until queue is drained
