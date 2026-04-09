@@ -486,7 +486,7 @@ export default function GenerateTimestampScreen() {
             })
           : await alignTextToAudio(text, audioPath, {
               mode: 'proportional',
-              ...(granularity === 'character' ? {} : { granularity }),
+              granularity,
             });
       setResult(subtitleResult);
     } catch (err) {

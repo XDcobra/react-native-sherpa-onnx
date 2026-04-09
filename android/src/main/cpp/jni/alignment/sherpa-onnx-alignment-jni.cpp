@@ -14,17 +14,27 @@
 namespace {
 
 bool PutDouble(JNIEnv* env, jobject map, jmethodID putId, const char* key, double value) {
-  jclass doubleClass = env->FindClass("java/lang/Double");
-  if (!doubleClass) {
-    return false;
+  // Cache the Double class global ref and valueOf method ID on first use.
+  static jclass doubleClassGlobal = nullptr;
+  static jmethodID valueOfId = nullptr;
+  if (!doubleClassGlobal) {
+    jclass local = env->FindClass("java/lang/Double");
+    if (!local) {
+      return false;
+    }
+    doubleClassGlobal = static_cast<jclass>(env->NewGlobalRef(local));
+    env->DeleteLocalRef(local);
+    if (!doubleClassGlobal) {
+      return false;
+    }
+    valueOfId = env->GetStaticMethodID(doubleClassGlobal, "valueOf", "(D)Ljava/lang/Double;");
+    if (!valueOfId) {
+      env->DeleteGlobalRef(doubleClassGlobal);
+      doubleClassGlobal = nullptr;
+      return false;
+    }
   }
-  jmethodID valueOf = env->GetStaticMethodID(doubleClass, "valueOf", "(D)Ljava/lang/Double;");
-  if (!valueOf) {
-    env->DeleteLocalRef(doubleClass);
-    return false;
-  }
-  jobject boxed = env->CallStaticObjectMethod(doubleClass, valueOf, static_cast<jdouble>(value));
-  env->DeleteLocalRef(doubleClass);
+  jobject boxed = env->CallStaticObjectMethod(doubleClassGlobal, valueOfId, static_cast<jdouble>(value));
   if (!boxed) {
     return false;
   }

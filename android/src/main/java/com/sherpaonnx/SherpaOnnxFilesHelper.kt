@@ -35,8 +35,8 @@ internal class SherpaOnnxFilesHelper(
       } ?: throw IllegalStateException("Failed to open output stream for URI: $fileUri")
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
-      Log.e(logTag, "TTS_SAVE_ERROR: Failed to save text to content URI", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to save text to content URI", e)
+      Log.e(logTag, "FILES_SAVE_ERROR: Failed to save text to content URI", e)
+      promise.reject("FILES_SAVE_ERROR", "Failed to save text to content URI", e)
     }
   }
 
@@ -53,7 +53,7 @@ internal class SherpaOnnxFilesHelper(
     try {
       val file = File(filePath)
       if (!file.isFile || !file.canRead()) {
-        promise.reject("TTS_SAVE_ERROR", "File not found or not readable: $filePath")
+        promise.reject("FILES_SAVE_ERROR", "File not found or not readable: $filePath")
         return
       }
       val resolver = context.contentResolver
@@ -66,8 +66,8 @@ internal class SherpaOnnxFilesHelper(
       }
       promise.resolve(fileUri.toString())
     } catch (e: Exception) {
-      Log.e(logTag, "TTS_SAVE_ERROR: Failed to copy file to content URI", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to copy file to content URI", e)
+      Log.e(logTag, "FILES_SAVE_ERROR: Failed to copy file to content URI", e)
+      promise.reject("FILES_SAVE_ERROR", "Failed to copy file to content URI", e)
     }
   }
 
@@ -83,8 +83,8 @@ internal class SherpaOnnxFilesHelper(
       } ?: throw IllegalStateException("Failed to open input stream for URI: $fileUri")
       promise.resolve(cacheFile.absolutePath)
     } catch (e: Exception) {
-      Log.e(logTag, "TTS_SAVE_ERROR: Failed to copy audio to cache", e)
-      promise.reject("TTS_SAVE_ERROR", "Failed to copy audio to cache", e)
+      Log.e(logTag, "FILES_SAVE_ERROR: Failed to copy audio to cache", e)
+      promise.reject("FILES_SAVE_ERROR", "Failed to copy audio to cache", e)
     }
   }
 
@@ -116,8 +116,8 @@ internal class SherpaOnnxFilesHelper(
       context.startActivity(chooser)
       promise.resolve(null)
     } catch (e: Exception) {
-      Log.e(logTag, "TTS_SHARE_ERROR: Failed to share audio", e)
-      promise.reject("TTS_SHARE_ERROR", "Failed to share audio", e)
+      Log.e(logTag, "FILES_SHARE_ERROR: Failed to share audio", e)
+      promise.reject("FILES_SHARE_ERROR", "Failed to share audio", e)
     }
   }
 }

@@ -18,7 +18,7 @@
 {
     @try {
         if ([fileUri hasPrefix:@"content://"]) {
-            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+            reject(@"FILES_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
             return;
         }
         NSString *srcPath = [fileUri hasPrefix:@"file://"]
@@ -26,7 +26,7 @@
             : fileUri;
         NSFileManager *fm = [NSFileManager defaultManager];
         if (![fm fileExistsAtPath:srcPath]) {
-            reject(@"TTS_SAVE_ERROR", @"Source file does not exist", nil);
+            reject(@"FILES_SAVE_ERROR", @"Source file does not exist", nil);
             return;
         }
         NSArray *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
@@ -35,7 +35,7 @@
         NSError *err = nil;
         [fm createDirectoryAtPath:[destPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:&err];
         if (err) {
-            reject(@"TTS_SAVE_ERROR", err.localizedDescription, err);
+            reject(@"FILES_SAVE_ERROR", err.localizedDescription, err);
             return;
         }
         if ([fm fileExistsAtPath:destPath]) {
@@ -43,13 +43,13 @@
         }
         BOOL ok = [fm copyItemAtPath:srcPath toPath:destPath error:&err];
         if (!ok || err) {
-            reject(@"TTS_SAVE_ERROR", err ? err.localizedDescription : @"Copy failed", err);
+            reject(@"FILES_SAVE_ERROR", err ? err.localizedDescription : @"Copy failed", err);
             return;
         }
         resolve(destPath);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception copying file: %@", exception.reason];
-        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
+        reject(@"FILES_SAVE_ERROR", errorMsg, nil);
     }
 }
 
@@ -60,7 +60,7 @@
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
-    reject(@"TTS_SAVE_ERROR", @"Copy file to content URI is not supported on iOS (Android SAF only)", nil);
+    reject(@"FILES_SAVE_ERROR", @"Copy file to content URI is not supported on iOS (Android SAF only)", nil);
 }
 
 - (void)saveTextToContentUri:(NSString *)text
@@ -72,7 +72,7 @@
 {
     @try {
         if ([directoryUri hasPrefix:@"content://"]) {
-            reject(@"TTS_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
+            reject(@"FILES_SAVE_ERROR", @"Content URIs are not supported on iOS", nil);
             return;
         }
 
@@ -84,7 +84,7 @@
         }
 
         if (!directoryUrl) {
-            reject(@"TTS_SAVE_ERROR", @"Invalid directory URL", nil);
+            reject(@"FILES_SAVE_ERROR", @"Invalid directory URL", nil);
             return;
         }
 
@@ -98,14 +98,14 @@
                                     error:&writeError];
 
         if (!success || writeError) {
-            reject(@"TTS_SAVE_ERROR", @"Failed to save text to file", writeError);
+            reject(@"FILES_SAVE_ERROR", @"Failed to save text to file", writeError);
             return;
         }
 
         resolve(outPath);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception saving text file: %@", exception.reason];
-        reject(@"TTS_SAVE_ERROR", errorMsg, nil);
+        reject(@"FILES_SAVE_ERROR", errorMsg, nil);
     }
 }
 
@@ -115,22 +115,26 @@
                 reject:(RCTPromiseRejectBlock)reject
 {
     @try {
+        if ([fileUri hasPrefix:@"content://"]) {
+            reject(@"FILES_SHARE_ERROR", @"Content URIs are not supported on iOS — pass a file path or file:// URL", nil);
+            return;
+        }
         NSURL *url = nil;
-        if ([fileUri hasPrefix:@"file://"] || [fileUri hasPrefix:@"content://"]) {
+        if ([fileUri hasPrefix:@"file://"]) {
             url = [NSURL URLWithString:fileUri];
         } else {
             url = [NSURL fileURLWithPath:fileUri];
         }
 
         if (!url) {
-            reject(@"TTS_SHARE_ERROR", @"Invalid file URL", nil);
+            reject(@"FILES_SHARE_ERROR", @"Invalid file URL", nil);
             return;
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             UIViewController *controller = RCTPresentedViewController();
             if (!controller) {
-                reject(@"TTS_SHARE_ERROR", @"No active view controller", nil);
+                reject(@"FILES_SHARE_ERROR", @"No active view controller", nil);
                 return;
             }
 
@@ -142,7 +146,7 @@
         });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Failed to share audio: %@", exception.reason];
-        reject(@"TTS_SHARE_ERROR", errorMsg, nil);
+        reject(@"FILES_SHARE_ERROR", errorMsg, nil);
     }
 }
 

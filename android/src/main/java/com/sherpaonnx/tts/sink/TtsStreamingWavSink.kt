@@ -3,8 +3,9 @@ package com.sherpaonnx.tts.sink
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+
+/** Maximum PCM data size that fits in a RIFF/WAV 32-bit size field (~4 GB). */
+private const val WAV_MAX_DATA_BYTES: Long = 0xFFFFFFFFL
 
 internal class TtsStreamingWavSink(
   private val path: String,
@@ -14,6 +15,9 @@ internal class TtsStreamingWavSink(
   private val out = FileOutputStream(file)
   private var dataBytes: Long = 0L
 
+  // Reusable conversion buffer; grown as needed to avoid per-chunk allocation.
+  private var convBuf = ByteArray(0)
+
   init {
     // Reserve header; patch sizes in finalizeFile().
     out.write(ByteArray(44))
@@ -21,26 +25,39 @@ internal class TtsStreamingWavSink(
 
   fun writeChunk(samples: FloatArray) {
     if (samples.isEmpty()) return
-    val bb = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+    val needed = samples.size * 2
+    if (convBuf.size < needed) {
+      convBuf = ByteArray(needed)
+    }
+    // Write 16-bit PCM little-endian directly into the reusable buffer.
+    var idx = 0
     for (f in samples) {
       val s = (f.coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
-      bb.putShort(s)
+      convBuf[idx++] = (s.toInt() and 0xFF).toByte()
+      convBuf[idx++] = ((s.toInt() ushr 8) and 0xFF).toByte()
     }
-    val bytes = bb.array()
-    out.write(bytes)
-    dataBytes += bytes.size.toLong()
+    out.write(convBuf, 0, needed)
+    dataBytes += needed.toLong()
   }
 
   fun finalizeFile(): Long {
     out.flush()
     out.close()
+
+    val chunkSize = 36L + dataBytes
+    if (chunkSize > WAV_MAX_DATA_BYTES || dataBytes > WAV_MAX_DATA_BYTES) {
+      throw IllegalStateException(
+        "WAV output exceeds 4 GB RIFF size limit (dataBytes=$dataBytes). " +
+          "Split the output into smaller files."
+      )
+    }
+
     val raf = RandomAccessFile(file, "rw")
     try {
       val channels = 1
       val bitsPerSample = 16
       val byteRate = sampleRate * channels * bitsPerSample / 8
       val blockAlign = channels * bitsPerSample / 8
-      val chunkSize = 36L + dataBytes
 
       raf.seek(0)
       raf.writeBytes("RIFF")
