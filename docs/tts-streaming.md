@@ -13,6 +13,7 @@ Incremental speech generation with chunk callbacks: lower time-to-first-byte, pl
 | **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
 | **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
 | **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
+| **Incremental text feeding** (progressive input) | `createIncrementalStreamingTTS` | `playback: false, emitChunks: true` (default) |
 | **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
 | **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
 
@@ -151,6 +152,56 @@ await ctrl.cancel().catch(() => {});
 await tts.destroy();
 ```
 
+### 4) Incremental text feeding (`createIncrementalStreamingTTS`)
+
+Use this path when text arrives progressively (chat/LLM typing).  
+The engine batches text into segments and reuses the existing streaming path internally.
+
+```ts
+import { createIncrementalStreamingTTS } from 'react-native-sherpa-onnx/tts';
+
+const inc = await createIncrementalStreamingTTS({
+  source: {
+    engineOptions: {
+      modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' },
+    },
+  },
+  // Override defaults for native playback with minimal bridge traffic
+  streamOptions: { playback: true, emitChunks: false },
+  segmentation: {
+    maxCharsPerSegment: 220,
+    minCharsPerSegment: 24,
+    maxWaitMs: 900,
+  },
+  onSessionEvent: (e) => {
+    // session:started | session:draining | session:idle | session:cancelled | session:error
+    console.log(e.type);
+  },
+  onSegmentEvent: (e) => {
+    // segment:queued | segment:started | segment:chunk | segment:ended | segment:dropped
+    if (e.type === 'segment:dropped') console.warn(e.reason);
+  },
+});
+
+// Push progressive text chunks
+inc.pushText('Hallo Michael. ');
+inc.pushText('Today, the weather was amazing. But tomorrow, I think it will rain instead. ');
+
+// Force-commit current buffer now
+inc.commit();
+
+// Wait until queue is drained
+await inc.flush();
+
+// Pause / resume during playback:
+// Incremental engine currently does not expose a per-segment controller/player handle.
+// Use createStreamingTTS + generateSpeechStream directly when runtime pause/resume is required.
+
+// Optional: cancel active + queued work
+await inc.cancel({ scope: 'all' });
+await inc.destroy();
+```
+
 **Note:** Zipvoice cloning is **not** supported in streaming on Android; Pocket cloning uses `voiceClone: { kind: 'pocket', referenceAudio: { samples, sampleRate } }`. For Zipvoice voice cloning use batch **`generateSpeech`** on the offline path — [tts-offline.md](tts-offline.md).
 
 ## Stream options (`TtsStreamOptions`)
@@ -221,6 +272,23 @@ Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline
 
 ```ts
 const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
+```
+
+### `createIncrementalStreamingTTS(options)`
+
+```ts
+function createIncrementalStreamingTTS(
+  options: IncrementalStreamingTtsOptions
+): Promise<IncrementalStreamingTtsEngine>;
+```
+
+High-level incremental layer over `StreamingTtsEngine`.  
+It handles buffering, boundary detection, queue policy, and serial dispatch.
+
+```ts
+const inc = await createIncrementalStreamingTTS({
+  source: { engineOptions: { modelPath: { type: 'asset', path: 'models/my-tts-model' } } },
+});
 ```
 
 ## Streaming engine (`StreamingTtsEngine`)
@@ -330,6 +398,60 @@ getNumSpeakers(): Promise<number>;
 destroy(): Promise<void>;
 ```
 
+## Incremental engine (`IncrementalStreamingTtsEngine`)
+
+### `inc.pushText(text)`
+
+```ts
+pushText(text: string): void;
+```
+
+Adds incremental input text to the internal buffer. Auto-segmentation may enqueue new segments.
+
+### `inc.commit(options?)`
+
+```ts
+commit(options?: CommitOptions): void;
+```
+
+Force-commits current buffer as one segment and enqueues it immediately.
+
+### `inc.flush(options?)`
+
+```ts
+flush(options?: FlushOptions): Promise<void>;
+```
+
+Commits remaining buffer and resolves when queue + active segment are finished.
+
+### `inc.cancel(options?)`
+
+```ts
+cancel(options?: CancelOptions): Promise<void>;
+```
+
+Cancels by scope:
+
+- `all` (default): active + queued
+- `active`: active only
+- `queued`: queued only
+
+### `inc.getMetrics()`
+
+```ts
+getMetrics(): IncrementalMetrics;
+```
+
+Returns a snapshot: queue depth, totals, and current active segment id.
+
+### `inc.destroy()`
+
+```ts
+destroy(): Promise<void>;
+```
+
+Cancels work, clears timers/listeners, marks the session destroyed.
+
 ## Stream controller (`TtsStreamController`)
 
 ### `controller.cancel()`
@@ -385,6 +507,23 @@ controller.unsubscribe();
 | `TtsStreamToFileHandlers` | `{ onChunk?, onEnd?: (e: TtsStreamFileEnd), onError?: (e: TtsStreamFileError) }` |
 | `TtsStreamFileController` | `cancel()`, `unsubscribe()` |
 | `ModelPathConfig` | From `react-native-sherpa-onnx` |
+
+### Incremental streaming
+
+| Type | Notes |
+| --- | --- |
+| `IncrementalStreamingTtsEngine` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `destroy` |
+| `IncrementalStreamingTtsOptions` | `{ source, segmentation?, queue?, streamOptions?, generationOptions?, onSessionEvent?, onSegmentEvent?, onMetrics? }` |
+| `IncrementalStreamingTtsSource` | `{ engine: StreamingTtsEngine }` or `{ engineOptions: TTSInitializeOptions \| ModelPathConfig }` |
+| `SegmentationPolicy` | `boundaryChars?`, `maxCharsPerSegment?`, `maxWaitMs?`, `minCharsPerSegment?`, `debounceMs?` |
+| `QueuePolicy` | `mode?`, `maxSegments?`, `maxBufferedChars?`, `overflowStrategy?` |
+| `QueueMode` | `'fifo' \| 'replace-tail' \| 'latest-wins'` |
+| `OverflowStrategy` | `'drop-oldest' \| 'drop-newest' \| 'reject'` |
+| `CommitOptions` | `{ force?: boolean }` |
+| `CancelOptions` | `{ scope?: 'all' \| 'active' \| 'queued' }` |
+| `IncrementalMetrics` | `{ queueDepth, totalSegmentsQueued, totalSegmentsCompleted, totalSegmentsDropped, totalSegmentsReplaced, activeSegmentId }` |
+| `SessionEvent` | `session:started`, `session:idle`, `session:draining`, `session:cancelled`, `session:error` |
+| `SegmentEvent` | `segment:queued`, `segment:started`, `segment:chunk`, `segment:ended`, `segment:dropped` |
 
 ### Init, update, generation
 
