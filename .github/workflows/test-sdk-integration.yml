@@ -156,12 +156,154 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  # Expo + development client: matches how many apps integrate native modules (expo run:android).
+  # Pinned template follows Expo SDK 54 (React Native ~0.81); bump @sdk-NN when raising CI target.
+  test-integration-android-expo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      JAVA_VERSION: '17'
+
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v6
+        with:
+          path: react-native-sherpa-onnx
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: react-native-sherpa-onnx/.nvmrc
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK
+        id: setup-ndk-expo
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+          local-cache: false
+
+      - name: Start Local NPM Registry (Verdaccio)
+        run: |
+          npm install -g verdaccio wait-on --registry https://registry.npmjs.org/
+
+          PASS_HASH=$(echo -n "ci-password" | openssl dgst -sha1 -binary | openssl base64)
+          echo "ci-user:{SHA}${PASS_HASH}" > ./htpasswd
+
+          cat << 'CONF' > verdaccio-config.yaml
+          storage: ./storage
+          auth:
+            htpasswd:
+              file: ./htpasswd
+              max_users: -1
+          uplinks:
+            npmjs:
+              url: https://registry.npmjs.org/
+          packages:
+            '@*/*':
+              access: $all
+              publish: $authenticated
+              proxy: npmjs
+            '**':
+              access: $all
+              publish: $authenticated
+              proxy: npmjs
+          CONF
+
+          verdaccio --config verdaccio-config.yaml --listen 4873 &
+          wait-on http://localhost:4873/-/ping
+
+          AUTH_BASE64=$(echo -n 'ci-user:ci-password' | base64)
+          cat > ~/.npmrc << NPMRC
+          registry=http://localhost:4873/
+          always-auth=true
+          //localhost:4873/:_auth=${AUTH_BASE64}
+          //localhost:4873/:email=ci@example.com
+          NPMRC
+
+          npm whoami --registry http://localhost:4873
+
+      - name: Build and Publish SDK to Local Registry
+        working-directory: react-native-sherpa-onnx
+        run: |
+          yarn install
+          yarn prepare
+
+          npm version prerelease --preid ci --no-git-tag-version
+
+          node -e "const p=require('./package.json'); p.publishConfig={registry:'http://localhost:4873/'}; require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+          npm publish --registry http://localhost:4873
+
+          npm view react-native-sherpa-onnx version --registry http://localhost:4873
+
+      - name: Initialize Fresh Expo App (dev-client workflow)
+        run: |
+          CI=1 npx create-expo-app@latest TestExpoProject --template blank-typescript@sdk-54 --yes
+
+      - name: Install dev client, SDK, and peers in TestExpoProject
+        working-directory: TestExpoProject
+        run: |
+          npm config set registry http://localhost:4873/
+          npm install
+          npx expo install expo-dev-client
+          npm install react-native-sherpa-onnx
+
+      - name: Generate native Android project (expo prebuild)
+        working-directory: TestExpoProject
+        env:
+          CI: '1'
+        run: |
+          npx expo prebuild --platform android --clean
+
+      - name: Build Android App in TestExpoProject
+        working-directory: TestExpoProject/android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew wrapper --gradle-version 8.13
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testexpo-build-android.log
+          GRADLE_EXIT=${PIPESTATUS[0]}
+          if [ "$GRADLE_EXIT" -ne 0 ]; then
+            echo "::error::Expo Android Build Failed"
+            exit "$GRADLE_EXIT"
+          fi
+
+      - name: Upload Expo Android Logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: testexpo-android-build-logs
+          path: /tmp/testexpo-build-android.log
+
+      - name: Upload Expo APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: testexpo-release-apk
+          path: TestExpoProject/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
+          if-no-files-found: error
+
   test-integration-ios:
     runs-on: macos-latest
     timeout-minutes: 60
 
     env:
-      XCODE_VERSION: 15.4
+      XCODE_VERSION: '15.4'
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
