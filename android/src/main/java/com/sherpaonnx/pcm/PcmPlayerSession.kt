@@ -40,6 +40,8 @@ internal class PcmPlayerSession(
   /** Enqueue float PCM. Shared by JS writes and native producers. */
   fun enqueueMonoFloat32(samples: FloatArray) {
     if (destroyed || samples.isEmpty()) return
+    // Defensive copy: the same FloatArray may be passed to multiple consumers
+    // (e.g., WAV sink + enqueueFromNative + coalescer) in the TTS callback path.
     queue.put(samples.copyOf())
   }
 

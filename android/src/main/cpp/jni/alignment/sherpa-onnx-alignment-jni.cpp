@@ -4,6 +4,7 @@
 
 #include <jni.h>
 
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -14,25 +15,33 @@
 namespace {
 
 bool PutDouble(JNIEnv* env, jobject map, jmethodID putId, const char* key, double value) {
-  // Cache the Double class global ref and valueOf method ID on first use.
+  // Thread-safe one-time initialization of the cached Double class ref and valueOf ID.
+  static std::once_flag initFlag;
   static jclass doubleClassGlobal = nullptr;
   static jmethodID valueOfId = nullptr;
-  if (!doubleClassGlobal) {
+  static bool initOk = false;
+
+  std::call_once(initFlag, [&env]() {
     jclass local = env->FindClass("java/lang/Double");
     if (!local) {
-      return false;
+      return;
     }
     doubleClassGlobal = static_cast<jclass>(env->NewGlobalRef(local));
     env->DeleteLocalRef(local);
     if (!doubleClassGlobal) {
-      return false;
+      return;
     }
     valueOfId = env->GetStaticMethodID(doubleClassGlobal, "valueOf", "(D)Ljava/lang/Double;");
     if (!valueOfId) {
       env->DeleteGlobalRef(doubleClassGlobal);
       doubleClassGlobal = nullptr;
-      return false;
+      return;
     }
+    initOk = true;
+  });
+
+  if (!initOk || !doubleClassGlobal || !valueOfId) {
+    return false;
   }
   jobject boxed = env->CallStaticObjectMethod(doubleClassGlobal, valueOfId, static_cast<jdouble>(value));
   if (!boxed) {
