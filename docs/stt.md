@@ -20,7 +20,6 @@ Offline speech recognition: transcribe audio files or float PCM samples using on
 - [Model-Specific Options](#model-specific-options)
   - [Supported Model Types (File Patterns)](#supported-model-types-file-patterns)
   - [Validation (Required Files)](#validation-required-files)
-  - [Model Language Helpers](#model-language-helpers)
 - [Detailed Examples](#detailed-examples)
 - [Troubleshooting & Tuning](#troubleshooting--tuning)
 - [Native Bridge Mapping](#native-bridge-mapping)
@@ -119,10 +118,12 @@ function detectSttModel(
   isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
+  /** When `success` is `true` and the model kind is known: `{ iso6391Hint, id }` rows (coarse tag vs `modelOptions` value); not parsed from filenames. */
+  languages?: { iso6391Hint: string; id: string }[];
 }>;
 ```
 
-Detect model type without loading. Includes required-files validation.
+Detect model type without loading. Includes required-files validation. **`languages`** summarizes curated spoken-language hints for known kinds (e.g. Whisper); omitted when the detected kind has no SDK list.
 
 When `success` is `false`, check **`error`** for the native explanation (show it in your UI); if `error` is absent, treat as an unknown detect/validation failure. **`isHardwareSpecificUnsupported`** is set when native reports hardware-specific models the runtime cannot use.
 
@@ -194,11 +195,6 @@ import {
   STT_MODEL_TYPES,
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
-  getWhisperLanguages,
-  getSenseVoiceLanguages,
-  getCanaryLanguages,
-  getFunasrNanoLanguages,
-  getFunasrMltNanoLanguages,
 } from 'react-native-sherpa-onnx/stt';
 
 import type {
@@ -209,9 +205,10 @@ import type {
   SttRuntimeConfig,
   SttEngine,
   SttInitResult,
-  SttModelLanguage,
 } from 'react-native-sherpa-onnx/stt';
 ```
+
+Language list helpers and `ModelLanguage` live in **[model-languages.md](model-languages.md)** (`react-native-sherpa-onnx/model-languages`).
 
 ---
 
@@ -263,30 +260,6 @@ Example: `STT Transducer: missing required files in /data/models/zipformer: enco
 
 This runs automatically in both `detectSttModel()` and `createSTT()`.
 
-### Model Language Helpers
-
-Several models accept a language hint. The SDK provides per-model lists of valid codes with display names so you can build dropdowns.
-
-| Model | Getter | Use For |
-| --- | --- | --- |
-| Whisper | `getWhisperLanguages()` | `modelOptions.whisper.language` |
-| SenseVoice | `getSenseVoiceLanguages()` | `modelOptions.senseVoice.language` |
-| Canary | `getCanaryLanguages()` | `modelOptions.canary.srcLang` / `tgtLang` |
-| FunASR Nano | `getFunasrNanoLanguages()` | `modelOptions.funasrNano.language` |
-| FunASR MLT Nano | `getFunasrMltNanoLanguages()` | `modelOptions.funasrNano.language` |
-| Cohere Transcribe (14-lang) | `getCohereTranscribeLanguages()` | `modelOptions.cohereTranscribe.language` |
-| Qwen3 ASR | `getQwen3AsrLanguages()` | Informational / UI only — `SttQwen3AsrModelOptions` has no language field in this SDK. |
-| Dolphin (multilingual) | `getDolphinInfoLanguages()` | Informational / UI only — not used in `modelOptions` (no language hint in sherpa-onnx; see [k2-fsa/sherpa-onnx#2293](https://github.com/k2-fsa/sherpa-onnx/issues/2293)). |
-
-Each returns `{ id: string; name: string }[]`. For models with a **Use For** `modelOptions` path, use `id` for the option and `name` for display. For Dolphin, `id` values are Language–Region tags (e.g. `zh-cn`, `ct-hk`); they are metadata for apps only and are not passed to the native recognizer.
-
-```typescript
-import { getWhisperLanguages } from 'react-native-sherpa-onnx/stt';
-
-const languages = getWhisperLanguages();
-// languages[0] => { id: 'en', name: 'english' }
-```
-
 ---
 
 ## Detailed Examples
@@ -316,6 +289,8 @@ for (const m of models.filter(m => m.hint === 'stt')) {
 ```
 
 ### Whisper with language selection
+
+Use codes your checkpoint actually supports (see the model’s documentation). Optional UI lists: [model-languages.md](model-languages.md).
 
 ```typescript
 import { createSTT, getWhisperLanguages } from 'react-native-sherpa-onnx/stt';
@@ -404,6 +379,7 @@ The JS layer normalizes results via `normalizeSttResult()` so arrays and strings
 
 ## See Also
 
+- [Model language helpers](model-languages.md) — `ModelLanguage`, list getters, `resolvePublicLanguageHints`
 - [Streaming STT](stt-streaming.md) — Real-time recognition with partial results
 - [PCM Live Stream](pcm-live-stream.md) — Microphone capture for streaming STT
 - [Hotwords](hotwords.md) — Contextual biasing for transducer models

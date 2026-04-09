@@ -8,13 +8,15 @@
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],
       "react-native-sherpa-onnx/stt": ["../src/stt/index.ts"],
+      "react-native-sherpa-onnx/model-languages": ["../src/model-languages/index.ts"],
       "react-native-sherpa-onnx/tts": ["../src/tts/index.ts"],
       "react-native-sherpa-onnx/vad": ["../src/vad/index.ts"],
       "react-native-sherpa-onnx/diarization": ["../src/diarization/index.ts"],
       "react-native-sherpa-onnx/enhancement": ["../src/enhancement/index.ts"],
       "react-native-sherpa-onnx/separation": ["../src/separation/index.ts"],
       "react-native-sherpa-onnx/extraction": ["../src/extraction/index.ts"],
-      "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"]
+      "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"],
+      "react-native-sherpa-onnx/files": ["../src/files/index.ts"]
     }
   },
   "include": ["src/**/*"]

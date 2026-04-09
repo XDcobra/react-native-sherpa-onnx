@@ -32,8 +32,8 @@ import {
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
-  saveAudioToFile,
-  saveAudioToContentUri,
+  saveAudioFromPCM,
+  type GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
 import {
   getAssetModelPath,
@@ -110,10 +110,20 @@ export default function EnhancementScreen() {
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   /** Path of the input file used for the last successful run (for playback). */
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
-  const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [lastEnhancedAudio, setLastEnhancedAudio] =
+    useState<GeneratedAudio | null>(null);
+  const buildGeneratedAudio = (
+    samples: number[],
+    sampleRate: number
+  ): GeneratedAudio => ({
+    sampleRate,
+    numSamples: samples.length,
+    generation: 0,
+    async getSamples(): Promise<Float32Array> {
+      return Float32Array.from(samples);
+    },
+  });
+
   const [saving, setSaving] = useState(false);
 
   const engineRef = useRef<EnhancementEngine | null>(null);
@@ -159,7 +169,7 @@ export default function EnhancementScreen() {
   };
 
   const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.samples.length) {
+    if (!lastEnhancedAudio?.numSamples) {
       Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
       return;
     }
@@ -170,10 +180,17 @@ export default function EnhancementScreen() {
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       if (directoryUri) {
-        const savedUri = await saveAudioToContentUri(
-          lastEnhancedAudio,
-          directoryUri,
-          filename
+        const savedUri = await saveAudioFromPCM(
+          {
+            samples: await lastEnhancedAudio.getSamples(),
+            sampleRate: lastEnhancedAudio.sampleRate,
+          },
+          {
+            kind: 'androidContent',
+            directoryUri,
+            filename,
+          },
+          { format: 'wav' }
         );
         Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(savedUri)}`);
         return;
@@ -188,7 +205,14 @@ export default function EnhancementScreen() {
       }
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      await saveAudioToFile(lastEnhancedAudio, filePath);
+      await saveAudioFromPCM(
+        {
+          samples: await lastEnhancedAudio.getSamples(),
+          sampleRate: lastEnhancedAudio.sampleRate,
+        },
+        { kind: 'file', path: filePath },
+        { format: 'wav' }
+      );
       Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -446,11 +470,18 @@ export default function EnhancementScreen() {
       const sr = enhanced.sampleRate;
       const sec = sr > 0 ? (n / sr).toFixed(2) : '?';
       const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-      const audioForFile = {
-        samples: Array.from(enhanced.samples),
-        sampleRate: sr,
-      };
-      await saveAudioToFile(audioForFile, outPath);
+      const audioForFile = buildGeneratedAudio(
+        Array.from(enhanced.samples),
+        sr
+      );
+      await saveAudioFromPCM(
+        {
+          samples: await audioForFile.getSamples(),
+          sampleRate: audioForFile.sampleRate,
+        },
+        { kind: 'file', path: outPath },
+        { format: 'wav' }
+      );
       setOutputWavPath(outPath);
       setLastInputPath(inputPath);
       setLastEnhancedAudio(audioForFile);

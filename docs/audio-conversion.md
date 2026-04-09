@@ -87,7 +87,7 @@ Pick file --> copy to cache --> validate --> convert to 16 kHz WAV if non-WAV --
 ```ts
 import * as DocumentPicker from '@react-native-documents/picker';
 import { convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts';
+import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
 import { CachesDirectoryPath, copyFile, stat, unlink } from '@dr.pogodin/react-native-fs';
 
 // 1. Pick audio file
@@ -136,29 +136,28 @@ try {
 
 ## TTS save example
 
-For saving TTS audio as MP3 or FLAC to a content URI on Android: generate WAV --> convert to target format --> copy to destination. See [TTS documentation](tts.md#saving-mp3flac-to-content-uri-android) for the full save flow and `copyFileToContentUri`.
+**Recommended:** encode and write in one step with **`saveAudioFromGeneration`** (native PCM → codec; no app-managed WAV temp file).
 
 ```ts
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
-import { saveAudioToFile, copyFileToContentUri } from 'react-native-sherpa-onnx/tts';
-import { CachesDirectoryPath, unlink } from '@dr.pogodin/react-native-fs';
+import { CachesDirectoryPath } from '@dr.pogodin/react-native-fs';
+import { saveAudioFromGeneration } from 'react-native-sherpa-onnx/tts';
 
-const tempWav = `${CachesDirectoryPath}/tts_${Date.now()}.wav`;
-const tempMp3 = `${CachesDirectoryPath}/tts_${Date.now()}.mp3`;
+// Android SAF — MP3 (requires FFmpeg)
+const savedUri = await saveAudioFromGeneration(
+  audio,
+  { kind: 'androidContent', directoryUri, filename: 'output.mp3' },
+  { format: 'mp3' }
+);
 
-// 1. Save TTS audio as WAV
-await saveAudioToFile(audio, tempWav);
-
-// 2. Convert to MP3
-await convertAudioToFormat(tempWav, tempMp3, 'mp3');
-
-// 3. Copy to user-selected folder (content URI)
-const savedUri = await copyFileToContentUri(tempMp3, directoryUri, 'output.mp3', 'audio/mpeg');
-
-// 4. Cleanup
-await unlink(tempWav).catch(() => {});
-await unlink(tempMp3).catch(() => {});
+// Local file — FLAC
+const path = await saveAudioFromGeneration(
+  audio,
+  { kind: 'file', path: `${CachesDirectoryPath}/out.flac` },
+  { format: 'flac' }
+);
 ```
+
+**Alternative (still valid):** file-based pipeline using `react-native-sherpa-onnx/audio` — save WAV, `convertAudioToFormat`, then `copyFileToContentUri` from [`react-native-sherpa-onnx/files`](files.md) for SAF. See [TTS offline — Persistence](tts-offline.md#persistence--sharing).
 
 ## Disabling FFmpeg (Android)
 

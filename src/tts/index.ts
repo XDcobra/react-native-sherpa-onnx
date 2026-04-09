@@ -1,91 +1,45 @@
-import { unlink } from '@dr.pogodin/react-native-fs';
+import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type {
-  TTSInitializeOptions,
-  TTSModelType,
-  TtsModelOptions,
-  TtsUpdateOptions,
-  TtsGenerationOptions,
-  GeneratedAudio,
-  GeneratedAudioWithTimestamps,
-  TTSModelInfo,
-  TtsEngine,
+import type { PcmPlayer } from '../pcm/types';
+import {
+  isTtsModelType,
+  type TTSInitializeOptions,
+  type TTSModelType,
+  type TtsModelOptions,
+  type TtsUpdateOptions,
+  type TtsGenerationOptions,
+  type GeneratedAudio,
+  type GeneratedAudioWithTimestamps,
+  type TTSModelInfo,
+  type TtsEngine,
+  type SaveAudioTarget,
+  type SaveAudioOptions,
+  type SaveAudioFromPcmInput,
+  type PlayFromSinkOptions,
+  type TtsBatchPlaybackController,
 } from './types';
+import {
+  isDetectionSource,
+  type DetectionSource,
+  type TtsDetectModelResult,
+  type DetectedModelEntry,
+} from '../types/modelDetect';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
-  assertSubtitleGranularityForMode,
-  generateSubtitlesFromAudio,
-} from './subtitles';
-import { saveAlignmentAudioToTempWav } from './tempAudio';
+  alignTextToTtsSink,
+  assertAlignmentGranularityForMode,
+} from '../alignment';
+import {
+  expandTtsInitializeOptions,
+  expandTtsUpdateOptions,
+  flattenTtsModelOptionsForNative,
+  toNativeTtsGenerationOptions,
+} from './ttsNativeBridge';
+import { resolvePublicLanguageHints } from '../model-languages';
+import { ModelCategory } from '../download/types';
 
 let ttsInstanceCounter = 0;
-
-/**
- * Flatten model-specific options for the given model type to native init/update params.
- * When modelType is 'auto' or missing, returns undefined for all (native uses defaults).
- */
-function flattenTtsModelOptionsForNative(
-  modelType: TTSModelType | undefined,
-  modelOptions: TtsModelOptions | undefined
-): {
-  noiseScale: number | undefined;
-  noiseScaleW: number | undefined;
-  lengthScale: number | undefined;
-} {
-  if (
-    !modelOptions ||
-    !modelType ||
-    modelType === 'auto' ||
-    modelType === 'zipvoice' // Zipvoice does not use noise/length scale; native uses its own defaults
-  )
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const block =
-    modelType === 'vits'
-      ? modelOptions.vits
-      : modelType === 'matcha'
-      ? modelOptions.matcha
-      : modelType === 'kokoro'
-      ? modelOptions.kokoro
-      : modelType === 'kitten'
-      ? modelOptions.kitten
-      : modelType === 'pocket'
-      ? modelOptions.pocket
-      : modelType === 'supertonic'
-      ? modelOptions.supertonic
-      : undefined;
-  if (!block)
-    return {
-      noiseScale: undefined,
-      noiseScaleW: undefined,
-      lengthScale: undefined,
-    };
-  const out: {
-    noiseScale: number | undefined;
-    noiseScaleW: number | undefined;
-    lengthScale: number | undefined;
-  } = {
-    noiseScale: undefined,
-    noiseScaleW: undefined,
-    lengthScale: undefined,
-  };
-  const n = block as {
-    noiseScale?: number;
-    noiseScaleW?: number;
-    lengthScale?: number;
-  };
-  if (n.noiseScale !== undefined && typeof n.noiseScale === 'number')
-    out.noiseScale = n.noiseScale;
-  if (n.noiseScaleW !== undefined && typeof n.noiseScaleW === 'number')
-    out.noiseScaleW = n.noiseScaleW;
-  if (n.lengthScale !== undefined && typeof n.lengthScale === 'number')
-    out.lengthScale = n.lengthScale;
-  return out;
-}
 
 /**
  * Detect TTS model type and structure without initializing the engine.
@@ -94,7 +48,11 @@ function flattenTtsModelOptionsForNative(
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional modelType (default: 'auto')
- * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional error when success is false, and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
+ * @returns Object with success, detectedModels (array of { type, modelDir }),
+ * modelType (primary detected type, narrowed to known `TTSModelType` literals),
+ * optional error when success is false, optionally lexiconLanguageCandidates
+ * (from lexicon files for Kokoro/Kitten), and optionally **languages**, **quantization**, **sizeTier**
+ * (`languages`: normalized primary tags, mostly ISO 639-1 from folder/catalog heuristics plus optional SDK hints when empty — not lexicon keys)
  * @example
  * ```typescript
  * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
@@ -107,71 +65,64 @@ function flattenTtsModelOptionsForNative(
 export async function detectTtsModel(
   modelPath: ModelPathConfig,
   options?: { modelType?: TTSModelType }
-): Promise<{
-  success: boolean;
-  /** Native validation/detect failure (e.g. missing lexicon for Zipvoice). */
-  error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-  /** Language ids from detected lexicon files ("default" for lexicon.txt, or e.g. "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten; use for language selection UI. */
-  lexiconLanguageCandidates?: string[];
-}> {
+): Promise<TtsDetectModelResult> {
   const resolvedPath = await resolveModelPath(modelPath);
-  const raw = await SherpaOnnx.detectTtsModel(resolvedPath, options?.modelType);
+  const raw = await SherpaOnnx.detectTtsModel(
+    resolvedPath,
+    null,
+    options?.modelType ?? null
+  );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
+    (m) => ({
+      type: m.type,
+      modelDir: m.modelDir,
+    })
+  );
+  const detectionSources: DetectionSource[] = [];
+  const rawSources = raw.detectionSources;
+  if (Array.isArray(rawSources)) {
+    for (const s of rawSources) {
+      if (typeof s === 'string' && isDetectionSource(s)) {
+        detectionSources.push(s);
+      }
+    }
+  }
+  const modelType =
+    typeof raw.modelType === 'string' && isTtsModelType(raw.modelType)
+      ? raw.modelType
+      : undefined;
+  const rawLanguageStrings =
+    Array.isArray(raw.languages) && raw.languages.length > 0
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
+      : [];
+  const resolvedLanguages = resolvePublicLanguageHints({
+    domain: ModelCategory.Tts,
+    modelType,
+    rawFromNative: rawLanguageStrings,
+  });
+  const quantization =
+    typeof raw.quantization === 'string' && raw.quantization.length > 0
+      ? raw.quantization
+      : undefined;
+  const sizeTier =
+    typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
+      ? raw.sizeTier
+      : undefined;
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
-    detectedModels: raw.detectedModels ?? [],
-    ...(raw.modelType != null && raw.modelType !== ''
-      ? { modelType: raw.modelType }
-      : {}),
+    detectedModels,
+    ...(modelType != null ? { modelType } : {}),
     ...(raw.lexiconLanguageCandidates != null &&
     raw.lexiconLanguageCandidates.length > 0
       ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
       : {}),
+    ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
+    ...(quantization != null ? { quantization } : {}),
+    ...(sizeTier != null ? { sizeTier } : {}),
+    ...(detectionSources.length > 0 ? { detectionSources } : {}),
   };
-}
-
-/**
- * Convert TtsGenerationOptions to a flat object for the native bridge.
- * Flattens referenceAudio { samples, sampleRate } to referenceAudio array + referenceSampleRate.
- */
-function toNativeTtsOptions(
-  options?: TtsGenerationOptions
-): Record<string, unknown> {
-  if (options == null) return {};
-  const out: Record<string, unknown> = {};
-  if (options.sid !== undefined) out.sid = options.sid;
-  if (options.speed !== undefined) out.speed = options.speed;
-  if (options.silenceScale !== undefined)
-    out.silenceScale = options.silenceScale;
-  if (options.referenceAudio != null) {
-    const sr = options.referenceAudio.sampleRate;
-    if (
-      typeof __DEV__ !== 'undefined' &&
-      __DEV__ &&
-      (!Number.isFinite(sr) || sr <= 0)
-    ) {
-      console.warn(
-        '[react-native-sherpa-onnx] TTS referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
-      );
-    }
-    out.referenceAudio = options.referenceAudio.samples;
-    out.referenceSampleRate = options.referenceAudio.sampleRate;
-  }
-  if (options.referenceText !== undefined)
-    out.referenceText = options.referenceText;
-  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
-  if (options.extra != null && Object.keys(options.extra).length > 0)
-    out.extra = options.extra;
-  if (options.subtitles?.mode !== undefined) {
-    out.subtitleMode = options.subtitles.mode;
-  }
-  if (options.subtitles?.granularity !== undefined) {
-    out.subtitleGranularity = options.subtitles.granularity;
-  }
-  return out;
 }
 
 // TTS stream events are sent from native via sendEventWithName; use DeviceEventEmitter
@@ -209,16 +160,17 @@ export async function createTTS(
   let silenceScale: number | undefined;
 
   if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    modelType = options.modelType;
-    provider = options.provider;
-    numThreads = options.numThreads;
-    debug = options.debug;
-    modelOptions = options.modelOptions;
-    ruleFsts = options.ruleFsts;
-    ruleFars = options.ruleFars;
-    maxNumSentences = options.maxNumSentences;
-    silenceScale = options.silenceScale;
+    const expanded = expandTtsInitializeOptions(options);
+    modelPath = expanded.modelPath;
+    modelType = expanded.modelType;
+    provider = expanded.provider;
+    numThreads = expanded.numThreads;
+    debug = expanded.debug;
+    modelOptions = expanded.modelOptions;
+    ruleFsts = expanded.ruleFsts;
+    ruleFars = expanded.ruleFars;
+    maxNumSentences = expanded.maxNumSentences;
+    silenceScale = expanded.silenceScale;
   } else {
     modelPath = options;
     modelType = undefined;
@@ -290,16 +242,26 @@ export async function createTTS(
       guard();
       const optionsWithSubtitlesOff: TtsGenerationOptions = {
         ...(opts ?? {}),
-        subtitles: {
-          ...(opts?.subtitles ?? {}),
-          mode: 'off',
-        },
+        subtitles: { mode: 'off' },
       };
-      return SherpaOnnx.generateTts(
+      const raw = await SherpaOnnx.generateTts(
         instanceId,
         text,
-        toNativeTtsOptions(optionsWithSubtitlesOff)
+        toNativeTtsGenerationOptions(optionsWithSubtitlesOff)
       );
+      return {
+        sampleRate: raw.sampleRate,
+        numSamples: raw.numSamples,
+        generation: raw.generation,
+        _instanceId: instanceId,
+        async getSamples(): Promise<Float32Array> {
+          const samplesResult = await SherpaOnnx.getTtsSamples(
+            instanceId,
+            raw.generation
+          );
+          return new Float32Array(samplesResult.samples);
+        },
+      } as GeneratedAudio;
     },
 
     async generateSpeechWithTimestamps(
@@ -307,103 +269,146 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
-      const subtitleMode = opts?.subtitles?.mode ?? 'fast';
-      const subtitleGranularity = opts?.subtitles?.granularity ?? 'sentence';
+      const subs = opts?.subtitles;
+      const subtitleMode = subs?.mode ?? 'proportional';
+      const subtitleGranularity = subs?.granularity ?? 'sentence';
 
-      assertSubtitleGranularityForMode(subtitleMode, subtitleGranularity);
+      if (subtitleMode !== 'off') {
+        assertAlignmentGranularityForMode(
+          subtitleMode === 'accurate' ? 'aligned' : subtitleMode,
+          subtitleGranularity
+        );
+      }
 
-      if (subtitleMode !== 'accurate') {
-        const optionsWithDefaultSubtitleMode: TtsGenerationOptions = {
-          ...(opts ?? {}),
-          subtitles: {
-            ...(opts?.subtitles ?? {}),
-            mode: subtitleMode,
+      // Helper to build a GeneratedAudio object from native metadata
+      const buildAudio = (raw: {
+        sampleRate: number;
+        numSamples: number;
+        generation: number;
+      }): GeneratedAudio =>
+        ({
+          sampleRate: raw.sampleRate,
+          numSamples: raw.numSamples,
+          generation: raw.generation,
+          _instanceId: instanceId,
+          async getSamples(): Promise<Float32Array> {
+            const samplesResult = await SherpaOnnx.getTtsSamples(
+              instanceId,
+              raw.generation
+            );
+            return new Float32Array(samplesResult.samples);
           },
-        };
+        } as GeneratedAudio);
 
-        const native = await SherpaOnnx.generateTtsWithTimestamps(
+      if (subtitleMode === 'off') {
+        const raw = await SherpaOnnx.generateTts(
           instanceId,
           text,
-          toNativeTtsOptions(optionsWithDefaultSubtitleMode)
+          toNativeTtsGenerationOptions({
+            ...(opts ?? {}),
+            subtitles: { mode: 'off' },
+          })
         );
-
-        const timingMode =
-          native.timingMode === 'off' ||
-          native.timingMode === 'estimated' ||
-          native.timingMode === 'aligned'
-            ? native.timingMode
-            : 'off';
-
-        return {
-          ...native,
-          timingMode,
-        };
+        return { ...buildAudio(raw), subtitles: [], timingMode: 'off' };
       }
 
-      const alignmentModelPath = opts?.subtitles?.alignmentModelPath?.trim();
+      const nonAccurateGranularity =
+        subtitleGranularity === 'character' ? 'sentence' : subtitleGranularity;
 
-      if (!alignmentModelPath) {
-        throw new Error(
-          'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
-        );
-      }
-
-      const optionsWithSubtitlesOff: TtsGenerationOptions = {
-        ...(opts ?? {}),
-        subtitles: {
-          ...(opts?.subtitles ?? {}),
-          mode: 'off',
-        },
-      };
-
-      const generated = await SherpaOnnx.generateTts(
-        instanceId,
-        text,
-        toNativeTtsOptions(optionsWithSubtitlesOff)
-      );
-
-      let tempAudioPath: string | null = null;
-      try {
-        tempAudioPath = await saveAlignmentAudioToTempWav(
-          generated,
-          instanceId
-        );
-        const subtitleResult = await generateSubtitlesFromAudio(
+      if (subtitleMode === 'estimated') {
+        const raw = await SherpaOnnx.generateTtsWithTimestamps(
+          instanceId,
           text,
-          tempAudioPath,
-          {
-            mode: 'accurate',
-            granularity: subtitleGranularity,
-            alignmentModelPath,
-          }
+          toNativeTtsGenerationOptions({
+            ...(opts ?? {}),
+            subtitles: {
+              mode: 'estimated',
+              granularity: nonAccurateGranularity,
+            },
+          })
         );
+        const counts = raw.segmentSampleCounts?.map((n) => Number(n));
+        if (!counts || counts.length === 0) {
+          throw new Error(
+            'TTS_CHUNK_TIMELINE: native did not return segmentSampleCounts for estimated subtitle mode.'
+          );
+        }
 
+        const audio = buildAudio(raw);
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'estimated',
+          chunks: {
+            sampleRate: raw.sampleRate,
+            segmentSampleCounts: counts,
+          },
+          granularity: nonAccurateGranularity,
+        });
         return {
-          ...generated,
+          ...audio,
           subtitles: subtitleResult.subtitles,
           timingMode: subtitleResult.timingMode,
         };
-      } finally {
-        if (tempAudioPath) {
-          unlink(tempAudioPath).catch(() => {
-            // ignore cleanup errors
-          });
-        }
       }
+
+      const raw = await SherpaOnnx.generateTts(
+        instanceId,
+        text,
+        toNativeTtsGenerationOptions({
+          ...(opts ?? {}),
+          subtitles: { mode: 'off' },
+        })
+      );
+      const audio = buildAudio(raw);
+
+      if (subtitleMode === 'accurate') {
+        const alignmentModelPath = subs?.alignmentModelPath?.trim() ?? '';
+        if (!alignmentModelPath) {
+          throw new Error(
+            'ALIGNMENT_MODEL_MISSING: Provide subtitles.alignmentModelPath for accurate mode.'
+          );
+        }
+
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'accurate',
+          granularity: subtitleGranularity,
+          alignmentModelPath,
+        });
+
+        return {
+          ...audio,
+          subtitles: subtitleResult.subtitles,
+          timingMode: subtitleResult.timingMode,
+        };
+      }
+
+      if (subtitleMode === 'proportional') {
+        const subtitleResult = await alignTextToTtsSink(text, audio, {
+          mode: 'proportional',
+          granularity: nonAccurateGranularity,
+        });
+        return {
+          ...audio,
+          subtitles: subtitleResult.subtitles,
+          timingMode: subtitleResult.timingMode,
+        };
+      }
+
+      throw new Error(`Unsupported subtitles.mode: ${String(subtitleMode)}`);
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
       success: boolean;
-      detectedModels: Array<{ type: string; modelDir: string }>;
+      detectedModels: DetectedModelEntry[];
     }> {
       guard();
+      const expanded = expandTtsUpdateOptions(opts);
       const effectiveModelTypeForUpdate =
-        opts.modelType && opts.modelType !== 'auto'
-          ? opts.modelType
+        expanded.modelType && expanded.modelType !== 'auto'
+          ? expanded.modelType
           : effectiveModelType;
       const flatOpts = flattenTtsModelOptionsForNative(
         effectiveModelTypeForUpdate,
-        opts.modelOptions
+        expanded.modelOptions
       );
       const noiseArg =
         flatOpts.noiseScale === undefined ? Number.NaN : flatOpts.noiseScale;
@@ -411,12 +416,19 @@ export async function createTTS(
         flatOpts.noiseScaleW === undefined ? Number.NaN : flatOpts.noiseScaleW;
       const lengthArg =
         flatOpts.lengthScale === undefined ? Number.NaN : flatOpts.lengthScale;
-      return SherpaOnnx.updateTtsParams(
+      const raw = await SherpaOnnx.updateTtsParams(
         instanceId,
         noiseArg,
         noiseWArg,
         lengthArg
       );
+      return {
+        success: raw.success,
+        detectedModels: (raw.detectedModels ?? []).map((m) => ({
+          type: m.type,
+          modelDir: m.modelDir,
+        })),
+      };
     },
 
     async getModelInfo(): Promise<TTSModelInfo> {
@@ -438,6 +450,51 @@ export async function createTTS(
       return SherpaOnnx.getTtsNumSpeakers(instanceId);
     },
 
+    async playFromSink(
+      generation: number,
+      playOptions?: PlayFromSinkOptions
+    ): Promise<TtsBatchPlaybackController> {
+      guard();
+      const { playerId } = await SherpaOnnx.playTtsFromSink(
+        instanceId,
+        generation,
+        playOptions?.sampleRate ?? 0
+      );
+      let playerDestroyed = false;
+      const pid = playerId;
+      const player: PcmPlayer = {
+        get playerId() {
+          return pid;
+        },
+        get feed() {
+          return 'native' as const;
+        },
+        async writePcmChunk(): Promise<void> {
+          throw new Error(
+            `PcmPlayer ${pid} has feed 'native'; writePcmChunk() is not allowed from JS.`
+          );
+        },
+        async pause(): Promise<void> {
+          if (playerDestroyed) return;
+          return SherpaOnnx.pausePcmPlayer(pid);
+        },
+        async resume(): Promise<void> {
+          if (playerDestroyed) return;
+          return SherpaOnnx.resumePcmPlayer(pid);
+        },
+        async destroy(): Promise<void> {
+          if (playerDestroyed) return;
+          playerDestroyed = true;
+          try {
+            await SherpaOnnx.destroyPcmPlayer(pid);
+          } catch {
+            // ignore — player may already be destroyed
+          }
+        },
+      };
+      return { player };
+    },
+
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
@@ -450,99 +507,133 @@ export async function createTTS(
 
 // ========== Module-level utilities (stateless, no instance required) ==========
 
-/**
- * Save generated TTS audio to a WAV file.
- */
-export function saveAudioToFile(
+/** Save TTS audio by generation directly from native sink. */
+export function saveAudioFromGeneration(
   audio: GeneratedAudio,
-  filePath: string
+  target: SaveAudioTarget,
+  options?: SaveAudioOptions
 ): Promise<string> {
-  return SherpaOnnx.saveTtsAudioToFile(
-    audio.samples,
+  const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
+  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+
+  if (
+    audio.generation == null ||
+    audio.generation <= 0 ||
+    !('_instanceId' in audio) ||
+    typeof (audio as any)._instanceId !== 'string'
+  ) {
+    return Promise.reject(
+      new Error(
+        'saveAudioFromGeneration: missing valid generation/_instanceId. Use saveAudioFromPCM for raw samples.'
+      )
+    );
+  }
+
+  const iid = (audio as any)._instanceId as string;
+  if (target.kind === 'androidContent') {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(
+        new Error(
+          'saveAudioFromGeneration: kind "androidContent" is only supported on Android.'
+        )
+      );
+    }
+    return SherpaOnnx.saveTtsAudioFromSink(
+      iid,
+      audio.generation,
+      'androidContent',
+      target.directoryUri,
+      target.filename,
+      format,
+      outputSampleRateHz
+    );
+  }
+
+  return SherpaOnnx.saveTtsAudioFromSink(
+    iid,
+    audio.generation,
+    'file',
+    target.path,
+    '',
+    format,
+    outputSampleRateHz
+  );
+}
+
+/** Save explicit PCM payload (`samples` + `sampleRate`) to file/SAF. */
+export function saveAudioFromPCM(
+  audio: SaveAudioFromPcmInput,
+  target: SaveAudioTarget,
+  options?: SaveAudioOptions
+): Promise<string> {
+  const format = (options?.format ?? 'wav').trim().toLowerCase() || 'wav';
+  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+  const samplesArray =
+    audio.samples instanceof Float32Array
+      ? Array.from(audio.samples)
+      : (audio.samples as number[]);
+
+  if (target.kind === 'androidContent') {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(
+        new Error(
+          'saveAudioFromPCM: kind "androidContent" is only supported on Android.'
+        )
+      );
+    }
+    return SherpaOnnx.saveTtsAudioFromPCM(
+      samplesArray,
+      audio.sampleRate,
+      'androidContent',
+      target.directoryUri,
+      target.filename,
+      format,
+      outputSampleRateHz
+    );
+  }
+
+  return SherpaOnnx.saveTtsAudioFromPCM(
+    samplesArray,
     audio.sampleRate,
-    filePath
+    'file',
+    target.path,
+    '',
+    format,
+    outputSampleRateHz
   );
-}
-
-/**
- * Save generated TTS audio to a WAV file via Android SAF content URI.
- */
-export function saveAudioToContentUri(
-  audio: GeneratedAudio,
-  directoryUri: string,
-  filename: string
-): Promise<string> {
-  return SherpaOnnx.saveTtsAudioToContentUri(
-    audio.samples,
-    audio.sampleRate,
-    directoryUri,
-    filename
-  );
-}
-
-/**
- * Save a text file via Android SAF content URI.
- */
-export function saveTextToContentUri(
-  text: string,
-  directoryUri: string,
-  filename: string,
-  mimeType = 'text/plain'
-): Promise<string> {
-  return SherpaOnnx.saveTtsTextToContentUri(
-    text,
-    directoryUri,
-    filename,
-    mimeType
-  );
-}
-
-/**
- * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
- * Use for saving converted audio (e.g. MP3, FLAC) to a content URI.
- */
-export function copyFileToContentUri(
-  filePath: string,
-  directoryUri: string,
-  filename: string,
-  mimeType: string
-): Promise<string> {
-  return SherpaOnnx.copyFileToContentUri(
-    filePath,
-    directoryUri,
-    filename,
-    mimeType
-  );
-}
-
-/**
- * Copy a SAF content URI to a cache file for local playback (Android only).
- */
-export function copyContentUriToCache(
-  fileUri: string,
-  filename: string
-): Promise<string> {
-  return SherpaOnnx.copyTtsContentUriToCache(fileUri, filename);
-}
-
-/**
- * Share a TTS audio file (file path or content URI).
- */
-export function shareAudioFile(
-  fileUri: string,
-  mimeType = 'audio/wav'
-): Promise<void> {
-  return SherpaOnnx.shareTtsAudio(fileUri, mimeType);
 }
 
 // Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';
-export { generateSubtitlesFromAudio } from './subtitles';
+
+export {
+  alignTextToAudio,
+  alignTextToTtsSink,
+  assertAlignmentGranularityForMode,
+} from '../alignment';
+export type {
+  AlignAudioInput,
+  AlignTextToAudioOptions,
+  AlignTextToAudioResult,
+  AlignTextToTtsSinkFn,
+  AlignTextToTtsSinkInput,
+  AlignmentChunkTimeline,
+  SubtitleTimingItem,
+} from '../alignment/types';
 
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
+  TTSInitializeOptionsAuto,
+  TTSInitializeOptionsBase,
+  TTSInitializeOptionsVits,
+  TTSInitializeOptionsMatcha,
+  TTSInitializeOptionsKokoro,
+  TTSInitializeOptionsKitten,
+  TTSInitializeOptionsPocket,
+  TTSInitializeOptionsZipvoice,
+  TTSInitializeOptionsSupertonic,
   TTSModelType,
   TtsModelOptions,
   TtsVitsModelOptions,
@@ -552,21 +643,49 @@ export type {
   TtsPocketModelOptions,
   TtsSupertonicModelOptions,
   TtsUpdateOptions,
+  TtsUpdateOptionsEmpty,
   TtsGenerationOptions,
+  TtsReferenceAudio,
+  TtsExecutionProvider,
+  TtsVoiceClone,
+  TtsVoiceCloneZipvoice,
+  TtsVoiceClonePocket,
   SubtitleMode,
   SubtitleGranularity,
   SubtitleOptions,
-  SubtitleFromAudioOptions,
-  SubtitleResult,
+  SubtitleOptionsAccurate,
+  SubtitleOptionsProportionalOrEstimated,
   GeneratedAudio,
   GeneratedAudioWithTimestamps,
-  TtsSubtitleItem,
   TTSModelInfo,
+  SaveAudioTarget,
+  SaveAudioTargetFile,
+  SaveAudioTargetAndroidContent,
+  SaveAudioFromPcmInput,
+  SaveAudioOptions,
+  PlayFromSinkOptions,
+  TtsBatchPlaybackController,
   TtsEngine,
   TtsStreamController,
   TtsStreamHandlers,
+  TtsStreamOptions,
   TtsStreamChunk,
   TtsStreamEnd,
   TtsStreamError,
+  TtsStreamFileOutput,
+  TtsStreamToFileOptions,
+  TtsStreamToFileHandlers,
+  TtsStreamFileController,
+  TtsStreamFileEnd,
+  TtsStreamFileError,
 } from './types';
-export { TTS_MODEL_TYPES } from './types';
+export { TTS_MODEL_TYPES, isTtsModelType } from './types';
+export {
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type ModelDetectResultBase,
+  type TtsDetectModelResult,
+  type AlignmentDetectModelResult,
+} from '../types/modelDetect';

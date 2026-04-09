@@ -34,6 +34,7 @@ export {
   refreshModels,
   getModelsCacheStatus,
   getModelById,
+  type RefreshModelsOptions,
 } from './registry';
 
 export {

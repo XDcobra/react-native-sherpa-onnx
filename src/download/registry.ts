@@ -10,7 +10,6 @@ import {
   MODEL_ONNX_EXT,
 } from './constants';
 import { emitModelsListUpdated } from './downloadEvents';
-import { deriveLanguages } from './deriveTtsLanguages';
 import {
   CATEGORY_CONFIG,
   getArchiveFilename,
@@ -29,8 +28,10 @@ import {
   type TtsModelType,
 } from './types';
 import { parseChecksumFile } from './validation';
+import SherpaOnnx from '../NativeSherpaOnnx';
+import { resolvePublicLanguageHints } from '../model-languages';
 
-type RefreshModelsOptions = {
+export type RefreshModelsOptions = {
   forceRefresh?: boolean;
   cacheTtlMinutes?: number;
   maxRetries?: number;
@@ -42,6 +43,14 @@ type ReleaseAsset = {
   size: number;
   browser_download_url: string;
   digest?: string;
+};
+
+type NativeTtsCatalogHint = {
+  modelId: string;
+  modelType: string;
+  languages: string[];
+  quantization: string;
+  sizeTier: string;
 };
 
 const memoryCacheByCategory: Partial<Record<ModelCategory, CachePayload>> = {};
@@ -127,36 +136,59 @@ function deriveDisplayName(id: string): string {
   return toTitleCase(cleaned);
 }
 
-function deriveType(id: string): TtsModelType {
-  const lower = id.toLowerCase();
-  if (lower.includes('vits')) return 'vits';
-  if (lower.includes('kokoro')) return 'kokoro';
-  if (lower.includes('matcha')) return 'matcha';
-  if (lower.includes('kitten')) return 'kitten';
-  if (lower.includes('pocket')) return 'pocket';
-  if (lower.includes('zipvoice')) return 'zipvoice';
-  if (lower.includes('supertonic')) return 'supertonic';
-  return 'unknown';
-}
-
-function deriveQuantization(id: string): Quantization {
-  const lower = id.toLowerCase();
-  if (lower.includes('int8') && lower.includes('quant')) {
-    return 'int8-quantized';
+async function buildTtsCatalogHintsMap(
+  ids: string[]
+): Promise<Map<string, NativeTtsCatalogHint>> {
+  const map = new Map<string, NativeTtsCatalogHint>();
+  for (const id of ids) {
+    const raw = await SherpaOnnx.detectTtsModel('', id, 'auto');
+    const modelType =
+      typeof raw.modelType === 'string' && raw.modelType.length > 0
+        ? raw.modelType
+        : 'unknown';
+    const rawLangs = Array.isArray(raw.languages)
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
+      : [];
+    const languageRows = resolvePublicLanguageHints({
+      domain: ModelCategory.Tts,
+      modelType: modelType !== 'unknown' ? modelType : undefined,
+      rawFromNative: rawLangs,
+    });
+    const languages = languageRows.map((r) => r.iso6391Hint);
+    const quantization =
+      typeof raw.quantization === 'string' && raw.quantization.length > 0
+        ? raw.quantization
+        : 'unknown';
+    const sizeTier =
+      typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
+        ? raw.sizeTier
+        : 'unknown';
+    map.set(id, {
+      modelId: id,
+      modelType,
+      languages,
+      quantization,
+      sizeTier,
+    });
   }
-  if (lower.includes('int8')) return 'int8';
-  if (lower.includes('fp16')) return 'fp16';
-  return 'unknown';
+  return map;
 }
 
-function deriveSizeTier(id: string): SizeTier {
-  const lower = id.toLowerCase();
-  if (lower.includes('tiny')) return 'tiny';
-  if (lower.includes('small')) return 'small';
-  if (lower.includes('medium')) return 'medium';
-  if (lower.includes('large')) return 'large';
-  if (lower.includes('low')) return 'small';
-  return 'unknown';
+function collectTtsModelIdsFromAssets(assets: ReleaseAsset[]): string[] {
+  const out: string[] = [];
+  for (const asset of assets) {
+    const archiveExt = getAssetExtension(asset.name);
+    if (archiveExt !== 'tar.bz2') {
+      continue;
+    }
+    if (
+      !isAssetSupportedForCategory(ModelCategory.Tts, asset.name, archiveExt)
+    ) {
+      continue;
+    }
+    out.push(stripAssetExtension(asset.name, archiveExt));
+  }
+  return out;
 }
 
 function getAssetExtension(name: string): 'tar.bz2' | 'onnx' | null {
@@ -213,8 +245,18 @@ function parseDigestSha256(value?: string): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
-function toTtsModelMeta(asset: ReleaseAsset, archiveExt: 'tar.bz2'): ModelMeta {
+function toTtsModelMeta(
+  asset: ReleaseAsset,
+  archiveExt: 'tar.bz2',
+  hints: Map<string, NativeTtsCatalogHint>
+): ModelMeta {
   const id = stripAssetExtension(asset.name, archiveExt);
+  const hint = hints.get(id);
+  if (!hint) {
+    throw new Error(
+      `Missing native TTS catalog hints for "${id}" — detectTtsModel did not produce metadata for this id.`
+    );
+  }
 
   return {
     id,
@@ -224,10 +266,10 @@ function toTtsModelMeta(asset: ReleaseAsset, archiveExt: 'tar.bz2'): ModelMeta {
     bytes: asset.size,
     sha256: parseDigestSha256(asset.digest),
     category: ModelCategory.Tts,
-    type: deriveType(id),
-    languages: deriveLanguages(id),
-    quantization: deriveQuantization(id),
-    sizeTier: deriveSizeTier(id),
+    type: hint.modelType as TtsModelType,
+    languages: [...hint.languages],
+    quantization: hint.quantization as Quantization,
+    sizeTier: hint.sizeTier as SizeTier,
   };
 }
 
@@ -251,7 +293,8 @@ function toGenericModelMeta(
 
 function toModelMeta(
   category: ModelCategory,
-  asset: ReleaseAsset
+  asset: ReleaseAsset,
+  ttsHints: Map<string, NativeTtsCatalogHint>
 ): ModelMeta | null {
   const archiveExt = getAssetExtension(asset.name);
   if (!archiveExt) {
@@ -263,7 +306,7 @@ function toModelMeta(
   }
 
   if (category === ModelCategory.Tts && archiveExt === 'tar.bz2') {
-    return toTtsModelMeta(asset, archiveExt);
+    return toTtsModelMeta(asset, archiveExt, ttsHints);
   }
 
   return toGenericModelMeta(category, asset, archiveExt);
@@ -345,8 +388,14 @@ export async function refreshModels(
       ? (body.assets as ReleaseAsset[])
       : [];
 
+    let ttsHints = new Map<string, NativeTtsCatalogHint>();
+    if (category === ModelCategory.Tts) {
+      const ttsIds = collectTtsModelIdsFromAssets(assets);
+      ttsHints = await buildTtsCatalogHintsMap(ttsIds);
+    }
+
     const models = assets
-      .map((asset) => toModelMeta(category, asset))
+      .map((asset) => toModelMeta(category, asset, ttsHints))
       .filter((model): model is ModelMeta => model != null);
 
     const checksums = await fetchChecksumsFromRelease(category);

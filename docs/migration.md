@@ -1,5 +1,226 @@
 # Migration Guides
 
+## STT/TTS model language lists (`ModelLanguage`)
+
+All model-language data and helpers live under **`react-native-sherpa-onnx/model-languages`**: **`ModelLanguage`**, per-model lists (e.g. `getWhisperLanguages`, `WHISPER_LANGUAGES`), and **`resolvePublicLanguageHints`**. Nothing in this area is re-exported from **`react-native-sherpa-onnx/stt`**. See **[model-languages.md](model-languages.md)** for usage and limitations (helpers are not authoritative for every checkpoint).
+
+### Breaking changes
+
+| Before | After |
+|--------|--------|
+| `SttModelLanguage`, `WhisperLanguage` | `ModelLanguage` from `react-native-sherpa-onnx/model-languages` |
+| Lists / getters from `…/stt` | `react-native-sherpa-onnx/model-languages` |
+| Deep import `…/stt/sttModelLanguages` | `react-native-sherpa-onnx/model-languages` |
+
+`detectTtsModel()` and `detectSttModel().languages` expose **`{ iso6391Hint, id }[]`** (see **`PublicLanguageHint`** in `react-native-sherpa-onnx/model-languages`). Download **`ModelMeta.languages`** remains **`string[]`** (hint tags only). For custom flows, call `resolvePublicLanguageHints({ domain: 'tts' \| 'stt' \| 'vad' \| 'alignment', modelType?, rawFromNative? })`.
+
+## Standalone PCM player (replacing TTS-bound player)
+
+The PCM player is no longer attached to `StreamingTtsEngine`. Use `createPcmPlayer` from `react-native-sherpa-onnx/pcm` for manual feed, or `playback: true` on streaming options for native playback.
+
+### Removed methods
+
+| Removed from `StreamingTtsEngine` | Replacement |
+|-----------------------------------|-------------|
+| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer({ sampleRate, feed: 'js' })` or `{ playback: true }` stream option |
+| `writePcmChunk(samples)` | `player.writePcmChunk(samples)` |
+| `stopPcmPlayer()` | `player.destroy()` |
+
+### TurboModule renames
+
+| Before | After |
+|--------|-------|
+| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, sampleRate, channels, feed, ttsInstanceId)` |
+| `writeTtsPcmChunk(instanceId, samples)` | `writePcmChunk(playerId, samples)` |
+| `stopTtsPcmPlayer(instanceId)` | `destroyPcmPlayer(playerId)` |
+
+### Before / After
+
+**Streaming + playback (preferred: native playback):**
+
+```ts
+// Before
+await tts.startPcmPlayer(22050, 1);
+await tts.generateSpeechStream(text, opts, {
+  onChunk: (c) => tts.writePcmChunk(c.samples),
+  onEnd: () => tts.stopPcmPlayer(),
+});
+
+// After (native playback)
+const ctrl = await tts.generateSpeechStream(text, opts, {
+  onEnd: () => { /* done */ },
+}, { playback: true, emitChunks: false });
+
+// Pause / resume during playback:
+await ctrl.player?.pause();
+await ctrl.player?.resume();
+// ctrl.cancel() stops synthesis + destroys player
+```
+
+**Manual JS feed (non-TTS audio):**
+
+```ts
+// Before: not possible (PCM player was TTS-only)
+
+// After
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+const player = await createPcmPlayer({ sampleRate: 16000, feed: 'js' });
+await player.writePcmChunk(someFloat32Samples);
+await player.destroy();
+```
+
+**Batch TTS playback (new):**
+
+```ts
+const audio = await tts.generateSpeech('Hello');
+const playback = await tts.playFromSink(audio.generation);
+// playback.player gives pause/resume/destroy control
+await playback.player.pause();
+await playback.player.resume();
+await playback.player.destroy();
+```
+
+See [pcm-player.md](pcm-player.md) for standalone player details.
+
+## Streaming TTS: binary chunks (`Float32Array` replaces `number[]`)
+
+Streaming chunk payloads now deliver PCM as **`Float32Array`** instead of `number[]`. This eliminates per-element bridge marshalling and significantly reduces CPU/GC overhead for long text.
+
+### Breaking changes
+
+| Before | After |
+| --- | --- |
+| `chunk.samples` is `number[]` | `chunk.samples` is `Float32Array` |
+| `writePcmChunk(samples: number[])` | `writePcmChunk(samples: Float32Array \| number[])` |
+
+### Migration
+
+**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to `writePcmChunk` or another consumer that accepts `Float32Array`:
+
+```ts
+onChunk: (chunk) => {
+  // chunk.samples is now Float32Array — works directly
+  void tts.writePcmChunk(chunk.samples);
+},
+```
+
+**If you index into samples or use Array methods**, `Float32Array` supports `[]` indexing and `.length` but not `.push()`, `.map()`, etc. Convert explicitly when needed:
+
+```ts
+// Before
+const doubled = chunk.samples.map(s => s * 2);
+
+// After
+const doubled = Array.from(chunk.samples).map(s => s * 2);
+// Or use Float32Array methods:
+const doubled = chunk.samples.map(s => s * 2); // Float32Array.prototype.map returns Float32Array
+```
+
+### Preferred path for long-text export
+
+Use **`generateSpeechStreamToFile`** for file export workflows. This writes audio incrementally in native code without routing PCM through JS:
+
+```ts
+await tts.generateSpeechStreamToFile(
+  longText,
+  undefined,
+  { output: { kind: 'file', path: outputPath }, format: 'wav' },
+  {
+    onEnd: (e) => console.log(`Saved ${e.bytesWritten} bytes to ${e.path}`),
+    onError: (e) => console.error(e.message),
+  }
+);
+```
+
+Set `emitChunks: true` only when you also need live playback during export.
+
+## Alignment API (native-first restructure)
+
+Alignment was restructured to be standalone and native-first across all modes.
+
+### Breaking / behavioral changes
+
+| Before | After |
+| --- | --- |
+| `alignTextToAudio(..., { samples: number[], sampleRate }, ...)` | `alignTextToAudio(..., { samples: Float32Array, sampleRate }, ...)` |
+| TTS accurate flow pulled PCM to JS and sent it back to native | TTS accurate flow aligns directly from native sink (`alignTextToTtsSink`) |
+| Estimated timestamp integration relied on `exportChunkTimelineOnly` workaround | Estimated path uses native timeline output + alignment engine; `exportChunkTimelineOnly` is removed |
+
+### New standalone sink helper
+
+Use `alignTextToTtsSink` when you already have `GeneratedAudio` from TTS and want subtitle alignment without JS PCM round-trip:
+
+```ts
+import { alignTextToTtsSink } from 'react-native-sherpa-onnx/alignment';
+
+const aligned = await alignTextToTtsSink(text, audio, {
+  mode: 'accurate',
+  alignmentModelPath: '/absolute/path/to/alignment.onnx',
+  granularity: 'word',
+});
+```
+
+### Native methods (direct TurboModule callers)
+
+If you call `NativeSherpaOnnx` directly, prefer these methods:
+
+- `alignTextToAudioFromPath`
+- `alignTextToAudioFromPcm`
+- `alignTextToTtsSink`
+- `getAudioDuration`
+
+## TTS release catalog metadata (native)
+
+For **`react-native-sherpa-onnx/download`**, TTS **`ModelMeta`** fields **`type`**, **`languages`**, **`quantization`**, and **`sizeTier`** are filled from the native TurboModule **`detectTtsModel`** with an empty directory and the release **asset id** as **`assetName`** (name-only heuristics; no filesystem). After extraction, the model folder **basename equals the release asset id** (archive stem), which is what the native layer uses.
+
+**`refreshModels(ModelCategory.Tts)`** resolves those fields with **one `detectTtsModel` call per asset id** (JavaScript loop; no native batch API).
+
+The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogHints`** are removed. The export **`DEFAULT_TTS_CATALOG_HINTS_CHUNK_SIZE`** and the **`refreshModels`** option **`ttsCatalogHintsChunkSize`** are removed. Use **`SherpaOnnx.detectTtsModel(modelDir, assetName, modelType?)`** instead: pass **`''`** for `modelDir` and the release id string for `assetName` when you only need name-based catalog metadata.
+
+## TTS `detectTtsModel` — `detectionSources` (additive)
+
+Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly DetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isDetectionSource`** when parsing unknown payloads.
+
+## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
+
+The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:
+
+| Before | After |
+| --- | --- |
+| `saveAudioToFile(audio, path)` | `saveAudio(audio, { kind: 'file', path })` |
+| `saveAudioToContentUri(audio, directoryUri, filename)` | `saveAudio(audio, { kind: 'androidContent', directoryUri, filename })` (Android only) |
+
+Optional third argument: **`{ format?: string; outputSampleRateHz?: number }`** — default `format` is `'wav'`. Non-WAV formats require FFmpeg (see [disable-ffmpeg.md](./disable-ffmpeg.md)).
+
+TurboModule consumers: call **`saveTtsAudio`** with flat arguments (`destinationType`: `'file'` | `'androidContent'`, `pathOrDirectoryUri`, `filename`, `format`, `outputSampleRateHz`).
+
+## Files API (persistence & sharing helpers)
+
+The following are **no longer** exported from **`react-native-sherpa-onnx/tts`**. Import them from **`react-native-sherpa-onnx/files`** (or `copyFileToContentUri` from the package root).
+
+| Before | After |
+| --- | --- |
+| `import { saveTextToContentUri, … } from 'react-native-sherpa-onnx/tts'` | `import { saveTextToContentUri, … } from 'react-native-sherpa-onnx/files'` |
+| `import { copyFileToContentUri } from 'react-native-sherpa-onnx/tts'` | `import { copyFileToContentUri } from 'react-native-sherpa-onnx/files'` (or from `'react-native-sherpa-onnx'`) |
+| `import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts'` | `import { copyContentUriToCache } from 'react-native-sherpa-onnx/files'` |
+| `import { shareAudioFile } from 'react-native-sherpa-onnx/tts'` | `import { shareAudioFile } from 'react-native-sherpa-onnx/files'` |
+
+**`saveAudio`** stays on **`react-native-sherpa-onnx/tts`** (unchanged).
+
+### TurboModule (`NativeSherpaOnnx` / `SherpaOnnx`)
+
+If you call the native module directly (bypassing the JS helpers), method names were renamed to match the **`files`** surface:
+
+| Before | After |
+| --- | --- |
+| `saveTtsTextToContentUri` | `saveTextToContentUri` |
+| `copyTtsContentUriToCache` | `copyContentUriToCache` |
+| `shareTtsAudio` | `shareAudioFile` |
+| `copyFileToContentUri` | *(unchanged)* |
+| `saveTtsAudio` | *(unchanged; TTS PCM export)* |
+
+See [docs/files.md](./files.md).
+
 ## Breaking changes (upgrading to 0.3.0)
 
 If you are upgrading from an earlier version to **0.3.0**, plan for the following migration steps.
@@ -191,3 +412,48 @@ const unsubscribe = onProgress((category, modelId, progress) => {
 });
 ```
 
+### Text-to-Speech: strict types (0.4.0)
+
+The TTS public TypeScript surface uses **discriminated unions** so invalid combinations are caught at compile time. This is a **breaking change** for code that relied on the previous loose shapes.
+
+| Topic | Before | After |
+| --- | --- | --- |
+| Init + `auto` | `modelType: 'auto'` (or omitted) with `modelOptions` | With `'auto'` or omitted `modelType`, **`modelOptions` is not allowed**. Set an explicit `modelType` (e.g. `'vits'`) to pass scales. |
+| Init + concrete type | Any keys on `TtsModelOptions` | Only the block matching `modelType` (e.g. `modelType: 'vits'` + `modelOptions: { vits: { ... } }`). |
+| `updateParams` | `modelOptions` without a strict tie to `modelType` | Same rules as init: use a variant with matching `modelType` and `modelOptions` (or `{}` / `{ modelType: 'auto' }` for no-op style updates). |
+| Generation / cloning | Top-level `referenceAudio` / `referenceText` | Use **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }`. |
+| Subtitles | `mode: 'fast'` | Renamed to **`proportional`**; **`estimated`** uses native chunk timeline; **`character`** only with `subtitles: { mode: 'accurate', alignmentModelPath: string, ... }`. For `off` / `proportional` / `estimated`, `alignmentModelPath` must not be set. |
+| Standalone alignment | `generateSubtitlesFromAudio` | Removed; use **`alignTextToAudio`** from **`react-native-sherpa-onnx/alignment`**. **`accurate`** requires `alignmentModelPath`. **`proportional`** / **`estimated`** only allow `granularity: 'sentence' \| 'word'`. |
+
+**Zipvoice example (`voiceClone`):**
+
+```ts
+await tts.generateSpeech('Hello', {
+  voiceClone: {
+    kind: 'zipvoice',
+    referenceAudio: { samples, sampleRate },
+    referenceText: 'Transcript of reference',
+  },
+});
+```
+
+See [docs/tts.md](./tts.md), [docs/tts-streaming.md](./tts-streaming.md), and [docs/alignment.md](./alignment.md) for updated option tables and standalone `alignTextToAudio`.
+
+## Alignment: native low-I/O refactor (upcoming major; **no** backward compatibility)
+
+A future **major** release will replace the current alignment stack with a native-first design (shared C++ CTC path, path-based proportional metrics, optional TTS→alignment without redundant I/O). **There will be no long-lived compatibility shims:** superseded TurboModule methods and obsolete JS exports are **removed** rather than deprecated.
+
+**Who must read this**
+
+- Callers of **`NativeSherpaOnnx`** alignment-related APIs **directly** (bypassing [`react-native-sherpa-onnx/alignment`](./alignment.md)).
+- Anyone relying on **implementation details** that may disappear (e.g. alignment-only use of temp WAV helpers).
+
+**Migration principles**
+
+| Topic | Policy |
+| --- | --- |
+| TurboModule | **Removed:** `runCTCForcedAlignment`, `alignAccurateFromPath`, `alignAccurateFromFloat32`, `getAlignmentAudioMetrics`. **Use:** `alignTextToAudioFromPath`, `alignTextToAudioFromPcm`, `alignTextToTtsSink`, and `getAudioDuration`; see [alignment.md](./alignment.md). |
+| Public JS | Prefer **`alignTextToAudio`** (and related types) from **`react-native-sherpa-onnx/alignment`** as the stable app-facing API. Its surface may change in the same major; there will be **no** parallel deprecated export set. |
+| Docs | [alignment.md](./alignment.md) will describe the final APIs and performance expectations; this section will be tightened with **concrete** removed symbols at ship time. |
+
+**At release time:** maintainers should (1) list every removed export and TurboModule method in **CHANGELOG**, (2) replace the placeholders in the table above with exact names, and (3) keep this guide in sync.

@@ -5,7 +5,7 @@
 
 import { AudioContext, AudioBufferSourceNode } from 'react-native-audio-api';
 import { readFile } from '@dr.pogodin/react-native-fs';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/tts';
+import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
 
 import { Buffer } from 'buffer';
 

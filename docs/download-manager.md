@@ -173,7 +173,7 @@ const ready = await ensureModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny');
 function refreshModels(category: ModelCategory, options?: { forceRefresh?: boolean; cacheTtlMinutes?: number; maxRetries?: number; signal?: AbortSignal }): Promise<ModelMeta[]>;
 ```
 
-Fetches remote release metadata and updates cache.
+Fetches remote release metadata and updates cache. For **`ModelCategory.Tts`**, TTS-specific fields (**`type`**, **`languages`**, **`quantization`**, **`sizeTier`**) are filled by calling the native TurboModule **`detectTtsModel`** once per release asset id (name-only heuristics; no filesystem scan of downloaded files).
 
 ```ts
 await refreshModels(ModelCategory.Tts, { forceRefresh: true });

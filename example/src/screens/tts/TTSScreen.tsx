@@ -15,21 +15,24 @@ import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudioToFile,
-  saveAudioToContentUri,
-  copyContentUriToCache,
-  shareAudioFile,
+  saveAudioFromGeneration,
+  saveAudioFromPCM,
   type TTSModelType,
   type TtsGenerationOptions,
-  type TtsModelOptions,
+  type TtsMatchaModelOptions,
+  type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  copyContentUriToCache,
+  shareAudioFile,
+} from 'react-native-sherpa-onnx/files';
 import type {
   TtsEngine,
   StreamingTtsEngine,
   TtsStreamController,
+  GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
   getAssetPackPath,
@@ -84,10 +87,9 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [generatedAudio, setGeneratedAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [generatedAudio, setGeneratedAudio] = useState<GeneratedAudio | null>(
+    null
+  );
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -147,7 +149,7 @@ export default function TTSScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
-  const streamChunksRef = useRef<number[][]>([]);
+  const streamChunksRef = useRef<Float32Array[]>([]);
   const streamSampleRateRef = useRef<number | null>(null);
   const streamControllerRef = useRef<TtsStreamController | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
@@ -249,31 +251,45 @@ export default function TTSScreen() {
       ) {
         return;
       }
-      const modelOptions: TtsModelOptions = {};
-      if (modelType === 'vits') {
-        modelOptions.vits = {};
-        if (nextNoise != null) modelOptions.vits.noiseScale = nextNoise;
-        if (nextNoiseW != null) modelOptions.vits.noiseScaleW = nextNoiseW;
-        if (nextLength != null) modelOptions.vits.lengthScale = nextLength;
-      } else if (modelType === 'matcha') {
-        modelOptions.matcha = {};
-        if (nextNoise != null) modelOptions.matcha.noiseScale = nextNoise;
-        if (nextLength != null) modelOptions.matcha.lengthScale = nextLength;
-      } else if (modelType === 'kokoro' && nextLength != null) {
-        modelOptions.kokoro = { lengthScale: nextLength };
-      } else if (modelType === 'kitten' && nextLength != null) {
-        modelOptions.kitten = { lengthScale: nextLength };
-      }
-      engine
-        .updateParams({
-          modelType,
-          modelOptions,
-        })
-        .catch((err) => {
-          const message =
-            err instanceof Error ? err.message : 'Failed to update TTS params';
-          setError(message);
-        });
+      const runUpdate = () => {
+        if (modelType === 'vits') {
+          const vits: TtsVitsModelOptions = {};
+          if (nextNoise != null) vits.noiseScale = nextNoise;
+          if (nextNoiseW != null) vits.noiseScaleW = nextNoiseW;
+          if (nextLength != null) vits.lengthScale = nextLength;
+          return engine.updateParams({
+            modelType: 'vits',
+            modelOptions: { vits },
+          });
+        }
+        if (modelType === 'matcha') {
+          const matcha: TtsMatchaModelOptions = {};
+          if (nextNoise != null) matcha.noiseScale = nextNoise;
+          if (nextLength != null) matcha.lengthScale = nextLength;
+          return engine.updateParams({
+            modelType: 'matcha',
+            modelOptions: { matcha },
+          });
+        }
+        if (modelType === 'kokoro' && nextLength != null) {
+          return engine.updateParams({
+            modelType: 'kokoro',
+            modelOptions: { kokoro: { lengthScale: nextLength } },
+          });
+        }
+        if (modelType === 'kitten' && nextLength != null) {
+          return engine.updateParams({
+            modelType: 'kitten',
+            modelOptions: { kitten: { lengthScale: nextLength } },
+          });
+        }
+        return Promise.resolve();
+      };
+      runUpdate().catch((err) => {
+        const message =
+          err instanceof Error ? err.message : 'Failed to update TTS params';
+        setError(message);
+      });
     }, 500);
     return () => {
       if (paramsDebounceRef.current) {
@@ -330,7 +346,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -346,7 +361,6 @@ export default function TTSScreen() {
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
-        streamingEngine.stopPcmPlayer().catch(() => {});
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
@@ -372,23 +386,28 @@ export default function TTSScreen() {
     []
   );
 
-  const buildStreamedAudio = useCallback(() => {
+  const buildStreamedAudio = useCallback((): GeneratedAudio | null => {
     const chunks = streamChunksRef.current;
     if (chunks.length === 0) {
       return null;
     }
     const total = chunks.reduce((sum, part) => sum + part.length, 0);
-    const combined = new Array<number>(total);
+    const combined = new Float32Array(total);
     let offset = 0;
     for (const part of chunks) {
-      for (let i = 0; i < part.length; i += 1) {
-        combined[offset + i] = part[i] as number;
-      }
+      combined.set(part, offset);
       offset += part.length;
     }
     const sampleRate =
       streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-    return { samples: combined, sampleRate };
+    return {
+      sampleRate,
+      numSamples: combined.length,
+      generation: 0,
+      async getSamples(): Promise<Float32Array> {
+        return combined;
+      },
+    };
   }, [modelInfo?.sampleRate]);
 
   const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
@@ -408,29 +427,11 @@ export default function TTSScreen() {
     if (isNaN(speedValue) || speedValue <= 0) {
       throw new Error('Invalid speed value');
     }
-    const options: TtsGenerationOptions = { sid, speed: speedValue };
     const silenceScaleVal = silenceScale.trim();
-    if (silenceScaleVal.length > 0) {
-      const v = parseFloat(silenceScaleVal);
-      if (!isNaN(v) && v > 0) options.silenceScale = v;
-    }
     const numStepsVal = numSteps.trim();
-    if (numStepsVal.length > 0) {
-      const v = parseInt(numStepsVal, 10);
-      if (!isNaN(v) && v > 0) options.numSteps = v;
-    }
-    const hasValidRefAudio =
-      referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
-      referenceAudio.sampleRate > 0;
-    if (hasValidRefAudio) {
-      options.referenceAudio = referenceAudio;
-      if (referenceText.trim().length > 0) {
-        options.referenceText = referenceText.trim();
-      }
-    }
+    let extra: Record<string, string> | undefined;
     if (extraOptions.trim().length > 0) {
-      const extra: Record<string, string> = {};
+      const ex: Record<string, string> = {};
       extraOptions
         .split(',')
         .map((s) => s.trim())
@@ -440,12 +441,59 @@ export default function TTSScreen() {
           if (idx > 0) {
             const k = pair.slice(0, idx).trim();
             const v = pair.slice(idx + 1).trim();
-            if (k && v) extra[k] = v;
+            if (k && v) ex[k] = v;
           }
         });
-      if (Object.keys(extra).length > 0) options.extra = extra;
+      if (Object.keys(ex).length > 0) extra = ex;
     }
-    return options;
+    const hasValidRefAudio =
+      referenceAudio != null &&
+      referenceAudio.samples.length > 0 &&
+      referenceAudio.sampleRate > 0;
+    const refTrim = referenceText.trim();
+
+    const base: TtsGenerationOptions = {
+      sid,
+      speed: speedValue,
+      ...(silenceScaleVal.length > 0
+        ? (() => {
+            const v = parseFloat(silenceScaleVal);
+            return !isNaN(v) && v > 0 ? { silenceScale: v } : {};
+          })()
+        : {}),
+      ...(numStepsVal.length > 0
+        ? (() => {
+            const v = parseInt(numStepsVal, 10);
+            return !isNaN(v) && v > 0 ? { numSteps: v } : {};
+          })()
+        : {}),
+      ...(extra != null ? { extra } : {}),
+    };
+
+    if (hasValidRefAudio && selectedModelType === 'zipvoice') {
+      if (!refTrim) {
+        throw new Error('Zipvoice voice cloning requires reference text');
+      }
+      return {
+        ...base,
+        voiceClone: {
+          kind: 'zipvoice',
+          referenceAudio,
+          referenceText: refTrim,
+        },
+      };
+    }
+    if (hasValidRefAudio && selectedModelType === 'pocket') {
+      return {
+        ...base,
+        voiceClone: {
+          kind: 'pocket',
+          referenceAudio,
+          ...(refTrim.length > 0 ? { referenceText: refTrim } : {}),
+        },
+      };
+    }
+    return base;
   }, [
     speakerId,
     speed,
@@ -455,6 +503,7 @@ export default function TTSScreen() {
     referenceAudio,
     extraOptions,
     modelInfo?.numSpeakers,
+    selectedModelType,
   ]);
 
   const handlePickReferenceWav = useCallback(async () => {
@@ -526,52 +575,52 @@ export default function TTSScreen() {
     }
 
     try {
-      const controller = await engine.generateSpeechStream(nextText, options, {
-        onChunk: (chunk) => {
-          streamSampleRateRef.current = chunk.sampleRate;
-          if (chunk.samples.length > 0) {
-            streamingTtsEngineRef.current?.writePcmChunk(chunk.samples);
-          }
-          streamChunksRef.current.push(chunk.samples);
-          setStreamSampleCount((prev) => prev + chunk.samples.length);
-          setStreamProgress(chunk.progress);
-        },
-        onEnd: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          if (event.cancelled) {
+      const controller = await engine.generateSpeechStream(
+        nextText,
+        options,
+        {
+          onChunk: (chunk) => {
+            streamSampleRateRef.current = chunk.sampleRate;
+            streamChunksRef.current.push(chunk.samples);
+            setStreamSampleCount((prev) => prev + chunk.samples.length);
+            setStreamProgress(chunk.progress);
+          },
+          onEnd: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
+            if (event.cancelled) {
+              const eng = streamingTtsEngineRef.current;
+              if (eng) {
+                eng.destroy().catch(() => {});
+              }
+              streamingTtsEngineRef.current = null;
+              setStreamProgress(null);
+              setStreaming(false);
+              const audio = buildStreamedAudio();
+              if (audio) setGeneratedAudio(audio);
+            } else {
+              setStreamProgress(null);
+              streamProcessCallSourceRef.current = 'onEnd';
+              processStreamQueue().catch((err) => {
+                console.warn('processStreamQueue:', err);
+              });
+            }
+          },
+          onError: (event) => {
+            streamInFlightRef.current = false;
+            streamControllerRef.current = null;
             const eng = streamingTtsEngineRef.current;
             if (eng) {
-              eng.stopPcmPlayer().catch(() => {});
               eng.destroy().catch(() => {});
             }
             streamingTtsEngineRef.current = null;
+            setError(event.message);
             setStreamProgress(null);
             setStreaming(false);
-            const audio = buildStreamedAudio();
-            if (audio) setGeneratedAudio(audio);
-          } else {
-            setStreamProgress(null);
-            streamProcessCallSourceRef.current = 'onEnd';
-            processStreamQueue().catch((err) => {
-              console.warn('processStreamQueue:', err);
-            });
-          }
+          },
         },
-        onError: (event) => {
-          streamInFlightRef.current = false;
-          streamControllerRef.current = null;
-          const eng = streamingTtsEngineRef.current;
-          if (eng) {
-            eng.stopPcmPlayer().catch(() => {});
-            eng.destroy().catch(() => {});
-          }
-          streamingTtsEngineRef.current = null;
-          setError(event.message);
-          setStreamProgress(null);
-          setStreaming(false);
-        },
-      });
+        { playback: true }
+      );
       streamControllerRef.current = controller;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -884,7 +933,7 @@ export default function TTSScreen() {
       setGeneratedAudio(result);
       Alert.alert(
         'Success',
-        `Generated ${result.samples.length} samples at ${result.sampleRate} Hz`
+        `Generated ${result.numSamples} samples at ${result.sampleRate} Hz`
       );
     } catch (err) {
       console.error('TTS Generation error:', err);
@@ -1001,8 +1050,6 @@ export default function TTSScreen() {
       }
 
       streamingTtsEngineRef.current = streamingEngine;
-      const sampleRate = await streamingEngine.getSampleRate();
-      await streamingEngine.startPcmPlayer(sampleRate, 1);
 
       streamChunksRef.current = [];
       streamSampleRateRef.current = null;
@@ -1091,11 +1138,8 @@ export default function TTSScreen() {
     );
   };
 
-  const saveAudioWithData = async (audio: {
-    samples: number[];
-    sampleRate: number;
-  }) => {
-    if (!audio.samples.length) {
+  const saveAudioWithData = async (audio: GeneratedAudio) => {
+    if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
       return;
     }
@@ -1105,23 +1149,37 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = 'wav';
-      const filename = `tts_${timestamp}.${ext}`;
+      const format = 'wav';
+      const filename = `tts_${timestamp}.${format}`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      if (directoryUri) {
-        if (ext !== 'wav') {
-          Alert.alert(
-            'Format not supported for content URI',
-            'Saving non-WAV formats to a content URI is not supported. Saving WAV instead.'
-          );
+      const saveWithTarget = async (
+        target:
+          | { kind: 'file'; path: string }
+          | { kind: 'androidContent'; directoryUri: string; filename: string }
+      ) => {
+        if (
+          audio.generation > 0 &&
+          '_instanceId' in audio &&
+          typeof (audio as any)._instanceId === 'string'
+        ) {
+          return saveAudioFromGeneration(audio, target, { format });
         }
-        const savedUri = await saveAudioToContentUri(
-          audio,
-          directoryUri,
-          `tts_${timestamp}.wav`
+        const pcm = await audio.getSamples();
+        return saveAudioFromPCM(
+          { samples: pcm, sampleRate: audio.sampleRate },
+          target,
+          { format }
         );
+      };
+
+      if (directoryUri) {
+        const savedUri = await saveWithTarget({
+          kind: 'androidContent',
+          directoryUri,
+          filename,
+        });
         setSavedAudioPath(savedUri);
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
@@ -1136,45 +1194,16 @@ export default function TTSScreen() {
       }
 
       await mkdir(targetDirectory);
-      if (ext === 'wav') {
-        const filePath = `${targetDirectory}/${filename}`;
-        // Save audio to file (WAV)
-        const savedPath = await saveAudioToFile(audio, filePath);
-        setSavedAudioPath(savedPath);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
+      const filePath = `${targetDirectory}/${filename}`;
+      const savedPath = await saveWithTarget({
+        kind: 'file',
+        path: filePath,
+      });
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
 
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
-      } else {
-        // Save as WAV first, then convert to requested format
-        const tempWav = `${targetDirectory}/tts_${timestamp}.wav`;
-        await saveAudioToFile(audio, tempWav);
-        const targetPath = `${targetDirectory}/tts_${timestamp}.${ext}`;
-        try {
-          await convertAudioToFormat(tempWav, targetPath, ext);
-          setSavedAudioPath(targetPath);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          // Remove temporary WAV
-          try {
-            await unlink(tempWav);
-          } catch {}
-          Alert.alert(
-            'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`
-          );
-        } catch (convErr) {
-          // Conversion failed: fall back to WAV
-          console.warn('Conversion failed, saved WAV at', tempWav, convErr);
-          setSavedAudioPath(tempWav);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          Alert.alert(
-            'Partial success',
-            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
-          );
-        }
-      }
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1205,47 +1234,34 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const ext = 'wav';
+      const format = 'wav';
       const directoryPath = DocumentDirectoryPath;
       await mkdir(directoryPath);
 
-      if (ext === 'wav') {
-        const filename = `tts_${timestamp}.wav`;
-        const filePath = `${directoryPath}/${filename}`;
-        const savedPath = await saveAudioToFile(generatedAudio, filePath);
-        setSavedAudioPath(savedPath);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
+      const filename = `tts_${timestamp}.wav`;
+      const filePath = `${directoryPath}/${filename}`;
+      const savedPath =
+        generatedAudio.generation > 0 &&
+        '_instanceId' in generatedAudio &&
+        typeof (generatedAudio as any)._instanceId === 'string'
+          ? await saveAudioFromGeneration(
+              generatedAudio,
+              { kind: 'file', path: filePath },
+              { format }
+            )
+          : await saveAudioFromPCM(
+              {
+                samples: await generatedAudio.getSamples(),
+                sampleRate: generatedAudio.sampleRate,
+              },
+              { kind: 'file', path: filePath },
+              { format }
+            );
+      setSavedAudioPath(savedPath);
+      setCachedPlaybackPath(null);
+      setCachedPlaybackSource(null);
 
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
-      } else {
-        // Save WAV first then convert
-        const tempWav = `${directoryPath}/tts_${timestamp}.wav`;
-        await saveAudioToFile(generatedAudio, tempWav);
-        const targetPath = `${directoryPath}/tts_${timestamp}.${ext}`;
-        try {
-          await convertAudioToFormat(tempWav, targetPath, ext);
-          setSavedAudioPath(targetPath);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          try {
-            await unlink(tempWav);
-          } catch {}
-          Alert.alert(
-            'Success',
-            `Audio saved to:\n${getDisplayPath(targetPath)}`
-          );
-        } catch (convErr) {
-          console.warn('Conversion failed, WAV saved at', tempWav, convErr);
-          setSavedAudioPath(tempWav);
-          setCachedPlaybackPath(null);
-          setCachedPlaybackSource(null);
-          Alert.alert(
-            'Partial success',
-            `Conversion failed; WAV saved to:\n${getDisplayPath(tempWav)}`
-          );
-        }
-      }
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1835,7 +1851,7 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Generated Audio</Text>
               <View style={styles.resultContainer}>
                 <Text style={styles.resultText}>
-                  Samples: {generatedAudio.samples.length.toLocaleString()}
+                  Samples: {generatedAudio.numSamples.toLocaleString()}
                 </Text>
                 <Text style={styles.resultText}>
                   Sample Rate: {generatedAudio.sampleRate} Hz
@@ -1843,7 +1859,7 @@ export default function TTSScreen() {
                 <Text style={styles.resultText}>
                   Duration:{' '}
                   {(
-                    generatedAudio.samples.length / generatedAudio.sampleRate
+                    generatedAudio.numSamples / generatedAudio.sampleRate
                   ).toFixed(2)}{' '}
                   seconds
                 </Text>

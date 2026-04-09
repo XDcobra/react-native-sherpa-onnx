@@ -9,6 +9,11 @@ import type {
 } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+import {
+  resolvePublicLanguageHints,
+  type PublicLanguageHint,
+} from '../model-languages';
+import { ModelCategory } from '../download/types';
 
 let sttInstanceCounter = 0;
 
@@ -40,7 +45,7 @@ function normalizeSttResult(raw: {
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
  * @param options - Optional preferInt8 and modelType (default: auto)
- * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional error when success is false, and optionally isHardwareSpecificUnsupported
+ * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional **languages** (`iso6391Hint` for coarse tags; **`id`** for `modelOptions` where applicable), optional error when success is false, and optionally isHardwareSpecificUnsupported
  * @example
  * ```typescript
  * const path = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
@@ -59,6 +64,8 @@ export async function detectSttModel(
   error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
+  /** Curated language rows: **`iso6391Hint`** for catalog-style tags; **`id`** for **`modelOptions`** (e.g. Fun-ASR `中文`). Omitted when unknown or empty. */
+  languages?: PublicLanguageHint[];
   isHardwareSpecificUnsupported?: boolean;
 }> {
   const resolvedPath = await resolveModelPath(modelPath);
@@ -68,6 +75,12 @@ export async function detectSttModel(
     options?.modelType
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  const modelType =
+    raw.modelType != null && raw.modelType !== '' ? raw.modelType : undefined;
+  const languageHints =
+    raw.success && modelType != null
+      ? resolvePublicLanguageHints({ domain: ModelCategory.Stt, modelType })
+      : [];
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
@@ -75,9 +88,8 @@ export async function detectSttModel(
       ? { isHardwareSpecificUnsupported: true }
       : {}),
     detectedModels: raw.detectedModels ?? [],
-    ...(raw.modelType != null && raw.modelType !== ''
-      ? { modelType: raw.modelType }
-      : {}),
+    ...(modelType != null ? { modelType } : {}),
+    ...(languageHints.length > 0 ? { languages: languageHints } : {}),
   };
 }
 
@@ -271,22 +283,3 @@ export {
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
 } from './types';
-export {
-  getWhisperLanguages,
-  WHISPER_LANGUAGES,
-  getSenseVoiceLanguages,
-  SENSEVOICE_LANGUAGES,
-  getCanaryLanguages,
-  CANARY_LANGUAGES,
-  getFunasrNanoLanguages,
-  FUNASR_NANO_LANGUAGES,
-  getFunasrMltNanoLanguages,
-  FUNASR_MLT_NANO_LANGUAGES,
-  getCohereTranscribeLanguages,
-  COHERE_TRANSCRIBE_LANGUAGES,
-  getQwen3AsrLanguages,
-  QWEN3_ASR_LANGUAGES,
-  getDolphinInfoLanguages,
-  DOLPHIN_INFO_LANGUAGES,
-} from './sttModelLanguages';
-export type { SttModelLanguage, WhisperLanguage } from './sttModelLanguages';

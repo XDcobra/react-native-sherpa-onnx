@@ -1,0 +1,462 @@
+/**
+ * sherpa-onnx-model-detect-tts.cpp
+ *
+ * Purpose: Detects TTS model type and fills TtsModelPaths from a model directory. Used by
+ * nativeDetectTtsModel (module-jni). Supports Vits, Matcha, Kokoro, Kitten, Pocket, Zipvoice, Supertonic.
+ *
+ * --- Detection pipeline (overview) ---
+ *
+ * 1. Gather files in modelDir (recursive), then map file names to logical paths (ttsModel,
+ *    acousticModel, vocoder, encoder, decoder, lmFlow, lmMain, textConditioner, tokens, lexicon,
+ *    dataDir, voices, vocabJson, tokenScoresJson). Path hints from directory name (isLikelyVits,
+ *    isLikelyKitten, isLikelyKokoro).
+ *
+ * 2. Capabilities (hasVits, hasMatcha, hasPocket, hasZipvoice, hasVoicesFile, hasDataDir): which
+ *    model types are *possible* given the paths. Multiple can be true (e.g. voices.bin can satisfy
+ *    both Kokoro and Kitten).
+ *
+ * 3. detectedModels (for UI "Select model type"): built from capabilities only. Every kind with
+ *    the corresponding has* == true is added (with existing rules: zipvoice only if !hasMatcha,
+ *    vits when hasVits and no voices or ambiguous folder name).
+ *
+ * 4. selectedKind: from ResolveTtsKind(). If modelType is explicit, use it if capabilities allow.
+ *    If modelType == "auto": Priority 1 = folder name (GetKindsFromDirNameTts: tokens like "vits",
+ *    "matcha", "kokoro" in dir name --> candidate kinds). Priority 2 = among those candidates, pick
+ *    the first that CapabilitySupportsTtsKind(). Fallback = file-only order (matcha --> pocket -->
+ *    zipvoice --> kokoro/kitten --> vits).
+ *
+ * 5. paths: all gathered paths are written into result.paths; the selected kind determines which
+ *    engine is used at runtime.
+ *
+ * Result to caller: ok, error, detectedModels (list), selectedKind (single), paths.
+ */
+#include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-tts-catalog-metadata.h"
+#include "sherpa-onnx-validate-tts.h"
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <optional>
+#include <string>
+#include <vector>
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "TtsModelDetect"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#elif defined(__APPLE__)
+#define LOGI(...) \
+    do { \
+        fprintf(stderr, "[TtsModelDetect] "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
+#define LOGE(...) \
+    do { \
+        fprintf(stderr, "[TtsModelDetect] ERROR "); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+    } while (0)
+#else
+#define LOGI(...) ((void)0)
+#define LOGE(...) ((void)0)
+#endif
+
+namespace sherpaonnx {
+namespace {
+
+using model_detect::ToLower;
+
+TtsModelKind ParseTtsModelType(const std::string& modelType) {
+    if (modelType == "vits") return TtsModelKind::kVits;
+    if (modelType == "matcha") return TtsModelKind::kMatcha;
+    if (modelType == "kokoro") return TtsModelKind::kKokoro;
+    if (modelType == "kitten") return TtsModelKind::kKitten;
+    if (modelType == "pocket") return TtsModelKind::kPocket;
+    if (modelType == "zipvoice") return TtsModelKind::kZipvoice;
+    if (modelType == "supertonic") return TtsModelKind::kSupertonic;
+    return TtsModelKind::kUnknown;
+}
+
+/** Returns true if the given kind is supported by the current paths and hints (required files present).
+ *  data_dir (espeak-ng-data) is required for Kitten, Kokoro, and Zipvoice (Zipvoice uses MatchaTtsLexicon + espeak).
+ *  VITS and Matcha use dataDir optionally in this detector; Pocket does not use it. */
+static bool CapabilitySupportsTtsKind(
+    TtsModelKind kind,
+    bool hasVits,
+    bool hasMatcha,
+    bool hasPocket,
+    bool hasZipvoice,
+    bool hasSupertonic,
+    bool hasVoicesFile,
+    bool hasDataDir
+) {
+    switch (kind) {
+        case TtsModelKind::kVits:
+            return hasVits;
+        case TtsModelKind::kMatcha:
+            return hasMatcha;
+        case TtsModelKind::kKokoro:
+        case TtsModelKind::kKitten:
+            return hasVoicesFile && hasDataDir;
+        case TtsModelKind::kPocket:
+            return hasPocket;
+        case TtsModelKind::kZipvoice:
+            return hasZipvoice;
+        case TtsModelKind::kSupertonic:
+            return hasSupertonic;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Priority 1: Collect candidate TTS kinds from the model directory name (last path component).
+ * Tokens like "vits", "matcha", "kokoro" are matched case-insensitively. Returns candidates in a
+ * fixed priority order for file-based disambiguation when multiple names match.
+ */
+static std::vector<TtsModelKind> GetKindsFromDirNameTts(const std::string& modelDir) {
+    using namespace model_detect;
+    size_t pos = modelDir.find_last_of("/\\");
+    std::string base = (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+    std::string lower = ToLower(base);
+
+    std::vector<TtsModelKind> out;
+    auto add = [&out](TtsModelKind k) {
+        if (std::find(out.begin(), out.end(), k) == out.end())
+            out.push_back(k);
+    };
+
+    if (lower.find("matcha") != std::string::npos) add(TtsModelKind::kMatcha);
+    if (lower.find("pocket") != std::string::npos) add(TtsModelKind::kPocket);
+    if (lower.find("zipvoice") != std::string::npos) add(TtsModelKind::kZipvoice);
+    if (lower.find("supertonic") != std::string::npos) add(TtsModelKind::kSupertonic);
+    if (lower.find("kokoro") != std::string::npos) add(TtsModelKind::kKokoro);
+    if (lower.find("kitten") != std::string::npos) add(TtsModelKind::kKitten);
+    if (lower.find("vits") != std::string::npos) add(TtsModelKind::kVits);
+
+    return out;
+}
+
+static void AppendUniqueDetectionSource(std::vector<DetectionSource>& out, DetectionSource s) {
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+        out.push_back(s);
+    }
+}
+
+static const char* TtsModelKindTag(TtsModelKind k) {
+    switch (k) {
+        case TtsModelKind::kVits: return "vits";
+        case TtsModelKind::kMatcha: return "matcha";
+        case TtsModelKind::kKokoro: return "kokoro";
+        case TtsModelKind::kKitten: return "kitten";
+        case TtsModelKind::kPocket: return "pocket";
+        case TtsModelKind::kZipvoice: return "zipvoice";
+        case TtsModelKind::kSupertonic: return "supertonic";
+        default: return "unknown";
+    }
+}
+
+/** Shared detection logic: runs on a pre-built file list. No filesystem listing; logging when called from DetectTtsModel. */
+static TtsDetectResult DetectTtsModelFromFiles(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType
+) {
+    using namespace model_detect;
+
+    TtsDetectResult result;
+
+    if (files.empty()) {
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kNameOnly);
+        std::vector<TtsModelKind> nameKinds = GetKindsFromDirNameTts(modelDir);
+        for (TtsModelKind k : nameKinds) {
+            result.detectedModels.push_back({TtsModelKindTag(k), modelDir});
+        }
+        static constexpr const char* kNameOnlyErr =
+            "TTS: Name-only detection cannot validate files; run a full directory scan before createTTS.";
+        if (modelType != "auto") {
+            TtsModelKind sel = ParseTtsModelType(modelType);
+            if (sel == TtsModelKind::kUnknown) {
+                result.error = "TTS: Unknown model type: " + modelType;
+                return result;
+            }
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
+            result.selectedKind = sel;
+            result.detectedModels.clear();
+            result.detectedModels.push_back({TtsModelKindTag(sel), modelDir});
+            result.ok = false;
+            result.error = kNameOnlyErr;
+            return result;
+        }
+        if (nameKinds.empty()) {
+            result.error = "TTS: No model type inferred from directory name (name-only mode).";
+            return result;
+        }
+        result.selectedKind = nameKinds[0];
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
+        result.ok = false;
+        result.error = kNameOnlyErr;
+        return result;
+    }
+
+    AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFileListing);
+
+    std::string tokensFile = FindFileByName(files, "tokens.txt");
+    std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
+    std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
+    LOGI("DetectTtsModel: modelDir=%s espeak-ng dataDir=%s (empty=%d)",
+         modelDir.c_str(),
+         dataDirPath.empty() ? "(empty)" : dataDirPath.c_str(),
+         (int)dataDirPath.empty());
+    std::string voicesFile = FindFileByName(files, "voices.bin");
+
+    std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
+    std::string vocoder = FindOnnxByAnyToken(files, {"vocoder", "vocos"}, std::nullopt);
+    std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, std::nullopt);
+    std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, std::nullopt);
+    std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
+    std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, std::nullopt);
+    std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
+    std::string vocabJsonFile = FindFileByName(files, "vocab.json");
+    std::string tokenScoresJsonFile = FindFileByName(files, "token_scores.json");
+    std::string durationPredictor = FindOnnxByAnyToken(files, {"duration_predictor", "duration-predictor"}, std::nullopt);
+    std::string textEncoderSupertonic = FindOnnxByAnyToken(files, {"text_encoder", "text-encoder"}, std::nullopt);
+    std::string vectorEstimator = FindOnnxByAnyToken(files, {"vector_estimator", "vector-estimator"}, std::nullopt);
+    std::string ttsJsonFile = FindFileByName(files, "tts.json");
+    std::string unicodeIndexerFile = FindFileByName(files, "unicode_indexer.bin");
+    std::string voiceStyleFile = FindFileByName(files, "voice.bin");
+
+    std::vector<std::string> modelExcludes = {
+        "acoustic", "vocoder", "encoder", "decoder", "joiner",
+        // Supertonic component models are not VITS monolithic model.onnx files.
+        "duration_predictor", "duration-predictor",
+        "text_encoder", "text-encoder",
+        "vector_estimator", "vector-estimator"
+    };
+    std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, std::nullopt);
+    if (ttsModel.empty()) {
+        ttsModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
+    }
+
+    // VITS requires both model.onnx-like file and tokens.txt
+    bool hasVits = !ttsModel.empty() && !tokensFile.empty();
+    std::string modelDirLower = ToLower(modelDir);
+    bool isLikelyMatcha = modelDirLower.find("matcha") != std::string::npos;
+    bool hasMatcha = (!acousticModel.empty() && !vocoder.empty())
+        || (isLikelyMatcha && !ttsModel.empty() && !tokensFile.empty());
+    if (hasMatcha && acousticModel.empty())
+        acousticModel = ttsModel;  // single-file Matcha: model.onnx is the acoustic model
+    bool hasVoicesFile = !voicesFile.empty();
+    bool isLikelyZipvoice = modelDirLower.find("zipvoice") != std::string::npos;
+    bool hasZipvoice = !encoder.empty() && !decoder.empty() && !vocoder.empty();
+    if (isLikelyZipvoice && !encoder.empty() && !decoder.empty() && vocoder.empty()) {
+        result.ok = false;
+        result.error = "TTS: Zipvoice distill variant (no vocoder) is not supported. Use a full Zipvoice model with vocoder or add vocos_24khz.onnx separately.";
+        return result;
+    }
+    bool hasPocket = !lmFlow.empty() && !lmMain.empty() && !encoder.empty() && !decoder.empty() &&
+                     !textConditioner.empty() && !vocabJsonFile.empty() && !tokenScoresJsonFile.empty();
+    bool hasSupertonic = !durationPredictor.empty() && !textEncoderSupertonic.empty() &&
+                         !vectorEstimator.empty() && !vocoder.empty() && !ttsJsonFile.empty() &&
+                         !unicodeIndexerFile.empty() && !voiceStyleFile.empty();
+    bool hasDataDir = !dataDirPath.empty();
+
+    bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
+    bool isLikelyKokoro = modelDirLower.find("kokoro") != std::string::npos;
+
+    if (hasMatcha) result.detectedModels.push_back({"matcha", modelDir});
+    if (hasPocket) result.detectedModels.push_back({"pocket", modelDir});
+    if (hasZipvoice && !hasMatcha) result.detectedModels.push_back({"zipvoice", modelDir});
+    if (hasSupertonic) result.detectedModels.push_back({"supertonic", modelDir});
+    if (hasVoicesFile) {
+        if (isLikelyKitten && !isLikelyKokoro) {
+            result.detectedModels.push_back({"kitten", modelDir});
+        } else if (isLikelyKokoro && !isLikelyKitten) {
+            result.detectedModels.push_back({"kokoro", modelDir});
+        } else {
+            result.detectedModels.push_back({"kokoro", modelDir});
+            result.detectedModels.push_back({"kitten", modelDir});
+        }
+    }
+    if (hasVits) {
+        bool isLikelyVits = modelDirLower.find("vits") != std::string::npos;
+        bool voicesAmbiguous = !isLikelyKitten && !isLikelyKokoro;
+        bool addVits = !hasVoicesFile || isLikelyVits || voicesAmbiguous;
+        if (addVits) result.detectedModels.push_back({"vits", modelDir});
+    }
+
+    TtsModelKind selected = TtsModelKind::kUnknown;
+    if (modelType != "auto") {
+        selected = ParseTtsModelType(modelType);
+        if (selected == TtsModelKind::kUnknown) {
+            result.error = "TTS: Unknown model type: " + modelType;
+            return result;
+        }
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
+    } else {
+        std::vector<TtsModelKind> nameCandidates = GetKindsFromDirNameTts(modelDir);
+        bool pickedFromDir = false;
+        if (!nameCandidates.empty()) {
+            for (TtsModelKind k : nameCandidates) {
+                if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice, hasSupertonic,
+                                              hasVoicesFile, hasDataDir)) {
+                    selected = k;
+                    pickedFromDir = true;
+                    break;
+                }
+            }
+        }
+        if (pickedFromDir) {
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
+        } else if (selected == TtsModelKind::kUnknown) {
+            if (hasMatcha) selected = TtsModelKind::kMatcha;
+            else if (hasPocket) selected = TtsModelKind::kPocket;
+            else if (hasZipvoice) selected = TtsModelKind::kZipvoice;
+            else if (hasSupertonic) selected = TtsModelKind::kSupertonic;
+            else if (hasVoicesFile) {
+                if (isLikelyKitten && !isLikelyKokoro) selected = TtsModelKind::kKitten;
+                else if (isLikelyKokoro && !isLikelyKitten) selected = TtsModelKind::kKokoro;
+                else selected = TtsModelKind::kKokoro;
+            } else if (hasVits) selected = TtsModelKind::kVits;
+            if (selected != TtsModelKind::kUnknown) {
+                AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFallbackOrder);
+            }
+        }
+    }
+
+    if (selected == TtsModelKind::kUnknown) {
+        result.error = "TTS: No compatible model type detected in " + modelDir;
+        return result;
+    }
+
+    std::string lexiconPath;
+    for (const auto& c : lexiconCandidates) {
+        result.lexiconLanguageCandidates.push_back(c.languageId);
+    }
+    if (!lexiconCandidates.empty()) {
+        lexiconPath = lexiconCandidates[0].path;
+    }
+
+    if (selected == TtsModelKind::kMatcha && !acousticModel.empty() && vocoder.empty()) {
+        vocoder = acousticModel;
+    }
+
+    result.selectedKind = selected;
+    result.paths.ttsModel = ttsModel;
+    result.paths.tokens = tokensFile;
+    result.paths.lexicon = lexiconPath;
+    result.paths.dataDir = dataDirPath;
+    result.paths.voices = voicesFile;
+    result.paths.acousticModel = acousticModel;
+    result.paths.vocoder = vocoder;
+    result.paths.encoder = encoder;
+    result.paths.decoder = decoder;
+    result.paths.lmFlow = lmFlow;
+    result.paths.lmMain = lmMain;
+    result.paths.textConditioner = textConditioner;
+    result.paths.vocabJson = vocabJsonFile;
+    result.paths.tokenScoresJson = tokenScoresJsonFile;
+    result.paths.durationPredictor = durationPredictor;
+    result.paths.textEncoder = textEncoderSupertonic;
+    result.paths.vectorEstimator = vectorEstimator;
+    result.paths.ttsJson = ttsJsonFile;
+    result.paths.unicodeIndexer = unicodeIndexerFile;
+    result.paths.voiceStyle = voiceStyleFile;
+
+    auto validation = ValidateTtsPaths(selected, result.paths, modelDir);
+    if (!validation.ok) {
+        result.ok = false;
+        result.error = validation.error;
+        return result;
+    }
+
+    result.ok = true;
+    return result;
+}
+
+} // namespace
+
+TtsDetectResult DetectTtsModel(
+    const std::optional<std::string>& model_dir_opt,
+    const std::optional<std::string>& asset_name_opt,
+    const std::string& modelType) {
+    using namespace model_detect;
+
+    TtsDetectResult result;
+
+    const bool has_dir = model_dir_opt && !model_dir_opt->empty();
+    const bool has_asset = asset_name_opt && !asset_name_opt->empty();
+
+    if (!has_dir && !has_asset) {
+        result.error = "TTS: modelDir and assetName are both empty";
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    LOGI("DetectTtsModel: has_dir=%d has_asset=%d modelType=%s",
+         static_cast<int>(has_dir), static_cast<int>(has_asset), modelType.c_str());
+
+    // Asset id only: name-only detection (no filesystem).
+    if (!has_dir && has_asset) {
+        const std::string& assetName = *asset_name_opt;
+        const std::string syntheticDir = std::string("m/") + assetName;
+        result = DetectTtsModelFromFileList({}, syntheticDir, modelType);
+        FillTtsDerivedCatalogMetadata(result, assetName);
+        LOGI("DetectTtsModel: assetName-only path for %s", assetName.c_str());
+        return result;
+    }
+
+    const std::string& modelDir = *model_dir_opt;
+
+    if (!FileExists(modelDir) || !IsDirectory(modelDir)) {
+        result.error = "TTS: Model directory does not exist or is not a directory: " + modelDir;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    const auto files = ListFilesRecursive(modelDir, 4);
+    LOGI("DetectTtsModel: Found %zu files in %s", files.size(), modelDir.c_str());
+    for (const auto& f : files) {
+        LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+    }
+
+    result = DetectTtsModelFromFiles(files, modelDir, modelType);
+
+    if (has_asset) {
+        FillTtsDerivedCatalogMetadata(result, *asset_name_opt);
+    } else {
+        FillTtsDerivedCatalogMetadataUsingModelDirBasename(result, modelDir);
+    }
+
+    if (!result.ok) {
+        if (!result.error.empty()) LOGE("%s", result.error.c_str());
+        return result;
+    }
+    LOGI("DetectTtsModel: tokens=%s, lexicon=%s, dataDir=%s, voices=%s",
+         result.paths.tokens.c_str(), result.paths.lexicon.c_str(),
+         result.paths.dataDir.c_str(), result.paths.voices.c_str());
+    LOGI("DetectTtsModel: selected kind=%d, ttsModel=%s",
+         static_cast<int>(result.selectedKind), result.paths.ttsModel.c_str());
+    LOGI("DetectTtsModel: final paths — tokens=%s, dataDir=%s",
+         result.paths.tokens.c_str(), result.paths.dataDir.c_str());
+    LOGI("DetectTtsModel: detection OK for %s", modelDir.c_str());
+    return result;
+}
+
+// Test-only: used by host-side model_detect_test; not used in production (Android/iOS use DetectTtsModel).
+TtsDetectResult DetectTtsModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType
+) {
+    TtsDetectResult result;
+    if (modelDir.empty()) {
+        result.error = "TTS: Model directory is empty";
+        return result;
+    }
+    return DetectTtsModelFromFiles(files, modelDir, modelType);
+}
+
+} // namespace sherpaonnx

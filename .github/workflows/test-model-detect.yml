@@ -1,4 +1,5 @@
-# Test Model Detect: On PR to main, run CSV check (warning only), ASR/TTS/speech-enhancement detection tests, and validation tests.
+# Test Model Detect: On PR to main, run CSV check (warning only), ASR/TTS/speech-enhancement detection tests
+# (TTS includes fixture CSV tests and TtsCatalogHints C++ tests), and validation tests.
 # If any of the called workflows fails, this workflow fails.
 # Runs in parallel with sdk-android, sdk-ios, sdk-sdk on pull_request.
 

@@ -1,14 +1,20 @@
 package com.sherpaonnx
 
 import android.net.Uri
+import android.util.Base64
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
+import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
+import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
+import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
+import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -49,14 +55,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val pcmPlayerService = PcmPlayerService()
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
-    { modelDir, modelType -> Companion.nativeDetectTtsModel(modelDir, modelType) },
+    { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
     { instanceId, requestId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, requestId, samples, sampleRate, progress, isFinal) },
     { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
-    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) }
+    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) },
+    { instanceId, requestId, message, path -> emitTtsStreamFileError(instanceId, requestId, message, path) },
+    { instanceId, requestId, cancelled, path, bytesWritten, sampleRate -> emitTtsStreamFileEnd(instanceId, requestId, cancelled, path, bytesWritten, sampleRate) },
+    { rawPath, pcmSr, outPath, fmt, outHz ->
+      Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
+    },
+    pcmPlayerService
   )
-  private val alignmentHelper = SherpaOnnxAlignmentHelper(reactApplicationContext)
+  private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
+  private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
+  private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
+  private val filesHelper = SherpaOnnxFilesHelper(reactApplicationContext)
+  private val alignmentHelper = SherpaOnnxAlignmentHelper(
+    reactApplicationContext,
+    { instanceId, generation -> ttsHelper.getBatchSinkSnapshot(instanceId, generation) }
+  )
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
     { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
@@ -73,9 +93,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pcmCapture?.stop()
     pcmCapture = null
     onlineSttHelper.shutdown()
-    ttsHelper.shutdown()
+    commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    pcmPlayerService.shutdown()
   }
 
   /**
@@ -834,7 +855,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     provider: String?,
     promise: Promise
   ) {
-    ttsHelper.initializeTts(
+    commonTtsHelper.initializeTts(
       instanceId,
       modelDir,
       modelType,
@@ -855,61 +876,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /**
    * Detect TTS model type and structure without initializing the engine.
    */
-  override fun detectTtsModel(modelDir: String, modelType: String?, promise: Promise) {
-    try {
-      val result = Companion.nativeDetectTtsModel(modelDir, modelType ?: "auto")
-      if (result == null) {
-        android.util.Log.e(NAME, "DETECT_ERROR: TTS model detection returned null")
-        promise.reject("DETECT_ERROR", "TTS model detection returned null")
-        return
-      }
-      val success = result["success"] as? Boolean ?: false
-      val detectedModels = result["detectedModels"] as? ArrayList<*>
-        ?: arrayListOf<HashMap<String, String>>()
-      val modelTypeStr = result["modelType"] as? String
-      val paths = result["paths"] as? HashMap<*, *>
-
-      val resultMap = Arguments.createMap()
-      resultMap.putBoolean("success", success)
-      val modelsArray = Arguments.createArray()
-      for (model in detectedModels) {
-        val modelMap = model as? HashMap<*, *>
-        if (modelMap != null) {
-          val entry = Arguments.createMap()
-          entry.putString("type", modelMap["type"] as? String ?: "")
-          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
-          modelsArray.pushMap(entry)
-        }
-      }
-      resultMap.putArray("detectedModels", modelsArray)
-      if (modelTypeStr != null) {
-        resultMap.putString("modelType", modelTypeStr)
-      }
-      val modelPath = paths?.get("model") as? String
-      if (!modelPath.isNullOrBlank()) {
-        val pathsMap = Arguments.createMap()
-        pathsMap.putString("model", modelPath)
-        resultMap.putMap("paths", pathsMap)
-      }
-      if (!success) {
-        val error = result["error"] as? String
-        if (!error.isNullOrBlank()) {
-          resultMap.putString("error", error)
-        }
-      }
-      val lexiconLanguageCandidates = result["lexiconLanguageCandidates"] as? ArrayList<*>
-      if (!lexiconLanguageCandidates.isNullOrEmpty()) {
-        val candidatesArray = Arguments.createArray()
-        for (c in lexiconLanguageCandidates) {
-          (c as? String)?.let { candidatesArray.pushString(it) }
-        }
-        resultMap.putArray("lexiconLanguageCandidates", candidatesArray)
-      }
-      promise.resolve(resultMap)
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "DETECT_ERROR: TTS model detection failed: ${e.message}", e)
-      promise.reject("DETECT_ERROR", "TTS model detection failed: ${e.message}", e)
-    }
+  override fun detectTtsModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise,
+  ) {
+    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, promise)
   }
 
   /**
@@ -922,66 +895,173 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     lengthScale: Double?,
     promise: Promise
   ) {
-    ttsHelper.updateTtsParams(instanceId, noiseScale, noiseScaleW, lengthScale, promise)
+    offlineTtsHelper.updateTtsParams(instanceId, noiseScale, noiseScaleW, lengthScale, promise)
   }
 
   /**
    * Generate speech from text.
    */
   override fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTts(instanceId, text, options, promise)
+    offlineTtsHelper.generateTts(instanceId, text, options, promise)
   }
 
   /**
    * Generate speech with subtitle/timestamp metadata.
    */
   override fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
+    offlineTtsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
   }
 
-  override fun runCTCForcedAlignment(
-    modelPath: String,
+  /**
+   * Retrieve PCM samples from the native sink for a given generation.
+   */
+  override fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
+    offlineTtsHelper.getTtsSamples(instanceId, generation, promise)
+  }
+
+  /**
+   * Save TTS audio directly from the native sink (no JS PCM round-trip).
+   */
+  override fun saveTtsAudioFromSink(
+    instanceId: String,
+    generation: Double,
+    destinationType: String,
+    pathOrDirectoryUri: String,
+    filename: String,
+    format: String,
+    outputSampleRateHz: Double,
+    promise: Promise
+  ) {
+    offlineTtsHelper.saveTtsAudioFromSink(
+      instanceId, generation, destinationType, pathOrDirectoryUri,
+      filename, format, outputSampleRateHz, promise
+    )
+  }
+
+  override fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
+    offlineTtsHelper.playTtsFromSink(instanceId, generation, sampleRate, promise)
+  }
+
+  override fun getAudioDuration(
     audioPath: String,
-    text: String,
-    vocabJson: String,
     promise: Promise,
   ) {
-    alignmentHelper.runCTCForcedAlignment(modelPath, audioPath, text, vocabJson, promise)
+    alignmentHelper.getAudioDuration(audioPath, promise)
+  }
+
+  override fun alignTextToAudioFromPath(
+    text: String,
+    audioPath: String,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignTextToAudioFromPath(
+      text,
+      audioPath,
+      mode,
+      granularity,
+      options,
+      promise
+    )
+  }
+
+  override fun alignTextToAudioFromPcm(
+    text: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignTextToAudioFromPcm(
+      text,
+      samples,
+      sampleRate,
+      mode,
+      granularity,
+      options,
+      promise
+    )
+  }
+
+  override fun alignTextToTtsSink(
+    generatedAudio: ReadableMap,
+    text: String,
+    mode: String,
+    granularity: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignTextToTtsSink(
+      generatedAudio,
+      text,
+      mode,
+      granularity,
+      options,
+      promise
+    )
   }
 
   /**
    * Generate speech in streaming mode (emits chunk events).
    */
   override fun generateTtsStream(instanceId: String, requestId: String, text: String, options: ReadableMap?, promise: Promise) {
-    ttsHelper.generateTtsStream(instanceId, requestId, text, options, promise)
+    onlineTtsHelper.generateTtsStream(instanceId, requestId, text, options, promise)
+  }
+
+  override fun generateTtsStreamToFile(
+    instanceId: String,
+    requestId: String,
+    text: String,
+    options: ReadableMap?,
+    fileOptions: ReadableMap?,
+    promise: Promise
+  ) {
+    onlineTtsHelper.generateTtsStreamToFile(
+      instanceId,
+      requestId,
+      text,
+      options,
+      fileOptions,
+      promise
+    )
   }
 
   /**
    * Cancel ongoing streaming TTS.
    */
   override fun cancelTtsStream(instanceId: String, promise: Promise) {
-    ttsHelper.cancelTtsStream(instanceId, promise)
+    onlineTtsHelper.cancelTtsStream(instanceId, promise)
   }
 
-  /**
-   * Start PCM playback for streaming TTS.
-   */
-  override fun startTtsPcmPlayer(instanceId: String, sampleRate: Double, channels: Double, promise: Promise) {
-    ttsHelper.startTtsPcmPlayer(instanceId, sampleRate, channels, promise)
+  override fun createPcmPlayer(
+    playerId: String,
+    sampleRate: Double,
+    channels: Double,
+    feed: String,
+    ttsInstanceId: String?,
+    promise: Promise
+  ) {
+    pcmPlayerService.create(playerId, sampleRate, channels, feed, ttsInstanceId, promise)
   }
 
-  /**
-   * Write PCM samples to the streaming TTS player.
-   */
-  override fun writeTtsPcmChunk(instanceId: String, samples: ReadableArray, promise: Promise) {
-    ttsHelper.writeTtsPcmChunk(instanceId, samples, promise)
+  override fun writePcmChunk(playerId: String, samples: ReadableArray, promise: Promise) {
+    pcmPlayerService.write(playerId, samples, promise)
   }
 
-  /**
-   * Stop PCM playback for streaming TTS.
-   */
-  override fun stopTtsPcmPlayer(instanceId: String, promise: Promise) {
-    ttsHelper.stopTtsPcmPlayer(instanceId, promise)
+  override fun pausePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.pause(playerId, promise)
+  }
+
+  override fun resumePcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.resume(playerId, promise)
+  }
+
+  override fun destroyPcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.destroy(playerId, promise)
   }
 
   private fun emitTtsStreamChunk(
@@ -994,14 +1074,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val samplesArray = Arguments.createArray()
-    for (sample in samples) {
-      samplesArray.pushDouble(sample.toDouble())
+    // Encode float PCM as base64 little-endian bytes (4 bytes per sample).
+    // This replaces per-element pushDouble and avoids O(n) bridge marshalling.
+    val pcmBase64 = if (samples.isNotEmpty()) {
+      val bb = java.nio.ByteBuffer.allocate(samples.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+      bb.asFloatBuffer().put(samples)
+      Base64.encodeToString(bb.array(), Base64.NO_WRAP)
+    } else {
+      ""
     }
     val payload = Arguments.createMap()
     payload.putString("instanceId", instanceId)
     payload.putString("requestId", requestId)
-    payload.putArray("samples", samplesArray)
+    payload.putString("pcmBase64", pcmBase64)
     payload.putInt("sampleRate", sampleRate)
     payload.putDouble("progress", progress.toDouble())
     payload.putBoolean("isFinal", isFinal)
@@ -1028,25 +1113,63 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     eventEmitter.emit("ttsStreamEnd", payload)
   }
 
+  private fun emitTtsStreamFileError(
+    instanceId: String,
+    requestId: String,
+    message: String,
+    path: String?
+  ) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("instanceId", instanceId)
+    payload.putString("requestId", requestId)
+    payload.putString("message", message)
+    if (!path.isNullOrBlank()) {
+      payload.putString("path", path)
+    }
+    eventEmitter.emit("ttsStreamFileError", payload)
+  }
+
+  private fun emitTtsStreamFileEnd(
+    instanceId: String,
+    requestId: String,
+    cancelled: Boolean,
+    path: String,
+    bytesWritten: Long,
+    sampleRate: Int
+  ) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("instanceId", instanceId)
+    payload.putString("requestId", requestId)
+    payload.putBoolean("cancelled", cancelled)
+    payload.putString("path", path)
+    payload.putDouble("bytesWritten", bytesWritten.toDouble())
+    payload.putInt("sampleRate", sampleRate)
+    eventEmitter.emit("ttsStreamFileEnd", payload)
+  }
+
   /**
    * Get TTS sample rate.
    */
   override fun getTtsSampleRate(instanceId: String, promise: Promise) {
-    ttsHelper.getTtsSampleRate(instanceId, promise)
+    commonTtsHelper.getTtsSampleRate(instanceId, promise)
   }
 
   /**
    * Get number of speakers.
    */
   override fun getTtsNumSpeakers(instanceId: String, promise: Promise) {
-    ttsHelper.getTtsNumSpeakers(instanceId, promise)
+    commonTtsHelper.getTtsNumSpeakers(instanceId, promise)
   }
 
   /**
    * Release TTS resources.
    */
   override fun unloadTts(instanceId: String, promise: Promise) {
-    ttsHelper.unloadTts(instanceId, promise)
+    commonTtsHelper.unloadTts(instanceId, promise)
   }
 
   // ==================== Speech Enhancement Methods ====================
@@ -1199,29 +1322,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.unloadOnline(instanceId, promise)
   }
 
-  /**
-   * Save TTS audio samples to a WAV file.
-   */
-  override fun saveTtsAudioToFile(
+  override fun saveTtsAudioFromPCM(
     samples: ReadableArray,
     sampleRate: Double,
-    filePath: String,
-    promise: Promise
-  ) {
-    ttsHelper.saveTtsAudioToFile(samples, sampleRate, filePath, promise)
-  }
-
-  /**
-   * Save TTS audio samples to a WAV file via Android SAF content URI.
-   */
-  override fun saveTtsAudioToContentUri(
-    samples: ReadableArray,
-    sampleRate: Double,
-    directoryUri: String,
+    destinationType: String,
+    pathOrDirectoryUri: String,
     filename: String,
+    format: String,
+    outputSampleRateHz: Double,
     promise: Promise
   ) {
-    ttsHelper.saveTtsAudioToContentUri(samples, sampleRate, directoryUri, filename, promise)
+    offlineTtsHelper.saveTtsAudioFromPCM(
+      samples,
+      sampleRate,
+      destinationType,
+      pathOrDirectoryUri,
+      filename,
+      format,
+      outputSampleRateHz,
+      promise
+    )
   }
 
   /**
@@ -1234,38 +1354,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     mimeType: String,
     promise: Promise
   ) {
-    ttsHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
+    filesHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
   }
 
-  /**
-   * Save text content to a file via Android SAF content URI.
-   */
-  override fun saveTtsTextToContentUri(
+  override fun saveTextToContentUri(
     text: String,
     directoryUri: String,
     filename: String,
     mimeType: String,
     promise: Promise
   ) {
-    ttsHelper.saveTtsTextToContentUri(text, directoryUri, filename, mimeType, promise)
+    filesHelper.saveTextToContentUri(text, directoryUri, filename, mimeType, promise)
   }
 
-  /**
-   * Copy a SAF content URI to a cache file for local playback.
-   */
-  override fun copyTtsContentUriToCache(
+  override fun copyContentUriToCache(
     fileUri: String,
     filename: String,
     promise: Promise
   ) {
-    ttsHelper.copyTtsContentUriToCache(fileUri, filename, promise)
+    filesHelper.copyContentUriToCache(fileUri, filename, promise)
   }
 
-  /**
-   * Share a TTS audio file (file path or content URI).
-   */
-  override fun shareTtsAudio(fileUri: String, mimeType: String, promise: Promise) {
-    ttsHelper.shareTtsAudio(fileUri, mimeType, promise)
+  override fun shareAudioFile(fileUri: String, mimeType: String, promise: Promise) {
+    filesHelper.shareAudioFile(fileUri, mimeType, promise)
   }
 
   /**
@@ -1369,9 +1480,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       debug: Boolean
     ): HashMap<String, Any>?
 
-    /** Model detection for TTS: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
+    /** Model detection for TTS: optional directory and/or asset name; returns HashMap (for Kotlin API config). */
     @JvmStatic
-    private external fun nativeDetectTtsModel(modelDir: String, modelType: String): HashMap<String, Any>?
+    private external fun nativeDetectTtsModel(
+      modelDir: String,
+      assetName: String?,
+      modelType: String?,
+    ): HashMap<String, Any>?
 
     /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
@@ -1397,5 +1512,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
      */
     @JvmStatic
     private external fun nativeDecodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Int): Array<Any>
+
+    /** Mono float32 little-endian raw PCM file to output format (requires FFmpeg). Empty = success. */
+    @JvmStatic
+    private external fun nativeConvertFloat32MonoFileToFormat(
+      rawPath: String,
+      pcmSampleRate: Int,
+      outputPath: String,
+      format: String,
+      outputSampleRateHz: Int
+    ): String
   }
 }

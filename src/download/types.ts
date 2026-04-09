@@ -25,6 +25,7 @@ export type ModelMeta = {
   sha256?: string;
   category: ModelCategory;
   type?: TtsModelType;
+  /** Normalized primary language hints (mostly ISO 639-1), not raw release-id tokens. */
   languages?: string[];
   quantization?: Quantization;
   sizeTier?: SizeTier;

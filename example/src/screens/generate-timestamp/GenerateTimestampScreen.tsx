@@ -18,15 +18,12 @@ import {
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
+import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
 import {
-  copyContentUriToCache,
-  generateSubtitlesFromAudio,
-  type SubtitleGranularity,
-  type SubtitleMode,
-  type SubtitleResult,
-} from 'react-native-sherpa-onnx/tts';
-import {
+  alignTextToAudio,
   detectAlignmentModel,
+  type AlignTextToAudioResult,
+  type AlignmentGranularity,
   type AlignmentModelType,
 } from 'react-native-sherpa-onnx/alignment';
 import {
@@ -56,7 +53,7 @@ function isAlignmentModelFolder(folder: string, hint: string): boolean {
 type AlignmentModelEntry = { id: string; label: string };
 
 type DropdownType = 'mode' | 'granularity' | null;
-type ScreenSubtitleMode = Extract<SubtitleMode, 'fast' | 'accurate'>;
+type ScreenSubtitleMode = 'proportional' | 'accurate';
 
 type ModeOption = {
   value: ScreenSubtitleMode;
@@ -65,21 +62,21 @@ type ModeOption = {
 };
 
 type GranularityOption = {
-  value: SubtitleGranularity;
+  value: AlignmentGranularity;
   label: string;
   description: string;
 };
 
 const MODE_OPTIONS: ModeOption[] = [
   {
-    value: 'fast',
-    label: 'fast',
-    description: 'Estimated timing from audio length and text split',
+    value: 'proportional',
+    label: 'proportional',
+    description: 'Spread duration by text weight (no alignment model)',
   },
   {
     value: 'accurate',
     label: 'accurate',
-    description: 'Precise forced alignment using wav2vec2 (requires model)',
+    description: 'CTC forced alignment (wav2vec2; requires model)',
   },
 ];
 
@@ -184,9 +181,9 @@ export default function GenerateTimestampScreen() {
     null
   );
   const [transcriptText, setTranscriptText] = useState<string>('');
-  const [mode, setMode] = useState<ScreenSubtitleMode>('fast');
+  const [mode, setMode] = useState<ScreenSubtitleMode>('proportional');
   const [granularity, setGranularity] =
-    useState<SubtitleGranularity>('sentence');
+    useState<AlignmentGranularity>('sentence');
   const [openDropdown, setOpenDropdown] = useState<DropdownType>(null);
 
   const [running, setRunning] = useState(false);
@@ -194,7 +191,7 @@ export default function GenerateTimestampScreen() {
   const [errorSource, setErrorSource] = useState<'init' | 'generate' | null>(
     null
   );
-  const [result, setResult] = useState<SubtitleResult | null>(null);
+  const [result, setResult] = useState<AlignTextToAudioResult | null>(null);
 
   const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
@@ -314,9 +311,9 @@ export default function GenerateTimestampScreen() {
   const selectedMode = useMemo(
     () =>
       MODE_OPTIONS.find((option) => option.value === mode) ?? {
-        value: 'fast',
-        label: 'fast',
-        description: 'Estimated timing',
+        value: 'proportional',
+        label: 'proportional',
+        description: 'Proportional timing',
       },
     [mode]
   );
@@ -482,13 +479,13 @@ export default function GenerateTimestampScreen() {
 
       const subtitleResult =
         mode === 'accurate'
-          ? await generateSubtitlesFromAudio(text, audioPath, {
-              mode,
+          ? await alignTextToAudio(text, audioPath, {
+              mode: 'accurate',
               granularity,
               alignmentModelPath: initializedModelPath,
             })
-          : await generateSubtitlesFromAudio(text, audioPath, {
-              mode,
+          : await alignTextToAudio(text, audioPath, {
+              mode: 'proportional',
               granularity,
             });
       setResult(subtitleResult);

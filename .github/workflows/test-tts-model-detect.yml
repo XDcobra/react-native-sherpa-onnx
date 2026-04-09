@@ -1,4 +1,5 @@
-# TTS model detection tests: C++ tests that compare detector output with tts-models-expected.csv.
+# TTS model detection tests: C++ tests that compare detector output with tts-models-expected.csv,
+# plus TtsCatalogHints gtests (tts_catalog_hints_test.cpp — native catalog metadata parity).
 # Triggered on PR (via test-model-detect) or manually. Uses test/fixtures (tts-models-structure.txt, tts-models-expected.csv).
 
 name: Test – TTS model detection
@@ -31,4 +32,6 @@ jobs:
 
       - name: Run TTS model detection tests
         working-directory: ${{ github.workspace }}
-        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected
+        run: |
+          ./test/cpp/build/model_detect_test \
+            --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected:TtsCatalogHints.*

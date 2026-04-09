@@ -294,13 +294,16 @@ export interface Spec extends TurboModule {
    * Detect TTS model type and structure without initializing the engine.
    * Uses the same native file-based detection as initializeTts.
    * For Kokoro/Kitten multi-language models, also returns lexiconLanguageCandidates (e.g. ["default"], ["us-en", "gb-en", "zh"]) from detected lexicon.txt / lexicon-*.txt files.
-   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
+   * Note: this is the raw native bridge shape; JS facade `tts/detectTtsModel` narrows `modelType` to `TTSModelType`.
+   * @param modelDir - Absolute path to extracted model directory, or empty string when using `assetName` only (catalog hints).
+   * @param assetName - Release asset stem / folder basename (e.g. vits-piper-en_US-lessac-medium), or null/empty when scanning `modelDir` only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally lexiconLanguageCandidates (language ids for multi-lang Kokoro/Kitten)
+   * @returns Object with success, detectedModels, modelType, optional lexiconLanguageCandidates, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
    */
   detectTtsModel(
     modelDir: string,
-    modelType?: string
+    assetName: string | null,
+    modelType?: string | null
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -309,6 +312,14 @@ export interface Spec extends TurboModule {
     modelType?: string;
     /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
     lexiconLanguageCandidates?: string[];
+    /** Raw heuristic language tags from asset/folder name (catalog); not from lexicon files. JS `detectTtsModel` / download catalog normalize these for the public API. */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** tiny, small, medium, large, unknown — from name heuristics. */
+    sizeTier?: string;
+    /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
+    detectionSources?: string[];
   }>;
 
   /**
@@ -334,57 +345,143 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Generate speech from text.
+   * Generate speech from text. Returns metadata only (no PCM samples).
+   * Use getTtsSamples() to retrieve PCM from the native sink.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
    *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
-   * @returns Object with { samples: number[], sampleRate: number }
+   * @returns Object with { sampleRate, numSamples, generation }
    */
   generateTts(
     instanceId: string,
     text: string,
     options: Object
   ): Promise<{
-    samples: number[];
     sampleRate: number;
+    numSamples: number;
+    generation: number;
   }>;
 
   /**
-   * Generate speech with subtitle/timestamp metadata.
+   * Generate speech with subtitle/timestamp metadata. Returns metadata only (no PCM samples).
+   * Use getTtsSamples() to retrieve PCM from the native sink.
    * @param instanceId - Unique ID for this engine instance
    * @param text - Text to convert to speech
    * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
-   * @returns Object with samples, sampleRate, subtitles, and timingMode
+   * @returns Object with sampleRate, numSamples, generation, subtitles, and timingMode
    */
   generateTtsWithTimestamps(
     instanceId: string,
     text: string,
     options: Object
   ): Promise<{
-    samples: number[];
     sampleRate: number;
+    numSamples: number;
+    generation: number;
     subtitles: Array<{ text: string; start: number; end: number }>;
     timingMode: string;
+    /** Present for estimated subtitle mode (one sample-count per sentence chunk). */
+    segmentSampleCounts?: number[];
   }>;
+
+  /**
+   * Retrieve PCM samples from the native sink for a given TTS generation.
+   * @param instanceId - TTS engine instance ID
+   * @param generation - Generation number from generateTts/generateTtsWithTimestamps
+   * @returns Object with { samples: number[], sampleRate: number }
+   */
+  getTtsSamples(
+    instanceId: string,
+    generation: number
+  ): Promise<{
+    samples: number[];
+    sampleRate: number;
+  }>;
+
+  /**
+   * Save TTS audio directly from the native sink (no JS PCM round-trip).
+   * @param instanceId - TTS engine instance ID
+   * @param generation - Generation number from generateTts
+   * @param destinationType - 'file' or 'androidContent'
+   * @param pathOrDirectoryUri - Output path or SAF directory URI
+   * @param filename - Filename for androidContent destination
+   * @param format - Output format (wav, mp3, flac, etc.)
+   * @param outputSampleRateHz - Encoder sample rate hint; 0 for defaults
+   */
+  saveTtsAudioFromSink(
+    instanceId: string,
+    generation: number,
+    destinationType: string,
+    pathOrDirectoryUri: string,
+    filename: string,
+    format: string,
+    outputSampleRateHz: number
+  ): Promise<string>;
+
+  /**
+   * Play PCM from the native batch sink through the device speaker.
+   * @param instanceId - TTS engine instance ID
+   * @param generation - Expected sink generation (stale check)
+   * @param sampleRate - Override sample rate (0 = use sink rate)
+   */
+  playTtsFromSink(
+    instanceId: string,
+    generation: number,
+    sampleRate: number
+  ): Promise<{ playerId: string }>;
 
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
-   * Run wav2vec2 CTC forced alignment on an audio file and transcript.
-   * @param modelPath - Absolute path to wav2vec2 ONNX model file
-   * @param audioPath - Absolute path to input audio file (WAV recommended)
-   * @param text - Transcript to align
-   * @param vocabJson - JSON map of token -> id (stringified to reduce bridge overhead)
+   * Read audio duration/sample metrics for common formats (WAV fast path + decoder/metadata fallback).
    */
-  runCTCForcedAlignment(
-    modelPath: string,
-    audioPath: string,
+  getAudioDuration(audioPath: string): Promise<{
+    sampleRate: number;
+    totalSamples: number;
+  }>;
+
+  /**
+   * Standalone alignment from audio path (all modes).
+   */
+  alignTextToAudioFromPath(
     text: string,
-    vocabJson: string
+    audioPath: string,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
   ): Promise<{
-    words: Array<{ text: string; start: number; end: number }>;
-    chars: Array<{ text: string; start: number; end: number }>;
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Standalone alignment from in-memory PCM (all modes).
+   */
+  alignTextToAudioFromPcm(
+    text: string,
+    samples: number[],
+    sampleRate: number,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
+  ): Promise<{
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Sink-based alignment from generated TTS audio (zero PCM round-trip for accurate mode).
+   */
+  alignTextToTtsSink(
+    generatedAudio: Object,
+    text: string,
+    mode: 'proportional' | 'estimated' | 'accurate',
+    granularity: 'sentence' | 'word' | 'character',
+    options?: Object
+  ): Promise<{
+    subtitles: Array<{ text: string; start: number; end: number }>;
+    timingMode: string;
   }>;
 
   detectAlignmentModel(
@@ -398,6 +495,12 @@ export interface Spec extends TurboModule {
     paths?: {
       model?: string;
     };
+    /** Raw heuristic language tags from folder name (catalog). */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** Optional trace strings from native (see DetectionSource). */
+    detectionSources?: string[];
   }>;
 
   // ==================== Online (streaming) TTS Methods ====================
@@ -417,35 +520,64 @@ export interface Spec extends TurboModule {
   ): Promise<void>;
 
   /**
+   * Generate speech in streaming mode and write directly to file in native.
+   * Emits `ttsStreamFileEnd` / `ttsStreamFileError` and optionally `ttsStreamChunk`.
+   */
+  generateTtsStreamToFile(
+    instanceId: string,
+    requestId: string,
+    text: string,
+    options: Object,
+    fileOptions: Object
+  ): Promise<void>;
+
+  /**
    * Cancel an ongoing streaming TTS generation.
    * @param instanceId - Unique ID for this engine instance
    */
   cancelTtsStream(instanceId: string): Promise<void>;
 
   /**
-   * Start PCM playback for streaming TTS.
-   * @param instanceId - Unique ID for this engine instance
+   * Create a standalone PCM player session.
+   * @param playerId - Unique session ID (generated by JS)
    * @param sampleRate - Sample rate in Hz
    * @param channels - Number of channels (1 = mono)
+   * @param feed - 'js' or 'native'
+   * @param ttsInstanceId - Optional TTS engine binding (null = standalone)
    */
-  startTtsPcmPlayer(
-    instanceId: string,
+  createPcmPlayer(
+    playerId: string,
     sampleRate: number,
-    channels: number
+    channels: number,
+    feed: string,
+    ttsInstanceId: string | null
   ): Promise<void>;
 
   /**
-   * Write PCM samples to the streaming TTS player.
-   * @param instanceId - Unique ID for this engine instance
-   * @param samples - Float PCM samples in range [-1.0, 1.0]
+   * Write float PCM samples to a player session.
+   * Rejects if feed is 'native' or player not found.
+   * @param playerId - Player session ID
+   * @param samples - Float PCM [-1, 1]
    */
-  writeTtsPcmChunk(instanceId: string, samples: number[]): Promise<void>;
+  writePcmChunk(playerId: string, samples: number[]): Promise<void>;
 
   /**
-   * Stop PCM playback for streaming TTS.
-   * @param instanceId - Unique ID for this engine instance
+   * Pause a PCM player session. Buffered samples are retained.
+   * @param playerId - Player session ID
    */
-  stopTtsPcmPlayer(instanceId: string): Promise<void>;
+  pausePcmPlayer(playerId: string): Promise<void>;
+
+  /**
+   * Resume a paused PCM player session.
+   * @param playerId - Player session ID
+   */
+  resumePcmPlayer(playerId: string): Promise<void>;
+
+  /**
+   * Destroy a PCM player session and release native resources.
+   * @param playerId - Player session ID
+   */
+  destroyPcmPlayer(playerId: string): Promise<void>;
 
   /**
    * Get the sample rate of the initialized TTS model.
@@ -539,42 +671,34 @@ export interface Spec extends TurboModule {
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
 
   /**
-   * Save TTS audio samples to a WAV file.
-   * @param samples - Audio samples array
-   * @param sampleRate - Sample rate in Hz
-   * @param filePath - Absolute path where to save the WAV file
-   * @returns The file path where audio was saved
+   * Save TTS audio (mono float PCM) to a file path or Android SAF directory.
+   * @param destinationType - `'file'` = `pathOrDirectoryUri` is the full output file path; `'androidContent'` = directory tree URI + `filename`
+   * @param pathOrDirectoryUri - Absolute file path (when `file`) or SAF directory URI (when `androidContent`)
+   * @param filename - Used when `androidContent`; ignored / empty when `file`
+   * @param format - Output container/codec hint: `wav` (default behavior), `mp3`, `flac`, `m4a`, `opus`, … (same as convertAudioToFormat; requires FFmpeg when not WAV)
+   * @param outputSampleRateHz - Encoder hint (e.g. MP3 32000/44100/48000); use 0 for defaults
    */
-  saveTtsAudioToFile(
+  saveTtsAudioFromPCM(
     samples: number[],
     sampleRate: number,
-    filePath: string
+    destinationType: string,
+    pathOrDirectoryUri: string,
+    filename: string,
+    format: string,
+    outputSampleRateHz: number
   ): Promise<string>;
 
-  /**
-   * Save TTS audio samples to a WAV file via Android SAF content URI.
-   * @param samples - Audio samples array
-   * @param sampleRate - Sample rate in Hz
-   * @param directoryUri - Directory content URI (tree or document)
-   * @param filename - Desired file name (e.g., tts_123.wav)
-   * @returns The content URI of the saved file
-   */
-  saveTtsAudioToContentUri(
-    samples: number[],
-    sampleRate: number,
-    directoryUri: string,
-    filename: string
-  ): Promise<string>;
+  // ==================== File / persistence (shared) ====================
 
   /**
-   * Save a text file via Android SAF content URI.
+   * Save a text file via Android SAF directory URI, or a regular directory path on iOS.
    * @param text - Text content to write
-   * @param directoryUri - Directory content URI (tree or document)
-   * @param filename - Desired file name (e.g., tts_123.srt)
-   * @param mimeType - MIME type (e.g., application/x-subrip)
-   * @returns The content URI of the saved file
+   * @param directoryUri - Directory content URI (tree or document) on Android; file URL or path on iOS
+   * @param filename - Desired file name (e.g. note.txt)
+   * @param mimeType - MIME type (e.g. text/plain)
+   * @returns The content URI of the saved file (Android) or file path (iOS)
    */
-  saveTtsTextToContentUri(
+  saveTextToContentUri(
     text: string,
     directoryUri: string,
     filename: string,
@@ -583,9 +707,11 @@ export interface Spec extends TurboModule {
 
   /**
    * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
-   * @param fileUri - Content URI of the saved WAV file
-   * @param filename - Desired cache filename
-   * @returns Absolute file path to the cached copy
+   * @param filePath - Absolute path to an existing file on disk
+   * @param directoryUri - SAF directory tree or document URI
+   * @param filename - Display name for the new document
+   * @param mimeType - MIME type for the created document
+   * @returns The content URI of the created document
    */
   copyFileToContentUri(
     filePath: string,
@@ -595,19 +721,19 @@ export interface Spec extends TurboModule {
   ): Promise<string>;
 
   /**
-   * Copy a SAF content URI to a cache file for local playback.
-   * @param fileUri - Content URI of the saved WAV file
-   * @param filename - Desired cache filename
+   * Copy a content URI (or file path) to an app cache file for native consumers.
+   * @param fileUri - content:// URI or file path
+   * @param filename - Desired cache file name
    * @returns Absolute file path to the cached copy
    */
-  copyTtsContentUriToCache(fileUri: string, filename: string): Promise<string>;
+  copyContentUriToCache(fileUri: string, filename: string): Promise<string>;
 
   /**
-   * Share a TTS audio file (file path or content URI).
+   * Open the system share sheet for an audio file (file path or content URI).
    * @param fileUri - File path or content URI
-   * @param mimeType - MIME type (e.g., audio/wav)
+   * @param mimeType - MIME type (e.g. audio/wav)
    */
-  shareTtsAudio(fileUri: string, mimeType: string): Promise<void>;
+  shareAudioFile(fileUri: string, mimeType: string): Promise<void>;
 
   // ==================== Helper - Assets ====================
 

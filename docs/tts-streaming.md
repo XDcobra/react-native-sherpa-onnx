@@ -1,318 +1,438 @@
-# Streaming Text-to-Speech
+# Streaming Text-to-Speech (TTS)
 
-Incremental speech generation with chunk callbacks. Use for lower time-to-first-byte, playback while generating, or piping into another audio pipeline.
+Incremental speech generation with chunk callbacks: lower time-to-first-byte, playback while generating, or piping float PCM into another pipeline. The API is **instance-based** — create an engine with `createStreamingTTS()`, then call `destroy()` when done.
+
+**For full-buffer synthesis, timestamps on the batch path, WAV save/share, and `alignTextToAudio`:** see [Offline TTS](tts-offline.md) and [alignment.md](alignment.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
----
+## Choosing a streaming path
 
-## Table of Contents
+| Goal | Use | Options |
+|------|-----|---------|
+| **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
+| **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
+| **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
+| **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
+| **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
 
-- [Overview](#overview)
-- [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-  - [createStreamingTTS()](#createstreamingttsoptions)
-  - [StreamingTtsEngine](#streamingttsengine)
-  - [generateSpeechStream()](#generatespeechstream)
-  - [TtsStreamHandlers](#ttsstreamhandlers)
-  - [TtsStreamChunk / TtsStreamEnd / TtsStreamError](#ttsstreamchunk--ttsstreamend--ttsstreamerror)
-  - [TtsStreamController](#ttsstreamcontroller)
-  - [Types & Imports](#types--imports)
-- [Detailed Examples](#detailed-examples)
-- [Troubleshooting & Tuning](#troubleshooting--tuning)
-- [Architecture Overview](#architecture-overview)
-- [See Also](#see-also)
+**`generateSpeechStreamToFile`** is the preferred path for long text because all PCM stays in native memory. Set `emitChunks: true` only when you also need live playback or visualization during export.
 
----
+## Models & paths
 
-## Overview
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Streaming engine creation | ✅ | `createStreamingTTS()` --> `StreamingTtsEngine` |
-| Chunk callbacks | ✅ | `onChunk`, `onEnd`, `onError` |
-| Cancel mid-stream | ✅ | `controller.cancel()` |
-| Native PCM playback | ✅ | `startPcmPlayer()` / `writePcmChunk()` / `stopPcmPlayer()` |
-| Per-instance routing | ✅ | Events tagged with `instanceId` and `requestId` |
-| Voice cloning (streaming) | ✅ (iOS & Android) | **Pocket** only with valid `referenceAudio` + `sampleRate > 0`. **Not** Zipvoice (use batch `generateSpeech`). Other model types --> error if reference is set. |
-
-`createStreamingTTS()` creates a streaming-only engine. Use `createTTS()` for batch one-shot synthesis (`generateSpeech`, `generateSpeechWithTimestamps`). Both share the same underlying native helper — one active stream per engine at a time.
-
----
+- **`ModelPathConfig`** (from `react-native-sherpa-onnx`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
+- **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
+- **`detectTtsModel()`** below scans the model directory and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
 ## Quick Start
 
-```typescript
-import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
+### 1) Interactive playback / visualization (`generateSpeechStream`)
+
+Use this path when you want real-time chunk handling in JS. This example shows the recommended pre-check with `detectTtsModel` before engine init.
+
+```ts
+import { createStreamingTTS, detectTtsModel } from 'react-native-sherpa-onnx/tts';
+
+const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+const det = await detectTtsModel(modelPath);
+if (!det.success || det.modelType !== 'vits') {
+  throw new Error(det.error ?? 'Expected a VITS model for this example');
+}
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'asset', path: 'models/sherpa-onnx-vits-piper-en' },
-  modelType: 'vits',
+  modelPath,
+  modelType: det.modelType,
+  numThreads: 2,
+  modelOptions: {
+    vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 },
+  },
 });
 
+// Native playback — no manual PCM player needed
 const controller = await tts.generateSpeechStream(
-  'Hello, this is streaming TTS.',
-  undefined,
+  'Streaming hello.',
+  { sid: 0, speed: 1.0 },
   {
-    onChunk: (chunk) => {
-      // chunk.samples: float[], chunk.sampleRate, chunk.progress (0..1), chunk.isFinal
-      playPcmSamples(chunk.samples, chunk.sampleRate);
+    onChunk: (c) => {
+      // chunks are only published if emitChunks: true
+      // set emitChunks: false to reduce overhead if you only want to use the pcm player
+      // c.samples, c.sampleRate, c.progress, c.isFinal
     },
-    onEnd: (event) => {
-      if (event.cancelled) console.log('Cancelled');
-      else console.log('Done');
+    onEnd: () => {
+      console.log('Playback finished');
     },
-    onError: (event) => console.error('TTS error:', event.message),
-  }
+    onError: (e) => {
+      console.error('Stream error:', e.message);
+    },
+  },
+  { playback: true, emitChunks: true }
 );
 
+// Pause / resume during playback:
+await controller.player?.pause();
+await controller.player?.resume();
+
+// Cancel stops synthesis + destroys player
+await controller.cancel().catch(() => {});
 await tts.destroy();
 ```
 
----
+### 2) Long-text file export (preferred) (`generateSpeechStreamToFile`)
+
+Preferred for long text because PCM stays native and is written incrementally to file.  
+If needed, you can use `detectTtsModel` exactly like in example 1 before `createStreamingTTS`.
+
+```ts
+import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({
+  modelPath: { type: 'file', path: '/absolute/path/to/tts-model' },
+});
+
+const ctrl = await tts.generateSpeechStreamToFile(
+  'Long text that should be exported directly.',
+  { sid: 0, speed: 1.0 },
+  {
+    output: { kind: 'file', path: '/absolute/path/out.wav' },
+    format: 'wav',
+    keepPartialOnCancel: false,
+    emitChunks: false,
+  },
+  {
+    onEnd: (e) => {
+      // e.path, e.bytesWritten, e.sampleRate, e.cancelled
+    },
+    onError: (e) => {
+      // e.message
+    },
+  }
+);
+
+await ctrl.cancel().catch(() => {});
+await tts.destroy();
+```
+
+### 3) File export + live playback (`generateSpeechStreamToFile` + `playback: true`)
+
+Use when you need native file export and native audio playback at the same time.  
+If needed, you can use `detectTtsModel` exactly like in example 1 before `createStreamingTTS`.
+
+```ts
+import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({
+  modelPath: { type: 'file', path: '/absolute/path/to/tts-model' },
+});
+
+const ctrl = await tts.generateSpeechStreamToFile(
+  'Export and play while generating.',
+  { sid: 0, speed: 1.0 },
+  {
+    output: { kind: 'file', path: '/absolute/path/out-with-monitor.wav' },
+    format: 'wav',
+    emitChunks: false,
+  },
+  {
+    onEnd: (e) => {
+      console.log(`Saved ${e.bytesWritten} bytes to ${e.path}`);
+    },
+    onError: (e) => {
+      console.error('Stream error:', e.message);
+    },
+  },
+  { playback: true }
+);
+
+// Pause / resume during playback:
+await ctrl.player?.pause();
+await ctrl.player?.resume();
+
+await ctrl.cancel().catch(() => {});
+await tts.destroy();
+```
+
+**Note:** Zipvoice cloning is **not** supported in streaming on Android; Pocket cloning uses `voiceClone: { kind: 'pocket', referenceAudio: { samples, sampleRate } }`. For Zipvoice voice cloning use batch **`generateSpeech`** on the offline path — [tts-offline.md](tts-offline.md).
+
+## Stream options (`TtsStreamOptions`)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `playback` | `boolean` | `false` | Enqueue PCM to native player automatically |
+| `emitChunks` | `boolean` | `true` | Deliver `onChunk` callbacks with binary PCM |
+| `autoDestroy` | `boolean` | `true` | Auto-destroy the internal player after `onEnd` fires |
+
+**Invalid combination:** `playback: false` + `emitChunks: false` is a no-op. The current JS wrapper does **not** reject; it logs a warning and returns a no-op controller. Enable at least one of `playback` or `emitChunks`.
+
+When `playback: true`, the streaming controller exposes `ctrl.player` — a `PcmPlayer` with `pause()`, `resume()`, and `destroy()`. See [pcm-player.md](pcm-player.md) for standalone player usage.
+
+## Setup (iOS & Android)
+
+| Topic | Requirement |
+| --- | --- |
+| Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
+| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [alignment.md](alignment.md) |
+| Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 
 ## API Reference
+
+Each entry below uses a one-line TypeScript signature (exported names match `react-native-sherpa-onnx/tts`). `ModelPathConfig` is imported from `react-native-sherpa-onnx` when you use the path-only `createStreamingTTS` shorthand.
+
+## Detection
+
+### `detectTtsModel(modelPath, options?)`
+
+```ts
+function detectTtsModel(
+  modelPath: ModelPathConfig,
+  options?: { modelType?: TTSModelType }
+): Promise<{
+  success: boolean;
+  error?: string;
+  detectedModels: { type: string; modelDir: string }[];
+  modelType?: TTSModelType;
+  // only available for Kokoro/Kitten; otherwise empty
+  lexiconLanguageCandidates?: string[];
+  languages?: { iso6391Hint: string; id: string }[];
+  quantization?: string;
+  sizeTier?: string;
+  /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
+  detectionSources?: readonly DetectionSource[];
+}>;
+```
+
+File-based detection and validation **without** initializing the TTS engine: no native synthesizer is created, so this call is comparatively cheap and suitable as a **pre-check** before **`createStreamingTTS`** or **`createTTS`** — for example to obtain a concrete `modelType` (and Kokoro/Kitten `lexiconLanguageCandidates`) so you can pass the right `modelOptions` on init.
+
+**`detectionSources`** is an optional, ordered trace of mechanisms used (stable string literals; see `DetectionSource` in `react-native-sherpa-onnx/tts`). The host-only **name-only** path (empty file list in C++ tests) never validates paths and is not used by production `detectTtsModel` after a real directory scan.
+
+```ts
+const result = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
+if (!result.success) console.warn(result.error);
+```
+
+## Factories
 
 ### `createStreamingTTS(options)`
 
 ```ts
-function createStreamingTTS(
-  options: TTSInitializeOptions | ModelPathConfig
-): Promise<StreamingTtsEngine>;
+function createStreamingTTS(options: TTSInitializeOptions | ModelPathConfig): Promise<StreamingTtsEngine>;
 ```
 
-Creates a streaming TTS engine. Same init options as `createTTS()` (see [tts.md](tts.md#createttsoptions)). Call `engine.destroy()` when done.
-
----
-
-### `StreamingTtsEngine`
-
-| Member | Description |
-| --- | --- |
-| `instanceId` | Read-only engine ID |
-| `generateSpeechStream(text, options, handlers)` | Start streaming generation; returns `TtsStreamController` |
-| `cancelSpeechStream()` | Cancel the current stream |
-| `startPcmPlayer(sampleRate, channels)` | Start built-in PCM playback |
-| `writePcmChunk(samples)` | Write float PCM samples to player (from `onChunk`) |
-| `stopPcmPlayer()` | Stop the PCM player |
-| `getModelInfo()`, `getSampleRate()`, `getNumSpeakers()` | Model info |
-| `destroy()` | Release native resources |
-
----
-
-### `generateSpeechStream()`
+Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline.md#createttsoptions); call `destroy()` when finished.
 
 ```ts
-tts.generateSpeechStream(
+const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
+```
+
+## Streaming engine (`StreamingTtsEngine`)
+
+### `tts.generateSpeechStream(text, options, handlers)`
+
+```ts
+generateSpeechStream(
   text: string,
   options: TtsGenerationOptions | undefined,
   handlers: TtsStreamHandlers
 ): Promise<TtsStreamController>;
 ```
 
-Start streaming TTS. Only one stream per engine at a time — starting another while active rejects with `TTS_STREAM_ERROR`.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `text` | `string` | Text to synthesize |
-| `options` | `TtsGenerationOptions \| undefined` | Same keys as batch TTS. Reference streaming: **Pocket** only (`referenceAudio` non-empty, `sampleRate > 0`). `referenceText` optional for Pocket (not used natively). Native rejects reference options for VITS/Matcha/Kokoro/Kitten/Zipvoice. |
-| `handlers` | `TtsStreamHandlers` | Callbacks: `onChunk`, `onEnd`, `onError` |
-
----
-
-### `TtsStreamHandlers`
-
-| Property | Type | Description |
-| --- | --- | --- |
-| `onChunk?` | `(chunk: TtsStreamChunk) => void` | Called for each audio chunk |
-| `onEnd?` | `(event: TtsStreamEnd) => void` | Called when generation finishes or is cancelled. Listeners auto-removed |
-| `onError?` | `(event: TtsStreamError) => void` | Called on error. Listeners auto-removed |
-
----
-
-### `TtsStreamChunk` / `TtsStreamEnd` / `TtsStreamError`
-
-**`TtsStreamChunk`:**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `instanceId?` | `string` | Engine instance ID |
-| `requestId?` | `string` | Request ID for this generation |
-| `samples` | `number[]` | PCM samples, float in [-1, 1] |
-| `sampleRate` | `number` | Sample rate in Hz |
-| `progress` | `number` | Progress 0…1 |
-| `isFinal` | `boolean` | True for the last chunk |
-
-**`TtsStreamEnd`:**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `instanceId?` | `string` | Engine instance ID |
-| `requestId?` | `string` | Request ID |
-| `cancelled` | `boolean` | True if generation was cancelled |
-
-**`TtsStreamError`:**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `instanceId?` | `string` | Engine instance ID |
-| `requestId?` | `string` | Request ID |
-| `message` | `string` | Error message |
-
----
-
-### `TtsStreamController`
-
-Returned by `generateSpeechStream()`.
-
-| Method | Signature | Description |
-| --- | --- | --- |
-| `cancel` | `() => Promise<void>` | Stop generation and remove listeners |
-| `unsubscribe` | `() => void` | Remove listeners only |
-
-Listeners are **automatically** removed when `onEnd` or `onError` fires. Call `unsubscribe()` manually if you discard the controller without waiting (e.g. on navigation).
-
----
-
-### Types & Imports
+Starts streaming synthesis; events are delivered to `handlers`. Only one stream per engine at a time.
 
 ```ts
-import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
-import type {
-  StreamingTtsEngine,
-  TtsStreamController,
-  TtsStreamHandlers,
-  TtsStreamChunk,
-  TtsStreamEnd,
-  TtsStreamError,
-  TtsGenerationOptions,
-} from 'react-native-sherpa-onnx/tts';
-```
-
----
-
-## Detailed Examples
-
-### Play while generating (low latency)
-
-```typescript
-const tts = await createStreamingTTS({
-  modelPath: { type: 'asset', path: 'models/vits-piper-en' },
-  modelType: 'vits',
-});
-
-const sampleRate = await tts.getSampleRate();
-await tts.startPcmPlayer(sampleRate, 1);
-
-const controller = await tts.generateSpeechStream(longText, { speed: 1.0 }, {
-  onChunk: (chunk) => {
-    if (chunk.samples.length > 0) tts.writePcmChunk(chunk.samples);
+const ctrl = await tts.generateSpeechStream('Hi', undefined, {
+  onChunk: (c) => {
+    // c.samples, c.sampleRate, c.progress, c.isFinal
   },
-  onEnd: () => tts.stopPcmPlayer(),
-  onError: (err) => {
-    tts.stopPcmPlayer();
-    console.error(err.message);
+  onEnd: (e) => {
+    // e.cancelled
+  },
+  onError: (e) => {
+    // e.message
   },
 });
-
-// To cancel: await controller.cancel();
 ```
 
-### Cancel and cleanup
+### `tts.generateSpeechStreamToFile(text, options, fileOptions, handlers)`
 
-```typescript
-const controller = await tts.generateSpeechStream(text, undefined, handlers);
+```ts
+generateSpeechStreamToFile(
+  text: string,
+  options: TtsGenerationOptions | undefined,
+  fileOptions: TtsStreamToFileOptions,
+  handlers: TtsStreamToFileHandlers
+): Promise<TtsStreamFileController>;
+```
 
-// User taps "Stop"
+Streams synthesis directly to a native file sink (v1: WAV). Use this mode for long texts to avoid collecting all samples in JS memory.
+
+```ts
+const ctrl = await tts.generateSpeechStreamToFile(
+  'Save this stream.',
+  undefined,
+  {
+    output: { kind: 'file', path: '/absolute/path/out.wav' },
+    format: 'wav',
+    keepPartialOnCancel: false,
+    emitChunks: true,
+  },
+  {
+    onChunk: (c) => {
+      // optional when emitChunks=true — use for waveform visualization etc.
+    },
+    onEnd: (e) => {
+      // e.path, e.bytesWritten, e.sampleRate, e.cancelled
+    },
+    onError: (e) => {
+      // e.message, e.path?
+    },
+  }
+);
+```
+
+### `tts.cancelSpeechStream()`
+
+```ts
+cancelSpeechStream(): Promise<void>;
+```
+
+Cancels the current stream from the engine side.
+
+```ts
+await tts.cancelSpeechStream();
+```
+
+### Standalone PCM player
+
+For manual PCM playback (non-TTS audio, custom feed logic), use the standalone player from `react-native-sherpa-onnx/pcm`. See [pcm-player.md](pcm-player.md).
+
+### `tts.getModelInfo()` (streaming)
+
+```ts
+getModelInfo(): Promise<TTSModelInfo>;
+```
+
+Same as batch engine.
+
+### `tts.getSampleRate()` (streaming)
+
+```ts
+getSampleRate(): Promise<number>;
+```
+
+### `tts.getNumSpeakers()` (streaming)
+
+```ts
+getNumSpeakers(): Promise<number>;
+```
+
+### `tts.destroy()` (streaming)
+
+```ts
+destroy(): Promise<void>;
+```
+
+## Stream controller (`TtsStreamController`)
+
+### `controller.cancel()`
+
+```ts
+cancel(): Promise<void>;
+```
+
+Cancels the ongoing generation and unsubscribes listeners.
+
+```ts
 await controller.cancel();
 ```
 
-### Record streamed audio
+### `controller.unsubscribe()`
 
-```typescript
-const chunks: number[] = [];
-let sampleRate = 0;
-
-await tts.generateSpeechStream(text, undefined, {
-  onChunk: (chunk) => {
-    sampleRate = chunk.sampleRate;
-    chunks.push(...chunk.samples);
-  },
-  onEnd: async () => {
-    if (chunks.length > 0) {
-      await saveAudioToFile({ samples: chunks, sampleRate }, outputPath);
-    }
-  },
-  onError: () => {},
-});
+```ts
+unsubscribe(): void;
 ```
 
-### Back-to-back requests
+Removes event listeners (also called automatically on end/error).
 
-Only one stream per engine at a time. Wait for `onEnd` (or cancel) before starting the next:
-
-```typescript
-// Option A: sequential on one engine
-await controller1.cancel(); // or wait for onEnd
-const controller2 = await tts.generateSpeechStream(nextText, undefined, handlers);
-
-// Option B: multiple engines for concurrent voices
-const ttsA = await createStreamingTTS({ ... });
-const ttsB = await createStreamingTTS({ ... });
+```ts
+controller.unsubscribe();
 ```
 
----
+## Types
 
-## Troubleshooting & Tuning
+### Core
 
-| Issue | Solution |
+| Type | Notes |
 | --- | --- |
-| `TTS_STREAM_ERROR` starting second stream | Wait for `onEnd`/`onError` or `cancel()` the active stream first |
-| No `onChunk` calls | Check that handlers are passed correctly; ensure text is non-empty |
-| Memory grows for long sessions | Avoid accumulating all chunks in JS; write to file incrementally or use native playback |
-| Listener leak warnings | Call `unsubscribe()` on unmount if `onEnd`/`onError` hasn't fired yet |
-| Streaming with reference audio | **Zipvoice:** use batch `generateSpeech()` with reference. **Pocket:** supported. **Other types:** rejected natively. |
+| `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
+| `TTS_MODEL_TYPES` | Readonly list of model type literals |
+| `TtsEngine` | Batch engine interface |
+| `StreamingTtsEngine` | Streaming engine interface |
+| `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
+| `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
+| `SubtitleTimingItem` | `{ text, start, end }` (seconds) |
+| `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
+| `DetectedModelEntry` | `{ type: string; modelDir: string }` |
+| `TtsStreamChunk` | `{ samples, sampleRate, progress, isFinal }` + optional `instanceId`, `requestId` |
+| `TtsStreamEnd` | `{ cancelled: boolean }` + optional `instanceId`, `requestId` |
+| `TtsStreamError` | `{ message: string }` + optional `instanceId`, `requestId` |
+| `TtsStreamHandlers` | `{ onChunk?: (chunk: TtsStreamChunk) => void; onEnd?: (e: TtsStreamEnd) => void; onError?: (e: TtsStreamError) => void }` |
+| `TtsStreamOptions` | `{ playback?, emitChunks?, autoDestroy? }` |
+| `TtsStreamController` | `cancel()`, `unsubscribe()`, `player: PcmPlayer \| null` |
+| `PcmPlayer` | `writePcmChunk()`, `pause()`, `resume()`, `destroy()` — see [pcm-player.md](pcm-player.md) |
+| `TtsStreamFileOutput` | `{ kind: 'file'; path: string }` |
+| `TtsStreamToFileOptions` | `{ output, format?: 'wav', keepPartialOnCancel?, emitChunks? }` |
+| `TtsStreamFileEnd` | `{ path, bytesWritten, sampleRate, cancelled }` + optional ids |
+| `TtsStreamFileError` | `{ message, path? }` + optional ids |
+| `TtsStreamToFileHandlers` | `{ onChunk?, onEnd?: (e: TtsStreamFileEnd), onError?: (e: TtsStreamFileError) }` |
+| `TtsStreamFileController` | `cancel()`, `unsubscribe()` |
+| `ModelPathConfig` | From `react-native-sherpa-onnx` |
 
-**Tips:**
+### Init, update, generation
 
-- Keep `onChunk` lightweight — forward to native PCM player, don't do heavy processing
-- Chunk sizes vary by model; don't assume fixed sizes
-- Events include `instanceId` and `requestId` for safe multi-engine routing
+| Type | Notes |
+| --- | --- |
+| `TTSInitializeOptions` | Discriminated union: with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed**; otherwise only the matching `modelOptions` key (`vits`, `matcha`, …) |
+| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
+| `TtsUpdateOptions` | Union including `{}` and per-`modelType` variants (same coupling rules as init) |
+| `TtsGenerationOptions` | Base fields + optional **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }` |
+| `TtsReferenceAudio` | `{ samples: number[]; sampleRate: number }` |
+| `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
+| `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
+| `TtsModelOptions` | Internal aggregate for native flattening; prefer init/update unions in app code |
+| `TtsVitsModelOptions`, `TtsMatchaModelOptions`, … | Per-architecture scale options |
 
----
+### Subtitles
 
-## Architecture Overview
+| Type | Notes |
+| --- | --- |
+| `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` |
+| `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (character only with accurate) |
+| `SubtitleOptions` | Proportional/estimated vs accurate (see TypeScript unions in `tts`) |
+| Standalone alignment | `AlignTextToAudioOptions`, `AlignTextToAudioResult` in `react-native-sherpa-onnx/alignment` |
 
-```mermaid
-graph TD
-  subgraph jsLayer [JS/TS Public API]
-    createTTS["createTTS()"]
-    TtsEngine["TtsEngine — batch"]
-    createStreamingTTS["createStreamingTTS()"]
-    StreamingTtsEngine["StreamingTtsEngine — streaming"]
-  end
+Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
 
-  subgraph nativeLayer [Native — single helper per platform]
-    TtsHelper["SherpaOnnxTtsHelper / TtsWrapper"]
-    OfflineTts["OfflineTts: generate + generateWithCallback"]
-  end
+## Troubleshooting
 
-  createTTS --> TtsEngine
-  createStreamingTTS --> StreamingTtsEngine
-  TtsEngine --> TtsHelper
-  StreamingTtsEngine --> TtsHelper
-  TtsHelper --> OfflineTts
-```
+| Symptom | Likely cause | Action |
+| --- | --- | --- |
+| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [alignment.md](alignment.md) |
+| `TTS_GENERATE_ERROR` / cloning | `voiceClone` on non–Zipvoice/Pocket model | Remove `voiceClone` or switch model |
+| Zipvoice clone fails | Missing / empty `referenceText` | Use `voiceClone: { kind: 'zipvoice', referenceAudio, referenceText }` with non-empty text |
+| Init throws with `modelOptions` | `modelType` is `'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
+| Methods throw after `destroy` | Engine already released | Create a new engine |
+| Streaming error on Android + Zipvoice + ref audio | Unsupported combination | Use batch `generateSpeech` for Zipvoice cloning |
+| `generateSpeechStreamToFile` fails with format error | Non-WAV format requested | Use `format: 'wav'` for v1 stream-to-file |
+| Wrong or slow inference | Provider not built / unavailable | Check [execution-providers.md](execution-providers.md) and native logs |
 
-One native TTS helper on each platform serves both batch and streaming. Streaming uses `generateTtsStream` with `requestId` for event routing; events `ttsStreamChunk`, `ttsStreamEnd`, `ttsStreamError` include `requestId` so the JS layer matches them to the correct request.
+## Mapping to Native API
 
----
+If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTTS()` / `createStreamingTTS()`, instance-bound TTS methods take **`instanceId`** as the first argument. Prefer the factory APIs in this document unless you manage native instances yourself.
 
-## See Also
+## See also
 
-- [TTS (Batch)](tts.md) — Full-buffer generation, save/share, voice cloning
-- [Audio Conversion](audio-conversion.md) — Convert formats (MP3, FLAC, WAV)
-- [Model Setup](model-setup.md) — Model discovery and paths
-- [Download Manager](download-manager.md) — Download models in-app
+- [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share, standalone subtitles  
+- [pcm-player.md](pcm-player.md) — standalone PCM player  
+- [alignment.md](alignment.md) — alignment models, `alignTextToAudio`, accurate subtitles  
+- [execution-providers.md](execution-providers.md) — ORT execution providers  
+- [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
+- [migration.md](migration.md) — strict TTS TypeScript unions (0.4.0)

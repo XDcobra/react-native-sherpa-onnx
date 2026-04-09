@@ -1,4 +1,7 @@
 import type { ModelPathConfig } from '../types';
+import type { SubtitleTimingItem } from '../alignment/types';
+import type { PcmPlayer } from '../pcm/types';
+import type { DetectedModelEntry } from '../types/modelDetect';
 
 /**
  * Supported TTS model types.
@@ -22,6 +25,16 @@ export type TTSModelType =
   | 'supertonic'
   | 'auto';
 
+export {
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type TtsDetectModelResult,
+  type AlignmentDetectModelResult,
+  type ModelDetectResultBase,
+} from '../types/modelDetect';
+
 /** Runtime list of supported TTS model types. */
 export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'vits',
@@ -33,6 +46,23 @@ export const TTS_MODEL_TYPES: readonly TTSModelType[] = [
   'supertonic',
   'auto',
 ] as const;
+
+/** Runtime guard for model kind literals returned from native detection. */
+export function isTtsModelType(s: string): s is TTSModelType {
+  return (TTS_MODEL_TYPES as readonly string[]).includes(s);
+}
+
+/**
+ * ONNX Runtime execution provider string passed to native TTS init.
+ * Extend with `(string & {})` so callers can pass future/custom provider ids.
+ */
+export type TtsExecutionProvider =
+  | 'cpu'
+  | 'coreml'
+  | 'xnnpack'
+  | 'nnapi'
+  | 'qnn'
+  | (string & {});
 
 // ========== Model-specific options (only applied when that model type is loaded) ==========
 
@@ -77,8 +107,8 @@ export interface TtsSupertonicModelOptions {
 }
 
 /**
- * Model-specific TTS options. Only the block for the actually loaded model type is applied;
- * others are ignored (e.g. vits options have no effect when a kokoro model is loaded).
+ * Aggregate of per-model init/update blocks for the native bridge.
+ * Prefer {@link TTSInitializeOptions} / {@link TtsUpdateOptions} discriminated unions in app code.
  */
 export interface TtsModelOptions {
   vits?: TtsVitsModelOptions;
@@ -89,10 +119,8 @@ export interface TtsModelOptions {
   supertonic?: TtsSupertonicModelOptions;
 }
 
-/**
- * Configuration for TTS initialization.
- */
-export interface TTSInitializeOptions {
+/** Shared init fields (excluding modelType / modelOptions). */
+export type TTSInitializeOptionsBase = {
   /**
    * Path to the model directory.
    * Can be an asset path, file system path, or auto-detection path.
@@ -100,21 +128,12 @@ export interface TTSInitializeOptions {
   modelPath: ModelPathConfig;
 
   /**
-   * Model type to use.
-   * If not specified or 'auto', the model type will be auto-detected
-   * based on the files present in the model directory.
-   *
-   * @default 'auto'
-   */
-  modelType?: TTSModelType;
-
-  /**
    * Execution provider (e.g. `'cpu'`, `'coreml'`, `'xnnpack'`, `'nnapi'`, `'qnn'`).
    * Use getCoreMlSupport(), getXnnpackSupport(), etc. to check availability. See execution-providers.md.
    *
    * @default 'cpu'
    */
-  provider?: string;
+  provider?: TtsExecutionProvider;
 
   /**
    * Number of threads to use for inference.
@@ -130,12 +149,6 @@ export interface TTSInitializeOptions {
    * @default false
    */
   debug?: boolean;
-
-  /**
-   * Model-specific options. Only options for the loaded model type are applied.
-   * E.g. when modelType is 'vits', only modelOptions.vits is used.
-   */
-  modelOptions?: TtsModelOptions;
 
   /**
    * Path(s) to rule FSTs for TTS (OfflineTtsConfig.ruleFsts).
@@ -160,64 +173,170 @@ export interface TTSInitializeOptions {
    * Default: 0.2.
    */
   silenceScale?: number;
-}
+};
+
+/** `modelType` omitted or `'auto'`: no `modelOptions` (set an explicit `modelType` to pass scales). */
+export type TTSInitializeOptionsAuto = TTSInitializeOptionsBase & {
+  modelType?: 'auto' | undefined;
+  modelOptions?: never;
+};
+
+export type TTSInitializeOptionsVits = TTSInitializeOptionsBase & {
+  modelType: 'vits';
+  modelOptions?: { vits: TtsVitsModelOptions };
+};
+
+export type TTSInitializeOptionsMatcha = TTSInitializeOptionsBase & {
+  modelType: 'matcha';
+  modelOptions?: { matcha: TtsMatchaModelOptions };
+};
+
+export type TTSInitializeOptionsKokoro = TTSInitializeOptionsBase & {
+  modelType: 'kokoro';
+  modelOptions?: { kokoro: TtsKokoroModelOptions };
+};
+
+export type TTSInitializeOptionsKitten = TTSInitializeOptionsBase & {
+  modelType: 'kitten';
+  modelOptions?: { kitten: TtsKittenModelOptions };
+};
+
+export type TTSInitializeOptionsPocket = TTSInitializeOptionsBase & {
+  modelType: 'pocket';
+  modelOptions?: never;
+};
+
+export type TTSInitializeOptionsZipvoice = TTSInitializeOptionsBase & {
+  modelType: 'zipvoice';
+  modelOptions?: never;
+};
+
+export type TTSInitializeOptionsSupertonic = TTSInitializeOptionsBase & {
+  modelType: 'supertonic';
+  modelOptions?: never;
+};
+
+/**
+ * Configuration for TTS initialization. Discriminated by `modelType`:
+ * with `'auto'` or omitted, `modelOptions` is not allowed; with a concrete synthesizer type, only the matching `modelOptions` block is allowed.
+ */
+export type TTSInitializeOptions =
+  | TTSInitializeOptionsAuto
+  | TTSInitializeOptionsVits
+  | TTSInitializeOptionsMatcha
+  | TTSInitializeOptionsKokoro
+  | TTSInitializeOptionsKitten
+  | TTSInitializeOptionsPocket
+  | TTSInitializeOptionsZipvoice
+  | TTSInitializeOptionsSupertonic;
+
+/** No runtime parameter change. */
+export type TtsUpdateOptionsEmpty = {
+  modelType?: never;
+  modelOptions?: never;
+};
+
+export type TtsUpdateOptionsAuto = {
+  modelType?: 'auto';
+  modelOptions?: never;
+};
+
+export type TtsUpdateOptionsVits = {
+  modelType: 'vits';
+  modelOptions?: { vits: TtsVitsModelOptions };
+};
+
+export type TtsUpdateOptionsMatcha = {
+  modelType: 'matcha';
+  modelOptions?: { matcha: TtsMatchaModelOptions };
+};
+
+export type TtsUpdateOptionsKokoro = {
+  modelType: 'kokoro';
+  modelOptions?: { kokoro: TtsKokoroModelOptions };
+};
+
+export type TtsUpdateOptionsKitten = {
+  modelType: 'kitten';
+  modelOptions?: { kitten: TtsKittenModelOptions };
+};
+
+export type TtsUpdateOptionsPocket = {
+  modelType: 'pocket';
+  modelOptions?: never;
+};
+
+export type TtsUpdateOptionsZipvoice = {
+  modelType: 'zipvoice';
+  modelOptions?: never;
+};
+
+export type TtsUpdateOptionsSupertonic = {
+  modelType: 'supertonic';
+  modelOptions?: never;
+};
 
 /**
  * Options for updating TTS model parameters at runtime.
- * Only the block for the given modelType is applied; flattened to native noiseScale / noiseScaleW / lengthScale.
+ * Only the block matching `modelType` is applied. Use `{}` for a no-op update.
  */
-export interface TtsUpdateOptions {
-  /**
-   * Model type currently loaded. When omitted or 'auto', the SDK uses the model type from the last
-   * successful initializeTTS(). After unloadTTS(), pass modelType explicitly until init is called again.
-   */
-  modelType?: TTSModelType;
+export type TtsUpdateOptions =
+  | TtsUpdateOptionsEmpty
+  | TtsUpdateOptionsAuto
+  | TtsUpdateOptionsVits
+  | TtsUpdateOptionsMatcha
+  | TtsUpdateOptionsKokoro
+  | TtsUpdateOptionsKitten
+  | TtsUpdateOptionsPocket
+  | TtsUpdateOptionsZipvoice
+  | TtsUpdateOptionsSupertonic;
 
-  /**
-   * Model-specific options. Only the block for the effective model type is used (e.g. modelOptions.vits when type is 'vits').
-   */
-  modelOptions?: TtsModelOptions;
-}
-
-export type SubtitleMode = 'off' | 'fast' | 'accurate';
+export type SubtitleMode = 'off' | 'proportional' | 'estimated' | 'accurate';
 
 export type SubtitleGranularity = 'sentence' | 'word' | 'character';
 
-export interface SubtitleOptions {
-  /**
-   * Subtitle generation mode.
-   *
-   * - 'off': Do not generate subtitles/timestamps
-   * - 'fast': Estimated timing based on callback chunks (default)
-   * - 'accurate': wav2vec2 CTC forced alignment
-   *
-   * @default 'fast'
-   */
-  mode?: SubtitleMode;
+/** Subtitles off, proportional timing, or estimated (synthesis chunks); no alignment model; character not allowed. */
+export type SubtitleOptionsProportionalOrEstimated = {
+  mode?: 'off' | 'proportional' | 'estimated';
+  granularity?: 'sentence' | 'word';
+  alignmentModelPath?: never;
+};
 
-  /**
-   * Subtitle granularity.
-   *
-   * - 'sentence': sentence-level subtitles
-   * - 'word': word-level subtitles
-   * - 'character': character-level subtitles (only supported with mode: 'accurate')
-   *
-   * @default 'sentence'
-   */
-  granularity?: SubtitleGranularity;
+/** Forced alignment: alignment ONNX path required; character granularity allowed. */
+export type SubtitleOptionsAccurate = {
+  mode: 'accurate';
+  /** Absolute path to alignment ONNX (required). */
+  alignmentModelPath: string;
+  granularity?: 'sentence' | 'word' | 'character';
+};
 
-  /**
-   * Optional absolute path to an alignment ONNX model.
-   * Required when `mode: 'accurate'`.
-   */
-  alignmentModelPath?: string;
-}
+export type SubtitleOptions =
+  | SubtitleOptionsProportionalOrEstimated
+  | SubtitleOptionsAccurate;
 
-/**
- * Options for TTS generation. Maps to Kotlin GenerationConfig when reference
- * audio or advanced options are used; otherwise simple sid/speed are used.
- */
-export interface TtsGenerationOptions {
+/** Mono float samples in [-1, 1] for Zipvoice / Pocket voice cloning. */
+export type TtsReferenceAudio = {
+  samples: number[];
+  sampleRate: number;
+};
+
+/** Zipvoice cloning: prompt text is required for native. */
+export type TtsVoiceCloneZipvoice = {
+  kind: 'zipvoice';
+  referenceAudio: TtsReferenceAudio;
+  referenceText: string;
+};
+
+/** Pocket cloning: reference audio required; transcript optional (not read natively). */
+export type TtsVoiceClonePocket = {
+  kind: 'pocket';
+  referenceAudio: TtsReferenceAudio;
+  referenceText?: string;
+};
+
+export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
+
+type TtsGenerationBase = {
   /**
    * Speaker ID for multi-speaker models.
    * For single-speaker models, this is ignored.
@@ -231,10 +350,6 @@ export interface TtsGenerationOptions {
   /**
    * Speech speed multiplier.
    *
-   * - 1.0 = normal speed
-   * - 0.5 = half speed (slower)
-   * - 2.0 = double speed (faster)
-   *
    * @default 1.0
    */
   speed?: number;
@@ -243,20 +358,6 @@ export interface TtsGenerationOptions {
    * Silence scale (Kotlin GenerationConfig.silenceScale). Used at generate time.
    */
   silenceScale?: number;
-
-  /**
-   * Reference audio for voice cloning (native GenerationConfig / Zipvoice prompt).
-   * **Native (iOS & Android):** Requires non-empty samples and `sampleRate > 0`. Used for **Zipvoice** (cloning) and **Pocket** (Mimi encoder).
-   * Other model types (vits, matcha, kokoro, kitten) are **rejected** if reference audio is passed.
-   * Mono float samples in [-1, 1].
-   */
-  referenceAudio?: { samples: number[]; sampleRate: number };
-
-  /**
-   * Transcript of the reference utterance for **Zipvoice** voice cloning (prompt text); **required** when cloning with Zipvoice (non-empty after trim).
-   * **Pocket:** not read by sherpa-onnx native code; optional, e.g. for app metadata only.
-   */
-  referenceText?: string;
 
   /**
    * Number of steps, e.g. flow-matching steps (Kotlin GenerationConfig.numSteps).
@@ -274,47 +375,47 @@ export interface TtsGenerationOptions {
    * Subtitle/timestamp generation options.
    */
   subtitles?: SubtitleOptions;
-}
+};
+
+/**
+ * Options for TTS generation. Use `voiceClone` for Zipvoice/Pocket reference audio (not top-level reference fields).
+ */
+export type TtsGenerationOptions = TtsGenerationBase &
+  ({ voiceClone?: undefined } | { voiceClone: TtsVoiceClone });
 
 /**
  * Generated audio data from TTS synthesis.
  *
- * The samples are normalized float values in the range [-1.0, 1.0].
- * To save as a WAV file or play the audio, you'll need to convert
- * these samples to the appropriate format for your use case.
+ * PCM samples are held in a native sink and not transferred to JS by default.
+ * Use `getSamples()` to retrieve the PCM data when needed.
  */
 export interface GeneratedAudio {
-  /**
-   * Audio samples as an array of float values in range [-1.0, 1.0].
-   * This is raw PCM audio data.
-   */
-  samples: number[];
-
   /**
    * Sample rate of the generated audio in Hz.
    * Common values: 16000, 22050, 44100, 48000
    */
   sampleRate: number;
-}
-
-/**
- * Subtitle/timestamp item for synthesized speech.
- */
-export interface TtsSubtitleItem {
-  /**
-   * Text token for this time range.
-   */
-  text: string;
 
   /**
-   * Start time in seconds.
+   * Number of mono float PCM samples in the generated audio.
    */
-  start: number;
+  numSamples: number;
 
   /**
-   * End time in seconds.
+   * Monotonic generation ID (matches native sink).
+   * Used internally for stale-detection; may also be useful for debugging.
    */
-  end: number;
+  generation: number;
+
+  /**
+   * Retrieve raw PCM samples from the native sink as Float32Array.
+   * Allocates memory in JS — call only when you need raw PCM (e.g. custom playback).
+   * Prefer `saveAudioFromGeneration()` for saving to file (avoids JS round-trip).
+   *
+   * @throws if the generation is stale (a new generateSpeech was called on the same engine)
+   * @throws if the engine instance has been destroyed
+   */
+  getSamples(): Promise<Float32Array>;
 }
 
 /**
@@ -324,63 +425,30 @@ export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
   /**
    * Subtitle/timestamp entries.
    */
-  subtitles: TtsSubtitleItem[];
+  subtitles: SubtitleTimingItem[];
 
   /**
-   * Subtitle timing mode.
-   *
-   * - 'off': No subtitle timing requested/generated
-   * - 'estimated': Fast mode estimation
-   * - 'aligned': Accurate forced alignment mode
+   * Subtitle timing mode (aligned with `react-native-sherpa-onnx/alignment`).
    */
-  timingMode: 'off' | 'estimated' | 'aligned';
-}
-
-export interface SubtitleFromAudioOptions {
-  /**
-   * Subtitle generation mode.
-   */
-  mode: 'fast' | 'accurate';
-
-  /**
-   * Subtitle granularity.
-   *
-   * - 'sentence': sentence-level subtitles
-   * - 'word': word-level subtitles
-   * - 'character': character-level subtitles (only supported with mode: 'accurate')
-   *
-   * @default 'sentence'
-   */
-  granularity?: SubtitleGranularity;
-
-  /**
-   * Optional language hint for future multi-language alignment variants.
-   */
-  language?: string;
-
-  /**
-   * Optional absolute path to an alignment ONNX model.
-   * Required when `mode: 'accurate'`.
-   */
-  alignmentModelPath?: string;
-}
-
-export interface SubtitleResult {
-  subtitles: TtsSubtitleItem[];
-  timingMode: 'estimated' | 'aligned';
+  timingMode: 'off' | 'proportional' | 'estimated' | 'aligned';
 }
 
 /**
  * Streaming chunk event payload for TTS generation.
+ *
+ * PCM data is delivered as `Float32Array` (base64-decoded from native into a
+ * typed array in JS; not a zero-copy binary transfer).
+ * Internal routing IDs (`instanceId`, `requestId`) are stripped before
+ * the chunk reaches public handlers.
  */
 export interface TtsStreamChunk {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation (distinguishes concurrent streams on same instance). */
-  requestId?: string;
-  samples: number[];
+  /** Mono float PCM samples in [-1, 1]. */
+  samples: Float32Array;
+  /** Sample rate of the generated audio in Hz. */
   sampleRate: number;
+  /** Synthesis progress in [0, 1]. 1.0 on the final chunk. */
   progress: number;
+  /** True for the last chunk of a generation. */
   isFinal: boolean;
 }
 
@@ -388,10 +456,6 @@ export interface TtsStreamChunk {
  * Streaming end event payload.
  */
 export interface TtsStreamEnd {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   cancelled: boolean;
 }
 
@@ -399,10 +463,6 @@ export interface TtsStreamEnd {
  * Streaming error event payload.
  */
 export interface TtsStreamError {
-  /** Instance ID (set by native for multi-instance routing). */
-  instanceId?: string;
-  /** Request ID for this generation. */
-  requestId?: string;
   message: string;
 }
 
@@ -411,10 +471,15 @@ export interface TtsStreamError {
  * Use cancel() to stop generation, unsubscribe() to remove event listeners.
  */
 export interface TtsStreamController {
-  /** Cancel the ongoing TTS generation. */
+  /** Cancel the ongoing TTS generation (and destroy the player if playback was active). */
   cancel(): Promise<void>;
   /** Remove event listeners (called automatically on end/error, or manually). */
   unsubscribe(): void;
+  /**
+   * The player managing native playback for this stream run.
+   * Non-null only when streamOptions.playback was true.
+   */
+  readonly player: PcmPlayer | null;
 }
 
 /**
@@ -424,6 +489,80 @@ export interface TtsStreamHandlers {
   onChunk?: (chunk: TtsStreamChunk) => void;
   onEnd?: (event: TtsStreamEnd) => void;
   onError?: (event: TtsStreamError) => void;
+}
+
+/** Options controlling stream behavior (playback, chunk emission). */
+export interface TtsStreamOptions {
+  /**
+   * When true, synthesis enqueues PCM into a native player automatically.
+   * No writePcmChunk() needed. Default: false.
+   */
+  playback?: boolean;
+  /**
+   * When true, onChunk callbacks deliver binary PCM to JS.
+   * When false, no chunk events are emitted (only onEnd / onError).
+   * Default: true.
+   */
+  emitChunks?: boolean;
+  /**
+   * When true, the internally created player (used when playback: true) is automatically
+   * destroyed after onEnd fires. Default: true.
+   * Set to false to retain the player for deferred destroy() or final draining.
+   */
+  autoDestroy?: boolean;
+}
+
+/** File output target for streaming-to-file generation. */
+export type TtsStreamFileOutput = {
+  kind: 'file';
+  /** Absolute output path. */
+  path: string;
+};
+
+/** Event payload emitted when stream-to-file finishes. */
+export interface TtsStreamFileEnd {
+  cancelled: boolean;
+  path: string;
+  bytesWritten: number;
+  sampleRate: number;
+}
+
+/** Event payload emitted when stream-to-file fails. */
+export interface TtsStreamFileError {
+  message: string;
+  path?: string;
+}
+
+/** Stream-to-file behavior options. */
+export type TtsStreamToFileOptions = {
+  output: TtsStreamFileOutput;
+  /**
+   * Output format. v1 supports 'wav'.
+   * Reserved for future expansion.
+   */
+  format?: 'wav';
+  /** Keep finalized partial file when cancelled. Default: false. */
+  keepPartialOnCancel?: boolean;
+  /** Emit normal chunk events while writing to file. Default: false. */
+  emitChunks?: boolean;
+  /**
+   * When true, also play audio through a native player while writing to file.
+   * Default: false.
+   */
+  playback?: boolean;
+};
+
+/** Handlers for stream-to-file generation. */
+export interface TtsStreamToFileHandlers {
+  onChunk?: (chunk: TtsStreamChunk) => void;
+  onEnd?: (event: TtsStreamFileEnd) => void;
+  onError?: (event: TtsStreamFileError) => void;
+}
+
+/** Controller returned by generateSpeechStreamToFile(). */
+export interface TtsStreamFileController {
+  cancel(): Promise<void>;
+  unsubscribe(): void;
 }
 
 /**
@@ -442,14 +581,41 @@ export interface TtsEngine {
     text: string,
     options?: TtsGenerationOptions
   ): Promise<GeneratedAudioWithTimestamps>;
+  /**
+   * Play the most recent batch synthesis result through the device speaker.
+   * Reads PCM directly from the native sink — no JS memory allocation.
+   *
+   * @param generation - The generation number from GeneratedAudio.generation.
+   *                     Must match the current sink to prevent playing stale audio.
+   * @param options - Optional player configuration.
+   */
+  playFromSink(
+    generation: number,
+    options?: PlayFromSinkOptions
+  ): Promise<TtsBatchPlaybackController>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
-    detectedModels: Array<{ type: string; modelDir: string }>;
+    detectedModels: DetectedModelEntry[];
   }>;
   getModelInfo(): Promise<TTSModelInfo>;
   getSampleRate(): Promise<number>;
   getNumSpeakers(): Promise<number>;
   destroy(): Promise<void>;
+}
+
+/**
+ * Controller returned by TtsEngine.playFromSink().
+ * Provides pause/resume/destroy controls over the batch playback player.
+ */
+export interface TtsBatchPlaybackController {
+  /** The underlying PCM player (feed: 'native'). Use for pause/resume/destroy. */
+  readonly player: PcmPlayer;
+}
+
+/** Options for TtsEngine.playFromSink(). */
+export interface PlayFromSinkOptions {
+  /** Sample rate override. If omitted, uses the sink's sample rate. */
+  sampleRate?: number;
 }
 
 /**
@@ -468,3 +634,38 @@ export interface TTSModelInfo {
    */
   numSpeakers: number;
 }
+
+/** Save TTS audio to an absolute file path (include extension matching `format`, e.g. `.wav`, `.mp3`). */
+export type SaveAudioTargetFile = { kind: 'file'; path: string };
+
+/**
+ * Save TTS audio via Android Storage Access Framework into a user-granted directory tree.
+ * **Android only** — throws on other platforms.
+ */
+export type SaveAudioTargetAndroidContent = {
+  kind: 'androidContent';
+  directoryUri: string;
+  filename: string;
+};
+
+export type SaveAudioTarget =
+  | SaveAudioTargetFile
+  | SaveAudioTargetAndroidContent;
+
+/** Explicit PCM payload for `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`. */
+export type SaveAudioFromPcmInput = {
+  samples: number[] | Float32Array;
+  sampleRate: number;
+};
+
+/**
+ * Options for `saveAudioFromGeneration()` / `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`.
+ * `format` defaults to `'wav'`.
+ * Non-WAV formats require native FFmpeg; see docs/disable-ffmpeg.md.
+ */
+export type SaveAudioOptions = {
+  /** Same format strings as `convertAudioToFormat` in `react-native-sherpa-onnx/audio` (e.g. `wav`, `mp3`, `flac`, `m4a`, `opus`). */
+  format?: string;
+  /** Encoder output sample rate hint; `0` uses native defaults. MP3/Opus have allowed values — see audio-conversion.md. */
+  outputSampleRateHz?: number;
+};

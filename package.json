@@ -15,6 +15,11 @@
       "types": "./lib/typescript/src/stt/index.d.ts",
       "default": "./lib/module/stt/index.js"
     },
+    "./model-languages": {
+      "source": "./src/model-languages/index.ts",
+      "types": "./lib/typescript/src/model-languages/index.d.ts",
+      "default": "./lib/module/model-languages/index.js"
+    },
     "./tts": {
       "source": "./src/tts/index.ts",
       "types": "./lib/typescript/src/tts/index.d.ts",
@@ -59,6 +64,16 @@
       "source": "./src/audio/index.ts",
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
+    },
+    "./files": {
+      "source": "./src/files/index.ts",
+      "types": "./lib/typescript/src/files/index.d.ts",
+      "default": "./lib/module/files/index.js"
+    },
+    "./pcm": {
+      "source": "./src/pcm/index.ts",
+      "types": "./lib/typescript/src/pcm/index.d.ts",
+      "default": "./lib/module/pcm/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -230,6 +245,11 @@
     ],
     "rules": {
       "header-max-length": [
+        2,
+        "always",
+        300
+      ],
+      "body-max-line-length": [
         2,
         "always",
         300
