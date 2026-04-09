@@ -9,7 +9,9 @@ import type {
 import type {
   SessionEvent,
   SegmentEvent,
-  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsFactoryOptions,
+  IncrementalStreamHandlers,
+  IncrementalStreamController,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -82,137 +84,307 @@ function createMockStreamingEngine(): StreamingTtsEngine & {
 }
 
 // ---------------------------------------------------------------------------
-// Helper to collect events
+// Helpers
 // ---------------------------------------------------------------------------
 
-function createOptions(
-  mockEngine: StreamingTtsEngine,
-  overrides?: Partial<IncrementalStreamingTtsOptions>
-): IncrementalStreamingTtsOptions & {
-  sessionEvents: SessionEvent[];
-  segmentEvents: SegmentEvent[];
-} {
-  const sessionEvents: SessionEvent[] = [];
-  const segmentEvents: SegmentEvent[] = [];
-
-  const opts: IncrementalStreamingTtsOptions = {
-    source: { engine: mockEngine },
+function createFactoryOptions(
+  overrides?: Partial<Omit<IncrementalStreamingTtsFactoryOptions, 'source'>>
+): Omit<IncrementalStreamingTtsFactoryOptions, 'source'> {
+  return {
     segmentation: {
-      // Disable timers for deterministic tests
       maxWaitMs: 0,
       debounceMs: 0,
       minCharsPerSegment: 5,
+      ...(overrides?.segmentation ?? {}),
     },
-    streamOptions: { playback: false, emitChunks: false },
-    onSessionEvent: (e) => sessionEvents.push(e),
-    onSegmentEvent: (e) => segmentEvents.push(e),
-    ...overrides,
+    queue: overrides?.queue,
+  };
+}
+
+function createHandlers(): IncrementalStreamHandlers & {
+  sessionEvents: SessionEvent[];
+  segmentEvents: SegmentEvent[];
+  ended: boolean;
+  endCancelled: boolean | null;
+} {
+  const sessionEvents: SessionEvent[] = [];
+  const segmentEvents: SegmentEvent[] = [];
+  let ended = false;
+  let endCancelled: boolean | null = null;
+
+  const handlers = {
+    onSessionEvent: (e: SessionEvent) => sessionEvents.push(e),
+    onSegmentEvent: (e: SegmentEvent) => segmentEvents.push(e),
+    onEnd: (event: { cancelled: boolean }) => {
+      ended = true;
+      endCancelled = event.cancelled;
+    },
+    sessionEvents,
+    segmentEvents,
+    get ended() {
+      return ended;
+    },
+    get endCancelled() {
+      return endCancelled;
+    },
   };
 
-  return Object.assign(opts, { sessionEvents, segmentEvents });
+  return handlers as IncrementalStreamHandlers & {
+    sessionEvents: SessionEvent[];
+    segmentEvents: SegmentEvent[];
+    ended: boolean;
+    endCancelled: boolean | null;
+  };
+}
+
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('IncrementalStreamingTtsEngine', () => {
-  describe('lifecycle', () => {
+describe('IncrementalStreamingTtsEngine (request-centric)', () => {
+  describe('factory / engine-level', () => {
+    it('exposes instanceId from underlying engine', () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      expect(engine.instanceId).toBe('mock_streaming_1');
+    });
+
+    it('delegates getModelInfo / getSampleRate / getNumSpeakers', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      expect(await engine.getModelInfo()).toEqual({
+        sampleRate: 22050,
+        numSpeakers: 1,
+      });
+      expect(await engine.getSampleRate()).toBe(22050);
+      expect(await engine.getNumSpeakers()).toBe(1);
+    });
+
+    it('rejects concurrent requests', () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const streamOpts = { playback: false, emitChunks: false };
+
+      // First request — OK
+      engine.generateIncrementalSpeechStream(undefined, handlers, streamOpts);
+
+      // Second simultaneous request — should throw
+      expect(() =>
+        engine.generateIncrementalSpeechStream(
+          undefined,
+          createHandlers(),
+          streamOpts
+        )
+      ).toThrow(/already active/);
+    });
+
+    it('allows a new request after previous flush completes', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers1 = createHandlers();
+      const streamOpts = { playback: false, emitChunks: false };
+
+      const ctrl1 = engine.generateIncrementalSpeechStream(
+        undefined,
+        handlers1,
+        streamOpts
+      );
+      ctrl1.pushText('Request one text.');
+      const flushP = ctrl1.flush();
+      await tick();
+      mock.completeNext();
+      await flushP;
+
+      // Now a second request should succeed
+      const handlers2 = createHandlers();
+      const ctrl2 = engine.generateIncrementalSpeechStream(
+        undefined,
+        handlers2,
+        streamOpts
+      );
+      expect(ctrl2.state).toBe('idle');
+    });
+
+    it('allows a new request after previous cancel', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const streamOpts = { playback: false, emitChunks: false };
+
+      const ctrl1 = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        streamOpts
+      );
+      ctrl1.pushText('Will cancel.');
+      ctrl1.commit();
+      await tick();
+      await ctrl1.cancel();
+
+      const ctrl2 = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        streamOpts
+      );
+      expect(ctrl2.state).toBe('idle');
+    });
+
+    it('throws after destroy', async () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      await engine.destroy();
+      expect(() =>
+        engine.generateIncrementalSpeechStream(undefined, createHandlers(), {
+          playback: false,
+          emitChunks: false,
+        })
+      ).toThrow(/destroyed/);
+    });
+  });
+
+  describe('controller lifecycle', () => {
     it('starts in idle state', () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
-      expect(engine.state).toBe('idle');
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
+      expect(ctrl.state).toBe('idle');
     });
 
     it('transitions to active on pushText', () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Hello world. ');
-      expect(engine.state).toBe('active');
-      expect(opts.sessionEvents[0]!.type).toBe('session:started');
+      ctrl.pushText('Hello world. ');
+      expect(ctrl.state).toBe('active');
+      expect(handlers.sessionEvents[0]!.type).toBe('session:started');
     });
 
-    it('throws on pushText after destroy', async () => {
+    it('throws on pushText after cancel', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
+      ctrl.pushText('Some text here.');
+      ctrl.commit();
+      await tick();
+      await ctrl.cancel();
 
-      await engine.destroy();
-      expect(engine.state).toBe('destroyed');
-      expect(() => engine.pushText('x')).toThrow('destroyed');
-    });
-
-    it('throws on commit after destroy', async () => {
-      const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
-
-      await engine.destroy();
-      expect(() => engine.commit()).toThrow('destroyed');
-    });
-
-    it('destroy is idempotent', async () => {
-      const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
-
-      await engine.destroy();
-      await engine.destroy(); // should not throw
-      expect(engine.state).toBe('destroyed');
+      expect(() => ctrl.pushText('x')).toThrow(/cancelled/);
     });
   });
 
   describe('commit and queue', () => {
-    it('commit enqueues a segment', async () => {
+    it('commit enqueues a segment and dispatches', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Hello world test text.');
-      engine.commit();
-
-      // Wait a tick for async dispatch
+      ctrl.pushText('Hello world test text.');
+      ctrl.commit();
       await tick();
 
-      expect(opts.segmentEvents.some((e) => e.type === 'segment:queued')).toBe(
-        true
-      );
-      expect(opts.segmentEvents.some((e) => e.type === 'segment:started')).toBe(
-        true
-      );
+      expect(
+        handlers.segmentEvents.some(
+          (e: SegmentEvent) => e.type === 'segment:queued'
+        )
+      ).toBe(true);
+      expect(
+        handlers.segmentEvents.some(
+          (e: SegmentEvent) => e.type === 'segment:started'
+        )
+      ).toBe(true);
       expect(mock.pendingStreams).toHaveLength(1);
       expect(mock.pendingStreams[0]!.text).toBe('Hello world test text.');
     });
 
     it('commit with empty buffer is a no-op', () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.commit();
-      expect(opts.segmentEvents).toHaveLength(0);
+      ctrl.commit();
+      expect(handlers.segmentEvents).toHaveLength(0);
     });
 
     it('preserves FIFO ordering', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
 
-      engine.pushText('First segment text here.');
-      engine.commit();
-      engine.pushText('Second segment text here.');
-      engine.commit();
+      ctrl.pushText('First segment text here.');
+      ctrl.commit();
+      ctrl.pushText('Second segment text here.');
+      ctrl.commit();
 
       await tick();
 
-      // First segment dispatched
       expect(mock.pendingStreams).toHaveLength(1);
       expect(mock.pendingStreams[0]!.text).toBe('First segment text here.');
 
-      // Complete first → second gets dispatched
       mock.completeNext();
       await tick();
 
@@ -224,17 +396,22 @@ describe('IncrementalStreamingTtsEngine', () => {
   describe('flush', () => {
     it('commits remaining buffer and waits for completion', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Flush this text here.');
-      const flushPromise = engine.flush();
+      ctrl.pushText('Flush this text here.');
+      const flushPromise = ctrl.flush();
 
       await tick();
-
       expect(mock.pendingStreams).toHaveLength(1);
 
-      // Not resolved yet
       let resolved = false;
       void flushPromise.then(() => {
         resolved = true;
@@ -242,35 +419,51 @@ describe('IncrementalStreamingTtsEngine', () => {
       await tick();
       expect(resolved).toBe(false);
 
-      // Complete the segment
       mock.completeNext();
       await tick();
 
       expect(resolved).toBe(true);
-      expect(engine.state).toBe('idle');
+      expect(handlers.ended).toBe(true);
+      expect(handlers.endCancelled).toBe(false);
     });
 
     it('resolves immediately when nothing to process', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      await engine.flush(); // should not hang
-      expect(engine.state).toBe('idle');
+      await ctrl.flush();
+      expect(handlers.ended).toBe(true);
+      expect(handlers.endCancelled).toBe(false);
     });
 
     it('emits draining event', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Drain me please now.');
-      const flushPromise = engine.flush();
-
+      ctrl.pushText('Drain me please now.');
+      const flushPromise = ctrl.flush();
       await tick();
 
       expect(
-        opts.sessionEvents.some((e) => e.type === 'session:draining')
+        handlers.sessionEvents.some(
+          (e: SessionEvent) => e.type === 'session:draining'
+        )
       ).toBe(true);
 
       mock.completeNext();
@@ -281,67 +474,72 @@ describe('IncrementalStreamingTtsEngine', () => {
   describe('cancel', () => {
     it('cancels active and queued segments', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Active segment text.');
-      engine.commit();
-      engine.pushText('Queued segment text.');
-      engine.commit();
+      ctrl.pushText('Active segment text.');
+      ctrl.commit();
+      ctrl.pushText('Queued segment text.');
+      ctrl.commit();
 
       await tick();
 
-      await engine.cancel();
+      await ctrl.cancel();
 
-      expect(engine.state).toBe('cancelled');
-      const cancelledEvent = opts.sessionEvents.find(
-        (e) => e.type === 'session:cancelled'
+      expect(ctrl.state).toBe('cancelled');
+      expect(handlers.ended).toBe(true);
+      expect(handlers.endCancelled).toBe(true);
+      const cancelledEvent = handlers.sessionEvents.find(
+        (e: SessionEvent) => e.type === 'session:cancelled'
       );
       expect(cancelledEvent).toBeDefined();
     });
 
     it('cancel scope=queued keeps active running', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
 
-      engine.pushText('Active segment text.');
-      engine.commit();
-      engine.pushText('Queued segment text.');
-      engine.commit();
+      ctrl.pushText('Active segment text.');
+      ctrl.commit();
+      ctrl.pushText('Queued segment text.');
+      ctrl.commit();
 
       await tick();
 
-      await engine.cancel({ scope: 'queued' });
-
+      await ctrl.cancel({ scope: 'queued' });
       // Active segment still running
       expect(mock.pendingStreams).toHaveLength(1);
     });
 
-    it('allows new input after cancel', async () => {
-      const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
-
-      engine.pushText('Will be cancelled.');
-      engine.commit();
-      await tick();
-      await engine.cancel();
-
-      expect(engine.state).toBe('cancelled');
-
-      // New input should work
-      engine.pushText('New text after cancel.');
-      expect(engine.state).toBe('active');
-    });
-
     it('resolves pending flush on cancel', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
 
-      engine.pushText('Flushing text content.');
-      const flushPromise = engine.flush();
+      ctrl.pushText('Flushing text content.');
+      const flushPromise = ctrl.flush();
       await tick();
 
       let resolved = false;
@@ -349,9 +547,8 @@ describe('IncrementalStreamingTtsEngine', () => {
         resolved = true;
       });
 
-      await engine.cancel();
+      await ctrl.cancel();
       await tick();
-
       expect(resolved).toBe(true);
     });
   });
@@ -359,90 +556,129 @@ describe('IncrementalStreamingTtsEngine', () => {
   describe('error handling', () => {
     it('continues dispatching after segment error', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('First segment fails.');
-      engine.commit();
-      engine.pushText('Second segment works.');
-      engine.commit();
+      ctrl.pushText('First segment fails.');
+      ctrl.commit();
+      ctrl.pushText('Second segment works.');
+      ctrl.commit();
 
       await tick();
 
-      // Fail the first segment
       mock.failNext('synth error');
       await tick();
 
-      // Second segment should be dispatched
       expect(mock.pendingStreams).toHaveLength(1);
       expect(mock.pendingStreams[0]!.text).toBe('Second segment works.');
 
-      // Error event should have been emitted
-      expect(opts.sessionEvents.some((e) => e.type === 'session:error')).toBe(
-        true
-      );
+      expect(
+        handlers.sessionEvents.some(
+          (e: SessionEvent) => e.type === 'session:error'
+        )
+      ).toBe(true);
     });
   });
 
   describe('metrics', () => {
     it('tracks queue depth and counters', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock);
-      const engine = createEngine(mock, opts);
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl = engine.generateIncrementalSpeechStream(
+        undefined,
+        createHandlers(),
+        { playback: false, emitChunks: false }
+      );
 
-      expect(engine.getMetrics().queueDepth).toBe(0);
-      expect(engine.getMetrics().totalSegmentsQueued).toBe(0);
+      expect(ctrl.getMetrics().queueDepth).toBe(0);
+      expect(ctrl.getMetrics().totalSegmentsQueued).toBe(0);
 
-      engine.pushText('Segment one text here.');
-      engine.commit();
-      engine.pushText('Segment two text here.');
-      engine.commit();
+      ctrl.pushText('Segment one text here.');
+      ctrl.commit();
+      ctrl.pushText('Segment two text here.');
+      ctrl.commit();
 
       await tick();
 
-      // One active, one queued
-      expect(engine.getMetrics().queueDepth).toBe(1);
-      expect(engine.getMetrics().totalSegmentsQueued).toBe(2);
-      expect(engine.getMetrics().activeSegmentId).not.toBeNull();
+      expect(ctrl.getMetrics().queueDepth).toBe(1);
+      expect(ctrl.getMetrics().totalSegmentsQueued).toBe(2);
+      expect(ctrl.getMetrics().activeSegmentId).not.toBeNull();
 
       mock.completeNext();
       await tick();
 
-      expect(engine.getMetrics().totalSegmentsCompleted).toBe(1);
-      expect(engine.getMetrics().queueDepth).toBe(0);
+      expect(ctrl.getMetrics().totalSegmentsCompleted).toBe(1);
+      expect(ctrl.getMetrics().queueDepth).toBe(0);
     });
   });
 
   describe('auto-segmentation', () => {
     it('splits on punctuation with debounceMs=0', async () => {
       const mock = createMockStreamingEngine();
-      const opts = createOptions(mock, {
-        segmentation: {
-          debounceMs: 0,
-          maxWaitMs: 0,
-          minCharsPerSegment: 5,
-        },
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions({
+          segmentation: {
+            debounceMs: 0,
+            maxWaitMs: 0,
+            minCharsPerSegment: 5,
+          },
+        }),
       });
-      const engine = createEngine(mock, opts);
+      const handlers = createHandlers();
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
-      engine.pushText('Hello world. How are you?');
-
-      // With debounceMs=0, segmentation runs synchronously
+      ctrl.pushText('Hello world. How are you?');
       await tick();
 
-      // Should have detected punctuation boundaries
-      const queuedEvents = opts.segmentEvents.filter(
-        (e) => e.type === 'segment:queued'
+      const queuedEvents = handlers.segmentEvents.filter(
+        (e: SegmentEvent) => e.type === 'segment:queued'
       );
       expect(queuedEvents.length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('player proxy', () => {
+    it('returns null player when playback is false', () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl: IncrementalStreamController =
+        engine.generateIncrementalSpeechStream(undefined, createHandlers(), {
+          playback: false,
+          emitChunks: false,
+        });
+      expect(ctrl.player).toBeNull();
+    });
+
+    it('returns a player proxy when playback is true', () => {
+      const mock = createMockStreamingEngine();
+      const engine = createEngine(mock, {
+        source: { engine: mock },
+        ...createFactoryOptions(),
+      });
+      const ctrl: IncrementalStreamController =
+        engine.generateIncrementalSpeechStream(undefined, createHandlers(), {
+          playback: true,
+          emitChunks: false,
+        });
+      expect(ctrl.player).not.toBeNull();
+      expect(ctrl.player!.feed).toBe('native');
+    });
+  });
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
