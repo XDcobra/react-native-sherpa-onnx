@@ -1,32 +1,36 @@
 import type {
-  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsFactoryOptions,
   IncrementalStreamingTtsEngine,
 } from './types';
 import { createStreamingTTS } from '../streaming';
 import { createEngine } from './engine';
 
 /**
- * Create an incremental-streaming TTS engine.
+ * Create an incremental-streaming TTS engine (factory).
  *
- * Accepts progressive text pushes (`pushText`) and segments/queues them
- * automatically, dispatching one segment at a time to the underlying
- * streaming engine. Defaults match createStreamingTTS behavior.
+ * Returns an `IncrementalStreamingTtsEngine` whose
+ * `generateIncrementalSpeechStream()` method creates per-request controllers
+ * for progressive text pushing, segmentation, and playback.
  *
  * @example
  * ```ts
  * const engine = await createIncrementalStreamingTTS({
  *   source: { engineOptions: { modelPath: { type: 'asset', path: 'model' } } },
- *   // defaults: playback: false, emitChunks: true
  * });
  *
- * engine.pushText('Hello world. ');
- * engine.pushText('This is streaming TTS.');
- * await engine.flush();
+ * const ctrl = engine.generateIncrementalSpeechStream(
+ *   undefined,
+ *   { onEnd: () => console.log('done') },
+ *   { playback: true, emitChunks: false },
+ * );
+ * ctrl.pushText('Hello world. ');
+ * ctrl.pushText('This is streaming TTS.');
+ * await ctrl.flush();
  * await engine.destroy();
  * ```
  */
 export async function createIncrementalStreamingTTS(
-  options: IncrementalStreamingTtsOptions
+  options: IncrementalStreamingTtsFactoryOptions
 ): Promise<IncrementalStreamingTtsEngine> {
   let ownsEngine = false;
 
@@ -63,9 +67,17 @@ export { applyEnqueuePolicy, resolveQueuePolicy } from './policies';
 export type {
   // Engine
   IncrementalStreamingTtsEngine,
-  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsFactoryOptions,
   IncrementalStreamingTtsSource,
   IncrementalMetrics,
+  // Controllers
+  IncrementalStreamController,
+  IncrementalStreamFileController,
+  // Handlers
+  IncrementalStreamHandlers,
+  IncrementalStreamToFileHandlers,
+  // Per-request options
+  IncrementalRequestOptions,
   // IDs & state
   SessionId,
   SegmentId,

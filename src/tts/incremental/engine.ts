@@ -3,7 +3,12 @@ import type {
   SegmentId,
   SessionState,
   IncrementalStreamingTtsEngine,
-  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsFactoryOptions,
+  IncrementalStreamController,
+  IncrementalStreamFileController,
+  IncrementalStreamHandlers,
+  IncrementalStreamToFileHandlers,
+  IncrementalRequestOptions,
   IncrementalMetrics,
   CommitOptions,
   CancelOptions,
@@ -11,7 +16,13 @@ import type {
   SegmentEvent,
 } from './types';
 import type { StreamingTtsEngine } from '../streamingTypes';
-import type { TtsStreamController } from '../types';
+import type {
+  TtsStreamController,
+  TtsStreamOptions,
+  TtsGenerationOptions,
+  TtsStreamToFileOptions,
+} from '../types';
+import type { PcmPlayer } from '../../pcm/types';
 import {
   resolveSegmentationPolicy,
   detectBoundaries,
@@ -53,23 +64,154 @@ function nextSegmentId(): SegmentId {
 }
 
 // ---------------------------------------------------------------------------
-// Engine implementation
+// Engine factory (returns IncrementalStreamingTtsEngine)
 // ---------------------------------------------------------------------------
 
 export function createEngine(
   streamingEngine: StreamingTtsEngine,
-  options: IncrementalStreamingTtsOptions
+  factoryOptions: IncrementalStreamingTtsFactoryOptions
 ): IncrementalStreamingTtsEngine {
-  const sessionId = nextSessionId();
-  const segPolicy: ResolvedSegmentationPolicy = resolveSegmentationPolicy(
-    options.segmentation
-  );
-  const qPolicy: ResolvedQueuePolicy = resolveQueuePolicy(options.queue);
+  let destroyed = false;
+  let activeRequest = false;
 
-  const defaultStreamOptions = options.streamOptions ?? {
-    playback: false,
-    emitChunks: true,
+  const guard = () => {
+    if (destroyed) {
+      throw new Error('IncrementalStreamingTtsEngine has been destroyed.');
+    }
   };
+
+  const engine: IncrementalStreamingTtsEngine = {
+    get instanceId() {
+      return streamingEngine.instanceId;
+    },
+
+    generateIncrementalSpeechStream(
+      genOptions: TtsGenerationOptions | undefined,
+      handlers: IncrementalStreamHandlers,
+      streamOptions?: TtsStreamOptions,
+      incrementalOptions?: IncrementalRequestOptions
+    ): IncrementalStreamController {
+      guard();
+      if (activeRequest) {
+        throw new Error(
+          'An incremental request is already active. ' +
+            'Cancel or flush the current request before starting a new one.'
+        );
+      }
+      activeRequest = true;
+
+      const resolvedStreamOptions = streamOptions ?? {
+        playback: true,
+        emitChunks: false,
+      };
+
+      const segPolicy = resolveSegmentationPolicy(
+        incrementalOptions?.segmentation ?? factoryOptions.segmentation
+      );
+      const qPolicy = resolveQueuePolicy(
+        incrementalOptions?.queue ?? factoryOptions.queue
+      );
+
+      const session = createRequestSession(
+        streamingEngine,
+        genOptions,
+        handlers,
+        segPolicy,
+        qPolicy,
+        resolvedStreamOptions,
+        'stream',
+        undefined,
+        () => {
+          activeRequest = false;
+        }
+      );
+
+      return session.controller as IncrementalStreamController;
+    },
+
+    generateIncrementalSpeechStreamToFile(
+      genOptions: TtsGenerationOptions | undefined,
+      fileOptions: TtsStreamToFileOptions,
+      handlers: IncrementalStreamToFileHandlers,
+      incrementalOptions?: IncrementalRequestOptions
+    ): IncrementalStreamFileController {
+      guard();
+      if (activeRequest) {
+        throw new Error(
+          'An incremental request is already active. ' +
+            'Cancel or flush the current request before starting a new one.'
+        );
+      }
+      activeRequest = true;
+
+      const segPolicy = resolveSegmentationPolicy(
+        incrementalOptions?.segmentation ?? factoryOptions.segmentation
+      );
+      const qPolicy = resolveQueuePolicy(
+        incrementalOptions?.queue ?? factoryOptions.queue
+      );
+
+      const session = createRequestSession(
+        streamingEngine,
+        genOptions,
+        handlers,
+        segPolicy,
+        qPolicy,
+        undefined,
+        'file',
+        fileOptions,
+        () => {
+          activeRequest = false;
+        }
+      );
+
+      return session.controller as IncrementalStreamFileController;
+    },
+
+    async getModelInfo() {
+      guard();
+      return streamingEngine.getModelInfo();
+    },
+
+    async getSampleRate() {
+      guard();
+      return streamingEngine.getSampleRate();
+    },
+
+    async getNumSpeakers() {
+      guard();
+      return streamingEngine.getNumSpeakers();
+    },
+
+    async destroy() {
+      if (destroyed) return;
+      destroyed = true;
+    },
+  };
+
+  return engine;
+}
+
+// ---------------------------------------------------------------------------
+// Per-request session (internal)
+// ---------------------------------------------------------------------------
+
+interface RequestSession {
+  controller: IncrementalStreamController | IncrementalStreamFileController;
+}
+
+function createRequestSession(
+  streamingEngine: StreamingTtsEngine,
+  genOptions: TtsGenerationOptions | undefined,
+  handlers: IncrementalStreamHandlers | IncrementalStreamToFileHandlers,
+  segPolicy: ResolvedSegmentationPolicy,
+  qPolicy: ResolvedQueuePolicy,
+  streamOptions: TtsStreamOptions | undefined,
+  mode: 'stream' | 'file',
+  fileOptions: TtsStreamToFileOptions | undefined,
+  onRequestEnd: () => void
+): RequestSession {
+  const sessionId = nextSessionId();
 
   // -----------------------------------------------------------------------
   // Internal mutable state
@@ -96,20 +238,23 @@ export function createEngine(
   let totalDropped = 0;
   let totalReplaced = 0;
 
+  // Player proxy state (only for stream mode with playback)
+  let isPaused = false;
+
   // -----------------------------------------------------------------------
   // Event helpers
   // -----------------------------------------------------------------------
 
   const emitSession = (e: SessionEvent) => {
     try {
-      options.onSessionEvent?.(e);
+      handlers.onSessionEvent?.(e);
     } catch {
       /* subscriber errors must not break the engine */
     }
   };
   const emitSegment = (e: SegmentEvent) => {
     try {
-      options.onSegmentEvent?.(e);
+      handlers.onSegmentEvent?.(e);
     } catch {
       /* subscriber errors must not break the engine */
     }
@@ -117,7 +262,7 @@ export function createEngine(
 
   function emitMetrics(): void {
     try {
-      options.onMetrics?.(buildMetrics());
+      handlers.onMetrics?.(buildMetrics());
     } catch {
       /* subscriber errors must not break the engine */
     }
@@ -140,6 +285,10 @@ export function createEngine(
 
   function setState(next: SessionState): void {
     state = next;
+  }
+
+  function completeRequest(): void {
+    onRequestEnd();
   }
 
   // -----------------------------------------------------------------------
@@ -175,7 +324,6 @@ export function createEngine(
         autoSegment(false);
       }, segPolicy.debounceMs);
     } else {
-      // No debounce — run immediately
       autoSegment(false);
     }
   }
@@ -215,7 +363,6 @@ export function createEngine(
     const seg: QueuedSegment = { id: nextSegmentId(), text: trimmed };
     const result = applyEnqueuePolicy(queue, seg, qPolicy);
 
-    // Emit for dropped segments
     for (const d of result.dropped) {
       const reason =
         qPolicy.mode === 'replace-tail'
@@ -272,53 +419,92 @@ export function createEngine(
     emitSegment(segmentStarted(sessionId, seg.id));
     emitMetrics();
 
-    // Fire the native streaming call (async).
-    // We intentionally don't return the promise — lifecycle is callback-driven.
-    startSegmentGeneration(seg);
+    void startSegmentGeneration(seg);
   }
 
   async function startSegmentGeneration(seg: QueuedSegment): Promise<void> {
     try {
-      const controller = await streamingEngine.generateSpeechStream(
-        seg.text,
-        options.generationOptions,
-        {
-          onChunk(chunk) {
-            // Only emit if the segment is still the active one (not cancelled)
-            if (activeSegment?.id === seg.id) {
-              emitSegment(segmentChunk(sessionId, seg.id, chunk));
+      const segHandlers = {
+        onChunk(chunk: Parameters<NonNullable<typeof handlers.onChunk>>[0]) {
+          if (activeSegment?.id === seg.id) {
+            emitSegment(segmentChunk(sessionId, seg.id, chunk));
+            // Propagate to top-level onChunk
+            try {
+              handlers.onChunk?.(chunk);
+            } catch {
+              /* ignore */
             }
-          },
-          onEnd(event) {
-            if (activeSegment?.id !== seg.id) return; // stale
-            emitSegment(segmentEnded(sessionId, seg.id, event.cancelled));
-            if (!event.cancelled) totalCompleted++;
-            activeSegment = null;
-            activeController = null;
-            dispatching = false;
-            emitMetrics();
-            scheduleDispatch();
-          },
-          onError(error) {
-            if (activeSegment?.id !== seg.id) return; // stale
-            activeSegment = null;
-            activeController = null;
-            dispatching = false;
-            emitSession(sessionError(sessionId, error.message, seg.id));
-            emitMetrics();
-            // Continue dispatching — one segment error should not kill the session
-            scheduleDispatch();
-          },
+          }
         },
-        defaultStreamOptions
-      );
+        onEnd(event: { cancelled: boolean }) {
+          if (activeSegment?.id !== seg.id) return;
+          emitSegment(segmentEnded(sessionId, seg.id, event.cancelled));
+          if (!event.cancelled) totalCompleted++;
+          activeSegment = null;
+          activeController = null;
+          dispatching = false;
+          emitMetrics();
+          scheduleDispatch();
+        },
+        onError(error: { message: string }) {
+          if (activeSegment?.id !== seg.id) return;
+          activeSegment = null;
+          activeController = null;
+          dispatching = false;
+          emitSession(sessionError(sessionId, error.message, seg.id));
+          // Propagate to top-level onError
+          try {
+            handlers.onError?.(error as never);
+          } catch {
+            /* ignore */
+          }
+          emitMetrics();
+          scheduleDispatch();
+        },
+      };
 
-      // Controller is only useful if segment is still active
+      let controller: TtsStreamController;
+
+      if (mode === 'file' && fileOptions) {
+        // File mode: dispatch via generateSpeechStreamToFile
+        const fileCtrl = await streamingEngine.generateSpeechStreamToFile(
+          seg.text,
+          genOptions,
+          fileOptions,
+          segHandlers as never
+        );
+        // Wrap into TtsStreamController shape for uniform handling
+        controller = {
+          async cancel() {
+            return fileCtrl.cancel();
+          },
+          unsubscribe() {
+            fileCtrl.unsubscribe();
+          },
+          player: null,
+        };
+      } else {
+        // Stream mode
+        controller = await streamingEngine.generateSpeechStream(
+          seg.text,
+          genOptions,
+          segHandlers,
+          streamOptions
+        );
+      }
+
       if (activeSegment?.id === seg.id) {
         activeController = controller;
+        // Apply paused state to new segment player
+        if (isPaused && controller.player) {
+          try {
+            void controller.player.pause();
+          } catch {
+            /* ignore */
+          }
+        }
       }
     } catch (err: unknown) {
-      // generateSpeechStream itself threw (setup failure)
       activeSegment = null;
       dispatching = false;
       const msg = err instanceof Error ? err.message : String(err);
@@ -340,6 +526,13 @@ export function createEngine(
       setState('idle');
       emitSession(sessionIdle(sessionId));
       emitMetrics();
+      // Fire top-level onEnd at flush completion
+      try {
+        (handlers as IncrementalStreamHandlers).onEnd?.({ cancelled: false });
+      } catch {
+        /* ignore */
+      }
+      completeRequest();
       flushResolve?.();
       flushResolve = null;
     } else if (state === 'active' || state === 'draining') {
@@ -350,48 +543,92 @@ export function createEngine(
   }
 
   // -----------------------------------------------------------------------
-  // Public API
+  // Player proxy (for stream mode with playback)
   // -----------------------------------------------------------------------
 
-  const engine: IncrementalStreamingTtsEngine = {
-    get sessionId() {
-      return sessionId;
-    },
+  function createPlayerProxy(): PcmPlayer | null {
+    if (mode !== 'stream' || !streamOptions?.playback) return null;
 
-    get state() {
-      return state;
-    },
+    const proxy: PcmPlayer = {
+      get playerId() {
+        return `inc_player_proxy_${sessionId}`;
+      },
+      get feed() {
+        return 'native' as const;
+      },
+      async writePcmChunk(): Promise<void> {
+        throw new Error(
+          `PcmPlayer proxy ${sessionId} has feed 'native'; writePcmChunk() is not allowed from JS.`
+        );
+      },
+      async pause(): Promise<void> {
+        isPaused = true;
+        if (activeController?.player) {
+          await activeController.player.pause();
+        }
+      },
+      async resume(): Promise<void> {
+        isPaused = false;
+        if (activeController?.player) {
+          await activeController.player.resume();
+        }
+      },
+      async destroy(): Promise<void> {
+        await cancelImpl({ scope: 'all' });
+      },
+    };
+    return proxy;
+  }
 
-    // ------- pushText -------
-    pushText(text: string): void {
-      if (state === 'destroyed') {
-        throw new Error('Cannot pushText on a destroyed engine.');
-      }
-      if (state === 'cancelled') {
-        setState('idle');
-      }
+  // -----------------------------------------------------------------------
+  // Shared controller methods
+  // -----------------------------------------------------------------------
 
-      textBuffer += text;
+  function pushTextImpl(text: string): void {
+    if (state === 'destroyed') {
+      throw new Error('Cannot pushText: request has been destroyed.');
+    }
+    if (state === 'cancelled') {
+      throw new Error('Cannot pushText: request has been cancelled.');
+    }
 
-      if (state === 'idle') {
-        setState('active');
-        emitSession(sessionStarted(sessionId));
-      }
+    textBuffer += text;
 
-      resetWaitTimer();
-      resetDebounceTimer();
-    },
+    if (state === 'idle') {
+      setState('active');
+      emitSession(sessionStarted(sessionId));
+    }
 
-    // ------- commit -------
-    commit(_opts?: CommitOptions): void {
-      if (state === 'destroyed') {
-        throw new Error('Cannot commit on a destroyed engine.');
-      }
+    resetWaitTimer();
+    resetDebounceTimer();
+  }
 
-      clearTimers();
-      if (textBuffer.length === 0) return;
+  function commitImpl(_opts?: CommitOptions): void {
+    if (state === 'destroyed') {
+      throw new Error('Cannot commit: request has been destroyed.');
+    }
 
-      // Force-commit entire buffer
+    clearTimers();
+    if (textBuffer.length === 0) return;
+
+    const boundaries = detectBoundaries(textBuffer, segPolicy, {
+      forced: true,
+    });
+    for (const b of boundaries) {
+      enqueueText(b.text);
+    }
+    textBuffer = '';
+    scheduleDispatch();
+  }
+
+  async function flushImpl(): Promise<void> {
+    if (state === 'destroyed') {
+      throw new Error('Cannot flush: request has been destroyed.');
+    }
+
+    clearTimers();
+
+    if (textBuffer.length > 0) {
       const boundaries = detectBoundaries(textBuffer, segPolicy, {
         forced: true,
       });
@@ -399,133 +636,128 @@ export function createEngine(
         enqueueText(b.text);
       }
       textBuffer = '';
-      scheduleDispatch();
-    },
+    }
 
-    // ------- flush -------
-    async flush(): Promise<void> {
-      if (state === 'destroyed') {
-        throw new Error('Cannot flush a destroyed engine.');
+    if (queue.length === 0 && activeSegment === null) {
+      if (state !== 'idle') {
+        setState('idle');
+        emitSession(sessionIdle(sessionId));
+        emitMetrics();
       }
-
-      clearTimers();
-
-      // Commit any remaining buffer
-      if (textBuffer.length > 0) {
-        const boundaries = detectBoundaries(textBuffer, segPolicy, {
-          forced: true,
-        });
-        for (const b of boundaries) {
-          enqueueText(b.text);
-        }
-        textBuffer = '';
+      // Fire top-level onEnd
+      try {
+        (handlers as IncrementalStreamHandlers).onEnd?.({ cancelled: false });
+      } catch {
+        /* ignore */
       }
+      completeRequest();
+      return;
+    }
 
-      // Nothing to process → immediate
-      if (queue.length === 0 && activeSegment === null) {
-        if (state !== 'idle') {
-          setState('idle');
-          emitSession(sessionIdle(sessionId));
-          emitMetrics();
-        }
-        return;
+    flushing = true;
+    setState('draining');
+    emitSession(
+      sessionDraining(sessionId, queue.length + (activeSegment ? 1 : 0))
+    );
+
+    scheduleDispatch();
+
+    return new Promise<void>((resolve) => {
+      flushResolve = resolve;
+    });
+  }
+
+  async function cancelImpl(opts?: CancelOptions): Promise<void> {
+    if (state === 'destroyed') return;
+
+    const scope = opts?.scope ?? 'all';
+    clearTimers();
+
+    let droppedCount = 0;
+
+    if (scope === 'all' || scope === 'queued') {
+      for (const seg of queue) {
+        emitSegment(segmentDropped(sessionId, seg.id, 'cancelled'));
+        droppedCount++;
+        totalDropped++;
       }
-
-      flushing = true;
-      setState('draining');
-      emitSession(
-        sessionDraining(sessionId, queue.length + (activeSegment ? 1 : 0))
-      );
-
-      scheduleDispatch();
-
-      return new Promise<void>((resolve) => {
-        flushResolve = resolve;
-      });
-    },
-
-    // ------- cancel -------
-    async cancel(opts?: CancelOptions): Promise<void> {
-      if (state === 'destroyed') return;
-
-      const scope = opts?.scope ?? 'all';
-      clearTimers();
-
-      let droppedCount = 0;
-
-      // Cancel queued segments
-      if (scope === 'all' || scope === 'queued') {
-        for (const seg of queue) {
-          emitSegment(segmentDropped(sessionId, seg.id, 'cancelled'));
-          droppedCount++;
-          totalDropped++;
-        }
-        queue.length = 0;
-        textBuffer = '';
-      }
-
-      // Cancel active segment
-      if ((scope === 'all' || scope === 'active') && activeController) {
-        try {
-          await activeController.cancel();
-        } catch {
-          // ignore — synthesis may already have ended
-        }
-        if (activeSegment) {
-          emitSegment(segmentDropped(sessionId, activeSegment.id, 'cancelled'));
-          droppedCount++;
-          totalDropped++;
-        }
-        activeSegment = null;
-        activeController = null;
-        dispatching = false;
-      }
-
-      setState('cancelled');
-      emitSession(sessionCancelled(sessionId, droppedCount));
-
-      // Resolve pending flush
-      if (flushResolve) {
-        flushing = false;
-        flushResolve();
-        flushResolve = null;
-      }
-
-      emitMetrics();
-    },
-
-    // ------- getMetrics -------
-    getMetrics(): IncrementalMetrics {
-      return buildMetrics();
-    },
-
-    // ------- destroy -------
-    async destroy(): Promise<void> {
-      if (state === 'destroyed') return;
-
-      clearTimers();
       queue.length = 0;
       textBuffer = '';
+    }
 
-      if (activeController) {
-        try {
-          await activeController.cancel();
-        } catch {
-          // ignore
-        }
-        activeController = null;
-        activeSegment = null;
+    if ((scope === 'all' || scope === 'active') && activeController) {
+      try {
+        await activeController.cancel();
+      } catch {
+        /* ignore */
       }
-
-      if (flushResolve) {
-        flushing = false;
-        flushResolve();
-        flushResolve = null;
+      if (activeSegment) {
+        emitSegment(segmentDropped(sessionId, activeSegment.id, 'cancelled'));
+        droppedCount++;
+        totalDropped++;
       }
+      activeSegment = null;
+      activeController = null;
+      dispatching = false;
+    }
 
-      setState('destroyed');
+    setState('cancelled');
+    emitSession(sessionCancelled(sessionId, droppedCount));
+
+    // Fire top-level onEnd with cancelled
+    try {
+      (handlers as IncrementalStreamHandlers).onEnd?.({ cancelled: true });
+    } catch {
+      /* ignore */
+    }
+
+    completeRequest();
+
+    if (flushResolve) {
+      flushing = false;
+      flushResolve();
+      flushResolve = null;
+    }
+
+    emitMetrics();
+  }
+
+  function getMetricsImpl(): IncrementalMetrics {
+    return buildMetrics();
+  }
+
+  // -----------------------------------------------------------------------
+  // Build controller
+  // -----------------------------------------------------------------------
+
+  const playerProxy = createPlayerProxy();
+
+  if (mode === 'stream') {
+    const controller: IncrementalStreamController = {
+      pushText: pushTextImpl,
+      commit: commitImpl,
+      flush: flushImpl,
+      cancel: cancelImpl,
+      getMetrics: getMetricsImpl,
+      get state() {
+        return state;
+      },
+      get player() {
+        return playerProxy;
+      },
+    };
+    return { controller };
+  }
+
+  const controller: IncrementalStreamFileController = {
+    pushText: pushTextImpl,
+    commit: commitImpl,
+    flush: flushImpl,
+    cancel: cancelImpl,
+    getMetrics: getMetricsImpl,
+    get state() {
+      return state;
     },
   };
-
-  return engine;
+  return { controller };
 }

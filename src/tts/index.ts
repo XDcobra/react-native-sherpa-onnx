@@ -611,8 +611,13 @@ export type { StreamingTtsEngine } from './streamingTypes';
 export { createIncrementalStreamingTTS } from './incremental';
 export type {
   IncrementalStreamingTtsEngine,
-  IncrementalStreamingTtsOptions,
+  IncrementalStreamingTtsFactoryOptions,
   IncrementalStreamingTtsSource,
+  IncrementalStreamController,
+  IncrementalStreamFileController,
+  IncrementalStreamHandlers,
+  IncrementalStreamToFileHandlers,
+  IncrementalRequestOptions,
   IncrementalMetrics,
   SessionId,
   SegmentId,
