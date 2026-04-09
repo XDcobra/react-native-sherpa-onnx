@@ -270,11 +270,10 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
         ...createFactoryOptions(),
       });
       const handlers = createHandlers();
-      const ctrl = engine.generateIncrementalSpeechStream(
-        undefined,
-        handlers,
-        { playback: false, emitChunks: false }
-      );
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
       ctrl.pushText('Some text here to process.');
       ctrl.commit();
@@ -567,11 +566,10 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
         ...createFactoryOptions(),
       });
       const handlers = createHandlers();
-      const ctrl = engine.generateIncrementalSpeechStream(
-        undefined,
-        handlers,
-        { playback: false, emitChunks: false }
-      );
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
       ctrl.pushText('Active segment text.');
       ctrl.commit();
@@ -628,11 +626,10 @@ describe('IncrementalStreamingTtsEngine (request-centric)', () => {
         },
       };
 
-      const ctrl = engine.generateIncrementalSpeechStream(
-        undefined,
-        handlers,
-        { playback: false, emitChunks: false }
-      );
+      const ctrl = engine.generateIncrementalSpeechStream(undefined, handlers, {
+        playback: false,
+        emitChunks: false,
+      });
 
       ctrl.pushText('Some text here.');
       ctrl.commit();

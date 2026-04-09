@@ -101,10 +101,8 @@ export function createEngine(
       }
       activeRequest = true;
 
-      const resolvedStreamOptions = streamOptions ?? {
-        playback: true,
-        emitChunks: false,
-      };
+      // Same per-field defaults as generateSpeechStream: playback false, emitChunks true.
+      const resolvedStreamOptions = streamOptions;
 
       const segPolicy = resolveSegmentationPolicy(
         incrementalOptions?.segmentation ?? factoryOptions.segmentation
@@ -508,7 +506,12 @@ function createRequestSession(
                 (
                   handlers as IncrementalStreamToFileHandlers
                 ).onSegmentFileEnd?.({
-                  ...(event as { cancelled: boolean; path: string; bytesWritten: number; sampleRate: number }),
+                  ...(event as {
+                    cancelled: boolean;
+                    path: string;
+                    bytesWritten: number;
+                    sampleRate: number;
+                  }),
                   segmentId: seg.id,
                 });
               } catch {

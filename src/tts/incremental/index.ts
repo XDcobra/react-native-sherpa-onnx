@@ -10,7 +10,7 @@ import { createEngine } from './engine';
  *
  * Returns an `IncrementalStreamingTtsEngine` whose
  * `generateIncrementalSpeechStream()` method creates per-request controllers
- * for progressive text pushing, segmentation, and playback.
+ * for progressive text pushing, segmentation, and optional native playback.
  *
  * @example
  * ```ts
@@ -18,11 +18,13 @@ import { createEngine } from './engine';
  *   source: { engineOptions: { modelPath: { type: 'asset', path: 'model' } } },
  * });
  *
- * const ctrl = engine.generateIncrementalSpeechStream(
- *   undefined,
- *   { onEnd: () => console.log('done') },
- *   { playback: true, emitChunks: false },
- * );
+ * const ctrl = engine.generateIncrementalSpeechStream(undefined, {
+ *   onChunk: (c) => {
+ *     // default: playback false, emitChunks true
+ *   },
+ *   onEnd: () => console.log('done'),
+ * });
+ * // Native playback instead: add third arg `{ playback: true, emitChunks: false }`
  * ctrl.pushText('Hello world. ');
  * ctrl.pushText('This is streaming TTS.');
  * await ctrl.flush();

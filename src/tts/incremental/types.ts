@@ -281,7 +281,8 @@ export interface IncrementalStreamingTtsEngine {
   readonly instanceId: string;
 
   /**
-   * Start an incremental streaming speech request with native playback.
+   * Start an incremental streaming speech request (same `TtsStreamOptions` defaults as
+   * `generateSpeechStream`: playback false, emitChunks true when `streamOptions` is omitted).
    * Returns a controller for pushing text, committing, flushing, and cancelling.
    * Only one active request at a time.
    */
