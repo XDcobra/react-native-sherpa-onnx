@@ -2,7 +2,7 @@
 
 Incremental speech generation with chunk callbacks: lower time-to-first-byte, playback while generating, or piping float PCM into another pipeline. The API is **instance-based** — create an engine with `createStreamingTTS()`, then call `destroy()` when done.
 
-**For full-buffer synthesis, timestamps on the batch path, WAV save/share, and `alignTextToAudio`:** see [Offline TTS](tts-offline.md) and [alignment.md](alignment.md).
+**For full-buffer synthesis, timestamps on the batch path, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -13,7 +13,7 @@ Incremental speech generation with chunk callbacks: lower time-to-first-byte, pl
 | **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
 | **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
 | **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
-| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: true, emitChunks: false` (default) |
+| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: false, emitChunks: true` (default; same as `generateSpeechStream`) |
 | **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
 | **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
 
@@ -174,6 +174,7 @@ const inc = await createIncrementalStreamingTTS({
 });
 
 // Start one incremental request (request-centric API).
+// Omitting streamOptions uses playback: false, emitChunks: true (chunks to JS).
 const ctrl = inc.generateIncrementalSpeechStream(
   { sid: 0, speed: 1.0 },
   {
@@ -185,12 +186,13 @@ const ctrl = inc.generateIncrementalSpeechStream(
       // segment:queued | segment:started | segment:chunk | segment:ended | segment:dropped
       if (e.type === 'segment:dropped') console.warn(e.reason);
     },
+    onChunk: (c) => {
+      // c.samples, c.sampleRate — default emitChunks: true
+    },
     onError: (e) => {
       console.error('Incremental stream error:', e.message);
     },
-  },
-  // Native playback with minimal bridge traffic
-  { playback: true, emitChunks: false }
+  }
 );
 
 // Push progressive text chunks
@@ -205,9 +207,10 @@ ctrl.commit();
 // Wait until queue is drained
 await ctrl.flush();
 
-// Pause / resume during playback:
-await ctrl.player?.pause();
-await ctrl.player?.resume();
+// With default options, ctrl.player is null. For native playback, pass e.g.
+// { playback: true, emitChunks: false } as the third argument, then:
+// await ctrl.player?.pause();
+// await ctrl.player?.resume();
 
 // Optional: cancel active + queued work
 await ctrl.cancel({ scope: 'all' });
@@ -233,7 +236,7 @@ When `playback: true`, the streaming controller exposes `ctrl.player` — a `Pcm
 | Topic | Requirement |
 | --- | --- |
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
-| Accurate subtitles | Alignment ONNX from `react-native-sherpa-onnx/alignment`; see [alignment.md](alignment.md) |
+| Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment.md](alignment.md) |
 | Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 
 ## API Reference
@@ -424,6 +427,7 @@ generateIncrementalSpeechStream(
 ```
 
 Starts one incremental request with chunk/playback behavior analogous to `generateSpeechStream`.  
+Omitted `streamOptions` uses the same per-field defaults: `playback: false`, `emitChunks: true`.  
 Only one active request per engine instance at a time.
 
 ### `inc.generateIncrementalSpeechStreamToFile(options, fileOptions, handlers, incrementalOptions?)`
@@ -530,35 +534,72 @@ Removes event listeners (also called automatically on end/error).
 controller.unsubscribe();
 ```
 
+## Subtitles
+
+**Subtitle generation is not integrated into the streaming TTS API.** `generateSpeechStream`, `generateSpeechStreamToFile`, and the incremental APIs do not accept `SubtitleOptions` and do not emit word- or line-level timings during synthesis.
+
+**Supported workflow today (post-hoc alignment)**
+
+1. **`generateSpeechStreamToFile`** (preferred for performance)— When writing finishes (`onEnd` on the stream-to-file handlers), pass the **output audio file** and your **transcript** to **`alignTextToAudio`** from `react-native-sherpa-onnx/alignment` (modes and wav2vec2 setup: [alignment.md](alignment.md)).
+
+2. **`generateSpeechStream`** — Collect **PCM** from **`onChunk`** across the utterance (same `sampleRate`), or assemble the full buffer before handling **`onEnd`**, then call **`alignTextToAudio`** with that audio and the transcript, following the input shapes described in [alignment.md](alignment.md) (e.g. WAV path or supported PCM payload).
+
+Batch **`generateSpeechWithTimestamps`** on [Offline TTS](tts-offline.md) remains the path for proportional / estimated / accurate timings in **one** non-streaming call.
+
+**Roadmap:** Built-in subtitle or live timing support for streaming TTS is **planned for a future release**; until then, use the alignment flow above after audio is available.
+
+
 ## Types
 
-### Core
+Listed types are those used by **streaming TTS** in this document (`createStreamingTTS`, `generateSpeechStream` / `ToFile`, `createIncrementalStreamingTTS`, and shared `detectTtsModel` / engine init). **Subtitles:** not part of these streaming types — see [Subtitles](#subtitles). Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
+
+### Detection & model path
 
 | Type | Notes |
 | --- | --- |
+| `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto'; path: string }` |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
-| `TtsEngine` | Batch engine interface |
-| `StreamingTtsEngine` | Streaming engine interface |
-| `GeneratedAudio` | `{ sampleRate: number; numSamples: number; generation: number; getSamples(): Promise<Float32Array> }` |
-| `GeneratedAudioWithTimestamps` | Extends `GeneratedAudio` with `subtitles`, `timingMode` |
-| `SubtitleTimingItem` | `{ text, start, end }` (seconds) |
-| `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
+| `isTtsModelType` | Runtime guard for `TTSModelType` |
+| `TtsDetectModelResult` | Return type of `detectTtsModel()` |
 | `DetectedModelEntry` | `{ type: string; modelDir: string }` |
+| `DetectionSource` | Trace literals from native detection |
+
+### Init & generation
+
+**`TtsUpdateOptions`** / `updateParams` are **batch-only** ([tts-offline.md](tts-offline.md)); `StreamingTtsEngine` does not expose parameter updates.
+
+| Type | Notes |
+| --- | --- |
+| `TTSInitializeOptions` | `createStreamingTTS()` / `IncrementalStreamingTtsSource.engineOptions` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
+| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
+| `TtsGenerationOptions` | Synth options (`voiceClone`, `sid`, `speed`, …) for `generateSpeechStream` / incremental segments |
+| `TtsReferenceAudio` | `{ samples: number[]; sampleRate: number }` |
+| `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
+| `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
+| `TtsModelOptions` | Internal aggregate for native flattening; prefer init unions in app code |
+| `TtsVitsModelOptions`, `TtsMatchaModelOptions`, … | Per-architecture scale options |
+
+
+### Streaming engine & stream results
+
+| Type | Notes |
+| --- | --- |
+| `StreamingTtsEngine` | `createStreamingTTS()` instance |
+| `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
 | `TtsStreamChunk` | `{ samples, sampleRate, progress, isFinal }` + optional `instanceId`, `requestId` |
-| `TtsStreamEnd` | `{ cancelled: boolean }` + optional `instanceId`, `requestId` |
-| `TtsStreamError` | `{ message: string }` + optional `instanceId`, `requestId` |
-| `TtsStreamHandlers` | `{ onChunk?: (chunk: TtsStreamChunk) => void; onEnd?: (e: TtsStreamEnd) => void; onError?: (e: TtsStreamError) => void }` |
+| `TtsStreamEnd` | `{ cancelled: boolean }` + optional ids |
+| `TtsStreamError` | `{ message: string }` + optional ids |
+| `TtsStreamHandlers` | `{ onChunk?, onEnd?, onError? }` |
 | `TtsStreamOptions` | `{ playback?, emitChunks?, autoDestroy? }` |
 | `TtsStreamController` | `cancel()`, `unsubscribe()`, `player: PcmPlayer \| null` |
-| `PcmPlayer` | `writePcmChunk()`, `pause()`, `resume()`, `destroy()` — see [pcm-player.md](pcm-player.md) |
+| `PcmPlayer` | On stream controller when `playback: true` — see [pcm-player.md](pcm-player.md) |
 | `TtsStreamFileOutput` | `{ kind: 'file'; path: string }` |
 | `TtsStreamToFileOptions` | `{ output, format?: 'wav', keepPartialOnCancel?, emitChunks? }` |
 | `TtsStreamFileEnd` | `{ path, bytesWritten, sampleRate, cancelled }` + optional ids |
 | `TtsStreamFileError` | `{ message, path? }` + optional ids |
-| `TtsStreamToFileHandlers` | `{ onChunk?, onEnd?: (e: TtsStreamFileEnd), onError?: (e: TtsStreamFileError) }` |
+| `TtsStreamToFileHandlers` | `{ onChunk?, onEnd?, onError? }` |
 | `TtsStreamFileController` | `cancel()`, `unsubscribe()` |
-| `ModelPathConfig` | From `react-native-sherpa-onnx` |
 
 ### Incremental streaming
 
@@ -577,35 +618,16 @@ controller.unsubscribe();
 | `QueueMode` | `'fifo' \| 'replace-tail' \| 'latest-wins'` |
 | `OverflowStrategy` | `'drop-oldest' \| 'drop-newest' \| 'reject'` |
 | `CommitOptions` | `{ force?: boolean }` |
-| `CancelOptions` | `{ scope?: 'all' \| 'active' \| 'queued' }` |
+| `FlushOptions` | Placeholder `{}` for `flush(options?)` |
+| `CancelOptions` | `{ scope?: CancelScope }` |
+| `CancelScope` | `'all' \| 'active' \| 'queued'` |
+| `SessionId`, `SegmentId` | Opaque string ids on session/segment events |
+| `SessionState` | `'idle' \| 'active' \| 'draining' \| 'cancelled' \| 'errored' \| 'destroyed'` |
 | `IncrementalMetrics` | `{ queueDepth, totalSegmentsQueued, totalSegmentsCompleted, totalSegmentsDropped, totalSegmentsReplaced, activeSegmentId }` |
 | `SessionEvent` | `session:started`, `session:idle`, `session:draining`, `session:cancelled`, `session:error` |
 | `SegmentEvent` | `segment:queued`, `segment:started`, `segment:chunk`, `segment:ended`, `segment:dropped` |
 
-### Init, update, generation
-
-| Type | Notes |
-| --- | --- |
-| `TTSInitializeOptions` | Discriminated union: with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed**; otherwise only the matching `modelOptions` key (`vits`, `matcha`, …) |
-| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
-| `TtsUpdateOptions` | Union including `{}` and per-`modelType` variants (same coupling rules as init) |
-| `TtsGenerationOptions` | Base fields + optional **`voiceClone`**: `{ kind: 'zipvoice', referenceAudio, referenceText }` or `{ kind: 'pocket', referenceAudio, referenceText? }` |
-| `TtsReferenceAudio` | `{ samples: number[]; sampleRate: number }` |
-| `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
-| `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
-| `TtsModelOptions` | Internal aggregate for native flattening; prefer init/update unions in app code |
-| `TtsVitsModelOptions`, `TtsMatchaModelOptions`, … | Per-architecture scale options |
-
-### Subtitles
-
-| Type | Notes |
-| --- | --- |
-| `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` |
-| `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (character only with accurate) |
-| `SubtitleOptions` | Proportional/estimated vs accurate (see TypeScript unions in `tts`) |
-| Standalone alignment | `AlignTextToAudioOptions`, `AlignTextToAudioResult` in `react-native-sherpa-onnx/alignment` |
-
-Breaking type history: [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
+**Breaking type history:** [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
 
 ## Troubleshooting
 
@@ -626,9 +648,9 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTT
 
 ## See also
 
-- [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share, standalone subtitles  
+- [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share  
 - [pcm-player.md](pcm-player.md) — standalone PCM player  
-- [alignment.md](alignment.md) — alignment models, `alignTextToAudio`, accurate subtitles  
+- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)  
 - [execution-providers.md](execution-providers.md) — ORT execution providers  
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
 - [migration.md](migration.md) — strict TTS TypeScript unions (0.4.0)
