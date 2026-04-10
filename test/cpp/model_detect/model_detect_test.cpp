@@ -111,7 +111,7 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
         if (expectedType == "unsupported") {
             auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
             auto result = sherpaonnx::DetectSttModelFromFileList(
-                files, block.modelDir, std::nullopt, "auto");
+                files, block.modelDir, "auto", std::nullopt);
             EXPECT_FALSE(result.ok)
                 << "Asset " << block.assetName
                 << ": unsupported must not report ok=true so initialization is not attempted.";
@@ -131,7 +131,7 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
 
         auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
         auto result = sherpaonnx::DetectSttModelFromFileList(
-            files, block.modelDir, std::nullopt, "auto");
+            files, block.modelDir, "auto", std::nullopt);
 
         ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
         EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
@@ -310,7 +310,7 @@ TEST(ModelDetectValidation, SttTransducerMissingEncoderRejected) {
         MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
         MakeEntry(dir, "tokens.txt"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "transducer", std::nullopt);
     EXPECT_FALSE(result.ok) << "Should fail when encoder is missing (capability check)";
 }
 
@@ -320,7 +320,7 @@ TEST(ModelDetectValidation, SttWhisperMissingTokensValidation) {
         MakeEntry(dir, "encoder.onnx"),
         MakeEntry(dir, "decoder.onnx"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "whisper");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "whisper", std::nullopt);
     EXPECT_FALSE(result.ok) << "Should fail when tokens is missing";
     EXPECT_NE(result.error.find("tokens"), std::string::npos)
         << "Validation error should mention 'tokens': " << result.error;
@@ -331,7 +331,7 @@ TEST(ModelDetectValidation, SttParaformerMissingTokensValidation) {
     std::vector<FE> files = {
         MakeEntry(dir, "model.onnx"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "paraformer");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "paraformer", std::nullopt);
     EXPECT_FALSE(result.ok) << "Should fail when tokens is missing for paraformer";
     EXPECT_NE(result.error.find("tokens"), std::string::npos)
         << "Validation error should mention 'tokens': " << result.error;
@@ -344,7 +344,7 @@ TEST(ModelDetectValidation, SttFireRedMissingTokensValidation) {
         MakeEntry(dir, "decoder.onnx"),
         MakeEntry(dir, "joiner.onnx"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "fire_red_asr");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "fire_red_asr", std::nullopt);
     EXPECT_FALSE(result.ok) << "Should fail when tokens is missing for Fire Red ASR";
     EXPECT_NE(result.error.find("tokens"), std::string::npos)
         << "Validation error should mention 'tokens': " << result.error;
@@ -357,7 +357,7 @@ TEST(ModelDetectValidation, SttTransducerMissingTokens) {
         MakeEntry(dir, "decoder-epoch-99-avg-1.onnx"),
         MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "transducer", std::nullopt);
     EXPECT_FALSE(result.ok) << "Should fail when tokens.txt is missing";
     EXPECT_NE(result.error.find("tokens"), std::string::npos)
         << "Error should mention 'tokens': " << result.error;
@@ -375,7 +375,7 @@ TEST(ModelDetectValidation, SttTransducerOptionalBpeVocab) {
         MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
         MakeEntry(dir, "tokens.txt"),
     };
-    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, std::nullopt, "transducer");
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "transducer", std::nullopt);
     EXPECT_TRUE(result.ok) << "Should succeed without optional bpeVocab: " << result.error;
     EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kTransducer);
 }
