@@ -119,7 +119,7 @@ Exported from `react-native-sherpa-onnx/audiobuffer`:
 - **Mic:** `startMicToLiveAudioBuffer(liveBufferId, { emitToJs? })`, `stopMicToLiveAudioBuffer`
 - **Callbacks:** `onFramesAppended` / `onError` in `createLiveAudioBuffer(...)`, or `subscribeLiveAudioBufferEvents(...)`
 
-Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts).
+Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`); **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`).
 
 ---
 

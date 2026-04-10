@@ -31,6 +31,25 @@ export interface OfflineAudioBufferInfo {
   durationMs: number;
 }
 
+/**
+ * Strongly-typed reference returned by offline buffer creation functions.
+ * Includes both metadata and branded handle.
+ */
+export interface OfflineAudioBufferRef {
+  info: OfflineAudioBufferInfo;
+  bufferId: OfflineBufferHandle;
+}
+
+/**
+ * Strongly-typed reference returned by `createLiveAudioBuffer` (recording state).
+ * Includes metadata, branded recording handle, and event unsubscribe.
+ */
+export interface LiveAudioBufferRef {
+  info: LiveAudioBufferInfo;
+  bufferId: LiveBufferHandleRecording;
+  unsubscribeEvents: () => void;
+}
+
 /** Info returned by all pipeline audio buffer operations (live). */
 export interface LiveAudioBufferInfo {
   bufferId: string;

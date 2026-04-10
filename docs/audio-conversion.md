@@ -31,7 +31,7 @@ Converts an audio file to a requested format.
 
 ### `convertAudioToWav16k(inputPath, outputPath)`
 
-Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format expected by sherpa-onnx for offline STT (`transcribeFile`). Internally delegates to `convertAudioToFormat(inputPath, outputPath, "wav")`.
+Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format expected by sherpa-onnx for offline STT. Internally delegates to `convertAudioToFormat(inputPath, outputPath, "wav")`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -125,14 +125,19 @@ if (ext === 'mp3' || ext === 'flac') {
 }
 
 try {
-  const result = await engine.transcribeFile(pathToTranscribe);
-  // use result...
+  const bufferId = await createOfflineAudioBufferFromFile(pathToTranscribe);
+  try {
+    const ref = await engine.transcribe(bufferId);
+    // use ref...
+  } finally {
+    await releasePipelineAudioBuffer(bufferId);
+  }
 } finally {
   if (tempWavPath) await unlink(tempWavPath).catch(() => {});
 }
 ```
 
-> **Tip:** WAV files can be passed directly to `transcribeFile` — sherpa-onnx's `WaveReader` handles any WAV sample rate natively. Only MP3/FLAC need conversion.
+> **Tip:** WAV files can be loaded directly into an audio buffer — sherpa-onnx's `WaveReader` handles any WAV sample rate natively. Only MP3/FLAC need conversion.
 
 ## TTS save example
 

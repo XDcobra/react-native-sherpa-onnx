@@ -51,12 +51,6 @@ internal class SherpaOnnxSttHelper(
   private val logTag: String
 ) {
 
-  data class SttAlignmentInput(
-    val text: String,
-    val tokenCount: Int,
-    val sampleRate: Int,
-  )
-
   private data class SttEngineInstance(
     @Volatile var recognizer: OfflineRecognizer? = null,
     @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
@@ -345,101 +339,7 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
-    var tempPath: String? = null
-    try {
-      val inst = getInstance(instanceId) ?: run {
-        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-        return
-      }
-      val rec = inst.recognizer
-      if (rec == null) {
-        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
-        return
-      }
-      val pathToRead: String = if (filePath.startsWith("content://")) {
-        resolveContentUriToFile(filePath, "stt_transcribe").also { tempPath = it }
-      } else {
-        filePath
-      }
-      if (pathToRead.isBlank()) {
-        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Could not resolve audio file path")
-        return
-      }
-      val f = File(pathToRead)
-      if (!f.exists() || f.length() == 0L) {
-        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Audio file does not exist or is empty: $pathToRead (size=${f.length()})")
-        return
-      }
-      val wave = WaveReader.readWave(pathToRead)
-      val samples = wave.samples ?: FloatArray(0)
-      if (samples.isEmpty()) {
-        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
-        return
-      }
-      val stream: OfflineStream = rec.createStream()
-      try {
-        if (inst.currentSttModelType == "qwen3_asr") {
-          val hw = inst.qwen3HotwordsForStream
-          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
-        }
-        stream.acceptWaveform(samples, wave.sampleRate)
-        rec.decode(stream)
-        val result = rec.getResult(stream)
-        val retained = retainResult(result, wave.sampleRate, "file")
-        val resultId = inst.resultSlot.store(retained)
-        promise.resolve(retained.toTranscribeRefMap(resultId))
-      } finally {
-        stream.release()
-      }
-    } catch (e: Exception) {
-      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
-      Log.e(logTag, "transcribeFile error: $message", e)
-      promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
-    } finally {
-      tempPath?.let { path ->
-        try {
-          File(path).takeIf { it.exists() }?.delete()
-        } catch (_: Exception) { }
-      }
-    }
-  }
-
-  fun transcribeSamples(instanceId: String, samples: com.facebook.react.bridge.ReadableArray, sampleRate: Int, promise: Promise) {
-    try {
-      val inst = getInstance(instanceId) ?: run {
-        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-        return
-      }
-      val rec = inst.recognizer
-      if (rec == null) {
-        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
-        return
-      }
-      val floatSamples = FloatArray(samples.size()) { i -> samples.getDouble(i).toFloat() }
-      val stream: OfflineStream = rec.createStream()
-      try {
-        if (inst.currentSttModelType == "qwen3_asr") {
-          val hw = inst.qwen3HotwordsForStream
-          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
-        }
-        stream.acceptWaveform(floatSamples, sampleRate)
-        rec.decode(stream)
-        val result = rec.getResult(stream)
-        val retained = retainResult(result, sampleRate, "samples")
-        val resultId = inst.resultSlot.store(retained)
-        promise.resolve(retained.toTranscribeRefMap(resultId))
-      } finally {
-        stream.release()
-      }
-    } catch (e: Exception) {
-      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe samples"
-      Log.e(logTag, "transcribeSamples error: $message", e)
-      promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
-    }
-  }
-
-  fun transcribeFromAudioBuffer(instanceId: String, bufferId: String, sourceTag: String?, promise: Promise) {
+  fun transcribe(instanceId: String, bufferId: String, promise: Promise) {
     try {
       val inst = getInstance(instanceId) ?: run {
         promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
@@ -452,6 +352,13 @@ internal class SherpaOnnxSttHelper(
       }
       val entry = PipelineAudioRegistry.getOffline(bufferId)
       if (entry == null) {
+        if (PipelineAudioRegistry.getLive(bufferId) != null) {
+          promise.reject(
+            SttErrorCodes.BUFFER_KIND_MISMATCH,
+            "Buffer kind mismatch: expected offline buffer, got live buffer: $bufferId"
+          )
+          return
+        }
         promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline audio buffer not found: $bufferId")
         return
       }
@@ -469,8 +376,7 @@ internal class SherpaOnnxSttHelper(
         stream.acceptWaveform(samples, entry.sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
-        val source = sourceTag?.trim()?.takeIf { it.isNotEmpty() } ?: "buffer"
-        val retained = retainResult(result, entry.sampleRate, source)
+        val retained = retainResult(result, entry.sampleRate, "buffer")
         val resultId = inst.resultSlot.store(retained)
         promise.resolve(retained.toTranscribeRefMap(resultId))
       } finally {
@@ -478,7 +384,7 @@ internal class SherpaOnnxSttHelper(
       }
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe from audio buffer"
-      Log.e(logTag, "transcribeFromAudioBuffer error: $message", e)
+      Log.e(logTag, "transcribe error: $message", e)
       promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
     }
   }
@@ -569,32 +475,6 @@ internal class SherpaOnnxSttHelper(
     }
     inst.resultSlot.release()
     promise.resolve(null)
-  }
-
-  fun getAlignmentInput(instanceId: String, resultId: Double, promise: Promise): SttAlignmentInput? {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return null
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) {
-      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
-      return null
-    }
-    if (slot.isStale(resultId.toLong())) {
-      promise.reject(
-        SttErrorCodes.STALE_RESULT,
-        "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}. Materialize data before the next transcribe or use a second instance."
-      )
-      return null
-    }
-
-    val retained = slot.result!!
-    return SttAlignmentInput(
-      text = retained.text,
-      tokenCount = retained.tokens.size,
-      sampleRate = retained.sampleRate,
-    )
   }
 
   private fun validateSliceArgs(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise): SttRetainedResult? {

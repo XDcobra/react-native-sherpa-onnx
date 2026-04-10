@@ -108,11 +108,13 @@ export interface Spec extends TurboModule {
   // ==================== Offline STT (by-reference) ====================
 
   /**
-   * Transcribe an audio file. Returns metadata-only ref; use getters for large data.
+   * Transcribe from a pipeline offline audio buffer. Returns metadata-only ref; use getters for large data.
+   * @param instanceId - STT engine instance ID
+   * @param bufferId - Offline audio buffer handle (off_…)
    */
-  transcribeFile(
+  transcribe(
     instanceId: string,
-    filePath: string
+    bufferId: string
   ): Promise<{
     success: boolean;
     resultId?: number;
@@ -124,51 +126,6 @@ export interface Spec extends TurboModule {
     hasLang?: boolean;
     hasEmotion?: boolean;
     hasEvent?: boolean;
-    source?: string;
-    error?: string;
-  }>;
-
-  /**
-   * Transcribe from float PCM samples. Returns metadata-only ref.
-   */
-  transcribeSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{
-    success: boolean;
-    resultId?: number;
-    sampleRate?: number;
-    textLength?: number;
-    tokenCount?: number;
-    timestampCount?: number;
-    durationCount?: number;
-    hasLang?: boolean;
-    hasEmotion?: boolean;
-    hasEvent?: boolean;
-    source?: string;
-    error?: string;
-  }>;
-
-  /**
-   * Transcribe from a native audio buffer. Returns metadata-only ref.
-   */
-  transcribeFromAudioBuffer(
-    instanceId: string,
-    bufferId: string,
-    sourceTag?: string
-  ): Promise<{
-    success: boolean;
-    resultId?: number;
-    sampleRate?: number;
-    textLength?: number;
-    tokenCount?: number;
-    timestampCount?: number;
-    durationCount?: number;
-    hasLang?: boolean;
-    hasEmotion?: boolean;
-    hasEvent?: boolean;
-    source?: string;
     error?: string;
   }>;
 
@@ -212,49 +169,6 @@ export interface Spec extends TurboModule {
    * Release STT resources.
    */
   unloadStt(instanceId: string): Promise<void>;
-
-  // ==================== Alignment Stage ====================
-
-  alignSttResult(
-    instanceId: string,
-    resultId: number,
-    bufferId: string,
-    alignmentModelId?: string,
-    granularity?: string
-  ): Promise<{
-    success: boolean;
-    alignmentId?: number;
-    segmentCount?: number;
-    tokenCount?: number;
-    error?: string;
-  }>;
-
-  alignTextToBuffer(
-    text: string,
-    bufferId: string,
-    alignmentModelId?: string,
-    granularity?: string
-  ): Promise<{
-    success: boolean;
-    alignmentId?: number;
-    segmentCount?: number;
-    tokenCount?: number;
-    error?: string;
-  }>;
-
-  getAlignmentSegments(
-    alignmentId: number,
-    start: number,
-    maxCount: number
-  ): Promise<Array<{ text: string; startSec: number; endSec: number }>>;
-
-  saveAlignment(
-    alignmentId: number,
-    targetPath: string,
-    format?: string
-  ): Promise<void>;
-
-  releaseAlignment(alignmentId: number): Promise<void>;
 
   // ==================== Online (streaming) STT Methods ====================
 

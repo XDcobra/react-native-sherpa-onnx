@@ -48,6 +48,7 @@ import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   createLiveAudioBuffer,
+  createOfflineAudioBufferFromFile,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
@@ -356,7 +357,15 @@ export default function STTScreen() {
         setError('STT engine not initialized');
         return;
       }
-      const ref = await engine.transcribeFile(pathToTranscribe);
+      const { bufferId } = await createOfflineAudioBufferFromFile(
+        pathToTranscribe
+      );
+      let ref;
+      try {
+        ref = await engine.transcribe(bufferId);
+      } finally {
+        await releasePipelineAudioBuffer(bufferId);
+      }
       if (!ref.success || ref.resultId == null) {
         setErrorSource('transcribe');
         setError(ref.error ?? 'Transcription failed');

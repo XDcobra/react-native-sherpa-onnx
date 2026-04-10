@@ -1,18 +1,17 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
+  OfflineAudioBufferRef,
+  OfflineBufferHandle,
+} from '../audiobuffer/types';
+import type {
   STTInitializeOptions,
   STTModelType,
   SttEngine,
   SttModelOptions,
   SttRuntimeConfig,
   SttTranscribeRef,
-  AlignmentRef,
-  AlignmentSegment,
 } from './types';
-import {
-  STT_DEFAULT_SLICE_COUNT,
-  ALIGNMENT_DEFAULT_SLICE_COUNT,
-} from './types';
+import { STT_DEFAULT_SLICE_COUNT } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
@@ -51,9 +50,17 @@ function normalizeSttTranscribeRef(raw: {
     hasLang: raw.hasLang,
     hasEmotion: raw.hasEmotion,
     hasEvent: raw.hasEvent,
-    source: raw.source as SttTranscribeRef['source'],
     error: raw.error,
   };
+}
+
+function normalizeOfflineBufferInput(
+  buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
+): string {
+  if (typeof buffer === 'string') {
+    return buffer;
+  }
+  return buffer.bufferId;
 }
 
 /**
@@ -149,8 +156,8 @@ export async function detectSttModel(
  * const stt = await createSTT({
  *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
  * });
- * const result = await stt.transcribeFile('/path/to/audio.wav');
- * console.log(result.text);
+ * const ref = await stt.transcribe(bufferId);
+ * const text = await stt.getSttResultText(ref.resultId!);
  * await stt.destroy();
  * ```
  */
@@ -250,35 +257,12 @@ export async function createSTT(
       return instanceId;
     },
 
-    async transcribeFile(filePath: string): Promise<SttTranscribeRef> {
-      guard();
-      const raw = await SherpaOnnx.transcribeFile(instanceId, filePath);
-      return normalizeSttTranscribeRef(raw);
-    },
-
-    async transcribeSamples(
-      samples: number[],
-      sampleRate: number
+    async transcribe(
+      buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
     ): Promise<SttTranscribeRef> {
       guard();
-      const raw = await SherpaOnnx.transcribeSamples(
-        instanceId,
-        samples,
-        sampleRate
-      );
-      return normalizeSttTranscribeRef(raw);
-    },
-
-    async transcribeFromAudioBuffer(
-      bufferId: string,
-      options?: { sourceTag?: string }
-    ): Promise<SttTranscribeRef> {
-      guard();
-      const raw = await SherpaOnnx.transcribeFromAudioBuffer(
-        instanceId,
-        bufferId,
-        options?.sourceTag
-      );
+      const bufferId = normalizeOfflineBufferInput(buffer);
+      const raw = await SherpaOnnx.transcribe(instanceId, bufferId);
       return normalizeSttTranscribeRef(raw);
     },
 
@@ -375,80 +359,6 @@ export async function createSTT(
   return engine;
 }
 
-// ==================== Alignment Stage ====================
-
-export async function alignSttResult(
-  instanceId: string,
-  resultId: number,
-  bufferId: string,
-  options?: {
-    alignmentModelId?: string;
-    granularity?: 'segment' | 'word' | 'token';
-  }
-): Promise<AlignmentRef> {
-  const raw = await SherpaOnnx.alignSttResult(
-    instanceId,
-    resultId,
-    bufferId,
-    options?.alignmentModelId,
-    options?.granularity
-  );
-  return {
-    success: raw.success === true,
-    alignmentId: raw.alignmentId,
-    segmentCount: raw.segmentCount,
-    tokenCount: raw.tokenCount,
-    error: raw.error,
-  };
-}
-
-export async function alignTextToBuffer(
-  text: string,
-  bufferId: string,
-  options?: {
-    alignmentModelId?: string;
-    granularity?: 'segment' | 'word' | 'token';
-  }
-): Promise<AlignmentRef> {
-  const raw = await SherpaOnnx.alignTextToBuffer(
-    text,
-    bufferId,
-    options?.alignmentModelId,
-    options?.granularity
-  );
-  return {
-    success: raw.success === true,
-    alignmentId: raw.alignmentId,
-    segmentCount: raw.segmentCount,
-    tokenCount: raw.tokenCount,
-    error: raw.error,
-  };
-}
-
-export async function getAlignmentSegments(
-  alignmentId: number,
-  start?: number,
-  maxCount?: number
-): Promise<AlignmentSegment[]> {
-  return SherpaOnnx.getAlignmentSegments(
-    alignmentId,
-    start ?? 0,
-    maxCount ?? ALIGNMENT_DEFAULT_SLICE_COUNT
-  );
-}
-
-export async function saveAlignment(
-  alignmentId: number,
-  targetPath: string,
-  format?: 'json' | 'srt' | 'vtt'
-): Promise<void> {
-  return SherpaOnnx.saveAlignment(alignmentId, targetPath, format);
-}
-
-export async function releaseAlignment(alignmentId: number): Promise<void> {
-  return SherpaOnnx.releaseAlignment(alignmentId);
-}
-
 // Streaming (online) STT
 export {
   createStreamingSTT,
@@ -474,8 +384,6 @@ export type {
   SttQwen3AsrModelOptions,
   SttCohereTranscribeModelOptions,
   SttTranscribeRef,
-  AlignmentRef,
-  AlignmentSegment,
   SttRuntimeConfig,
   SttEngine,
   SttInitResult,
@@ -489,6 +397,4 @@ export {
   SttErrorCode,
   STT_DEFAULT_SLICE_COUNT,
   STT_MAX_SLICE_COUNT,
-  ALIGNMENT_DEFAULT_SLICE_COUNT,
-  ALIGNMENT_MAX_SLICE_COUNT,
 } from './types';

@@ -16,7 +16,9 @@ import {
 import type { Spec } from '../NativeSherpaOnnx';
 import type {
   OfflineAudioBufferInfo,
+  OfflineAudioBufferRef,
   LiveAudioBufferInfo,
+  LiveAudioBufferRef,
   PipelineAudioBufferInfo,
   OfflineBufferHandle,
   LiveBufferHandleRecording,
@@ -210,7 +212,7 @@ export async function createOfflineAudioBufferFromFile(
   sourcePath: string,
   targetSampleRateHz?: number,
   forceMono?: boolean
-): Promise<{ info: OfflineAudioBufferInfo; bufferId: OfflineBufferHandle }> {
+): Promise<OfflineAudioBufferRef> {
   const result = await getNative().createOfflineAudioBufferFromFile(
     sourcePath,
     targetSampleRateHz,
@@ -227,7 +229,7 @@ export async function createOfflineAudioBufferFromSamples(
   samples: number[],
   sampleRate: number,
   channelCount?: number
-): Promise<{ info: OfflineAudioBufferInfo; bufferId: OfflineBufferHandle }> {
+): Promise<OfflineAudioBufferRef> {
   const result = await getNative().createOfflineAudioBufferFromSamples(
     samples,
     sampleRate,
@@ -247,7 +249,7 @@ export async function createOfflineAudioBufferFromSamples(
 export async function createOfflineAudioBufferFromLive(
   liveBufferId: string,
   mode?: OfflineFromLiveMode
-): Promise<{ info: OfflineAudioBufferInfo; bufferId: OfflineBufferHandle }> {
+): Promise<OfflineAudioBufferRef> {
   const result = await getNative().createOfflineAudioBufferFromLive(
     liveBufferId,
     mode
@@ -263,11 +265,7 @@ export async function createOfflineAudioBufferFromLive(
  */
 export async function createLiveAudioBuffer(
   options: CreateLiveAudioBufferOptions
-): Promise<{
-  info: LiveAudioBufferInfo;
-  bufferId: LiveBufferHandleRecording;
-  unsubscribeEvents: () => void;
-}> {
+): Promise<LiveAudioBufferRef> {
   const {
     onFramesAppended,
     onError,
@@ -435,7 +433,9 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
 
 export type {
   OfflineAudioBufferInfo,
+  OfflineAudioBufferRef,
   LiveAudioBufferInfo,
+  LiveAudioBufferRef,
   PipelineAudioBufferInfo,
   OfflineBufferHandle,
   LiveBufferHandleRecording,

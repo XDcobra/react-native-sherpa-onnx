@@ -125,3 +125,4 @@ Audio von einem **`live_…`**-Buffer wird vor Offline-STT **immer** über **`cr
 - Pipeline-Architektur: [audio_pipeline_buffers_7605bf7f.plan.md](../audio_pipeline_buffers_7605bf7f.plan.md)
 - Ältere STT-Pipeline-Notiz: [stt-native-pipeline-spec-implementation-plan.md](../stt-native-pipeline-spec-implementation-plan.md)
 - Pipeline-Buffers: [audiobuffer.md](../../audiobuffer.md); PCM-Player-Alias: [pcm-stream.md](../../pcm-stream.md)
+- STT nur noch über Buffer + Alignment entkoppeln: [stt-pipeline-buffer-only-api-plan.md](./stt-pipeline-buffer-only-api-plan.md)

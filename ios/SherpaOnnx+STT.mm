@@ -12,14 +12,10 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
-#include "sherpa_onnx_alignment_engine.hpp"
 #include <atomic>
-#include <fstream>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,20 +29,14 @@ static NSString *const kSttErrInstanceNotFound = @"STT_INSTANCE_NOT_FOUND";
 static NSString *const kSttErrResultStale = @"STT_STALE_RESULT";
 static NSString *const kSttErrResultEmpty = @"STT_RESULT_EMPTY";
 static NSString *const kSttErrBufferNotFound = @"STT_BUFFER_NOT_FOUND";
+static NSString *const kSttErrBufferKindMismatch = @"STT_BUFFER_KIND_MISMATCH";
 static NSString *const kSttErrSliceInvalid = @"STT_SLICE_INVALID";
 static NSString *const kSttErrSliceTooLarge = @"STT_SLICE_TOO_LARGE";
 static NSString *const kSttErrInternalError = @"STT_INTERNAL_ERROR";
-static NSString *const kSttErrAlignmentFailed = @"STT_ALIGNMENT_FAILED";
-static NSString *const kSttErrAlignmentNotFound = @"STT_ALIGNMENT_NOT_FOUND";
-static NSString *const kSttErrAlignmentInputMismatch = @"STT_ALIGNMENT_INPUT_MISMATCH";
-static NSString *const kSttErrAlignmentSliceInvalid = @"STT_ALIGNMENT_SLICE_INVALID";
-static NSString *const kSttErrAlignmentSliceTooLarge = @"STT_ALIGNMENT_SLICE_TOO_LARGE";
 
 // ==================== Slice Constants ====================
 static const int kSttDefaultSliceCount = 1024;
 static const int kSttMaxSliceCount = 16384;
-static const int kAlignmentDefaultSliceCount = 512;
-static const int kAlignmentMaxSliceCount = 8192;
 
 // ==================== Retained Result ====================
 struct SttRetainedResult {
@@ -82,22 +72,6 @@ struct SttResultSlot {
     bool isStale(int64_t id) const { return id != resultId; }
     bool isEmpty() const { return retained == nullptr; }
 };
-
-struct SttAlignmentSegment {
-    std::string text;
-    double startSec;
-    double endSec;
-};
-
-struct SttAlignmentRecord {
-    int64_t alignmentId;
-    std::vector<SttAlignmentSegment> segments;
-    int32_t tokenCount; // -1 = unknown (e.g. alignTextToBuffer where accurate count isn't available)
-};
-
-static std::atomic<int64_t> g_alignment_id_counter{0};
-static std::unordered_map<int64_t, SttAlignmentRecord> g_stt_alignments;
-static std::mutex g_stt_alignment_mutex;
 
 // ==================== Instance State ====================
 struct SttInstanceState {
@@ -163,96 +137,6 @@ static std::unique_ptr<SttRetainedResult> retainResult(const sherpaonnx::SttReco
     retained->sampleRate = sampleRate;
     retained->source = source;
     return retained;
-}
-
-static std::string sttGranularityToAlignmentGranularity(NSString *granularity) {
-    NSString *g = granularity != nil
-        ? [[granularity lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-        : @"segment";
-
-    if (g.length == 0 || [g isEqualToString:@"segment"]) return "sentence";
-    if ([g isEqualToString:@"word"]) return "word";
-    if ([g isEqualToString:@"token"]) return "character";
-    throw std::invalid_argument("Unsupported granularity");
-}
-
-static std::string formatSubtitleTimestamp(double seconds, bool useDotSeparator) {
-    long long totalMs = static_cast<long long>(std::max(0.0, seconds) * 1000.0);
-    long long hours = totalMs / 3600000;
-    long long minutes = (totalMs % 3600000) / 60000;
-    long long secs = (totalMs % 60000) / 1000;
-    long long millis = totalMs % 1000;
-
-    std::ostringstream oss;
-    oss << std::setfill('0') << std::setw(2) << hours
-        << ":" << std::setw(2) << minutes
-        << ":" << std::setw(2) << secs
-        << (useDotSeparator ? '.' : ',')
-        << std::setw(3) << millis;
-    return oss.str();
-}
-
-static std::string escapeJson(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 8);
-    for (char c : s) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c; break;
-        }
-    }
-    return out;
-}
-
-static bool saveAlignmentAsJson(const SttAlignmentRecord& record, const std::string& targetPath, std::string *errorOut) {
-    std::ofstream out(targetPath, std::ios::out | std::ios::trunc);
-    if (!out.is_open()) {
-        if (errorOut) *errorOut = "Could not open target file";
-        return false;
-    }
-
-    out << "[";
-    for (size_t i = 0; i < record.segments.size(); ++i) {
-        const auto &seg = record.segments[i];
-        if (i > 0) out << ",";
-        out << "{\"text\":\"" << escapeJson(seg.text)
-            << "\",\"startSec\":" << seg.startSec
-            << ",\"endSec\":" << seg.endSec
-            << "}";
-    }
-    out << "]";
-    return true;
-}
-
-static bool saveAlignmentAsSrtVtt(const SttAlignmentRecord& record, const std::string& targetPath, bool vtt, std::string *errorOut) {
-    std::ofstream out(targetPath, std::ios::out | std::ios::trunc);
-    if (!out.is_open()) {
-        if (errorOut) *errorOut = "Could not open target file";
-        return false;
-    }
-
-    if (vtt) {
-        out << "WEBVTT\n\n";
-    }
-
-    for (size_t i = 0; i < record.segments.size(); ++i) {
-        const auto &seg = record.segments[i];
-        if (!vtt) {
-            out << (i + 1) << "\n";
-        }
-        out << formatSubtitleTimestamp(seg.startSec, vtt)
-            << " --> "
-            << formatSubtitleTimestamp(seg.endSec, vtt)
-            << "\n"
-            << seg.text
-            << "\n\n";
-    }
-
-    return true;
 }
 
 static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromiseRejectBlock reject) {
@@ -544,78 +428,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     }
 }
 
-- (void)transcribeFile:(NSString *)instanceId
-             filePath:(NSString *)filePath
-              resolve:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
-        reject(kSttErrInstanceNotFound, @"STT not initialized. Call initializeStt first.", nil);
-        return;
-    }
-    SttInstanceState *inst = it->second.get();
-    try {
-        std::string filePathStr = [filePath UTF8String];
-        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeFile(filePathStr);
-        auto retained = retainResult(result, 16000, "file");
-        int64_t resultId = inst->resultSlot.store(std::move(retained));
-        resolve(sttTranscribeRefToDict(resultId, *inst->resultSlot.retained));
-    } catch (const std::exception& e) {
-        NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
-        if (!errorMsg) errorMsg = @"Recognition failed.";
-        RCTLogError(@"Transcribe error: %@", errorMsg);
-        reject(kSttErrTranscribeFailed, errorMsg, nil);
-    } catch (...) {
-        reject(kSttErrTranscribeFailed, @"Unknown error during transcription", nil);
-    }
-}
-
-- (void)transcribeSamples:(NSString *)instanceId
-                  samples:(NSArray<NSNumber *> *)samples
-                sampleRate:(double)sampleRate
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
-        reject(kSttErrInstanceNotFound, @"STT not initialized. Call initializeStt first.", nil);
-        return;
-    }
-    SttInstanceState *inst = it->second.get();
-    try {
-        std::vector<float> floatSamples;
-        floatSamples.reserve([samples count]);
-        for (NSNumber *n in samples) {
-            floatSamples.push_back([n floatValue]);
-        }
-        int32_t sr = static_cast<int32_t>(sampleRate);
-        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(floatSamples, sr);
-        auto retained = retainResult(result, sr, "samples");
-        int64_t resultId = inst->resultSlot.store(std::move(retained));
-        resolve(sttTranscribeRefToDict(resultId, *inst->resultSlot.retained));
-    } catch (const std::exception& e) {
-        NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
-        if (!errorMsg) errorMsg = @"Recognition failed.";
-        RCTLogError(@"TranscribeSamples error: %@", errorMsg);
-        reject(kSttErrTranscribeFailed, errorMsg, nil);
-    } catch (...) {
-        reject(kSttErrTranscribeFailed, @"Unknown error during transcription", nil);
-    }
-}
-
 - (void)setSttConfig:(NSString *)instanceId
              options:(NSDictionary *)options
               resolve:(RCTPromiseResolveBlock)resolve
@@ -703,13 +515,12 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     }
 }
 
-// ==================== Transcribe From Buffer ====================
+// ==================== Transcribe ====================
 
-- (void)transcribeFromAudioBuffer:(NSString *)instanceId
-                         bufferId:(NSString *)bufferId
-                        sourceTag:(NSString *)sourceTag
-                          resolve:(RCTPromiseResolveBlock)resolve
-                           reject:(RCTPromiseRejectBlock)reject
+- (void)transcribe:(NSString *)instanceId
+          bufferId:(NSString *)bufferId
+           resolve:(RCTPromiseResolveBlock)resolve
+            reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
@@ -730,6 +541,14 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         std::lock_guard<std::mutex> paLock(g_pa_mutex);
         auto oit = g_pa_offline.find(bufferIdStr);
         if (oit == g_pa_offline.end()) {
+            auto lit = g_pa_live.find(bufferIdStr);
+            if (lit != g_pa_live.end()) {
+                reject(
+                    kSttErrBufferKindMismatch,
+                    [NSString stringWithFormat:@"Buffer kind mismatch: expected offline buffer, got live buffer: %@", bufferId],
+                    nil);
+                return;
+            }
             reject(kSttErrBufferNotFound,
                    [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
             return;
@@ -748,8 +567,7 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     SttInstanceState *inst = it->second.get();
     try {
         sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, sampleRate);
-        std::string source = (sourceTag != nil && [sourceTag length] > 0) ? [sourceTag UTF8String] : "buffer";
-        auto retained = retainResult(result, sampleRate, source);
+        auto retained = retainResult(result, sampleRate, "buffer");
         int64_t resultId = inst->resultSlot.store(std::move(retained));
         resolve(sttTranscribeRefToDict(resultId, *inst->resultSlot.retained));
     } catch (const std::exception& e) {
@@ -941,342 +759,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     if (it != g_stt_instances.end()) {
         it->second->resultSlot.release();
     }
-    resolve(nil);
-}
-
-// ==================== Alignment Stage ====================
-
-- (void)alignSttResult:(NSString *)instanceId
-              resultId:(double)resultId
-              bufferId:(NSString *)bufferId
-      alignmentModelId:(NSString *)alignmentModelId
-           granularity:(NSString *)granularity
-               resolve:(RCTPromiseResolveBlock)resolve
-                reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
-        return;
-    }
-
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::string text;
-    int32_t tokenCount = 0;
-    int32_t sttSampleRate = 0;
-
-    {
-        std::lock_guard<std::mutex> sttLock(g_stt_mutex);
-        auto it = g_stt_instances.find(instanceIdStr);
-        if (it == g_stt_instances.end()) {
-            reject(kSttErrInstanceNotFound, @"STT instance not found", nil);
-            return;
-        }
-
-        SttResultSlot& slot = it->second->resultSlot;
-        if (slot.isEmpty()) {
-            reject(kSttErrResultEmpty, @"No result available", nil);
-            return;
-        }
-        if (slot.isStale((int64_t)resultId)) {
-            reject(kSttErrResultStale, @"Result is stale", nil);
-            return;
-        }
-
-        text = slot.retained->text;
-        tokenCount = (int32_t)slot.retained->tokens.size();
-        sttSampleRate = slot.retained->sampleRate;
-    }
-
-    std::string bufferIdStr = [bufferId UTF8String];
-    std::shared_ptr<PaOfflineEntry> entry;
-    {
-        std::lock_guard<std::mutex> paLock(g_pa_mutex);
-        auto oit = g_pa_offline.find(bufferIdStr);
-        if (oit == g_pa_offline.end()) {
-            reject(kSttErrBufferNotFound, @"Offline audio buffer not found", nil);
-            return;
-        }
-        entry = oit->second;
-    }
-
-    if (sttSampleRate != entry->sampleRate) {
-        reject(
-            kSttErrAlignmentInputMismatch,
-            [NSString stringWithFormat:@"STT result sampleRate (%d) does not match buffer sampleRate (%d)",
-                                       sttSampleRate,
-                                       entry->sampleRate],
-            nil);
-        return;
-    }
-
-    std::vector<float> samples = entry->readAllSamples();
-    int32_t bufferSampleRate = entry->sampleRate;
-
-    try {
-        const std::string alignGranularity = sttGranularityToAlignmentGranularity(granularity);
-        const bool useAccurate = (alignmentModelId != nil && [alignmentModelId length] > 0);
-
-        sherpa_onnx::alignment::AlignmentResult aligned;
-        if (useAccurate) {
-            std::string modelPath = [[alignmentModelId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] UTF8String];
-            if (modelPath.empty()) {
-                reject(kSttErrInvalidArgument, @"alignmentModelId must not be empty for accurate mode", nil);
-                return;
-            }
-            aligned = sherpa_onnx::alignment::AlignAccurateFromPcm(
-                modelPath,
-                text,
-                samples.data(),
-                samples.size(),
-                bufferSampleRate,
-                alignGranularity);
-        } else {
-            aligned = sherpa_onnx::alignment::AlignProportional(
-                text,
-                (int32_t)samples.size(),
-                bufferSampleRate,
-                alignGranularity);
-        }
-
-        std::vector<SttAlignmentSegment> segments;
-        segments.reserve(aligned.subtitles.size());
-        for (const auto& item : aligned.subtitles) {
-            segments.push_back(SttAlignmentSegment{
-                item.text,
-                item.start_s,
-                item.end_s,
-            });
-        }
-
-        const int64_t alignmentId = g_alignment_id_counter.fetch_add(1) + 1;
-        {
-            std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
-            g_stt_alignments[alignmentId] = SttAlignmentRecord{
-                alignmentId,
-                std::move(segments),
-                tokenCount,
-            };
-        }
-
-        resolve(@{
-            @"success": @YES,
-            @"alignmentId": @(alignmentId),
-            @"segmentCount": @((int)aligned.subtitles.size()),
-            @"tokenCount": @(tokenCount),
-        });
-    } catch (const std::invalid_argument& e) {
-        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Invalid alignment arguments";
-        reject(kSttErrInvalidArgument, msg, nil);
-    } catch (const std::exception& e) {
-        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-        reject(kSttErrAlignmentFailed, msg, nil);
-    } catch (...) {
-        reject(kSttErrAlignmentFailed, @"Alignment failed", nil);
-    }
-}
-
-- (void)alignTextToBuffer:(NSString *)text
-                 bufferId:(NSString *)bufferId
-         alignmentModelId:(NSString *)alignmentModelId
-              granularity:(NSString *)granularity
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject
-{
-    if (text == nil || [text length] == 0) {
-        reject(kSttErrInvalidArgument, @"text is required", nil);
-        return;
-    }
-
-    std::string bufferIdStr = [bufferId UTF8String];
-    std::shared_ptr<PaOfflineEntry> entry;
-    {
-        std::lock_guard<std::mutex> paLock(g_pa_mutex);
-        auto oit = g_pa_offline.find(bufferIdStr);
-        if (oit == g_pa_offline.end()) {
-            reject(kSttErrBufferNotFound, @"Offline audio buffer not found", nil);
-            return;
-        }
-        entry = oit->second;
-    }
-
-    std::vector<float> samples = entry->readAllSamples();
-    int32_t bufferSampleRate = entry->sampleRate;
-
-    try {
-        const std::string alignGranularity = sttGranularityToAlignmentGranularity(granularity);
-        const std::string textStr = [text UTF8String];
-        const bool useAccurate = (alignmentModelId != nil && [alignmentModelId length] > 0);
-
-        sherpa_onnx::alignment::AlignmentResult aligned;
-        if (useAccurate) {
-            std::string modelPath = [[alignmentModelId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] UTF8String];
-            if (modelPath.empty()) {
-                reject(kSttErrInvalidArgument, @"alignmentModelId must not be empty for accurate mode", nil);
-                return;
-            }
-            aligned = sherpa_onnx::alignment::AlignAccurateFromPcm(
-                modelPath,
-                textStr,
-                samples.data(),
-                samples.size(),
-                bufferSampleRate,
-                alignGranularity);
-        } else {
-            aligned = sherpa_onnx::alignment::AlignProportional(
-                textStr,
-                (int32_t)samples.size(),
-                bufferSampleRate,
-                alignGranularity);
-        }
-
-        std::vector<SttAlignmentSegment> segments;
-        segments.reserve(aligned.subtitles.size());
-        for (const auto& item : aligned.subtitles) {
-            segments.push_back(SttAlignmentSegment{
-                item.text,
-                item.start_s,
-                item.end_s,
-            });
-        }
-
-        const int64_t alignmentId = g_alignment_id_counter.fetch_add(1) + 1;
-        {
-            std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
-            g_stt_alignments[alignmentId] = SttAlignmentRecord{
-                alignmentId,
-                std::move(segments),
-                -1,
-            };
-        }
-
-        resolve(@{
-            @"success": @YES,
-            @"alignmentId": @(alignmentId),
-            @"segmentCount": @((int)aligned.subtitles.size()),
-        });
-    } catch (const std::invalid_argument& e) {
-        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Invalid alignment arguments";
-        reject(kSttErrInvalidArgument, msg, nil);
-    } catch (const std::exception& e) {
-        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-        reject(kSttErrAlignmentFailed, msg, nil);
-    } catch (...) {
-        reject(kSttErrAlignmentFailed, @"Alignment failed", nil);
-    }
-}
-
-- (void)getAlignmentSegments:(double)alignmentId
-                       start:(double)start
-                    maxCount:(double)maxCount
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject
-{
-    const int64_t id = (int64_t)alignmentId;
-    SttAlignmentRecord record;
-    {
-        std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
-        auto it = g_stt_alignments.find(id);
-        if (it == g_stt_alignments.end()) {
-            reject(kSttErrAlignmentNotFound, @"Alignment not found", nil);
-            return;
-        }
-        record = it->second;
-    }
-
-    const int s = (int)start;
-    const int mc = (int)maxCount;
-    if (s < 0) {
-        reject(kSttErrAlignmentSliceInvalid, [NSString stringWithFormat:@"start must be >= 0, got %d", s], nil);
-        return;
-    }
-    if (mc <= 0) {
-        reject(kSttErrAlignmentSliceInvalid, [NSString stringWithFormat:@"maxCount must be > 0, got %d", mc], nil);
-        return;
-    }
-    if (mc > kAlignmentMaxSliceCount) {
-        reject(kSttErrAlignmentSliceTooLarge, [NSString stringWithFormat:@"maxCount %d exceeds max %d", mc, kAlignmentMaxSliceCount], nil);
-        return;
-    }
-
-    if (s >= (int)record.segments.size()) {
-        resolve(@[]);
-        return;
-    }
-
-    const int end = std::min(s + mc, (int)record.segments.size());
-    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
-    for (int i = s; i < end; ++i) {
-        const auto &seg = record.segments[i];
-        [arr addObject:@{
-            @"text": [NSString stringWithUTF8String:seg.text.c_str()] ?: @"",
-            @"startSec": @(seg.startSec),
-            @"endSec": @(seg.endSec),
-        }];
-    }
-    resolve(arr);
-}
-
-- (void)saveAlignment:(double)alignmentId
-           targetPath:(NSString *)targetPath
-               format:(NSString *)format
-              resolve:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject
-{
-    const int64_t id = (int64_t)alignmentId;
-    SttAlignmentRecord record;
-    {
-        std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
-        auto it = g_stt_alignments.find(id);
-        if (it == g_stt_alignments.end()) {
-            reject(kSttErrAlignmentNotFound, @"Alignment not found", nil);
-            return;
-        }
-        record = it->second;
-    }
-
-    @try {
-        NSString *fmt = [format isKindOfClass:[NSString class]] ? [format lowercaseString] : @"json";
-        if (fmt == nil || [fmt length] == 0) {
-            fmt = @"json";
-        }
-
-        NSString *dir = [targetPath stringByDeletingLastPathComponent];
-        if (dir != nil && [dir length] > 0) {
-            [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-        }
-
-        std::string err;
-        const std::string outPath = [targetPath UTF8String];
-        bool ok = false;
-        if ([fmt isEqualToString:@"json"]) {
-            ok = saveAlignmentAsJson(record, outPath, &err);
-        } else if ([fmt isEqualToString:@"srt"]) {
-            ok = saveAlignmentAsSrtVtt(record, outPath, false, &err);
-        } else if ([fmt isEqualToString:@"vtt"]) {
-            ok = saveAlignmentAsSrtVtt(record, outPath, true, &err);
-        } else {
-            reject(kSttErrInvalidArgument, [NSString stringWithFormat:@"Unsupported alignment format: %@", fmt], nil);
-            return;
-        }
-
-        if (!ok) {
-            NSString *msg = [NSString stringWithUTF8String:err.c_str()] ?: @"Failed to save alignment";
-            reject(kSttErrAlignmentFailed, msg, nil);
-            return;
-        }
-
-        resolve(nil);
-    } @catch (NSException *exception) {
-        reject(kSttErrAlignmentFailed, [NSString stringWithFormat:@"Failed to save alignment: %@", exception.reason], nil);
-    }
-}
-
-- (void)releaseAlignment:(double)alignmentId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
-    g_stt_alignments.erase((int64_t)alignmentId);
     resolve(nil);
 }
 

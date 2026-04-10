@@ -1,4 +1,8 @@
 import type { ModelPathConfig } from '../types';
+import type {
+  OfflineAudioBufferRef,
+  OfflineBufferHandle,
+} from '../audiobuffer/types';
 
 /**
  * Supported STT model types.
@@ -296,24 +300,7 @@ export interface SttTranscribeRef {
   hasLang?: boolean;
   hasEmotion?: boolean;
   hasEvent?: boolean;
-  source?: string;
   error?: string;
-}
-
-/** Reference to an alignment result (by-reference). */
-export interface AlignmentRef {
-  success: boolean;
-  alignmentId?: number;
-  segmentCount?: number;
-  tokenCount?: number;
-  error?: string;
-}
-
-/** A single alignment segment (text + time range). */
-export interface AlignmentSegment {
-  text: string;
-  startSec: number;
-  endSec: number;
 }
 
 // ========== STT error codes ==========
@@ -335,11 +322,6 @@ export const SttErrorCode = {
   STALE_RESULT: 'STT_STALE_RESULT',
   SLICE_INVALID: 'STT_SLICE_INVALID',
   SLICE_TOO_LARGE: 'STT_SLICE_TOO_LARGE',
-  ALIGNMENT_FAILED: 'STT_ALIGNMENT_FAILED',
-  ALIGNMENT_NOT_FOUND: 'STT_ALIGNMENT_NOT_FOUND',
-  ALIGNMENT_INPUT_MISMATCH: 'STT_ALIGNMENT_INPUT_MISMATCH',
-  ALIGNMENT_SLICE_INVALID: 'STT_ALIGNMENT_SLICE_INVALID',
-  ALIGNMENT_SLICE_TOO_LARGE: 'STT_ALIGNMENT_SLICE_TOO_LARGE',
   STREAM_INSTANCE_NOT_FOUND: 'STT_STREAM_INSTANCE_NOT_FOUND',
   STREAM_NOT_FOUND: 'STT_STREAM_NOT_FOUND',
   STREAM_DECODE_FAILED: 'STT_STREAM_DECODE_FAILED',
@@ -354,25 +336,17 @@ export type SttErrorCodeValue =
 
 export const STT_DEFAULT_SLICE_COUNT = 1024;
 export const STT_MAX_SLICE_COUNT = 16384;
-export const ALIGNMENT_DEFAULT_SLICE_COUNT = 512;
-export const ALIGNMENT_MAX_SLICE_COUNT = 8192;
 
 // ========== Engine interfaces ==========
 
 /**
  * Instance-based STT engine returned by createSTT().
- * All transcribe methods return metadata-only refs; use getters for large data.
+ * transcribe() returns a metadata-only ref; use getters for large data.
  */
 export interface SttEngine {
   readonly instanceId: string;
-  transcribeFile(filePath: string): Promise<SttTranscribeRef>;
-  transcribeSamples(
-    samples: number[],
-    sampleRate: number
-  ): Promise<SttTranscribeRef>;
-  transcribeFromAudioBuffer(
-    bufferId: string,
-    options?: { sourceTag?: string }
+  transcribe(
+    buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
   ): Promise<SttTranscribeRef>;
   getSttResultText(resultId: number): Promise<string>;
   getSttResultTokens(
