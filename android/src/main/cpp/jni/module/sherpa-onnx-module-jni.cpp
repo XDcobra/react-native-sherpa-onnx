@@ -213,23 +213,33 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
   return sherpaonnx::TtsDetectResultToJava(env, result);
 }
 
-// Detect enhancement model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.
+// Detect enhancement model from optional directory and/or asset name. Returns HashMap with unified detect fields.
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
     JNIEnv* env,
     jobject /* this */,
     jstring j_model_dir,
+    jstring j_asset_name,
     jstring j_model_type) {
-  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  if (j_model_dir) {
+    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
+    if (c && c[0] != '\0') model_dir = std::string(c);
+    env->ReleaseStringUTFChars(j_model_dir, c);
+  }
+  if (j_asset_name) {
+    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
+    if (c && c[0] != '\0') asset_name = std::string(c);
+    env->ReleaseStringUTFChars(j_asset_name, c);
+  }
   const char* model_type_c =
       j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_dir(model_dir_c ? model_dir_c : "");
   std::string model_type(model_type_c ? model_type_c : "auto");
-  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
   if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::EnhancementDetectResult result =
-      sherpaonnx::DetectEnhancementModel(model_dir, model_type);
+      sherpaonnx::DetectEnhancementModel(model_dir, asset_name, model_type);
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
 }
 
