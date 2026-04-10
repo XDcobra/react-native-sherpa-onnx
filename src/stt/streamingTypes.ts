@@ -93,10 +93,12 @@ export interface StreamingSttInitOptions {
 }
 
 /**
- * Partial or final recognition result from streaming STT (maps to Kotlin OnlineRecognizerResult).
+ * Partial or final recognition result from streaming STT.
+ * Text-first: tokens/timestamps included but may be empty for partials.
  */
 export interface StreamingSttResult {
   text: string;
+  isFinal: boolean;
   tokens: string[];
   timestamps: number[];
 }

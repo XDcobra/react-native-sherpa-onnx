@@ -54,11 +54,13 @@ let sttStreamCounter = 0;
 
 function normalizeStreamingResult(raw: {
   text?: string;
+  isFinal?: boolean;
   tokens?: string[] | unknown;
   timestamps?: number[] | unknown;
 }): StreamingSttResult {
   return {
     text: typeof raw.text === 'string' ? raw.text : '',
+    isFinal: raw.isFinal === true,
     tokens: Array.isArray(raw.tokens) ? (raw.tokens as string[]) : [],
     timestamps: Array.isArray(raw.timestamps)
       ? (raw.timestamps as number[])

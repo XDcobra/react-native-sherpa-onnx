@@ -20,6 +20,7 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineToneCtcModelConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
+import com.sherpaonnx.stt.SttErrorCodes
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -306,7 +307,7 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
     } catch (e: Exception) {
       Log.e(logTag, "initializeOnlineStt failed: ${e.message}", e)
-      promise.reject("INIT_ERROR", "Online STT init failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.INIT_FAILED, "Online STT init failed: ${e.message}", e)
     }
   }
 
@@ -314,11 +315,11 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val inst = getInstance(instanceId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Online STT instance not found: $instanceId")
+          promise.reject(SttErrorCodes.STREAM_INSTANCE_NOT_FOUND, "Online STT instance not found: $instanceId")
           return
         }
       if (inst.streams.containsKey(streamId)) {
-        promise.reject("STREAM_ERROR", "Stream already exists: $streamId")
+        promise.reject(SttErrorCodes.INVALID_ARGUMENT, "Stream already exists: $streamId")
         return
       }
       val stream = inst.recognizer.createStream(hotwords = hotwords?.trim().orEmpty())
@@ -327,7 +328,7 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "createSttStream failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "Create stream failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "Create stream failed: ${e.message}", e)
     }
   }
 
@@ -338,7 +339,7 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (_, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       val floatSamples = readableArrayToFloatArray(samples)
@@ -346,7 +347,7 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "acceptSttWaveform failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "acceptSttWaveform failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "acceptSttWaveform failed: ${e.message}", e)
     }
   }
 
@@ -354,14 +355,14 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (_, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       stream.inputFinished()
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "sttStreamInputFinished failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "sttStreamInputFinished failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "sttStreamInputFinished failed: ${e.message}", e)
     }
   }
 
@@ -369,14 +370,14 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       inst.recognizer.decode(stream)
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "decodeSttStream failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "decodeSttStream failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "decodeSttStream failed: ${e.message}", e)
     }
   }
 
@@ -384,14 +385,14 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       val ready = inst.recognizer.isReady(stream)
       promise.resolve(ready)
     } catch (e: Exception) {
       Log.e(logTag, "isSttStreamReady failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "isSttStreamReady failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "isSttStreamReady failed: ${e.message}", e)
     }
   }
 
@@ -411,14 +412,17 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       val result = inst.recognizer.getResult(stream)
-      promise.resolve(resultToWritableMap(result))
+      val isFinal = !inst.recognizer.isReady(stream) && result.text.isNotEmpty()
+      val map = resultToWritableMap(result)
+      map.putBoolean("isFinal", isFinal)
+      promise.resolve(map)
     } catch (e: Exception) {
       Log.e(logTag, "getSttStreamResult failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "getSttStreamResult failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "getSttStreamResult failed: ${e.message}", e)
     }
   }
 
@@ -426,14 +430,14 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       val endpoint = inst.recognizer.isEndpoint(stream)
       promise.resolve(endpoint)
     } catch (e: Exception) {
       Log.e(logTag, "isSttStreamEndpoint failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "isSttStreamEndpoint failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "isSttStreamEndpoint failed: ${e.message}", e)
     }
   }
 
@@ -441,14 +445,14 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       inst.recognizer.reset(stream)
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "resetSttStream failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "resetSttStream failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "resetSttStream failed: ${e.message}", e)
     }
   }
 
@@ -466,7 +470,7 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "releaseSttStream failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "releaseSttStream failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "releaseSttStream failed: ${e.message}", e)
     }
   }
 
@@ -484,7 +488,7 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "unloadOnlineStt failed: ${e.message}", e)
-      promise.reject("RELEASE_ERROR", "unloadOnlineStt failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.INTERNAL_ERROR, "unloadOnlineStt failed: ${e.message}", e)
     }
   }
 
@@ -500,7 +504,7 @@ internal class SherpaOnnxOnlineSttHelper(
     try {
       val (inst, stream) = getStream(streamId)
         ?: run {
-          promise.reject("STREAM_ERROR", "Stream not found: $streamId")
+          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
           return
         }
       val floatSamples = readableArrayToFloatArray(samples)
@@ -510,12 +514,14 @@ internal class SherpaOnnxOnlineSttHelper(
       }
       val result = inst.recognizer.getResult(stream)
       val isEndpoint = inst.recognizer.isEndpoint(stream)
+      val isFinal = !inst.recognizer.isReady(stream) && result.text.isNotEmpty()
       val map = resultToWritableMap(result)
       map.putBoolean("isEndpoint", isEndpoint)
+      map.putBoolean("isFinal", isFinal)
       promise.resolve(map)
     } catch (e: Exception) {
       Log.e(logTag, "processSttAudioChunk failed: ${e.message}", e)
-      promise.reject("STREAM_ERROR", "processSttAudioChunk failed: ${e.message}", e)
+      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "processSttAudioChunk failed: ${e.message}", e)
     }
   }
 

@@ -24,6 +24,12 @@ internal data class AlignmentTtsSinkSnapshot(
   val numSamples: Int,
 )
 
+internal data class SttAlignmentSegment(
+  val text: String,
+  val startSec: Double,
+  val endSec: Double,
+)
+
 internal class SherpaOnnxAlignmentHelper(
   private val context: ReactApplicationContext,
   private val getTtsSinkSnapshot: (instanceId: String, generation: Long) -> AlignmentTtsSinkSnapshot,
@@ -264,6 +270,79 @@ internal class SherpaOnnxAlignmentHelper(
       } catch (e: Exception) {
         Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
         promise.reject("ALIGNMENT_ERROR", e.message ?: "Alignment failed", e)
+      }
+    }
+  }
+
+  fun alignTextToPcmForStt(
+    text: String,
+    samples: FloatArray,
+    sampleRate: Int,
+    mode: String,
+    granularity: String,
+    alignmentModelPath: String?,
+    onSuccess: (segments: List<SttAlignmentSegment>, timingMode: String) -> Unit,
+    onError: (message: String, error: Throwable?) -> Unit,
+  ) {
+    executor.execute {
+      try {
+        if (text.isBlank()) {
+          onError("text is required", null)
+          return@execute
+        }
+        if (sampleRate <= 0) {
+          onError("sampleRate must be positive", null)
+          return@execute
+        }
+        if (samples.isEmpty()) {
+          onError("samples array is empty", null)
+          return@execute
+        }
+
+        val normalizedMode = normalizeMode(mode)
+        val normalizedGranularity = normalizeGranularity(granularity)
+
+        val raw = when (normalizedMode) {
+          "proportional" -> nativeAlignProportional(
+            text,
+            samples.size,
+            sampleRate,
+            normalizedGranularity,
+          )
+          "accurate" -> {
+            val modelPath = alignmentModelPath?.trim().orEmpty()
+            if (modelPath.isEmpty()) {
+              throw IllegalArgumentException("ALIGNMENT_MODEL_MISSING: alignmentModelPath is required for accurate mode")
+            }
+            nativeAlignAccurateFromFloatPcm(
+              modelPath,
+              text,
+              samples,
+              sampleRate,
+              normalizedGranularity,
+            )
+          }
+          else -> throw IllegalArgumentException("Unsupported alignment mode for STT stage: $normalizedMode")
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val subtitles = raw["subtitles"] as? ArrayList<HashMap<String, Any>>
+          ?: throw IllegalStateException("native alignment: missing subtitles")
+        val timingMode = raw["timingMode"] as? String
+          ?: throw IllegalStateException("native alignment: missing timingMode")
+
+        val segments = subtitles.map { item ->
+          SttAlignmentSegment(
+            text = item["text"] as? String ?: "",
+            startSec = (item["start"] as? Double) ?: 0.0,
+            endSec = (item["end"] as? Double) ?: 0.0,
+          )
+        }
+
+        onSuccess(segments, timingMode)
+      } catch (e: Exception) {
+        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
+        onError(e.message ?: "Alignment failed", e)
       }
     }
   }
