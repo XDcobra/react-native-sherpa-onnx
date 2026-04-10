@@ -51,6 +51,13 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
   lexiconLanguageCandidates?: string[];
 }
 
+// ─── STT extension ──────────────────────────────────────────────────────
+
+export interface SttDetectModelResult extends ModelDetectResultBase {
+  /** True when model targets unsupported hardware-specific acceleration (RK35xx, Ascend, CANN). */
+  isHardwareSpecificUnsupported?: boolean;
+}
+
 // ─── Alignment extension ────────────────────────────────────────────────
 
 export interface AlignmentDetectModelResult extends ModelDetectResultBase {

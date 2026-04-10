@@ -75,17 +75,20 @@ export interface Spec extends TurboModule {
 
   /**
    * Detect STT model type and structure without initializing the recognizer.
-   * Uses the same native file-based detection as initializeStt. Useful to show model-specific
-   * options before init or to query the type for a given path.
-   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
-   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * Uses the same native detection logic as initializeStt.
+   * @param modelDir - Absolute path to extracted model directory, or empty string for asset-name-only detection.
+   * @param assetName - Release asset stem / folder basename (e.g. sherpa-onnx-whisper-tiny); null/empty when scanning modelDir only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally isHardwareSpecificUnsupported (true when the model is for unsupported hardware e.g. RK35xx, Ascend)
+   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param debug - Optional: enable verbose native logging
+   * @returns Object with unified detect fields plus STT-specific `isHardwareSpecificUnsupported`.
    */
   detectSttModel(
     modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
     preferInt8?: boolean,
-    modelType?: string
+    debug?: boolean
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -94,6 +97,12 @@ export interface Spec extends TurboModule {
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
+    /** Raw heuristic language tags from asset/folder name (catalog). */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
+    detectionSources?: string[];
   }>;
 
   /**

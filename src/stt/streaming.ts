@@ -162,6 +162,8 @@ export async function createStreamingSTT(
   if (options.modelType === 'auto' || options.modelType === undefined) {
     const detectResult = await SherpaOnnx.detectSttModel(
       resolvedPath,
+      null,
+      undefined,
       undefined,
       undefined
     );
