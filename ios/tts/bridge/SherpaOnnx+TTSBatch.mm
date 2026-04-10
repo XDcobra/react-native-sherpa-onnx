@@ -15,6 +15,15 @@
 #include <string>
 #include <vector>
 
+static NSString *SherpaOnnxTtsStaleGenerationMessage(uint64_t requested, uint64_t current) {
+    return [NSString stringWithFormat:
+            @"Generation %llu is no longer available; the native sink now holds generation %llu. "
+            @"Each TTS engine keeps only the latest synthesis in that sink - call getSamples() or "
+            @"saveAudioFromGeneration() before the next generateSpeech on the same engine, or use a "
+            @"second createTTS() instance. See docs/tts-offline.md (Data lifetime).",
+            (unsigned long long)requested, (unsigned long long)current];
+}
+
 @implementation SherpaOnnx (TTSBatch)
 
 - (void)so_generateTts:(NSString *)instanceId
@@ -287,9 +296,8 @@
         return;
     }
     if (requestedGen != sink.generation) {
-        NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
-                         (unsigned long long)requestedGen, (unsigned long long)sink.generation];
-        reject(@"TTS_STALE_GENERATION", msg, nil);
+        reject(@"TTS_STALE_GENERATION",
+               SherpaOnnxTtsStaleGenerationMessage(requestedGen, sink.generation), nil);
         return;
     }
     NSMutableArray *samplesArray = [NSMutableArray arrayWithCapacity:sink.samples.size()];
@@ -334,9 +342,8 @@
             return;
         }
         if (requestedGen != sink.generation) {
-            NSString *msg = [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
-                             (unsigned long long)requestedGen, (unsigned long long)sink.generation];
-            reject(@"TTS_STALE_GENERATION", msg, nil);
+            reject(@"TTS_STALE_GENERATION",
+                   SherpaOnnxTtsStaleGenerationMessage(requestedGen, sink.generation), nil);
             return;
         }
         samplesCopy = [NSMutableArray arrayWithCapacity:sink.samples.size()];
@@ -387,8 +394,7 @@
         uint64_t requestedGen = static_cast<uint64_t>(generation);
         if (requestedGen != sink.generation) {
             reject(@"TTS_SINK_STALE",
-                   [NSString stringWithFormat:@"Generation %llu is stale; current is %llu",
-                    requestedGen, sink.generation], nil);
+                   SherpaOnnxTtsStaleGenerationMessage(requestedGen, sink.generation), nil);
             return;
         }
         pcmCopy = sink.samples;
