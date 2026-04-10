@@ -393,6 +393,171 @@ export interface Spec extends TurboModule {
   /** Stop native PCM live capture. */
   stopPcmLiveStream(): Promise<void>;
 
+  // ==================== Pipeline Audio Buffers ====================
+
+  /**
+   * Create an offline audio buffer from a WAV file.
+   * Small files are loaded into memory; large files (>10 MB) stay file-backed.
+   */
+  createOfflineAudioBufferFromFile(
+    sourcePath: string,
+    targetSampleRateHz?: number,
+    forceMono?: boolean
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create an offline audio buffer from Float32 PCM samples.
+   */
+  createOfflineAudioBufferFromSamples(
+    samples: number[],
+    sampleRate: number,
+    channelCount?: number
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create an offline audio buffer from a live buffer.
+   * @param liveBufferId - The live buffer to snapshot/convert.
+   * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).
+   */
+  createOfflineAudioBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create a live audio buffer with a rolling-window ring buffer.
+   * @param options.sampleRate - Sample rate in Hz.
+   * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
+   * @param options.persistencePath - Optional file path for WAV spool.
+   * @param options.persistenceFormat - "wav_pcm_s16le" (default) or "wav_pcm_float".
+   */
+  createLiveAudioBuffer(options: {
+    sampleRate: number;
+    channelCount?: number;
+    windowSeconds?: number;
+    persistencePath?: string;
+    persistenceFormat?: string;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+    totalSamplesWritten: number;
+    totalSamplesDropped: number;
+    hasActiveSpool: boolean;
+  }>;
+
+  /**
+   * Append Float32 samples to a live audio buffer (recording state only).
+   */
+  appendSamplesToLiveAudioBuffer(
+    liveBufferId: string,
+    samples: number[],
+    sampleRate: number
+  ): Promise<void>;
+
+  /**
+   * Append all samples from an offline buffer to a live buffer.
+   */
+  appendOfflineToLiveAudioBuffer(
+    liveBufferId: string,
+    offlineBufferId: string
+  ): Promise<void>;
+
+  /**
+   * Finalize a live audio buffer (recording → finished).
+   * No more appends allowed after this. Patches spool WAV header if persistence is active.
+   */
+  finalizeLiveAudioBuffer(liveBufferId: string): Promise<void>;
+
+  /**
+   * Save an offline audio buffer as 16-bit PCM WAV.
+   */
+  saveOfflineAudioBufferToWav(
+    bufferId: string,
+    outputPath: string
+  ): Promise<void>;
+
+  /**
+   * Save a live audio buffer as 16-bit PCM WAV.
+   * If spool active and finalized, copies the spool file. Otherwise writes ring snapshot.
+   */
+  saveLiveAudioBufferToWav(
+    liveBufferId: string,
+    outputPath: string
+  ): Promise<void>;
+
+  /**
+   * Get info for any pipeline audio buffer (offline or live).
+   */
+  getPipelineAudioBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+    totalSamplesWritten?: number;
+    totalSamplesDropped?: number;
+    hasActiveSpool?: boolean;
+  }>;
+
+  /**
+   * Release any pipeline audio buffer (offline or live).
+   */
+  releasePipelineAudioBuffer(bufferId: string): Promise<void>;
+
+  /**
+   * Get a slice of Float32 samples from a live buffer's ring (for debug/export).
+   */
+  getLiveAudioBufferSamplesSlice(
+    liveBufferId: string,
+    startFrame: number,
+    frameCount: number
+  ): Promise<number[]>;
+
+  /**
+   * Start microphone capture directly into a live audio buffer (no JS roundtrip).
+   * The mic writes resampled Float32 samples directly into the live buffer's ring.
+   */
+  startMicToLiveAudioBuffer(
+    liveBufferId: string,
+    options?: { emitToJs?: boolean }
+  ): Promise<void>;
+
+  /**
+   * Stop microphone capture to a live audio buffer.
+   */
+  stopMicToLiveAudioBuffer(): Promise<void>;
+
   // ==================== TTS Methods ====================
 
   /**

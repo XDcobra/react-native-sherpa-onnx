@@ -97,6 +97,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val sttAlignmentStore = ConcurrentHashMap<Long, SttAlignmentRecord>()
   private val sttAlignmentIdCounter = AtomicLong(0)
   private var pcmCapture: SherpaOnnxPcmCapture? = null
+  private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
 
   override fun getName(): String {
     return NAME
@@ -725,6 +726,242 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun releaseAudioBuffer(bufferId: String, promise: Promise) {
     com.sherpaonnx.stt.AudioBufferRegistry.release(bufferId)
     promise.resolve(null)
+  }
+
+  // ==================== Pipeline Audio Buffers ====================
+
+  override fun createOfflineAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFile(
+        sourcePath,
+        targetSampleRateHz?.toInt(),
+        forceMono
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineAudioBufferFromSamples(samples: ReadableArray, sampleRate: Double, channelCount: Double?, promise: Promise) {
+    try {
+      val floats = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.readableArrayToFloatArray(samples)
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromSamples(
+        floats,
+        sampleRate.toInt(),
+        channelCount?.toInt() ?: 1
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromLive(
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createLiveAudioBuffer(options: ReadableMap, promise: Promise) {
+    try {
+      val sampleRate = options.getDouble("sampleRate").toInt()
+      val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
+      val windowSeconds = if (options.hasKey("windowSeconds")) options.getDouble("windowSeconds") else 60.0
+
+      val persistence = if (options.hasKey("persistencePath")) {
+        val path = options.getString("persistencePath") ?: throw IllegalArgumentException("persistencePath must be a string")
+        val formatStr = if (options.hasKey("persistenceFormat")) options.getString("persistenceFormat") else "wav_pcm_s16le"
+        val format = when (formatStr) {
+          "wav_pcm_float" -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_FLOAT
+          else -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE
+        }
+        com.sherpaonnx.audio.pipeline.PersistenceConfig(path, format)
+      } else null
+
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createLive(
+        sampleRate = sampleRate,
+        channelCount = channelCount,
+        windowSeconds = windowSeconds,
+        persistence = persistence
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendSamplesToLiveAudioBuffer(liveBufferId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
+    try {
+      val floats = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.readableArrayToFloatArray(samples)
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.appendSamplesToLive(liveBufferId, floats, sampleRate.toInt())
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendOfflineToLiveAudioBuffer(liveBufferId: String, offlineBufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.appendOfflineToLive(liveBufferId, offlineBufferId)
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun finalizeLiveAudioBuffer(liveBufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.finalizeLive(liveBufferId)
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun saveOfflineAudioBufferToWav(bufferId: String, outputPath: String, promise: Promise) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.saveOfflineToWav(bufferId, outputPath)
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.FILE_WRITE_ERROR, e.message, e)
+    }
+  }
+
+  override fun saveLiveAudioBufferToWav(liveBufferId: String, outputPath: String, promise: Promise) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.saveLiveToWav(liveBufferId, outputPath)
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.FILE_WRITE_ERROR, e.message, e)
+    }
+  }
+
+  override fun getPipelineAudioBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      val info = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getInfo(bufferId)
+      promise.resolve(info)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun releasePipelineAudioBuffer(bufferId: String, promise: Promise) {
+    com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.release(bufferId)
+    promise.resolve(null)
+  }
+
+  override fun getLiveAudioBufferSamplesSlice(liveBufferId: String, startFrame: Double, frameCount: Double, promise: Promise) {
+    try {
+      val samples = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLiveSamplesSlice(
+        liveBufferId, startFrame.toInt(), frameCount.toInt()
+      )
+      val arr = Arguments.createArray()
+      for (s in samples) {
+        arr.pushDouble(s.toDouble())
+      }
+      promise.resolve(arr)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun startMicToLiveAudioBuffer(liveBufferId: String, options: ReadableMap?, promise: Promise) {
+    try {
+      // Stop any existing mic sink
+      micToLiveSink?.stop()
+      micToLiveSink = null
+
+      val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
+        ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+
+      if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
+        throw IllegalStateException("Live buffer is finalized, cannot capture into it")
+      }
+
+      val emitToJs = options?.hasKey("emitToJs") == true && options.getBoolean("emitToJs")
+
+      val jsCallback: ((FloatArray, Int) -> Unit)? = if (emitToJs) {
+        { samples, sampleRate ->
+          val eventEmitter = reactApplicationContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          val payload = Arguments.createMap()
+          val arr = Arguments.createArray()
+          for (s in samples) arr.pushDouble(s.toDouble())
+          payload.putArray("samples", arr)
+          payload.putInt("sampleRate", sampleRate)
+          payload.putString("liveBufferId", liveBufferId)
+          eventEmitter.emit("pipelineLiveAudioChunk", payload)
+        }
+      } else null
+
+      val sink = com.sherpaonnx.audio.pipeline.MicToLiveBufferSink(
+        liveEntry = liveEntry,
+        onChunkForJs = jsCallback,
+        onError = { msg ->
+          val eventEmitter = reactApplicationContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          val payload = Arguments.createMap()
+          payload.putString("message", msg)
+          payload.putString("liveBufferId", liveBufferId)
+          eventEmitter.emit("pipelineLiveAudioError", payload)
+        },
+        logTag = NAME
+      )
+      micToLiveSink = sink
+      sink.start()
+      promise.resolve(null)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
+    }
+  }
+
+  override fun stopMicToLiveAudioBuffer(promise: Promise) {
+    try {
+      micToLiveSink?.stop()
+      micToLiveSink = null
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
+    }
   }
 
   // ==================== STT Methods ====================
