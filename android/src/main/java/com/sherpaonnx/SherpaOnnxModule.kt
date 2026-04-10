@@ -79,7 +79,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   )
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
-    { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
+    { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var pcmCapture: SherpaOnnxPcmCapture? = null
@@ -1201,10 +1201,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun detectEnhancementModel(
     modelDir: String,
+    assetName: String?,
     modelType: String?,
     promise: Promise
   ) {
-    enhancementHelper.detectEnhancementModel(modelDir, modelType, promise)
+    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
   }
 
   override fun detectAlignmentModel(
@@ -1514,9 +1515,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelType: String?,
     ): HashMap<String, Any>?
 
-    /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
+    /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
-    private external fun nativeDetectEnhancementModel(modelDir: String, modelType: String): HashMap<String, Any>?
+    private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
 
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
