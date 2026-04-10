@@ -96,8 +96,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val sttAlignmentStore = ConcurrentHashMap<Long, SttAlignmentRecord>()
   private val sttAlignmentIdCounter = AtomicLong(0)
-  private var pcmCapture: SherpaOnnxPcmCapture? = null
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
+
+  private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
+    val eventEmitter = reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+    val payload = Arguments.createMap()
+    payload.putString("liveBufferId", event.liveBufferId)
+    payload.putString("source", event.source)
+    payload.putInt("sampleRate", event.sampleRate)
+    payload.putInt("frameCount", event.frameCount)
+    payload.putDouble("totalSamplesWritten", event.totalSamplesWritten.toDouble())
+    event.samples?.let { samples ->
+      val arr = Arguments.createArray()
+      for (s in samples) arr.pushDouble(s.toDouble())
+      payload.putArray("samples", arr)
+    }
+    eventEmitter.emit("pipelineLiveAudioChunk", payload)
+  }
 
   override fun getName(): String {
     return NAME
@@ -632,71 +648,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
   }
 
-  override fun startPcmLiveStream(options: ReadableMap, promise: Promise) {
-    try {
-      pcmCapture?.stop()
-      pcmCapture = null
-      val sampleRate = options.getDouble("sampleRate").toInt().takeIf { it > 0 } ?: 16000
-      val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt().coerceIn(1, 2) else 1
-      val bufferSizeFrames = if (options.hasKey("bufferSizeFrames")) options.getDouble("bufferSizeFrames").toInt() else 0
-      var startError: String? = null
-      var started = false
-      val capture = SherpaOnnxPcmCapture(
-        targetSampleRate = sampleRate,
-        channelCount = channelCount,
-        bufferSizeFrames = bufferSizeFrames,
-        onChunk = { base64Pcm, sr -> emitPcmLiveStreamData(base64Pcm, sr) },
-        onError = { msg ->
-          if (!started) {
-            startError = msg
-          } else {
-            emitPcmLiveStreamError(msg)
-          }
-        },
-        logTag = NAME
-      )
-      pcmCapture = capture
-      capture.start()
-      started = true
-      val err = startError
-      if (err != null) {
-        promise.reject("PCM_LIVE_STREAM_ERROR", err)
-      } else {
-        promise.resolve(null)
-      }
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "startPcmLiveStream failed", e)
-      promise.reject("PCM_LIVE_STREAM_ERROR", e.message ?: "Failed to start PCM capture", e)
-    }
-  }
-
-  override fun stopPcmLiveStream(promise: Promise) {
-    try {
-      pcmCapture?.stop()
-      pcmCapture = null
-      promise.resolve(null)
-    } catch (e: Exception) {
-      promise.reject("PCM_LIVE_STREAM_ERROR", e.message ?: "Failed to stop PCM capture", e)
-    }
-  }
-
-  private fun emitPcmLiveStreamData(base64Pcm: String, sampleRate: Int) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("base64Pcm", base64Pcm)
-    payload.putInt("sampleRate", sampleRate)
-    eventEmitter.emit("pcmLiveStreamData", payload)
-  }
-
-  private fun emitPcmLiveStreamError(message: String) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("message", message)
-    eventEmitter.emit("pcmLiveStreamError", payload)
-  }
-
   // ==================== Audio Buffer Registry ====================
 
   override fun createAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
@@ -783,6 +734,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
       val windowSeconds = if (options.hasKey("windowSeconds")) options.getDouble("windowSeconds") else 60.0
 
+      val emitAppendedEvents =
+        options.hasKey("emitAppendedEvents") && !options.isNull("emitAppendedEvents") && options.getBoolean("emitAppendedEvents")
+      val emitAppendedSamples =
+        !options.hasKey("emitAppendedSamples") || options.isNull("emitAppendedSamples") || options.getBoolean("emitAppendedSamples")
+      val appendEventMinIntervalMs =
+        if (options.hasKey("appendEventMinIntervalMs") && !options.isNull("appendEventMinIntervalMs")) {
+          options.getDouble("appendEventMinIntervalMs").toInt().coerceAtLeast(0)
+        } else {
+          0
+        }
+
       val persistence = if (options.hasKey("persistencePath")) {
         val path = options.getString("persistencePath") ?: throw IllegalArgumentException("persistencePath must be a string")
         val formatStr = if (options.hasKey("persistenceFormat")) options.getString("persistenceFormat") else "wav_pcm_s16le"
@@ -797,7 +759,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         sampleRate = sampleRate,
         channelCount = channelCount,
         windowSeconds = windowSeconds,
-        persistence = persistence
+        persistence = persistence,
+        appendEventConfig = com.sherpaonnx.audio.pipeline.LiveAppendEventConfig(
+          enabled = emitAppendedEvents,
+          includeSamples = emitAppendedSamples,
+          minIntervalMs = appendEventMinIntervalMs,
+        ),
+        onFramesAppended = { event ->
+          emitPipelineLiveAudioChunk(event)
+        },
       )
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
@@ -810,7 +780,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun appendSamplesToLiveAudioBuffer(liveBufferId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
     try {
       val floats = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.readableArrayToFloatArray(samples)
-      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.appendSamplesToLive(liveBufferId, floats, sampleRate.toInt())
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.appendSamplesToLive(
+        liveBufferId,
+        floats,
+        sampleRate.toInt(),
+        com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_APPEND,
+      )
       promise.resolve(null)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
@@ -913,25 +888,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         throw IllegalStateException("Live buffer is finalized, cannot capture into it")
       }
 
-      val emitToJs = options?.hasKey("emitToJs") == true && options.getBoolean("emitToJs")
-
-      val jsCallback: ((FloatArray, Int) -> Unit)? = if (emitToJs) {
-        { samples, sampleRate ->
-          val eventEmitter = reactApplicationContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-          val payload = Arguments.createMap()
-          val arr = Arguments.createArray()
-          for (s in samples) arr.pushDouble(s.toDouble())
-          payload.putArray("samples", arr)
-          payload.putInt("sampleRate", sampleRate)
-          payload.putString("liveBufferId", liveBufferId)
-          eventEmitter.emit("pipelineLiveAudioChunk", payload)
-        }
-      } else null
+      // Compatibility option: emitToJs now toggles centralized append-event emission.
+      if (options?.hasKey("emitToJs") == true && !options.isNull("emitToJs")) {
+        val emitToJs = options.getBoolean("emitToJs")
+        com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.configureLiveAppendEvents(
+          liveBufferId = liveBufferId,
+          enabled = emitToJs,
+          includeSamples = emitToJs,
+        )
+      }
 
       val sink = com.sherpaonnx.audio.pipeline.MicToLiveBufferSink(
         liveEntry = liveEntry,
-        onChunkForJs = jsCallback,
         onError = { msg ->
           val eventEmitter = reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)

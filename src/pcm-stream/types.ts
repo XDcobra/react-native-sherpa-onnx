@@ -84,6 +84,39 @@ export type LiveBufferHandle =
 /** Any pipeline audio buffer handle. */
 export type PipelineBufferHandle = OfflineBufferHandle | LiveBufferHandle;
 
+// ========== Live Append Events ==========
+
+/** Source that produced newly appended frames in a live buffer. */
+export type LiveBufferAppendSource =
+  | 'mic'
+  | 'append'
+  | 'append_offline'
+  | 'unknown'
+  | 'mixed';
+
+/** Producer-agnostic event: new frames were appended to a live buffer. */
+export interface LiveAudioBufferFramesAppendedEvent {
+  liveBufferId: string;
+  source: LiveBufferAppendSource;
+  sampleRate: number;
+  frameCount: number;
+  totalSamplesWritten: number;
+  /** Present when native emitAppendedSamples=true. */
+  samples?: number[];
+}
+
+/** Live-buffer related error event (for example mic capture failures). */
+export interface LiveAudioBufferErrorEvent {
+  liveBufferId?: string;
+  message: string;
+}
+
+/** Callback set for live buffer append/error events. */
+export interface LiveAudioBufferCallbacks {
+  onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  onError?: (event: LiveAudioBufferErrorEvent) => void;
+}
+
 // ========== Creation Options ==========
 
 /** Options for creating a live audio buffer. */
@@ -98,11 +131,23 @@ export interface CreateLiveAudioBufferOptions {
   persistencePath?: string;
   /** Spool WAV format: "wav_pcm_s16le" (default) or "wav_pcm_float". */
   persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';
+
+  /** If true, emit producer-agnostic append events for this live buffer. */
+  emitAppendedEvents?: boolean;
+  /** If true, append events include Float32 samples. Default: true. */
+  emitAppendedSamples?: boolean;
+  /** Optional native event throttle/coalesce interval in ms. Default: 0 (no throttle). */
+  appendEventMinIntervalMs?: number;
+
+  /** Optional JS callback for producer-agnostic append events. */
+  onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  /** Optional JS callback for live-buffer errors. */
+  onError?: (event: LiveAudioBufferErrorEvent) => void;
 }
 
 /** Options for starting mic capture into a live buffer. */
 export interface StartMicToLiveOptions {
-  /** If true, also emit audio chunks to JS via pipelineLiveAudioChunk events. Default: false. */
+  /** Compatibility switch: force-enable/disable centralized append events for this live buffer. */
   emitToJs?: boolean;
 }
 

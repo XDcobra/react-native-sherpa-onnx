@@ -2,6 +2,7 @@ package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import android.os.SystemClock
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -33,12 +34,36 @@ import kotlin.concurrent.write
  * - Supports peek/drain semantics without copying to JS.
  * - Multiple consumers: each gets an independent cursor handle via [createCursorHandle].
  */
+
+const val LIVE_APPEND_SOURCE_MIC = "mic"
+const val LIVE_APPEND_SOURCE_APPEND = "append"
+const val LIVE_APPEND_SOURCE_APPEND_OFFLINE = "append_offline"
+const val LIVE_APPEND_SOURCE_UNKNOWN = "unknown"
+const val LIVE_APPEND_SOURCE_MIXED = "mixed"
+
+data class LiveAppendEventConfig(
+  val enabled: Boolean = false,
+  val includeSamples: Boolean = true,
+  val minIntervalMs: Int = 0,
+)
+
+data class LiveFramesAppendedEvent(
+  val liveBufferId: String,
+  val source: String,
+  val sampleRate: Int,
+  val frameCount: Int,
+  val totalSamplesWritten: Long,
+  val samples: FloatArray?,
+)
+
 class LiveEntry(
   val bufferId: String,
   val sampleRate: Int,
   val channelCount: Int = 1,
   windowSeconds: Double = 60.0,
-  persistence: PersistenceConfig? = null
+  persistence: PersistenceConfig? = null,
+  appendEventConfig: LiveAppendEventConfig = LiveAppendEventConfig(),
+  onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
 ) {
   val kind: String = "livePcmBuffer"
 
@@ -68,6 +93,22 @@ class LiveEntry(
   // ---------- Consumer cursors ----------
   private var nextCursorId = 0
   private val cursors = mutableMapOf<Int, CursorHandle>()
+
+  // ---------- Append events ----------
+  @Volatile
+  private var appendEventsEnabled: Boolean = appendEventConfig.enabled
+  @Volatile
+  private var appendEventsIncludeSamples: Boolean = appendEventConfig.includeSamples
+  @Volatile
+  private var appendEventsMinIntervalMs: Int = appendEventConfig.minIntervalMs.coerceAtLeast(0)
+  @Volatile
+  private var onFramesAppendedListener: ((LiveFramesAppendedEvent) -> Unit)? = onFramesAppended
+
+  private val appendEventLock = Any()
+  private var lastAppendEventAtMs: Long = 0L
+  private var pendingFrames: Int = 0
+  private val pendingSampleChunks = mutableListOf<FloatArray>()
+  private var pendingSource: String? = null
 
   /**
    * Duration of the current ring content in milliseconds.
@@ -108,7 +149,11 @@ class LiveEntry(
    * Append Float32 samples. Thread-safe.
    * @throws IllegalStateException if buffer is finalized.
    */
-  fun appendSamples(samples: FloatArray, inputSampleRate: Int = sampleRate) {
+  fun appendSamples(
+    samples: FloatArray,
+    inputSampleRate: Int = sampleRate,
+    source: String = LIVE_APPEND_SOURCE_UNKNOWN,
+  ) {
     check(state == State.RECORDING) { "Cannot append to finalized LiveBuffer" }
 
     val toAppend = if (inputSampleRate != sampleRate) {
@@ -138,6 +183,113 @@ class LiveEntry(
 
     // Write to spool file (outside ring lock for better concurrency)
     spoolWriter?.append(toAppend)
+
+    dispatchFramesAppended(toAppend, source)
+  }
+
+  fun configureAppendEvents(
+    enabled: Boolean? = null,
+    includeSamples: Boolean? = null,
+    minIntervalMs: Int? = null,
+  ) {
+    synchronized(appendEventLock) {
+      enabled?.let { appendEventsEnabled = it }
+      includeSamples?.let {
+        appendEventsIncludeSamples = it
+        if (!it) pendingSampleChunks.clear()
+      }
+      minIntervalMs?.let { appendEventsMinIntervalMs = it.coerceAtLeast(0) }
+      if (!appendEventsEnabled) {
+        pendingFrames = 0
+        pendingSource = null
+        pendingSampleChunks.clear()
+      }
+    }
+  }
+
+  fun setOnFramesAppendedListener(listener: ((LiveFramesAppendedEvent) -> Unit)?) {
+    synchronized(appendEventLock) {
+      onFramesAppendedListener = listener
+    }
+  }
+
+  fun flushFramesAppendedEvents() {
+    flushPendingFramesAppendedEvent()
+  }
+
+  private fun dispatchFramesAppended(appendedSamples: FloatArray, source: String) {
+    val listener = onFramesAppendedListener ?: return
+    if (!appendEventsEnabled) return
+
+    var eventToEmit: LiveFramesAppendedEvent? = null
+    synchronized(appendEventLock) {
+      pendingFrames += appendedSamples.size
+      pendingSource = when (pendingSource) {
+        null -> source
+        source -> source
+        else -> LIVE_APPEND_SOURCE_MIXED
+      }
+
+      if (appendEventsIncludeSamples) {
+        pendingSampleChunks.add(appendedSamples.copyOf())
+      }
+
+      val now = SystemClock.elapsedRealtime()
+      val shouldEmit = appendEventsMinIntervalMs <= 0 ||
+        lastAppendEventAtMs == 0L ||
+        (now - lastAppendEventAtMs) >= appendEventsMinIntervalMs
+
+      if (shouldEmit) {
+        eventToEmit = buildPendingFramesAppendedEventLocked()
+        lastAppendEventAtMs = now
+      }
+    }
+
+    eventToEmit?.let(listener)
+  }
+
+  private fun flushPendingFramesAppendedEvent() {
+    val listener = onFramesAppendedListener ?: return
+    if (!appendEventsEnabled) return
+
+    val event = synchronized(appendEventLock) {
+      buildPendingFramesAppendedEventLocked()
+    }
+    event?.let(listener)
+  }
+
+  private fun buildPendingFramesAppendedEventLocked(): LiveFramesAppendedEvent? {
+    if (pendingFrames <= 0) return null
+
+    val source = pendingSource ?: LIVE_APPEND_SOURCE_UNKNOWN
+    val frameCount = pendingFrames
+    val totalWritten = totalSamplesWritten
+
+    val samples = if (appendEventsIncludeSamples && pendingSampleChunks.isNotEmpty()) {
+      val total = pendingSampleChunks.sumOf { it.size }
+      val merged = FloatArray(total)
+      var offset = 0
+      for (chunk in pendingSampleChunks) {
+        System.arraycopy(chunk, 0, merged, offset, chunk.size)
+        offset += chunk.size
+      }
+      merged
+    } else {
+      null
+    }
+
+    pendingFrames = 0
+    pendingSource = null
+    pendingSampleChunks.clear()
+
+    return LiveFramesAppendedEvent(
+      liveBufferId = bufferId,
+      source = source,
+      sampleRate = sampleRate,
+      frameCount = frameCount,
+      totalSamplesWritten = totalWritten,
+      samples = samples,
+    )
   }
 
   // ========== Finalize ==========
@@ -151,6 +303,7 @@ class LiveEntry(
       return // already finalized, idempotent
     }
     spoolWriter?.finalize_()
+    flushPendingFramesAppendedEvent()
   }
 
   // ========== Snapshot / Read ==========
@@ -308,6 +461,7 @@ class LiveEntry(
     if (state == State.RECORDING) {
       finalize_()
     }
+    flushPendingFramesAppendedEvent()
     spoolWriter?.release()
     synchronized(cursors) { cursors.clear() }
   }

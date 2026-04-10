@@ -8,7 +8,11 @@
  * Buffers are pipeline building blocks: pass handles to STT, TTS, Enhancement, Alignment, PCM Player.
  */
 
-import { TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import type {
   OfflineAudioBufferInfo,
@@ -20,10 +24,181 @@ import type {
   CreateLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  LiveAudioBufferCallbacks,
+  LiveAudioBufferFramesAppendedEvent,
+  LiveAudioBufferErrorEvent,
 } from './types';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+
+type NativeSubscription = { remove: () => void };
+
+const framesCallbacks = new Map<
+  string,
+  Set<(event: LiveAudioBufferFramesAppendedEvent) => void>
+>();
+const errorCallbacks = new Map<
+  string,
+  Set<(event: LiveAudioBufferErrorEvent) => void>
+>();
+
+let framesSubscription: NativeSubscription | null = null;
+let errorSubscription: NativeSubscription | null = null;
+
+function ensureLiveEventSubscriptions(): void {
+  if (framesSubscription && errorSubscription) return;
+
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+
+  if (!framesSubscription) {
+    framesSubscription = emitter.addListener(
+      'pipelineLiveAudioChunk',
+      (rawEvent: {
+        liveBufferId?: string;
+        source?: string;
+        sampleRate?: number;
+        frameCount?: number;
+        totalSamplesWritten?: number;
+        samples?: number[];
+      }) => {
+        const liveBufferId = rawEvent?.liveBufferId;
+        if (!liveBufferId) return;
+
+        const callbacks = framesCallbacks.get(liveBufferId);
+        if (!callbacks || callbacks.size === 0) return;
+
+        const source =
+          rawEvent.source === 'mic' ||
+          rawEvent.source === 'append' ||
+          rawEvent.source === 'append_offline' ||
+          rawEvent.source === 'mixed' ||
+          rawEvent.source === 'unknown'
+            ? rawEvent.source
+            : 'unknown';
+
+        const event: LiveAudioBufferFramesAppendedEvent = {
+          liveBufferId,
+          source,
+          sampleRate: rawEvent.sampleRate ?? 0,
+          frameCount: rawEvent.frameCount ?? rawEvent.samples?.length ?? 0,
+          totalSamplesWritten: rawEvent.totalSamplesWritten ?? 0,
+          samples: rawEvent.samples,
+        };
+
+        for (const cb of callbacks) {
+          cb(event);
+        }
+      }
+    );
+  }
+
+  if (!errorSubscription) {
+    errorSubscription = emitter.addListener(
+      'pipelineLiveAudioError',
+      (rawEvent: { liveBufferId?: string; message?: string }) => {
+        const event: LiveAudioBufferErrorEvent = {
+          liveBufferId: rawEvent?.liveBufferId,
+          message: rawEvent?.message ?? 'Unknown live audio buffer error',
+        };
+
+        const targetLiveBufferId = event.liveBufferId;
+        if (targetLiveBufferId) {
+          const callbacks = errorCallbacks.get(targetLiveBufferId);
+          if (!callbacks || callbacks.size === 0) return;
+          for (const cb of callbacks) {
+            cb(event);
+          }
+          return;
+        }
+
+        // If liveBufferId is missing, broadcast to all registered error listeners.
+        for (const callbacks of errorCallbacks.values()) {
+          for (const cb of callbacks) {
+            cb(event);
+          }
+        }
+      }
+    );
+  }
+}
+
+function maybeTearDownLiveEventSubscriptions(): void {
+  const hasFrameCallbacks = [...framesCallbacks.values()].some(
+    (set) => set.size > 0
+  );
+  const hasErrorCallbacks = [...errorCallbacks.values()].some(
+    (set) => set.size > 0
+  );
+
+  if (hasFrameCallbacks || hasErrorCallbacks) return;
+
+  framesSubscription?.remove();
+  errorSubscription?.remove();
+  framesSubscription = null;
+  errorSubscription = null;
+}
+
+function addFramesCallback(
+  liveBufferId: string,
+  callback: (event: LiveAudioBufferFramesAppendedEvent) => void
+): void {
+  const set = framesCallbacks.get(liveBufferId) ?? new Set();
+  set.add(callback);
+  framesCallbacks.set(liveBufferId, set);
+}
+
+function addErrorCallback(
+  liveBufferId: string,
+  callback: (event: LiveAudioBufferErrorEvent) => void
+): void {
+  const set = errorCallbacks.get(liveBufferId) ?? new Set();
+  set.add(callback);
+  errorCallbacks.set(liveBufferId, set);
+}
+
+function clearLiveAudioBufferCallbacks(liveBufferId: string): void {
+  framesCallbacks.delete(liveBufferId);
+  errorCallbacks.delete(liveBufferId);
+  maybeTearDownLiveEventSubscriptions();
+}
+
+/**
+ * Subscribe callbacks for a live audio buffer.
+ * Returns an unsubscribe function.
+ */
+export function subscribeLiveAudioBufferEvents(
+  liveBufferId: string,
+  callbacks: LiveAudioBufferCallbacks
+): () => void {
+  ensureLiveEventSubscriptions();
+
+  if (callbacks.onFramesAppended) {
+    addFramesCallback(liveBufferId, callbacks.onFramesAppended);
+  }
+  if (callbacks.onError) {
+    addErrorCallback(liveBufferId, callbacks.onError);
+  }
+
+  return () => {
+    if (callbacks.onFramesAppended) {
+      const frameSet = framesCallbacks.get(liveBufferId);
+      frameSet?.delete(callbacks.onFramesAppended);
+      if (frameSet && frameSet.size === 0) {
+        framesCallbacks.delete(liveBufferId);
+      }
+    }
+    if (callbacks.onError) {
+      const errorSet = errorCallbacks.get(liveBufferId);
+      errorSet?.delete(callbacks.onError);
+      if (errorSet && errorSet.size === 0) {
+        errorCallbacks.delete(liveBufferId);
+      }
+    }
+
+    maybeTearDownLiveEventSubscriptions();
+  };
+}
 
 // ==================== Offline Audio Buffer ====================
 
@@ -91,16 +266,45 @@ export async function createLiveAudioBuffer(
 ): Promise<{
   info: LiveAudioBufferInfo;
   bufferId: LiveBufferHandleRecording;
+  unsubscribeEvents: () => void;
 }> {
+  const {
+    onFramesAppended,
+    onError,
+    emitAppendedEvents,
+    emitAppendedSamples,
+    appendEventMinIntervalMs,
+  } = options;
+
+  const nativeEmitAppendedEvents =
+    emitAppendedEvents ?? Boolean(onFramesAppended);
+
   const result = await getNative().createLiveAudioBuffer({
     sampleRate: options.sampleRate,
     channelCount: options.channelCount,
     windowSeconds: options.windowSeconds,
     persistencePath: options.persistencePath,
     persistenceFormat: options.persistenceFormat,
+    emitAppendedEvents: nativeEmitAppendedEvents,
+    emitAppendedSamples,
+    appendEventMinIntervalMs,
   });
+
   const info = result as unknown as LiveAudioBufferInfo;
-  return { info, bufferId: info.bufferId as LiveBufferHandleRecording };
+
+  const unsubscribeEvents =
+    onFramesAppended || onError
+      ? subscribeLiveAudioBufferEvents(info.bufferId, {
+          onFramesAppended,
+          onError,
+        })
+      : () => {};
+
+  return {
+    info,
+    bufferId: info.bufferId as LiveBufferHandleRecording,
+    unsubscribeEvents,
+  };
 }
 
 /**
@@ -183,6 +387,7 @@ export async function releasePipelineAudioBuffer(
   bufferId: string
 ): Promise<void> {
   await getNative().releasePipelineAudioBuffer(bufferId);
+  clearLiveAudioBufferCallbacks(bufferId);
 }
 
 // ==================== Live Samples Slice (debug/export) ====================
@@ -243,6 +448,10 @@ export type {
   CreateLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  LiveBufferAppendSource,
+  LiveAudioBufferCallbacks,
+  LiveAudioBufferFramesAppendedEvent,
+  LiveAudioBufferErrorEvent,
   PipelineAudioErrorCodeValue,
 } from './types';
 

@@ -12,14 +12,11 @@ import kotlin.concurrent.thread
  * Native microphone capture that writes directly into a LiveEntry's ring buffer.
  *
  * This avoids the JS roundtrip: Mic → Int16 → resample → Float32 → LiveEntry.appendSamples().
- * The existing SherpaOnnxPcmCapture emits base64-encoded chunks to JS; this class instead
- * pushes samples directly into a native LiveEntry for pipeline consumption.
- *
- * Optional JS event emission can be enabled via [onChunkForJs] for UI feedback (e.g. waveform).
+ * Mic samples are written directly into the native LiveEntry ring buffer.
+ * JS event emission is handled centrally by LiveEntry append callbacks, independent of producer.
  */
 class MicToLiveBufferSink(
   private val liveEntry: LiveEntry,
-  private val onChunkForJs: ((FloatArray, Int) -> Unit)? = null,
   private val onError: ((String) -> Unit)? = null,
   private val logTag: String = "MicToLiveBufferSink"
 ) {
@@ -91,10 +88,11 @@ class MicToLiveBufferSink(
           }
 
           // Write directly to the live entry's ring buffer (no JS roundtrip)
-          liveEntry.appendSamples(rawSamples, targetRate)
-
-          // Optional JS callback for UI
-          onChunkForJs?.invoke(rawSamples, targetRate)
+          liveEntry.appendSamples(
+            rawSamples,
+            targetRate,
+            LIVE_APPEND_SOURCE_MIC,
+          )
         }
       } catch (e: Exception) {
         if (running) {
@@ -118,6 +116,7 @@ class MicToLiveBufferSink(
     captureThread?.join(2000)
     captureThread = null
     audioRecord = null
+    liveEntry.flushFramesAppendedEvents()
   }
 
   val isRunning: Boolean get() = running

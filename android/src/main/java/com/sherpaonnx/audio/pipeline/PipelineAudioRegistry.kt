@@ -188,7 +188,9 @@ object PipelineAudioRegistry {
     sampleRate: Int,
     channelCount: Int = 1,
     windowSeconds: Double = 60.0,
-    persistence: PersistenceConfig? = null
+    persistence: PersistenceConfig? = null,
+    appendEventConfig: LiveAppendEventConfig = LiveAppendEventConfig(),
+    onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
   ): LiveEntry {
     if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
     if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
@@ -200,7 +202,9 @@ object PipelineAudioRegistry {
       sampleRate = sampleRate,
       channelCount = channelCount,
       windowSeconds = windowSeconds,
-      persistence = persistence
+      persistence = persistence,
+      appendEventConfig = appendEventConfig,
+      onFramesAppended = onFramesAppended,
     )
     liveEntries[bufferId] = entry
     return entry
@@ -214,13 +218,18 @@ object PipelineAudioRegistry {
    * @param samples Float32 samples [-1, 1].
    * @param sampleRate Sample rate of the incoming samples.
    */
-  fun appendSamplesToLive(liveBufferId: String, samples: FloatArray, sampleRate: Int) {
+  fun appendSamplesToLive(
+    liveBufferId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+    source: String = LIVE_APPEND_SOURCE_APPEND,
+  ) {
     val entry = liveEntries[liveBufferId]
       ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
     if (entry.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
-    entry.appendSamples(samples, sampleRate)
+    entry.appendSamples(samples, sampleRate, source)
   }
 
   /**
@@ -242,9 +251,29 @@ object PipelineAudioRegistry {
         val read = reader.readSamples(chunk, 0, chunk.size)
         if (read <= 0) break
         val toAppend = if (read == chunk.size) chunk else chunk.copyOf(read)
-        live.appendSamples(toAppend, offline.sampleRate)
+        live.appendSamples(toAppend, offline.sampleRate, LIVE_APPEND_SOURCE_APPEND_OFFLINE)
       }
     }
+  }
+
+  fun configureLiveAppendEvents(
+    liveBufferId: String,
+    enabled: Boolean? = null,
+    includeSamples: Boolean? = null,
+    minIntervalMs: Int? = null,
+  ) {
+    val entry = liveEntries[liveBufferId]
+      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    entry.configureAppendEvents(enabled, includeSamples, minIntervalMs)
+  }
+
+  fun setLiveFramesAppendedListener(
+    liveBufferId: String,
+    listener: ((LiveFramesAppendedEvent) -> Unit)?,
+  ) {
+    val entry = liveEntries[liveBufferId]
+      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    entry.setOnFramesAppendedListener(listener)
   }
 
   // ==================== Finalize Live Buffer ====================

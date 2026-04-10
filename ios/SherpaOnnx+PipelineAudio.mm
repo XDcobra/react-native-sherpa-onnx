@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <functional>
 #include <cmath>
 #include <atomic>
 #include <cstring>
@@ -34,6 +35,12 @@ static NSString *const kPAErrFileWriteError   = @"AUDIO_FILE_WRITE_ERROR";
 static NSString *const kPAErrAlreadyFinalized = @"AUDIO_ALREADY_FINALIZED";
 static NSString *const kPAErrCaptureError     = @"AUDIO_CAPTURE_ERROR";
 static NSString *const kPAErrInternalError    = @"AUDIO_INTERNAL_ERROR";
+
+static const char *kPaAppendSourceMic = "mic";
+static const char *kPaAppendSourceAppend = "append";
+static const char *kPaAppendSourceAppendOffline = "append_offline";
+static const char *kPaAppendSourceUnknown = "unknown";
+static const char *kPaAppendSourceMixed = "mixed";
 
 // ==================== Resampler ====================
 static std::vector<float> pa_resampleLinear(const float *input, size_t inputSize, int inputRate, int outputRate) {
@@ -259,9 +266,29 @@ struct PaLiveEntry {
   int nextCursorId = 0;
   std::unordered_map<int, CursorHandle> cursors;
 
+  // Append events
+  bool appendEventsEnabled = false;
+  bool appendEventsIncludeSamples = true;
+  int appendEventMinIntervalMs = 0;
+  std::function<void(const std::string &, const std::vector<float> &, int, int64_t)> onFramesAppended;
+  std::mutex appendEventMutex;
+  uint64_t lastAppendEventAtMs = 0;
+  int pendingFrames = 0;
+  std::vector<float> pendingSamples;
+  std::string pendingSource;
+
   PaLiveEntry(const std::string &bid, int sr, int ch, double windowSec,
-              const std::string &spoolPathArg, bool spoolFloat)
+              const std::string &spoolPathArg, bool spoolFloat,
+              bool emitAppendedEvents,
+              bool emitAppendedSamples,
+              int appendEventMinIntervalMsArg,
+              std::function<void(const std::string &, const std::vector<float> &, int, int64_t)> onFramesAppendedArg)
     : bufferId(bid), sampleRate(sr), channelCount(ch) {
+    appendEventsEnabled = emitAppendedEvents;
+    appendEventsIncludeSamples = emitAppendedSamples;
+    appendEventMinIntervalMs = std::max(0, appendEventMinIntervalMsArg);
+    onFramesAppended = std::move(onFramesAppendedArg);
+
     windowCapacity = std::max(sr, (int)(windowSec * sr));
     ring.resize(windowCapacity, 0.0f);
 
@@ -303,7 +330,7 @@ struct PaLiveEntry {
     };
   }
 
-  void appendSamples(const float *data, size_t count, int inputRate) {
+  void appendSamples(const float *data, size_t count, int inputRate, const std::string &source = kPaAppendSourceUnknown) {
     std::vector<float> resampled;
     const float *toAppend = data;
     size_t appendCount = count;
@@ -342,6 +369,96 @@ struct PaLiveEntry {
       }
       spoolSamplesWritten += appendCount;
     }
+
+    dispatchFramesAppended(toAppend, appendCount, source);
+  }
+
+  void configureAppendEvents(bool enabled, bool includeSamples, int minIntervalMs) {
+    std::lock_guard<std::mutex> lock(appendEventMutex);
+    appendEventsEnabled = enabled;
+    appendEventsIncludeSamples = includeSamples;
+    appendEventMinIntervalMs = std::max(0, minIntervalMs);
+    if (!appendEventsEnabled) {
+      pendingFrames = 0;
+      pendingSamples.clear();
+      pendingSource.clear();
+    }
+    if (!appendEventsIncludeSamples) {
+      pendingSamples.clear();
+    }
+  }
+
+  void dispatchFramesAppended(const float *appendedSamples, size_t appendedCount, const std::string &source) {
+    if (!appendEventsEnabled || !onFramesAppended) return;
+
+    std::vector<float> samplesToEmit;
+    std::string sourceToEmit;
+    int frameCountToEmit = 0;
+    int64_t totalWrittenToEmit = 0;
+    bool shouldEmit = false;
+
+    {
+      std::lock_guard<std::mutex> lock(appendEventMutex);
+      pendingFrames += (int)appendedCount;
+      if (pendingSource.empty()) {
+        pendingSource = source;
+      } else if (pendingSource != source) {
+        pendingSource = kPaAppendSourceMixed;
+      }
+
+      if (appendEventsIncludeSamples && appendedSamples != nullptr && appendedCount > 0) {
+        pendingSamples.insert(pendingSamples.end(), appendedSamples, appendedSamples + appendedCount);
+      }
+
+      uint64_t nowMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+      bool intervalReached = appendEventMinIntervalMs <= 0 ||
+                             lastAppendEventAtMs == 0 ||
+                             (nowMs - lastAppendEventAtMs) >= (uint64_t)appendEventMinIntervalMs;
+
+      if (intervalReached && pendingFrames > 0) {
+        frameCountToEmit = pendingFrames;
+        sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
+        totalWrittenToEmit = totalSamplesWritten;
+        if (appendEventsIncludeSamples) {
+          samplesToEmit.swap(pendingSamples);
+        }
+        pendingFrames = 0;
+        pendingSource.clear();
+        lastAppendEventAtMs = nowMs;
+        shouldEmit = true;
+      }
+    }
+
+    if (shouldEmit && onFramesAppended) {
+      onFramesAppended(sourceToEmit, samplesToEmit, frameCountToEmit, totalWrittenToEmit);
+    }
+  }
+
+  void flushPendingFramesAppended() {
+    if (!appendEventsEnabled || !onFramesAppended) return;
+
+    std::vector<float> samplesToEmit;
+    std::string sourceToEmit;
+    int frameCountToEmit = 0;
+    int64_t totalWrittenToEmit = 0;
+
+    {
+      std::lock_guard<std::mutex> lock(appendEventMutex);
+      if (pendingFrames <= 0) return;
+
+      frameCountToEmit = pendingFrames;
+      sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
+      totalWrittenToEmit = totalSamplesWritten;
+      if (appendEventsIncludeSamples) {
+        samplesToEmit.swap(pendingSamples);
+      }
+
+      pendingFrames = 0;
+      pendingSource.clear();
+      lastAppendEventAtMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+    }
+
+    onFramesAppended(sourceToEmit, samplesToEmit, frameCountToEmit, totalWrittenToEmit);
   }
 
   void finalize_() {
@@ -365,6 +482,8 @@ struct PaLiveEntry {
 
       spoolFile.close();
     }
+
+    flushPendingFramesAppended();
   }
 
   std::vector<float> snapshotRing() {
@@ -435,6 +554,7 @@ struct PaLiveEntry {
 
   void release() {
     if (state == RECORDING) finalize_();
+    flushPendingFramesAppended();
     if (spoolFile.is_open()) spoolFile.close();
     cursors.clear();
   }
@@ -458,13 +578,10 @@ static const size_t kPaMicCaptureRatesCount = 3;
 static const UInt32 kPaMicAQNumberBuffers = 3;
 
 static std::shared_ptr<PaLiveEntry> _paMicLiveEntry = nullptr;
-static __weak SherpaOnnx *_paMicModule = nil;
 static AudioQueueRef _paMicAudioQueue = NULL;
 static AudioQueueBufferRef _paMicAQBuffers[kPaMicAQNumberBuffers];
 static volatile BOOL _paMicAQRunning = NO;
 static NSInteger _paMicCaptureRate = 16000;
-static bool _paMicEmitToJs = false;
-static NSString *_paMicLiveBufferId = nil;
 
 static void paMicStopQueue(void) {
   if (_paMicAudioQueue == NULL) return;
@@ -478,6 +595,9 @@ static void paMicStopQueue(void) {
   }
   AudioQueueDispose(_paMicAudioQueue, true);
   _paMicAudioQueue = NULL;
+  if (_paMicLiveEntry) {
+    _paMicLiveEntry->flushPendingFramesAppended();
+  }
   _paMicLiveEntry = nullptr;
 }
 
@@ -517,23 +637,7 @@ static void paMicAQInputCallback(void *inUserData,
   for (size_t i = 0; i < count16; i++) {
     floatSamples[i] = (float)samples16[i] / 32768.0f;
   }
-  liveEntry->appendSamples(floatSamples.data(), floatSamples.size(), targetRate);
-
-  // Optional JS emission
-  if (_paMicEmitToJs) {
-    SherpaOnnx *module = _paMicModule;
-    if (module) {
-      NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count16];
-      for (size_t i = 0; i < count16; i++) {
-        [arr addObject:@(floatSamples[i])];
-      }
-      NSString *liveId = _paMicLiveBufferId;
-      dispatch_async(dispatch_get_main_queue(), ^{
-        [module sendEventWithName:@"pipelineLiveAudioChunk"
-                            body:@{ @"samples": arr, @"sampleRate": @(targetRate), @"liveBufferId": liveId ?: @"" }];
-      });
-    }
-  }
+  liveEntry->appendSamples(floatSamples.data(), floatSamples.size(), targetRate, kPaAppendSourceMic);
 
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 }
@@ -716,8 +820,57 @@ static void paMicAQInputCallback(void *inUserData,
       }
     }
 
+    bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
+    bool emitAppendedSamples = options.emitAppendedSamples().has_value() ? options.emitAppendedSamples().value() : true;
+    int appendEventMinIntervalMs = options.appendEventMinIntervalMs().has_value()
+      ? std::max(0, (int)options.appendEventMinIntervalMs().value())
+      : 0;
+
     std::string bufferId = pa_generateId("live");
-    auto entry = std::make_shared<PaLiveEntry>(bufferId, sr, ch, windowSec, spoolPath, spoolFloat);
+    NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()];
+    __weak SherpaOnnx *weakSelf = self;
+
+    auto onFramesAppended = [weakSelf, liveBufferId, sr](
+      const std::string &source,
+      const std::vector<float> &samples,
+      int frameCount,
+      int64_t totalSamplesWritten
+    ) {
+      SherpaOnnx *module = weakSelf;
+      if (!module) return;
+
+      NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+      payload[@"liveBufferId"] = liveBufferId ?: @"";
+      payload[@"source"] = [NSString stringWithUTF8String:source.c_str()];
+      payload[@"sampleRate"] = @(sr);
+      payload[@"frameCount"] = @(frameCount);
+      payload[@"totalSamplesWritten"] = @((double)totalSamplesWritten);
+
+      if (!samples.empty()) {
+        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:samples.size()];
+        for (float s : samples) {
+          [arr addObject:@(s)];
+        }
+        payload[@"samples"] = arr;
+      }
+
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [module sendEventWithName:@"pipelineLiveAudioChunk" body:payload];
+      });
+    };
+
+    auto entry = std::make_shared<PaLiveEntry>(
+      bufferId,
+      sr,
+      ch,
+      windowSec,
+      spoolPath,
+      spoolFloat,
+      emitAppendedEvents,
+      emitAppendedSamples,
+      appendEventMinIntervalMs,
+      onFramesAppended
+    );
     {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       g_pa_live[bufferId] = entry;
@@ -755,7 +908,7 @@ static void paMicAQInputCallback(void *inUserData,
     for (NSUInteger i = 0; i < samples.count; i++) {
       floats[i] = [samples[i] floatValue];
     }
-    live->appendSamples(floats.data(), floats.size(), (int)sampleRate);
+    live->appendSamples(floats.data(), floats.size(), (int)sampleRate, kPaAppendSourceAppend);
     resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
@@ -787,7 +940,7 @@ static void paMicAQInputCallback(void *inUserData,
       return;
     }
     auto allSamples = offline->readAllSamples();
-    live->appendSamples(allSamples.data(), allSamples.size(), offline->sampleRate);
+    live->appendSamples(allSamples.data(), allSamples.size(), offline->sampleRate, kPaAppendSourceAppendOffline);
     resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
@@ -952,9 +1105,12 @@ static void paMicAQInputCallback(void *inUserData,
     }
 
     _paMicLiveEntry = live;
-    _paMicModule = self;
-    _paMicLiveBufferId = liveBufferId;
-    _paMicEmitToJs = options[@"emitToJs"] && [options[@"emitToJs"] boolValue];
+
+    // Compatibility option: emitToJs now toggles centralized append-event emission.
+    if (options[@"emitToJs"] != nil) {
+      bool emitToJs = [options[@"emitToJs"] boolValue];
+      live->configureAppendEvents(emitToJs, emitToJs, live->appendEventMinIntervalMs);
+    }
 
     // Audio session
     NSError *error = nil;

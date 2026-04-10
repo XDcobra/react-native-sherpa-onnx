@@ -379,20 +379,6 @@ export interface Spec extends TurboModule {
     isFinal: boolean;
   }>;
 
-  /**
-   * Start native PCM live capture. Microphone audio is captured and resampled to the requested
-   * sampleRate; chunks are emitted via the "pcmLiveStreamData" event (base64 Int16 PCM).
-   * App must have RECORD_AUDIO (Android) and NSMicrophoneUsageDescription (iOS) and grant permission before calling.
-   */
-  startPcmLiveStream(options: {
-    sampleRate: number;
-    channelCount?: number;
-    bufferSizeFrames?: number;
-  }): Promise<void>;
-
-  /** Stop native PCM live capture. */
-  stopPcmLiveStream(): Promise<void>;
-
   // ==================== Pipeline Audio Buffers ====================
 
   /**
@@ -454,6 +440,9 @@ export interface Spec extends TurboModule {
    * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.persistencePath - Optional file path for WAV spool.
    * @param options.persistenceFormat - "wav_pcm_s16le" (default) or "wav_pcm_float".
+   * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
+   * @param options.emitAppendedSamples - If true, include Float32 samples in append events (default: true).
+   * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
    */
   createLiveAudioBuffer(options: {
     sampleRate: number;
@@ -461,6 +450,9 @@ export interface Spec extends TurboModule {
     windowSeconds?: number;
     persistencePath?: string;
     persistenceFormat?: string;
+    emitAppendedEvents?: boolean;
+    emitAppendedSamples?: boolean;
+    appendEventMinIntervalMs?: number;
   }): Promise<{
     bufferId: string;
     kind: string;
@@ -547,6 +539,7 @@ export interface Spec extends TurboModule {
   /**
    * Start microphone capture directly into a live audio buffer (no JS roundtrip).
    * The mic writes resampled Float32 samples directly into the live buffer's ring.
+   * `emitToJs` is a compatibility shortcut to force-enable/disable append events for this live buffer.
    */
   startMicToLiveAudioBuffer(
     liveBufferId: string,
