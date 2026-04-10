@@ -28,7 +28,8 @@ Pod::Spec.new do |s|
 
   s.source_files = [
     "ios/**/*.{h,m,mm,swift,cpp}",
-    # Shared with Android NDK: all model_detect (STT/TTS/enhancement/alignment + JNI wrappers).
+    # Shared with Android NDK: portable model_detect C++ (detection/validation/catalog).
+    # Android-only JNI marshalling (*-wrapper.cpp, detect-jni-common.cpp) is excluded below — iOS uses ios/**/\*.mm bridges.
     "android/src/main/cpp/jni/model_detect/**/*.cpp",
     # Shared alignment core (segmenter + proportional/estimated/accurate CTC).
     "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp",
@@ -39,7 +40,10 @@ Pod::Spec.new do |s|
   s.exclude_files = [
     "ios/Frameworks/**/*",
     # Duplicate implementations: use android/src/main/cpp/jni/model_detect sources only.
-    "ios/model_detect/**/*"
+    "ios/model_detect/**/*",
+    # Android JNI only (jni.h / JNIEnv). iOS compiles ObjC++ wrappers under ios/ instead.
+    "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
+    "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
