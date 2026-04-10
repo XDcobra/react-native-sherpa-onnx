@@ -181,6 +181,26 @@ The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogH
 
 Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly DetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isDetectionSource`** when parsing unknown payloads.
 
+## STT and Speech Enhancement: model detection (TTS-aligned)
+
+Native detection for **STT** and **Speech Enhancement** now follows the same pattern as **TTS**: optional **`modelDir`** + optional **`assetName`** (at least one required), shared **catalog name heuristics** (**`languages`**, **`quantization`** on the wire), optional **`detectionSources`**, and a **name-only** branch when there is no directory scan ( **`success: false`** until a real folder is used for init — same idea as TTS).
+
+### TurboModule / `NativeSherpaOnnx`
+
+| Method | Before (typical) | After |
+| --- | --- | --- |
+| **`detectSttModel`** | `(modelDir, preferInt8?, modelType?)` | `(modelDir, assetName \| null, modelType?, preferInt8?, debug?)` |
+| **`detectEnhancementModel`** | `(modelDir, modelType?)` | `(modelDir, assetName \| null, modelType?)` |
+
+### Public JS facades (`…/stt`, `…/enhancement`)
+
+| API | Before | After |
+| --- | --- | --- |
+| **`detectSttModel`** | `options`: `preferInt8`, `modelType` only | Also optional **`assetName`** (overrides basename derived from `modelPath.path`), **`debug`**. Result adds optional **`detectionSources`**, **`quantization`**, and **`languages`** as **`PublicLanguageHint[]`** (native raw strings normalized via `resolvePublicLanguageHints`). |
+| **`detectEnhancementModel`** | `options`: `modelType` only | Also optional **`assetName`**. Result adds optional **`detectionSources`**, **`languages`**, **`quantization`** (same shared catalog pipeline as TTS/STT). |
+
+Direct TurboModule callers should pass **`null`** for **`assetName`** when unused. Facades derive a default **`assetName`** from the last segment of **`modelPath.path`** when you omit **`options.assetName`**.
+
 ## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
 
 The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:

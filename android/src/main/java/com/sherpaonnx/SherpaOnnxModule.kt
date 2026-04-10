@@ -49,8 +49,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
     reactApplicationContext,
-    { modelDir, preferInt8, hasPreferInt8, modelType, debug ->
-      Companion.nativeDetectSttModel(modelDir, preferInt8, hasPreferInt8, modelType, debug)
+    { modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug ->
+      Companion.nativeDetectSttModel(modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug)
     },
     NAME
   )
@@ -79,7 +79,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   )
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
-    { modelDir, modelType -> Companion.nativeDetectEnhancementModel(modelDir, modelType) }
+    { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var pcmCapture: SherpaOnnxPcmCapture? = null
@@ -404,17 +404,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun detectSttModel(
     modelDir: String,
-    preferInt8: Boolean?,
+    assetName: String?,
     modelType: String?,
+    preferInt8: Boolean?,
+    debug: Boolean?,
     promise: Promise
   ) {
     try {
       val result = Companion.nativeDetectSttModel(
         modelDir,
+        assetName,
+        modelType ?: "auto",
         preferInt8 ?: false,
         preferInt8 != null,
-        modelType ?: "auto",
-        false
+        debug ?: false
       )
       if (result == null) {
         android.util.Log.e(NAME, "DETECT_ERROR: STT model detection returned null")
@@ -426,6 +429,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val detectedModels = result["detectedModels"] as? ArrayList<*>
         ?: arrayListOf<HashMap<String, String>>()
       val modelTypeStr = result["modelType"] as? String
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      val languages = result["languages"] as? ArrayList<*>
+      val quantization = result["quantization"] as? String
+      val error = result["error"] as? String
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", success)
@@ -444,11 +451,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (modelTypeStr != null) {
         resultMap.putString("modelType", modelTypeStr)
       }
-      if (!success) {
-        val error = result["error"] as? String
-        if (!error.isNullOrBlank()) {
-          resultMap.putString("error", error)
+      if (!error.isNullOrBlank()) {
+        resultMap.putString("error", error)
+      }
+      if (detectionSources != null && detectionSources.isNotEmpty()) {
+        val sourceArray = Arguments.createArray()
+        for (source in detectionSources) {
+          if (source is String && source.isNotBlank()) {
+            sourceArray.pushString(source)
+          }
         }
+        resultMap.putArray("detectionSources", sourceArray)
+      }
+      if (languages != null && languages.isNotEmpty()) {
+        val languagesArray = Arguments.createArray()
+        for (lang in languages) {
+          if (lang is String && lang.isNotBlank()) {
+            languagesArray.pushString(lang)
+          }
+        }
+        resultMap.putArray("languages", languagesArray)
+      }
+      if (!quantization.isNullOrBlank()) {
+        resultMap.putString("quantization", quantization)
       }
       promise.resolve(resultMap)
     } catch (e: Exception) {
@@ -1176,10 +1201,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun detectEnhancementModel(
     modelDir: String,
+    assetName: String?,
     modelType: String?,
     promise: Promise
   ) {
-    enhancementHelper.detectEnhancementModel(modelDir, modelType, promise)
+    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
   }
 
   override fun detectAlignmentModel(
@@ -1473,10 +1499,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for STT: returns HashMap with success, error, detectedModels, modelType, paths (for Kotlin API config). */
     @JvmStatic
     private external fun nativeDetectSttModel(
-      modelDir: String,
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
       preferInt8: Boolean,
       hasPreferInt8: Boolean,
-      modelType: String,
       debug: Boolean
     ): HashMap<String, Any>?
 
@@ -1488,9 +1515,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelType: String?,
     ): HashMap<String, Any>?
 
-    /** Model detection for speech enhancement: returns HashMap with success, error, detectedModels, modelType, paths. */
+    /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
-    private external fun nativeDetectEnhancementModel(modelDir: String, modelType: String): HashMap<String, Any>?
+    private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
 
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic

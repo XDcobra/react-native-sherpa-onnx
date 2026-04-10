@@ -1,4 +1,14 @@
 import type { ModelPathConfig } from '../types';
+import type { EnhancementDetectModelResult } from '../types/modelDetect';
+
+export {
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type EnhancementDetectModelResult,
+  type ModelDetectResultBase,
+} from '../types/modelDetect';
 
 export type EnhancementModelType = 'gtcrn' | 'dpdfnet';
 
@@ -20,12 +30,7 @@ export interface EnhancementInitializeOptions {
   debug?: boolean;
 }
 
-export type EnhancementDetectResult = {
-  success: boolean;
-  error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-};
+export type EnhancementDetectResult = EnhancementDetectModelResult;
 
 export interface EnhancementEngine {
   readonly instanceId: string;

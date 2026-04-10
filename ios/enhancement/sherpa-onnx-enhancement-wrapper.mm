@@ -82,7 +82,11 @@ EnhancementInitializeResult EnhancementWrapper::initialize(
         return result;
     }
 
-    auto detect = DetectEnhancementModel(modelDir, modelType);
+    auto detect = DetectEnhancementModel(
+        std::optional<std::string>(modelDir),
+        std::nullopt,
+        modelType
+    );
     result.detectedModels = detect.detectedModels;
     result.modelType = EnhancementKindToString(detect.selectedKind);
     if (!detect.ok) {
@@ -153,7 +157,11 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initialize(
         return result;
     }
 
-    auto detect = DetectEnhancementModel(modelDir, modelType);
+    auto detect = DetectEnhancementModel(
+        std::optional<std::string>(modelDir),
+        std::nullopt,
+        modelType
+    );
     result.detectedModels = detect.detectedModels;
     result.modelType = EnhancementKindToString(detect.selectedKind);
     if (!detect.ok) {

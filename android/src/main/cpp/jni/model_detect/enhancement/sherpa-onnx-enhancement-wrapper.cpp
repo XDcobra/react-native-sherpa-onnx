@@ -1,6 +1,7 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 
 #include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-model-detect.h"
 
 namespace sherpaonnx {
 namespace {
@@ -48,6 +49,28 @@ jobject EnhancementDetectResultToJava(
     env->DeleteLocalRef(keyDetected);
     env->DeleteLocalRef(detectedList);
   }
+
+  std::vector<std::string> detectionSourceStrings;
+  detectionSourceStrings.reserve(result.detectionSources.size());
+  for (DetectionSource s : result.detectionSources) {
+    detectionSourceStrings.emplace_back(DetectionSourceToLiteral(s));
+  }
+  jobject detectionSourcesList = BuildStringList(env, detectionSourceStrings);
+  if (detectionSourcesList) {
+    jstring keyDetectionSources = env->NewStringUTF("detectionSources");
+    env->CallObjectMethod(map, mapPut, keyDetectionSources, detectionSourcesList);
+    env->DeleteLocalRef(keyDetectionSources);
+    env->DeleteLocalRef(detectionSourcesList);
+  }
+
+  jobject derivedLangs = BuildStringList(env, result.derivedLanguages);
+  if (derivedLangs) {
+    jstring keyLang = env->NewStringUTF("languages");
+    env->CallObjectMethod(map, mapPut, keyLang, derivedLangs);
+    env->DeleteLocalRef(keyLang);
+    env->DeleteLocalRef(derivedLangs);
+  }
+  PutString(env, map, mapPut, "quantization", result.quantization);
 
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {

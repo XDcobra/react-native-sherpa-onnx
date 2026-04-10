@@ -33,6 +33,7 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-stt-catalog-metadata.h"
 #include "sherpa-onnx-validate-stt.h"
 #include <cstdio>
 #include <cstdlib>
@@ -239,6 +240,19 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
 
     return out;
 }
+
+static void AppendUniqueDetectionSource(std::vector<DetectionSource>& out, DetectionSource s) {
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+        out.push_back(s);
+    }
+}
+
+enum class SttResolutionSource {
+    kUnknown,
+    kExplicitModelType,
+    kDirName,
+    kFallbackOrder,
+};
 
 static SttCandidatePaths GatherSttCandidatePaths(
     const std::vector<model_detect::FileEntry>& files,
@@ -509,14 +523,18 @@ static void CollectDetectedModels(
 }
 
 static SttModelKind ResolveSttKind(
-    const std::optional<std::string>& modelType,
+    const std::string& modelType,
     const SttCapabilities& cap,
     const SttPathHints& hints,
     const SttCandidatePaths& paths,
     const std::string& modelDir,
+    SttResolutionSource* outSource,
     std::string& outError
 ) {
     outError.clear();
+    if (outSource != nullptr) {
+        *outSource = SttResolutionSource::kUnknown;
+    }
     if (hints.isLikelyVad) {
         outError = "VAD models are not yet supported by the React Native SDK.";
         return SttModelKind::kUnknown;
@@ -525,10 +543,10 @@ static SttModelKind ResolveSttKind(
         outError = "TDNN (keyword/yesno) models are not yet supported by the React Native SDK.";
         return SttModelKind::kUnknown;
     }
-    if (modelType.has_value() && modelType.value() != "auto") {
-        SttModelKind selected = ParseSttModelType(modelType.value());
+    if (modelType != "auto") {
+        SttModelKind selected = ParseSttModelType(modelType);
         if (selected == SttModelKind::kUnknown) {
-            outError = "Unknown model type: " + modelType.value();
+            outError = "Unknown model type: " + modelType;
             return SttModelKind::kUnknown;
         }
         if (selected == SttModelKind::kTransducer && !cap.hasTransducer) {
@@ -601,6 +619,9 @@ static SttModelKind ResolveSttKind(
             outError = "Tone CTC model requested but path does not contain 'tone' (as a word), 't-one', or 't_one' (e.g. sherpa-onnx-streaming-t-one-*) in " + modelDir;
             return SttModelKind::kUnknown;
         }
+        if (outSource != nullptr) {
+            *outSource = SttResolutionSource::kExplicitModelType;
+        }
         return selected;
     }
 
@@ -608,41 +629,53 @@ static SttModelKind ResolveSttKind(
     std::vector<SttModelKind> nameCandidates = GetKindsFromDirName(modelDir);
     if (!nameCandidates.empty()) {
         for (SttModelKind k : nameCandidates) {
-            if (CapabilitySupportsKind(k, cap, hints, paths))
+            if (CapabilitySupportsKind(k, cap, hints, paths)) {
+                if (outSource != nullptr) {
+                    *outSource = SttResolutionSource::kDirName;
+                }
                 return k;
+            }
         }
         // Name hinted at a model type but no candidate had required files; fall through to file-only.
     }
 
     // Fallback: no name-based candidates, or none supported – use file-only detection order.
+    auto returnFallback = [outSource](SttModelKind kind) {
+        if (outSource != nullptr) {
+            *outSource = SttResolutionSource::kFallbackOrder;
+        }
+        return kind;
+    };
     if (cap.hasTransducer) {
-        return (hints.isLikelyNemo || hints.isLikelyTdt) ? SttModelKind::kNemoTransducer : SttModelKind::kTransducer;
+        return returnFallback((hints.isLikelyNemo || hints.isLikelyTdt)
+                                  ? SttModelKind::kNemoTransducer
+                                  : SttModelKind::kTransducer);
     }
-    if (hints.isLikelyMoonshine && cap.hasMoonshineV2) return SttModelKind::kMoonshineV2;
-    if (hints.isLikelyMoonshine && cap.hasMoonshine) return SttModelKind::kMoonshine;
+    if (hints.isLikelyMoonshine && cap.hasMoonshineV2) return returnFallback(SttModelKind::kMoonshineV2);
+    if (hints.isLikelyMoonshine && cap.hasMoonshine) return returnFallback(SttModelKind::kMoonshine);
     if (!paths.ctcModel.empty() && (hints.isLikelyToneCtc || hints.isLikelyNemo || hints.isLikelyWenetCtc || hints.isLikelySenseVoice)) {
-        if (hints.isLikelyToneCtc) return SttModelKind::kToneCtc;
-        if (hints.isLikelyNemo) return SttModelKind::kNemoCtc;
-        if (hints.isLikelyWenetCtc) return SttModelKind::kWenetCtc;
-        return SttModelKind::kSenseVoice;
+        if (hints.isLikelyToneCtc) return returnFallback(SttModelKind::kToneCtc);
+        if (hints.isLikelyNemo) return returnFallback(SttModelKind::kNemoCtc);
+        if (hints.isLikelyWenetCtc) return returnFallback(SttModelKind::kWenetCtc);
+        return returnFallback(SttModelKind::kSenseVoice);
     }
-    if (cap.hasFunAsrNano && hints.isLikelyFunAsrNano) return SttModelKind::kFunAsrNano;
-    if (cap.hasFireRedCtc) return SttModelKind::kZipformerCtc;
-    if (!paths.paraformerModel.empty()) return SttModelKind::kParaformer;
-    if (cap.hasCanary) return SttModelKind::kCanary;
-    if (cap.hasFireRedAsr) return SttModelKind::kFireRedAsr;
-    if (cap.hasQwen3Asr && hints.isLikelyQwen3Asr) return SttModelKind::kQwen3Asr;
-    if (cap.hasCohereTranscribe) return SttModelKind::kCohereTranscribe;
-    if (cap.hasWhisper) return SttModelKind::kWhisper;
-    if (cap.hasQwen3Asr) return SttModelKind::kQwen3Asr;
-    if (cap.hasFunAsrNano) return SttModelKind::kFunAsrNano;
-    if (cap.hasMoonshineV2) return SttModelKind::kMoonshineV2;
-    if (cap.hasDolphin) return SttModelKind::kDolphin;
-    if (cap.hasOmnilingual) return SttModelKind::kOmnilingual;
-    if (cap.hasMedAsr) return SttModelKind::kMedAsr;
-    if (cap.hasTeleSpeechCtc) return SttModelKind::kTeleSpeechCtc;
-    if (cap.hasToneCtc) return SttModelKind::kToneCtc;
-    if (!paths.ctcModel.empty()) return SttModelKind::kZipformerCtc;
+    if (cap.hasFunAsrNano && hints.isLikelyFunAsrNano) return returnFallback(SttModelKind::kFunAsrNano);
+    if (cap.hasFireRedCtc) return returnFallback(SttModelKind::kZipformerCtc);
+    if (!paths.paraformerModel.empty()) return returnFallback(SttModelKind::kParaformer);
+    if (cap.hasCanary) return returnFallback(SttModelKind::kCanary);
+    if (cap.hasFireRedAsr) return returnFallback(SttModelKind::kFireRedAsr);
+    if (cap.hasQwen3Asr && hints.isLikelyQwen3Asr) return returnFallback(SttModelKind::kQwen3Asr);
+    if (cap.hasCohereTranscribe) return returnFallback(SttModelKind::kCohereTranscribe);
+    if (cap.hasWhisper) return returnFallback(SttModelKind::kWhisper);
+    if (cap.hasQwen3Asr) return returnFallback(SttModelKind::kQwen3Asr);
+    if (cap.hasFunAsrNano) return returnFallback(SttModelKind::kFunAsrNano);
+    if (cap.hasMoonshineV2) return returnFallback(SttModelKind::kMoonshineV2);
+    if (cap.hasDolphin) return returnFallback(SttModelKind::kDolphin);
+    if (cap.hasOmnilingual) return returnFallback(SttModelKind::kOmnilingual);
+    if (cap.hasMedAsr) return returnFallback(SttModelKind::kMedAsr);
+    if (cap.hasTeleSpeechCtc) return returnFallback(SttModelKind::kTeleSpeechCtc);
+    if (cap.hasToneCtc) return returnFallback(SttModelKind::kToneCtc);
+    if (!paths.ctcModel.empty()) return returnFallback(SttModelKind::kZipformerCtc);
     return SttModelKind::kUnknown;
 }
 
@@ -726,44 +759,57 @@ static void ApplyPathsForSttKind(SttModelKind kind, const SttCandidatePaths& can
     }
 }
 
-} // namespace
-
-SttDetectResult DetectSttModel(
+/** Shared detection logic: runs on a pre-built file list. No filesystem listing. */
+static SttDetectResult DetectSttModelFromFiles(
+    const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
+    const std::string& modelType,
     const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType,
-    bool debug /* = false */
+    bool debug
 ) {
-    using namespace model_detect;
-
     SttDetectResult result;
 
-    LOGI("DetectSttModel: modelDir=%s, modelType=%s, preferInt8=%s",
-         modelDir.c_str(),
-         modelType.has_value() ? modelType->c_str() : "auto",
-         preferInt8.has_value() ? (preferInt8.value() ? "true" : "false") : "unset");
-
     if (modelDir.empty()) {
-        result.error = "Model directory is empty";
-        LOGE("%s", result.error.c_str());
+        result.error = "STT: Model directory is empty";
         return result;
     }
 
-    if (!FileExists(modelDir) || !IsDirectory(modelDir)) {
-        result.error = "Model directory does not exist or is not a directory: " + modelDir;
-        LOGE("%s", result.error.c_str());
-        return result;
-    }
+    const std::string requestedModelType = modelType.empty() ? "auto" : modelType;
 
-    // Depth 4 supports layouts like root/data/lang_bpe_500/tokens.txt (icefall, k2)
-    const int kMaxSearchDepth = 4;
-    const auto files = ListFilesRecursive(modelDir, kMaxSearchDepth);
-    if (debug) {
-        LOGI("DetectSttModel: Found %zu files in %s", files.size(), modelDir.c_str());
-        for (const auto& f : files) {
-            LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+    if (files.empty()) {
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kNameOnly);
+        std::vector<SttModelKind> nameKinds = GetKindsFromDirName(modelDir);
+        for (SttModelKind k : nameKinds) {
+            result.detectedModels.push_back({KindToName(k), modelDir});
         }
+        static constexpr const char* kNameOnlyErr =
+            "STT: Name-only detection cannot validate files; run a full directory scan before createSTT.";
+        if (requestedModelType != "auto") {
+            SttModelKind sel = ParseSttModelType(requestedModelType);
+            if (sel == SttModelKind::kUnknown) {
+                result.error = "STT: Unknown model type: " + requestedModelType;
+                return result;
+            }
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
+            result.selectedKind = sel;
+            result.detectedModels.clear();
+            result.detectedModels.push_back({KindToName(sel), modelDir});
+            result.ok = false;
+            result.error = kNameOnlyErr;
+            return result;
+        }
+        if (nameKinds.empty()) {
+            result.error = "STT: No model type inferred from directory name (name-only mode).";
+            return result;
+        }
+        result.selectedKind = nameKinds[0];
+        AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
+        result.ok = false;
+        result.error = kNameOnlyErr;
+        return result;
     }
+
+    AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFileListing);
 
     SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
@@ -796,7 +842,29 @@ SttDetectResult DetectSttModel(
 
     CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
 
-    result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
+    SttResolutionSource selectedFrom = SttResolutionSource::kUnknown;
+    result.selectedKind = ResolveSttKind(
+        requestedModelType,
+        cap,
+        hints,
+        candidate,
+        modelDir,
+        &selectedFrom,
+        result.error);
+    switch (selectedFrom) {
+        case SttResolutionSource::kExplicitModelType:
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
+            break;
+        case SttResolutionSource::kDirName:
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
+            break;
+        case SttResolutionSource::kFallbackOrder:
+            AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFallbackOrder);
+            break;
+        case SttResolutionSource::kUnknown:
+            break;
+    }
+
     if (result.selectedKind == SttModelKind::kUnknown) {
         if (IsHardwareSpecificModelDir(modelDir)) {
             result.ok = false;
@@ -812,8 +880,9 @@ SttDetectResult DetectSttModel(
         result.error = "No compatible model type detected in " + modelDir;
         LOGE("%s", result.error.c_str());
         if (debug) {
-            for (const auto& f : files)
+            for (const auto& f : files) {
                 LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
+            }
         }
         return result;
     }
@@ -823,16 +892,8 @@ SttDetectResult DetectSttModel(
                              result.selectedKind != SttModelKind::kQwen3Asr);
     ApplyPathsForSttKind(result.selectedKind, candidate, result.paths);
 
-    if (!candidate.tokens.empty() && FileExists(candidate.tokens)) {
-        result.paths.tokens = candidate.tokens;
-    } else if (result.tokensRequired) {
-        result.error = "Tokens file not found in " + modelDir;
-        LOGE("%s", result.error.c_str());
-        return result;
-    }
-    if (!candidate.bpeVocab.empty() && FileExists(candidate.bpeVocab)) {
-        result.paths.bpeVocab = candidate.bpeVocab;
-    }
+    result.paths.tokens = candidate.tokens;
+    result.paths.bpeVocab = candidate.bpeVocab;
 
     auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
     if (!validation.ok) {
@@ -899,59 +960,90 @@ SttDetectResult DetectSttModel(
     return result;
 }
 
-// Test-only: used by host-side model_detect_test; not used in production (Android/iOS use DetectSttModel).
-SttDetectResult DetectSttModelFromFileList(
-    const std::vector<model_detect::FileEntry>& files,
-    const std::string& modelDir,
+} // namespace
+
+SttDetectResult DetectSttModel(
+    const std::optional<std::string>& model_dir_opt,
+    const std::optional<std::string>& asset_name_opt,
+    const std::string& modelType,
     const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType
+    bool debug /* = false */
 ) {
     using namespace model_detect;
 
     SttDetectResult result;
 
-    if (modelDir.empty()) {
-        result.error = "Model directory is empty";
+    const bool has_dir = model_dir_opt && !model_dir_opt->empty();
+    const bool has_asset = asset_name_opt && !asset_name_opt->empty();
+    const std::string requestedModelType = modelType.empty() ? "auto" : modelType;
+
+    if (!has_dir && !has_asset) {
+        result.error = "STT: modelDir and assetName are both empty";
+        LOGE("%s", result.error.c_str());
         return result;
     }
 
-    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
-    SttPathHints hints = GetSttPathHints(modelDir);
-    ApplyQnnBinaryModel(files, modelDir, hints, candidate);
-    SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
+    LOGI("DetectSttModel: has_dir=%d has_asset=%d modelType=%s preferInt8=%s",
+         static_cast<int>(has_dir),
+         static_cast<int>(has_asset),
+         requestedModelType.c_str(),
+         preferInt8.has_value() ? (preferInt8.value() ? "true" : "false") : "unset");
 
-    CollectDetectedModels(result.detectedModels, cap, hints, candidate, modelDir);
+    // Asset id only: name-only detection (no filesystem).
+    if (!has_dir && has_asset) {
+        const std::string& assetName = *asset_name_opt;
+        const std::string syntheticDir = std::string("m/") + assetName;
+        result = DetectSttModelFromFiles({}, syntheticDir, requestedModelType, preferInt8, debug);
+        FillSttDerivedCatalogMetadata(result, assetName);
+        LOGI("DetectSttModel: assetName-only path for %s", assetName.c_str());
+        return result;
+    }
 
-    result.selectedKind = ResolveSttKind(modelType, cap, hints, candidate, modelDir, result.error);
-    if (result.selectedKind == SttModelKind::kUnknown) {
-        if (IsHardwareSpecificModelDir(modelDir)) {
-            result.ok = false;
-            result.isHardwareSpecificUnsupported = true;
-            result.error = kHardwareSpecificUnsupportedMessage;
-            return result;
+    const std::string& modelDir = *model_dir_opt;
+
+    if (!FileExists(modelDir) || !IsDirectory(modelDir)) {
+        result.error = "STT: Model directory does not exist or is not a directory: " + modelDir;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    // Depth 4 supports layouts like root/data/lang_bpe_500/tokens.txt (icefall, k2)
+    const int kMaxSearchDepth = 4;
+    const auto files = ListFilesRecursive(modelDir, kMaxSearchDepth);
+    if (debug) {
+        LOGI("DetectSttModel: Found %zu files in %s", files.size(), modelDir.c_str());
+        for (const auto& f : files) {
+            LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
         }
-        if (result.error.empty())
-            result.error = "No compatible model type detected in " + modelDir;
-        result.ok = false;
+    }
+
+    result = DetectSttModelFromFiles(files, modelDir, requestedModelType, preferInt8, debug);
+
+    if (has_asset) {
+        FillSttDerivedCatalogMetadata(result, *asset_name_opt);
+    } else {
+        FillSttDerivedCatalogMetadataUsingModelDirBasename(result, modelDir);
+    }
+
+    if (!result.ok) {
+        if (!result.error.empty()) {
+            LOGE("%s", result.error.c_str());
+        }
         return result;
     }
 
-    result.tokensRequired = (result.selectedKind != SttModelKind::kFunAsrNano &&
-                             result.selectedKind != SttModelKind::kQwen3Asr);
-    ApplyPathsForSttKind(result.selectedKind, candidate, result.paths);
-
-    result.paths.tokens = candidate.tokens;
-    result.paths.bpeVocab = candidate.bpeVocab;
-
-    auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
-    if (!validation.ok) {
-        result.ok = false;
-        result.error = validation.error;
-        return result;
-    }
-
-    result.ok = true;
+    LOGI("DetectSttModel: detection OK for %s", modelDir.c_str());
     return result;
+}
+
+// Test-only: used by host-side model_detect_test; not used in production (Android/iOS use DetectSttModel).
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType,
+    const std::optional<bool>& preferInt8
+) {
+    return DetectSttModelFromFiles(files, modelDir, modelType, preferInt8, false);
 }
 
 } // namespace sherpaonnx

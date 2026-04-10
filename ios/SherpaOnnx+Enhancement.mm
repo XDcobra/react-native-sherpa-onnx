@@ -60,6 +60,23 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
         @"detectedModels": detectedModelsArray,
         @"modelType": enhancementKindToNSString(result.selectedKind),
     } mutableCopy];
+    if (!result.detectionSources.empty()) {
+        NSMutableArray *sources = [NSMutableArray array];
+        for (const auto s : result.detectionSources) {
+            [sources addObject:[NSString stringWithUTF8String:sherpaonnx::DetectionSourceToLiteral(s)] ?: @""];
+        }
+        dict[@"detectionSources"] = sources;
+    }
+    if (!result.derivedLanguages.empty()) {
+        NSMutableArray *langs = [NSMutableArray array];
+        for (const auto& id : result.derivedLanguages) {
+            [langs addObject:[NSString stringWithUTF8String:id.c_str()] ?: @""];
+        }
+        dict[@"languages"] = langs;
+    }
+    if (!result.quantization.empty()) {
+        dict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()] ?: @"";
+    }
     if (!result.ok && !result.error.empty()) {
         dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Enhancement model detection failed";
     }
@@ -71,14 +88,22 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
 @implementation SherpaOnnx (Enhancement)
 
 - (void)detectEnhancementModel:(NSString *)modelDir
+                     assetName:(NSString *)assetName
                      modelType:(NSString *)modelType
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
     @try {
-        std::string modelDirStr = (modelDir != nil) ? [modelDir UTF8String] : "";
+        std::optional<std::string> modelDirOpt = std::nullopt;
+        if (modelDir != nil && [modelDir length] > 0) {
+            modelDirOpt = std::string([modelDir UTF8String]);
+        }
+        std::optional<std::string> assetNameOpt = std::nullopt;
+        if (assetName != nil && [assetName length] > 0) {
+            assetNameOpt = std::string([assetName UTF8String]);
+        }
         std::string modelTypeStr = (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
-        auto result = sherpaonnx::DetectEnhancementModel(modelDirStr, modelTypeStr);
+        auto result = sherpaonnx::DetectEnhancementModel(modelDirOpt, assetNameOpt, modelTypeStr);
         resolve(enhancementDetectResultToDict(result));
     } @catch (NSException *exception) {
         reject(@"DETECT_ERROR",

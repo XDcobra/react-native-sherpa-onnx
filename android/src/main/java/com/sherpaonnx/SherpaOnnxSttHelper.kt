@@ -37,10 +37,11 @@ import java.util.concurrent.ConcurrentHashMap
 internal class SherpaOnnxSttHelper(
   private val context: Context,
   private val detectSttModel: (
-    modelDir: String,
+    modelDir: String?,
+    assetName: String?,
+    modelType: String,
     preferInt8: Boolean,
     hasPreferInt8: Boolean,
-    modelType: String,
     debug: Boolean
   ) -> HashMap<String, Any>?,
   private val logTag: String
@@ -202,9 +203,10 @@ internal class SherpaOnnxSttHelper(
 
       val result = detectSttModel(
         modelDir,
+        null,
+        modelType ?: "auto",
         preferInt8 ?: false,
         preferInt8 != null,
-        modelType ?: "auto",
         debug ?: false
       )
 

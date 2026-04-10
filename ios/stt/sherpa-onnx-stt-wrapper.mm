@@ -193,7 +193,14 @@ SttInitializeResult SttWrapper::initialize(
         config.feat_config.sample_rate = 16000;
         config.feat_config.feature_dim = 80;
 
-        auto detect = DetectSttModel(modelDir, preferInt8, modelType, debug);
+        const std::string detectModelType =
+            (modelType.has_value() && !modelType->empty()) ? *modelType : "auto";
+        auto detect = DetectSttModel(
+            std::optional<std::string>(modelDir),
+            std::nullopt,
+            detectModelType,
+            preferInt8,
+            debug);
         if (!detect.ok) {
             result.error = detect.error;
             LOGE("%s", result.error.c_str());

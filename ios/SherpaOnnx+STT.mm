@@ -279,23 +279,32 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
 }
 
 - (void)detectSttModel:(NSString *)modelDir
-           preferInt8:(NSNumber *)preferInt8
+            assetName:(NSString *)assetName
             modelType:(NSString *)modelType
+           preferInt8:(NSNumber *)preferInt8
+                debug:(NSNumber *)debug
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
-    RCTLogInfo(@"Detecting STT model in: %@", modelDir);
+    RCTLogInfo(@"Detecting STT model: modelDir=%@ assetName=%@", modelDir, assetName);
     @try {
-        std::string modelDirStr = [modelDir UTF8String];
+        std::optional<std::string> modelDirOpt = std::nullopt;
+        if (modelDir != nil && [modelDir length] > 0) {
+            modelDirOpt = std::string([modelDir UTF8String]);
+        }
+        std::optional<std::string> assetNameOpt = std::nullopt;
+        if (assetName != nil && [assetName length] > 0) {
+            assetNameOpt = std::string([assetName UTF8String]);
+        }
         std::optional<bool> preferInt8Opt = std::nullopt;
         if (preferInt8 != nil) {
             preferInt8Opt = [preferInt8 boolValue];
         }
-        std::optional<std::string> modelTypeOpt = std::nullopt;
-        if (modelType != nil && [modelType length] > 0 && ![modelType isEqualToString:@"auto"]) {
-            modelTypeOpt = [modelType UTF8String];
-        }
-        sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(modelDirStr, preferInt8Opt, modelTypeOpt, false);
+        const std::string modelTypeStr =
+            (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
+        const bool debugVal = (debug != nil && [debug boolValue]);
+        sherpaonnx::SttDetectResult result =
+            sherpaonnx::DetectSttModel(modelDirOpt, assetNameOpt, modelTypeStr, preferInt8Opt, debugVal);
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);
@@ -312,6 +321,23 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
         }
         resultDict[@"detectedModels"] = detectedModelsArray;
         resultDict[@"modelType"] = sttModelKindToNSString(result.selectedKind);
+        if (!result.derivedLanguages.empty()) {
+            NSMutableArray *langs = [NSMutableArray array];
+            for (const auto& id : result.derivedLanguages) {
+                [langs addObject:[NSString stringWithUTF8String:id.c_str()]];
+            }
+            resultDict[@"languages"] = langs;
+        }
+        if (!result.quantization.empty()) {
+            resultDict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()];
+        }
+        if (!result.detectionSources.empty()) {
+            NSMutableArray *sources = [NSMutableArray array];
+            for (const auto s : result.detectionSources) {
+                [sources addObject:[NSString stringWithUTF8String:sherpaonnx::DetectionSourceToLiteral(s)]];
+            }
+            resultDict[@"detectionSources"] = sources;
+        }
         resolve(resultDict);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"STT model detection failed: %@", exception.reason];

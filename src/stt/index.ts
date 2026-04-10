@@ -8,12 +8,15 @@ import type {
   SttRuntimeConfig,
 } from './types';
 import type { ModelPathConfig } from '../types';
-import { resolveModelPath } from '../utils';
-import {
-  resolvePublicLanguageHints,
-  type PublicLanguageHint,
-} from '../model-languages';
+import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
+import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
+import {
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type SttDetectModelResult,
+} from '../types/modelDetect';
 
 let sttInstanceCounter = 0;
 
@@ -44,7 +47,7 @@ function normalizeSttResult(raw: {
  * Uses the same native file-based detection as createSTT. Stateless; no instance required.
  *
  * @param modelPath - Model path configuration (asset, file, or auto)
- * @param options - Optional preferInt8 and modelType (default: auto)
+ * @param options - Optional preferInt8/modelType plus optional assetName and debug flag
  * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional **languages** (`iso6391Hint` for coarse tags; **`id`** for `modelOptions` where applicable), optional error when success is false, and optionally isHardwareSpecificUnsupported
  * @example
  * ```typescript
@@ -57,39 +60,68 @@ function normalizeSttResult(raw: {
  */
 export async function detectSttModel(
   modelPath: ModelPathConfig,
-  options?: { preferInt8?: boolean; modelType?: STTModelType }
-): Promise<{
-  success: boolean;
-  /** Native validation/detect failure. */
-  error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-  /** Curated language rows: **`iso6391Hint`** for catalog-style tags; **`id`** for **`modelOptions`** (e.g. Fun-ASR `中文`). Omitted when unknown or empty. */
-  languages?: PublicLanguageHint[];
-  isHardwareSpecificUnsupported?: boolean;
-}> {
+  options?: {
+    preferInt8?: boolean;
+    modelType?: STTModelType;
+    assetName?: string;
+    debug?: boolean;
+  }
+): Promise<SttDetectModelResult> {
   const resolvedPath = await resolveModelPath(modelPath);
+  const optionAssetName = options?.assetName?.trim();
+  const assetName =
+    optionAssetName && optionAssetName.length > 0
+      ? optionAssetName
+      : deriveAssetNameFromModelPath(modelPath);
   const raw = await SherpaOnnx.detectSttModel(
     resolvedPath,
+    assetName,
+    options?.modelType ?? null,
     options?.preferInt8,
-    options?.modelType
+    options?.debug
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
+    (m) => ({
+      type: m.type,
+      modelDir: m.modelDir,
+    })
+  );
   const modelType =
     raw.modelType != null && raw.modelType !== '' ? raw.modelType : undefined;
-  const languageHints =
-    raw.success && modelType != null
-      ? resolvePublicLanguageHints({ domain: ModelCategory.Stt, modelType })
+  const detectionSources: DetectionSource[] = [];
+  const rawSources = raw.detectionSources;
+  if (Array.isArray(rawSources)) {
+    for (const s of rawSources) {
+      if (typeof s === 'string' && isDetectionSource(s)) {
+        detectionSources.push(s);
+      }
+    }
+  }
+  const rawLanguageStrings =
+    Array.isArray(raw.languages) && raw.languages.length > 0
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
       : [];
+  const resolvedLanguages = resolvePublicLanguageHints({
+    domain: ModelCategory.Stt,
+    modelType,
+    rawFromNative: rawLanguageStrings,
+  });
+  const quantization =
+    typeof raw.quantization === 'string' && raw.quantization.length > 0
+      ? raw.quantization
+      : undefined;
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
     ...(raw.isHardwareSpecificUnsupported === true
       ? { isHardwareSpecificUnsupported: true }
       : {}),
-    detectedModels: raw.detectedModels ?? [],
+    detectedModels,
     ...(modelType != null ? { modelType } : {}),
-    ...(languageHints.length > 0 ? { languages: languageHints } : {}),
+    ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
+    ...(quantization != null ? { quantization } : {}),
+    ...(detectionSources.length > 0 ? { detectionSources } : {}),
   };
 }
 
@@ -278,6 +310,7 @@ export type {
   SttEngine,
   SttInitResult,
 } from './types';
+export type { SttDetectModelResult } from '../types/modelDetect';
 export {
   STT_MODEL_TYPES,
   STT_HOTWORDS_MODEL_TYPES,
