@@ -257,6 +257,7 @@ internal class TtsBatchGenerationService(
   /**
    * Return PCM samples from the native sink as a number[] for the given generation.
    * This is the fallback path (non-JSI); a future JSI path can return Float32Array directly.
+   * TODO: implement a JSI path that returns Float32Array directly.
    */
   fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
     try {
