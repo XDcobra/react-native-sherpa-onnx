@@ -172,13 +172,21 @@ else()
                     "Build prebuilts: cd third_party/sherpa-onnx-prebuilt && ./build_sherpa_onnx.sh")
 endif()
 
-# Include directories (must be after add_library). Subdirs so #include "sherpa-onnx-*.h" resolves after move.
-set(ORT_INCLUDE_DIR "${PROJECT_ROOT}/../third_party/onnxruntime/include")
-if(EXISTS "${ORT_INCLUDE_DIR}/onnxruntime/core/session/onnxruntime_c_api.h")
-    message(STATUS "ONNX Runtime C API headers (CTC alignment): ${ORT_INCLUDE_DIR}")
+# ONNX Runtime C API headers for CTC alignment (same layout: <root>/onnxruntime/core/session/onnxruntime_c_api.h):
+# (1) Monorepo third_party/onnxruntime/include (local dev / full ORT checkout)
+# (2) android/src/main/cpp/include after Gradle copies headers/ or include/ from the onnxruntime AAR or third_party bundle
+set(ORT_INCLUDE_MONO "${PROJECT_ROOT}/../third_party/onnxruntime/include")
+set(ORT_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include")
+if(EXISTS "${ORT_INCLUDE_MONO}/onnxruntime/core/session/onnxruntime_c_api.h")
+    set(ORT_INCLUDE_DIR "${ORT_INCLUDE_MONO}")
+    message(STATUS "ONNX Runtime C API headers (CTC alignment, monorepo): ${ORT_INCLUDE_DIR}")
+elseif(EXISTS "${ORT_INCLUDE_CPP}/onnxruntime/core/session/onnxruntime_c_api.h")
+    set(ORT_INCLUDE_DIR "${ORT_INCLUDE_CPP}")
+    message(STATUS "ONNX Runtime C API headers (CTC alignment, AAR/cpp/include): ${ORT_INCLUDE_DIR}")
 else()
-    message(FATAL_ERROR "ONNX Runtime headers not found at ${ORT_INCLUDE_DIR}. "
-                        "Add third_party/onnxruntime or run prebuilt setup so onnxruntime_c_api.h exists.")
+    message(FATAL_ERROR "ONNX Runtime C API headers not found. Expected onnxruntime/core/session/onnxruntime_c_api.h under:\n"
+                        "  - ${ORT_INCLUDE_MONO} (third_party/onnxruntime submodule), or\n"
+                        "  - ${ORT_INCLUDE_CPP} (run Android Gradle so prebuilt-download copies headers from onnxruntime AAR).")
 endif()
 
 set(ORT_JNILIB_DIR "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")

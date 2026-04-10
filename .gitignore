@@ -122,6 +122,7 @@ android/src/main/cpp/include/ffmpeg/
 android/src/main/cpp/include/libarchive/
 # sherpa-onnx C-API headers (from Maven AAR or release; Gradle extracts to here)
 android/src/main/cpp/include/sherpa-onnx/
+android/src/main/cpp/include/onnxruntime/
 
 # sherpa-onnx source submodule at repo root (not nested include/ dirs)
 /third_party/sherpa-onnx/

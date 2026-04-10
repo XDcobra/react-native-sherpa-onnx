@@ -81,6 +81,10 @@ def hasLibarchiveHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
 }
 
+def hasOnnxruntimeHeaders = {
+  return new File(project.projectDir, "src/main/cpp/include/onnxruntime/core/session/onnxruntime_c_api.h").exists()
+}
+
 /** Both ORT .so present per ABI (sherpa-onnx AAR no longer ships libonnxruntime.so). */
 def hasAllOnnxruntimeBundleLibs = {
   for (abi in requiredAbis) {
@@ -379,7 +383,36 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // Java OrtEnvironment loads libonnxruntime4j_jni.so, which dlopen's libonnxruntime.so.
     // Sherpa-onnx AAR does not ship libonnxruntime.so; both come from the onnxruntime AAR
     // or a full third_party/onnxruntime_prebuilt/android bundle.
+    //
+    // C API headers (onnxruntime_c_api.h) for native CTC alignment: copy from AAR
+    // headers/onnxruntime or include/onnxruntime (and per-ABI <abi>/headers/...) into
+    // src/main/cpp/include/onnxruntime so CMake can use them without third_party/onnxruntime.
     // =====================================================================
+    def ortOnnxHeadersDest = file("${project.projectDir}/src/main/cpp/include/onnxruntime")
+    def copyOrtHeadersFromOnnxruntimeSubdir = { File onnxruntimeDir, String label ->
+      if (onnxruntimeDir == null || !onnxruntimeDir.isDirectory()) return false
+      def marker = new File(onnxruntimeDir, "core/session/onnxruntime_c_api.h")
+      if (!marker.exists()) return false
+      project.delete(ortOnnxHeadersDest)
+      ortOnnxHeadersDest.mkdirs()
+      copy { from onnxruntimeDir; into ortOnnxHeadersDest }
+      println "[onnxruntime] C API headers ...................... ${label} --> ${ortOnnxHeadersDest}"
+      return true
+    }
+    def tryOrtHeadersFromRoot = { File root, String label ->
+      if (root == null || !root.exists()) return false
+      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "headers/onnxruntime"), "${label} headers/onnxruntime")) return true
+      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "include/onnxruntime"), "${label} include/onnxruntime")) return true
+      return false
+    }
+    def copyOrtHeadersBestEffort = { File root, String label ->
+      if (tryOrtHeadersFromRoot(root, label)) return true
+      for (abi in requiredAbis) {
+        if (tryOrtHeadersFromRoot(new File(root, abi), "${label} <${abi}>/")) return true
+      }
+      return false
+    }
+
     def ortMatchedPairCopied = false
     if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
       requiredAbis.each { abi ->
@@ -391,6 +424,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       ortMatchedPairCopied = true
       println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... THIRD_PARTY  ${thirdPartyOrtDir}"
+      copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY")
     }
     if (!ortMatchedPairCopied) {
       try {
@@ -414,6 +448,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           }
           ortMatchedPairCopied = true
           println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... MAVEN_AAR  ${aar.name}"
+          copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR")
         }
       } catch (Exception e) {
         println "[onnxruntime] MAVEN_AAR matched-pair copy failed: ${e.message}"
@@ -432,6 +467,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         }
         println "[onnxruntime] libonnxruntime4j_jni.so only .... THIRD_PARTY  ${thirdPartyOrtDir}"
         println "[onnxruntime]   WARN: no libonnxruntime.so in ort third_party — add full bundle or resolve onnxruntime AAR."
+        copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY (jni-only)")
       }
       if (!hasAllOnnxruntimeBundleLibs()) {
         try {
@@ -455,6 +491,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             }
             println "[onnxruntime] libonnxruntime4j_jni.so only .... MAVEN_AAR  ${aar.name}"
             println "[onnxruntime]   WARN: AAR jni/<abi> missing libonnxruntime.so — use a complete onnxruntime AAR."
+            copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR (jni-only)")
           } else {
             println "[onnxruntime] MAVEN_AAR: onnxruntimeAar empty — ORT native libs still missing"
           }
@@ -465,6 +502,10 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
     if (!hasAllOnnxruntimeBundleLibs()) {
       println "[onnxruntime] WARN: libonnxruntime.so and/or libonnxruntime4j_jni.so missing after resolution. checkJniLibs will fail; use com.xdcobra.sherpa:onnxruntime or full third_party bundle."
+    }
+    if (hasAllOnnxruntimeBundleLibs() && !hasOnnxruntimeHeaders()) {
+      println "[onnxruntime] WARN: ORT native libs present but C API headers missing under src/main/cpp/include/onnxruntime."
+      println "[onnxruntime]   CMake (CTC alignment) needs onnxruntime_c_api.h. Bundle headers/onnxruntime or include/onnxruntime in AAR/third_party, or use third_party/onnxruntime/include."
     }
 
     // =====================================================================
