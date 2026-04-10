@@ -105,41 +105,132 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
+  // ==================== Audio Buffer Registry ====================
+
+  createAudioBufferFromFile(
+    sourcePath: string,
+    targetSampleRateHz?: number,
+    forceMono?: boolean
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  getAudioBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  releaseAudioBuffer(bufferId: string): Promise<void>;
+
+  // ==================== Offline STT (by-reference) ====================
+
   /**
-   * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
+   * Transcribe an audio file. Returns metadata-only ref; use getters for large data.
    */
   transcribeFile(
     instanceId: string,
     filePath: string
   ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    lang: string;
-    emotion: string;
-    event: string;
-    durations: number[];
+    success: boolean;
+    resultId?: number;
+    sampleRate?: number;
+    textLength?: number;
+    tokenCount?: number;
+    timestampCount?: number;
+    durationCount?: number;
+    hasLang?: boolean;
+    hasEmotion?: boolean;
+    hasEvent?: boolean;
+    source?: string;
+    error?: string;
   }>;
 
   /**
-   * Transcribe from float PCM samples (e.g. from microphone). Same return type as transcribeFile.
+   * Transcribe from float PCM samples. Returns metadata-only ref.
    */
   transcribeSamples(
     instanceId: string,
     samples: number[],
     sampleRate: number
   ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    lang: string;
-    emotion: string;
-    event: string;
-    durations: number[];
+    success: boolean;
+    resultId?: number;
+    sampleRate?: number;
+    textLength?: number;
+    tokenCount?: number;
+    timestampCount?: number;
+    durationCount?: number;
+    hasLang?: boolean;
+    hasEmotion?: boolean;
+    hasEvent?: boolean;
+    source?: string;
+    error?: string;
   }>;
 
   /**
-   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
+   * Transcribe from a native audio buffer. Returns metadata-only ref.
+   */
+  transcribeFromAudioBuffer(
+    instanceId: string,
+    bufferId: string,
+    sourceTag?: string
+  ): Promise<{
+    success: boolean;
+    resultId?: number;
+    sampleRate?: number;
+    textLength?: number;
+    tokenCount?: number;
+    timestampCount?: number;
+    durationCount?: number;
+    hasLang?: boolean;
+    hasEmotion?: boolean;
+    hasEvent?: boolean;
+    source?: string;
+    error?: string;
+  }>;
+
+  // ==================== STT Result Getters (by-reference) ====================
+
+  getSttResultText(instanceId: string, resultId: number): Promise<string>;
+
+  getSttResultTokens(
+    instanceId: string,
+    resultId: number,
+    start: number,
+    maxCount: number
+  ): Promise<string[]>;
+
+  getSttResultTimestamps(
+    instanceId: string,
+    resultId: number,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  getSttResultDurations(
+    instanceId: string,
+    resultId: number,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  getSttResultLang(instanceId: string, resultId: number): Promise<string>;
+  getSttResultEmotion(instanceId: string, resultId: number): Promise<string>;
+  getSttResultEvent(instanceId: string, resultId: number): Promise<string>;
+
+  releaseSttResult(instanceId: string): Promise<void>;
+
+  /**
+   * Update recognizer config at runtime.
    */
   setSttConfig(instanceId: string, options: Object): Promise<void>;
 
@@ -147,6 +238,49 @@ export interface Spec extends TurboModule {
    * Release STT resources.
    */
   unloadStt(instanceId: string): Promise<void>;
+
+  // ==================== Alignment Stage ====================
+
+  alignSttResult(
+    instanceId: string,
+    resultId: number,
+    bufferId: string,
+    alignmentModelId?: string,
+    granularity?: string
+  ): Promise<{
+    success: boolean;
+    alignmentId?: number;
+    segmentCount?: number;
+    tokenCount?: number;
+    error?: string;
+  }>;
+
+  alignTextToBuffer(
+    text: string,
+    bufferId: string,
+    alignmentModelId?: string,
+    granularity?: string
+  ): Promise<{
+    success: boolean;
+    alignmentId?: number;
+    segmentCount?: number;
+    tokenCount?: number;
+    error?: string;
+  }>;
+
+  getAlignmentSegments(
+    alignmentId: number,
+    start: number,
+    maxCount: number
+  ): Promise<Array<{ text: string; startSec: number; endSec: number }>>;
+
+  saveAlignment(
+    alignmentId: number,
+    targetPath: string,
+    format?: string
+  ): Promise<void>;
+
+  releaseAlignment(alignmentId: number): Promise<void>;
 
   // ==================== Online (streaming) STT Methods ====================
 
@@ -210,9 +344,10 @@ export interface Spec extends TurboModule {
   /** True if the stream has enough audio to decode. */
   isSttStreamReady(streamId: string): Promise<boolean>;
 
-  /** Get current partial or final result (call after decodeSttStream). */
+  /** Get current partial or final result. Text-first; no large arrays by default. */
   getSttStreamResult(streamId: string): Promise<{
     text: string;
+    isFinal: boolean;
     tokens: string[];
     timestamps: number[];
   }>;
@@ -241,6 +376,7 @@ export interface Spec extends TurboModule {
     tokens: string[];
     timestamps: number[];
     isEndpoint: boolean;
+    isFinal: boolean;
   }>;
 
   /**

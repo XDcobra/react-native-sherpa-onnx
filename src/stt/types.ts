@@ -235,7 +235,7 @@ export interface STTInitializeOptions {
    * Modeling unit for hotwords tokenization (Kotlin OfflineModelConfig.modelingUnit).
    * Only used when hotwords are set and model is transducer/nemo_transducer.
    * Must match how the model was trained: 'bpe' (e.g. English zipformer), 'cjkchar' (e.g. Chinese conformer), 'cjkchar+bpe' (bilingual zh-en).
-   * See docs/stt.md "When to use which modelingUnit" and sherpa-onnx hotwords docs.
+   * See docs/stt-offline.md "When to use which modelingUnit" and sherpa-onnx hotwords docs.
    */
   modelingUnit?: 'cjkchar' | 'bpe' | 'cjkchar+bpe';
 
@@ -281,58 +281,148 @@ export interface STTInitializeOptions {
   modelOptions?: SttModelOptions;
 }
 
-/**
- * Full recognition result from offline STT (maps to Kotlin OfflineRecognizerResult).
- */
-export interface SttRecognitionResult {
-  /** Transcribed text. */
-  text: string;
-  /** Token strings. */
-  tokens: string[];
-  /** Timestamps per token (model-dependent). */
-  timestamps: number[];
-  /** Detected or specified language (model-dependent). */
-  lang: string;
-  /** Emotion label (model-dependent, e.g. SenseVoice). */
-  emotion: string;
-  /** Event label (model-dependent). */
-  event: string;
-  /** Durations (valid for TDT models). */
-  durations: number[];
+// ========== Pipeline-first types (1.0.0 breaking) ==========
+
+/** Kinds of native audio buffers in the shared registry. */
+export type AudioBufferKind = 'offlinePcmBuffer';
+
+/** Info about a native audio buffer. Returned by createAudioBufferFromFile / getAudioBufferInfo. */
+export interface AudioBufferInfo {
+  bufferId: string;
+  kind: AudioBufferKind;
+  sampleRate: number;
+  channelCount: number;
+  numSamples: number;
+  durationMs: number;
 }
 
 /**
+ * Metadata-only reference to a native STT result (by-reference).
+ * Large arrays (tokens, timestamps, durations) stay native until fetched via discrete getters.
+ */
+export interface SttTranscribeRef {
+  success: boolean;
+  resultId?: number;
+  sampleRate?: number;
+  textLength?: number;
+  tokenCount?: number;
+  timestampCount?: number;
+  durationCount?: number;
+  hasLang?: boolean;
+  hasEmotion?: boolean;
+  hasEvent?: boolean;
+  source?: string;
+  error?: string;
+}
+
+/** Reference to an alignment result (by-reference). */
+export interface AlignmentRef {
+  success: boolean;
+  alignmentId?: number;
+  segmentCount?: number;
+  tokenCount?: number;
+  error?: string;
+}
+
+/** A single alignment segment (text + time range). */
+export interface AlignmentSegment {
+  text: string;
+  startSec: number;
+  endSec: number;
+}
+
+// ========== STT error codes ==========
+
+export const SttErrorCode = {
+  INVALID_ARGUMENT: 'STT_INVALID_ARGUMENT',
+  INSTANCE_NOT_FOUND: 'STT_INSTANCE_NOT_FOUND',
+  NOT_INITIALIZED: 'STT_NOT_INITIALIZED',
+  INIT_FAILED: 'STT_INIT_FAILED',
+  MODEL_DETECTION_FAILED: 'STT_MODEL_DETECTION_FAILED',
+  MODEL_UNSUPPORTED_HARDWARE: 'STT_MODEL_UNSUPPORTED_HARDWARE',
+  CONFIG_FAILED: 'STT_CONFIG_FAILED',
+  TRANSCRIBE_FAILED: 'STT_TRANSCRIBE_FAILED',
+  BUFFER_NOT_FOUND: 'STT_BUFFER_NOT_FOUND',
+  BUFFER_KIND_MISMATCH: 'STT_BUFFER_KIND_MISMATCH',
+  BUFFER_EMPTY: 'STT_BUFFER_EMPTY',
+  RESULT_EMPTY: 'STT_RESULT_EMPTY',
+  RESULT_NOT_FOUND: 'STT_RESULT_NOT_FOUND',
+  STALE_RESULT: 'STT_STALE_RESULT',
+  SLICE_INVALID: 'STT_SLICE_INVALID',
+  SLICE_TOO_LARGE: 'STT_SLICE_TOO_LARGE',
+  ALIGNMENT_FAILED: 'STT_ALIGNMENT_FAILED',
+  ALIGNMENT_NOT_FOUND: 'STT_ALIGNMENT_NOT_FOUND',
+  ALIGNMENT_INPUT_MISMATCH: 'STT_ALIGNMENT_INPUT_MISMATCH',
+  ALIGNMENT_SLICE_INVALID: 'STT_ALIGNMENT_SLICE_INVALID',
+  ALIGNMENT_SLICE_TOO_LARGE: 'STT_ALIGNMENT_SLICE_TOO_LARGE',
+  STREAM_INSTANCE_NOT_FOUND: 'STT_STREAM_INSTANCE_NOT_FOUND',
+  STREAM_NOT_FOUND: 'STT_STREAM_NOT_FOUND',
+  STREAM_DECODE_FAILED: 'STT_STREAM_DECODE_FAILED',
+  STREAM_FINAL_NOT_AVAILABLE: 'STT_STREAM_FINAL_NOT_AVAILABLE',
+  INTERNAL_ERROR: 'STT_INTERNAL_ERROR',
+} as const;
+
+export type SttErrorCodeValue =
+  (typeof SttErrorCode)[keyof typeof SttErrorCode];
+
+// ========== Slice constants ==========
+
+export const STT_DEFAULT_SLICE_COUNT = 1024;
+export const STT_MAX_SLICE_COUNT = 16384;
+export const ALIGNMENT_DEFAULT_SLICE_COUNT = 512;
+export const ALIGNMENT_MAX_SLICE_COUNT = 8192;
+
+// ========== Engine interfaces ==========
+
+/**
  * Instance-based STT engine returned by createSTT().
- * Call destroy() when done to free native resources.
+ * All transcribe methods return metadata-only refs; use getters for large data.
  */
 export interface SttEngine {
   readonly instanceId: string;
-  transcribeFile(filePath: string): Promise<SttRecognitionResult>;
+  transcribeFile(filePath: string): Promise<SttTranscribeRef>;
   transcribeSamples(
     samples: number[],
     sampleRate: number
-  ): Promise<SttRecognitionResult>;
+  ): Promise<SttTranscribeRef>;
+  transcribeFromAudioBuffer(
+    bufferId: string,
+    options?: { sourceTag?: string }
+  ): Promise<SttTranscribeRef>;
+  getSttResultText(resultId: number): Promise<string>;
+  getSttResultTokens(
+    resultId: number,
+    start?: number,
+    maxCount?: number
+  ): Promise<string[]>;
+  getSttResultTimestamps(
+    resultId: number,
+    start?: number,
+    maxCount?: number
+  ): Promise<number[]>;
+  getSttResultDurations(
+    resultId: number,
+    start?: number,
+    maxCount?: number
+  ): Promise<number[]>;
+  getSttResultLang(resultId: number): Promise<string>;
+  getSttResultEmotion(resultId: number): Promise<string>;
+  getSttResultEvent(resultId: number): Promise<string>;
+  releaseSttResult(): Promise<void>;
   setConfig(options: SttRuntimeConfig): Promise<void>;
   destroy(): Promise<void>;
 }
 
 /**
- * Runtime config for the offline recognizer (Kotlin OfflineRecognizerConfig).
+ * Runtime config for the offline recognizer.
  * Only fields that can be updated via setConfig are included.
  */
 export interface SttRuntimeConfig {
-  /** Decoding method (e.g. greedy_search). */
   decodingMethod?: string;
-  /** Max active paths (beam search). */
   maxActivePaths?: number;
-  /** Path to hotwords file. */
   hotwordsFile?: string;
-  /** Hotwords score. */
   hotwordsScore?: number;
-  /** Blank penalty. */
   blankPenalty?: number;
-  /** Path to rule FSTs. */
   ruleFsts?: string;
-  /** Path to rule FARs. */
   ruleFars?: string;
 }

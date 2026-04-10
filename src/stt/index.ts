@@ -4,9 +4,13 @@ import type {
   STTModelType,
   SttEngine,
   SttModelOptions,
-  SttRecognitionResult,
   SttRuntimeConfig,
+  SttTranscribeRef,
+  AudioBufferInfo,
+  AlignmentRef,
+  AlignmentSegment,
 } from './types';
+import { STT_DEFAULT_SLICE_COUNT } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
@@ -20,25 +24,33 @@ import {
 
 let sttInstanceCounter = 0;
 
-function normalizeSttResult(raw: {
-  text?: string;
-  tokens?: string[] | unknown;
-  timestamps?: number[] | unknown;
-  lang?: string;
-  emotion?: string;
-  event?: string;
-  durations?: number[] | unknown;
-}): SttRecognitionResult {
+function normalizeSttTranscribeRef(raw: {
+  success?: boolean;
+  resultId?: number;
+  sampleRate?: number;
+  textLength?: number;
+  tokenCount?: number;
+  timestampCount?: number;
+  durationCount?: number;
+  hasLang?: boolean;
+  hasEmotion?: boolean;
+  hasEvent?: boolean;
+  source?: string;
+  error?: string;
+}): SttTranscribeRef {
   return {
-    text: typeof raw.text === 'string' ? raw.text : '',
-    tokens: Array.isArray(raw.tokens) ? (raw.tokens as string[]) : [],
-    timestamps: Array.isArray(raw.timestamps)
-      ? (raw.timestamps as number[])
-      : [],
-    lang: typeof raw.lang === 'string' ? raw.lang : '',
-    emotion: typeof raw.emotion === 'string' ? raw.emotion : '',
-    event: typeof raw.event === 'string' ? raw.event : '',
-    durations: Array.isArray(raw.durations) ? (raw.durations as number[]) : [],
+    success: raw.success === true,
+    resultId: raw.resultId,
+    sampleRate: raw.sampleRate,
+    textLength: raw.textLength,
+    tokenCount: raw.tokenCount,
+    timestampCount: raw.timestampCount,
+    durationCount: raw.durationCount,
+    hasLang: raw.hasLang,
+    hasEmotion: raw.hasEmotion,
+    hasEvent: raw.hasEvent,
+    source: raw.source as SttTranscribeRef['source'],
+    error: raw.error,
   };
 }
 
@@ -236,23 +248,103 @@ export async function createSTT(
       return instanceId;
     },
 
-    async transcribeFile(filePath: string): Promise<SttRecognitionResult> {
+    async transcribeFile(filePath: string): Promise<SttTranscribeRef> {
       guard();
       const raw = await SherpaOnnx.transcribeFile(instanceId, filePath);
-      return normalizeSttResult(raw);
+      return normalizeSttTranscribeRef(raw);
     },
 
     async transcribeSamples(
       samples: number[],
       sampleRate: number
-    ): Promise<SttRecognitionResult> {
+    ): Promise<SttTranscribeRef> {
       guard();
       const raw = await SherpaOnnx.transcribeSamples(
         instanceId,
         samples,
         sampleRate
       );
-      return normalizeSttResult(raw);
+      return normalizeSttTranscribeRef(raw);
+    },
+
+    async transcribeFromAudioBuffer(
+      bufferId: string,
+      options?: { sourceTag?: string }
+    ): Promise<SttTranscribeRef> {
+      guard();
+      const raw = await SherpaOnnx.transcribeFromAudioBuffer(
+        instanceId,
+        bufferId,
+        options?.sourceTag
+      );
+      return normalizeSttTranscribeRef(raw);
+    },
+
+    async getSttResultText(resultId: number): Promise<string> {
+      guard();
+      return SherpaOnnx.getSttResultText(instanceId, resultId);
+    },
+
+    async getSttResultTokens(
+      resultId: number,
+      start?: number,
+      maxCount?: number
+    ): Promise<string[]> {
+      guard();
+      return SherpaOnnx.getSttResultTokens(
+        instanceId,
+        resultId,
+        start ?? 0,
+        maxCount ?? STT_DEFAULT_SLICE_COUNT
+      );
+    },
+
+    async getSttResultTimestamps(
+      resultId: number,
+      start?: number,
+      maxCount?: number
+    ): Promise<number[]> {
+      guard();
+      return SherpaOnnx.getSttResultTimestamps(
+        instanceId,
+        resultId,
+        start ?? 0,
+        maxCount ?? STT_DEFAULT_SLICE_COUNT
+      );
+    },
+
+    async getSttResultDurations(
+      resultId: number,
+      start?: number,
+      maxCount?: number
+    ): Promise<number[]> {
+      guard();
+      return SherpaOnnx.getSttResultDurations(
+        instanceId,
+        resultId,
+        start ?? 0,
+        maxCount ?? STT_DEFAULT_SLICE_COUNT
+      );
+    },
+
+    async getSttResultLang(resultId: number): Promise<string> {
+      guard();
+      return SherpaOnnx.getSttResultLang(instanceId, resultId);
+    },
+
+    async getSttResultEmotion(resultId: number): Promise<string> {
+      guard();
+      return SherpaOnnx.getSttResultEmotion(instanceId, resultId);
+    },
+
+    async getSttResultEvent(resultId: number): Promise<string> {
+      guard();
+      return SherpaOnnx.getSttResultEvent(instanceId, resultId);
+    },
+
+    async releaseSttResult(): Promise<void> {
+      guard();
+      return SherpaOnnx.releaseSttResult(instanceId);
     },
 
     async setConfig(config: SttRuntimeConfig): Promise<void> {
@@ -281,6 +373,120 @@ export async function createSTT(
   return engine;
 }
 
+// ==================== Audio Buffer Registry ====================
+
+export async function createAudioBufferFromFile(
+  sourcePath: string,
+  targetSampleRateHz?: number,
+  forceMono?: boolean
+): Promise<AudioBufferInfo> {
+  const raw = await SherpaOnnx.createAudioBufferFromFile(
+    sourcePath,
+    targetSampleRateHz,
+    forceMono
+  );
+  return {
+    bufferId: raw.bufferId,
+    kind: raw.kind as AudioBufferInfo['kind'],
+    sampleRate: raw.sampleRate,
+    channelCount: raw.channelCount,
+    numSamples: raw.numSamples,
+    durationMs: raw.durationMs,
+  };
+}
+
+export async function getAudioBufferInfo(
+  bufferId: string
+): Promise<AudioBufferInfo> {
+  const raw = await SherpaOnnx.getAudioBufferInfo(bufferId);
+  return {
+    bufferId: raw.bufferId,
+    kind: raw.kind as AudioBufferInfo['kind'],
+    sampleRate: raw.sampleRate,
+    channelCount: raw.channelCount,
+    numSamples: raw.numSamples,
+    durationMs: raw.durationMs,
+  };
+}
+
+export async function releaseAudioBuffer(bufferId: string): Promise<void> {
+  return SherpaOnnx.releaseAudioBuffer(bufferId);
+}
+
+// ==================== Alignment Stage ====================
+
+export async function alignSttResult(
+  instanceId: string,
+  resultId: number,
+  bufferId: string,
+  options?: {
+    alignmentModelId?: string;
+    granularity?: 'segment' | 'word' | 'token';
+  }
+): Promise<AlignmentRef> {
+  const raw = await SherpaOnnx.alignSttResult(
+    instanceId,
+    resultId,
+    bufferId,
+    options?.alignmentModelId,
+    options?.granularity
+  );
+  return {
+    success: raw.success === true,
+    alignmentId: raw.alignmentId,
+    segmentCount: raw.segmentCount,
+    tokenCount: raw.tokenCount,
+    error: raw.error,
+  };
+}
+
+export async function alignTextToBuffer(
+  text: string,
+  bufferId: string,
+  options?: {
+    alignmentModelId?: string;
+    granularity?: 'segment' | 'word' | 'token';
+  }
+): Promise<AlignmentRef> {
+  const raw = await SherpaOnnx.alignTextToBuffer(
+    text,
+    bufferId,
+    options?.alignmentModelId,
+    options?.granularity
+  );
+  return {
+    success: raw.success === true,
+    alignmentId: raw.alignmentId,
+    segmentCount: raw.segmentCount,
+    tokenCount: raw.tokenCount,
+    error: raw.error,
+  };
+}
+
+export async function getAlignmentSegments(
+  alignmentId: number,
+  start?: number,
+  maxCount?: number
+): Promise<AlignmentSegment[]> {
+  return SherpaOnnx.getAlignmentSegments(
+    alignmentId,
+    start ?? 0,
+    maxCount ?? 512
+  );
+}
+
+export async function saveAlignment(
+  alignmentId: number,
+  targetPath: string,
+  format?: 'json' | 'srt' | 'vtt'
+): Promise<void> {
+  return SherpaOnnx.saveAlignment(alignmentId, targetPath, format);
+}
+
+export async function releaseAlignment(alignmentId: number): Promise<void> {
+  return SherpaOnnx.releaseAlignment(alignmentId);
+}
+
 // Streaming (online) STT
 export {
   createStreamingSTT,
@@ -305,14 +511,24 @@ export type {
   SttModelOptions,
   SttQwen3AsrModelOptions,
   SttCohereTranscribeModelOptions,
-  SttRecognitionResult,
+  SttTranscribeRef,
+  AudioBufferInfo,
+  AudioBufferKind,
+  AlignmentRef,
+  AlignmentSegment,
   SttRuntimeConfig,
   SttEngine,
   SttInitResult,
+  SttErrorCodeValue,
 } from './types';
 export type { SttDetectModelResult } from '../types/modelDetect';
 export {
   STT_MODEL_TYPES,
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
+  SttErrorCode,
+  STT_DEFAULT_SLICE_COUNT,
+  STT_MAX_SLICE_COUNT,
+  ALIGNMENT_DEFAULT_SLICE_COUNT,
+  ALIGNMENT_MAX_SLICE_COUNT,
 } from './types';
