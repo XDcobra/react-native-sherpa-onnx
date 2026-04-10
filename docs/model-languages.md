@@ -45,6 +45,6 @@ for (const row of rows) {
 
 ## See also
 
-- [Speech-to-Text (STT)](stt.md) — `createSTT`, `detectSttModel`, `modelOptions`
+- [Speech-to-Text (STT)](stt-offline.md) — `createSTT`, `detectSttModel`, `modelOptions`
 - [Offline TTS](tts-offline.md)
 - [Migration](migration.md)

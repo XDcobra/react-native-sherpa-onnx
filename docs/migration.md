@@ -201,6 +201,38 @@ Native detection for **STT** and **Speech Enhancement** now follows the same pat
 
 Direct TurboModule callers should pass **`null`** for **`assetName`** when unused. Facades derive a default **`assetName`** from the last segment of **`modelPath.path`** when you omit **`options.assetName`**.
 
+## STT native pipeline rework (upcoming **1.0.0 major**, breaking by design)
+
+This rework is a **public major 1.0.0** cut. Breaking changes are intentional; superseded STT APIs are removed instead of kept as long-lived deprecated shims.
+
+### What app developers must migrate
+
+| Topic | Before | After |
+| --- | --- | --- |
+| Offline STT result return | `transcribe*` returns full `SttRecognitionResult` payload (`text`, `tokens`, `timestamps`, `durations`, ...) | `transcribe*` returns small metadata + `resultId`; fetch heavy fields via lazy getters (`getSttResultText`, `getSttResultTokens`, `getSttResultTimestamps`, `getSttResultDurations`, `getSttResultLang`, `getSttResultEmotion`, `getSttResultEvent`) |
+| Access model | One-call “materialize everything” result usage | Discrete getter calls per concern (no masked bulk getter) |
+| Lifetime semantics | No `resultId` stale contract | Single active retained result per STT instance; old `resultId` becomes stale after a newer transcribe on the same instance |
+| `transcribeFile` execution path | Path decoded directly in recognizer path | File is normalized into internal native buffer + `bufferId` execution path (transparent for facade users; relevant to direct native callers/pipeline tools) |
+| Cross-feature ids | Potential per-feature id handling differences | One shared buffer-id type + sample-rate metadata contract across STT / Enhancement / Alignment entry points |
+| Opt-in bulk PCM to JS | Bridge stacks that still use `number[]` for large float audio | **`Float32Array`** with **JSI / `ArrayBuffer`** bulk copy (STT power-user paths + **TTS** batch `getSamples` / `getTtsSamples`) — **`number[]`** is not the target for megabyte-scale PCM |
+
+### Notes for direct TurboModule/native callers
+
+- Prefer id-based flows for pipeline composition (buffer/result handles) instead of pushing large PCM/results through JS.
+- Plan for stale-result errors when reusing an old `resultId` after a new transcribe on the same `instanceId`.
+- Remove reliance on compatibility wrappers that mirror pre-1.0 STT return shapes.
+- When you must materialize **float PCM** in JS, plan for **typed array / JSI** shapes, not element-wise **`number[]`**.
+
+## Bulk PCM to JS (`Float32Array` / JSI `ArrayBuffer`, TTS + STT)
+
+For the **same major** as the STT native pipeline rework, bulk **float** audio crossing into JavaScript uses **`Float32Array`** backed by a **single native bulk copy** (JSI **`ArrayBuffer`** view where the runtime/spec requires hand-written native code — same direction as batch TTS sink work).
+
+| Area | Direction |
+| --- | --- |
+| **STT** | Any opt-in “pull samples / buffer to JS” API returns **`Float32Array`** (or equivalent), not **`number[]`**, for large payloads. |
+| **TTS (batch)** | Replace legacy **`getTtsSamples` → `number[]`** with the **`Float32Array`** path already targeted by **`GeneratedAudio.getSamples()`** — see [migration/tts-generated-audio-native-sink-migration.md](./migration/tts-generated-audio-native-sink-migration.md) and [migration/stt-native-pipeline-research.md](./migration/stt-native-pipeline-research.md) (**Decision: PCM transport**). |
+| **Recognition arrays** | Token timestamps / durations may still use bridge-friendly numeric arrays where sizes are modest; that is separate from **megabyte-scale PCM**. |
+
 ## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
 
 The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:

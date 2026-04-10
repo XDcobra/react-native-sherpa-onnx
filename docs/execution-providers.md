@@ -310,7 +310,7 @@ console.log('Available EPs:', providers);
 
 ## See Also
 
-- [STT](stt.md) — `provider` option in `createSTT()`
+- [STT](stt-offline.md) — `provider` option in `createSTT()`
 - [TTS](tts.md) — `provider` option in `createTTS()`
 - [Download Manager](download-manager.md) — QNN model category
 - [Model Setup](model-setup.md) — Model discovery and paths
