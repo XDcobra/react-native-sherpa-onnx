@@ -481,7 +481,7 @@ import type {
 ## See also
 
 - [Streaming STT](stt-streaming.md)
-- [PCM Live Stream](pcm-live-stream.md)
+- [Pipeline audio (`pcm-stream`)](pcm-stream.md)
 - [Hotwords](hotwords.md)
 - [Alignment](alignment.md)
 - [Model Setup](model-setup.md)

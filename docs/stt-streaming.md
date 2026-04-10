@@ -124,7 +124,7 @@ await engine.destroy();
 | Topic | Requirement |
 | --- | --- |
 | Input source | Feed float PCM `[-1, 1]` plus sample rate |
-| Live microphone | Use [pcm-live-stream.md](pcm-live-stream.md) for capture/resampling helper path |
+| Live microphone | Use [pcm-stream.md](pcm-stream.md) (`startMicToLiveAudioBuffer` + optional `emitToJs` for `processAudioChunk`) |
 | Execution provider | Optional `provider`; see [execution-providers.md](execution-providers.md) |
 | Lifecycle | Always `release()` streams and `destroy()` engine |
 
@@ -320,6 +320,6 @@ import type {
 ## See also
 
 - [Offline STT](stt-offline.md)
-- [PCM Live Stream](pcm-live-stream.md)
+- [Pipeline audio (`pcm-stream`)](pcm-stream.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)
