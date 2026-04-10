@@ -334,6 +334,14 @@ static std::string NormalizeGranularity(NSString *granularity) {
   throw std::runtime_error("Unsupported alignment granularity");
 }
 
+static std::string TtsStaleGenerationUserMessage(uint64_t requested, uint64_t current) {
+  return std::string("Generation ") + std::to_string(requested) +
+         " is no longer available; the native sink now holds generation " + std::to_string(current) +
+         ". Each TTS engine keeps only the latest synthesis in that sink - call getSamples() or "
+         "saveAudioFromGeneration() before the next generateSpeech on the same engine, or use a "
+         "second createTTS() instance. See docs/tts-offline.md (Data lifetime).";
+}
+
 static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generation) {
   if (instanceId == nil || instanceId.length == 0) {
     throw std::runtime_error("generatedAudio._instanceId is required");
@@ -352,7 +360,7 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
     throw std::runtime_error("No batch synthesis result available for this TTS instance");
   }
   if (requestedGen != sink.generation) {
-    throw std::runtime_error("TTS generation is stale");
+    throw std::runtime_error(TtsStaleGenerationUserMessage(requestedGen, sink.generation));
   }
 
   TtsSinkSnapshot out;

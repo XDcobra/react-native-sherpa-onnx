@@ -31,7 +31,6 @@ import {
   detectSttModel,
   getOnlineTypeOrNull,
   type STTModelType,
-  type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
 import type {
   SttEngine,
@@ -89,8 +88,15 @@ export default function STTScreen() {
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [transcriptionResult, setTranscriptionResult] =
-    useState<SttRecognitionResult | null>(null);
+  const [transcriptionResult, setTranscriptionResult] = useState<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  } | null>(null);
   const [tokensExpanded, setTokensExpanded] = useState(false);
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
@@ -347,8 +353,43 @@ export default function STTScreen() {
         setError('STT engine not initialized');
         return;
       }
-      const result = await engine.transcribeFile(pathToTranscribe);
-      setTranscriptionResult(result);
+      const ref = await engine.transcribeFile(pathToTranscribe);
+      if (!ref.success || ref.resultId == null) {
+        setErrorSource('transcribe');
+        setError(ref.error ?? 'Transcription failed');
+        return;
+      }
+      const [text, tokens, timestamps, durations, lang, emotion, event] =
+        await Promise.all([
+          engine.getSttResultText(ref.resultId),
+          ref.tokenCount
+            ? engine.getSttResultTokens(ref.resultId, 0, ref.tokenCount)
+            : Promise.resolve([]),
+          ref.timestampCount
+            ? engine.getSttResultTimestamps(ref.resultId, 0, ref.timestampCount)
+            : Promise.resolve([]),
+          ref.durationCount
+            ? engine.getSttResultDurations(ref.resultId, 0, ref.durationCount)
+            : Promise.resolve([]),
+          ref.hasLang
+            ? engine.getSttResultLang(ref.resultId)
+            : Promise.resolve(''),
+          ref.hasEmotion
+            ? engine.getSttResultEmotion(ref.resultId)
+            : Promise.resolve(''),
+          ref.hasEvent
+            ? engine.getSttResultEvent(ref.resultId)
+            : Promise.resolve(''),
+        ]);
+      setTranscriptionResult({
+        text,
+        tokens,
+        timestamps,
+        durations,
+        lang,
+        emotion,
+        event,
+      });
     } catch (err) {
       const msg =
         (err instanceof Error ? err.message : (err as any)?.message) ?? '';

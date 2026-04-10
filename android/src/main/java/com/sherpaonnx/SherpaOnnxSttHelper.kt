@@ -7,12 +7,11 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizerResult
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizerResult
 import com.k2fsa.sherpa.onnx.OfflineStream
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig
@@ -31,6 +30,10 @@ import com.k2fsa.sherpa.onnx.OfflineCanaryModelConfig
 import com.k2fsa.sherpa.onnx.OfflineOmnilingualAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMedAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
+import com.sherpaonnx.stt.AudioBufferRegistry
+import com.sherpaonnx.stt.SttErrorCodes
+import com.sherpaonnx.stt.SttRetainedResult
+import com.sherpaonnx.stt.SttResultSlot
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -47,12 +50,18 @@ internal class SherpaOnnxSttHelper(
   private val logTag: String
 ) {
 
+  data class SttAlignmentInput(
+    val text: String,
+    val tokenCount: Int,
+    val sampleRate: Int,
+  )
+
   private data class SttEngineInstance(
     @Volatile var recognizer: OfflineRecognizer? = null,
     @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
     @Volatile var currentSttModelType: String? = null,
-    /** Qwen3-ASR: comma-separated hotwords applied via OfflineStream.setOption (not hotwords_file). */
-    @Volatile var qwen3HotwordsForStream: String = ""
+    @Volatile var qwen3HotwordsForStream: String = "",
+    val resultSlot: SttResultSlot = SttResultSlot()
   )
 
   private val instances = ConcurrentHashMap<String, SttEngineInstance>()
@@ -190,14 +199,14 @@ internal class SherpaOnnxSttHelper(
       if (!modelDirFile.exists()) {
         val errorMsg = "Model directory does not exist: $modelDir"
         Log.e(logTag, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
         return
       }
 
       if (!modelDirFile.isDirectory) {
         val errorMsg = "Model path is not a directory: $modelDir"
         Log.e(logTag, errorMsg)
-        promise.reject("INIT_ERROR", errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
         return
       }
 
@@ -213,7 +222,7 @@ internal class SherpaOnnxSttHelper(
       if (result == null) {
         val errorMsg = "Failed to detect STT model. Check native logs for details."
         Log.e(logTag, "Detection returned null for modelDir: $modelDir")
-        promise.reject("INIT_ERROR", errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
         return
       }
 
@@ -229,7 +238,7 @@ internal class SherpaOnnxSttHelper(
           "Failed to initialize sherpa-onnx. Check native logs for details."
         }
         Log.e(logTag, "Detection failed for modelDir: $modelDir")
-        promise.reject("INIT_ERROR", errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
         return
       }
 
@@ -241,7 +250,7 @@ internal class SherpaOnnxSttHelper(
       if (hotwordsFileTrimmed.isNotEmpty() && !supportsHotwords(modelTypeStr)) {
         val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: $modelTypeStr"
         Log.e(logTag, errorMsg)
-        promise.reject("HOTWORDS_NOT_SUPPORTED", errorMsg)
+        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
         return
       }
       val resolvedHotwordsPath = if (hotwordsFileTrimmed.isNotEmpty()) {
@@ -250,14 +259,14 @@ internal class SherpaOnnxSttHelper(
         } catch (e: Exception) {
           val errorMsg = e.message ?: "Hotwords file could not be resolved"
           Log.e(logTag, errorMsg, e)
-          promise.reject("INVALID_HOTWORDS_FILE", errorMsg, e)
+          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
           return
         }
       } else ""
       if (resolvedHotwordsPath.isNotEmpty()) {
         validateHotwordsFile(resolvedHotwordsPath)?.let { errorMsg ->
           Log.e(logTag, errorMsg)
-          promise.reject("INVALID_HOTWORDS_FILE", errorMsg)
+          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
           return
         }
       }
@@ -267,7 +276,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        promise.reject("INIT_ERROR", errorMsg, e)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
         return
       }
       val resolvedRuleFars = try {
@@ -275,7 +284,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        promise.reject("INIT_ERROR", errorMsg, e)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
         return
       }
 
@@ -325,13 +334,13 @@ internal class SherpaOnnxSttHelper(
         } catch (e: Exception) {
           val errorMsg = "Exception creating recognizer: ${e.message ?: e.javaClass.simpleName}"
           Log.e(logTag, errorMsg, e)
-          promise.reject("INIT_ERROR", errorMsg, e)
+          promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
         }
       }
     } catch (e: Exception) {
       val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMsg, e)
-      promise.reject("INIT_ERROR", errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
     }
   }
 
@@ -339,12 +348,12 @@ internal class SherpaOnnxSttHelper(
     var tempPath: String? = null
     try {
       val inst = getInstance(instanceId) ?: run {
-        promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
+        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
         return
       }
       val rec = inst.recognizer
       if (rec == null) {
-        promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
+        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
       val pathToRead: String = if (filePath.startsWith("content://")) {
@@ -353,18 +362,18 @@ internal class SherpaOnnxSttHelper(
         filePath
       }
       if (pathToRead.isBlank()) {
-        promise.reject("TRANSCRIBE_ERROR", "Could not resolve audio file path")
+        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Could not resolve audio file path")
         return
       }
       val f = File(pathToRead)
       if (!f.exists() || f.length() == 0L) {
-        promise.reject("TRANSCRIBE_ERROR", "Audio file does not exist or is empty: $pathToRead (size=${f.length()})")
+        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Audio file does not exist or is empty: $pathToRead (size=${f.length()})")
         return
       }
       val wave = WaveReader.readWave(pathToRead)
       val samples = wave.samples ?: FloatArray(0)
       if (samples.isEmpty()) {
-        promise.reject("TRANSCRIBE_ERROR", "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
+        promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, "Could not read audio samples (file=${f.length()} bytes). The file must be WAV format (use convertAudioToWav16k for MP3/FLAC).")
         return
       }
       val stream: OfflineStream = rec.createStream()
@@ -376,14 +385,16 @@ internal class SherpaOnnxSttHelper(
         stream.acceptWaveform(samples, wave.sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
-        promise.resolve(resultToWritableMap(result))
+        val retained = retainResult(result, wave.sampleRate, "file")
+        val resultId = inst.resultSlot.store(retained)
+        promise.resolve(retained.toTranscribeRefMap(resultId))
       } finally {
         stream.release()
       }
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe file"
       Log.e(logTag, "transcribeFile error: $message", e)
-      promise.reject("TRANSCRIBE_ERROR", message, e)
+      promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
     } finally {
       tempPath?.let { path ->
         try {
@@ -396,12 +407,12 @@ internal class SherpaOnnxSttHelper(
   fun transcribeSamples(instanceId: String, samples: com.facebook.react.bridge.ReadableArray, sampleRate: Int, promise: Promise) {
     try {
       val inst = getInstance(instanceId) ?: run {
-        promise.reject("TRANSCRIBE_ERROR", "STT instance not found: $instanceId")
+        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
         return
       }
       val rec = inst.recognizer
       if (rec == null) {
-        promise.reject("TRANSCRIBE_ERROR", "STT not initialized. Call initializeStt first.")
+        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
       val floatSamples = FloatArray(samples.size()) { i -> samples.getDouble(i).toFloat() }
@@ -414,27 +425,229 @@ internal class SherpaOnnxSttHelper(
         stream.acceptWaveform(floatSamples, sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
-        promise.resolve(resultToWritableMap(result))
+        val retained = retainResult(result, sampleRate, "samples")
+        val resultId = inst.resultSlot.store(retained)
+        promise.resolve(retained.toTranscribeRefMap(resultId))
       } finally {
         stream.release()
       }
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe samples"
       Log.e(logTag, "transcribeSamples error: $message", e)
-      promise.reject("TRANSCRIBE_ERROR", message, e)
+      promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
     }
+  }
+
+  fun transcribeFromAudioBuffer(instanceId: String, bufferId: String, sourceTag: String?, promise: Promise) {
+    try {
+      val inst = getInstance(instanceId) ?: run {
+        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+        return
+      }
+      val rec = inst.recognizer
+      if (rec == null) {
+        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
+        return
+      }
+      val buffer = AudioBufferRegistry.get(bufferId)
+      if (buffer == null) {
+        promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+        return
+      }
+      if (buffer.samples.isEmpty()) {
+        promise.reject(SttErrorCodes.BUFFER_EMPTY, "Audio buffer is empty: $bufferId")
+        return
+      }
+      val stream: OfflineStream = rec.createStream()
+      try {
+        if (inst.currentSttModelType == "qwen3_asr") {
+          val hw = inst.qwen3HotwordsForStream
+          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
+        }
+        stream.acceptWaveform(buffer.samples, buffer.sampleRate)
+        rec.decode(stream)
+        val result = rec.getResult(stream)
+        val source = sourceTag?.trim()?.takeIf { it.isNotEmpty() } ?: "buffer"
+        val retained = retainResult(result, buffer.sampleRate, source)
+        val resultId = inst.resultSlot.store(retained)
+        promise.resolve(retained.toTranscribeRefMap(resultId))
+      } finally {
+        stream.release()
+      }
+    } catch (e: Exception) {
+      val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe from audio buffer"
+      Log.e(logTag, "transcribeFromAudioBuffer error: $message", e)
+      promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
+    }
+  }
+
+  // ==================== Result Getters ====================
+
+  fun getSttResultText(instanceId: String, resultId: Double, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) {
+      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
+      return
+    }
+    if (slot.isStale(resultId.toLong())) {
+      promise.reject(SttErrorCodes.STALE_RESULT, "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}. Materialize data before the next transcribe or use a second instance.")
+      return
+    }
+    promise.resolve(slot.result!!.text)
+  }
+
+  fun getSttResultTokens(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
+    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
+    val tokens = validated.tokens
+    val end = minOf(start + maxCount, tokens.size)
+    val arr = Arguments.createArray()
+    for (i in start until end) arr.pushString(tokens[i])
+    promise.resolve(arr)
+  }
+
+  fun getSttResultTimestamps(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
+    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
+    val timestamps = validated.timestamps
+    val end = minOf(start + maxCount, timestamps.size)
+    val arr = Arguments.createArray()
+    for (i in start until end) arr.pushDouble(timestamps[i].toDouble())
+    promise.resolve(arr)
+  }
+
+  fun getSttResultDurations(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
+    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
+    val durations = validated.durations
+    val end = minOf(start + maxCount, durations.size)
+    val arr = Arguments.createArray()
+    for (i in start until end) arr.pushDouble(durations[i].toDouble())
+    promise.resolve(arr)
+  }
+
+  fun getSttResultLang(instanceId: String, resultId: Double, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
+    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
+    promise.resolve(slot.result!!.lang)
+  }
+
+  fun getSttResultEmotion(instanceId: String, resultId: Double, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
+    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
+    promise.resolve(slot.result!!.emotion)
+  }
+
+  fun getSttResultEvent(instanceId: String, resultId: Double, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
+    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
+    promise.resolve(slot.result!!.event)
+  }
+
+  fun releaseSttResult(instanceId: String, promise: Promise) {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return
+    }
+    inst.resultSlot.release()
+    promise.resolve(null)
+  }
+
+  fun getAlignmentInput(instanceId: String, resultId: Double, promise: Promise): SttAlignmentInput? {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return null
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) {
+      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
+      return null
+    }
+    if (slot.isStale(resultId.toLong())) {
+      promise.reject(
+        SttErrorCodes.STALE_RESULT,
+        "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}. Materialize data before the next transcribe or use a second instance."
+      )
+      return null
+    }
+
+    val retained = slot.result!!
+    return SttAlignmentInput(
+      text = retained.text,
+      tokenCount = retained.tokens.size,
+      sampleRate = retained.sampleRate,
+    )
+  }
+
+  private fun validateSliceArgs(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise): SttRetainedResult? {
+    val inst = getInstance(instanceId) ?: run {
+      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
+      return null
+    }
+    val slot = inst.resultSlot
+    if (slot.isEmpty()) {
+      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
+      return null
+    }
+    if (slot.isStale(resultId.toLong())) {
+      promise.reject(SttErrorCodes.STALE_RESULT, "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}")
+      return null
+    }
+    if (start < 0) {
+      promise.reject(SttErrorCodes.SLICE_INVALID, "start must be >= 0, got $start")
+      return null
+    }
+    if (maxCount <= 0) {
+      promise.reject(SttErrorCodes.SLICE_INVALID, "maxCount must be > 0, got $maxCount")
+      return null
+    }
+    if (maxCount > SttErrorCodes.STT_MAX_SLICE_COUNT) {
+      promise.reject(SttErrorCodes.SLICE_TOO_LARGE, "maxCount $maxCount exceeds max ${SttErrorCodes.STT_MAX_SLICE_COUNT}")
+      return null
+    }
+    return slot.result!!
+  }
+
+  private fun retainResult(result: OfflineRecognizerResult, sampleRate: Int, source: String): SttRetainedResult {
+    return SttRetainedResult(
+      text = result.text,
+      tokens = result.tokens,
+      timestamps = result.timestamps,
+      durations = result.durations,
+      lang = result.lang,
+      emotion = result.emotion,
+      event = result.event,
+      sampleRate = sampleRate,
+      source = source
+    )
   }
 
   fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
     try {
       val inst = getInstance(instanceId) ?: run {
-        promise.reject("CONFIG_ERROR", "STT instance not found: $instanceId")
+        promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
         return
       }
       val rec = inst.recognizer
       val current = inst.lastRecognizerConfig
       if (rec == null || current == null) {
-        promise.reject("CONFIG_ERROR", "STT not initialized. Call initializeStt first.")
+        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
       val merged = current.copy(
@@ -451,7 +664,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        promise.reject("CONFIG_ERROR", errorMsg, e)
+        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
         return
       }
       val resolvedRuleFars = try {
@@ -459,7 +672,7 @@ internal class SherpaOnnxSttHelper(
       } catch (e: Exception) {
         val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
         Log.e(logTag, errorMsg, e)
-        promise.reject("CONFIG_ERROR", errorMsg, e)
+        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
         return
       }
 
@@ -469,7 +682,7 @@ internal class SherpaOnnxSttHelper(
         if (modelType == null || !supportsHotwords(modelType)) {
           val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}"
           Log.e(logTag, errorMsg)
-          promise.reject("HOTWORDS_NOT_SUPPORTED", errorMsg)
+          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
           return
         }
         try {
@@ -477,12 +690,12 @@ internal class SherpaOnnxSttHelper(
         } catch (e: Exception) {
           val errorMsg = e.message ?: "Hotwords file could not be resolved"
           Log.e(logTag, errorMsg, e)
-          promise.reject("INVALID_HOTWORDS_FILE", errorMsg, e)
+          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
           return
         }.also { path ->
           validateHotwordsFile(path)?.let { errorMsg ->
             Log.e(logTag, errorMsg)
-            promise.reject("INVALID_HOTWORDS_FILE", errorMsg)
+            promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
             return
           }
         }
@@ -504,32 +717,15 @@ internal class SherpaOnnxSttHelper(
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to set STT config"
       Log.e(logTag, "setSttConfig error: $message", e)
-      promise.reject("CONFIG_ERROR", message, e)
+      promise.reject(SttErrorCodes.CONFIG_FAILED, message, e)
     }
-  }
-
-  private fun resultToWritableMap(result: OfflineRecognizerResult): WritableMap {
-    val map = Arguments.createMap()
-    map.putString("text", result.text)
-    val tokensArray = Arguments.createArray()
-    for (t in result.tokens) tokensArray.pushString(t)
-    map.putArray("tokens", tokensArray)
-    val timestampsArray = Arguments.createArray()
-    for (t in result.timestamps) timestampsArray.pushDouble(t.toDouble())
-    map.putArray("timestamps", timestampsArray)
-    map.putString("lang", result.lang)
-    map.putString("emotion", result.emotion)
-    map.putString("event", result.event)
-    val durationsArray = Arguments.createArray()
-    for (d in result.durations) durationsArray.pushDouble(d.toDouble())
-    map.putArray("durations", durationsArray)
-    return map
   }
 
   fun unloadStt(instanceId: String, promise: Promise) {
     try {
       val inst = instances.remove(instanceId)
       if (inst != null) {
+        inst.resultSlot.release()
         inst.recognizer?.release()
         inst.recognizer = null
         inst.lastRecognizerConfig = null
@@ -537,7 +733,7 @@ internal class SherpaOnnxSttHelper(
       }
       promise.resolve(null)
     } catch (e: Exception) {
-      promise.reject("RELEASE_ERROR", "Failed to release resources", e)
+      promise.reject(SttErrorCodes.INTERNAL_ERROR, "Failed to release resources", e)
     }
   }
 

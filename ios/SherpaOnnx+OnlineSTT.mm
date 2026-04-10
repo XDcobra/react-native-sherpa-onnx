@@ -46,7 +46,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
                                 reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
-        reject(@"INIT_ERROR", @"instanceId is required", nil);
+        reject(@"STT_INIT_FAILED", @"instanceId is required", nil);
         return;
     }
     NSString *modelDir = options.modelDir();
@@ -54,7 +54,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     RCTLogInfo(@"[SherpaOnnx OnlineSTT] initializeOnlineSttWithOptions instanceId=%@ modelDir=%@ modelType=%@",
                instanceId, modelDir, modelType);
     if (modelDir == nil || [modelDir length] == 0) {
-        reject(@"INIT_ERROR", @"modelDir is required", nil);
+        reject(@"STT_INIT_FAILED", @"modelDir is required", nil);
         return;
     }
     std::string instanceIdStr = [instanceId UTF8String];
@@ -86,7 +86,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     @try {
         std::lock_guard<std::mutex> lock(g_online_stt_mutex);
         if (g_online_stt_instances.find(instanceIdStr) != g_online_stt_instances.end()) {
-            reject(@"INIT_ERROR", @"Online STT instance already exists", nil);
+            reject(@"STT_INIT_FAILED", @"Online STT instance already exists", nil);
             return;
         }
         RCTLogInfo(@"[SherpaOnnx OnlineSTT] creating wrapper and calling initialize");
@@ -118,7 +118,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         );
         if (!result.success) {
             RCTLogError(@"[SherpaOnnx OnlineSTT] initialize failed: %s", result.error.c_str());
-            reject(@"INIT_ERROR", [NSString stringWithUTF8String:result.error.c_str()], nil);
+            reject(@"STT_INIT_FAILED", [NSString stringWithUTF8String:result.error.c_str()], nil);
             return;
         }
         g_online_stt_instances[instanceIdStr] = std::move(wrapper);
@@ -127,7 +127,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Online STT init failed: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
-        reject(@"INIT_ERROR", errorMsg, nil);
+        reject(@"STT_INIT_FAILED", errorMsg, nil);
     }
 }
 
@@ -139,14 +139,14 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstance(instanceId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Online STT instance not found", nil);
+        reject(@"STT_STREAM_INSTANCE_NOT_FOUND", @"Online STT instance not found", nil);
         return;
     }
     std::string instanceIdStr = [instanceId UTF8String];
     std::string streamIdStr = [streamId UTF8String];
     std::string hotwordsStr = hotwords != nil ? [hotwords UTF8String] : "";
     if (!wrapper->createStream(streamIdStr, hotwordsStr)) {
-        reject(@"STREAM_ERROR", @"Stream already exists or create failed", nil);
+        reject(@"STT_INVALID_ARGUMENT", @"Stream already exists or create failed", nil);
         return;
     }
     std::lock_guard<std::mutex> lock(g_online_stt_mutex);
@@ -162,7 +162,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::vector<float> floatSamples;
@@ -181,7 +181,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -195,7 +195,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -209,7 +209,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -223,7 +223,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -239,7 +239,8 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
     resolve(@{
         @"text": [NSString stringWithUTF8String:r.text.c_str()] ?: @"",
         @"tokens": tokens,
-        @"timestamps": timestamps
+        @"timestamps": timestamps,
+        @"isFinal": @(wrapper->isEndpoint(streamIdStr) && r.text.length() > 0)
     });
 }
 
@@ -249,7 +250,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -263,7 +264,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -309,7 +310,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         }
         resolve(nil);
     } @catch (NSException *exception) {
-        reject(@"RELEASE_ERROR", [NSString stringWithFormat:@"unloadOnlineStt failed: %@", exception.reason], nil);
+        reject(@"STT_INTERNAL_ERROR", [NSString stringWithFormat:@"unloadOnlineStt failed: %@", exception.reason], nil);
     }
 }
 
@@ -321,7 +322,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
 {
     sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
     if (wrapper == nullptr) {
-        reject(@"STREAM_ERROR", @"Stream not found", nil);
+        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
         return;
     }
     std::string streamIdStr = [streamId UTF8String];
@@ -360,7 +361,8 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         @"text": [NSString stringWithUTF8String:r.text.c_str()] ?: @"",
         @"tokens": tokens,
         @"timestamps": timestamps,
-        @"isEndpoint": @(isEndpoint)
+        @"isEndpoint": @(isEndpoint),
+        @"isFinal": @(isEndpoint && r.text.length() > 0)
     });
 }
 

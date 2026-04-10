@@ -245,5 +245,5 @@ if (!onlineType) {
 ## See Also
 
 - [Streaming STT](stt-streaming.md) — Real-time recognition (feed PCM from this API)
-- [STT (Offline)](stt.md) — Full-file transcription
+- [STT (Offline)](stt-offline.md) — Full-file transcription
 - [Audio Conversion](audio-conversion.md) — Convert audio formats

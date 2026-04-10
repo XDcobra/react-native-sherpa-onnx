@@ -119,6 +119,44 @@ const aligned: GeneratedAudioWithTimestamps = await tts.generateSpeechWithTimest
 await tts.destroy();
 ```
 
+### 3) Data lifetime (native sink)
+
+Each **`createTTS()`** engine keeps only **one** current PCM payload in the native batch sink. Another `generateSpeech` on the **same** engine **replaces** that payload. Older `GeneratedAudio` objects remain valid for metadata (`sampleRate`, `numSamples`, `generation`); **`getSamples()`**, **`saveAudioFromGeneration(...)`**, and **`playFromSink(...)`** fail once that generation is **stale** (the sink now holds a newer generation).
+
+```ts
+import { createTTS, saveAudioFromGeneration, type GeneratedAudio } from 'react-native-sherpa-onnx/tts';
+
+// Abbreviated init — use the same pattern as §1 for full setup / detection.
+const tts = await createTTS({
+  modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' },
+  modelType: 'vits',
+});
+
+// Engine is alive — native sink is empty until the first synthesis.
+const audio1: GeneratedAudio = await tts.generateSpeech('Hello');
+// Sink now holds PCM for "Hello"; e.g. audio1.generation === 1.
+
+// Same engine: second synthesis overwrites the sink.
+const audio2: GeneratedAudio = await tts.generateSpeech('World');
+// Sink = only "World" (e.g. generation 2). audio1 still references generation 1.
+
+// Accessing PCM for the old generation is rejected on purpose:
+try {
+  await audio1.getSamples(); // same for saveAudioFromGeneration(audio1, …) or playFromSink(audio1.generation)
+} catch (e: unknown) {
+  // Native reject: code TTS_STALE_GENERATION (or TTS_SINK_STALE for playFromSink)
+  // Message explains one-sink-per-engine behavior and points to this section (Data lifetime)
+  console.error(e);
+}
+
+// To keep audio: persist **before** the next generate on the same engine
+const keep: GeneratedAudio = await tts.generateSpeech('Keep this');
+await saveAudioFromGeneration(keep, { kind: 'file', path: '/path/to/keep.wav' });
+await tts.generateSpeech('Next'); // keep is stale in the sink; the WAV file remains.
+
+await tts.destroy();
+```
+
 `modelType: 'auto'` (or omitted `modelType`) is still valid, but an explicit detected `modelType` is recommended when you need model-specific `modelOptions`.
 
 ## Setup (iOS & Android)

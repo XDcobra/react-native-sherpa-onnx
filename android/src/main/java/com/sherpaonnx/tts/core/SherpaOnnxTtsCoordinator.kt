@@ -138,7 +138,7 @@ internal class SherpaOnnxTtsCoordinator(
         throw IllegalStateException("No batch synthesis result available for instance $instanceId")
       }
       if (generation != currentGen) {
-        throw IllegalStateException("Generation $generation is stale; current is $currentGen")
+        throw IllegalStateException(ttsStaleGenerationUserMessage(generation, currentGen))
       }
       val samples = inst.sink.samples?.copyOf()
         ?: throw IllegalStateException("No sink samples available for instance $instanceId")

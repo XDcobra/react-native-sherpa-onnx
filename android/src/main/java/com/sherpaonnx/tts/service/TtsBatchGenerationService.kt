@@ -8,6 +8,7 @@ import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
+import com.sherpaonnx.tts.core.ttsStaleGenerationUserMessage
 import com.sherpaonnx.tts.core.TtsJniCallbackFactory
 import com.sherpaonnx.tts.core.dispatchGenerate
 import com.sherpaonnx.pcm.PcmPlayerService
@@ -257,6 +258,7 @@ internal class TtsBatchGenerationService(
   /**
    * Return PCM samples from the native sink as a number[] for the given generation.
    * This is the fallback path (non-JSI); a future JSI path can return Float32Array directly.
+   * TODO: implement a JSI path that returns Float32Array directly.
    */
   fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
     try {
@@ -272,7 +274,10 @@ internal class TtsBatchGenerationService(
           return
         }
         if (requestedGen != currentGen) {
-          promise.reject("TTS_STALE_GENERATION", "Generation $requestedGen is stale; current is $currentGen")
+          promise.reject(
+            "TTS_STALE_GENERATION",
+            ttsStaleGenerationUserMessage(requestedGen, currentGen)
+          )
           return
         }
         val pcm = inst.sink.samples!!
@@ -319,7 +324,10 @@ internal class TtsBatchGenerationService(
           return
         }
         if (requestedGen != currentGen) {
-          promise.reject("TTS_STALE_GENERATION", "Generation $requestedGen is stale; current is $currentGen")
+          promise.reject(
+            "TTS_STALE_GENERATION",
+            ttsStaleGenerationUserMessage(requestedGen, currentGen)
+          )
           return
         }
         pcmCopy = inst.sink.samples!!.copyOf()
@@ -349,7 +357,7 @@ internal class TtsBatchGenerationService(
           return
         }
         if (requestedGen != currentGen) {
-          promise.reject("TTS_SINK_STALE", "Generation $requestedGen is stale; current is $currentGen")
+          promise.reject("TTS_SINK_STALE", ttsStaleGenerationUserMessage(requestedGen, currentGen))
           return
         }
         pcmCopy = inst.sink.samples!!.copyOf()

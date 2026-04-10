@@ -11,14 +11,26 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.stt.AudioBufferRegistry
+import com.sherpaonnx.stt.SttErrorCodes
 import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
+
+  private data class SttAlignmentRecord(
+    val alignmentId: Long,
+    val segments: List<SttAlignmentSegment>,
+    val tokenCount: Int?,
+  )
 
   init {
     // Load onnxruntime first so libsherpa-onnx-jni.so can resolve OrtGetApiBase.
@@ -82,6 +94,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
+  private val sttAlignmentStore = ConcurrentHashMap<Long, SttAlignmentRecord>()
+  private val sttAlignmentIdCounter = AtomicLong(0)
   private var pcmCapture: SherpaOnnxPcmCapture? = null
 
   override fun getName(): String {
@@ -95,6 +109,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
+    sttAlignmentStore.clear()
     enhancementHelper.shutdown()
     pcmPlayerService.shutdown()
   }
@@ -681,27 +696,332 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     eventEmitter.emit("pcmLiveStreamError", payload)
   }
 
+  // ==================== Audio Buffer Registry ====================
+
+  override fun createAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
+    try {
+      val buffer = com.sherpaonnx.stt.AudioBufferRegistry.createFromFile(
+        sourcePath,
+        targetSampleRateHz?.toInt(),
+        forceMono
+      )
+      promise.resolve(buffer.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.stt.SttErrorCodes.INVALID_ARGUMENT, e.message ?: "Invalid argument", e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.stt.SttErrorCodes.TRANSCRIBE_FAILED, e.message ?: "Failed to create audio buffer", e)
+    }
+  }
+
+  override fun getAudioBufferInfo(bufferId: String, promise: Promise) {
+    val buffer = com.sherpaonnx.stt.AudioBufferRegistry.get(bufferId)
+    if (buffer == null) {
+      promise.reject(com.sherpaonnx.stt.SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+      return
+    }
+    promise.resolve(buffer.toWritableMap())
+  }
+
+  override fun releaseAudioBuffer(bufferId: String, promise: Promise) {
+    com.sherpaonnx.stt.AudioBufferRegistry.release(bufferId)
+    promise.resolve(null)
+  }
+
   // ==================== STT Methods ====================
 
-  /**
-   * Transcribe an audio file. Returns full result (text, tokens, timestamps, lang, emotion, event, durations).
-   */
   override fun transcribeFile(instanceId: String, filePath: String, promise: Promise) {
     sttHelper.transcribeFile(instanceId, filePath, promise)
   }
 
-  /**
-   * Transcribe from float PCM samples.
-   */
   override fun transcribeSamples(instanceId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
     sttHelper.transcribeSamples(instanceId, samples, sampleRate.toInt(), promise)
   }
 
-  /**
-   * Update recognizer config at runtime.
-   */
+  override fun transcribeFromAudioBuffer(instanceId: String, bufferId: String, sourceTag: String?, promise: Promise) {
+    sttHelper.transcribeFromAudioBuffer(instanceId, bufferId, sourceTag, promise)
+  }
+
+  // ==================== STT Result Getters ====================
+
+  override fun getSttResultText(instanceId: String, resultId: Double, promise: Promise) {
+    sttHelper.getSttResultText(instanceId, resultId, promise)
+  }
+
+  override fun getSttResultTokens(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
+    sttHelper.getSttResultTokens(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
+  }
+
+  override fun getSttResultTimestamps(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
+    sttHelper.getSttResultTimestamps(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
+  }
+
+  override fun getSttResultDurations(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
+    sttHelper.getSttResultDurations(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
+  }
+
+  override fun getSttResultLang(instanceId: String, resultId: Double, promise: Promise) {
+    sttHelper.getSttResultLang(instanceId, resultId, promise)
+  }
+
+  override fun getSttResultEmotion(instanceId: String, resultId: Double, promise: Promise) {
+    sttHelper.getSttResultEmotion(instanceId, resultId, promise)
+  }
+
+  override fun getSttResultEvent(instanceId: String, resultId: Double, promise: Promise) {
+    sttHelper.getSttResultEvent(instanceId, resultId, promise)
+  }
+
+  override fun releaseSttResult(instanceId: String, promise: Promise) {
+    sttHelper.releaseSttResult(instanceId, promise)
+  }
+
   override fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
     sttHelper.setSttConfig(instanceId, options, promise)
+  }
+
+  // ==================== Alignment Stage ====================
+
+  override fun alignSttResult(instanceId: String, resultId: Double, bufferId: String, alignmentModelId: String?, granularity: String?, promise: Promise) {
+    val sttInput = sttHelper.getAlignmentInput(instanceId, resultId, promise) ?: return
+    val buffer = AudioBufferRegistry.get(bufferId)
+    if (buffer == null) {
+      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+      return
+    }
+
+    if (sttInput.sampleRate != buffer.sampleRate) {
+      promise.reject(
+        SttErrorCodes.ALIGNMENT_INPUT_MISMATCH,
+        "STT result sampleRate (${sttInput.sampleRate}) does not match buffer sampleRate (${buffer.sampleRate})"
+      )
+      return
+    }
+
+    val alignmentGranularity = try {
+      sttGranularityToAlignmentGranularity(granularity)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(SttErrorCodes.INVALID_ARGUMENT, e.message, e)
+      return
+    }
+
+    val mode = if (alignmentModelId.isNullOrBlank()) "proportional" else "accurate"
+
+    alignmentHelper.alignTextToPcmForStt(
+      text = sttInput.text,
+      samples = buffer.samples,
+      sampleRate = buffer.sampleRate,
+      mode = mode,
+      granularity = alignmentGranularity,
+      alignmentModelPath = alignmentModelId,
+      onSuccess = { segments, _ ->
+        val alignmentId = sttAlignmentIdCounter.incrementAndGet()
+        sttAlignmentStore[alignmentId] = SttAlignmentRecord(
+          alignmentId = alignmentId,
+          segments = segments,
+          tokenCount = sttInput.tokenCount,
+        )
+        val map = Arguments.createMap()
+        map.putBoolean("success", true)
+        map.putDouble("alignmentId", alignmentId.toDouble())
+        map.putInt("segmentCount", segments.size)
+        map.putInt("tokenCount", sttInput.tokenCount)
+        promise.resolve(map)
+      },
+      onError = { message, error ->
+        promise.reject(SttErrorCodes.ALIGNMENT_FAILED, message, error)
+      }
+    )
+  }
+
+  override fun alignTextToBuffer(text: String, bufferId: String, alignmentModelId: String?, granularity: String?, promise: Promise) {
+    if (text.isBlank()) {
+      promise.reject(SttErrorCodes.INVALID_ARGUMENT, "text is required")
+      return
+    }
+
+    val buffer = AudioBufferRegistry.get(bufferId)
+    if (buffer == null) {
+      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+      return
+    }
+
+    val alignmentGranularity = try {
+      sttGranularityToAlignmentGranularity(granularity)
+    } catch (e: IllegalArgumentException) {
+      promise.reject(SttErrorCodes.INVALID_ARGUMENT, e.message, e)
+      return
+    }
+
+    val mode = if (alignmentModelId.isNullOrBlank()) "proportional" else "accurate"
+
+    alignmentHelper.alignTextToPcmForStt(
+      text = text,
+      samples = buffer.samples,
+      sampleRate = buffer.sampleRate,
+      mode = mode,
+      granularity = alignmentGranularity,
+      alignmentModelPath = alignmentModelId,
+      onSuccess = { segments, _ ->
+        val alignmentId = sttAlignmentIdCounter.incrementAndGet()
+        sttAlignmentStore[alignmentId] = SttAlignmentRecord(
+          alignmentId = alignmentId,
+          segments = segments,
+          tokenCount = null,
+        )
+        val map = Arguments.createMap()
+        map.putBoolean("success", true)
+        map.putDouble("alignmentId", alignmentId.toDouble())
+        map.putInt("segmentCount", segments.size)
+        promise.resolve(map)
+      },
+      onError = { message, error ->
+        promise.reject(SttErrorCodes.ALIGNMENT_FAILED, message, error)
+      }
+    )
+  }
+
+  override fun getAlignmentSegments(alignmentId: Double, start: Double, maxCount: Double, promise: Promise) {
+    val id = alignmentId.toLong()
+    val record = sttAlignmentStore[id]
+    if (record == null) {
+      promise.reject(SttErrorCodes.ALIGNMENT_NOT_FOUND, "Alignment not found: $id")
+      return
+    }
+
+    val s = start.toInt()
+    val mc = maxCount.toInt()
+    if (s < 0) {
+      promise.reject(SttErrorCodes.ALIGNMENT_SLICE_INVALID, "start must be >= 0, got $s")
+      return
+    }
+    if (mc <= 0) {
+      promise.reject(SttErrorCodes.ALIGNMENT_SLICE_INVALID, "maxCount must be > 0, got $mc")
+      return
+    }
+    if (mc > SttErrorCodes.ALIGNMENT_MAX_SLICE_COUNT) {
+      promise.reject(
+        SttErrorCodes.ALIGNMENT_SLICE_TOO_LARGE,
+        "maxCount $mc exceeds max ${SttErrorCodes.ALIGNMENT_MAX_SLICE_COUNT}"
+      )
+      return
+    }
+
+    if (s >= record.segments.size) {
+      promise.resolve(Arguments.createArray())
+      return
+    }
+
+    val end = kotlin.math.min(s + mc, record.segments.size)
+    val out = Arguments.createArray()
+    for (i in s until end) {
+      val seg = record.segments[i]
+      val m = Arguments.createMap()
+      m.putString("text", seg.text)
+      m.putDouble("startSec", seg.startSec)
+      m.putDouble("endSec", seg.endSec)
+      out.pushMap(m)
+    }
+    promise.resolve(out)
+  }
+
+  override fun saveAlignment(alignmentId: Double, targetPath: String, format: String?, promise: Promise) {
+    val id = alignmentId.toLong()
+    val record = sttAlignmentStore[id]
+    if (record == null) {
+      promise.reject(SttErrorCodes.ALIGNMENT_NOT_FOUND, "Alignment not found: $id")
+      return
+    }
+
+    try {
+      val normalizedFormat = (format ?: "json").trim().lowercase(Locale.US)
+      val target = File(targetPath)
+      target.parentFile?.mkdirs()
+
+      when (normalizedFormat) {
+        "json" -> writeAlignmentAsJson(record, target)
+        "srt" -> writeAlignmentAsSrt(record, target)
+        "vtt" -> writeAlignmentAsVtt(record, target)
+        else -> {
+          promise.reject(SttErrorCodes.INVALID_ARGUMENT, "Unsupported alignment format: $normalizedFormat")
+          return
+        }
+      }
+
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(SttErrorCodes.ALIGNMENT_FAILED, e.message ?: "Failed to save alignment", e)
+    }
+  }
+
+  override fun releaseAlignment(alignmentId: Double, promise: Promise) {
+    sttAlignmentStore.remove(alignmentId.toLong())
+    promise.resolve(null)
+  }
+
+  private fun sttGranularityToAlignmentGranularity(granularity: String?): String {
+    val g = granularity?.trim()?.lowercase(Locale.US) ?: "segment"
+    return when (g) {
+      "segment" -> "sentence"
+      "word" -> "word"
+      "token" -> "character"
+      else -> throw IllegalArgumentException("Unsupported granularity: $granularity")
+    }
+  }
+
+  private fun writeAlignmentAsJson(record: SttAlignmentRecord, target: File) {
+    val sb = StringBuilder()
+    sb.append("[")
+    record.segments.forEachIndexed { index, seg ->
+      if (index > 0) sb.append(',')
+      sb.append("{\"text\":\"")
+      sb.append(seg.text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n"))
+      sb.append("\",\"startSec\":")
+      sb.append(seg.startSec)
+      sb.append(",\"endSec\":")
+      sb.append(seg.endSec)
+      sb.append('}')
+    }
+    sb.append(']')
+    target.writeText(sb.toString())
+  }
+
+  private fun writeAlignmentAsSrt(record: SttAlignmentRecord, target: File) {
+    val sb = StringBuilder()
+    record.segments.forEachIndexed { index, seg ->
+      sb.append(index + 1)
+      sb.append('\n')
+      sb.append(formatSubtitleTimestamp(seg.startSec, useDotSeparator = false))
+      sb.append(" --> ")
+      sb.append(formatSubtitleTimestamp(seg.endSec, useDotSeparator = false))
+      sb.append('\n')
+      sb.append(seg.text)
+      sb.append("\n\n")
+    }
+    target.writeText(sb.toString())
+  }
+
+  private fun writeAlignmentAsVtt(record: SttAlignmentRecord, target: File) {
+    val sb = StringBuilder()
+    sb.append("WEBVTT\n\n")
+    record.segments.forEach { seg ->
+      sb.append(formatSubtitleTimestamp(seg.startSec, useDotSeparator = true))
+      sb.append(" --> ")
+      sb.append(formatSubtitleTimestamp(seg.endSec, useDotSeparator = true))
+      sb.append('\n')
+      sb.append(seg.text)
+      sb.append("\n\n")
+    }
+    target.writeText(sb.toString())
+  }
+
+  private fun formatSubtitleTimestamp(seconds: Double, useDotSeparator: Boolean): String {
+    val totalMs = (seconds.coerceAtLeast(0.0) * 1000.0).toLong()
+    val hours = totalMs / 3_600_000
+    val minutes = (totalMs % 3_600_000) / 60_000
+    val secs = (totalMs % 60_000) / 1_000
+    val millis = totalMs % 1_000
+    val separator = if (useDotSeparator) '.' else ','
+    return String.format(Locale.US, "%02d:%02d:%02d%c%03d", hours, minutes, secs, separator, millis)
   }
 
   /**

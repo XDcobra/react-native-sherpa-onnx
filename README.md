@@ -116,7 +116,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 | Feature | Status | Docs | Notes |
 |---------|--------|------|-------|
-| Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
+| Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt-offline.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
 | Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
 | Live capture API | ✅ **Supported** | [PCM live stream](./docs/pcm-live-stream.md) | Native microphone capture with resampling for live transcription (use with streaming STT). |
 | Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
@@ -129,9 +129,9 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
 | Speech Enhancement | ✅ **Supported** | [Speech Enhancement](./docs/speech-enhancement.md) | API and initialization covered in docs. |
-| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 0.5.0 |
-| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 0.6.0 |
-| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 0.7.0 |
+| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.1.0 |
+| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.2.0 |
+| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.3.0 |
 
 ## Platform Support Status
 
@@ -203,7 +203,7 @@ APIs, batch vs online processing, and initialization are covered in [Speech Enha
 ## Documentation
 
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
-- [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
+- [Speech-to-Text (STT)](./docs/stt-offline.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation

@@ -259,6 +259,6 @@ await stt.setConfig({ hotwordsFile: hotwordsPath });
 
 ## See Also
 
-- [STT](stt.md) — Offline speech recognition API
+- [STT](stt-offline.md) — Offline speech recognition API
 - [Streaming STT](stt-streaming.md) — Real-time recognition with hotwords
 - [Model Setup](model-setup.md) — Model discovery and paths
