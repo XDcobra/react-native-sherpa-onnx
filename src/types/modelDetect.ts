@@ -58,6 +58,15 @@ export interface SttDetectModelResult extends ModelDetectResultBase {
   isHardwareSpecificUnsupported?: boolean;
 }
 
+// ─── Enhancement extension ─────────────────────────────────────────────
+
+export interface EnhancementDetectModelResult extends ModelDetectResultBase {
+  /** Resolved model file path from detection. */
+  paths?: {
+    model?: string;
+  };
+}
+
 // ─── Alignment extension ────────────────────────────────────────────────
 
 export interface AlignmentDetectModelResult extends ModelDetectResultBase {

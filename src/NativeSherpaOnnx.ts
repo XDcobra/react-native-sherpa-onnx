@@ -612,12 +612,16 @@ export interface Spec extends TurboModule {
 
   detectEnhancementModel(
     modelDir: string,
-    modelType?: string
+    assetName: string | null,
+    modelType?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
   }>;
 
   initializeEnhancement(

@@ -1,7 +1,12 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+import { resolvePublicLanguageHints } from '../model-languages';
+import { ModelCategory } from '../download/types';
+import { isDetectionSource } from './types';
 import type {
+  DetectedModelEntry,
+  DetectionSource,
   EnhancedAudio,
   EnhancementDetectResult,
   EnhancementEngine,
@@ -9,6 +14,20 @@ import type {
 } from './types';
 
 let enhancementInstanceCounter = 0;
+
+function deriveAssetNameFromModelPath(
+  modelPath: ModelPathConfig
+): string | null {
+  const raw = modelPath.path?.trim();
+  if (!raw) return null;
+  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
+  if (!leaf) return null;
+  return leaf
+    .replace(/\.tar\.bz2$/i, '')
+    .replace(/\.tar\.gz$/i, '')
+    .replace(/\.tgz$/i, '')
+    .replace(/\.zip$/i, '');
+}
 
 function normalizeEnhancedAudio(raw: {
   samples?: number[] | Float32Array;
@@ -25,21 +44,61 @@ function normalizeEnhancedAudio(raw: {
 
 export async function detectEnhancementModel(
   modelPath: ModelPathConfig,
-  options?: { modelType?: EnhancementInitializeOptions['modelType'] }
+  options?: {
+    modelType?: EnhancementInitializeOptions['modelType'];
+    assetName?: string;
+  }
 ): Promise<EnhancementDetectResult> {
   const resolvedPath = await resolveModelPath(modelPath);
+  const optionAssetName = options?.assetName?.trim();
+  const assetName =
+    optionAssetName && optionAssetName.length > 0
+      ? optionAssetName
+      : deriveAssetNameFromModelPath(modelPath);
   const raw = await SherpaOnnx.detectEnhancementModel(
     resolvedPath,
-    options?.modelType
+    assetName,
+    options?.modelType ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
+  const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
+    (m) => ({
+      type: m.type,
+      modelDir: m.modelDir,
+    })
+  );
+  const detectionSources: DetectionSource[] = [];
+  const rawSources = raw.detectionSources;
+  if (Array.isArray(rawSources)) {
+    for (const s of rawSources) {
+      if (typeof s === 'string' && isDetectionSource(s)) {
+        detectionSources.push(s);
+      }
+    }
+  }
+  const rawLanguageStrings =
+    Array.isArray(raw.languages) && raw.languages.length > 0
+      ? raw.languages.filter((x): x is string => typeof x === 'string')
+      : [];
+  const resolvedLanguages = resolvePublicLanguageHints({
+    domain: ModelCategory.Enhancement,
+    modelType: raw.modelType,
+    rawFromNative: rawLanguageStrings,
+  });
+  const quantization =
+    typeof raw.quantization === 'string' && raw.quantization.length > 0
+      ? raw.quantization
+      : undefined;
   return {
     success: raw.success,
     ...(err.length > 0 ? { error: err } : {}),
-    detectedModels: raw.detectedModels ?? [],
+    detectedModels,
     ...(raw.modelType != null && raw.modelType !== ''
       ? { modelType: raw.modelType }
       : {}),
+    ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
+    ...(quantization != null ? { quantization } : {}),
+    ...(detectionSources.length > 0 ? { detectionSources } : {}),
   };
 }
 
