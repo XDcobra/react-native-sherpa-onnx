@@ -30,7 +30,8 @@ import com.k2fsa.sherpa.onnx.OfflineCanaryModelConfig
 import com.k2fsa.sherpa.onnx.OfflineOmnilingualAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMedAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
-import com.sherpaonnx.stt.AudioBufferRegistry
+import com.sherpaonnx.audio.pipeline.OfflineEntry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.stt.SttErrorCodes
 import com.sherpaonnx.stt.SttRetainedResult
 import com.sherpaonnx.stt.SttResultSlot
@@ -449,26 +450,27 @@ internal class SherpaOnnxSttHelper(
         promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
-      val buffer = AudioBufferRegistry.get(bufferId)
-      if (buffer == null) {
-        promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+      val entry = PipelineAudioRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline audio buffer not found: $bufferId")
         return
       }
-      if (buffer.samples.isEmpty()) {
+      if (entry.numSamples == 0) {
         promise.reject(SttErrorCodes.BUFFER_EMPTY, "Audio buffer is empty: $bufferId")
         return
       }
+      val samples = entry.readAllSamples()
       val stream: OfflineStream = rec.createStream()
       try {
         if (inst.currentSttModelType == "qwen3_asr") {
           val hw = inst.qwen3HotwordsForStream
           if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
         }
-        stream.acceptWaveform(buffer.samples, buffer.sampleRate)
+        stream.acceptWaveform(samples, entry.sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
         val source = sourceTag?.trim()?.takeIf { it.isNotEmpty() } ?: "buffer"
-        val retained = retainResult(result, buffer.sampleRate, source)
+        val retained = retainResult(result, entry.sampleRate, source)
         val resultId = inst.resultSlot.store(retained)
         promise.resolve(retained.toTranscribeRefMap(resultId))
       } finally {

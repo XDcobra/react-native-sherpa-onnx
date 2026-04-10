@@ -562,9 +562,10 @@ struct PaLiveEntry {
 
 // ==================== Registry ====================
 
-static std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
-static std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
-static std::mutex g_pa_mutex;
+// Non-static: shared with SherpaOnnx+STT.mm via SherpaOnnx+PipelineAudioGlobals.h
+std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
+std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
+std::mutex g_pa_mutex;
 static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB
 
 static std::string pa_generateId(const char *prefix) {

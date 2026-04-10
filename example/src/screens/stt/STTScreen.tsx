@@ -51,7 +51,7 @@ import {
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/pcm-stream';
+} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   startWebAudioFilePlayback,
   stopWebAudioPlayback,

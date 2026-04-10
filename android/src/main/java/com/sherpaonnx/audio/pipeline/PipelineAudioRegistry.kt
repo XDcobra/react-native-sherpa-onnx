@@ -15,8 +15,6 @@ import java.util.concurrent.ConcurrentHashMap
  * Thread-safe via ConcurrentHashMap. Buffer IDs are prefixed for runtime type checking:
  * - `off_…` for OfflineEntry
  * - `live_…` for LiveEntry
- *
- * This registry replaces the old AudioBufferRegistry for all new pipeline operations.
  */
 object PipelineAudioRegistry {
 

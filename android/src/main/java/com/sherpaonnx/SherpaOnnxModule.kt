@@ -11,7 +11,7 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
-import com.sherpaonnx.stt.AudioBufferRegistry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.stt.SttErrorCodes
 import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
@@ -648,37 +648,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
   }
 
-  // ==================== Audio Buffer Registry ====================
-
-  override fun createAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
-    try {
-      val buffer = com.sherpaonnx.stt.AudioBufferRegistry.createFromFile(
-        sourcePath,
-        targetSampleRateHz?.toInt(),
-        forceMono
-      )
-      promise.resolve(buffer.toWritableMap())
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.stt.SttErrorCodes.INVALID_ARGUMENT, e.message ?: "Invalid argument", e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.stt.SttErrorCodes.TRANSCRIBE_FAILED, e.message ?: "Failed to create audio buffer", e)
-    }
-  }
-
-  override fun getAudioBufferInfo(bufferId: String, promise: Promise) {
-    val buffer = com.sherpaonnx.stt.AudioBufferRegistry.get(bufferId)
-    if (buffer == null) {
-      promise.reject(com.sherpaonnx.stt.SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
-      return
-    }
-    promise.resolve(buffer.toWritableMap())
-  }
-
-  override fun releaseAudioBuffer(bufferId: String, promise: Promise) {
-    com.sherpaonnx.stt.AudioBufferRegistry.release(bufferId)
-    promise.resolve(null)
-  }
-
   // ==================== Pipeline Audio Buffers ====================
 
   override fun createOfflineAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
@@ -988,16 +957,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun alignSttResult(instanceId: String, resultId: Double, bufferId: String, alignmentModelId: String?, granularity: String?, promise: Promise) {
     val sttInput = sttHelper.getAlignmentInput(instanceId, resultId, promise) ?: return
-    val buffer = AudioBufferRegistry.get(bufferId)
-    if (buffer == null) {
-      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+    val entry = PipelineAudioRegistry.getOffline(bufferId)
+    if (entry == null) {
+      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline audio buffer not found: $bufferId")
       return
     }
 
-    if (sttInput.sampleRate != buffer.sampleRate) {
+    if (sttInput.sampleRate != entry.sampleRate) {
       promise.reject(
         SttErrorCodes.ALIGNMENT_INPUT_MISMATCH,
-        "STT result sampleRate (${sttInput.sampleRate}) does not match buffer sampleRate (${buffer.sampleRate})"
+        "STT result sampleRate (${sttInput.sampleRate}) does not match buffer sampleRate (${entry.sampleRate})"
       )
       return
     }
@@ -1011,10 +980,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     val mode = if (alignmentModelId.isNullOrBlank()) "proportional" else "accurate"
 
+    val samples = entry.readAllSamples()
     alignmentHelper.alignTextToPcmForStt(
       text = sttInput.text,
-      samples = buffer.samples,
-      sampleRate = buffer.sampleRate,
+      samples = samples,
+      sampleRate = entry.sampleRate,
       mode = mode,
       granularity = alignmentGranularity,
       alignmentModelPath = alignmentModelId,
@@ -1044,9 +1014,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    val buffer = AudioBufferRegistry.get(bufferId)
-    if (buffer == null) {
-      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Audio buffer not found: $bufferId")
+    val entry = PipelineAudioRegistry.getOffline(bufferId)
+    if (entry == null) {
+      promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline audio buffer not found: $bufferId")
       return
     }
 
@@ -1059,10 +1029,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     val mode = if (alignmentModelId.isNullOrBlank()) "proportional" else "accurate"
 
+    val samples = entry.readAllSamples()
     alignmentHelper.alignTextToPcmForStt(
       text = text,
-      samples = buffer.samples,
-      sampleRate = buffer.sampleRate,
+      samples = samples,
+      sampleRate = entry.sampleRate,
       mode = mode,
       granularity = alignmentGranularity,
       alignmentModelPath = alignmentModelId,

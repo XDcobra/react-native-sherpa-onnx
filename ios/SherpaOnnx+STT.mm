@@ -6,6 +6,7 @@
  */
 
 #import "SherpaOnnx.h"
+#import "SherpaOnnx+PipelineAudioGlobals.h"
 #import <React/RCTLog.h>
 
 #include "sherpa-onnx-stt-wrapper.h"
@@ -82,18 +83,6 @@ struct SttResultSlot {
     bool isEmpty() const { return retained == nullptr; }
 };
 
-// ==================== Audio Buffer Registry ====================
-struct AudioBuffer {
-    std::string bufferId;
-    std::string kind;
-    std::vector<float> samples;
-    int32_t sampleRate;
-    int32_t channelCount;
-};
-
-static std::unordered_map<std::string, std::unique_ptr<AudioBuffer>> g_audio_buffers;
-static std::mutex g_audio_buffer_mutex;
-
 struct SttAlignmentSegment {
     std::string text;
     double startSec;
@@ -109,20 +98,6 @@ struct SttAlignmentRecord {
 static std::atomic<int64_t> g_alignment_id_counter{0};
 static std::unordered_map<int64_t, SttAlignmentRecord> g_stt_alignments;
 static std::mutex g_stt_alignment_mutex;
-
-static NSDictionary *audioBufferToDict(const AudioBuffer& buf) {
-    double durationMs = (buf.samples.size() > 0 && buf.sampleRate > 0)
-        ? (double)buf.samples.size() / buf.sampleRate * 1000.0
-        : 0.0;
-    return @{
-        @"bufferId": [NSString stringWithUTF8String:buf.bufferId.c_str()],
-        @"kind": [NSString stringWithUTF8String:buf.kind.c_str()],
-        @"sampleRate": @(buf.sampleRate),
-        @"channelCount": @(buf.channelCount),
-        @"numSamples": @((int)buf.samples.size()),
-        @"durationMs": @(durationMs)
-    };
-}
 
 // ==================== Instance State ====================
 struct SttInstanceState {
@@ -188,31 +163,6 @@ static std::unique_ptr<SttRetainedResult> retainResult(const sherpaonnx::SttReco
     retained->sampleRate = sampleRate;
     retained->source = source;
     return retained;
-}
-
-static std::vector<float> resampleLinear(
-    const std::vector<float>& input,
-    int32_t inputRate,
-    int32_t outputRate) {
-    if (input.empty() || inputRate <= 0 || outputRate <= 0 || inputRate == outputRate) {
-        return input;
-    }
-
-    const size_t outputSize = std::max<size_t>(
-        1,
-        static_cast<size_t>((static_cast<double>(input.size()) * outputRate) / inputRate));
-
-    std::vector<float> out(outputSize);
-    const double ratio = static_cast<double>(inputRate) / outputRate;
-    for (size_t i = 0; i < outputSize; ++i) {
-        const double src = i * ratio;
-        const size_t left = static_cast<size_t>(src);
-        const size_t right = std::min(left + 1, input.size() - 1);
-        const float frac = static_cast<float>(src - left);
-        out[i] = input[left] + (input[right] - input[left]) * frac;
-    }
-
-    return out;
 }
 
 static std::string sttGranularityToAlignmentGranularity(NSString *granularity) {
@@ -753,95 +703,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     }
 }
 
-// ==================== Audio Buffer Registry Methods ====================
-
-- (void)createAudioBufferFromFile:(NSString *)sourcePath
-              targetSampleRateHz:(NSNumber *)targetSampleRateHz
-                       forceMono:(NSNumber *)forceMono
-                         resolve:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject
-{
-    @try {
-        std::string sourcePathStr = [sourcePath UTF8String];
-
-        // Use sherpa-onnx CXX ReadWave to load audio
-        sherpa_onnx::cxx::Wave waveData;
-        try {
-            waveData = sherpa_onnx::cxx::ReadWave(sourcePathStr);
-        } catch (const std::exception& e) {
-            reject(kSttErrTranscribeFailed,
-                   [NSString stringWithFormat:@"Failed to read audio file: %s", e.what()], nil);
-            return;
-        }
-        if (waveData.samples.empty()) {
-            reject(kSttErrTranscribeFailed, @"Audio file is empty", nil);
-            return;
-        }
-
-        // Generate UUID for bufferId
-        NSString *uuid = [[NSUUID UUID] UUIDString];
-        std::string bufferId = [uuid UTF8String];
-
-        int32_t inputRate = static_cast<int32_t>(waveData.sample_rate);
-        int32_t outputRate = inputRate;
-        if (targetSampleRateHz != nil) {
-            outputRate = (int32_t)[targetSampleRateHz intValue];
-            if (outputRate <= 0) {
-                reject(kSttErrInvalidArgument, @"targetSampleRateHz must be > 0", nil);
-                return;
-            }
-        }
-
-        std::vector<float> outputSamples =
-            (outputRate == inputRate)
-                ? std::move(waveData.samples)
-                : resampleLinear(waveData.samples, inputRate, outputRate);
-
-        auto buf = std::make_unique<AudioBuffer>();
-        buf->bufferId = bufferId;
-        buf->kind = "offlinePcmBuffer";
-        buf->samples = std::move(outputSamples);
-        buf->sampleRate = outputRate;
-        (void)forceMono; // ReadWave already returns mono PCM.
-        buf->channelCount = 1;
-
-        NSDictionary *dict = audioBufferToDict(*buf);
-        {
-            std::lock_guard<std::mutex> lock(g_audio_buffer_mutex);
-            g_audio_buffers[bufferId] = std::move(buf);
-        }
-        resolve(dict);
-    } @catch (NSException *exception) {
-        reject(kSttErrTranscribeFailed,
-               [NSString stringWithFormat:@"Failed to create audio buffer: %@", exception.reason], nil);
-    }
-}
-
-- (void)getAudioBufferInfo:(NSString *)bufferId
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
-{
-    std::string bufferIdStr = [bufferId UTF8String];
-    std::lock_guard<std::mutex> lock(g_audio_buffer_mutex);
-    auto it = g_audio_buffers.find(bufferIdStr);
-    if (it == g_audio_buffers.end()) {
-        reject(kSttErrBufferNotFound,
-               [NSString stringWithFormat:@"Audio buffer not found: %@", bufferId], nil);
-        return;
-    }
-    resolve(audioBufferToDict(*it->second));
-}
-
-- (void)releaseAudioBuffer:(NSString *)bufferId
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
-{
-    std::string bufferIdStr = [bufferId UTF8String];
-    std::lock_guard<std::mutex> lock(g_audio_buffer_mutex);
-    g_audio_buffers.erase(bufferIdStr);
-    resolve(nil);
-}
-
 // ==================== Transcribe From Buffer ====================
 
 - (void)transcribeFromAudioBuffer:(NSString *)instanceId
@@ -864,19 +725,25 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         return;
     }
 
-    std::vector<float> samples;
-    int32_t sampleRate = 0;
+    std::shared_ptr<PaOfflineEntry> entry;
     {
-        std::lock_guard<std::mutex> bufLock(g_audio_buffer_mutex);
-        auto bufIt = g_audio_buffers.find(bufferIdStr);
-        if (bufIt == g_audio_buffers.end()) {
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+        auto oit = g_pa_offline.find(bufferIdStr);
+        if (oit == g_pa_offline.end()) {
             reject(kSttErrBufferNotFound,
-                   [NSString stringWithFormat:@"Audio buffer not found: %@", bufferId], nil);
+                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
             return;
         }
-        samples = bufIt->second->samples;
-        sampleRate = bufIt->second->sampleRate;
+        entry = oit->second;
     }
+
+    if (entry->numSamples() == 0) {
+        reject(kSttErrBufferNotFound, @"Audio buffer is empty", nil);
+        return;
+    }
+
+    std::vector<float> samples = entry->readAllSamples();
+    int32_t sampleRate = entry->sampleRate;
 
     SttInstanceState *inst = it->second.get();
     try {
@@ -1093,10 +960,9 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     }
 
     std::string instanceIdStr = [instanceId UTF8String];
-    std::vector<float> samples;
-    int32_t bufferSampleRate = 0;
     std::string text;
     int32_t tokenCount = 0;
+    int32_t sttSampleRate = 0;
 
     {
         std::lock_guard<std::mutex> sttLock(g_stt_mutex);
@@ -1118,28 +984,33 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
 
         text = slot.retained->text;
         tokenCount = (int32_t)slot.retained->tokens.size();
-
-        std::string bufferIdStr = [bufferId UTF8String];
-        std::lock_guard<std::mutex> bufferLock(g_audio_buffer_mutex);
-        auto bit = g_audio_buffers.find(bufferIdStr);
-        if (bit == g_audio_buffers.end()) {
-            reject(kSttErrBufferNotFound, @"Audio buffer not found", nil);
-            return;
-        }
-
-        if (slot.retained->sampleRate != bit->second->sampleRate) {
-            reject(
-                kSttErrAlignmentInputMismatch,
-                [NSString stringWithFormat:@"STT result sampleRate (%d) does not match buffer sampleRate (%d)",
-                                           slot.retained->sampleRate,
-                                           bit->second->sampleRate],
-                nil);
-            return;
-        }
-
-        samples = bit->second->samples;
-        bufferSampleRate = bit->second->sampleRate;
+        sttSampleRate = slot.retained->sampleRate;
     }
+
+    std::string bufferIdStr = [bufferId UTF8String];
+    std::shared_ptr<PaOfflineEntry> entry;
+    {
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+        auto oit = g_pa_offline.find(bufferIdStr);
+        if (oit == g_pa_offline.end()) {
+            reject(kSttErrBufferNotFound, @"Offline audio buffer not found", nil);
+            return;
+        }
+        entry = oit->second;
+    }
+
+    if (sttSampleRate != entry->sampleRate) {
+        reject(
+            kSttErrAlignmentInputMismatch,
+            [NSString stringWithFormat:@"STT result sampleRate (%d) does not match buffer sampleRate (%d)",
+                                       sttSampleRate,
+                                       entry->sampleRate],
+            nil);
+        return;
+    }
+
+    std::vector<float> samples = entry->readAllSamples();
+    int32_t bufferSampleRate = entry->sampleRate;
 
     try {
         const std::string alignGranularity = sttGranularityToAlignmentGranularity(granularity);
@@ -1216,19 +1087,20 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         return;
     }
 
-    std::vector<float> samples;
-    int32_t bufferSampleRate = 0;
+    std::string bufferIdStr = [bufferId UTF8String];
+    std::shared_ptr<PaOfflineEntry> entry;
     {
-        std::string bufferIdStr = [bufferId UTF8String];
-        std::lock_guard<std::mutex> bufferLock(g_audio_buffer_mutex);
-        auto bit = g_audio_buffers.find(bufferIdStr);
-        if (bit == g_audio_buffers.end()) {
-            reject(kSttErrBufferNotFound, @"Audio buffer not found", nil);
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+        auto oit = g_pa_offline.find(bufferIdStr);
+        if (oit == g_pa_offline.end()) {
+            reject(kSttErrBufferNotFound, @"Offline audio buffer not found", nil);
             return;
         }
-        samples = bit->second->samples;
-        bufferSampleRate = bit->second->sampleRate;
+        entry = oit->second;
     }
+
+    std::vector<float> samples = entry->readAllSamples();
+    int32_t bufferSampleRate = entry->sampleRate;
 
     try {
         const std::string alignGranularity = sttGranularityToAlignmentGranularity(granularity);

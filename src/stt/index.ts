@@ -6,7 +6,6 @@ import type {
   SttModelOptions,
   SttRuntimeConfig,
   SttTranscribeRef,
-  AudioBufferInfo,
   AlignmentRef,
   AlignmentSegment,
 } from './types';
@@ -376,46 +375,6 @@ export async function createSTT(
   return engine;
 }
 
-// ==================== Audio Buffer Registry ====================
-
-export async function createAudioBufferFromFile(
-  sourcePath: string,
-  targetSampleRateHz?: number,
-  forceMono?: boolean
-): Promise<AudioBufferInfo> {
-  const raw = await SherpaOnnx.createAudioBufferFromFile(
-    sourcePath,
-    targetSampleRateHz,
-    forceMono
-  );
-  return {
-    bufferId: raw.bufferId,
-    kind: raw.kind as AudioBufferInfo['kind'],
-    sampleRate: raw.sampleRate,
-    channelCount: raw.channelCount,
-    numSamples: raw.numSamples,
-    durationMs: raw.durationMs,
-  };
-}
-
-export async function getAudioBufferInfo(
-  bufferId: string
-): Promise<AudioBufferInfo> {
-  const raw = await SherpaOnnx.getAudioBufferInfo(bufferId);
-  return {
-    bufferId: raw.bufferId,
-    kind: raw.kind as AudioBufferInfo['kind'],
-    sampleRate: raw.sampleRate,
-    channelCount: raw.channelCount,
-    numSamples: raw.numSamples,
-    durationMs: raw.durationMs,
-  };
-}
-
-export async function releaseAudioBuffer(bufferId: string): Promise<void> {
-  return SherpaOnnx.releaseAudioBuffer(bufferId);
-}
-
 // ==================== Alignment Stage ====================
 
 export async function alignSttResult(
@@ -515,8 +474,6 @@ export type {
   SttQwen3AsrModelOptions,
   SttCohereTranscribeModelOptions,
   SttTranscribeRef,
-  AudioBufferInfo,
-  AudioBufferKind,
   AlignmentRef,
   AlignmentSegment,
   SttRuntimeConfig,

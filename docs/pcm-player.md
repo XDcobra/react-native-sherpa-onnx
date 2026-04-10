@@ -2,7 +2,7 @@
 
 Standalone PCM playback — play mono float audio from any source.
 
-**Import:** `react-native-sherpa-onnx/pcm`
+**Import:** `react-native-sherpa-onnx/pcm` (equivalent: **`react-native-sherpa-onnx/pcm-stream`** — same API; see [pcm-stream.md](pcm-stream.md)).
 
 ## Quick Start
 

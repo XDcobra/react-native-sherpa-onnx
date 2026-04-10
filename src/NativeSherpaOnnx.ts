@@ -105,32 +105,6 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
-  // ==================== Audio Buffer Registry ====================
-
-  createAudioBufferFromFile(
-    sourcePath: string,
-    targetSampleRateHz?: number,
-    forceMono?: boolean
-  ): Promise<{
-    bufferId: string;
-    kind: string;
-    sampleRate: number;
-    channelCount: number;
-    numSamples: number;
-    durationMs: number;
-  }>;
-
-  getAudioBufferInfo(bufferId: string): Promise<{
-    bufferId: string;
-    kind: string;
-    sampleRate: number;
-    channelCount: number;
-    numSamples: number;
-    durationMs: number;
-  }>;
-
-  releaseAudioBuffer(bufferId: string): Promise<void>;
-
   // ==================== Offline STT (by-reference) ====================
 
   /**

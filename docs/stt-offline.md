@@ -62,29 +62,29 @@ console.log(text);
 await stt.destroy();
 ```
 
-### 2) Buffer-first pipeline (`createAudioBufferFromFile` + `transcribeFromAudioBuffer`)
+### 2) Buffer-first pipeline (`createOfflineAudioBufferFromFile` + `transcribeFromAudioBuffer`)
 
 ```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
 import {
-  createSTT,
-  createAudioBufferFromFile,
-  releaseAudioBuffer,
-} from 'react-native-sherpa-onnx/stt';
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 
 const stt = await createSTT({
   modelPath: { type: 'file', path: '/absolute/path/to/model' },
   modelType: 'auto',
 });
 
-const buffer = await createAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
-const ref = await stt.transcribeFromAudioBuffer(buffer.bufferId, {
+const { bufferId } = await createOfflineAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
+const ref = await stt.transcribeFromAudioBuffer(bufferId, {
   sourceTag: 'episode-42-intro',
 });
 
 const tokens = await stt.getSttResultTokens(ref.resultId!, 0, 64);
 console.log(tokens.slice(0, 8));
 
-await releaseAudioBuffer(buffer.bufferId);
+await releasePipelineAudioBuffer(bufferId);
 await stt.destroy();
 ```
 
@@ -92,23 +92,22 @@ await stt.destroy();
 
 ```ts
 import {
-  initializeStt,
-  transcribeFromAudioBuffer,
+  createSTT,
   alignSttResult,
-  createAudioBufferFromFile,
   getAlignmentSegments,
   saveAlignment,
   releaseAlignment,
 } from 'react-native-sherpa-onnx/stt';
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
-const stt = await initializeStt({ /* ...model options... */ });
-const buf = await createAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
+const stt = await createSTT({ /* ...model options... */ });
+const { bufferId } = await createOfflineAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
 
 // The audio buffer and the STT instance must use the same sample rate.
 // Transcribing from the same buffer guarantees this automatically.
-const ref = await transcribeFromAudioBuffer(stt.instanceId, buf.bufferId);
+const ref = await stt.transcribeFromAudioBuffer(bufferId);
 
-const aligned = await alignSttResult(stt.instanceId, ref.resultId, buf.bufferId, {
+const aligned = await alignSttResult(stt.instanceId, ref.resultId!, bufferId, {
   granularity: 'word',
   // alignmentModelId optional; omit for proportional mode
 });
@@ -125,13 +124,13 @@ await releaseAlignment(aligned.alignmentId!);
 ```ts
 import {
   alignTextToBuffer,
-  createAudioBufferFromFile,
   getAlignmentSegments,
 } from 'react-native-sherpa-onnx/stt';
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
-const buffer = await createAudioBufferFromFile('/absolute/path/chunk.wav');
+const { bufferId } = await createOfflineAudioBufferFromFile('/absolute/path/chunk.wav');
 
-const ref = await alignTextToBuffer('Hello world from VoiceLab', buffer.bufferId, {
+const ref = await alignTextToBuffer('Hello world from VoiceLab', bufferId, {
   granularity: 'segment',
 });
 
@@ -331,41 +330,20 @@ destroy(): Promise<void>;
 await stt.destroy();
 ```
 
-## Audio buffer registry API
+## Audio buffer API
 
-### `createAudioBufferFromFile(sourcePath, targetSampleRateHz?, forceMono?)`
-
-```ts
-function createAudioBufferFromFile(
-  sourcePath: string,
-  targetSampleRateHz?: number,
-  forceMono?: boolean
-): Promise<AudioBufferInfo>;
-```
+Audio buffers are managed through the [audiobuffer](audiobuffer.md) module:
 
 ```ts
-const info = await createAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
+import {
+  createOfflineAudioBufferFromFile,
+  createOfflineAudioBufferFromSamples,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-### `getAudioBufferInfo(bufferId)`
-
-```ts
-function getAudioBufferInfo(bufferId: string): Promise<AudioBufferInfo>;
-```
-
-```ts
-const info = await getAudioBufferInfo(bufferId);
-```
-
-### `releaseAudioBuffer(bufferId)`
-
-```ts
-function releaseAudioBuffer(bufferId: string): Promise<void>;
-```
-
-```ts
-await releaseAudioBuffer(bufferId);
-```
+`transcribeFromAudioBuffer` and alignment methods accept `off_…` buffer IDs from this module.
 
 ## Alignment stage API
 
@@ -481,7 +459,7 @@ import type {
 ## See also
 
 - [Streaming STT](stt-streaming.md)
-- [Pipeline audio (`pcm-stream`)](pcm-stream.md)
+- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
 - [Hotwords](hotwords.md)
 - [Alignment](alignment.md)
 - [Model Setup](model-setup.md)

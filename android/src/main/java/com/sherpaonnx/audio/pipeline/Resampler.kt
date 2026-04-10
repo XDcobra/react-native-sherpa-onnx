@@ -2,7 +2,6 @@ package com.sherpaonnx.audio.pipeline
 
 /**
  * Linear interpolation resampler shared across the pipeline audio subsystem.
- * Same algorithm as AudioBufferRegistry / SherpaOnnxPcmCapture for consistency.
  */
 internal object Resampler {
 

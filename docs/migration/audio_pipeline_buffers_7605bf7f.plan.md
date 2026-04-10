@@ -1,6 +1,6 @@
 ---
 name: Audio pipeline buffers
-overview: Einheitliches natives Audio-Buffer-Subsystem mit zwei vollständigen Kind-Typen (Offline = immutable, In-Memory oder file-backed für große Dateien; Live = Rolling-Window, optional WAV-Spool, Finished, nativer Lese-Cursor, optional JS-Slice, Mikrofon-nativ als Eingang) in Kotlin und iOS, TurboModule und Export `react-native-sherpa-onnx/pcm-stream`. STT/Player-Anbindung folgt separat; die Buffer-Schicht ist ohne Halbheiten abgeschlossen.
+overview: Einheitliches natives Audio-Buffer-Subsystem mit zwei vollständigen Kind-Typen (Offline = immutable, In-Memory oder file-backed für große Dateien; Live = Rolling-Window, optional WAV-Spool, Finished, nativer Lese-Cursor, optional JS-Slice, Mikrofon-nativ als Eingang) in Kotlin und iOS, TurboModule und TS-Export `react-native-sherpa-onnx/audiobuffer`. PCM-Player bleibt unter `./pcm`; `./pcm-stream` re-exportiert nur den Player. STT-Anbindung folgt separat; die Buffer-Schicht ist ohne Halbheiten abgeschlossen.
 todos:
   - id: kotlin-registry
     content: "Kotlin: PipelineAudioRegistry (Offline in-memory + file-backed, Live ring + spool + cursor + mic sink, state machine, errors)"
@@ -11,8 +11,8 @@ todos:
   - id: migrate-stt-buffer
     content: Delegate or unify existing AudioBufferRegistry / createAudioBufferFromFile with new registry for backward compatibility
     status: pending
-  - id: ts-pcm-stream
-    content: "src/pcm-stream: types, facades, package.json export ./pcm-stream"
+  - id: ts-audiobuffer
+    content: "src/audiobuffer: types, facades, package.json export ./audiobuffer; ./pcm-stream = player re-export"
     status: pending
   - id: ios-parity
     content: "iOS: mirror registry (offline file-backed + live ring/spool/cursor/mic), WAV save, TurboModule bindings"
@@ -40,7 +40,7 @@ flowchart LR
 
 - **OfflineAudioBuffer**: **Voll funktionsfähig** für kleine und große Quellen: (a) RAM-Backing bei Samples/übertragbaren Größen, (b) **file-backed / sequentielles Lesen** für große WAV-Dateien (kein vollständiges Laden in den Heap), (c) Erstellung aus Datei, aus JS-Samples, aus Live-Snapshot bzw. aus abgeschlossenem Live-Spool ohne unnötige RAM-Dopplung.
 - **LiveAudioBuffer**: Zustand **`recording`** | **`finished`** (kein Rückweg). Hot Path = **Rolling Window** (Ringpuffer, konfigurierbare Fenstergröße in Sekunden/Samples). Optional **Persistenz**: gleichzeitiges Schreiben **linear-float oder WAV** in eine Datei (PCM nicht komprimiert; FFmpeg nur für späteren Export, nicht im Hot Path).
-- **Öffentliche API** unter neuem Export **[`package.json`](package.json)** `./pcm-stream` → z. B. [`src/pcm-stream/index.ts`](src/pcm-stream/index.ts) (Name wie von dir gewünscht; bestehendes [`src/pcm/index.ts`](src/pcm/index.ts) bleibt für Player o. Ä. unberührt oder re-exportiert nur bei Bedarf).
+- **Öffentliche API** für Pipeline-Buffers: **[`package.json`](package.json)** `./audiobuffer` → [`src/audiobuffer/index.ts`](src/audiobuffer/index.ts). **`./pcm-stream`** re-exportiert ausschließlich [`src/pcm/index.ts`](src/pcm/index.ts) (Player); bestehendes [`src/pcm/index.ts`](src/pcm/index.ts) bleibt kanonisch für Playback.
 - **Keine Feature-Integration** in diesem Schritt: keine neuen Aufrufe in [`SherpaOnnxSttHelper.kt`](android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt), kein `acceptWaveform`-Bypass—nur stabile Handles und Methoden, die später `engine.bindLiveBuffer(liveId)` o. Ä. verwenden können.
 
 ## Architektur Native (Kotlin, primär)
@@ -106,11 +106,11 @@ Neue/umbenannte Methoden in [`src/NativeSherpaOnnx.ts`](src/NativeSherpaOnnx.ts)
 
 ## TypeScript Public Layer
 
-- Neu: [`src/pcm-stream/types.ts`](src/pcm-stream/types.ts):
+- Neu: [`src/audiobuffer/types.ts`](src/audiobuffer/types.ts):
   - **`AudioBufferInfo`** erweitert um `state?: 'recording' | 'finished'` und `kind: 'offlinePcmBuffer' | 'livePcmBuffer'` (oder string literal union).
   - **Brands / Discriminated Unions**: z. B. `LiveBufferHandleRecording` vs `LiveBufferHandleFinished` als **Typen**, die nur nach `createLive…` bzw. `finalize…` zurückgegeben werden (rein TS; Native validiert ohnehin).
-- [`src/pcm-stream/index.ts`](src/pcm-stream/index.ts): dünne async Facades, keine Geschäftslogik.
-- **`package.json` exports**: `"./pcm-stream"` ergänzen + Builder-Bob/tsconfig paths.
+- [`src/audiobuffer/index.ts`](src/audiobuffer/index.ts): dünne async Facades, keine Geschäftslogik.
+- **`package.json` exports**: `"./audiobuffer"` + `"./pcm-stream"` (Player-Alias) + Builder-Bob/tsconfig paths.
 
 ## Dokumentation (kurz)
 
@@ -124,7 +124,7 @@ Neue/umbenannte Methoden in [`src/NativeSherpaOnnx.ts`](src/NativeSherpaOnnx.ts)
 ## Reihenfolge der Umsetzung
 
 1. Kotlin `PipelineAudioRegistry` + Offline (In-Memory + file-backed) + Live (Ring, Spool, Cursor, Capture-Ziel) + WAV save + TurboModule-Plumbing.  
-2. TS Spec + Facade + `pcm-stream` export (inkl. Slice-API wo spezifiziert).  
+2. TS Spec + Facade + `audiobuffer` export (inkl. Slice-API wo spezifiziert); `pcm-stream` nur Player-Re-Export.  
 3. iOS Parität (identische Semantik).  
 4. Alte `AudioBufferRegistry` → Delegation auf neue Registry, STT bleibt funktionsfähig.  
 5. Doku + Tests (Ring, State-Machine, file-backed Lesen, Live-Spool → Offline ohne Full-RAM).

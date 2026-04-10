@@ -1,5 +1,5 @@
 /**
- * Pipeline audio buffer types for react-native-sherpa-onnx/pcm-stream.
+ * Pipeline audio buffer types for react-native-sherpa-onnx/audiobuffer.
  *
  * Two core buffer kinds:
  * - OfflinePcmBuffer: immutable, fully populated PCM data (from file, samples, or live snapshot)

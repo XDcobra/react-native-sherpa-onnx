@@ -75,6 +75,11 @@
       "types": "./lib/typescript/src/pcm/index.d.ts",
       "default": "./lib/module/pcm/index.js"
     },
+    "./audiobuffer": {
+      "source": "./src/audiobuffer/index.ts",
+      "types": "./lib/typescript/src/audiobuffer/index.d.ts",
+      "default": "./lib/module/audiobuffer/index.js"
+    },
     "./pcm-stream": {
       "source": "./src/pcm-stream/index.ts",
       "types": "./lib/typescript/src/pcm-stream/index.d.ts",

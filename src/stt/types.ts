@@ -281,21 +281,6 @@ export interface STTInitializeOptions {
   modelOptions?: SttModelOptions;
 }
 
-// ========== Pipeline-first types (1.0.0 breaking) ==========
-
-/** Kinds of native audio buffers in the shared registry. */
-export type AudioBufferKind = 'offlinePcmBuffer';
-
-/** Info about a native audio buffer. Returned by createAudioBufferFromFile / getAudioBufferInfo. */
-export interface AudioBufferInfo {
-  bufferId: string;
-  kind: AudioBufferKind;
-  sampleRate: number;
-  channelCount: number;
-  numSamples: number;
-  durationMs: number;
-}
-
 /**
  * Metadata-only reference to a native STT result (by-reference).
  * Large arrays (tokens, timestamps, durations) stay native until fetched via discrete getters.
