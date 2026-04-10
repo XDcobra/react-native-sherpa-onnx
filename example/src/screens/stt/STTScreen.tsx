@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ToastAndroid,
+  DeviceEventEmitter,
 } from 'react-native';
 import { styles } from './STTScreen.styles';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -46,9 +47,11 @@ import {
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createPcmLiveStream,
-  type PcmLiveStreamHandle,
-} from 'react-native-sherpa-onnx/audio';
+  createLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/pcm-stream';
 import {
   startWebAudioFilePlayback,
   stopWebAudioPlayback,
@@ -107,10 +110,10 @@ export default function STTScreen() {
   const streamingEngineRef = useRef<StreamingSttEngine | null>(null);
   const liveStreamRef = useRef<SttStream | null>(null);
   const liveProcessPromiseRef = useRef<Promise<void>>(Promise.resolve());
-  const pcmLiveStreamRef = useRef<{
-    handle: PcmLiveStreamHandle;
-    unsubData: () => void;
-    unsubError: () => void;
+  const livePipelineRef = useRef<{
+    liveBufferId: string;
+    unsubChunk: { remove: () => void };
+    unsubErr: { remove: () => void };
   } | null>(null);
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
@@ -547,45 +550,74 @@ export default function STTScreen() {
       const stream = await engine.createStream();
       liveStreamRef.current = stream;
 
-      const pcmHandle = createPcmLiveStream({ sampleRate: LIVE_SAMPLE_RATE });
-      const unsubData = pcmHandle.onData((samples, sampleRate) => {
-        const streamCurrent = liveStreamRef.current;
-        if (!streamCurrent) return;
-        const prev = liveProcessPromiseRef.current;
-        liveProcessPromiseRef.current = (async () => {
-          await prev;
-          if (!liveStreamRef.current) return;
-          try {
-            const { result } = await streamCurrent.processAudioChunk(
-              samples,
-              sampleRate
-            );
-            setTranscriptionResult({
-              text: result.text,
-              tokens: result.tokens,
-              timestamps: result.timestamps,
-              lang: '',
-              emotion: '',
-              event: '',
-              durations: [],
-            });
-          } catch {
-            // ignore chunk errors (e.g. after release)
+      const { bufferId: liveBufferId } = await createLiveAudioBuffer({
+        sampleRate: LIVE_SAMPLE_RATE,
+        channelCount: 1,
+        windowSeconds: 120,
+      });
+
+      const unsubChunk = DeviceEventEmitter.addListener(
+        'pipelineLiveAudioChunk',
+        (event: {
+          samples?: number[];
+          sampleRate?: number;
+          liveBufferId?: string;
+        }) => {
+          if (event.liveBufferId !== liveBufferId) return;
+          const samples = event.samples;
+          if (!samples?.length) return;
+          const streamCurrent = liveStreamRef.current;
+          if (!streamCurrent) return;
+          const sr = event.sampleRate ?? LIVE_SAMPLE_RATE;
+          const prev = liveProcessPromiseRef.current;
+          liveProcessPromiseRef.current = (async () => {
+            await prev;
+            if (!liveStreamRef.current) return;
+            try {
+              const { result } = await streamCurrent.processAudioChunk(
+                samples,
+                sr
+              );
+              setTranscriptionResult({
+                text: result.text,
+                tokens: result.tokens,
+                timestamps: result.timestamps,
+                lang: '',
+                emotion: '',
+                event: '',
+                durations: [],
+              });
+            } catch {
+              // ignore chunk errors (e.g. after release)
+            }
+          })();
+        }
+      );
+      const unsubErr = DeviceEventEmitter.addListener(
+        'pipelineLiveAudioError',
+        (event: { message?: string; liveBufferId?: string }) => {
+          if (
+            event.liveBufferId != null &&
+            event.liveBufferId !== liveBufferId
+          ) {
+            return;
           }
-        })();
-      });
-      const unsubError = pcmHandle.onError((message) => {
-        setErrorSource('transcribe');
-        setError(message);
-      });
-      pcmLiveStreamRef.current = { handle: pcmHandle, unsubData, unsubError };
+          setErrorSource('transcribe');
+          setError(event.message ?? 'Microphone error');
+        }
+      );
+      livePipelineRef.current = {
+        liveBufferId,
+        unsubChunk,
+        unsubErr,
+      };
       try {
-        await pcmHandle.start();
+        await startMicToLiveAudioBuffer(liveBufferId, { emitToJs: true });
       } catch (startErr) {
-        pcmHandle.stop().catch(() => {});
-        unsubData();
-        unsubError();
-        pcmLiveStreamRef.current = null;
+        unsubChunk.remove();
+        unsubErr.remove();
+        livePipelineRef.current = null;
+        await releasePipelineAudioBuffer(liveBufferId).catch(() => {});
         throw startErr;
       }
       setIsLiveRecording(true);
@@ -600,12 +632,14 @@ export default function STTScreen() {
     if (!isLiveRecording) return;
     setIsLiveRecording(false);
 
-    const pcmCur = pcmLiveStreamRef.current;
-    if (pcmCur) {
-      await pcmCur.handle.stop();
-      pcmCur.unsubData();
-      pcmCur.unsubError();
-      pcmLiveStreamRef.current = null;
+    const pip = livePipelineRef.current;
+    let liveBufferIdForRelease: string | null = null;
+    if (pip) {
+      liveBufferIdForRelease = pip.liveBufferId;
+      await stopMicToLiveAudioBuffer().catch(() => {});
+      pip.unsubChunk.remove();
+      pip.unsubErr.remove();
+      livePipelineRef.current = null;
     }
 
     const stream = liveStreamRef.current;
@@ -648,6 +682,10 @@ export default function STTScreen() {
         streamingEngineRef.current = null;
         liveStreamRef.current = null;
       }
+    }
+
+    if (liveBufferIdForRelease) {
+      await releasePipelineAudioBuffer(liveBufferIdForRelease).catch(() => {});
     }
   };
 
