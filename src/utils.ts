@@ -8,6 +8,28 @@ import { resolveActualModelDir } from './download/validation';
  */
 
 /**
+ * Derive a bare asset name from a ModelPathConfig by stripping the path to its
+ * last segment and removing common archive suffixes (.tar.bz2, .tar.gz, .tgz, .zip).
+ * Returns null when no usable name can be derived.
+ *
+ * @param modelPath - Model path configuration
+ * @returns Derived asset name string, or null
+ */
+export function deriveAssetNameFromModelPath(
+  modelPath: ModelPathConfig
+): string | null {
+  const raw = modelPath.path?.trim();
+  if (!raw) return null;
+  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
+  if (!leaf) return null;
+  return leaf
+    .replace(/\.tar\.bz2$/i, '')
+    .replace(/\.tar\.gz$/i, '')
+    .replace(/\.tgz$/i, '')
+    .replace(/\.zip$/i, '');
+}
+
+/**
  * Get the default model directory path for the current platform.
  * This is a logical name (e.g. `'Documents/models'` on iOS), not an absolute path.
  * On iOS, when using file-based models without PAD, pass an absolute base path to

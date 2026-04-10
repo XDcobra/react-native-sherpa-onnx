@@ -286,7 +286,7 @@ static NSDictionary *sttResultToDict(const sherpaonnx::SttRecognitionResult& r) 
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
-    RCTLogInfo(@"Detecting STT model modelDir=%@ assetName=%@", modelDir, assetName);
+    RCTLogInfo(@"Detecting STT model: modelDir=%@ assetName=%@", modelDir, assetName);
     @try {
         std::optional<std::string> modelDirOpt = std::nullopt;
         if (modelDir != nil && [modelDir length] > 0) {

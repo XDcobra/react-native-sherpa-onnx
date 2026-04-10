@@ -8,7 +8,7 @@ import type {
   SttRuntimeConfig,
 } from './types';
 import type { ModelPathConfig } from '../types';
-import { resolveModelPath } from '../utils';
+import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {
@@ -40,20 +40,6 @@ function normalizeSttResult(raw: {
     event: typeof raw.event === 'string' ? raw.event : '',
     durations: Array.isArray(raw.durations) ? (raw.durations as number[]) : [],
   };
-}
-
-function deriveAssetNameFromModelPath(
-  modelPath: ModelPathConfig
-): string | null {
-  const raw = modelPath.path?.trim();
-  if (!raw) return null;
-  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
-  if (!leaf) return null;
-  return leaf
-    .replace(/\.tar\.bz2$/i, '')
-    .replace(/\.tar\.gz$/i, '')
-    .replace(/\.tgz$/i, '')
-    .replace(/\.zip$/i, '');
 }
 
 /**

@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { ModelPathConfig } from '../types';
-import { resolveModelPath } from '../utils';
+import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
@@ -14,20 +14,6 @@ import type {
 } from './types';
 
 let enhancementInstanceCounter = 0;
-
-function deriveAssetNameFromModelPath(
-  modelPath: ModelPathConfig
-): string | null {
-  const raw = modelPath.path?.trim();
-  if (!raw) return null;
-  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
-  if (!leaf) return null;
-  return leaf
-    .replace(/\.tar\.bz2$/i, '')
-    .replace(/\.tar\.gz$/i, '')
-    .replace(/\.tgz$/i, '')
-    .replace(/\.zip$/i, '');
-}
 
 function normalizeEnhancedAudio(raw: {
   samples?: number[] | Float32Array;

@@ -60,7 +60,9 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
 
   jobject detectedList = BuildDetectedModelsList(env, result.detectedModels);
   if (detectedList) {
-    env->CallObjectMethod(map, mapPut, env->NewStringUTF("detectedModels"), detectedList);
+    jstring keyDetected = env->NewStringUTF("detectedModels");
+    env->CallObjectMethod(map, mapPut, keyDetected, detectedList);
+    env->DeleteLocalRef(keyDetected);
     env->DeleteLocalRef(detectedList);
   }
 
@@ -71,13 +73,17 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
   }
   jobject detectionSourcesList = BuildStringList(env, detectionSourceStrings);
   if (detectionSourcesList) {
-    env->CallObjectMethod(map, mapPut, env->NewStringUTF("detectionSources"), detectionSourcesList);
+    jstring keyDetectionSources = env->NewStringUTF("detectionSources");
+    env->CallObjectMethod(map, mapPut, keyDetectionSources, detectionSourcesList);
+    env->DeleteLocalRef(keyDetectionSources);
     env->DeleteLocalRef(detectionSourcesList);
   }
 
   jobject derivedLangsList = BuildStringList(env, result.derivedLanguages);
   if (derivedLangsList) {
-    env->CallObjectMethod(map, mapPut, env->NewStringUTF("languages"), derivedLangsList);
+    jstring keyLangs = env->NewStringUTF("languages");
+    env->CallObjectMethod(map, mapPut, keyLangs, derivedLangsList);
+    env->DeleteLocalRef(keyLangs);
     env->DeleteLocalRef(derivedLangsList);
   }
   PutString(env, map, mapPut, "quantization", result.quantization);
@@ -119,7 +125,9 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
       PutString(env, pathsMap, mapPut, "canaryEncoder", result.paths.canaryEncoder);
       PutString(env, pathsMap, mapPut, "canaryDecoder", result.paths.canaryDecoder);
       PutString(env, pathsMap, mapPut, "bpeVocab", result.paths.bpeVocab);
-      env->CallObjectMethod(map, mapPut, env->NewStringUTF("paths"), pathsMap);
+      jstring keyPaths = env->NewStringUTF("paths");
+      env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
+      env->DeleteLocalRef(keyPaths);
       env->DeleteLocalRef(pathsMap);
     }
   }
