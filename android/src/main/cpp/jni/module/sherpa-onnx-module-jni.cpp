@@ -147,28 +147,41 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeHasNnapiAccelerator(JNIEnv* /* env */
 #endif
 }
 
-// Detect STT model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.
+// Detect STT model from optional directory and/or asset name. Returns HashMap with unified detect fields.
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
     JNIEnv* env,
     jobject /* this */,
     jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type,
     jboolean j_prefer_int8,
     jboolean j_has_prefer_int8,
-    jstring j_model_type,
     jboolean j_debug) {
-  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  if (j_model_dir) {
+    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
+    if (c && c[0] != '\0') model_dir = std::string(c);
+    env->ReleaseStringUTFChars(j_model_dir, c);
+  }
+  if (j_asset_name) {
+    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
+    if (c && c[0] != '\0') asset_name = std::string(c);
+    env->ReleaseStringUTFChars(j_asset_name, c);
+  }
   const char* model_type_c = j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_dir(model_dir_c ? model_dir_c : "");
+  std::string model_type(model_type_c ? model_type_c : "auto");
   std::optional<bool> prefer_int8;
   if (j_has_prefer_int8) prefer_int8 = (j_prefer_int8 == JNI_TRUE);
-  std::optional<std::string> model_type_opt;
-  if (model_type_c && model_type_c[0] != '\0') model_type_opt = std::string(model_type_c);
-  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
   if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(
-      model_dir, prefer_int8, model_type_opt, (j_debug == JNI_TRUE));
+      model_dir,
+      asset_name,
+      model_type,
+      prefer_int8,
+      (j_debug == JNI_TRUE));
   return sherpaonnx::SttDetectResultToJava(env, result);
 }
 

@@ -86,6 +86,7 @@ set(SOURCES
     jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
     jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp

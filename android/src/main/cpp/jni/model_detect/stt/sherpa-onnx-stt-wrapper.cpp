@@ -64,6 +64,24 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
     env->DeleteLocalRef(detectedList);
   }
 
+  std::vector<std::string> detectionSourceStrings;
+  detectionSourceStrings.reserve(result.detectionSources.size());
+  for (DetectionSource s : result.detectionSources) {
+    detectionSourceStrings.emplace_back(DetectionSourceToLiteral(s));
+  }
+  jobject detectionSourcesList = BuildStringList(env, detectionSourceStrings);
+  if (detectionSourcesList) {
+    env->CallObjectMethod(map, mapPut, env->NewStringUTF("detectionSources"), detectionSourcesList);
+    env->DeleteLocalRef(detectionSourcesList);
+  }
+
+  jobject derivedLangsList = BuildStringList(env, result.derivedLanguages);
+  if (derivedLangsList) {
+    env->CallObjectMethod(map, mapPut, env->NewStringUTF("languages"), derivedLangsList);
+    env->DeleteLocalRef(derivedLangsList);
+  }
+  PutString(env, map, mapPut, "quantization", result.quantization);
+
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {
     jobject pathsMap = env->NewObject(hashMapClass, mapInit);

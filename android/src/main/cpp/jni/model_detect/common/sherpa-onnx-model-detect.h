@@ -239,6 +239,12 @@ struct SttDetectResult {
     SttModelKind selectedKind = SttModelKind::kUnknown;
     bool tokensRequired = true;
     SttModelPaths paths;
+    /** Ordered trace of detection mechanisms (see DetectionSource). */
+    std::vector<DetectionSource> detectionSources;
+    /** Heuristic languages from asset/folder name (release id stem); not from model files. */
+    std::vector<std::string> derivedLanguages;
+    /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
+    std::string quantization;
 };
 
 struct TtsDetectResult {
@@ -281,10 +287,17 @@ struct AlignmentDetectResult {
     std::string quantization;
 };
 
+/**
+ * STT model detection. Pass at least one of `model_dir` or `asset_name`.
+ * - `model_dir`: absolute path to extracted model (full file scan when directory exists).
+ * - `asset_name`: release asset stem / folder basename (name-only detection when no directory).
+ * When both are set, directory scan is used and derived catalog metadata uses `asset_name`.
+ */
 SttDetectResult DetectSttModel(
-    const std::string& modelDir,
-    const std::optional<bool>& preferInt8,
-    const std::optional<std::string>& modelType,
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::optional<bool>& preferInt8 = std::nullopt,
     bool debug = false
 );
 
@@ -295,8 +308,8 @@ SttDetectResult DetectSttModel(
 SttDetectResult DetectSttModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::optional<bool>& preferInt8 = std::nullopt,
-    const std::optional<std::string>& modelType = std::nullopt
+    const std::string& modelType = "auto",
+    const std::optional<bool>& preferInt8 = std::nullopt
 );
 
 /**
