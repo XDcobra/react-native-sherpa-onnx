@@ -19,6 +19,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-model-detect-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-tts-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-model-detect-tts.cpp"
+  "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-enhancement-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-model-detect-enhancement.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-validate-tts.cpp"
