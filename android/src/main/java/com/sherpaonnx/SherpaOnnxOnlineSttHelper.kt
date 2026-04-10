@@ -416,7 +416,7 @@ internal class SherpaOnnxOnlineSttHelper(
           return
         }
       val result = inst.recognizer.getResult(stream)
-      val isFinal = !inst.recognizer.isReady(stream) && result.text.isNotEmpty()
+      val isFinal = inst.recognizer.isEndpoint(stream) && result.text.isNotEmpty()
       val map = resultToWritableMap(result)
       map.putBoolean("isFinal", isFinal)
       promise.resolve(map)
@@ -514,7 +514,7 @@ internal class SherpaOnnxOnlineSttHelper(
       }
       val result = inst.recognizer.getResult(stream)
       val isEndpoint = inst.recognizer.isEndpoint(stream)
-      val isFinal = !inst.recognizer.isReady(stream) && result.text.isNotEmpty()
+      val isFinal = isEndpoint && result.text.isNotEmpty()
       val map = resultToWritableMap(result)
       map.putBoolean("isEndpoint", isEndpoint)
       map.putBoolean("isFinal", isFinal)

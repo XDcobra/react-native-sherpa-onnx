@@ -10,7 +10,7 @@ import type {
   AlignmentRef,
   AlignmentSegment,
 } from './types';
-import { STT_DEFAULT_SLICE_COUNT } from './types';
+import { STT_DEFAULT_SLICE_COUNT, ALIGNMENT_DEFAULT_SLICE_COUNT } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
@@ -471,7 +471,7 @@ export async function getAlignmentSegments(
   return SherpaOnnx.getAlignmentSegments(
     alignmentId,
     start ?? 0,
-    maxCount ?? 512
+    maxCount ?? ALIGNMENT_DEFAULT_SLICE_COUNT
   );
 }
 

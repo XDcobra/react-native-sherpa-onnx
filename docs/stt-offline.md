@@ -92,6 +92,8 @@ await stt.destroy();
 
 ```ts
 import {
+  initializeStt,
+  transcribeFromAudioBuffer,
   alignSttResult,
   createAudioBufferFromFile,
   getAlignmentSegments,
@@ -99,10 +101,14 @@ import {
   releaseAlignment,
 } from 'react-native-sherpa-onnx/stt';
 
+const stt = await initializeStt({ /* ...model options... */ });
 const buf = await createAudioBufferFromFile('/absolute/path/input.wav', 16000, true);
 
-// resultId comes from stt.transcribeFile/transcribeSamples/transcribeFromAudioBuffer
-const aligned = await alignSttResult('stt_1', 1, buf.bufferId, {
+// The audio buffer and the STT instance must use the same sample rate.
+// Transcribing from the same buffer guarantees this automatically.
+const ref = await transcribeFromAudioBuffer(stt.instanceId, buf.bufferId);
+
+const aligned = await alignSttResult(stt.instanceId, ref.resultId, buf.bufferId, {
   granularity: 'word',
   // alignmentModelId optional; omit for proportional mode
 });

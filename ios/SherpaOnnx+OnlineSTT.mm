@@ -240,7 +240,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         @"text": [NSString stringWithUTF8String:r.text.c_str()] ?: @"",
         @"tokens": tokens,
         @"timestamps": timestamps,
-        @"isFinal": @(!wrapper->isReady(streamIdStr) && r.text.length() > 0)
+        @"isFinal": @(wrapper->isEndpoint(streamIdStr) && r.text.length() > 0)
     });
 }
 
@@ -362,7 +362,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         @"tokens": tokens,
         @"timestamps": timestamps,
         @"isEndpoint": @(isEndpoint),
-        @"isFinal": @(!wrapper->isReady(streamIdStr) && r.text.length() > 0)
+        @"isFinal": @(isEndpoint && r.text.length() > 0)
     });
 }
 

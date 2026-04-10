@@ -29,7 +29,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private data class SttAlignmentRecord(
     val alignmentId: Long,
     val segments: List<SttAlignmentSegment>,
-    val tokenCount: Int,
+    val tokenCount: Int?,
   )
 
   init {
@@ -706,6 +706,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         forceMono
       )
       promise.resolve(buffer.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.stt.SttErrorCodes.INVALID_ARGUMENT, e.message ?: "Invalid argument", e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.stt.SttErrorCodes.TRANSCRIBE_FAILED, e.message ?: "Failed to create audio buffer", e)
     }
@@ -851,7 +853,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
 
     val mode = if (alignmentModelId.isNullOrBlank()) "proportional" else "accurate"
-    val tokenCount = text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
 
     alignmentHelper.alignTextToPcmForStt(
       text = text,
@@ -865,13 +866,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         sttAlignmentStore[alignmentId] = SttAlignmentRecord(
           alignmentId = alignmentId,
           segments = segments,
-          tokenCount = tokenCount,
+          tokenCount = null,
         )
         val map = Arguments.createMap()
         map.putBoolean("success", true)
         map.putDouble("alignmentId", alignmentId.toDouble())
         map.putInt("segmentCount", segments.size)
-        map.putInt("tokenCount", tokenCount)
         promise.resolve(map)
       },
       onError = { message, error ->

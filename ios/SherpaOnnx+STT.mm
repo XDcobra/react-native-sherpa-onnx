@@ -103,7 +103,7 @@ struct SttAlignmentSegment {
 struct SttAlignmentRecord {
     int64_t alignmentId;
     std::vector<SttAlignmentSegment> segments;
-    int32_t tokenCount;
+    int32_t tokenCount; // -1 = unknown (e.g. alignTextToBuffer where accurate count isn't available)
 };
 
 static std::atomic<int64_t> g_alignment_id_counter{0};
@@ -160,11 +160,12 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 }
 
 static NSDictionary *sttTranscribeRefToDict(int64_t resultId, const SttRetainedResult& r) {
+    NSString *text = [NSString stringWithUTF8String:r.text.c_str()] ?: @"";
     return @{
         @"success": @YES,
         @"resultId": @(resultId),
         @"sampleRate": @(r.sampleRate),
-        @"textLength": @((int)r.text.size()),
+        @"textLength": @((NSUInteger)text.length),
         @"tokenCount": @((int)r.tokens.size()),
         @"timestampCount": @((int)r.timestamps.size()),
         @"durationCount": @((int)r.durations.size()),
@@ -863,7 +864,8 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         return;
     }
 
-    AudioBuffer *audioBuf = nullptr;
+    std::vector<float> samples;
+    int32_t sampleRate = 0;
     {
         std::lock_guard<std::mutex> bufLock(g_audio_buffer_mutex);
         auto bufIt = g_audio_buffers.find(bufferIdStr);
@@ -872,14 +874,15 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
                    [NSString stringWithFormat:@"Audio buffer not found: %@", bufferId], nil);
             return;
         }
-        audioBuf = bufIt->second.get();
+        samples = bufIt->second->samples;
+        sampleRate = bufIt->second->sampleRate;
     }
 
     SttInstanceState *inst = it->second.get();
     try {
-        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(audioBuf->samples, audioBuf->sampleRate);
+        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, sampleRate);
         std::string source = (sourceTag != nil && [sourceTag length] > 0) ? [sourceTag UTF8String] : "buffer";
-        auto retained = retainResult(result, audioBuf->sampleRate, source);
+        auto retained = retainResult(result, sampleRate, source);
         int64_t resultId = inst->resultSlot.store(std::move(retained));
         resolve(sttTranscribeRefToDict(resultId, *inst->resultSlot.retained));
     } catch (const std::exception& e) {
@@ -1264,22 +1267,13 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
             });
         }
 
-        int32_t tokenCount = 0;
-        {
-            std::istringstream iss(textStr);
-            std::string token;
-            while (iss >> token) {
-                ++tokenCount;
-            }
-        }
-
         const int64_t alignmentId = g_alignment_id_counter.fetch_add(1) + 1;
         {
             std::lock_guard<std::mutex> lock(g_stt_alignment_mutex);
             g_stt_alignments[alignmentId] = SttAlignmentRecord{
                 alignmentId,
                 std::move(segments),
-                tokenCount,
+                -1,
             };
         }
 
@@ -1287,7 +1281,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
             @"success": @YES,
             @"alignmentId": @(alignmentId),
             @"segmentCount": @((int)aligned.subtitles.size()),
-            @"tokenCount": @(tokenCount),
         });
     } catch (const std::invalid_argument& e) {
         NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Invalid alignment arguments";

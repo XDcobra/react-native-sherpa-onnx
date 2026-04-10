@@ -503,27 +503,27 @@ internal class SherpaOnnxSttHelper(
   fun getSttResultTokens(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
     val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
     val tokens = validated.tokens
-    val sliced = tokens.drop(start).take(maxCount)
+    val end = minOf(start + maxCount, tokens.size)
     val arr = Arguments.createArray()
-    for (t in sliced) arr.pushString(t)
+    for (i in start until end) arr.pushString(tokens[i])
     promise.resolve(arr)
   }
 
   fun getSttResultTimestamps(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
     val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
     val timestamps = validated.timestamps
-    val sliced = timestamps.drop(start).take(maxCount)
+    val end = minOf(start + maxCount, timestamps.size)
     val arr = Arguments.createArray()
-    for (t in sliced) arr.pushDouble(t.toDouble())
+    for (i in start until end) arr.pushDouble(timestamps[i].toDouble())
     promise.resolve(arr)
   }
 
   fun getSttResultDurations(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
     val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
     val durations = validated.durations
-    val sliced = durations.drop(start).take(maxCount)
+    val end = minOf(start + maxCount, durations.size)
     val arr = Arguments.createArray()
-    for (d in sliced) arr.pushDouble(d.toDouble())
+    for (i in start until end) arr.pushDouble(durations[i].toDouble())
     promise.resolve(arr)
   }
 
