@@ -890,44 +890,288 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ==================== Pipeline Text Buffers ====================
+
+  override fun createEmptyOfflineTextBuffer(promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createEmptyOffline()
+      promise.resolve(entry.toWritableMap())
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineTextBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createOfflineFromLive(liveBufferId, mode ?: "fullIfSpooled")
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
+    try {
+      val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
+      val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
+      val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLive(
+        windowMaxChars = windowMaxChars,
+        emitPartialEvents = emitPartialEvents,
+        partialEventMinIntervalMs = partialEventMinIntervalMs
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createLiveTextBufferFromOffline(offlineBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLiveFromOffline(offlineBufferId)
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun finalizeLiveTextBuffer(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Live text buffer not found: $liveBufferId")
+        return
+      }
+      entry.finalize_()
+      promise.resolve(null)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getPipelineTextBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      val offline = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (offline != null) {
+        promise.resolve(offline.toWritableMap())
+        return
+      }
+      val live = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(bufferId)
+      if (live != null) {
+        promise.resolve(live.toWritableMap())
+        return
+      }
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Text buffer not found: $bufferId")
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun releasePipelineTextBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.text.pipeline.TextPipelineRegistry.release(bufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferTextSlice(bufferId: String, startUtf16: Double, maxUtf16: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      val s = startUtf16.toInt()
+      val m = maxUtf16.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args: start=$s, max=$m")
+        return
+      }
+      if (m > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxUtf16 $m exceeds max ${com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT}")
+        return
+      }
+      val text = entry.text
+      if (s >= text.length) {
+        promise.resolve("")
+        return
+      }
+      val end = minOf(s + m, text.length)
+      promise.resolve(text.substring(s, end))
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferTokensSlice(bufferId: String, start: Double, maxCount: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      val s = start.toInt()
+      val m = maxCount.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args: start=$s, max=$m")
+        return
+      }
+      if (m > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxCount $m exceeds max ${com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT}")
+        return
+      }
+      val tokens = entry.tokens
+      if (s >= tokens.size) {
+        promise.resolve(Arguments.createArray())
+        return
+      }
+      val end = minOf(s + m, tokens.size)
+      val arr = Arguments.createArray()
+      for (i in s until end) arr.pushString(tokens[i])
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferTimestampsSlice(bufferId: String, start: Double, maxCount: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      val s = start.toInt()
+      val m = maxCount.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
+        return
+      }
+      if (m > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxCount exceeds max")
+        return
+      }
+      val timestamps = entry.timestamps
+      if (s >= timestamps.size) {
+        promise.resolve(Arguments.createArray())
+        return
+      }
+      val end = minOf(s + m, timestamps.size)
+      val arr = Arguments.createArray()
+      for (i in s until end) arr.pushDouble(timestamps[i].toDouble())
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferDurationsSlice(bufferId: String, start: Double, maxCount: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      val s = start.toInt()
+      val m = maxCount.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
+        return
+      }
+      if (m > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxCount exceeds max")
+        return
+      }
+      val durations = entry.durations
+      if (s >= durations.size) {
+        promise.resolve(Arguments.createArray())
+        return
+      }
+      val end = minOf(s + m, durations.size)
+      val arr = Arguments.createArray()
+      for (i in s until end) arr.pushDouble(durations[i].toDouble())
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferLang(bufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      promise.resolve(entry.lang)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferEmotion(bufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      promise.resolve(entry.emotion)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineTextBufferEvent(bufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      promise.resolve(entry.event)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveTextBufferPartialSlice(liveBufferId: String, startUtf16: Double, maxUtf16: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Live text buffer not found: $liveBufferId")
+        return
+      }
+      val s = startUtf16.toInt()
+      val m = maxUtf16.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
+        return
+      }
+      val text = entry.currentText
+      if (s >= text.length) {
+        promise.resolve("")
+        return
+      }
+      val end = minOf(s + m, text.length)
+      promise.resolve(text.substring(s, end))
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   // ==================== STT Methods ====================
 
-  override fun transcribe(instanceId: String, bufferId: String, promise: Promise) {
-    sttHelper.transcribe(instanceId, bufferId, promise)
-  }
-
-  // ==================== STT Result Getters ====================
-
-  override fun getSttResultText(instanceId: String, resultId: Double, promise: Promise) {
-    sttHelper.getSttResultText(instanceId, resultId, promise)
-  }
-
-  override fun getSttResultTokens(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
-    sttHelper.getSttResultTokens(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
-  }
-
-  override fun getSttResultTimestamps(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
-    sttHelper.getSttResultTimestamps(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
-  }
-
-  override fun getSttResultDurations(instanceId: String, resultId: Double, start: Double, maxCount: Double, promise: Promise) {
-    sttHelper.getSttResultDurations(instanceId, resultId, start.toInt(), maxCount.toInt(), promise)
-  }
-
-  override fun getSttResultLang(instanceId: String, resultId: Double, promise: Promise) {
-    sttHelper.getSttResultLang(instanceId, resultId, promise)
-  }
-
-  override fun getSttResultEmotion(instanceId: String, resultId: Double, promise: Promise) {
-    sttHelper.getSttResultEmotion(instanceId, resultId, promise)
-  }
-
-  override fun getSttResultEvent(instanceId: String, resultId: Double, promise: Promise) {
-    sttHelper.getSttResultEvent(instanceId, resultId, promise)
-  }
-
-  override fun releaseSttResult(instanceId: String, promise: Promise) {
-    sttHelper.releaseSttResult(instanceId, promise)
+  override fun transcribe(instanceId: String, bufferId: String, textOutBufferId: String, promise: Promise) {
+    sttHelper.transcribe(instanceId, bufferId, textOutBufferId, promise)
   }
 
   override fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {

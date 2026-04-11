@@ -7,6 +7,7 @@
 
 #import "SherpaOnnx.h"
 #import "SherpaOnnx+PipelineAudioGlobals.h"
+#import "SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 
 #include "sherpa-onnx-stt-wrapper.h"
@@ -26,57 +27,15 @@ static NSString *const kSttErrInitFailed = @"STT_INIT_FAILED";
 static NSString *const kSttErrTranscribeFailed = @"STT_TRANSCRIBE_FAILED";
 static NSString *const kSttErrConfigFailed = @"STT_CONFIG_FAILED";
 static NSString *const kSttErrInstanceNotFound = @"STT_INSTANCE_NOT_FOUND";
-static NSString *const kSttErrResultStale = @"STT_STALE_RESULT";
-static NSString *const kSttErrResultEmpty = @"STT_RESULT_EMPTY";
 static NSString *const kSttErrBufferNotFound = @"STT_BUFFER_NOT_FOUND";
 static NSString *const kSttErrBufferKindMismatch = @"STT_BUFFER_KIND_MISMATCH";
-static NSString *const kSttErrSliceInvalid = @"STT_SLICE_INVALID";
-static NSString *const kSttErrSliceTooLarge = @"STT_SLICE_TOO_LARGE";
+static NSString *const kSttErrTextBufferNotFound = @"TEXT_BUFFER_NOT_FOUND";
+static NSString *const kSttErrAlreadyPopulated = @"TEXT_ALREADY_POPULATED";
 static NSString *const kSttErrInternalError = @"STT_INTERNAL_ERROR";
-
-// ==================== Slice Constants ====================
-static const int kSttDefaultSliceCount = 1024;
-static const int kSttMaxSliceCount = 16384;
-
-// ==================== Retained Result ====================
-struct SttRetainedResult {
-    std::string text;
-    std::vector<std::string> tokens;
-    std::vector<float> timestamps;
-    std::vector<float> durations;
-    std::string lang;
-    std::string emotion;
-    std::string event;
-    int32_t sampleRate;
-    std::string source;
-};
-
-// ==================== Result Slot ====================
-static std::atomic<int64_t> g_stt_result_id_counter{0};
-
-struct SttResultSlot {
-    int64_t resultId = -1;
-    std::unique_ptr<SttRetainedResult> retained;
-
-    int64_t store(std::unique_ptr<SttRetainedResult> r) {
-        retained = std::move(r);
-        resultId = g_stt_result_id_counter.fetch_add(1) + 1;
-        return resultId;
-    }
-
-    void release() {
-        retained.reset();
-        resultId = -1;
-    }
-
-    bool isStale(int64_t id) const { return id != resultId; }
-    bool isEmpty() const { return retained == nullptr; }
-};
 
 // ==================== Instance State ====================
 struct SttInstanceState {
     std::unique_ptr<sherpaonnx::SttWrapper> wrapper;
-    SttResultSlot resultSlot;
 };
 
 static std::unordered_map<std::string, std::unique_ptr<SttInstanceState>> g_stt_instances;
@@ -106,57 +65,6 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         case K::kTeleSpeechCtc: return @"telespeech_ctc";
         default: return @"unknown";
     }
-}
-
-static NSDictionary *sttTranscribeRefToDict(int64_t resultId, const SttRetainedResult& r) {
-    NSString *text = [NSString stringWithUTF8String:r.text.c_str()] ?: @"";
-    return @{
-        @"success": @YES,
-        @"resultId": @(resultId),
-        @"sampleRate": @(r.sampleRate),
-        @"textLength": @((NSUInteger)text.length),
-        @"tokenCount": @((int)r.tokens.size()),
-        @"timestampCount": @((int)r.timestamps.size()),
-        @"durationCount": @((int)r.durations.size()),
-        @"hasLang": @(!r.lang.empty()),
-        @"hasEmotion": @(!r.emotion.empty()),
-        @"hasEvent": @(!r.event.empty()),
-        @"source": [NSString stringWithUTF8String:r.source.c_str()]
-    };
-}
-
-static std::unique_ptr<SttRetainedResult> retainResult(const sherpaonnx::SttRecognitionResult& r, int32_t sampleRate, const std::string& source) {
-    auto retained = std::make_unique<SttRetainedResult>();
-    retained->text = r.text;
-    retained->tokens = r.tokens;
-    retained->timestamps = r.timestamps;
-    retained->durations = r.durations;
-    retained->lang = r.lang;
-    retained->emotion = r.emotion;
-    retained->event = r.event;
-    retained->sampleRate = sampleRate;
-    retained->source = source;
-    return retained;
-}
-
-static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromiseRejectBlock reject) {
-    if (start < 0) {
-        reject(kSttErrSliceInvalid,
-               [NSString stringWithFormat:@"start must be >= 0, got %d", start], nil);
-        return false;
-    }
-    if (maxCount <= 0) {
-        reject(kSttErrSliceInvalid,
-               [NSString stringWithFormat:@"maxCount must be > 0, got %d", maxCount], nil);
-        return false;
-    }
-    if (maxCount > kSttMaxSliceCount) {
-        reject(kSttErrSliceTooLarge,
-               [NSString stringWithFormat:@"maxCount %d exceeds max %d", maxCount, kSttMaxSliceCount], nil);
-        return false;
-    }
-    (void)totalCount;
-    return true;
 }
 
 @implementation SherpaOnnx (STT)
@@ -501,7 +409,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         std::lock_guard<std::mutex> lock(g_stt_mutex);
         auto it = g_stt_instances.find(instanceIdStr);
         if (it != g_stt_instances.end()) {
-            it->second->resultSlot.release();
             it->second->wrapper->release();
             it->second->wrapper.reset();
             g_stt_instances.erase(it);
@@ -519,6 +426,7 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
 
 - (void)transcribe:(NSString *)instanceId
           bufferId:(NSString *)bufferId
+   textOutBufferId:(NSString *)textOutBufferId
            resolve:(RCTPromiseResolveBlock)resolve
             reject:(RCTPromiseRejectBlock)reject
 {
@@ -528,6 +436,7 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     }
     std::string instanceIdStr = [instanceId UTF8String];
     std::string bufferIdStr = [bufferId UTF8String];
+    std::string textOutIdStr = [textOutBufferId UTF8String];
 
     std::lock_guard<std::mutex> lock(g_stt_mutex);
     auto it = g_stt_instances.find(instanceIdStr);
@@ -536,6 +445,25 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
         return;
     }
 
+    // Look up text output buffer
+    std::shared_ptr<TxtOfflineEntry> textEntry;
+    {
+        std::lock_guard<std::mutex> txtLock(g_txt_mutex);
+        auto tit = g_txt_offline.find(textOutIdStr);
+        if (tit == g_txt_offline.end()) {
+            reject(kSttErrTextBufferNotFound,
+                   [NSString stringWithFormat:@"Offline text buffer not found: %@", textOutBufferId], nil);
+            return;
+        }
+        if (tit->second->populated) {
+            reject(kSttErrAlreadyPopulated,
+                   @"Text buffer already populated", nil);
+            return;
+        }
+        textEntry = tit->second;
+    }
+
+    // Look up audio buffer
     std::shared_ptr<PaOfflineEntry> entry;
     {
         std::lock_guard<std::mutex> paLock(g_pa_mutex);
@@ -567,9 +495,9 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     SttInstanceState *inst = it->second.get();
     try {
         sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, sampleRate);
-        auto retained = retainResult(result, sampleRate, "buffer");
-        int64_t resultId = inst->resultSlot.store(std::move(retained));
-        resolve(sttTranscribeRefToDict(resultId, *inst->resultSlot.retained));
+        textEntry->populate(result.text, result.tokens, result.timestamps,
+                            result.durations, result.lang, result.emotion, result.event);
+        resolve(nil);
     } catch (const std::exception& e) {
         NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
         if (!errorMsg) errorMsg = @"Recognition failed.";
@@ -577,189 +505,6 @@ static bool validateSliceArgs(int start, int maxCount, int totalCount, RCTPromis
     } catch (...) {
         reject(kSttErrTranscribeFailed, @"Unknown error during buffer transcription", nil);
     }
-}
-
-// ==================== STT Result Getters ====================
-
-- (void)getSttResultText:(NSString *)instanceId
-                resultId:(double)resultId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) {
-        reject(kSttErrInstanceNotFound, @"STT instance not found", nil);
-        return;
-    }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) {
-        reject(kSttErrResultEmpty, @"No result available", nil);
-        return;
-    }
-    if (slot.isStale((int64_t)resultId)) {
-        reject(kSttErrResultStale, @"Result is stale (superseded by new transcription)", nil);
-        return;
-    }
-    resolve([NSString stringWithUTF8String:slot.retained->text.c_str()]);
-}
-
-- (void)getSttResultTokens:(NSString *)instanceId
-                  resultId:(double)resultId
-                     start:(double)start
-                  maxCount:(double)maxCount
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) {
-        reject(kSttErrInstanceNotFound, @"STT instance not found", nil);
-        return;
-    }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-
-    int s = (int)start;
-    int mc = (int)maxCount;
-    int total = (int)slot.retained->tokens.size();
-    if (!validateSliceArgs(s, mc, total, reject)) return;
-    if (s >= total) {
-        resolve([NSArray array]);
-        return;
-    }
-
-    int end = std::min(s + mc, total);
-    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
-    for (int i = s; i < end; i++) {
-        [arr addObject:[NSString stringWithUTF8String:slot.retained->tokens[i].c_str()]];
-    }
-    resolve(arr);
-}
-
-- (void)getSttResultTimestamps:(NSString *)instanceId
-                      resultId:(double)resultId
-                         start:(double)start
-                      maxCount:(double)maxCount
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) { reject(kSttErrInstanceNotFound, @"STT instance not found", nil); return; }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-
-    int s = (int)start;
-    int mc = (int)maxCount;
-    int total = (int)slot.retained->timestamps.size();
-    if (!validateSliceArgs(s, mc, total, reject)) return;
-    if (s >= total) {
-        resolve([NSArray array]);
-        return;
-    }
-
-    int end = std::min(s + mc, total);
-    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
-    for (int i = s; i < end; i++) {
-        [arr addObject:@(slot.retained->timestamps[i])];
-    }
-    resolve(arr);
-}
-
-- (void)getSttResultDurations:(NSString *)instanceId
-                     resultId:(double)resultId
-                        start:(double)start
-                     maxCount:(double)maxCount
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) { reject(kSttErrInstanceNotFound, @"STT instance not found", nil); return; }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-
-    int s = (int)start;
-    int mc = (int)maxCount;
-    int total = (int)slot.retained->durations.size();
-    if (!validateSliceArgs(s, mc, total, reject)) return;
-    if (s >= total) {
-        resolve([NSArray array]);
-        return;
-    }
-
-    int end = std::min(s + mc, total);
-    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
-    for (int i = s; i < end; i++) {
-        [arr addObject:@(slot.retained->durations[i])];
-    }
-    resolve(arr);
-}
-
-- (void)getSttResultLang:(NSString *)instanceId
-                resultId:(double)resultId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) { reject(kSttErrInstanceNotFound, @"STT instance not found", nil); return; }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-    resolve([NSString stringWithUTF8String:slot.retained->lang.c_str()]);
-}
-
-- (void)getSttResultEmotion:(NSString *)instanceId
-                   resultId:(double)resultId
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) { reject(kSttErrInstanceNotFound, @"STT instance not found", nil); return; }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-    resolve([NSString stringWithUTF8String:slot.retained->emotion.c_str()]);
-}
-
-- (void)getSttResultEvent:(NSString *)instanceId
-                 resultId:(double)resultId
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it == g_stt_instances.end()) { reject(kSttErrInstanceNotFound, @"STT instance not found", nil); return; }
-    SttResultSlot& slot = it->second->resultSlot;
-    if (slot.isEmpty()) { reject(kSttErrResultEmpty, @"No result available", nil); return; }
-    if (slot.isStale((int64_t)resultId)) { reject(kSttErrResultStale, @"Result is stale", nil); return; }
-    resolve([NSString stringWithUTF8String:slot.retained->event.c_str()]);
-}
-
-- (void)releaseSttResult:(NSString *)instanceId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_stt_mutex);
-    auto it = g_stt_instances.find(instanceIdStr);
-    if (it != g_stt_instances.end()) {
-        it->second->resultSlot.release();
-    }
-    resolve(nil);
 }
 
 @end

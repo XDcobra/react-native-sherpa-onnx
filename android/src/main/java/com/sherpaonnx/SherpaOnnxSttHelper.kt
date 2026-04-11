@@ -33,8 +33,7 @@ import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.stt.SttErrorCodes
-import com.sherpaonnx.stt.SttRetainedResult
-import com.sherpaonnx.stt.SttResultSlot
+import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -55,8 +54,7 @@ internal class SherpaOnnxSttHelper(
     @Volatile var recognizer: OfflineRecognizer? = null,
     @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
     @Volatile var currentSttModelType: String? = null,
-    @Volatile var qwen3HotwordsForStream: String = "",
-    val resultSlot: SttResultSlot = SttResultSlot()
+    @Volatile var qwen3HotwordsForStream: String = ""
   )
 
   private val instances = ConcurrentHashMap<String, SttEngineInstance>()
@@ -339,7 +337,7 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  fun transcribe(instanceId: String, bufferId: String, promise: Promise) {
+  fun transcribe(instanceId: String, bufferId: String, textOutBufferId: String, promise: Promise) {
     try {
       val inst = getInstance(instanceId) ?: run {
         promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
@@ -366,6 +364,11 @@ internal class SherpaOnnxSttHelper(
         promise.reject(SttErrorCodes.BUFFER_EMPTY, "Audio buffer is empty: $bufferId")
         return
       }
+      val textEntry = TextPipelineRegistry.getOffline(textOutBufferId)
+      if (textEntry == null) {
+        promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $textOutBufferId")
+        return
+      }
       val samples = entry.readAllSamples()
       val stream: OfflineStream = rec.createStream()
       try {
@@ -376,9 +379,16 @@ internal class SherpaOnnxSttHelper(
         stream.acceptWaveform(samples, entry.sampleRate)
         rec.decode(stream)
         val result = rec.getResult(stream)
-        val retained = retainResult(result, entry.sampleRate, "buffer")
-        val resultId = inst.resultSlot.store(retained)
-        promise.resolve(retained.toTranscribeRefMap(resultId))
+        textEntry.populate(
+          text = result.text,
+          tokens = result.tokens,
+          timestamps = result.timestamps,
+          durations = result.durations,
+          lang = result.lang,
+          emotion = result.emotion,
+          event = result.event
+        )
+        promise.resolve(null)
       } finally {
         stream.release()
       }
@@ -387,137 +397,6 @@ internal class SherpaOnnxSttHelper(
       Log.e(logTag, "transcribe error: $message", e)
       promise.reject(SttErrorCodes.TRANSCRIBE_FAILED, message, e)
     }
-  }
-
-  // ==================== Result Getters ====================
-
-  fun getSttResultText(instanceId: String, resultId: Double, promise: Promise) {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) {
-      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
-      return
-    }
-    if (slot.isStale(resultId.toLong())) {
-      promise.reject(SttErrorCodes.STALE_RESULT, "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}. Materialize data before the next transcribe or use a second instance.")
-      return
-    }
-    promise.resolve(slot.result!!.text)
-  }
-
-  fun getSttResultTokens(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
-    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
-    val tokens = validated.tokens
-    val end = minOf(start + maxCount, tokens.size)
-    val arr = Arguments.createArray()
-    for (i in start until end) arr.pushString(tokens[i])
-    promise.resolve(arr)
-  }
-
-  fun getSttResultTimestamps(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
-    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
-    val timestamps = validated.timestamps
-    val end = minOf(start + maxCount, timestamps.size)
-    val arr = Arguments.createArray()
-    for (i in start until end) arr.pushDouble(timestamps[i].toDouble())
-    promise.resolve(arr)
-  }
-
-  fun getSttResultDurations(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise) {
-    val validated = validateSliceArgs(instanceId, resultId, start, maxCount, promise) ?: return
-    val durations = validated.durations
-    val end = minOf(start + maxCount, durations.size)
-    val arr = Arguments.createArray()
-    for (i in start until end) arr.pushDouble(durations[i].toDouble())
-    promise.resolve(arr)
-  }
-
-  fun getSttResultLang(instanceId: String, resultId: Double, promise: Promise) {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
-    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
-    promise.resolve(slot.result!!.lang)
-  }
-
-  fun getSttResultEmotion(instanceId: String, resultId: Double, promise: Promise) {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
-    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
-    promise.resolve(slot.result!!.emotion)
-  }
-
-  fun getSttResultEvent(instanceId: String, resultId: Double, promise: Promise) {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) { promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result"); return }
-    if (slot.isStale(resultId.toLong())) { promise.reject(SttErrorCodes.STALE_RESULT, "Result stale"); return }
-    promise.resolve(slot.result!!.event)
-  }
-
-  fun releaseSttResult(instanceId: String, promise: Promise) {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return
-    }
-    inst.resultSlot.release()
-    promise.resolve(null)
-  }
-
-  private fun validateSliceArgs(instanceId: String, resultId: Double, start: Int, maxCount: Int, promise: Promise): SttRetainedResult? {
-    val inst = getInstance(instanceId) ?: run {
-      promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
-      return null
-    }
-    val slot = inst.resultSlot
-    if (slot.isEmpty()) {
-      promise.reject(SttErrorCodes.RESULT_EMPTY, "No retained result for instance: $instanceId")
-      return null
-    }
-    if (slot.isStale(resultId.toLong())) {
-      promise.reject(SttErrorCodes.STALE_RESULT, "Result ${resultId.toLong()} is stale; current is ${slot.currentResultId}")
-      return null
-    }
-    if (start < 0) {
-      promise.reject(SttErrorCodes.SLICE_INVALID, "start must be >= 0, got $start")
-      return null
-    }
-    if (maxCount <= 0) {
-      promise.reject(SttErrorCodes.SLICE_INVALID, "maxCount must be > 0, got $maxCount")
-      return null
-    }
-    if (maxCount > SttErrorCodes.STT_MAX_SLICE_COUNT) {
-      promise.reject(SttErrorCodes.SLICE_TOO_LARGE, "maxCount $maxCount exceeds max ${SttErrorCodes.STT_MAX_SLICE_COUNT}")
-      return null
-    }
-    return slot.result!!
-  }
-
-  private fun retainResult(result: OfflineRecognizerResult, sampleRate: Int, source: String): SttRetainedResult {
-    return SttRetainedResult(
-      text = result.text,
-      tokens = result.tokens,
-      timestamps = result.timestamps,
-      durations = result.durations,
-      lang = result.lang,
-      emotion = result.emotion,
-      event = result.event,
-      sampleRate = sampleRate,
-      source = source
-    )
   }
 
   fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -607,7 +486,6 @@ internal class SherpaOnnxSttHelper(
     try {
       val inst = instances.remove(instanceId)
       if (inst != null) {
-        inst.resultSlot.release()
         inst.recognizer?.release()
         inst.recognizer = null
         inst.lastRecognizerConfig = null
