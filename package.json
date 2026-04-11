@@ -80,6 +80,11 @@
       "types": "./lib/typescript/src/audiobuffer/index.d.ts",
       "default": "./lib/module/audiobuffer/index.js"
     },
+    "./textbuffer": {
+      "source": "./src/textbuffer/index.ts",
+      "types": "./lib/typescript/src/textbuffer/index.d.ts",
+      "default": "./lib/module/textbuffer/index.js"
+    },
     "./pcm-stream": {
       "source": "./src/pcm-stream/index.ts",
       "types": "./lib/typescript/src/pcm-stream/index.d.ts",
