@@ -50,6 +50,34 @@ export interface LiveAudioBufferRef {
   unsubscribeEvents: () => void;
 }
 
+/** Argument that resolves to an offline audio buffer native id. */
+export type OfflineAudioBufferIdSource =
+  | OfflineAudioBufferRef
+  | OfflineBufferHandle
+  | string;
+
+/** Argument that resolves to a live audio buffer native id (recording or finished). */
+export type LiveAudioBufferIdSource =
+  | LiveAudioBufferRef
+  | LiveBufferHandleRecording
+  | LiveBufferHandleFinished
+  | string;
+
+/** Argument for APIs that accept any pipeline audio buffer (ref, last-fetched info, handle, or raw id). */
+export type PipelineAudioBufferIdSource =
+  | OfflineAudioBufferRef
+  | LiveAudioBufferRef
+  | PipelineAudioBufferInfo
+  | OfflineBufferHandle
+  | LiveBufferHandle
+  | string;
+
+/** Live audio buffer in `recording` state (mic, append, finalize input). */
+export type LiveAudioBufferRecordingSource =
+  | LiveAudioBufferRef
+  | LiveBufferHandleRecording
+  | string;
+
 /** Info returned by all pipeline audio buffer operations (live). */
 export interface LiveAudioBufferInfo {
   bufferId: string;

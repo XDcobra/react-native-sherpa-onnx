@@ -108,57 +108,17 @@ export interface Spec extends TurboModule {
   // ==================== Offline STT (by-reference) ====================
 
   /**
-   * Transcribe from a pipeline offline audio buffer. Returns metadata-only ref; use getters for large data.
+   * Transcribe from a pipeline offline audio buffer into an offline text buffer.
+   * The text buffer is populated with the recognition result.
    * @param instanceId - STT engine instance ID
    * @param bufferId - Offline audio buffer handle (off_…)
+   * @param textOutBufferId - Offline text buffer handle (txt_off_…) to write result into
    */
   transcribe(
     instanceId: string,
-    bufferId: string
-  ): Promise<{
-    success: boolean;
-    resultId?: number;
-    sampleRate?: number;
-    textLength?: number;
-    tokenCount?: number;
-    timestampCount?: number;
-    durationCount?: number;
-    hasLang?: boolean;
-    hasEmotion?: boolean;
-    hasEvent?: boolean;
-    error?: string;
-  }>;
-
-  // ==================== STT Result Getters (by-reference) ====================
-
-  getSttResultText(instanceId: string, resultId: number): Promise<string>;
-
-  getSttResultTokens(
-    instanceId: string,
-    resultId: number,
-    start: number,
-    maxCount: number
-  ): Promise<string[]>;
-
-  getSttResultTimestamps(
-    instanceId: string,
-    resultId: number,
-    start: number,
-    maxCount: number
-  ): Promise<number[]>;
-
-  getSttResultDurations(
-    instanceId: string,
-    resultId: number,
-    start: number,
-    maxCount: number
-  ): Promise<number[]>;
-
-  getSttResultLang(instanceId: string, resultId: number): Promise<string>;
-  getSttResultEmotion(instanceId: string, resultId: number): Promise<string>;
-  getSttResultEvent(instanceId: string, resultId: number): Promise<string>;
-
-  releaseSttResult(instanceId: string): Promise<void>;
+    bufferId: string,
+    textOutBufferId: string
+  ): Promise<void>;
 
   /**
    * Update recognizer config at runtime.
@@ -438,6 +398,159 @@ export interface Spec extends TurboModule {
    * Stop microphone capture to a live audio buffer.
    */
   stopMicToLiveAudioBuffer(): Promise<void>;
+
+  // ==================== Pipeline Text Buffers ====================
+
+  /**
+   * Create an empty offline text buffer as output target for offline STT.
+   */
+  createEmptyOfflineTextBuffer(): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create an offline text buffer from a live text buffer (snapshot or finalized).
+   * @param liveBufferId - Live text buffer handle
+   * @param mode - "fullIfSpooled" or "windowSnapshot"
+   */
+  createOfflineTextBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create a live text buffer for streaming/incremental text.
+   */
+  createLiveTextBuffer(options: {
+    windowMaxChars?: number;
+    emitPartialEvents?: boolean;
+    partialEventMinIntervalMs?: number;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    totalCharsWritten: number;
+    revision: number;
+  }>;
+
+  /**
+   * Create a live text buffer seeded from an offline text buffer.
+   */
+  createLiveTextBufferFromOffline(offlineBufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    totalCharsWritten: number;
+    revision: number;
+  }>;
+
+  /**
+   * Finalize a live text buffer (recording → finished).
+   */
+  finalizeLiveTextBuffer(liveBufferId: string): Promise<void>;
+
+  /**
+   * Get info for any pipeline text buffer (offline or live).
+   */
+  getPipelineTextBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length?: number;
+    tokenCount?: number;
+    timestampCount?: number;
+    durationCount?: number;
+    hasLang?: boolean;
+    hasEmotion?: boolean;
+    hasEvent?: boolean;
+    totalCharsWritten?: number;
+    revision?: number;
+  }>;
+
+  /**
+   * Release any pipeline text buffer (offline or live).
+   */
+  releasePipelineTextBuffer(bufferId: string): Promise<void>;
+
+  /**
+   * Get a slice of hypothesis text from an offline text buffer.
+   */
+  getOfflineTextBufferTextSlice(
+    bufferId: string,
+    startUtf16: number,
+    maxUtf16: number
+  ): Promise<string>;
+
+  /**
+   * Get a slice of tokens from an offline text buffer.
+   */
+  getOfflineTextBufferTokensSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<string[]>;
+
+  /**
+   * Get a slice of timestamps from an offline text buffer.
+   */
+  getOfflineTextBufferTimestampsSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  /**
+   * Get a slice of durations from an offline text buffer.
+   */
+  getOfflineTextBufferDurationsSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  /**
+   * Get the language string from an offline text buffer.
+   */
+  getOfflineTextBufferLang(bufferId: string): Promise<string>;
+
+  /**
+   * Get the emotion string from an offline text buffer.
+   */
+  getOfflineTextBufferEmotion(bufferId: string): Promise<string>;
+
+  /**
+   * Get the event string from an offline text buffer.
+   */
+  getOfflineTextBufferEvent(bufferId: string): Promise<string>;
+
+  /**
+   * Get a slice of partial text from a live text buffer (debug/UI).
+   */
+  getLiveTextBufferPartialSlice(
+    liveBufferId: string,
+    startUtf16: number,
+    maxUtf16: number
+  ): Promise<string>;
 
   // ==================== TTS Methods ====================
 

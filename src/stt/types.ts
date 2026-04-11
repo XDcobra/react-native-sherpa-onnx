@@ -3,6 +3,10 @@ import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
 } from '../audiobuffer/types';
+import type {
+  OfflineTextBufferRef,
+  OfflineTextBufferHandle,
+} from '../textbuffer/types';
 
 /**
  * Supported STT model types.
@@ -288,6 +292,7 @@ export interface STTInitializeOptions {
 /**
  * Metadata-only reference to a native STT result (by-reference).
  * Large arrays (tokens, timestamps, durations) stay native until fetched via discrete getters.
+ * @deprecated Replaced by TextBuffer pipeline. Use createEmptyOfflineTextBuffer() + transcribe(audio, textOut).
  */
 export interface SttTranscribeRef {
   success: boolean;
@@ -317,11 +322,8 @@ export const SttErrorCode = {
   BUFFER_NOT_FOUND: 'STT_BUFFER_NOT_FOUND',
   BUFFER_KIND_MISMATCH: 'STT_BUFFER_KIND_MISMATCH',
   BUFFER_EMPTY: 'STT_BUFFER_EMPTY',
-  RESULT_EMPTY: 'STT_RESULT_EMPTY',
-  RESULT_NOT_FOUND: 'STT_RESULT_NOT_FOUND',
-  STALE_RESULT: 'STT_STALE_RESULT',
-  SLICE_INVALID: 'STT_SLICE_INVALID',
-  SLICE_TOO_LARGE: 'STT_SLICE_TOO_LARGE',
+  TEXT_BUFFER_NOT_FOUND: 'TEXT_BUFFER_NOT_FOUND',
+  TEXT_ALREADY_POPULATED: 'TEXT_ALREADY_POPULATED',
   STREAM_INSTANCE_NOT_FOUND: 'STT_STREAM_INSTANCE_NOT_FOUND',
   STREAM_NOT_FOUND: 'STT_STREAM_NOT_FOUND',
   STREAM_DECODE_FAILED: 'STT_STREAM_DECODE_FAILED',
@@ -332,42 +334,18 @@ export const SttErrorCode = {
 export type SttErrorCodeValue =
   (typeof SttErrorCode)[keyof typeof SttErrorCode];
 
-// ========== Slice constants ==========
-
-export const STT_DEFAULT_SLICE_COUNT = 1024;
-export const STT_MAX_SLICE_COUNT = 16384;
-
 // ========== Engine interfaces ==========
 
 /**
  * Instance-based STT engine returned by createSTT().
- * transcribe() returns a metadata-only ref; use getters for large data.
+ * transcribe() writes results into an OfflineTextBuffer; use TextBuffer getters to read them.
  */
 export interface SttEngine {
   readonly instanceId: string;
   transcribe(
-    buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
-  ): Promise<SttTranscribeRef>;
-  getSttResultText(resultId: number): Promise<string>;
-  getSttResultTokens(
-    resultId: number,
-    start?: number,
-    maxCount?: number
-  ): Promise<string[]>;
-  getSttResultTimestamps(
-    resultId: number,
-    start?: number,
-    maxCount?: number
-  ): Promise<number[]>;
-  getSttResultDurations(
-    resultId: number,
-    start?: number,
-    maxCount?: number
-  ): Promise<number[]>;
-  getSttResultLang(resultId: number): Promise<string>;
-  getSttResultEmotion(resultId: number): Promise<string>;
-  getSttResultEvent(resultId: number): Promise<string>;
-  releaseSttResult(): Promise<void>;
+    buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
+    textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string
+  ): Promise<void>;
   setConfig(options: SttRuntimeConfig): Promise<void>;
   destroy(): Promise<void>;
 }

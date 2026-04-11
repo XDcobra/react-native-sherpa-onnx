@@ -4,14 +4,16 @@ import type {
   OfflineBufferHandle,
 } from '../audiobuffer/types';
 import type {
+  OfflineTextBufferRef,
+  OfflineTextBufferHandle,
+} from '../textbuffer/types';
+import type {
   STTInitializeOptions,
   STTModelType,
   SttEngine,
   SttModelOptions,
   SttRuntimeConfig,
-  SttTranscribeRef,
 } from './types';
-import { STT_DEFAULT_SLICE_COUNT } from './types';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
@@ -24,35 +26,6 @@ import {
 } from '../types/modelDetect';
 
 let sttInstanceCounter = 0;
-
-function normalizeSttTranscribeRef(raw: {
-  success?: boolean;
-  resultId?: number;
-  sampleRate?: number;
-  textLength?: number;
-  tokenCount?: number;
-  timestampCount?: number;
-  durationCount?: number;
-  hasLang?: boolean;
-  hasEmotion?: boolean;
-  hasEvent?: boolean;
-  source?: string;
-  error?: string;
-}): SttTranscribeRef {
-  return {
-    success: raw.success === true,
-    resultId: raw.resultId,
-    sampleRate: raw.sampleRate,
-    textLength: raw.textLength,
-    tokenCount: raw.tokenCount,
-    timestampCount: raw.timestampCount,
-    durationCount: raw.durationCount,
-    hasLang: raw.hasLang,
-    hasEmotion: raw.hasEmotion,
-    hasEvent: raw.hasEvent,
-    error: raw.error,
-  };
-}
 
 function normalizeOfflineBufferInput(
   buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
@@ -153,11 +126,18 @@ export async function detectSttModel(
  * @returns Promise resolving to an SttEngine instance
  * @example
  * ```typescript
+ * import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
+ * import {
+ *   createEmptyOfflineTextBuffer,
+ *   getOfflineTextBufferTextSlice,
+ * } from 'react-native-sherpa-onnx/textbuffer';
  * const stt = await createSTT({
  *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
  * });
- * const ref = await stt.transcribe(bufferId);
- * const text = await stt.getSttResultText(ref.resultId!);
+ * const audio = await createOfflineAudioBufferFromFile('/path/to.wav');
+ * const textOut = await createEmptyOfflineTextBuffer();
+ * await stt.transcribe(audio, textOut);
+ * const text = await getOfflineTextBufferTextSlice(textOut, 0, 4096);
  * await stt.destroy();
  * ```
  */
@@ -258,79 +238,14 @@ export async function createSTT(
     },
 
     async transcribe(
-      buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
-    ): Promise<SttTranscribeRef> {
+      buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
+      textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string
+    ): Promise<void> {
       guard();
       const bufferId = normalizeOfflineBufferInput(buffer);
-      const raw = await SherpaOnnx.transcribe(instanceId, bufferId);
-      return normalizeSttTranscribeRef(raw);
-    },
-
-    async getSttResultText(resultId: number): Promise<string> {
-      guard();
-      return SherpaOnnx.getSttResultText(instanceId, resultId);
-    },
-
-    async getSttResultTokens(
-      resultId: number,
-      start?: number,
-      maxCount?: number
-    ): Promise<string[]> {
-      guard();
-      return SherpaOnnx.getSttResultTokens(
-        instanceId,
-        resultId,
-        start ?? 0,
-        maxCount ?? STT_DEFAULT_SLICE_COUNT
-      );
-    },
-
-    async getSttResultTimestamps(
-      resultId: number,
-      start?: number,
-      maxCount?: number
-    ): Promise<number[]> {
-      guard();
-      return SherpaOnnx.getSttResultTimestamps(
-        instanceId,
-        resultId,
-        start ?? 0,
-        maxCount ?? STT_DEFAULT_SLICE_COUNT
-      );
-    },
-
-    async getSttResultDurations(
-      resultId: number,
-      start?: number,
-      maxCount?: number
-    ): Promise<number[]> {
-      guard();
-      return SherpaOnnx.getSttResultDurations(
-        instanceId,
-        resultId,
-        start ?? 0,
-        maxCount ?? STT_DEFAULT_SLICE_COUNT
-      );
-    },
-
-    async getSttResultLang(resultId: number): Promise<string> {
-      guard();
-      return SherpaOnnx.getSttResultLang(instanceId, resultId);
-    },
-
-    async getSttResultEmotion(resultId: number): Promise<string> {
-      guard();
-      return SherpaOnnx.getSttResultEmotion(instanceId, resultId);
-    },
-
-    async getSttResultEvent(resultId: number): Promise<string> {
-      guard();
-      return SherpaOnnx.getSttResultEvent(instanceId, resultId);
-    },
-
-    async releaseSttResult(): Promise<void> {
-      guard();
-      return SherpaOnnx.releaseSttResult(instanceId);
+      const textOutBufferId =
+        typeof textOut === 'string' ? textOut : textOut.bufferId;
+      await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
     },
 
     async setConfig(config: SttRuntimeConfig): Promise<void> {
@@ -395,6 +310,4 @@ export {
   STT_HOTWORDS_MODEL_TYPES,
   sttSupportsHotwords,
   SttErrorCode,
-  STT_DEFAULT_SLICE_COUNT,
-  STT_MAX_SLICE_COUNT,
 } from './types';

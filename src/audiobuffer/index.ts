@@ -23,6 +23,10 @@ import type {
   OfflineBufferHandle,
   LiveBufferHandleRecording,
   LiveBufferHandleFinished,
+  OfflineAudioBufferIdSource,
+  LiveAudioBufferIdSource,
+  PipelineAudioBufferIdSource,
+  LiveAudioBufferRecordingSource,
   CreateLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
@@ -33,6 +37,36 @@ import type {
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+
+function resolveOfflineAudioBufferId(
+  source: OfflineAudioBufferIdSource
+): string {
+  if (typeof source === 'object' && source !== null && 'info' in source) {
+    return (source as OfflineAudioBufferRef).bufferId;
+  }
+  return source as string;
+}
+
+function resolveLiveAudioBufferId(source: LiveAudioBufferIdSource): string {
+  if (typeof source === 'object' && source !== null && 'info' in source) {
+    return (source as LiveAudioBufferRef).bufferId;
+  }
+  return source as string;
+}
+
+function resolvePipelineAudioBufferId(
+  source: PipelineAudioBufferIdSource
+): string {
+  if (typeof source === 'object' && source !== null) {
+    if ('info' in source) {
+      return (source as OfflineAudioBufferRef | LiveAudioBufferRef).bufferId;
+    }
+    if ('kind' in source && 'bufferId' in source) {
+      return (source as PipelineAudioBufferInfo).bufferId;
+    }
+  }
+  return source as string;
+}
 
 type NativeSubscription = { remove: () => void };
 
@@ -170,31 +204,32 @@ function clearLiveAudioBufferCallbacks(liveBufferId: string): void {
  * Returns an unsubscribe function.
  */
 export function subscribeLiveAudioBufferEvents(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferIdSource,
   callbacks: LiveAudioBufferCallbacks
 ): () => void {
   ensureLiveEventSubscriptions();
+  const id = resolveLiveAudioBufferId(liveBufferId);
 
   if (callbacks.onFramesAppended) {
-    addFramesCallback(liveBufferId, callbacks.onFramesAppended);
+    addFramesCallback(id, callbacks.onFramesAppended);
   }
   if (callbacks.onError) {
-    addErrorCallback(liveBufferId, callbacks.onError);
+    addErrorCallback(id, callbacks.onError);
   }
 
   return () => {
     if (callbacks.onFramesAppended) {
-      const frameSet = framesCallbacks.get(liveBufferId);
+      const frameSet = framesCallbacks.get(id);
       frameSet?.delete(callbacks.onFramesAppended);
       if (frameSet && frameSet.size === 0) {
-        framesCallbacks.delete(liveBufferId);
+        framesCallbacks.delete(id);
       }
     }
     if (callbacks.onError) {
-      const errorSet = errorCallbacks.get(liveBufferId);
+      const errorSet = errorCallbacks.get(id);
       errorSet?.delete(callbacks.onError);
       if (errorSet && errorSet.size === 0) {
-        errorCallbacks.delete(liveBufferId);
+        errorCallbacks.delete(id);
       }
     }
 
@@ -247,13 +282,11 @@ export async function createOfflineAudioBufferFromSamples(
  * - "windowSnapshot": always snapshots the current ring window.
  */
 export async function createOfflineAudioBufferFromLive(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferIdSource,
   mode?: OfflineFromLiveMode
 ): Promise<OfflineAudioBufferRef> {
-  const result = await getNative().createOfflineAudioBufferFromLive(
-    liveBufferId,
-    mode
-  );
+  const id = resolveLiveAudioBufferId(liveBufferId);
+  const result = await getNative().createOfflineAudioBufferFromLive(id, mode);
   const info = result as unknown as OfflineAudioBufferInfo;
   return { info, bufferId: info.bufferId as OfflineBufferHandle };
 }
@@ -309,27 +342,24 @@ export async function createLiveAudioBuffer(
  * Append Float32 samples to a live audio buffer (recording state only).
  */
 export async function appendSamplesToLiveAudioBuffer(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferRecordingSource,
   samples: number[],
   sampleRate: number
 ): Promise<void> {
-  await getNative().appendSamplesToLiveAudioBuffer(
-    liveBufferId,
-    samples,
-    sampleRate
-  );
+  const id = resolveLiveAudioBufferId(liveBufferId);
+  await getNative().appendSamplesToLiveAudioBuffer(id, samples, sampleRate);
 }
 
 /**
  * Append all samples from an offline buffer to a live buffer.
  */
 export async function appendOfflineToLiveAudioBuffer(
-  liveBufferId: string,
-  offlineBufferId: string
+  liveBufferId: LiveAudioBufferRecordingSource,
+  offlineBufferId: OfflineAudioBufferIdSource
 ): Promise<void> {
   await getNative().appendOfflineToLiveAudioBuffer(
-    liveBufferId,
-    offlineBufferId
+    resolveLiveAudioBufferId(liveBufferId),
+    resolveOfflineAudioBufferId(offlineBufferId)
   );
 }
 
@@ -338,10 +368,11 @@ export async function appendOfflineToLiveAudioBuffer(
  * Returns a finished handle. No more appends allowed after this.
  */
 export async function finalizeLiveAudioBuffer(
-  liveBufferId: string
+  liveBufferId: LiveAudioBufferRecordingSource
 ): Promise<LiveBufferHandleFinished> {
-  await getNative().finalizeLiveAudioBuffer(liveBufferId);
-  return liveBufferId as LiveBufferHandleFinished;
+  const id = resolveLiveAudioBufferId(liveBufferId);
+  await getNative().finalizeLiveAudioBuffer(id);
+  return id as LiveBufferHandleFinished;
 }
 
 // ==================== Save ====================
@@ -350,20 +381,26 @@ export async function finalizeLiveAudioBuffer(
  * Save an offline audio buffer as 16-bit PCM WAV.
  */
 export async function saveOfflineAudioBufferToWav(
-  bufferId: string,
+  bufferId: OfflineAudioBufferIdSource,
   outputPath: string
 ): Promise<void> {
-  await getNative().saveOfflineAudioBufferToWav(bufferId, outputPath);
+  await getNative().saveOfflineAudioBufferToWav(
+    resolveOfflineAudioBufferId(bufferId),
+    outputPath
+  );
 }
 
 /**
  * Save a live audio buffer as 16-bit PCM WAV.
  */
 export async function saveLiveAudioBufferToWav(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferIdSource,
   outputPath: string
 ): Promise<void> {
-  await getNative().saveLiveAudioBufferToWav(liveBufferId, outputPath);
+  await getNative().saveLiveAudioBufferToWav(
+    resolveLiveAudioBufferId(liveBufferId),
+    outputPath
+  );
 }
 
 // ==================== Info / Release ====================
@@ -372,9 +409,10 @@ export async function saveLiveAudioBufferToWav(
  * Get info for any pipeline audio buffer (offline or live).
  */
 export async function getPipelineAudioBufferInfo(
-  bufferId: string
+  bufferId: PipelineAudioBufferIdSource
 ): Promise<PipelineAudioBufferInfo> {
-  const result = await getNative().getPipelineAudioBufferInfo(bufferId);
+  const id = resolvePipelineAudioBufferId(bufferId);
+  const result = await getNative().getPipelineAudioBufferInfo(id);
   return result as unknown as PipelineAudioBufferInfo;
 }
 
@@ -382,10 +420,11 @@ export async function getPipelineAudioBufferInfo(
  * Release any pipeline audio buffer (offline or live).
  */
 export async function releasePipelineAudioBuffer(
-  bufferId: string
+  bufferId: PipelineAudioBufferIdSource
 ): Promise<void> {
-  await getNative().releasePipelineAudioBuffer(bufferId);
-  clearLiveAudioBufferCallbacks(bufferId);
+  const id = resolvePipelineAudioBufferId(bufferId);
+  await getNative().releasePipelineAudioBuffer(id);
+  clearLiveAudioBufferCallbacks(id);
 }
 
 // ==================== Live Samples Slice (debug/export) ====================
@@ -395,12 +434,13 @@ export async function releasePipelineAudioBuffer(
  * Useful for debug visualization or export.
  */
 export async function getLiveAudioBufferSamplesSlice(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferIdSource,
   startFrame: number,
   frameCount: number
 ): Promise<number[]> {
+  const id = resolveLiveAudioBufferId(liveBufferId);
   return await getNative().getLiveAudioBufferSamplesSlice(
-    liveBufferId,
+    id,
     startFrame,
     frameCount
   );
@@ -413,11 +453,12 @@ export async function getLiveAudioBufferSamplesSlice(
  * Mic audio is resampled and written directly into the live buffer's ring.
  */
 export async function startMicToLiveAudioBuffer(
-  liveBufferId: string,
+  liveBufferId: LiveAudioBufferRecordingSource,
   options?: StartMicToLiveOptions
 ): Promise<void> {
+  const id = resolveLiveAudioBufferId(liveBufferId);
   await getNative().startMicToLiveAudioBuffer(
-    liveBufferId,
+    id,
     options ? { emitToJs: options.emitToJs } : undefined
   );
 }
@@ -437,6 +478,10 @@ export type {
   LiveAudioBufferInfo,
   LiveAudioBufferRef,
   PipelineAudioBufferInfo,
+  OfflineAudioBufferIdSource,
+  LiveAudioBufferIdSource,
+  PipelineAudioBufferIdSource,
+  LiveAudioBufferRecordingSource,
   OfflineBufferHandle,
   LiveBufferHandleRecording,
   LiveBufferHandleFinished,
