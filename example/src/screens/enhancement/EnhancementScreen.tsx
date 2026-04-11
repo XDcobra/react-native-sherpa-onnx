@@ -32,9 +32,10 @@ import {
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
-  saveAudioFromPCM,
-  type GeneratedAudio,
-} from 'react-native-sherpa-onnx/tts';
+  createOfflineAudioBufferFromSamples,
+  saveOfflineAudioBufferToWav,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -110,19 +111,10 @@ export default function EnhancementScreen() {
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   /** Path of the input file used for the last successful run (for playback). */
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
-  const [lastEnhancedAudio, setLastEnhancedAudio] =
-    useState<GeneratedAudio | null>(null);
-  const buildGeneratedAudio = (
-    samples: number[],
-    sampleRate: number
-  ): GeneratedAudio => ({
-    sampleRate,
-    numSamples: samples.length,
-    generation: 0,
-    async getSamples(): Promise<Float32Array> {
-      return Float32Array.from(samples);
-    },
-  });
+  const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
+    samples: number[];
+    sampleRate: number;
+  } | null>(null);
 
   const [saving, setSaving] = useState(false);
 
@@ -169,7 +161,7 @@ export default function EnhancementScreen() {
   };
 
   const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.numSamples) {
+    if (!lastEnhancedAudio?.samples.length) {
       Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
       return;
     }
@@ -179,20 +171,23 @@ export default function EnhancementScreen() {
       const filename = `sherpa_enhanced_${timestamp}.wav`;
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      if (directoryUri) {
-        const savedUri = await saveAudioFromPCM(
-          {
-            samples: await lastEnhancedAudio.getSamples(),
-            sampleRate: lastEnhancedAudio.sampleRate,
-          },
-          {
-            kind: 'androidContent',
-            directoryUri,
-            filename,
-          },
-          { format: 'wav' }
+      const savePcmToPath = async (path: string) => {
+        const buf = await createOfflineAudioBufferFromSamples(
+          lastEnhancedAudio.samples,
+          lastEnhancedAudio.sampleRate
         );
-        Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(savedUri)}`);
+        try {
+          await saveOfflineAudioBufferToWav(buf.bufferId, path);
+        } finally {
+          await releasePipelineAudioBuffer(buf.bufferId).catch(() => {});
+        }
+      };
+
+      if (directoryUri) {
+        // Android SAF: save to cache then copy
+        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
+        await savePcmToPath(tmpPath);
+        Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
 
@@ -205,14 +200,7 @@ export default function EnhancementScreen() {
       }
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      await saveAudioFromPCM(
-        {
-          samples: await lastEnhancedAudio.getSamples(),
-          sampleRate: lastEnhancedAudio.sampleRate,
-        },
-        { kind: 'file', path: filePath },
-        { format: 'wav' }
-      );
+      await savePcmToPath(filePath);
       Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -470,21 +458,16 @@ export default function EnhancementScreen() {
       const sr = enhanced.sampleRate;
       const sec = sr > 0 ? (n / sr).toFixed(2) : '?';
       const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-      const audioForFile = buildGeneratedAudio(
-        Array.from(enhanced.samples),
-        sr
-      );
-      await saveAudioFromPCM(
-        {
-          samples: await audioForFile.getSamples(),
-          sampleRate: audioForFile.sampleRate,
-        },
-        { kind: 'file', path: outPath },
-        { format: 'wav' }
-      );
+      const samplesArr = Array.from(enhanced.samples);
+      const buf = await createOfflineAudioBufferFromSamples(samplesArr, sr);
+      try {
+        await saveOfflineAudioBufferToWav(buf.bufferId, outPath);
+      } finally {
+        await releasePipelineAudioBuffer(buf.bufferId).catch(() => {});
+      }
       setOutputWavPath(outPath);
       setLastInputPath(inputPath);
-      setLastEnhancedAudio(audioForFile);
+      setLastEnhancedAudio({ samples: samplesArr, sampleRate: sr });
       setEnhanceResult(
         `Samples: ${n}\nSample rate: ${sr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
       );

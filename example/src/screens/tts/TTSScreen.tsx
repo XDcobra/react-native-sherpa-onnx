@@ -15,10 +15,9 @@ import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudioFromGeneration,
-  saveAudioFromPCM,
   type TTSModelType,
   type TtsGenerationOptions,
+  type TtsSynthesisOptions,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
@@ -30,8 +29,19 @@ import type {
   TtsEngine,
   StreamingTtsEngine,
   TtsStreamController,
-  GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  createEmptyOfflineAudioBuffer,
+  createOfflineAudioBufferFromSamples,
+  saveOfflineAudioBufferToWav,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
@@ -67,6 +77,20 @@ const PAD_PACK_NAME = 'sherpa_models';
 
 type TtsSavedAudioPlayback = ActiveWebAudioPlayback & { resolvedPath: string };
 
+/**
+ * Union type for generated audio results.
+ * - buffer: OfflineAudioBuffer from batch TTS synthesis
+ * - pcm: Raw PCM samples from streaming TTS
+ */
+type GeneratedResult =
+  | { kind: 'buffer'; bufferId: string; sampleRate: number; numSamples: number }
+  | {
+      kind: 'pcm';
+      samples: Float32Array;
+      sampleRate: number;
+      numSamples: number;
+    };
+
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
@@ -87,7 +111,7 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [generatedAudio, setGeneratedAudio] = useState<GeneratedAudio | null>(
+  const [generatedAudio, setGeneratedAudio] = useState<GeneratedResult | null>(
     null
   );
   const [generating, setGenerating] = useState(false);
@@ -386,7 +410,7 @@ export default function TTSScreen() {
     []
   );
 
-  const buildStreamedAudio = useCallback((): GeneratedAudio | null => {
+  const buildStreamedAudio = useCallback((): GeneratedResult | null => {
     const chunks = streamChunksRef.current;
     if (chunks.length === 0) {
       return null;
@@ -401,12 +425,10 @@ export default function TTSScreen() {
     const sampleRate =
       streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
     return {
+      kind: 'pcm',
+      samples: combined,
       sampleRate,
       numSamples: combined.length,
-      generation: 0,
-      async getSamples(): Promise<Float32Array> {
-        return combined;
-      },
     };
   }, [modelInfo?.sampleRate]);
 
@@ -927,14 +949,99 @@ export default function TTSScreen() {
       return;
     }
     try {
-      const options = getSynthesisOptions();
-      const result = await engine.generateSpeech(inputText, options);
+      // Build synthesis options (buffer-based voice clone)
+      const options: TtsSynthesisOptions = {};
+      const sid = parseInt(speakerId, 10);
+      if (!isNaN(sid) && sid >= 0) options.sid = sid;
+      const speedValue = parseFloat(speed);
+      if (!isNaN(speedValue) && speedValue > 0) options.speed = speedValue;
+      const silVal = silenceScale.trim();
+      if (silVal) {
+        const v = parseFloat(silVal);
+        if (!isNaN(v) && v > 0) options.silenceScale = v;
+      }
+      const stepsVal = numSteps.trim();
+      if (stepsVal) {
+        const v = parseInt(stepsVal, 10);
+        if (!isNaN(v) && v > 0) options.numSteps = v;
+      }
+      if (extraOptions.trim()) {
+        const ex: Record<string, string> = {};
+        extraOptions
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((pair) => {
+            const idx = pair.indexOf(':');
+            if (idx > 0) {
+              const k = pair.slice(0, idx).trim();
+              const v = pair.slice(idx + 1).trim();
+              if (k && v) ex[k] = v;
+            }
+          });
+        if (Object.keys(ex).length > 0) options.extra = ex;
+      }
 
-      setGeneratedAudio(result);
-      Alert.alert(
-        'Success',
-        `Generated ${result.numSamples} samples at ${result.sampleRate} Hz`
-      );
+      // Voice clone: create buffer from raw reference samples
+      let refAudioBuf: OfflineAudioBufferRef | undefined;
+      const hasRefAudio =
+        referenceAudio != null &&
+        referenceAudio.samples.length > 0 &&
+        referenceAudio.sampleRate > 0;
+      if (
+        hasRefAudio &&
+        (selectedModelType === 'zipvoice' || selectedModelType === 'pocket')
+      ) {
+        refAudioBuf = await createOfflineAudioBufferFromSamples(
+          referenceAudio.samples,
+          referenceAudio.sampleRate
+        );
+        if (selectedModelType === 'zipvoice') {
+          options.voiceClone = {
+            kind: 'zipvoice',
+            referenceAudio: refAudioBuf,
+            referenceText: referenceText.trim(),
+          };
+        } else {
+          const refTrim = referenceText.trim();
+          options.voiceClone = {
+            kind: 'pocket',
+            referenceAudio: refAudioBuf,
+            ...(refTrim ? { referenceText: refTrim } : {}),
+          };
+        }
+      }
+
+      // Buffer-to-buffer pipeline
+      const sr = modelInfo?.sampleRate ?? 16000;
+      const textBuf = await createOfflineTextBufferFromText(inputText);
+      const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+      try {
+        await engine.synthesize(
+          textBuf,
+          audioBuf,
+          Object.keys(options).length > 0 ? options : undefined
+        );
+        const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
+        setGeneratedAudio({
+          kind: 'buffer',
+          bufferId: audioBuf.bufferId,
+          sampleRate: info.sampleRate,
+          numSamples: info.numSamples ?? 0,
+        });
+        Alert.alert(
+          'Success',
+          `Generated ${info.numSamples ?? 0} samples at ${info.sampleRate} Hz`
+        );
+      } finally {
+        // Release text buffer (audio buffer kept for save/playback)
+        await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
+        if (refAudioBuf) {
+          await releasePipelineAudioBuffer(refAudioBuf.bufferId).catch(
+            () => {}
+          );
+        }
+      }
     } catch (err) {
       console.error('TTS Generation error:', err);
 
@@ -1138,7 +1245,24 @@ export default function TTSScreen() {
     );
   };
 
-  const saveAudioWithData = async (audio: GeneratedAudio) => {
+  /** Save a GeneratedResult (buffer or pcm) to a WAV file path. */
+  const saveResultToWav = async (audio: GeneratedResult, path: string) => {
+    if (audio.kind === 'buffer') {
+      await saveOfflineAudioBufferToWav(audio.bufferId, path);
+    } else {
+      const tmp = await createOfflineAudioBufferFromSamples(
+        Array.from(audio.samples),
+        audio.sampleRate
+      );
+      try {
+        await saveOfflineAudioBufferToWav(tmp.bufferId, path);
+      } finally {
+        await releasePipelineAudioBuffer(tmp.bufferId).catch(() => {});
+      }
+    }
+  };
+
+  const saveAudioWithData = async (audio: GeneratedResult) => {
     if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
       return;
@@ -1149,42 +1273,18 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const format = 'wav';
-      const filename = `tts_${timestamp}.${format}`;
+      const filename = `tts_${timestamp}.wav`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      const saveWithTarget = async (
-        target:
-          | { kind: 'file'; path: string }
-          | { kind: 'androidContent'; directoryUri: string; filename: string }
-      ) => {
-        if (
-          audio.generation > 0 &&
-          '_instanceId' in audio &&
-          typeof (audio as any)._instanceId === 'string'
-        ) {
-          return saveAudioFromGeneration(audio, target, { format });
-        }
-        const pcm = await audio.getSamples();
-        return saveAudioFromPCM(
-          { samples: pcm, sampleRate: audio.sampleRate },
-          target,
-          { format }
-        );
-      };
-
       if (directoryUri) {
-        const savedUri = await saveWithTarget({
-          kind: 'androidContent',
-          directoryUri,
-          filename,
-        });
-        setSavedAudioPath(savedUri);
+        // Android SAF: save to app cache, then inform user
+        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
+        await saveResultToWav(audio, tmpPath);
+        setSavedAudioPath(tmpPath);
         setCachedPlaybackPath(null);
         setCachedPlaybackSource(null);
-
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedUri)}`);
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
 
@@ -1195,15 +1295,12 @@ export default function TTSScreen() {
 
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      const savedPath = await saveWithTarget({
-        kind: 'file',
-        path: filePath,
-      });
-      setSavedAudioPath(savedPath);
+      await saveResultToWav(audio, filePath);
+      setSavedAudioPath(filePath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
 
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1234,34 +1331,17 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const format = 'wav';
       const directoryPath = DocumentDirectoryPath;
       await mkdir(directoryPath);
 
       const filename = `tts_${timestamp}.wav`;
       const filePath = `${directoryPath}/${filename}`;
-      const savedPath =
-        generatedAudio.generation > 0 &&
-        '_instanceId' in generatedAudio &&
-        typeof (generatedAudio as any)._instanceId === 'string'
-          ? await saveAudioFromGeneration(
-              generatedAudio,
-              { kind: 'file', path: filePath },
-              { format }
-            )
-          : await saveAudioFromPCM(
-              {
-                samples: await generatedAudio.getSamples(),
-                sampleRate: generatedAudio.sampleRate,
-              },
-              { kind: 'file', path: filePath },
-              { format }
-            );
-      setSavedAudioPath(savedPath);
+      await saveResultToWav(generatedAudio, filePath);
+      setSavedAudioPath(filePath);
       setCachedPlaybackPath(null);
       setCachedPlaybackSource(null);
 
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
