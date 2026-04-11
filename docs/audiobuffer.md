@@ -47,7 +47,7 @@ const engine = await createStreamingSTT({
 });
 const stream = await engine.createStream();
 
-const { bufferId, unsubscribeEvents } = await createLiveAudioBuffer({
+const live = await createLiveAudioBuffer({
   sampleRate: SAMPLE_RATE,
   channelCount: 1,
   windowSeconds: 120,
@@ -64,13 +64,13 @@ const { bufferId, unsubscribeEvents } = await createLiveAudioBuffer({
   },
 });
 
-await startMicToLiveAudioBuffer(bufferId);
+await startMicToLiveAudioBuffer(live);
 // … recording …
 await stopMicToLiveAudioBuffer();
-unsubscribeEvents();
+live.unsubscribeEvents();
 await stream.release();
 await engine.destroy();
-await releasePipelineAudioBuffer(bufferId);
+await releasePipelineAudioBuffer(live);
 ```
 
 `onFramesAppended` receives producer metadata: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`, and optional `samples`.
@@ -88,9 +88,9 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
-const { info: offInfo } = await createOfflineAudioBufferFromFile('/tmp/voice.wav');
+const offline = await createOfflineAudioBufferFromFile('/tmp/voice.wav');
 
-const { bufferId, unsubscribeEvents } = await createLiveAudioBuffer({
+const live = await createLiveAudioBuffer({
   sampleRate: 16000,
   emitAppendedEvents: true,
   emitAppendedSamples: false,
@@ -100,12 +100,12 @@ const { bufferId, unsubscribeEvents } = await createLiveAudioBuffer({
   },
 });
 
-await appendSamplesToLiveAudioBuffer(bufferId, [0.1, 0.2, 0.3], 16000); // source=append
-await appendOfflineToLiveAudioBuffer(bufferId, offInfo.bufferId); // source=append_offline
+await appendSamplesToLiveAudioBuffer(live, [0.1, 0.2, 0.3], 16000); // source=append
+await appendOfflineToLiveAudioBuffer(live, offline); // source=append_offline
 
-unsubscribeEvents();
-await releasePipelineAudioBuffer(offInfo.bufferId);
-await releasePipelineAudioBuffer(bufferId);
+live.unsubscribeEvents();
+await releasePipelineAudioBuffer(offline);
+await releasePipelineAudioBuffer(live);
 ```
 
 ---
@@ -114,12 +114,228 @@ await releasePipelineAudioBuffer(bufferId);
 
 Exported from `react-native-sherpa-onnx/audiobuffer`:
 
-- **Offline:** `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`, `saveOfflineAudioBufferToWav`, `getPipelineAudioBufferInfo`, `releasePipelineAudioBuffer`
-- **Live:** `createLiveAudioBuffer`, `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `finalizeLiveAudioBuffer`, `saveLiveAudioBufferToWav`, `getLiveAudioBufferSamplesSlice`
-- **Mic:** `startMicToLiveAudioBuffer(liveBufferId, { emitToJs? })`, `stopMicToLiveAudioBuffer`
-- **Callbacks:** `onFramesAppended` / `onError` in `createLiveAudioBuffer(...)`, or `subscribeLiveAudioBufferEvents(...)`
+### General
 
-Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`); **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`).
+- `getPipelineAudioBufferInfo`, `releasePipelineAudioBuffer`
+
+### Offline buffer
+
+- `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`, `saveOfflineAudioBufferToWav`
+
+### Live buffer
+
+- `createLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
+- `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
+- `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
+- `getLiveAudioBufferSamplesSlice`, `saveLiveAudioBufferToWav`
+- Callbacks: `onFramesAppended` / `onError` on `createLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
+
+Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`); **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`OfflineAudioBufferIdSource`**, **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
+
+---
+
+## API reference
+
+All signatures below are exported from `react-native-sherpa-onnx/audiobuffer`. Unless noted, buffer arguments accept the matching `*IdSource` union (ref, info snapshot, handle, or string).
+
+### General
+
+#### `getPipelineAudioBufferInfo(buffer)`
+
+```ts
+function getPipelineAudioBufferInfo(
+  buffer: PipelineAudioBufferIdSource
+): Promise<PipelineAudioBufferInfo>;
+```
+
+```ts
+const info = await getPipelineAudioBufferInfo(offline);
+console.log(info.kind, info.state);
+```
+
+#### `releasePipelineAudioBuffer(buffer)`
+
+```ts
+function releasePipelineAudioBuffer(buffer: PipelineAudioBufferIdSource): Promise<void>;
+```
+
+```ts
+await releasePipelineAudioBuffer(offline);
+await releasePipelineAudioBuffer(live);
+```
+
+### Offline buffer
+
+#### `createOfflineAudioBufferFromFile(sourcePath, targetSampleRateHz?, forceMono?)`
+
+```ts
+function createOfflineAudioBufferFromFile(
+  sourcePath: string,
+  targetSampleRateHz?: number,
+  forceMono?: boolean
+): Promise<OfflineAudioBufferRef>;
+```
+
+```ts
+const offline = await createOfflineAudioBufferFromFile('/tmp/input.wav', 16000, true);
+console.log(offline.info.sampleRate, offline.info.bufferId);
+```
+
+#### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
+
+```ts
+function createOfflineAudioBufferFromSamples(
+  samples: number[],
+  sampleRate: number,
+  channelCount?: number
+): Promise<OfflineAudioBufferRef>;
+```
+
+```ts
+const offline = await createOfflineAudioBufferFromSamples([0.1, 0.2, 0.3], 16000, 1);
+```
+
+#### `createOfflineAudioBufferFromLive(liveBuffer, mode?)`
+
+```ts
+function createOfflineAudioBufferFromLive(
+  liveBuffer: LiveAudioBufferIdSource,
+  mode?: OfflineFromLiveMode
+): Promise<OfflineAudioBufferRef>;
+```
+
+```ts
+const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
+```
+
+#### `saveOfflineAudioBufferToWav(buffer, outputPath)`
+
+```ts
+function saveOfflineAudioBufferToWav(
+  buffer: OfflineAudioBufferIdSource,
+  outputPath: string
+): Promise<void>;
+```
+
+```ts
+await saveOfflineAudioBufferToWav(offline, '/tmp/offline.wav');
+```
+
+### Live buffer
+
+#### `subscribeLiveAudioBufferEvents(liveBuffer, callbacks)`
+
+```ts
+function subscribeLiveAudioBufferEvents(
+  liveBuffer: LiveAudioBufferIdSource,
+  callbacks: LiveAudioBufferCallbacks
+): () => void;
+```
+
+```ts
+const unsub = subscribeLiveAudioBufferEvents(live, {
+  onFramesAppended: (e) => console.log(e.frameCount),
+});
+unsub();
+```
+
+#### `createLiveAudioBuffer(options)`
+
+```ts
+function createLiveAudioBuffer(
+  options: CreateLiveAudioBufferOptions
+): Promise<LiveAudioBufferRef>;
+```
+
+```ts
+const live = await createLiveAudioBuffer({
+  sampleRate: 16000,
+  emitAppendedEvents: true,
+  onFramesAppended: (e) => console.log(e.frameCount),
+});
+```
+
+#### `startMicToLiveAudioBuffer(liveBuffer, options?)` / `stopMicToLiveAudioBuffer()`
+
+```ts
+function startMicToLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource,
+  options?: StartMicToLiveOptions
+): Promise<void>;
+
+function stopMicToLiveAudioBuffer(): Promise<void>;
+```
+
+```ts
+await startMicToLiveAudioBuffer(live, { emitToJs: false });
+await stopMicToLiveAudioBuffer();
+```
+
+#### `appendSamplesToLiveAudioBuffer(liveBuffer, samples, sampleRate)`
+
+```ts
+function appendSamplesToLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource,
+  samples: number[],
+  sampleRate: number
+): Promise<void>;
+```
+
+```ts
+await appendSamplesToLiveAudioBuffer(live, [0.0, 0.1, 0.2], 16000);
+```
+
+#### `appendOfflineToLiveAudioBuffer(liveBuffer, offlineBuffer)`
+
+```ts
+function appendOfflineToLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource,
+  offlineBuffer: OfflineAudioBufferIdSource
+): Promise<void>;
+```
+
+```ts
+await appendOfflineToLiveAudioBuffer(live, offline);
+```
+
+#### `finalizeLiveAudioBuffer(liveBuffer)`
+
+```ts
+function finalizeLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource
+): Promise<LiveBufferHandleFinished>;
+```
+
+```ts
+const finishedId = await finalizeLiveAudioBuffer(live);
+```
+
+#### `getLiveAudioBufferSamplesSlice(liveBuffer, startFrame, frameCount)`
+
+```ts
+function getLiveAudioBufferSamplesSlice(
+  liveBuffer: LiveAudioBufferIdSource,
+  startFrame: number,
+  frameCount: number
+): Promise<number[]>;
+```
+
+```ts
+const chunk = await getLiveAudioBufferSamplesSlice(live, 0, 320);
+```
+
+#### `saveLiveAudioBufferToWav(liveBuffer, outputPath)`
+
+```ts
+function saveLiveAudioBufferToWav(
+  liveBuffer: LiveAudioBufferIdSource,
+  outputPath: string
+): Promise<void>;
+```
+
+```ts
+await saveLiveAudioBufferToWav(live, '/tmp/live.wav');
+```
 
 ---
 
