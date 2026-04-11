@@ -3,12 +3,10 @@ package com.sherpaonnx.tts.core
 import android.os.Handler
 import android.os.Looper
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.sherpaonnx.AlignmentTtsSinkSnapshot
 import com.sherpaonnx.pcm.PcmPlayerService
-import com.sherpaonnx.tts.service.TtsAudioExportService
 import com.sherpaonnx.tts.service.TtsBatchGenerationService
 import com.sherpaonnx.tts.service.TtsInitializationService
 import com.sherpaonnx.tts.service.TtsLifecycleService
@@ -26,8 +24,6 @@ internal class SherpaOnnxTtsCoordinator(
   private val emitEnd: (String, String, Boolean) -> Unit,
   private val emitFileError: (String, String, String, String?) -> Unit,
   private val emitFileEnd: (String, String, Boolean, String, Long, Int) -> Unit,
-  /** FFmpeg: mono f32le raw file → encoded output path. Returns empty string on success. */
-  encodeMonoFromRawFile: (rawPath: String, pcmSampleRate: Int, outputPath: String, format: String, outputSampleRateHz: Int) -> String,
   private val pcmPlayerService: PcmPlayerService
 ) {
   private val repository = TtsEngineRepository()
@@ -42,9 +38,7 @@ internal class SherpaOnnxTtsCoordinator(
     ttsInitExecutor
   )
 
-  private val audioExportService = TtsAudioExportService(context, encodeMonoFromRawFile)
-
-  private val batchGenerationService = TtsBatchGenerationService(repository, audioExportService, pcmPlayerService)
+  private val batchGenerationService = TtsBatchGenerationService(repository)
 
   private val streamingService = TtsStreamingService(
     repository,
@@ -104,30 +98,8 @@ internal class SherpaOnnxTtsCoordinator(
     promise: Promise
   ) = initializationService.updateTtsParams(instanceId, noiseScale, noiseScaleW, lengthScale, promise)
 
-  fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) =
-    batchGenerationService.generateTts(instanceId, text, options, promise)
-
-  fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) =
-    batchGenerationService.generateTtsWithTimestamps(instanceId, text, options, promise)
-
-  fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) =
-    batchGenerationService.getTtsSamples(instanceId, generation, promise)
-
-  fun saveTtsAudioFromSink(
-    instanceId: String,
-    generation: Double,
-    destinationType: String,
-    pathOrDirectoryUri: String,
-    filename: String,
-    format: String,
-    outputSampleRateHz: Double,
-    promise: Promise
-  ) = batchGenerationService.saveTtsAudioFromSink(
-    instanceId, generation, destinationType, pathOrDirectoryUri, filename, format, outputSampleRateHz, promise
-  )
-
-  fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) =
-    batchGenerationService.playTtsFromSink(instanceId, generation, sampleRate, promise)
+  fun synthesizeTts(instanceId: String, textInBufferId: String, audioOutBufferId: String, options: ReadableMap?, promise: Promise) =
+    batchGenerationService.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
 
   fun getBatchSinkSnapshot(instanceId: String, generation: Long): AlignmentTtsSinkSnapshot {
     val inst = repository[instanceId]
@@ -173,26 +145,6 @@ internal class SherpaOnnxTtsCoordinator(
 
   fun unloadTts(instanceId: String, promise: Promise) =
     lifecycleService.unloadTts(instanceId, promise)
-
-  fun saveTtsAudioFromPCM(
-    samples: ReadableArray,
-    sampleRate: Double,
-    destinationType: String,
-    pathOrDirectoryUri: String,
-    filename: String,
-    format: String,
-    outputSampleRateHz: Double,
-    promise: Promise
-  ) = audioExportService.saveTtsAudioFromPCM(
-    samples,
-    sampleRate,
-    destinationType,
-    pathOrDirectoryUri,
-    filename,
-    format,
-    outputSampleRateHz,
-    promise
-  )
 
   fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) =
     lifecycleService.detectTtsModel(modelDir, assetName, modelType, promise)

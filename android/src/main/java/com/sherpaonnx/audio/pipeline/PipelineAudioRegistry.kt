@@ -114,6 +114,31 @@ object PipelineAudioRegistry {
   }
 
   /**
+   * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
+   * Starts with no samples; native synthesis fills it exactly once via [adoptOfflineSamples].
+   *
+   * @param sampleRate Expected sample rate (must match model output rate for TTS).
+   * @param channelCount Only mono (1) is supported.
+   */
+  fun createEmptyOffline(
+    sampleRate: Int,
+    channelCount: Int = 1
+  ): OfflineEntry {
+    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
+    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
+
+    val bufferId = "off_${UUID.randomUUID()}"
+    val entry = OfflineEntry.InMemory(
+      bufferId = bufferId,
+      sampleRate = sampleRate,
+      channelCount = channelCount,
+      samples = FloatArray(0)
+    )
+    offlineEntries[bufferId] = entry
+    return entry
+  }
+
+  /**
    * Create an offline buffer from a live buffer.
    *
    * @param liveBufferId ID of the live buffer.

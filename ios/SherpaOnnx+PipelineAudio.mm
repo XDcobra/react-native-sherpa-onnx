@@ -750,6 +750,33 @@ static void paMicAQInputCallback(void *inUserData,
   }
 }
 
+// ---- Offline: empty (output target for TTS) ----
+- (void)createEmptyOfflineAudioBuffer:(double)sampleRate
+                         channelCount:(NSNumber *)channelCount
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    if (sampleRate <= 0) { reject(kPAErrInvalidArgument, @"sampleRate must be > 0", nil); return; }
+    int ch = channelCount ? [channelCount intValue] : 1;
+    if (ch != 1) { reject(kPAErrInvalidArgument, @"Only mono (channelCount=1) is supported", nil); return; }
+
+    std::string bufferId = pa_generateId("off");
+    auto entry = std::make_shared<PaOfflineEntry>();
+    entry->bufferId = bufferId;
+    entry->sampleRate = (int)sampleRate;
+    entry->channelCount = ch;
+    // samples is empty — will be populated by TTS synthesis
+    {
+      std::lock_guard<std::mutex> lock(g_pa_mutex);
+      g_pa_offline[bufferId] = entry;
+    }
+    resolve(entry->toDict());
+  } @catch (NSException *e) {
+    reject(kPAErrInternalError, e.reason, nil);
+  }
+}
+
 // ---- Offline: from live ----
 - (void)createOfflineAudioBufferFromLive:(NSString *)liveBufferId
                                     mode:(NSString *)mode

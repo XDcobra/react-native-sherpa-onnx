@@ -32,14 +32,39 @@ sealed class OfflineEntry {
   /**
    * In-memory buffer. All samples are held in a FloatArray on the heap.
    * Suitable for small to medium audio (< ~10 MB PCM).
+   *
+   * For empty buffers created as output targets (e.g. TTS), [samples] starts as an empty array
+   * and is filled exactly once via [adoptSamples].
    */
   class InMemory(
     override val bufferId: String,
     override val sampleRate: Int,
     override val channelCount: Int,
-    val samples: FloatArray
+    @Volatile var samples: FloatArray
   ) : OfflineEntry() {
     override val numSamples: Int get() = samples.size
+
+    /**
+     * Adopt (move) samples into this buffer. Only allowed once on an empty buffer.
+     * @throws IllegalStateException if the buffer is already populated (non-empty).
+     */
+    @Synchronized
+    fun adoptSamples(pcm: FloatArray) {
+      if (samples.isNotEmpty()) throw IllegalStateException("OfflineEntry already populated: $bufferId")
+      samples = pcm
+    }
+
+    /**
+     * Try to adopt samples into this buffer atomically.
+     * Returns true if adoption succeeded (buffer was empty); false if already populated.
+     * Avoids TOCTOU races between check and write.
+     */
+    @Synchronized
+    fun tryAdoptSamples(pcm: FloatArray): Boolean {
+      if (samples.isNotEmpty()) return false
+      samples = pcm
+      return true
+    }
   }
 
   /**

@@ -63,6 +63,49 @@ BOOL NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
     return o.has_value() && !o->reference_audio.empty() && o->reference_sample_rate > 0;
 }
 
+BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options) {
+    if (options == nil) return NO;
+    NSString *refId = options[@"referenceAudioBufferId"];
+    return refId != nil && [refId isKindOfClass:[NSString class]] && [refId length] > 0;
+}
+
+std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
+    NSDictionary *options,
+    const std::vector<float> &refSamples,
+    int32_t refSampleRate,
+    int32_t defaultNumSteps
+) {
+    if (refSamples.empty() || refSampleRate <= 0) return std::nullopt;
+
+    sherpaonnx::VoiceCloneOptions vo;
+    vo.reference_audio = refSamples;
+    vo.reference_sample_rate = refSampleRate;
+
+    NSString *rt = options[@"referenceText"];
+    if (rt != nil && [rt length] > 0) {
+        vo.reference_text = std::string([rt UTF8String]);
+    }
+    if (options[@"numSteps"] != nil) {
+        vo.num_steps = static_cast<int32_t>([options[@"numSteps"] doubleValue]);
+    } else {
+        vo.num_steps = defaultNumSteps;
+    }
+    if (options[@"silenceScale"] != nil) {
+        vo.silence_scale = static_cast<float>([options[@"silenceScale"] doubleValue]);
+    }
+    id extra = options[@"extra"];
+    if ([extra isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *ex = (NSDictionary *)extra;
+        for (NSString *k in ex) {
+            id v = ex[k];
+            if ([v isKindOfClass:[NSString class]]) {
+                vo.extra[std::string([k UTF8String])] = std::string([(NSString *)v UTF8String]);
+            }
+        }
+    }
+    return vo;
+}
+
 NSString *SubtitleModeFromOptions(NSDictionary *options) {
     NSString *raw = [options[@"subtitleMode"] isKindOfClass:[NSString class]] ? options[@"subtitleMode"] : nil;
     NSString *normalized = raw != nil

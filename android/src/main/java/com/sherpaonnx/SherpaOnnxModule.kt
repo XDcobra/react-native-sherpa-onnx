@@ -68,9 +68,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) },
     { instanceId, requestId, message, path -> emitTtsStreamFileError(instanceId, requestId, message, path) },
     { instanceId, requestId, cancelled, path, bytesWritten, sampleRate -> emitTtsStreamFileEnd(instanceId, requestId, cancelled, path, bytesWritten, sampleRate) },
-    { rawPath, pcmSr, outPath, fmt, outHz ->
-      Companion.nativeConvertFloat32MonoFileToFormat(rawPath, pcmSr, outPath, fmt, outHz)
-    },
     pcmPlayerService
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
@@ -686,6 +683,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun createEmptyOfflineAudioBuffer(sampleRate: Double, channelCount: Double?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createEmptyOffline(
+        sampleRate.toInt(),
+        channelCount?.toInt() ?: 1
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun createLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
       val sampleRate = options.getDouble("sampleRate").toInt()
@@ -904,6 +915,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createOfflineTextBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createOfflineFromLive(liveBufferId, mode ?: "fullIfSpooled")
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineTextBufferFromText(text: String, options: ReadableMap?, promise: Promise) {
+    try {
+      if (text.isEmpty()) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INVALID_ARGUMENT, "text must not be empty")
+        return
+      }
+      val lang = options?.getString("lang") ?: ""
+      val emotion = options?.getString("emotion") ?: ""
+      val event = options?.getString("event") ?: ""
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createOfflineFromText(text, lang, emotion, event)
+      promise.resolve(entry.toWritableMap())
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
@@ -1398,47 +1432,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Generate speech from text.
+   * Buffer-to-buffer TTS synthesis.
    */
-  override fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    offlineTtsHelper.generateTts(instanceId, text, options, promise)
-  }
-
-  /**
-   * Generate speech with subtitle/timestamp metadata.
-   */
-  override fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    offlineTtsHelper.generateTtsWithTimestamps(instanceId, text, options, promise)
-  }
-
-  /**
-   * Retrieve PCM samples from the native sink for a given generation.
-   */
-  override fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
-    offlineTtsHelper.getTtsSamples(instanceId, generation, promise)
-  }
-
-  /**
-   * Save TTS audio directly from the native sink (no JS PCM round-trip).
-   */
-  override fun saveTtsAudioFromSink(
-    instanceId: String,
-    generation: Double,
-    destinationType: String,
-    pathOrDirectoryUri: String,
-    filename: String,
-    format: String,
-    outputSampleRateHz: Double,
-    promise: Promise
-  ) {
-    offlineTtsHelper.saveTtsAudioFromSink(
-      instanceId, generation, destinationType, pathOrDirectoryUri,
-      filename, format, outputSampleRateHz, promise
-    )
-  }
-
-  override fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
-    offlineTtsHelper.playTtsFromSink(instanceId, generation, sampleRate, promise)
+  override fun synthesizeTts(instanceId: String, textInBufferId: String, audioOutBufferId: String, options: ReadableMap?, promise: Promise) {
+    offlineTtsHelper.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
   }
 
   override fun getAudioDuration(
@@ -1820,28 +1817,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadOnlineEnhancement(instanceId: String, promise: Promise) {
     enhancementHelper.unloadOnline(instanceId, promise)
-  }
-
-  override fun saveTtsAudioFromPCM(
-    samples: ReadableArray,
-    sampleRate: Double,
-    destinationType: String,
-    pathOrDirectoryUri: String,
-    filename: String,
-    format: String,
-    outputSampleRateHz: Double,
-    promise: Promise
-  ) {
-    offlineTtsHelper.saveTtsAudioFromPCM(
-      samples,
-      sampleRate,
-      destinationType,
-      pathOrDirectoryUri,
-      filename,
-      format,
-      outputSampleRateHz,
-      promise
-    )
   }
 
   /**

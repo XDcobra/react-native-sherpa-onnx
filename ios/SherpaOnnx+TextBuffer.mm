@@ -212,6 +212,42 @@ static std::string txt_generateId(const char *prefix) {
     }
 }
 
+- (void)createOfflineTextBufferFromText:(NSString *)text
+                                options:(NSDictionary *)options
+                                resolve:(RCTPromiseResolveBlock)resolve
+                                 reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (text == nil || [text length] == 0) {
+            reject(kTxtErrInvalidArgument, @"text must not be empty", nil);
+            return;
+        }
+        std::string bufferId = txt_generateId("txt_off");
+        auto entry = std::make_shared<TxtOfflineEntry>();
+        entry->bufferId = bufferId;
+        entry->text = [text UTF8String];
+        entry->populated = true;
+        if (options != nil) {
+            if ([options[@"lang"] isKindOfClass:[NSString class]]) {
+                entry->lang = [options[@"lang"] UTF8String];
+            }
+            if ([options[@"emotion"] isKindOfClass:[NSString class]]) {
+                entry->emotion = [options[@"emotion"] UTF8String];
+            }
+            if ([options[@"event"] isKindOfClass:[NSString class]]) {
+                entry->event = [options[@"event"] UTF8String];
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            g_txt_offline[bufferId] = entry;
+        }
+        resolve(entry->toDict());
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
 - (void)createLiveTextBuffer:(NSDictionary *)options
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject

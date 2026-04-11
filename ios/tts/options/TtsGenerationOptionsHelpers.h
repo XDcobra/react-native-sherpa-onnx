@@ -19,7 +19,21 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromNSDictionary(
     int32_t defaultNumSteps
 );
 
+/**
+ * Build VoiceCloneOptions from buffer-based reference audio.
+ * The caller provides pre-resolved samples and sample rate from the pipeline registry.
+ */
+std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
+    NSDictionary *options,
+    const std::vector<float> &refSamples,
+    int32_t refSampleRate,
+    int32_t defaultNumSteps
+);
+
 BOOL NSDictionaryHasValidReferenceAudio(NSDictionary *options);
+
+/** Check if options contain a buffer-based voice clone (referenceAudioBufferId key). */
+BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options);
 
 NSString *SubtitleModeFromOptions(NSDictionary *options);
 NSString *SubtitleGranularityFromOptions(NSDictionary *options);

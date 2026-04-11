@@ -30,6 +30,29 @@ object TextPipelineRegistry {
   }
 
   /**
+   * Create an offline text buffer pre-populated with the given text (e.g. for TTS input).
+   * The buffer is marked as populated immediately.
+   */
+  fun createOfflineFromText(
+    text: String,
+    lang: String = "",
+    emotion: String = "",
+    event: String = ""
+  ): OfflineTextEntry {
+    val bufferId = "txt_off_${UUID.randomUUID()}"
+    val entry = OfflineTextEntry(
+      bufferId = bufferId,
+      text = text,
+      lang = lang,
+      emotion = emotion,
+      event = event,
+      populated = true
+    )
+    offlineEntries[bufferId] = entry
+    return entry
+  }
+
+  /**
    * Create an offline text buffer from a live text buffer snapshot.
    * @param liveBufferId ID of the live text buffer.
    * @param mode "fullIfSpooled" (full text if finalized, otherwise window snapshot) or "windowSnapshot" (always current window).
