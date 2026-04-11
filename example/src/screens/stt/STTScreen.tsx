@@ -54,6 +54,19 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
+  createEmptyOfflineTextBuffer,
+  getPipelineTextBufferInfo,
+  getOfflineTextBufferTextSlice,
+  getOfflineTextBufferTokensSlice,
+  getOfflineTextBufferTimestampsSlice,
+  getOfflineTextBufferDurationsSlice,
+  getOfflineTextBufferLang,
+  getOfflineTextBufferEmotion,
+  getOfflineTextBufferEvent,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
+import {
   startWebAudioFilePlayback,
   stopWebAudioPlayback,
   type ActiveWebAudioPlayback,
@@ -360,39 +373,48 @@ export default function STTScreen() {
       const { bufferId } = await createOfflineAudioBufferFromFile(
         pathToTranscribe
       );
-      let ref;
+      const textRef = await createEmptyOfflineTextBuffer();
+      const textBufferId = textRef.bufferId;
       try {
-        ref = await engine.transcribe(bufferId);
+        await engine.transcribe(bufferId, textBufferId);
       } finally {
         await releasePipelineAudioBuffer(bufferId);
       }
-      if (!ref.success || ref.resultId == null) {
-        setErrorSource('transcribe');
-        setError(ref.error ?? 'Transcription failed');
-        return;
-      }
+      const rawInfo = await getPipelineTextBufferInfo(textBufferId);
+      const info = rawInfo as OfflineTextBufferInfo;
       const [text, tokens, timestamps, durations, lang, emotion, event] =
         await Promise.all([
-          engine.getSttResultText(ref.resultId),
-          ref.tokenCount
-            ? engine.getSttResultTokens(ref.resultId, 0, ref.tokenCount)
-            : Promise.resolve([]),
-          ref.timestampCount
-            ? engine.getSttResultTimestamps(ref.resultId, 0, ref.timestampCount)
-            : Promise.resolve([]),
-          ref.durationCount
-            ? engine.getSttResultDurations(ref.resultId, 0, ref.durationCount)
-            : Promise.resolve([]),
-          ref.hasLang
-            ? engine.getSttResultLang(ref.resultId)
+          info.utf16Length > 0
+            ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
             : Promise.resolve(''),
-          ref.hasEmotion
-            ? engine.getSttResultEmotion(ref.resultId)
+          info.tokenCount > 0
+            ? getOfflineTextBufferTokensSlice(textBufferId, 0, info.tokenCount)
+            : Promise.resolve([]),
+          info.timestampCount > 0
+            ? getOfflineTextBufferTimestampsSlice(
+                textBufferId,
+                0,
+                info.timestampCount
+              )
+            : Promise.resolve([]),
+          info.durationCount > 0
+            ? getOfflineTextBufferDurationsSlice(
+                textBufferId,
+                0,
+                info.durationCount
+              )
+            : Promise.resolve([]),
+          info.hasLang
+            ? getOfflineTextBufferLang(textBufferId)
             : Promise.resolve(''),
-          ref.hasEvent
-            ? engine.getSttResultEvent(ref.resultId)
+          info.hasEmotion
+            ? getOfflineTextBufferEmotion(textBufferId)
+            : Promise.resolve(''),
+          info.hasEvent
+            ? getOfflineTextBufferEvent(textBufferId)
             : Promise.resolve(''),
         ]);
+      await releasePipelineTextBuffer(textBufferId);
       setTranscriptionResult({
         text,
         tokens,
