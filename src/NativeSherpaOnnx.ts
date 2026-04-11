@@ -283,6 +283,25 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
+   * The buffer starts unpopulated; native synthesis fills it exactly once.
+   * @param sampleRate - Expected sample rate (must match model output rate for TTS).
+   * @param channelCount - Channel count (only 1/mono supported).
+   */
+  createEmptyOfflineAudioBuffer(
+    sampleRate: number,
+    channelCount?: number
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
    * Create a live audio buffer with a rolling-window ring buffer.
    * @param options.sampleRate - Sample rate in Hz.
    * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
@@ -425,6 +444,28 @@ export interface Spec extends TurboModule {
   createOfflineTextBufferFromLive(
     liveBufferId: string,
     mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create an offline text buffer pre-populated with the given text.
+   * Used as TTS input source for direct text-to-speech synthesis.
+   * @param text - The text content to populate the buffer with.
+   * @param options - Optional metadata (lang, emotion, event).
+   */
+  createOfflineTextBufferFromText(
+    text: string,
+    options?: Object
   ): Promise<{
     bufferId: string;
     kind: string;
@@ -649,91 +690,20 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Generate speech from text. Returns metadata only (no PCM samples).
-   * Use getTtsSamples() to retrieve PCM from the native sink.
-   * @param instanceId - Unique ID for this engine instance
-   * @param text - Text to convert to speech
-   * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
-   *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
-   * @returns Object with { sampleRate, numSamples, generation }
-   */
-  generateTts(
-    instanceId: string,
-    text: string,
-    options: Object
-  ): Promise<{
-    sampleRate: number;
-    numSamples: number;
-    generation: number;
-  }>;
-
-  /**
-   * Generate speech with subtitle/timestamp metadata. Returns metadata only (no PCM samples).
-   * Use getTtsSamples() to retrieve PCM from the native sink.
-   * @param instanceId - Unique ID for this engine instance
-   * @param text - Text to convert to speech
-   * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
-   * @returns Object with sampleRate, numSamples, generation, subtitles, and timingMode
-   */
-  generateTtsWithTimestamps(
-    instanceId: string,
-    text: string,
-    options: Object
-  ): Promise<{
-    sampleRate: number;
-    numSamples: number;
-    generation: number;
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-    /** Present for estimated subtitle mode (one sample-count per sentence chunk). */
-    segmentSampleCounts?: number[];
-  }>;
-
-  /**
-   * Retrieve PCM samples from the native sink for a given TTS generation.
+   * Synthesize speech from a text buffer into an audio buffer (buffer-to-buffer pipeline).
+   * The audioOut buffer must be empty (created via createEmptyOfflineAudioBuffer).
+   * Its sampleRate must match the model output rate (strict, no resampling).
    * @param instanceId - TTS engine instance ID
-   * @param generation - Generation number from generateTts/generateTtsWithTimestamps
-   * @returns Object with { samples: number[], sampleRate: number }
+   * @param textInBufferId - Offline text buffer ID (input text source)
+   * @param audioOutBufferId - Empty offline audio buffer ID (output target)
+   * @param options - Synthesis options (sid, speed, voiceClone, etc.)
    */
-  getTtsSamples(
+  synthesizeTts(
     instanceId: string,
-    generation: number
-  ): Promise<{
-    samples: number[];
-    sampleRate: number;
-  }>;
-
-  /**
-   * Save TTS audio directly from the native sink (no JS PCM round-trip).
-   * @param instanceId - TTS engine instance ID
-   * @param generation - Generation number from generateTts
-   * @param destinationType - 'file' or 'androidContent'
-   * @param pathOrDirectoryUri - Output path or SAF directory URI
-   * @param filename - Filename for androidContent destination
-   * @param format - Output format (wav, mp3, flac, etc.)
-   * @param outputSampleRateHz - Encoder sample rate hint; 0 for defaults
-   */
-  saveTtsAudioFromSink(
-    instanceId: string,
-    generation: number,
-    destinationType: string,
-    pathOrDirectoryUri: string,
-    filename: string,
-    format: string,
-    outputSampleRateHz: number
-  ): Promise<string>;
-
-  /**
-   * Play PCM from the native batch sink through the device speaker.
-   * @param instanceId - TTS engine instance ID
-   * @param generation - Expected sink generation (stale check)
-   * @param sampleRate - Override sample rate (0 = use sink rate)
-   */
-  playTtsFromSink(
-    instanceId: string,
-    generation: number,
-    sampleRate: number
-  ): Promise<{ playerId: string }>;
+    textInBufferId: string,
+    audioOutBufferId: string,
+    options?: Object
+  ): Promise<void>;
 
   // ==================== Alignment / Subtitle Methods ====================
 
@@ -977,24 +947,6 @@ export interface Spec extends TurboModule {
   resetOnlineEnhancement(instanceId: string): Promise<void>;
 
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
-
-  /**
-   * Save TTS audio (mono float PCM) to a file path or Android SAF directory.
-   * @param destinationType - `'file'` = `pathOrDirectoryUri` is the full output file path; `'androidContent'` = directory tree URI + `filename`
-   * @param pathOrDirectoryUri - Absolute file path (when `file`) or SAF directory URI (when `androidContent`)
-   * @param filename - Used when `androidContent`; ignored / empty when `file`
-   * @param format - Output container/codec hint: `wav` (default behavior), `mp3`, `flac`, `m4a`, `opus`, … (same as convertAudioToFormat; requires FFmpeg when not WAV)
-   * @param outputSampleRateHz - Encoder hint (e.g. MP3 32000/44100/48000); use 0 for defaults
-   */
-  saveTtsAudioFromPCM(
-    samples: number[],
-    sampleRate: number,
-    destinationType: string,
-    pathOrDirectoryUri: string,
-    filename: string,
-    format: string,
-    outputSampleRateHz: number
-  ): Promise<string>;
 
   // ==================== File / persistence (shared) ====================
 

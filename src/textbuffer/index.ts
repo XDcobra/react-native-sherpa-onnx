@@ -257,6 +257,39 @@ export async function createOfflineTextBufferFromLive(
   };
 }
 
+/**
+ * Create an offline text buffer pre-populated with the given text.
+ * Use as TTS input source (e.g. `tts.synthesize(textIn, audioOut)`).
+ *
+ * @param text - The text content to populate the buffer with (must not be empty).
+ * @param options - Optional metadata: `lang`, `emotion`, `event`.
+ */
+export async function createOfflineTextBufferFromText(
+  text: string,
+  options?: { lang?: string; emotion?: string; event?: string }
+): Promise<OfflineTextBufferRef> {
+  const raw = await getNative().createOfflineTextBufferFromText(
+    text,
+    options ?? undefined
+  );
+  const info: OfflineTextBufferInfo = {
+    bufferId: raw.bufferId,
+    kind: 'offlineTextBuffer',
+    state: 'immutable',
+    utf16Length: raw.utf16Length ?? 0,
+    tokenCount: raw.tokenCount ?? 0,
+    timestampCount: raw.timestampCount ?? 0,
+    durationCount: raw.durationCount ?? 0,
+    hasLang: raw.hasLang ?? false,
+    hasEmotion: raw.hasEmotion ?? false,
+    hasEvent: raw.hasEvent ?? false,
+  };
+  return {
+    info,
+    bufferId: raw.bufferId as OfflineTextBufferHandle,
+  };
+}
+
 // ==================== Live Text Buffer ====================
 
 /**

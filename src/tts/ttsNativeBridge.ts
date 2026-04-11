@@ -2,6 +2,7 @@ import type { ModelPathConfig } from '../types';
 import type {
   TTSInitializeOptions,
   TTSModelType,
+  TtsSynthesisOptions,
   TtsGenerationOptions,
   TtsKittenModelOptions,
   TtsKokoroModelOptions,
@@ -10,6 +11,7 @@ import type {
   TtsUpdateOptions,
   TtsVitsModelOptions,
 } from './types';
+import type { OfflineAudioBufferRef } from '../audiobuffer/types';
 
 export type FlattenedTtsModelNativeOptions = {
   noiseScale: number | undefined;
@@ -178,7 +180,49 @@ export function expandTtsUpdateOptions(opts: TtsUpdateOptions): {
 }
 
 /**
- * Convert TtsGenerationOptions to a flat object for the native bridge.
+ * Convert TtsSynthesisOptions to a flat object for the native bridge.
+ * VoiceClone reference audio is passed as a buffer ID (not raw samples).
+ */
+export function toNativeSynthesisOptions(
+  options?: TtsSynthesisOptions
+): Record<string, unknown> | undefined {
+  if (options == null) return undefined;
+  const out: Record<string, unknown> = {};
+  if (options.sid !== undefined) out.sid = options.sid;
+  if (options.speed !== undefined) out.speed = options.speed;
+  if (options.silenceScale !== undefined) {
+    out.silenceScale = options.silenceScale;
+  }
+  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.extra != null && Object.keys(options.extra).length > 0) {
+    out.extra = options.extra;
+  }
+  if (options.voiceClone != null) {
+    const vc = options.voiceClone;
+    // Resolve buffer ID from ref or handle
+    const refAudio = vc.referenceAudio;
+    const refBufferId =
+      typeof refAudio === 'string'
+        ? refAudio
+        : (refAudio as OfflineAudioBufferRef).bufferId;
+    out.referenceAudioBufferId = refBufferId;
+    if (vc.kind === 'zipvoice') {
+      if (!vc.referenceText || vc.referenceText.trim().length === 0) {
+        throw new Error(
+          '[TTS] Zipvoice voice cloning requires a non-empty referenceText in voiceClone options.'
+        );
+      }
+      out.referenceText = vc.referenceText;
+    } else if (vc.referenceText !== undefined) {
+      out.referenceText = vc.referenceText;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Flatten legacy TtsGenerationOptions for streaming TTS native bridge.
+ * Uses raw-sample voice clone (not buffer-based). Kept for streaming compat.
  */
 export function toNativeTtsGenerationOptions(
   options?: TtsGenerationOptions,

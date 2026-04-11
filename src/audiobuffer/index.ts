@@ -291,6 +291,25 @@ export async function createOfflineAudioBufferFromLive(
   return { info, bufferId: info.bufferId as OfflineBufferHandle };
 }
 
+/**
+ * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
+ * The buffer starts unpopulated (numSamples=0); native synthesis fills it exactly once.
+ *
+ * @param sampleRate - Expected sample rate. For TTS: must match model output rate (use `tts.getSampleRate()`).
+ * @param channelCount - Channel count (only 1/mono supported, default 1).
+ */
+export async function createEmptyOfflineAudioBuffer(
+  sampleRate: number,
+  channelCount?: 1
+): Promise<OfflineAudioBufferRef> {
+  const result = await getNative().createEmptyOfflineAudioBuffer(
+    sampleRate,
+    channelCount
+  );
+  const info = result as unknown as OfflineAudioBufferInfo;
+  return { info, bufferId: info.bufferId as OfflineBufferHandle };
+}
+
 // ==================== Live Audio Buffer ====================
 
 /**
