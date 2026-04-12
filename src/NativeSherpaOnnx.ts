@@ -872,17 +872,11 @@ export interface Spec extends TurboModule {
     sampleRate?: number;
   }>;
 
-  enhanceFile(
+  enhanceOfflineAudioBuffers(
     instanceId: string,
-    inputPath: string,
-    outputPath?: string
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  enhanceSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
+    audioInBufferId: string,
+    audioOutBufferId: string
+  ): Promise<void>;
 
   getEnhancementSampleRate(instanceId: string): Promise<number>;
 

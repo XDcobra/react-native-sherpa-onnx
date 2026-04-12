@@ -27,6 +27,7 @@ import {
 
 let sttInstanceCounter = 0;
 
+// TODO: Not only string check but also if string is a valid buffer id
 function normalizeOfflineBufferInput(
   buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
 ): string {

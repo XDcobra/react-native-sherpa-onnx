@@ -7,25 +7,21 @@ import { isDetectionSource } from './types';
 import type {
   DetectedModelEntry,
   DetectionSource,
-  EnhancedAudio,
   EnhancementDetectResult,
   EnhancementEngine,
   EnhancementInitializeOptions,
 } from './types';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 
 let enhancementInstanceCounter = 0;
 
-function normalizeEnhancedAudio(raw: {
-  samples?: number[] | Float32Array;
-  sampleRate?: number;
-}): EnhancedAudio {
-  const samplesArray = Array.isArray(raw.samples)
-    ? raw.samples
-    : Array.from(raw.samples ?? []);
-  return {
-    samples: Float32Array.from(samplesArray),
-    sampleRate: Number(raw.sampleRate ?? 0),
-  };
+function resolveOfflineAudioBufferId(
+  source: OfflineAudioBufferIdSource
+): string {
+  if (typeof source === 'object' && source !== null && 'info' in source) {
+    return (source as { bufferId: string }).bufferId;
+  }
+  return source as string;
 }
 
 export async function detectEnhancementModel(
@@ -124,29 +120,14 @@ export async function createEnhancement(
     get instanceId() {
       return instanceId;
     },
-    async enhanceFile(
-      inputPath: string,
-      outputPath?: string
-    ): Promise<EnhancedAudio> {
+    async enhance(
+      audioIn: OfflineAudioBufferIdSource,
+      audioOut: OfflineAudioBufferIdSource
+    ): Promise<void> {
       guard();
-      const raw = await SherpaOnnx.enhanceFile(
-        instanceId,
-        inputPath,
-        outputPath
-      );
-      return normalizeEnhancedAudio(raw);
-    },
-    async enhanceSamples(
-      samples: number[],
-      sampleRate: number
-    ): Promise<EnhancedAudio> {
-      guard();
-      const raw = await SherpaOnnx.enhanceSamples(
-        instanceId,
-        samples,
-        sampleRate
-      );
-      return normalizeEnhancedAudio(raw);
+      const inId = resolveOfflineAudioBufferId(audioIn);
+      const outId = resolveOfflineAudioBufferId(audioOut);
+      await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
     },
     async getSampleRate(): Promise<number> {
       guard();
