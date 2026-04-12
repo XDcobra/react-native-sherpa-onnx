@@ -278,15 +278,16 @@ export async function createSTT(
 // Streaming (online) STT
 export {
   createStreamingSTT,
+  createLiveSTT,
   mapDetectedToOnlineType,
   getOnlineTypeOrNull,
 } from './streaming';
 export type {
   OnlineSTTModelType,
-  StreamingSttEngine,
+  LiveSttEngine,
   StreamingSttInitOptions,
-  StreamingSttResult,
-  SttStream,
+  SttPipelineHandle,
+  SttPipelineOptions,
   EndpointConfig,
   EndpointRule,
 } from './streamingTypes';

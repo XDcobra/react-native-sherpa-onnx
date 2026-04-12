@@ -1,12 +1,12 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
+import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { resolveModelPath } from '../utils';
 import type { EnhancedAudio, EnhancementModelType } from './types';
 import type {
+  EnhancementPipelineHandle,
   LiveEnhancementEngine,
   OnlineEnhancementEngine,
   StreamingEnhancementInitializeOptions,
-  StreamingPipelineHandle,
-  StreamingPipelineStatus,
 } from './streamingTypes';
 
 let streamingEnhancementInstanceCounter = 0;
@@ -24,8 +24,12 @@ function normalizeEnhancedAudio(raw: {
   };
 }
 
-function createPipelineHandle(pipelineId: string): StreamingPipelineHandle {
+function createEnhancementPipelineHandle(
+  instanceId: string,
+  pipelineId: string
+): EnhancementPipelineHandle {
   return {
+    instanceId,
     get pipelineId() {
       return pipelineId;
     },
@@ -140,13 +144,13 @@ export async function createLiveEnhancement(
     async enhance(
       inputBufferId: string,
       outputBufferId: string
-    ): Promise<StreamingPipelineHandle> {
+    ): Promise<EnhancementPipelineHandle> {
       const raw = await SherpaOnnx.startEnhancementPipeline(
         base.instanceId,
         inputBufferId,
         outputBufferId
       );
-      return createPipelineHandle(raw.pipelineId);
+      return createEnhancementPipelineHandle(base.instanceId, raw.pipelineId);
     },
   };
 }
@@ -154,7 +158,6 @@ export async function createLiveEnhancement(
 export type {
   OnlineEnhancementEngine,
   LiveEnhancementEngine,
-  StreamingPipelineHandle,
-  StreamingPipelineStatus,
+  EnhancementPipelineHandle,
 } from './streamingTypes';
 export type { EnhancementModelType };

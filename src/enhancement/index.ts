@@ -146,8 +146,7 @@ export type {
   OnlineEnhancementEngine,
   LiveEnhancementEngine,
   StreamingEnhancementInitializeOptions,
-  StreamingPipelineHandle,
-  StreamingPipelineStatus,
+  EnhancementPipelineHandle,
 } from './streamingTypes';
 
 export type {

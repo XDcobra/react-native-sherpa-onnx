@@ -33,6 +33,7 @@ import type {
   LiveTextBufferCallbacks,
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
+  LiveTextSegment,
 } from './types';
 
 const getNative = (): Spec =>
@@ -300,6 +301,7 @@ export async function createLiveTextBuffer(
 ): Promise<LiveTextBufferRef> {
   const raw = await getNative().createLiveTextBuffer({
     windowMaxChars: options.windowMaxChars,
+    maxSegments: options.maxSegments,
     emitPartialEvents: options.emitPartialEvents,
     partialEventMinIntervalMs: options.partialEventMinIntervalMs,
   });
@@ -312,6 +314,7 @@ export async function createLiveTextBuffer(
     state: raw.state === 'finished' ? 'finished' : 'recording',
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
+    segmentCount: raw.segmentCount ?? 0,
   };
 
   const unsubscribeEvents = registerLiveTextCallbacks(liveBufferId, {
@@ -343,6 +346,7 @@ export async function createLiveTextBufferFromOffline(
     state: raw.state === 'finished' ? 'finished' : 'recording',
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
+    segmentCount: raw.segmentCount ?? 0,
   };
 
   return {
@@ -381,6 +385,7 @@ export async function getPipelineTextBufferInfo(
       state: raw.state === 'finished' ? 'finished' : 'recording',
       totalCharsWritten: raw.totalCharsWritten ?? 0,
       revision: raw.revision ?? 0,
+      segmentCount: raw.segmentCount ?? 0,
     } as LiveTextBufferInfo;
   }
 
@@ -503,6 +508,60 @@ export async function getLiveTextBufferPartialSlice(
   return getNative().getLiveTextBufferPartialSlice(id, startUtf16, maxUtf16);
 }
 
+/** Commit a text segment to a live text buffer segment log. */
+export async function appendLiveTextSegment(
+  liveBufferId: LiveTextBufferIdSource,
+  text: string,
+  tokens?: string[],
+  timestamps?: number[]
+): Promise<{ segmentIndex: number }> {
+  const id = resolveLiveTextBufferId(liveBufferId);
+  return getNative().appendLiveTextSegment(id, text, tokens, timestamps);
+}
+
+/**
+ * Read committed live text segments by index window.
+ * tokens/timestamps are omitted by default unless explicitly requested.
+ */
+export async function getLiveTextBufferSegments(
+  liveBufferId: LiveTextBufferIdSource,
+  startIndex: number,
+  maxCount: number,
+  options?: { includeTokens?: boolean; includeTimestamps?: boolean }
+): Promise<LiveTextSegment[]> {
+  const id = resolveLiveTextBufferId(liveBufferId);
+  const raw = await getNative().getLiveTextBufferSegments(
+    id,
+    startIndex,
+    maxCount,
+    options
+  );
+  return raw.segments.map((segment) => ({
+    text: segment.text,
+    source:
+      segment.source === 'stt_stream' ||
+      segment.source === 'append' ||
+      segment.source === 'replace' ||
+      segment.source === 'mixed' ||
+      segment.source === 'unknown'
+        ? segment.source
+        : 'unknown',
+    segmentIndex: segment.segmentIndex,
+    ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
+    ...(Array.isArray(segment.timestamps)
+      ? { timestamps: segment.timestamps }
+      : {}),
+  }));
+}
+
+/** Return number of committed segments currently retained in the live segment log. */
+export async function getLiveTextBufferSegmentCount(
+  liveBufferId: LiveTextBufferIdSource
+): Promise<number> {
+  const id = resolveLiveTextBufferId(liveBufferId);
+  return getNative().getLiveTextBufferSegmentCount(id);
+}
+
 // ==================== Exports ====================
 
 export type {
@@ -524,6 +583,7 @@ export type {
   LiveTextBufferState,
   PipelineTextBufferKind,
   LiveTextBufferPartialSource,
+  LiveTextSegment,
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
   LiveTextBufferCallbacks,

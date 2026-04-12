@@ -1,4 +1,5 @@
 import type { EnhancedAudio, EnhancementInitializeOptions } from './types';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 
 export type StreamingEnhancementInitializeOptions =
   EnhancementInitializeOptions;
@@ -15,26 +16,15 @@ export interface OnlineEnhancementEngine {
 
 // ==================== Live Enhancement Pipeline ====================
 
-export interface StreamingPipelineStatus {
-  pipelineId: string;
-  isRunning: boolean;
-  chunksProcessed: number;
-  samplesRead: number;
-  samplesWritten: number;
-  error: string | null;
-}
-
-export interface StreamingPipelineHandle {
-  readonly pipelineId: string;
-  stop(): Promise<void>;
-  flush(): Promise<void>;
-  reset(): Promise<void>;
-  getStatus(): Promise<StreamingPipelineStatus>;
+/** Pipeline handle returned by `LiveEnhancementEngine.enhance()` — same controls as `StreamingPipelineHandle` plus the online denoiser `instanceId`. */
+export interface EnhancementPipelineHandle extends StreamingPipelineHandle {
+  /** Online enhancement engine instance driving this pipeline (`startEnhancementPipeline` first arg). */
+  readonly instanceId: string;
 }
 
 export interface LiveEnhancementEngine extends OnlineEnhancementEngine {
   enhance(
     inputBufferId: string,
     outputBufferId: string
-  ): Promise<StreamingPipelineHandle>;
+  ): Promise<EnhancementPipelineHandle>;
 }

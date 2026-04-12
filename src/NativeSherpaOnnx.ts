@@ -169,63 +169,16 @@ export interface Spec extends TurboModule {
     }
   ): Promise<{ success: boolean; error?: string }>;
 
-  /** Create a new stream for the given OnlineRecognizer instance. */
-  createSttStream(
+  /** Start native streaming STT pipeline: live audio buffer -> live text buffer. */
+  startSttPipeline(
     instanceId: string,
-    streamId: string,
-    hotwords?: string
-  ): Promise<void>;
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    chunkSize?: number
+  ): Promise<{ pipelineId: string }>;
 
-  /** Feed PCM samples to a streaming STT stream. */
-  acceptSttWaveform(
-    streamId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<void>;
-
-  /** Signal end of input for a streaming STT stream. */
-  sttStreamInputFinished(streamId: string): Promise<void>;
-
-  /** Run decoding on the stream (call when isSttStreamReady is true). */
-  decodeSttStream(streamId: string): Promise<void>;
-
-  /** True if the stream has enough audio to decode. */
-  isSttStreamReady(streamId: string): Promise<boolean>;
-
-  /** Get current partial or final result. Text-first; no large arrays by default. */
-  getSttStreamResult(streamId: string): Promise<{
-    text: string;
-    isFinal: boolean;
-    tokens: string[];
-    timestamps: number[];
-  }>;
-
-  /** True if endpoint (end of utterance) was detected. */
-  isSttStreamEndpoint(streamId: string): Promise<boolean>;
-
-  /** Reset stream state for reuse. */
-  resetSttStream(streamId: string): Promise<void>;
-
-  /** Release stream and remove from native state. */
-  releaseSttStream(streamId: string): Promise<void>;
-
-  /** Release OnlineRecognizer and all its streams. */
+  /** Release OnlineRecognizer and stop any active STT pipeline for this instance. */
   unloadOnlineStt(instanceId: string): Promise<void>;
-
-  /**
-   * Convenience: feed audio, decode while ready, return result and endpoint status in one call.
-   */
-  processSttAudioChunk(
-    streamId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    isEndpoint: boolean;
-    isFinal: boolean;
-  }>;
 
   // ==================== Pipeline Audio Buffers ====================
 
@@ -484,6 +437,7 @@ export interface Spec extends TurboModule {
    */
   createLiveTextBuffer(options: {
     windowMaxChars?: number;
+    maxSegments?: number;
     emitPartialEvents?: boolean;
     partialEventMinIntervalMs?: number;
   }): Promise<{
@@ -492,6 +446,7 @@ export interface Spec extends TurboModule {
     state: string;
     totalCharsWritten: number;
     revision: number;
+    segmentCount: number;
   }>;
 
   /**
@@ -503,6 +458,7 @@ export interface Spec extends TurboModule {
     state: string;
     totalCharsWritten: number;
     revision: number;
+    segmentCount: number;
   }>;
 
   /**
@@ -526,6 +482,7 @@ export interface Spec extends TurboModule {
     hasEvent?: boolean;
     totalCharsWritten?: number;
     revision?: number;
+    segmentCount?: number;
   }>;
 
   /**
@@ -592,6 +549,36 @@ export interface Spec extends TurboModule {
     startUtf16: number,
     maxUtf16: number
   ): Promise<string>;
+
+  /** Commit a text segment to a live text buffer. */
+  appendLiveTextSegment(
+    liveBufferId: string,
+    text: string,
+    tokens?: string[],
+    timestamps?: number[]
+  ): Promise<{ segmentIndex: number }>;
+
+  /** Read committed text segments from a live text buffer by index window. */
+  getLiveTextBufferSegments(
+    liveBufferId: string,
+    startIndex: number,
+    maxCount: number,
+    options?: {
+      includeTokens?: boolean;
+      includeTimestamps?: boolean;
+    }
+  ): Promise<{
+    segments: Array<{
+      text: string;
+      source: string;
+      segmentIndex: number;
+      tokens?: string[];
+      timestamps?: number[];
+    }>;
+  }>;
+
+  /** Return number of committed segments currently retained in the live segment log. */
+  getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
 
   // ==================== TTS Methods ====================
 
@@ -930,8 +917,8 @@ export interface Spec extends TurboModule {
     pipelineId: string;
     isRunning: boolean;
     chunksProcessed: number;
-    samplesRead: number;
-    samplesWritten: number;
+    unitsRead: number;
+    unitsWritten: number;
     error: string | null;
   }>;
 

@@ -520,3 +520,8 @@ export type {
 } from './types';
 
 export { PipelineAudioErrorCode } from './types';
+
+export type {
+  StreamingPipelineStatus,
+  StreamingPipelineHandle,
+} from './streamingPipelineTypes';

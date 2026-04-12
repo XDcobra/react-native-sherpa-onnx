@@ -48,6 +48,17 @@ export interface LiveTextBufferInfo {
   totalCharsWritten: number;
   /** Generation/revision for partial events (native coalescing). */
   revision: number;
+  /** Number of committed segments currently retained in the segment log. */
+  segmentCount: number;
+}
+
+/** A committed text segment from a live text buffer segment log. */
+export interface LiveTextSegment {
+  text: string;
+  source: LiveTextBufferPartialSource;
+  segmentIndex: number;
+  tokens?: string[];
+  timestamps?: number[];
 }
 
 /** Discriminated union of all pipeline text buffer info types. */
@@ -176,6 +187,8 @@ export interface LiveTextBufferCallbacks {
 export interface CreateLiveTextBufferOptions {
   /** Max held UTF-16 characters for partial history (ring). Default: native/SDK. */
   windowMaxChars?: number;
+  /** Max committed segments retained in the live segment log. Default: 1000. */
+  maxSegments?: number;
   emitPartialEvents?: boolean;
   partialEventMinIntervalMs?: number;
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
