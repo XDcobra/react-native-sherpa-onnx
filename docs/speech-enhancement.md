@@ -290,6 +290,8 @@ await enhancement.destroy();
 
 ---
 
+### Online engine (`OnlineEnhancementEngine`)
+
 ### `createStreamingEnhancement(options)`
 
 ```ts
@@ -306,8 +308,6 @@ const online = await createStreamingEnhancement({
 ```
 
 ---
-
-### Online engine (`OnlineEnhancementEngine`)
 
 #### `streaming.feedSamples(samples, sampleRate)`
 
