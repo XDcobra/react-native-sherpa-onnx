@@ -18,11 +18,6 @@ export const ENHANCEMENT_MODEL_TYPES: readonly EnhancementModelType[] = [
   'dpdfnet',
 ] as const;
 
-export type EnhancedAudio = {
-  samples: Float32Array;
-  sampleRate: number;
-};
-
 export interface EnhancementInitializeOptions {
   modelPath: ModelPathConfig;
   modelType?: EnhancementModelType | 'auto';

@@ -141,17 +141,15 @@ export async function createEnhancement(
   };
 }
 
-export { createStreamingEnhancement, createLiveEnhancement } from './streaming';
+export { createStreamingEnhancement } from './streaming';
 export type {
-  OnlineEnhancementEngine,
-  LiveEnhancementEngine,
+  StreamingEnhancementEngine,
   StreamingEnhancementInitializeOptions,
   EnhancementPipelineHandle,
 } from './streamingTypes';
 
 export type {
   EnhancementModelType,
-  EnhancedAudio,
   EnhancementInitializeOptions,
   EnhancementDetectResult,
   EnhancementEngine,

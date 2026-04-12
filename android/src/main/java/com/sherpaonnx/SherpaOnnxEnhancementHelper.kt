@@ -3,10 +3,7 @@ package com.sherpaonnx
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.WritableMap
-import com.k2fsa.sherpa.onnx.DenoisedAudio
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserDpdfNetModelConfig
@@ -57,25 +54,6 @@ internal class SherpaOnnxEnhancementHelper(
   }
 
   private fun path(map: Map<String, String>, key: String): String = map[key].orEmpty()
-
-  private fun toEnhancedAudioMap(audio: DenoisedAudio): WritableMap {
-    val samples = Arguments.createArray()
-    for (sample in audio.samples) {
-      samples.pushDouble(sample.toDouble())
-    }
-    val out = Arguments.createMap()
-    out.putArray("samples", samples)
-    out.putInt("sampleRate", audio.sampleRate)
-    return out
-  }
-
-  private fun readableArrayToFloatArray(samples: ReadableArray): FloatArray {
-    val out = FloatArray(samples.size())
-    for (i in 0 until samples.size()) {
-      out[i] = samples.getDouble(i).toFloat()
-    }
-    return out
-  }
 
   fun detectEnhancementModel(
     modelDir: String,
@@ -412,55 +390,6 @@ internal class SherpaOnnxEnhancementHelper(
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject("STREAMING_PIPELINE_ERROR", "Failed to start enhancement pipeline: ${e.message}", e)
-    }
-  }
-
-  fun feedSamples(
-    instanceId: String,
-    samples: ReadableArray,
-    sampleRate: Double,
-    promise: Promise
-  ) {
-    val inst = onlineInstances[instanceId]
-    val denoiser = inst?.denoiser
-    if (denoiser == null) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Online enhancement instance not found: $instanceId")
-      return
-    }
-    try {
-      val audio = denoiser.run(readableArrayToFloatArray(samples), sampleRate.toInt())
-      promise.resolve(toEnhancedAudioMap(audio))
-    } catch (e: Exception) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Failed to feed enhancement samples: ${e.message}", e)
-    }
-  }
-
-  fun flushOnline(instanceId: String, promise: Promise) {
-    val inst = onlineInstances[instanceId]
-    val denoiser = inst?.denoiser
-    if (denoiser == null) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Online enhancement instance not found: $instanceId")
-      return
-    }
-    try {
-      promise.resolve(toEnhancedAudioMap(denoiser.flush()))
-    } catch (e: Exception) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Failed to flush online enhancement: ${e.message}", e)
-    }
-  }
-
-  fun resetOnline(instanceId: String, promise: Promise) {
-    val inst = onlineInstances[instanceId]
-    val denoiser = inst?.denoiser
-    if (denoiser == null) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Online enhancement instance not found: $instanceId")
-      return
-    }
-    try {
-      denoiser.reset()
-      promise.resolve(null)
-    } catch (e: Exception) {
-      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Failed to reset online enhancement: ${e.message}", e)
     }
   }
 

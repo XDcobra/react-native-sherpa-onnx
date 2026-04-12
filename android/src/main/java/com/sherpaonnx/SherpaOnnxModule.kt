@@ -1829,23 +1829,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
-  override fun feedEnhancementSamples(
-    instanceId: String,
-    samples: ReadableArray,
-    sampleRate: Double,
-    promise: Promise
-  ) {
-    enhancementHelper.feedSamples(instanceId, samples, sampleRate, promise)
-  }
-
-  override fun flushOnlineEnhancement(instanceId: String, promise: Promise) {
-    enhancementHelper.flushOnline(instanceId, promise)
-  }
-
-  override fun resetOnlineEnhancement(instanceId: String, promise: Promise) {
-    enhancementHelper.resetOnline(instanceId, promise)
-  }
-
   override fun unloadOnlineEnhancement(instanceId: String, promise: Promise) {
     enhancementHelper.unloadOnline(instanceId, promise)
   }

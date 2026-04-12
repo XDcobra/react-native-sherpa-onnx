@@ -883,18 +883,6 @@ export interface Spec extends TurboModule {
     frameShiftInSamples?: number;
   }>;
 
-  feedEnhancementSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  flushOnlineEnhancement(
-    instanceId: string
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  resetOnlineEnhancement(instanceId: string): Promise<void>;
-
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
 
   // ==================== Enhancement Pipeline ====================

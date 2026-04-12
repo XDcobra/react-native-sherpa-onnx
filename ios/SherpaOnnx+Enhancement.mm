@@ -39,17 +39,6 @@ static NSString *enhancementKindToNSString(sherpaonnx::EnhancementModelKind kind
     }
 }
 
-static NSDictionary *enhancedAudioToDict(const sherpaonnx::EnhancedAudioResult& r) {
-    NSMutableArray *samples = [NSMutableArray arrayWithCapacity:r.samples.size()];
-    for (float s : r.samples) {
-        [samples addObject:@(s)];
-    }
-    return @{
-        @"samples": samples,
-        @"sampleRate": @(r.sampleRate)
-    };
-}
-
 static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::EnhancementDetectResult& result) {
     NSMutableArray *detectedModelsArray = [NSMutableArray array];
     for (const auto& model : result.detectedModels) {
@@ -408,71 +397,6 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
                [NSString stringWithFormat:@"Online enhancement init failed: %@", exception.reason],
                nil);
     }
-}
-
-- (void)feedEnhancementSamples:(NSString *)instanceId
-                       samples:(NSArray *)samples
-                    sampleRate:(double)sampleRate
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(@"ONLINE_ENHANCEMENT_ERROR", @"instanceId is required", nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::vector<float> floatSamples;
-    floatSamples.reserve([samples count]);
-    for (NSNumber *n in samples) {
-        floatSamples.push_back([n floatValue]);
-    }
-
-    std::lock_guard<std::mutex> lock(g_enhancement_mutex);
-    auto it = g_online_enhancement_instances.find(instanceIdStr);
-    if (it == g_online_enhancement_instances.end() || it->second->wrapper == nullptr) {
-        reject(@"ONLINE_ENHANCEMENT_ERROR", @"Online enhancement instance not found", nil);
-        return;
-    }
-    auto out = it->second->wrapper->runSamples(floatSamples, static_cast<int32_t>(sampleRate));
-    resolve(enhancedAudioToDict(out));
-}
-
-- (void)flushOnlineEnhancement:(NSString *)instanceId
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(@"ONLINE_ENHANCEMENT_ERROR", @"instanceId is required", nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_enhancement_mutex);
-    auto it = g_online_enhancement_instances.find(instanceIdStr);
-    if (it == g_online_enhancement_instances.end() || it->second->wrapper == nullptr) {
-        reject(@"ONLINE_ENHANCEMENT_ERROR", @"Online enhancement instance not found", nil);
-        return;
-    }
-    auto out = it->second->wrapper->flush();
-    resolve(enhancedAudioToDict(out));
-}
-
-- (void)resetOnlineEnhancement:(NSString *)instanceId
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        resolve(nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::lock_guard<std::mutex> lock(g_enhancement_mutex);
-    auto it = g_online_enhancement_instances.find(instanceIdStr);
-    if (it == g_online_enhancement_instances.end() || it->second->wrapper == nullptr) {
-        reject(@"ONLINE_ENHANCEMENT_ERROR", @"Online enhancement instance not found", nil);
-        return;
-    }
-    it->second->wrapper->reset();
-    resolve(nil);
 }
 
 - (void)unloadOnlineEnhancement:(NSString *)instanceId
