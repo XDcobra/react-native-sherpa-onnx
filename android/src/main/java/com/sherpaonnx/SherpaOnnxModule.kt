@@ -12,6 +12,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.stt.SttErrorCodes
 import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
@@ -1753,6 +1754,82 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadOnlineEnhancement(instanceId: String, promise: Promise) {
     enhancementHelper.unloadOnline(instanceId, promise)
+  }
+
+  // ==================== Enhancement Pipeline ====================
+
+  override fun startEnhancementPipeline(
+    instanceId: String,
+    inputBufferId: String,
+    outputBufferId: String,
+    promise: Promise
+  ) {
+    enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
+  }
+
+  // ==================== Streaming Pipeline Control (generic) ====================
+
+  override fun stopStreamingPipeline(pipelineId: String, promise: Promise) {
+    try {
+      StreamingPipelineRegistry.stop(pipelineId)
+      StreamingPipelineRegistry.remove(pipelineId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("PIPELINE_ERROR", e.message, e)
+    }
+  }
+
+  override fun flushStreamingPipeline(pipelineId: String, promise: Promise) {
+    try {
+      StreamingPipelineRegistry.flush(pipelineId).whenComplete { _, error ->
+        if (error != null) {
+          promise.reject("PIPELINE_FLUSH_ERROR", error.message, error)
+        } else {
+          promise.resolve(null)
+        }
+      }
+    } catch (e: Exception) {
+      promise.reject("PIPELINE_ERROR", e.message, e)
+    }
+  }
+
+  override fun resetStreamingPipeline(pipelineId: String, promise: Promise) {
+    try {
+      StreamingPipelineRegistry.reset(pipelineId).whenComplete { _, error ->
+        if (error != null) {
+          promise.reject("PIPELINE_RESET_ERROR", error.message, error)
+        } else {
+          promise.resolve(null)
+        }
+      }
+    } catch (e: Exception) {
+      promise.reject("PIPELINE_ERROR", e.message, e)
+    }
+  }
+
+  override fun getStreamingPipelineStatus(pipelineId: String, promise: Promise) {
+    try {
+      val status = StreamingPipelineRegistry.getStatus(pipelineId)
+      if (status == null) {
+        promise.reject("PIPELINE_NOT_FOUND", "Streaming pipeline '$pipelineId' not found")
+        return
+      }
+      val map = Arguments.createMap().apply {
+        putString("pipelineId", pipelineId)
+        putBoolean("isRunning", status.isRunning)
+        putDouble("chunksProcessed", status.chunksProcessed.toDouble())
+        putDouble("samplesRead", status.samplesRead.toDouble())
+        putDouble("samplesWritten", status.samplesWritten.toDouble())
+        if (status.error != null) {
+          putString("error", status.error)
+        } else {
+          putNull("error")
+        }
+      }
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("PIPELINE_ERROR", e.message, e)
+    }
   }
 
   /**

@@ -16,6 +16,8 @@ import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiserConfig
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.EnhancementPipelineWorker
+import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxEnhancementHelper(
@@ -352,6 +354,64 @@ internal class SherpaOnnxEnhancementHelper(
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject("ONLINE_ENHANCEMENT_INIT_ERROR", "Failed to initialize online enhancement: ${e.message}", e)
+    }
+  }
+
+  fun startEnhancementPipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    promise: Promise
+  ) {
+    val inst = onlineInstances[instanceId]
+    val denoiser = inst?.denoiser
+    if (denoiser == null) {
+      promise.reject("ONLINE_ENHANCEMENT_ERROR", "Online enhancement instance not found: $instanceId")
+      return
+    }
+
+    val inputEntry = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+    if (inputEntry == null) {
+      promise.reject("ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND", "Input live buffer not found: $audioInLiveBufferId")
+      return
+    }
+    val outputEntry = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
+    if (outputEntry == null) {
+      promise.reject("ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND", "Output live buffer not found: $audioOutLiveBufferId")
+      return
+    }
+
+    if (inputEntry.kind != "livePcmBuffer") {
+      promise.reject("ENHANCEMENT_PIPELINE_BUFFER_KIND_MISMATCH", "Input buffer must be a live buffer")
+      return
+    }
+    if (outputEntry.kind != "livePcmBuffer") {
+      promise.reject("ENHANCEMENT_PIPELINE_BUFFER_KIND_MISMATCH", "Output buffer must be a live buffer")
+      return
+    }
+
+    if (inputEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
+      promise.reject("ENHANCEMENT_PIPELINE_BUFFER_NOT_RECORDING", "Input buffer is not in recording state")
+      return
+    }
+
+    if (inputEntry.sampleRate != denoiser.sampleRate) {
+      promise.reject(
+        "ENHANCEMENT_PIPELINE_SAMPLE_RATE_MISMATCH",
+        "Input buffer sample rate (${inputEntry.sampleRate}) does not match denoiser sample rate (${denoiser.sampleRate})"
+      )
+      return
+    }
+
+    try {
+      val worker = EnhancementPipelineWorker(denoiser, inputEntry, outputEntry)
+      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker)
+
+      val out = Arguments.createMap()
+      out.putString("pipelineId", pipelineId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("STREAMING_PIPELINE_ERROR", "Failed to start enhancement pipeline: ${e.message}", e)
     }
   }
 

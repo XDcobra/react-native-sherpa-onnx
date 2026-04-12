@@ -8,6 +8,7 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -38,6 +39,7 @@ import kotlin.concurrent.write
 const val LIVE_APPEND_SOURCE_MIC = "mic"
 const val LIVE_APPEND_SOURCE_APPEND = "append"
 const val LIVE_APPEND_SOURCE_APPEND_OFFLINE = "append_offline"
+const val LIVE_APPEND_SOURCE_ENHANCEMENT = "enhancement"
 const val LIVE_APPEND_SOURCE_UNKNOWN = "unknown"
 const val LIVE_APPEND_SOURCE_MIXED = "mixed"
 
@@ -103,6 +105,17 @@ class LiveEntry(
   private var appendEventsMinIntervalMs: Int = appendEventConfig.minIntervalMs.coerceAtLeast(0)
   @Volatile
   private var onFramesAppendedListener: ((LiveFramesAppendedEvent) -> Unit)? = onFramesAppended
+
+  // Multi-listener list for native pipeline workers (condition variable wakeup etc.)
+  private val appendListeners = CopyOnWriteArrayList<(LiveFramesAppendedEvent) -> Unit>()
+
+  fun addAppendListener(listener: (LiveFramesAppendedEvent) -> Unit) {
+    appendListeners.add(listener)
+  }
+
+  fun removeAppendListener(listener: (LiveFramesAppendedEvent) -> Unit) {
+    appendListeners.remove(listener)
+  }
 
   private val appendEventLock = Any()
   private var lastAppendEventAtMs: Long = 0L
@@ -185,6 +198,21 @@ class LiveEntry(
     spoolWriter?.append(toAppend)
 
     dispatchFramesAppended(toAppend, source)
+
+    // Notify native pipeline listeners (immediate, no throttling)
+    if (appendListeners.isNotEmpty()) {
+      val event = LiveFramesAppendedEvent(
+        liveBufferId = bufferId,
+        source = source,
+        sampleRate = sampleRate,
+        frameCount = toAppend.size,
+        totalSamplesWritten = totalSamplesWritten,
+        samples = null,
+      )
+      for (listener in appendListeners) {
+        listener(event)
+      }
+    }
   }
 
   fun configureAppendEvents(
@@ -304,6 +332,21 @@ class LiveEntry(
     }
     spoolWriter?.finalize_()
     flushPendingFramesAppendedEvent()
+
+    // Wake pipeline workers so they detect the FINISHED state immediately
+    if (appendListeners.isNotEmpty()) {
+      val event = LiveFramesAppendedEvent(
+        liveBufferId = bufferId,
+        source = LIVE_APPEND_SOURCE_UNKNOWN,
+        sampleRate = sampleRate,
+        frameCount = 0,
+        totalSamplesWritten = totalSamplesWritten,
+        samples = null,
+      )
+      for (listener in appendListeners) {
+        listener(event)
+      }
+    }
   }
 
   // ========== Snapshot / Read ==========

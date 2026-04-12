@@ -5,6 +5,9 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "SherpaOnnx+PipelineAudioGlobals.h"
+#include "PaLiveEntry.h"
+#include "SherpaOnnx+StreamingPipeline.h"
+#include "EnhancementPipelineWorker.h"
 
 #include <memory>
 #include <mutex>
@@ -18,7 +21,7 @@ struct EnhancementInstanceState {
 };
 
 struct OnlineEnhancementInstanceState {
-    std::unique_ptr<sherpaonnx::OnlineEnhancementWrapper> wrapper;
+    std::shared_ptr<sherpaonnx::OnlineEnhancementWrapper> wrapper;
 };
 
 static std::unordered_map<std::string, std::unique_ptr<EnhancementInstanceState>> g_enhancement_instances;
@@ -377,7 +380,7 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
         }
         auto *inst = g_online_enhancement_instances[instanceIdStr].get();
         if (inst->wrapper == nullptr) {
-            inst->wrapper = std::make_unique<sherpaonnx::OnlineEnhancementWrapper>();
+            inst->wrapper = std::make_shared<sherpaonnx::OnlineEnhancementWrapper>();
         }
 
         auto result = inst->wrapper->initialize(
@@ -484,10 +487,103 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
     std::lock_guard<std::mutex> lock(g_enhancement_mutex);
     auto it = g_online_enhancement_instances.find(instanceIdStr);
     if (it != g_online_enhancement_instances.end() && it->second->wrapper != nullptr) {
+        if (it->second->wrapper.use_count() > 1) {
+            reject(@"ONLINE_ENHANCEMENT_ERROR",
+                   @"Online enhancement instance is currently used by an active streaming pipeline",
+                   nil);
+            return;
+        }
         it->second->wrapper->release();
         g_online_enhancement_instances.erase(it);
     }
     resolve(nil);
+}
+
+- (void)startEnhancementPipeline:(NSString *)instanceId
+                   inputBufferId:(NSString *)inputBufferId
+                  outputBufferId:(NSString *)outputBufferId
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"ONLINE_ENHANCEMENT_ERROR", @"instanceId is required", nil);
+        return;
+    }
+    if (inputBufferId == nil || [inputBufferId length] == 0 ||
+        outputBufferId == nil || [outputBufferId length] == 0) {
+        reject(@"AUDIO_BUFFER_NOT_FOUND", @"inputBufferId and outputBufferId are required", nil);
+        return;
+    }
+
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::string inputIdStr = [inputBufferId UTF8String];
+    std::string outputIdStr = [outputBufferId UTF8String];
+
+    // 1. Look up online enhancement instance
+    std::shared_ptr<sherpaonnx::OnlineEnhancementWrapper> wrapper;
+    {
+        std::lock_guard<std::mutex> enhLock(g_enhancement_mutex);
+        auto enhIt = g_online_enhancement_instances.find(instanceIdStr);
+        if (enhIt == g_online_enhancement_instances.end() || !enhIt->second->wrapper) {
+            reject(@"ONLINE_ENHANCEMENT_ERROR", @"Online enhancement instance not found", nil);
+            return;
+        }
+        wrapper = enhIt->second->wrapper;
+    }
+
+    // 2. Look up input and output live buffers
+    std::shared_ptr<PaLiveEntry> inputEntry;
+    std::shared_ptr<PaLiveEntry> outputEntry;
+    {
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+
+        auto inIt = g_pa_live.find(inputIdStr);
+        if (inIt == g_pa_live.end()) {
+            reject(@"AUDIO_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Input live buffer '%@' not found", inputBufferId], nil);
+            return;
+        }
+        inputEntry = inIt->second;
+
+        auto outIt = g_pa_live.find(outputIdStr);
+        if (outIt == g_pa_live.end()) {
+            reject(@"AUDIO_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Output live buffer '%@' not found", outputBufferId], nil);
+            return;
+        }
+        outputEntry = outIt->second;
+    }
+
+    // 3. Validate: input must be recording
+    if (inputEntry->state != PaLiveEntry::RECORDING) {
+        reject(@"ONLINE_ENHANCEMENT_ERROR",
+               @"Input buffer is already finalized", nil);
+        return;
+    }
+
+    // 4. Validate: sample rate must match
+    int modelSr = wrapper->getSampleRate();
+    if (inputEntry->sampleRate != modelSr) {
+        reject(@"ONLINE_ENHANCEMENT_ERROR",
+               [NSString stringWithFormat:@"Input buffer sample rate (%d) does not match model sample rate (%d)",
+                inputEntry->sampleRate, modelSr], nil);
+        return;
+    }
+
+    // 5. Create and start the pipeline worker
+    auto worker = std::make_shared<EnhancementPipelineWorker>(wrapper, inputEntry, outputEntry);
+    std::string pid = worker->pipelineId;
+
+    {
+        std::lock_guard<std::mutex> pipeLock(g_streaming_pipeline_mutex);
+        g_streaming_pipelines[pid] = worker;
+    }
+
+    worker->start();
+
+    resolve(@{
+        @"pipelineId": [NSString stringWithUTF8String:pid.c_str()],
+    });
 }
 
 @end
