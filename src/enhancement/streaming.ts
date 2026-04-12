@@ -2,8 +2,11 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveModelPath } from '../utils';
 import type { EnhancedAudio, EnhancementModelType } from './types';
 import type {
+  LiveEnhancementEngine,
   OnlineEnhancementEngine,
   StreamingEnhancementInitializeOptions,
+  StreamingPipelineHandle,
+  StreamingPipelineStatus,
 } from './streamingTypes';
 
 let streamingEnhancementInstanceCounter = 0;
@@ -18,6 +21,26 @@ function normalizeEnhancedAudio(raw: {
   return {
     samples: Float32Array.from(samplesArray),
     sampleRate: Number(raw.sampleRate ?? 0),
+  };
+}
+
+function createPipelineHandle(pipelineId: string): StreamingPipelineHandle {
+  return {
+    get pipelineId() {
+      return pipelineId;
+    },
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus(): Promise<StreamingPipelineStatus> {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
   };
 }
 
@@ -101,5 +124,37 @@ export async function createStreamingEnhancement(
   };
 }
 
-export type { OnlineEnhancementEngine } from './streamingTypes';
+/**
+ * Create a live enhancement engine that extends the online engine with
+ * `enhance(inputBufferId, outputBufferId)` — starts a native streaming
+ * pipeline that reads from inputBuffer and writes enhanced audio to outputBuffer.
+ */
+export async function createLiveEnhancement(
+  options: StreamingEnhancementInitializeOptions
+): Promise<LiveEnhancementEngine> {
+  const base = await createStreamingEnhancement(options);
+
+  return {
+    ...base,
+
+    async enhance(
+      inputBufferId: string,
+      outputBufferId: string
+    ): Promise<StreamingPipelineHandle> {
+      const raw = await SherpaOnnx.startEnhancementPipeline(
+        base.instanceId,
+        inputBufferId,
+        outputBufferId
+      );
+      return createPipelineHandle(raw.pipelineId);
+    },
+  };
+}
+
+export type {
+  OnlineEnhancementEngine,
+  LiveEnhancementEngine,
+  StreamingPipelineHandle,
+  StreamingPipelineStatus,
+} from './streamingTypes';
 export type { EnhancementModelType };

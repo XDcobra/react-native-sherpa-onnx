@@ -910,6 +910,31 @@ export interface Spec extends TurboModule {
 
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
 
+  // ==================== Enhancement Pipeline ====================
+
+  startEnhancementPipeline(
+    instanceId: string,
+    inputBufferId: string,
+    outputBufferId: string
+  ): Promise<{ pipelineId: string }>;
+
+  // ==================== Streaming Pipeline Control (generic) ====================
+
+  stopStreamingPipeline(pipelineId: string): Promise<void>;
+
+  flushStreamingPipeline(pipelineId: string): Promise<void>;
+
+  resetStreamingPipeline(pipelineId: string): Promise<void>;
+
+  getStreamingPipelineStatus(pipelineId: string): Promise<{
+    pipelineId: string;
+    isRunning: boolean;
+    chunksProcessed: number;
+    samplesRead: number;
+    samplesWritten: number;
+    error: string | null;
+  }>;
+
   // ==================== File / persistence (shared) ====================
 
   /**

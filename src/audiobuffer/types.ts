@@ -138,6 +138,7 @@ export type LiveBufferAppendSource =
   | 'mic'
   | 'append'
   | 'append_offline'
+  | 'enhancement'
   | 'unknown'
   | 'mixed';
 
