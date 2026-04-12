@@ -5,7 +5,6 @@ import android.os.Looper
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
-import com.sherpaonnx.AlignmentTtsSinkSnapshot
 import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.tts.service.TtsBatchGenerationService
 import com.sherpaonnx.tts.service.TtsInitializationService
@@ -100,27 +99,6 @@ internal class SherpaOnnxTtsCoordinator(
 
   fun synthesizeTts(instanceId: String, textInBufferId: String, audioOutBufferId: String, options: ReadableMap?, promise: Promise) =
     batchGenerationService.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
-
-  fun getBatchSinkSnapshot(instanceId: String, generation: Long): AlignmentTtsSinkSnapshot {
-    val inst = repository[instanceId]
-      ?: throw IllegalStateException("TTS instance not found: $instanceId")
-    synchronized(inst.sinkLock) {
-      val currentGen = inst.sink.generation.get()
-      if (currentGen == 0L || inst.sink.samples == null) {
-        throw IllegalStateException("No batch synthesis result available for instance $instanceId")
-      }
-      if (generation != currentGen) {
-        throw IllegalStateException(ttsStaleGenerationUserMessage(generation, currentGen))
-      }
-      val samples = inst.sink.samples?.copyOf()
-        ?: throw IllegalStateException("No sink samples available for instance $instanceId")
-      return AlignmentTtsSinkSnapshot(
-        samples = samples,
-        sampleRate = inst.sink.sampleRate,
-        numSamples = inst.sink.numSamples,
-      )
-    }
-  }
 
   fun generateTtsStreamToFile(
     instanceId: String,

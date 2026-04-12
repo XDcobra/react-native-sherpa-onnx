@@ -14,12 +14,6 @@ import java.util.ArrayList
 import java.util.HashMap
 import java.util.concurrent.Executors
 
-internal data class AlignmentTtsSinkSnapshot(
-  val samples: FloatArray,
-  val sampleRate: Int,
-  val numSamples: Int,
-)
-
 internal data class SttAlignmentSegment(
   val text: String,
   val startSec: Double,
