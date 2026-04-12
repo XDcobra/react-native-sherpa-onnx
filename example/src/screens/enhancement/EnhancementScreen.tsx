@@ -32,9 +32,11 @@ import {
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
-  createOfflineAudioBufferFromSamples,
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
   saveOfflineAudioBufferToWav,
   releasePipelineAudioBuffer,
+  getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   getAssetModelPath,
@@ -112,8 +114,9 @@ export default function EnhancementScreen() {
   /** Path of the input file used for the last successful run (for playback). */
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
-    samples: number[];
+    outputBufferId: string;
     sampleRate: number;
+    numSamples: number;
   } | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -161,7 +164,7 @@ export default function EnhancementScreen() {
   };
 
   const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.samples.length) {
+    if (!lastEnhancedAudio?.outputBufferId) {
       Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
       return;
     }
@@ -171,22 +174,17 @@ export default function EnhancementScreen() {
       const filename = `sherpa_enhanced_${timestamp}.wav`;
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      const savePcmToPath = async (path: string) => {
-        const buf = await createOfflineAudioBufferFromSamples(
-          lastEnhancedAudio.samples,
-          lastEnhancedAudio.sampleRate
+      const saveBufferToPath = async (path: string) => {
+        await saveOfflineAudioBufferToWav(
+          lastEnhancedAudio.outputBufferId,
+          path
         );
-        try {
-          await saveOfflineAudioBufferToWav(buf.bufferId, path);
-        } finally {
-          await releasePipelineAudioBuffer(buf.bufferId).catch(() => {});
-        }
       };
 
       if (directoryUri) {
         // Android SAF: save to cache then copy
         const tmpPath = `${DocumentDirectoryPath}/${filename}`;
-        await savePcmToPath(tmpPath);
+        await saveBufferToPath(tmpPath);
         Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
@@ -200,7 +198,7 @@ export default function EnhancementScreen() {
       }
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      await savePcmToPath(filePath);
+      await saveBufferToPath(filePath);
       Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -453,24 +451,38 @@ export default function EnhancementScreen() {
         return;
       }
 
-      const enhanced = await engine.enhanceFile(inputPath);
-      const n = enhanced.samples.length;
-      const sr = enhanced.sampleRate;
-      const sec = sr > 0 ? (n / sr).toFixed(2) : '?';
-      const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-      const samplesArr = Array.from(enhanced.samples);
-      const buf = await createOfflineAudioBufferFromSamples(samplesArr, sr);
+      // Create input buffer from file
+      const inputBuf = await createOfflineAudioBufferFromFile(inputPath);
+      const sr = await engine.getSampleRate();
+      // Create empty output buffer at model sample rate
+      const outputBuf = await createEmptyOfflineAudioBuffer(sr);
       try {
-        await saveOfflineAudioBufferToWav(buf.bufferId, outPath);
-      } finally {
-        await releasePipelineAudioBuffer(buf.bufferId).catch(() => {});
+        await engine.enhance(inputBuf, outputBuf);
+        // Get output info for display
+        const outInfo = await getPipelineAudioBufferInfo(outputBuf.bufferId);
+        const n = outInfo.numSamples ?? 0;
+        const outSr = outInfo.sampleRate ?? sr;
+        const sec = outSr > 0 ? (n / outSr).toFixed(2) : '?';
+        const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
+        await saveOfflineAudioBufferToWav(outputBuf.bufferId, outPath);
+        // Release input buffer (output kept for save feature)
+        await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
+        setOutputWavPath(outPath);
+        setLastInputPath(inputPath);
+        setLastEnhancedAudio({
+          outputBufferId: outputBuf.bufferId as string,
+          sampleRate: outSr,
+          numSamples: n,
+        });
+        setEnhanceResult(
+          `Samples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
+        );
+      } catch (enhanceErr) {
+        // Release both buffers on error
+        await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
+        await releasePipelineAudioBuffer(outputBuf.bufferId).catch(() => {});
+        throw enhanceErr;
       }
-      setOutputWavPath(outPath);
-      setLastInputPath(inputPath);
-      setLastEnhancedAudio({ samples: samplesArr, sampleRate: sr });
-      setEnhanceResult(
-        `Samples: ${n}\nSample rate: ${sr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
-      );
     } catch (err) {
       let errorMessage = 'Unknown error';
       if (err instanceof Error) {
@@ -493,6 +505,12 @@ export default function EnhancementScreen() {
   };
 
   const handleFree = async () => {
+    // Release any held output buffer
+    if (lastEnhancedAudio?.outputBufferId) {
+      await releasePipelineAudioBuffer(lastEnhancedAudio.outputBufferId).catch(
+        () => {}
+      );
+    }
     const engine = engineRef.current;
     if (engine) {
       try {
