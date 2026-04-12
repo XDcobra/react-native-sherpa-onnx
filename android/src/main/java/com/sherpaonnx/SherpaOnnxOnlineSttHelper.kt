@@ -5,8 +5,6 @@ import android.net.Uri
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
-import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -15,13 +13,17 @@ import com.k2fsa.sherpa.onnx.OnlineNeMoCtcModelConfig
 import com.k2fsa.sherpa.onnx.OnlineParaformerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OnlineRecognizerResult
-import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineToneCtcModelConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
+import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.audio.pipeline.SttPipelineWorker
 import com.sherpaonnx.stt.SttErrorCodes
+import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -36,20 +38,12 @@ internal class SherpaOnnxOnlineSttHelper(
   private data class OnlineSttInstance(
     val recognizer: OnlineRecognizer,
     val config: OnlineRecognizerConfig,
-    val streams: MutableMap<String, OnlineStream> = mutableMapOf()
+    var activePipelineId: String? = null,
   )
 
   private val instances = ConcurrentHashMap<String, OnlineSttInstance>()
-  private val streamToInstance = ConcurrentHashMap<String, String>()
 
   private fun getInstance(instanceId: String): OnlineSttInstance? = instances[instanceId]
-
-  private fun getStream(streamId: String): Pair<OnlineSttInstance, OnlineStream>? {
-    val instanceId = streamToInstance[streamId] ?: return null
-    val inst = instances[instanceId] ?: return null
-    val stream = inst.streams[streamId] ?: return null
-    return inst to stream
-  }
 
   private fun resolveContentUriToFile(path: String, cacheFilePrefix: String): String {
     if (!path.startsWith("content://")) return path
@@ -311,168 +305,6 @@ internal class SherpaOnnxOnlineSttHelper(
     }
   }
 
-  fun createSttStream(instanceId: String, streamId: String, hotwords: String?, promise: Promise) {
-    try {
-      val inst = getInstance(instanceId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_INSTANCE_NOT_FOUND, "Online STT instance not found: $instanceId")
-          return
-        }
-      if (inst.streams.containsKey(streamId)) {
-        promise.reject(SttErrorCodes.INVALID_ARGUMENT, "Stream already exists: $streamId")
-        return
-      }
-      val stream = inst.recognizer.createStream(hotwords = hotwords?.trim().orEmpty())
-      inst.streams[streamId] = stream
-      streamToInstance[streamId] = instanceId
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "createSttStream failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "Create stream failed: ${e.message}", e)
-    }
-  }
-
-  private fun readableArrayToFloatArray(arr: ReadableArray): FloatArray =
-    FloatArray(arr.size()) { i -> arr.getDouble(i).toFloat() }
-
-  fun acceptSttWaveform(streamId: String, samples: ReadableArray, sampleRate: Int, promise: Promise) {
-    try {
-      val (_, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      val floatSamples = readableArrayToFloatArray(samples)
-      stream.acceptWaveform(floatSamples, sampleRate)
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "acceptSttWaveform failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "acceptSttWaveform failed: ${e.message}", e)
-    }
-  }
-
-  fun sttStreamInputFinished(streamId: String, promise: Promise) {
-    try {
-      val (_, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      stream.inputFinished()
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "sttStreamInputFinished failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "sttStreamInputFinished failed: ${e.message}", e)
-    }
-  }
-
-  fun decodeSttStream(streamId: String, promise: Promise) {
-    try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      inst.recognizer.decode(stream)
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "decodeSttStream failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "decodeSttStream failed: ${e.message}", e)
-    }
-  }
-
-  fun isSttStreamReady(streamId: String, promise: Promise) {
-    try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      val ready = inst.recognizer.isReady(stream)
-      promise.resolve(ready)
-    } catch (e: Exception) {
-      Log.e(logTag, "isSttStreamReady failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "isSttStreamReady failed: ${e.message}", e)
-    }
-  }
-
-  private fun resultToWritableMap(result: OnlineRecognizerResult): WritableMap {
-    val map = Arguments.createMap()
-    map.putString("text", result.text)
-    val tokensArray = Arguments.createArray()
-    for (t in result.tokens) tokensArray.pushString(t)
-    map.putArray("tokens", tokensArray)
-    val timestampsArray = Arguments.createArray()
-    for (t in result.timestamps) timestampsArray.pushDouble(t.toDouble())
-    map.putArray("timestamps", timestampsArray)
-    return map
-  }
-
-  fun getSttStreamResult(streamId: String, promise: Promise) {
-    try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      val result = inst.recognizer.getResult(stream)
-      val isFinal = inst.recognizer.isEndpoint(stream) && result.text.isNotEmpty()
-      val map = resultToWritableMap(result)
-      map.putBoolean("isFinal", isFinal)
-      promise.resolve(map)
-    } catch (e: Exception) {
-      Log.e(logTag, "getSttStreamResult failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "getSttStreamResult failed: ${e.message}", e)
-    }
-  }
-
-  fun isSttStreamEndpoint(streamId: String, promise: Promise) {
-    try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      val endpoint = inst.recognizer.isEndpoint(stream)
-      promise.resolve(endpoint)
-    } catch (e: Exception) {
-      Log.e(logTag, "isSttStreamEndpoint failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "isSttStreamEndpoint failed: ${e.message}", e)
-    }
-  }
-
-  fun resetSttStream(streamId: String, promise: Promise) {
-    try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      inst.recognizer.reset(stream)
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "resetSttStream failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "resetSttStream failed: ${e.message}", e)
-    }
-  }
-
-  fun releaseSttStream(streamId: String, promise: Promise) {
-    try {
-      val instanceId = streamToInstance.remove(streamId) ?: run {
-        promise.resolve(null)
-        return
-      }
-      val inst = instances[instanceId] ?: run {
-        promise.resolve(null)
-        return
-      }
-      inst.streams.remove(streamId)?.release()
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(logTag, "releaseSttStream failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "releaseSttStream failed: ${e.message}", e)
-    }
-  }
 
   fun unloadOnlineStt(instanceId: String, promise: Promise) {
     try {
@@ -480,10 +312,15 @@ internal class SherpaOnnxOnlineSttHelper(
         promise.resolve(null)
         return
       }
-      val streamIds = inst.streams.keys.toList()
-      inst.streams.values.forEach { it.release() }
-      inst.streams.clear()
-      streamIds.forEach { streamToInstance.remove(it) }
+
+      synchronized(inst) {
+        val activePipelineId = inst.activePipelineId
+        if (!activePipelineId.isNullOrBlank()) {
+          StreamingPipelineRegistry.stop(activePipelineId)
+          StreamingPipelineRegistry.remove(activePipelineId)
+        }
+        inst.activePipelineId = null
+      }
       inst.recognizer.release()
       promise.resolve(null)
     } catch (e: Exception) {
@@ -492,36 +329,93 @@ internal class SherpaOnnxOnlineSttHelper(
     }
   }
 
-  /**
-   * Convenience: accept waveform, then while (isReady) decode, then getResult and isEndpoint.
-   */
-  fun processSttAudioChunk(
-    streamId: String,
-    samples: ReadableArray,
-    sampleRate: Int,
+  fun startSttPipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    chunkSize: Int?,
     promise: Promise
   ) {
     try {
-      val (inst, stream) = getStream(streamId)
-        ?: run {
-          promise.reject(SttErrorCodes.STREAM_NOT_FOUND, "Stream not found: $streamId")
-          return
-        }
-      val floatSamples = readableArrayToFloatArray(samples)
-      stream.acceptWaveform(floatSamples, sampleRate)
-      while (inst.recognizer.isReady(stream)) {
-        inst.recognizer.decode(stream)
+      val inst = getInstance(instanceId)
+      if (inst == null) {
+        promise.reject("STT_PIPELINE_INSTANCE_NOT_FOUND", "Online STT instance not found: $instanceId")
+        return
       }
-      val result = inst.recognizer.getResult(stream)
-      val isEndpoint = inst.recognizer.isEndpoint(stream)
-      val isFinal = isEndpoint && result.text.isNotEmpty()
-      val map = resultToWritableMap(result)
-      map.putBoolean("isEndpoint", isEndpoint)
-      map.putBoolean("isFinal", isFinal)
-      promise.resolve(map)
+
+      val inputEntry = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      if (inputEntry == null) {
+        promise.reject("STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND", "Input live audio buffer not found: $audioInLiveBufferId")
+        return
+      }
+
+      val outputEntry = TextPipelineRegistry.getLive(textOutLiveBufferId)
+      if (outputEntry == null) {
+        promise.reject("STT_PIPELINE_TEXT_BUFFER_NOT_FOUND", "Output live text buffer not found: $textOutLiveBufferId")
+        return
+      }
+
+      if (inputEntry.kind != "livePcmBuffer") {
+        promise.reject("STT_PIPELINE_BUFFER_KIND_MISMATCH", "Input buffer must be a live audio buffer")
+        return
+      }
+
+      if (inputEntry.state != LiveEntry.State.RECORDING) {
+        promise.reject("STT_PIPELINE_BUFFER_NOT_RECORDING", "Input audio buffer is not in recording state")
+        return
+      }
+
+      if (outputEntry.state != com.sherpaonnx.text.pipeline.LiveTextEntry.State.RECORDING) {
+        promise.reject("STT_PIPELINE_BUFFER_NOT_RECORDING", "Output text buffer is not in recording state")
+        return
+      }
+
+      val recognizerSampleRate = inst.config.featConfig.sampleRate
+      if (inputEntry.sampleRate != recognizerSampleRate) {
+        promise.reject(
+          "STT_PIPELINE_SAMPLE_RATE_MISMATCH",
+          "Input buffer sample rate (${inputEntry.sampleRate}) does not match recognizer sample rate ($recognizerSampleRate)"
+        )
+        return
+      }
+
+      synchronized(inst) {
+        val existingPipelineId = inst.activePipelineId
+        if (!existingPipelineId.isNullOrBlank()) {
+          val existingWorker = StreamingPipelineRegistry.get(existingPipelineId)
+          if (existingWorker != null && existingWorker.isRunning) {
+            promise.reject("STT_PIPELINE_ALREADY_RUNNING", "STT pipeline already running for instance: $instanceId")
+            return
+          }
+          StreamingPipelineRegistry.remove(existingPipelineId)
+          inst.activePipelineId = null
+        }
+      }
+
+      val pipelineId = UUID.randomUUID().toString()
+      val stream = inst.recognizer.createStream()
+
+      val worker = SttPipelineWorker(
+        pipelineId = pipelineId,
+        recognizer = inst.recognizer,
+        stream = stream,
+        inputEntry = inputEntry,
+        outputEntry = outputEntry,
+        chunkSize = chunkSize ?: 3200,
+      )
+
+      StreamingPipelineRegistry.registerAndStart(worker)
+
+      synchronized(inst) {
+        inst.activePipelineId = pipelineId
+      }
+
+      val out = Arguments.createMap()
+      out.putString("pipelineId", pipelineId)
+      promise.resolve(out)
     } catch (e: Exception) {
-      Log.e(logTag, "processSttAudioChunk failed: ${e.message}", e)
-      promise.reject(SttErrorCodes.STREAM_DECODE_FAILED, "processSttAudioChunk failed: ${e.message}", e)
+      Log.e(logTag, "startSttPipeline failed: ${e.message}", e)
+      promise.reject("STREAMING_PIPELINE_ERROR", "Failed to start STT pipeline: ${e.message}", e)
     }
   }
 
@@ -530,15 +424,19 @@ internal class SherpaOnnxOnlineSttHelper(
     instances.keys.toList().forEach { instanceId ->
       try {
         val inst = instances.remove(instanceId) ?: return@forEach
-        val streamIds = inst.streams.keys.toList()
-        inst.streams.values.forEach { it.release() }
-        inst.streams.clear()
-        streamIds.forEach { streamToInstance.remove(it) }
+
+        synchronized(inst) {
+          val activePipelineId = inst.activePipelineId
+          if (!activePipelineId.isNullOrBlank()) {
+            StreamingPipelineRegistry.stop(activePipelineId)
+            StreamingPipelineRegistry.remove(activePipelineId)
+          }
+          inst.activePipelineId = null
+        }
         inst.recognizer.release()
       } catch (e: Exception) {
         Log.w(logTag, "shutdown: failed to release instance $instanceId: ${e.message}")
       }
     }
-    streamToInstance.clear()
   }
 }

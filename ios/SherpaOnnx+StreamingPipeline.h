@@ -12,8 +12,8 @@
 struct StreamingPipelineStatus {
   bool isRunning = false;
   int64_t chunksProcessed = 0;
-  int64_t samplesRead = 0;
-  int64_t samplesWritten = 0;
+  int64_t unitsRead = 0;
+  int64_t unitsWritten = 0;
   std::string error;
 };
 

@@ -5,8 +5,8 @@ import java.util.concurrent.CompletableFuture
 data class StreamingPipelineStatus(
   val isRunning: Boolean,
   val chunksProcessed: Long,
-  val samplesRead: Long,
-  val samplesWritten: Long,
+  val unitsRead: Long,
+  val unitsWritten: Long,
   val error: String? = null,
 )
 

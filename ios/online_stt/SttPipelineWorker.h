@@ -2,28 +2,32 @@
 
 #include "../SherpaOnnx+StreamingPipeline.h"
 #include "../PaLiveEntry.h"
-#include "sherpa-onnx-enhancement-wrapper.h"
+#include "../SherpaOnnx+TextBufferGlobals.h"
+#include "../online_stt/sherpa-onnx-online-stt-wrapper.h"
 #include <condition_variable>
 #include <deque>
 #include <thread>
 
 /**
- * EnhancementPipelineWorker — iOS C++ streaming pipeline worker for online speech enhancement.
+ * SttPipelineWorker — iOS C++ streaming pipeline worker for online STT.
  *
- * Mirrors Android's EnhancementPipelineWorker.kt:
- * - Dedicated thread with condition variable wakeup (zero-latency via PaLiveEntry::addAppendListener)
+ * Mirrors Android's SttPipelineWorker.kt:
+ * - Dedicated thread with condition variable wakeup via PaLiveEntry::addAppendListener
  * - Command queue for blocking flush / reset (std::promise<void>)
- * - Auto-flush + auto-stop when input buffer finalizes
+ * - Auto-flush + auto-stop when input audio buffer finalizes
+ * - Writes partial text and committed segments to TxtLiveEntry
  */
-class EnhancementPipelineWorker : public StreamingPipelineWorker {
+class SttPipelineWorker : public StreamingPipelineWorker {
 public:
-  EnhancementPipelineWorker(
-    std::shared_ptr<sherpaonnx::OnlineEnhancementWrapper> wrapper,
+  SttPipelineWorker(
+    sherpaonnx::OnlineSttWrapper *wrapper,
+    const std::string &streamId,
     std::shared_ptr<PaLiveEntry> inputEntry,
-    std::shared_ptr<PaLiveEntry> outputEntry
+    std::shared_ptr<TxtLiveEntry> outputEntry,
+    int chunkSize
   );
 
-  ~EnhancementPipelineWorker() override;
+  ~SttPipelineWorker() override;
 
   void start() override;
   void stop() override;
@@ -40,13 +44,16 @@ private:
   };
 
   void runLoop();
+  void autoFlushAndCommit();
   void processCommands();
   void drainRemainingCommands();
   void joinThread();
 
-  std::shared_ptr<sherpaonnx::OnlineEnhancementWrapper> wrapper_;
+  sherpaonnx::OnlineSttWrapper *wrapper_;
+  std::string streamId_;
   std::shared_ptr<PaLiveEntry> inputEntry_;
-  std::shared_ptr<PaLiveEntry> outputEntry_;
+  std::shared_ptr<TxtLiveEntry> outputEntry_;
+  int chunkSize_ = 3200;
 
   std::thread workerThread_;
   std::mutex mtx_;

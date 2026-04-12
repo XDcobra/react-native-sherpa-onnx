@@ -80,6 +80,7 @@ object TextPipelineRegistry {
    */
   fun createLive(
     windowMaxChars: Int = 65536,
+    maxSegments: Int = 1000,
     emitPartialEvents: Boolean = false,
     partialEventMinIntervalMs: Long = 0
   ): LiveTextEntry {
@@ -87,6 +88,7 @@ object TextPipelineRegistry {
     val entry = LiveTextEntry(
       bufferId = bufferId,
       windowMaxChars = windowMaxChars,
+      maxSegments = maxSegments,
       emitPartialEvents = emitPartialEvents,
       partialEventMinIntervalMs = partialEventMinIntervalMs
     )

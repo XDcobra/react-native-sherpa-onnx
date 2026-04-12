@@ -82,6 +82,7 @@ std::unordered_map<std::string, std::string> scanOnlineModelPaths(const std::str
 struct OnlineSttWrapper::Impl {
     std::unique_ptr<sherpa_onnx::cxx::OnlineRecognizer> recognizer;
     std::unordered_map<std::string, sherpa_onnx::cxx::OnlineStream> streams;
+    int32_t sampleRate = 16000;
     bool initialized = false;
 };
 
@@ -184,6 +185,7 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     try {
         sherpa_onnx::cxx::OnlineRecognizer rec = sherpa_onnx::cxx::OnlineRecognizer::Create(config);
         pImpl->recognizer = std::make_unique<sherpa_onnx::cxx::OnlineRecognizer>(std::move(rec));
+        pImpl->sampleRate = config.feat_config.sample_rate;
         pImpl->initialized = true;
         result.success = true;
     } catch (const std::exception& e) {
@@ -269,6 +271,10 @@ void OnlineSttWrapper::unload() {
 
 bool OnlineSttWrapper::isInitialized() const {
     return pImpl->initialized && pImpl->recognizer != nullptr;
+}
+
+int32_t OnlineSttWrapper::getSampleRate() const {
+    return pImpl->sampleRate;
 }
 
 } // namespace sherpaonnx

@@ -588,48 +588,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
-  override fun createSttStream(instanceId: String, streamId: String, hotwords: String?, promise: Promise) {
-    onlineSttHelper.createSttStream(instanceId, streamId, hotwords, promise)
-  }
-
-  override fun acceptSttWaveform(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
-    onlineSttHelper.acceptSttWaveform(streamId, samples, sampleRate.toInt(), promise)
-  }
-
-  override fun sttStreamInputFinished(streamId: String, promise: Promise) {
-    onlineSttHelper.sttStreamInputFinished(streamId, promise)
-  }
-
-  override fun decodeSttStream(streamId: String, promise: Promise) {
-    onlineSttHelper.decodeSttStream(streamId, promise)
-  }
-
-  override fun isSttStreamReady(streamId: String, promise: Promise) {
-    onlineSttHelper.isSttStreamReady(streamId, promise)
-  }
-
-  override fun getSttStreamResult(streamId: String, promise: Promise) {
-    onlineSttHelper.getSttStreamResult(streamId, promise)
-  }
-
-  override fun isSttStreamEndpoint(streamId: String, promise: Promise) {
-    onlineSttHelper.isSttStreamEndpoint(streamId, promise)
-  }
-
-  override fun resetSttStream(streamId: String, promise: Promise) {
-    onlineSttHelper.resetSttStream(streamId, promise)
-  }
-
-  override fun releaseSttStream(streamId: String, promise: Promise) {
-    onlineSttHelper.releaseSttStream(streamId, promise)
-  }
-
   override fun unloadOnlineStt(instanceId: String, promise: Promise) {
     onlineSttHelper.unloadOnlineStt(instanceId, promise)
   }
 
-  override fun processSttAudioChunk(streamId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
-    onlineSttHelper.processSttAudioChunk(streamId, samples, sampleRate.toInt(), promise)
+  override fun startSttPipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    chunkSize: Double?,
+    promise: Promise
+  ) {
+    onlineSttHelper.startSttPipeline(
+      instanceId = instanceId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      chunkSize = chunkSize?.toInt(),
+      promise = promise,
+    )
   }
 
   // ==================== Pipeline Audio Buffers ====================
@@ -940,10 +916,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
       val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
+      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLive(
         windowMaxChars = windowMaxChars,
+        maxSegments = maxSegments,
         emitPartialEvents = emitPartialEvents,
         partialEventMinIntervalMs = partialEventMinIntervalMs
       )
@@ -1188,6 +1166,122 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       val end = minOf(s + m, text.length)
       promise.resolve(text.substring(s, end))
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendLiveTextSegment(
+    liveBufferId: String,
+    text: String,
+    tokens: ReadableArray?,
+    timestamps: ReadableArray?,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Live text buffer not found: $liveBufferId")
+        return
+      }
+
+      val tokenArray = if (tokens != null) {
+        Array(tokens.size()) { i -> tokens.getString(i) ?: "" }
+      } else {
+        emptyArray()
+      }
+
+      val timestampArray = if (timestamps != null) {
+        FloatArray(timestamps.size()) { i -> timestamps.getDouble(i).toFloat() }
+      } else {
+        floatArrayOf()
+      }
+
+      val segmentIndex = entry.commitSegment(
+        text = text,
+        tokens = tokenArray,
+        timestamps = timestampArray,
+        source = "append",
+      )
+
+      val out = Arguments.createMap()
+      out.putInt("segmentIndex", segmentIndex)
+      promise.resolve(out)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveTextBufferSegments(
+    liveBufferId: String,
+    startIndex: Double,
+    maxCount: Double,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Live text buffer not found: $liveBufferId")
+        return
+      }
+
+      val start = startIndex.toInt()
+      val count = maxCount.toInt()
+      if (start < 0 || count <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args: start=$start, maxCount=$count")
+        return
+      }
+      if (count > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE,
+          "maxCount $count exceeds max ${com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT}"
+        )
+        return
+      }
+
+      val includeTokens = options?.hasKey("includeTokens") == true && options.getBoolean("includeTokens")
+      val includeTimestamps = options?.hasKey("includeTimestamps") == true && options.getBoolean("includeTimestamps")
+
+      val segments = entry.getSegments(start, count)
+      val outSegments = Arguments.createArray()
+      for (segment in segments) {
+        val map = Arguments.createMap().apply {
+          putString("text", segment.text)
+          putString("source", segment.source)
+          putInt("segmentIndex", segment.segmentIndex)
+          if (includeTokens) {
+            val tokenArr = Arguments.createArray()
+            segment.tokens.forEach { tokenArr.pushString(it) }
+            putArray("tokens", tokenArr)
+          }
+          if (includeTimestamps) {
+            val tsArr = Arguments.createArray()
+            segment.timestamps.forEach { tsArr.pushDouble(it.toDouble()) }
+            putArray("timestamps", tsArr)
+          }
+        }
+        outSegments.pushMap(map)
+      }
+
+      val out = Arguments.createMap()
+      out.putArray("segments", outSegments)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveTextBufferSegmentCount(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Live text buffer not found: $liveBufferId")
+        return
+      }
+      promise.resolve(entry.segmentCount)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1818,8 +1912,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         putString("pipelineId", pipelineId)
         putBoolean("isRunning", status.isRunning)
         putDouble("chunksProcessed", status.chunksProcessed.toDouble())
-        putDouble("samplesRead", status.samplesRead.toDouble())
-        putDouble("samplesWritten", status.samplesWritten.toDouble())
+        putDouble("unitsRead", status.unitsRead.toDouble())
+        putDouble("unitsWritten", status.unitsWritten.toDouble())
         if (status.error != null) {
           putString("error", status.error)
         } else {

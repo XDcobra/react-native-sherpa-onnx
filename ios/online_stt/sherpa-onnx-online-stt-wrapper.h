@@ -73,6 +73,7 @@ public:
     void resetStream(const std::string& streamId);
     void releaseStream(const std::string& streamId);
     void unload();
+    int32_t getSampleRate() const;
 
     bool isInitialized() const;
 

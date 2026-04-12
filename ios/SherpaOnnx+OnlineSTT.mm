@@ -1,22 +1,30 @@
 /**
  * SherpaOnnx+OnlineSTT.mm
  *
- * Purpose: iOS TurboModule methods for streaming (online) STT: initializeOnlineSttWithOptions,
- * createSttStream, acceptSttWaveform, decodeSttStream, getSttStreamResult, etc.
- * Uses sherpa-onnx-online-stt-wrapper for native OnlineRecognizer.
+ * Pipeline-only online STT bridge:
+ * - initializeOnlineSttWithOptions
+ * - startSttPipeline (live audio -> live text)
+ * - unloadOnlineStt
  */
 
 #import "SherpaOnnx.h"
 #import <React/RCTLog.h>
 
+#include "PaLiveEntry.h"
+#include "SherpaOnnx+PipelineAudioGlobals.h"
+#include "SherpaOnnx+StreamingPipeline.h"
+#include "SherpaOnnx+TextBufferGlobals.h"
+#include "online_stt/SttPipelineWorker.h"
 #include "sherpa-onnx-online-stt-wrapper.h"
+
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
 static std::unordered_map<std::string, std::unique_ptr<sherpaonnx::OnlineSttWrapper>> g_online_stt_instances;
-static std::unordered_map<std::string, std::string> g_online_stt_stream_to_instance;
+static std::unordered_map<std::string, std::string> g_online_stt_instance_to_pipeline;
 static std::mutex g_online_stt_mutex;
 
 static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) {
@@ -26,17 +34,6 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
     auto it = g_online_stt_instances.find(key);
     return (it != g_online_stt_instances.end() && it->second != nullptr) ? it->second.get() : nullptr;
 }
-
-static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* streamId) {
-    if (streamId == nil || [streamId length] == 0) return nullptr;
-    std::string streamIdStr = [streamId UTF8String];
-    std::lock_guard<std::mutex> lock(g_online_stt_mutex);
-    auto sit = g_online_stt_stream_to_instance.find(streamIdStr);
-    if (sit == g_online_stt_stream_to_instance.end()) return nullptr;
-    auto it = g_online_stt_instances.find(sit->second);
-    return (it != g_online_stt_instances.end() && it->second != nullptr) ? it->second.get() : nullptr;
-}
-
 
 @implementation SherpaOnnx (OnlineSTT)
 
@@ -49,14 +46,14 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         reject(@"STT_INIT_FAILED", @"instanceId is required", nil);
         return;
     }
+
     NSString *modelDir = options.modelDir();
     NSString *modelType = options.modelType();
-    RCTLogInfo(@"[SherpaOnnx OnlineSTT] initializeOnlineSttWithOptions instanceId=%@ modelDir=%@ modelType=%@",
-               instanceId, modelDir, modelType);
     if (modelDir == nil || [modelDir length] == 0) {
         reject(@"STT_INIT_FAILED", @"modelDir is required", nil);
         return;
     }
+
     std::string instanceIdStr = [instanceId UTF8String];
     std::string modelDirStr = [modelDir UTF8String];
     std::string modelTypeStr = (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "transducer";
@@ -89,7 +86,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
             reject(@"STT_INIT_FAILED", @"Online STT instance already exists", nil);
             return;
         }
-        RCTLogInfo(@"[SherpaOnnx OnlineSTT] creating wrapper and calling initialize");
+
         auto wrapper = std::make_unique<sherpaonnx::OnlineSttWrapper>();
         sherpaonnx::OnlineSttInitResult result = wrapper->initialize(
             modelDirStr,
@@ -116,176 +113,163 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
             rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
             rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
         );
+
         if (!result.success) {
-            RCTLogError(@"[SherpaOnnx OnlineSTT] initialize failed: %s", result.error.c_str());
             reject(@"STT_INIT_FAILED", [NSString stringWithUTF8String:result.error.c_str()], nil);
             return;
         }
+
         g_online_stt_instances[instanceIdStr] = std::move(wrapper);
-        RCTLogInfo(@"[SherpaOnnx OnlineSTT] init success for instanceId=%@", instanceId);
         resolve(@{ @"success": @YES });
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Online STT init failed: %@", exception.reason];
-        RCTLogError(@"%@", errorMsg);
         reject(@"STT_INIT_FAILED", errorMsg, nil);
     }
 }
 
-- (void)createSttStream:(NSString *)instanceId
-              streamId:(NSString *)streamId
-              hotwords:(NSString *)hotwords
-               resolve:(RCTPromiseResolveBlock)resolve
-                reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstance(instanceId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_INSTANCE_NOT_FOUND", @"Online STT instance not found", nil);
-        return;
-    }
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::string streamIdStr = [streamId UTF8String];
-    std::string hotwordsStr = hotwords != nil ? [hotwords UTF8String] : "";
-    if (!wrapper->createStream(streamIdStr, hotwordsStr)) {
-        reject(@"STT_INVALID_ARGUMENT", @"Stream already exists or create failed", nil);
-        return;
-    }
-    std::lock_guard<std::mutex> lock(g_online_stt_mutex);
-    g_online_stt_stream_to_instance[streamIdStr] = instanceIdStr;
-    resolve(nil);
-}
-
-- (void)acceptSttWaveform:(NSString *)streamId
-                  samples:(NSArray *)samples
-               sampleRate:(double)sampleRate
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
-        return;
-    }
-    std::vector<float> floatSamples;
-    floatSamples.reserve([samples count]);
-    for (NSNumber* n in samples) {
-        floatSamples.push_back([n floatValue]);
-    }
-    std::string streamIdStr = [streamId UTF8String];
-    wrapper->acceptWaveform(streamIdStr, (int32_t)sampleRate, floatSamples.data(), floatSamples.size());
-    resolve(nil);
-}
-
-- (void)sttStreamInputFinished:(NSString *)streamId
-                       resolve:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
-        return;
-    }
-    std::string streamIdStr = [streamId UTF8String];
-    wrapper->inputFinished(streamIdStr);
-    resolve(nil);
-}
-
-- (void)decodeSttStream:(NSString *)streamId
-                resolve:(RCTPromiseResolveBlock)resolve
-                 reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
-        return;
-    }
-    std::string streamIdStr = [streamId UTF8String];
-    wrapper->decode(streamIdStr);
-    resolve(nil);
-}
-
-- (void)isSttStreamReady:(NSString *)streamId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
-        return;
-    }
-    std::string streamIdStr = [streamId UTF8String];
-    BOOL ready = wrapper->isReady(streamIdStr);
-    resolve(@(ready));
-}
-
-- (void)getSttStreamResult:(NSString *)streamId
+- (void)startSttPipeline:(NSString *)instanceId
+       audioInLiveBufferId:(NSString *)audioInLiveBufferId
+      textOutLiveBufferId:(NSString *)textOutLiveBufferId
+                 chunkSize:(NSNumber *)chunkSize
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(@"STT_PIPELINE_INSTANCE_NOT_FOUND", @"Online STT instance not found", nil);
         return;
     }
-    std::string streamIdStr = [streamId UTF8String];
-    sherpaonnx::OnlineSttStreamResult r = wrapper->getResult(streamIdStr);
-    NSMutableArray* tokens = [NSMutableArray arrayWithCapacity:r.tokens.size()];
-    for (const auto& t : r.tokens) {
-        [tokens addObject:[NSString stringWithUTF8String:t.c_str()]];
-    }
-    NSMutableArray* timestamps = [NSMutableArray arrayWithCapacity:r.timestamps.size()];
-    for (float ts : r.timestamps) {
-        [timestamps addObject:@(ts)];
-    }
-    resolve(@{
-        @"text": [NSString stringWithUTF8String:r.text.c_str()] ?: @"",
-        @"tokens": tokens,
-        @"timestamps": timestamps,
-        @"isFinal": @(wrapper->isEndpoint(streamIdStr) && r.text.length() > 0)
-    });
-}
-
-- (void)isSttStreamEndpoint:(NSString *)streamId
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
+    if (audioInLiveBufferId == nil || [audioInLiveBufferId length] == 0) {
+        reject(@"STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND", @"Input live audio buffer id is required", nil);
         return;
     }
-    std::string streamIdStr = [streamId UTF8String];
-    BOOL endpoint = wrapper->isEndpoint(streamIdStr);
-    resolve(@(endpoint));
-}
-
-- (void)resetSttStream:(NSString *)streamId
-               resolve:(RCTPromiseResolveBlock)resolve
-                reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
+    if (textOutLiveBufferId == nil || [textOutLiveBufferId length] == 0) {
+        reject(@"STT_PIPELINE_TEXT_BUFFER_NOT_FOUND", @"Output live text buffer id is required", nil);
         return;
     }
-    std::string streamIdStr = [streamId UTF8String];
-    wrapper->resetStream(streamIdStr);
-    resolve(nil);
-}
 
-- (void)releaseSttStream:(NSString *)streamId
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    std::string streamIdStr = [streamId UTF8String];
-    if (wrapper != nullptr) {
-        wrapper->releaseStream(streamIdStr);
+    std::string instanceKey = [instanceId UTF8String];
+    std::string inputBufferKey = [audioInLiveBufferId UTF8String];
+    std::string outputBufferKey = [textOutLiveBufferId UTF8String];
+
+    sherpaonnx::OnlineSttWrapper *wrapper = getOnlineSttInstance(instanceId);
+    if (!wrapper) {
+        reject(@"STT_PIPELINE_INSTANCE_NOT_FOUND", @"Online STT instance not found", nil);
+        return;
     }
+
+    std::string existingPipelineId;
     {
         std::lock_guard<std::mutex> lock(g_online_stt_mutex);
-        g_online_stt_stream_to_instance.erase(streamIdStr);
+        auto pit = g_online_stt_instance_to_pipeline.find(instanceKey);
+        if (pit != g_online_stt_instance_to_pipeline.end()) {
+            existingPipelineId = pit->second;
+        }
     }
-    resolve(nil);
+
+    if (!existingPipelineId.empty()) {
+        std::shared_ptr<StreamingPipelineWorker> staleWorker;
+        {
+            std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+            auto it = g_streaming_pipelines.find(existingPipelineId);
+            if (it != g_streaming_pipelines.end()) {
+                if (it->second && it->second->isRunning()) {
+                    reject(@"STT_PIPELINE_ALREADY_RUNNING",
+                           [NSString stringWithFormat:@"STT pipeline already running for instance %@", instanceId],
+                           nil);
+                    return;
+                }
+                staleWorker = it->second;
+                g_streaming_pipelines.erase(it);
+            }
+        }
+        if (staleWorker) {
+            staleWorker->release();
+        }
+        std::lock_guard<std::mutex> lock(g_online_stt_mutex);
+        g_online_stt_instance_to_pipeline.erase(instanceKey);
+    }
+
+    std::shared_ptr<PaLiveEntry> inputEntry;
+    {
+        std::lock_guard<std::mutex> lock(g_pa_mutex);
+        auto it = g_pa_live.find(inputBufferKey);
+        if (it == g_pa_live.end() || it->second == nullptr) {
+            reject(@"STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Input live audio buffer not found: %@", audioInLiveBufferId], nil);
+            return;
+        }
+        inputEntry = it->second;
+    }
+
+    auto outputEntry = txt_get_live_entry(outputBufferKey);
+    if (!outputEntry) {
+        reject(@"STT_PIPELINE_TEXT_BUFFER_NOT_FOUND",
+               [NSString stringWithFormat:@"Output live text buffer not found: %@", textOutLiveBufferId], nil);
+        return;
+    }
+
+    if (inputEntry->kind != "livePcmBuffer") {
+        reject(@"STT_PIPELINE_BUFFER_KIND_MISMATCH", @"Input buffer must be a live audio buffer", nil);
+        return;
+    }
+    if (inputEntry->state != PaLiveEntry::RECORDING) {
+        reject(@"STT_PIPELINE_BUFFER_NOT_RECORDING", @"Input audio buffer is not in recording state", nil);
+        return;
+    }
+    if (!txt_live_is_recording(outputEntry)) {
+        reject(@"STT_PIPELINE_BUFFER_NOT_RECORDING", @"Output text buffer is not in recording state", nil);
+        return;
+    }
+
+    int expectedSampleRate = wrapper->getSampleRate();
+    if (inputEntry->sampleRate != expectedSampleRate) {
+        reject(@"STT_PIPELINE_SAMPLE_RATE_MISMATCH",
+               [NSString stringWithFormat:@"Input buffer sample rate (%d) does not match recognizer sample rate (%d)",
+                inputEntry->sampleRate, expectedSampleRate], nil);
+        return;
+    }
+
+    int safeChunkSize = 3200;
+    if (chunkSize != nil && [chunkSize intValue] > 0) {
+        safeChunkSize = [chunkSize intValue];
+    }
+
+    std::string streamId = std::string("stt_pipeline_stream_") +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+    if (!wrapper->createStream(streamId, "")) {
+        reject(@"STREAMING_PIPELINE_ERROR", @"Failed to create STT pipeline stream", nil);
+        return;
+    }
+
+    try {
+        auto worker = std::make_shared<SttPipelineWorker>(
+            wrapper,
+            streamId,
+            inputEntry,
+            outputEntry,
+            safeChunkSize
+        );
+
+        {
+            std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+            g_streaming_pipelines[worker->pipelineId] = worker;
+        }
+        worker->start();
+
+        {
+            std::lock_guard<std::mutex> lock(g_online_stt_mutex);
+            g_online_stt_instance_to_pipeline[instanceKey] = worker->pipelineId;
+        }
+
+        resolve(@{ @"pipelineId": [NSString stringWithUTF8String:worker->pipelineId.c_str()] });
+    } catch (const std::exception &e) {
+        wrapper->releaseStream(streamId);
+        reject(@"STREAMING_PIPELINE_ERROR", [NSString stringWithUTF8String:e.what()], nil);
+    } catch (...) {
+        wrapper->releaseStream(streamId);
+        reject(@"STREAMING_PIPELINE_ERROR", @"Failed to start STT pipeline", nil);
+    }
 }
 
 - (void)unloadOnlineStt:(NSString *)instanceId
@@ -296,74 +280,45 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstanceForStream(NSString* str
         resolve(nil);
         return;
     }
+
     std::string key = [instanceId UTF8String];
     @try {
+        std::string pipelineId;
+        {
+            std::lock_guard<std::mutex> lock(g_online_stt_mutex);
+            auto pit = g_online_stt_instance_to_pipeline.find(key);
+            if (pit != g_online_stt_instance_to_pipeline.end()) {
+                pipelineId = pit->second;
+            }
+        }
+
+        if (!pipelineId.empty()) {
+            std::shared_ptr<StreamingPipelineWorker> worker;
+            {
+                std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+                auto wit = g_streaming_pipelines.find(pipelineId);
+                if (wit != g_streaming_pipelines.end()) {
+                    worker = wit->second;
+                    g_streaming_pipelines.erase(wit);
+                }
+            }
+            if (worker) {
+                worker->stop();
+            }
+        }
+
         std::lock_guard<std::mutex> lock(g_online_stt_mutex);
         auto it = g_online_stt_instances.find(key);
         if (it != g_online_stt_instances.end()) {
             it->second->unload();
-            for (auto sit = g_online_stt_stream_to_instance.begin(); sit != g_online_stt_stream_to_instance.end(); ) {
-                if (sit->second == key) sit = g_online_stt_stream_to_instance.erase(sit);
-                else ++sit;
-            }
             g_online_stt_instances.erase(it);
         }
+        g_online_stt_instance_to_pipeline.erase(key);
+
         resolve(nil);
     } @catch (NSException *exception) {
         reject(@"STT_INTERNAL_ERROR", [NSString stringWithFormat:@"unloadOnlineStt failed: %@", exception.reason], nil);
     }
-}
-
-- (void)processSttAudioChunk:(NSString *)streamId
-                     samples:(NSArray *)samples
-                  sampleRate:(double)sampleRate
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject
-{
-    sherpaonnx::OnlineSttWrapper* wrapper = getOnlineSttInstanceForStream(streamId);
-    if (wrapper == nullptr) {
-        reject(@"STT_STREAM_NOT_FOUND", @"Stream not found", nil);
-        return;
-    }
-    std::string streamIdStr = [streamId UTF8String];
-    std::vector<float> floatSamples;
-    NSUInteger count = [samples count];
-    floatSamples.reserve(count);
-    for (NSUInteger i = 0; i < count; i++) {
-        id obj = [samples objectAtIndex:i];
-        float val = 0.0f;
-        if ([obj isKindOfClass:[NSNumber class]]) {
-            val = [(NSNumber *)obj floatValue];
-        } else if ([obj respondsToSelector:@selector(doubleValue)]) {
-            val = (float)[(id)obj doubleValue];
-        }
-        floatSamples.push_back(val);
-    }
-    if (floatSamples.empty()) {
-        RCTLogWarn(@"[SherpaOnnx OnlineSTT] processSttAudioChunk: no samples (count=%lu)", (unsigned long)count);
-    }
-
-    wrapper->acceptWaveform(streamIdStr, (int32_t)sampleRate, floatSamples.data(), floatSamples.size());
-    while (wrapper->isReady(streamIdStr)) {
-        wrapper->decode(streamIdStr);
-    }
-    sherpaonnx::OnlineSttStreamResult r = wrapper->getResult(streamIdStr);
-    BOOL isEndpoint = wrapper->isEndpoint(streamIdStr);
-    NSMutableArray* tokens = [NSMutableArray arrayWithCapacity:r.tokens.size()];
-    for (const auto& t : r.tokens) {
-        [tokens addObject:[NSString stringWithUTF8String:t.c_str()]];
-    }
-    NSMutableArray* timestamps = [NSMutableArray arrayWithCapacity:r.timestamps.size()];
-    for (float ts : r.timestamps) {
-        [timestamps addObject:@(ts)];
-    }
-    resolve(@{
-        @"text": [NSString stringWithUTF8String:r.text.c_str()] ?: @"",
-        @"tokens": tokens,
-        @"timestamps": timestamps,
-        @"isEndpoint": @(isEndpoint),
-        @"isFinal": @(isEndpoint && r.text.length() > 0)
-    });
 }
 
 @end

@@ -107,8 +107,8 @@
         @"pipelineId": pipelineId,
         @"isRunning": @(status.isRunning),
         @"chunksProcessed": @((double)status.chunksProcessed),
-        @"samplesRead": @((double)status.samplesRead),
-        @"samplesWritten": @((double)status.samplesWritten),
+        @"unitsRead": @((double)status.unitsRead),
+        @"unitsWritten": @((double)status.unitsWritten),
         @"error": status.error.empty() ? [NSNull null] : [NSString stringWithUTF8String:status.error.c_str()],
     });
 }

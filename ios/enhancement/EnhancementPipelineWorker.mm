@@ -50,7 +50,7 @@ void EnhancementPipelineWorker::runLoop() {
             outputEntry_->appendSamples(flushed.samples.data(), flushed.samples.size(),
                                         sr, kPaAppendSourceEnhancement);
             std::lock_guard<std::mutex> sLock(statusMtx_);
-            samplesWritten_ += (int64_t)flushed.samples.size();
+            unitsWritten_ += (int64_t)flushed.samples.size();
           }
           break;
         }
@@ -67,8 +67,8 @@ void EnhancementPipelineWorker::runLoop() {
 
       {
         std::lock_guard<std::mutex> sLock(statusMtx_);
-        samplesRead_ += (int64_t)chunk.size();
-        samplesWritten_ += (int64_t)denoised.samples.size();
+        unitsRead_ += (int64_t)chunk.size();
+        unitsWritten_ += (int64_t)denoised.samples.size();
         chunksProcessed_++;
       }
     }
@@ -105,7 +105,7 @@ void EnhancementPipelineWorker::processCommands() {
             outputEntry_->appendSamples(flushed.samples.data(), flushed.samples.size(),
                                         wrapper_->getSampleRate(), kPaAppendSourceEnhancement);
             std::lock_guard<std::mutex> sLock(statusMtx_);
-            samplesWritten_ += (int64_t)flushed.samples.size();
+            unitsWritten_ += (int64_t)flushed.samples.size();
           }
           cmd.completion.set_value();
         } catch (...) {
@@ -201,8 +201,8 @@ StreamingPipelineStatus EnhancementPipelineWorker::getStatus() {
   return StreamingPipelineStatus{
     running.load(),
     chunksProcessed_,
-    samplesRead_,
-    samplesWritten_,
+    unitsRead_,
+    unitsWritten_,
     error_
   };
 }

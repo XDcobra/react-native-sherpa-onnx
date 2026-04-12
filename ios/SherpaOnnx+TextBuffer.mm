@@ -17,6 +17,9 @@
 #include <vector>
 #include <string>
 #include <atomic>
+#include <deque>
+#include <algorithm>
+#include <stdexcept>
 
 // ==================== Error Codes ====================
 static NSString *const kTxtErrBufferNotFound   = @"TEXT_BUFFER_NOT_FOUND";
@@ -86,6 +89,15 @@ struct TxtOfflineEntry {
     }
 };
 
+// ==================== Text Segment ====================
+struct TextSegment {
+    std::string text;
+    std::vector<std::string> tokens;
+    std::vector<float> timestamps;
+    std::string source;
+    int segmentIndex;
+};
+
 // ==================== Live Text Entry ====================
 struct TxtLiveEntry {
     enum State { RECORDING, FINISHED };
@@ -96,10 +108,104 @@ struct TxtLiveEntry {
     int64_t totalCharsWritten = 0;
     std::atomic<int> revision{0};
     int windowMaxChars = 65536;
+    int maxSegments = 1000;
     bool emitPartialEvents = false;
     int64_t partialEventMinIntervalMs = 0;
 
+    // ── Segment log (ring with maxSegments capacity) ──
+    std::deque<TextSegment> segments;
+    std::mutex segmentMutex;
+    int64_t evictedCount = 0;
+
+    int segmentCount() {
+        std::lock_guard<std::mutex> lock(segmentMutex);
+        return (int)segments.size();
+    }
+
+    // ── Cursor system ──
+    struct SegmentCursor {
+        int cursorId;
+        std::atomic<int> readPos{0};
+    };
+    std::unordered_map<int, std::unique_ptr<SegmentCursor>> segmentCursors;
+    std::mutex cursorMutex;
+    std::atomic<int> nextCursorId{0};
+
+    int createSegmentCursor() {
+        int id = nextCursorId.fetch_add(1);
+        auto cursor = std::make_unique<SegmentCursor>();
+        cursor->cursorId = id;
+        cursor->readPos.store(0);
+        std::lock_guard<std::mutex> lock(cursorMutex);
+        segmentCursors[id] = std::move(cursor);
+        return id;
+    }
+
+    std::vector<TextSegment> drainSegments(int cursorId, int maxCount) {
+        std::lock_guard<std::mutex> cLock(cursorMutex);
+        auto it = segmentCursors.find(cursorId);
+        if (it == segmentCursors.end()) return {};
+        std::lock_guard<std::mutex> sLock(segmentMutex);
+        int pos = it->second->readPos.load();
+        if (pos >= (int)segments.size()) return {};
+        int end = std::min(pos + maxCount, (int)segments.size());
+        std::vector<TextSegment> result(segments.begin() + pos, segments.begin() + end);
+        it->second->readPos.store(end);
+        return result;
+    }
+
+    std::vector<TextSegment> getSegments(int startIndex, int maxCount) {
+        if (startIndex < 0 || maxCount <= 0) return {};
+        std::lock_guard<std::mutex> sLock(segmentMutex);
+        if (startIndex >= (int)segments.size()) return {};
+        int end = std::min(startIndex + maxCount, (int)segments.size());
+        return std::vector<TextSegment>(segments.begin() + startIndex, segments.begin() + end);
+    }
+
+    void releaseSegmentCursor(int cursorId) {
+        std::lock_guard<std::mutex> lock(cursorMutex);
+        segmentCursors.erase(cursorId);
+    }
+
+    // ── Append listeners (token-based) ──
+    struct NativeAppendListener {
+        int token;
+        std::function<void()> callback;
+    };
+    std::vector<NativeAppendListener> appendListeners;
+    std::mutex appendListenerMutex;
+    std::atomic<int> nextListenerToken{0};
+
+    int addAppendListener(std::function<void()> listener) {
+        int token = nextListenerToken.fetch_add(1);
+        std::lock_guard<std::mutex> lock(appendListenerMutex);
+        appendListeners.push_back({token, std::move(listener)});
+        return token;
+    }
+
+    void removeAppendListener(int token) {
+        std::lock_guard<std::mutex> lock(appendListenerMutex);
+        appendListeners.erase(
+            std::remove_if(appendListeners.begin(), appendListeners.end(),
+                           [token](const NativeAppendListener &l) { return l.token == token; }),
+            appendListeners.end());
+    }
+
+    void notifyAppendListeners() {
+        std::vector<std::function<void()>> callbacks;
+        {
+            std::lock_guard<std::mutex> lock(appendListenerMutex);
+            callbacks.reserve(appendListeners.size());
+            for (auto &l : appendListeners) callbacks.push_back(l.callback);
+        }
+        for (auto &cb : callbacks) cb();
+    }
+
+    // ── Partial text ──
     void writePartial(const std::string &text) {
+        if (state == FINISHED) {
+            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+        }
         // Convert to NSString for UTF-16 length handling
         NSString *ns = [NSString stringWithUTF8String:text.c_str()];
         int len = ns ? (int)[ns length] : 0;
@@ -114,6 +220,9 @@ struct TxtLiveEntry {
     }
 
     void appendText(const std::string &text) {
+        if (state == FINISHED) {
+            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+        }
         std::string combined = currentText + text;
         NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
         int len = ns ? (int)[ns length] : 0;
@@ -129,21 +238,65 @@ struct TxtLiveEntry {
         revision.fetch_add(1);
     }
 
+    int commitSegment(const std::string &text,
+                      const std::vector<std::string> &tokens = {},
+                      const std::vector<float> &timestamps = {},
+                      const std::string &source = "unknown") {
+        if (state == FINISHED) {
+            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+        }
+        int committedSegmentIndex = -1;
+        {
+            std::lock_guard<std::mutex> lock(segmentMutex);
+            TextSegment seg;
+            seg.text = text;
+            seg.tokens = tokens;
+            seg.timestamps = timestamps;
+            seg.source = source;
+            seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
+            committedSegmentIndex = seg.segmentIndex;
+            segments.push_back(std::move(seg));
+            // Evict oldest if over capacity
+            if ((int)segments.size() > maxSegments) {
+                segments.pop_front();
+                evictedCount++;
+                // Snap cursors forward
+                std::lock_guard<std::mutex> cLock(cursorMutex);
+                for (auto &pair : segmentCursors) {
+                    int p = pair.second->readPos.load();
+                    if (p > 0) pair.second->readPos.fetch_sub(1);
+                    else pair.second->readPos.store(0);
+                }
+            }
+            NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
+            int charLen = textNs ? (int)[textNs length] : 0;
+            totalCharsWritten += charLen;
+            revision.fetch_add(1);
+        }
+        notifyAppendListeners();
+        return committedSegmentIndex;
+    }
+
     void finalize_() {
+        if (state == FINISHED) {
+            throw std::runtime_error("Already finalized: " + bufferId);
+        }
         state = FINISHED;
+        notifyAppendListeners();
     }
 
     std::string snapshotText() const {
         return currentText;
     }
 
-    NSDictionary *toDict() const {
+    NSDictionary *toDict() {
         return @{
             @"bufferId": [NSString stringWithUTF8String:bufferId.c_str()],
             @"kind": @"liveTextBuffer",
             @"state": state == RECORDING ? @"recording" : @"finished",
             @"totalCharsWritten": @(totalCharsWritten),
             @"revision": @(revision.load()),
+            @"segmentCount": @(segmentCount()),
         };
     }
 };
@@ -154,6 +307,65 @@ struct TxtLiveEntry {
 std::unordered_map<std::string, std::shared_ptr<TxtOfflineEntry>> g_txt_offline;
 std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> g_txt_live;
 std::mutex g_txt_mutex;
+
+std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_live.find(bufferId);
+    if (it == g_txt_live.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry) {
+    if (!entry) return false;
+    return entry->state == TxtLiveEntry::RECORDING;
+}
+
+bool txt_live_write_partial(
+    const std::shared_ptr<TxtLiveEntry> &entry,
+    const std::string &text,
+    std::string *error
+) {
+    if (!entry) {
+        if (error) *error = "Live text buffer not found";
+        return false;
+    }
+    try {
+        entry->writePartial(text);
+        return true;
+    } catch (const std::exception &e) {
+        if (error) *error = e.what();
+        return false;
+    } catch (...) {
+        if (error) *error = "Unknown live text writePartial error";
+        return false;
+    }
+}
+
+bool txt_live_commit_segment(
+    const std::shared_ptr<TxtLiveEntry> &entry,
+    const std::string &text,
+    const std::vector<std::string> &tokens,
+    const std::vector<float> &timestamps,
+    const std::string &source,
+    std::string *error
+) {
+    if (!entry) {
+        if (error) *error = "Live text buffer not found";
+        return false;
+    }
+    try {
+        entry->commitSegment(text, tokens, timestamps, source);
+        return true;
+    } catch (const std::exception &e) {
+        if (error) *error = e.what();
+        return false;
+    } catch (...) {
+        if (error) *error = "Unknown live text commitSegment error";
+        return false;
+    }
+}
 
 static std::string txt_generateId(const char *prefix) {
     return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
@@ -254,11 +466,15 @@ static std::string txt_generateId(const char *prefix) {
 {
     @try {
         int windowMaxChars = 65536;
+        int maxSegments = 1000;
         bool emitPartialEvents = false;
         int64_t partialEventMinIntervalMs = 0;
 
         if (options[@"windowMaxChars"]) {
             windowMaxChars = [options[@"windowMaxChars"] intValue];
+        }
+        if (options[@"maxSegments"]) {
+            maxSegments = [options[@"maxSegments"] intValue];
         }
         if (options[@"emitPartialEvents"]) {
             emitPartialEvents = [options[@"emitPartialEvents"] boolValue];
@@ -271,6 +487,7 @@ static std::string txt_generateId(const char *prefix) {
         auto entry = std::make_shared<TxtLiveEntry>();
         entry->bufferId = bufferId;
         entry->windowMaxChars = windowMaxChars;
+        entry->maxSegments = maxSegments;
         entry->emitPartialEvents = emitPartialEvents;
         entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
         {
@@ -651,6 +868,160 @@ static std::string txt_generateId(const char *prefix) {
         int end = MIN(s + m, totalLen);
         NSRange range = NSMakeRange(s, end - s);
         resolve([full substringWithRange:range]);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
+- (void)appendLiveTextSegment:(NSString *)liveBufferId
+                          text:(NSString *)text
+                        tokens:(NSArray<NSString *> *)tokens
+                    timestamps:(NSArray<NSNumber *> *)timestamps
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::string textStr = [text UTF8String] ?: "";
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        std::vector<std::string> tokenVec;
+        if (tokens != nil) {
+            tokenVec.reserve(tokens.count);
+            for (id obj in tokens) {
+                if ([obj isKindOfClass:[NSString class]]) {
+                    tokenVec.emplace_back([(NSString *)obj UTF8String] ?: "");
+                }
+            }
+        }
+
+        std::vector<float> timestampVec;
+        if (timestamps != nil) {
+            timestampVec.reserve(timestamps.count);
+            for (id obj in timestamps) {
+                if ([obj isKindOfClass:[NSNumber class]]) {
+                    timestampVec.emplace_back([(NSNumber *)obj floatValue]);
+                }
+            }
+        }
+
+        int segmentIndex = entry->commitSegment(textStr, tokenVec, timestampVec, "append");
+        resolve(@{ @"segmentIndex": @(segmentIndex) });
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::runtime_error &e) {
+        reject(kTxtErrAlreadyFinalized, [NSString stringWithUTF8String:e.what()], nil);
+    } catch (const std::exception &e) {
+        reject(kTxtErrInternalError, [NSString stringWithUTF8String:e.what()], nil);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown appendLiveTextSegment error", nil);
+    }
+}
+
+- (void)getLiveTextBufferSegments:(NSString *)liveBufferId
+                        startIndex:(double)startIndex
+                          maxCount:(double)maxCount
+                           options:(NSDictionary *)options
+                           resolve:(RCTPromiseResolveBlock)resolve
+                            reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        int s = (int)startIndex;
+        int m = (int)maxCount;
+
+        if (s < 0 || m <= 0) {
+            reject(kTxtErrSliceInvalid, @"Invalid slice args", nil);
+            return;
+        }
+        if (m > kTxtMaxSliceCount) {
+            reject(kTxtErrSliceTooLarge,
+                   [NSString stringWithFormat:@"maxCount %d exceeds max %d", m, kTxtMaxSliceCount], nil);
+            return;
+        }
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        BOOL includeTokens = options != nil && options[@"includeTokens"] != nil
+            ? [options[@"includeTokens"] boolValue]
+            : NO;
+        BOOL includeTimestamps = options != nil && options[@"includeTimestamps"] != nil
+            ? [options[@"includeTimestamps"] boolValue]
+            : NO;
+
+        auto segments = entry->getSegments(s, m);
+        NSMutableArray *segmentArray = [NSMutableArray arrayWithCapacity:segments.size()];
+        for (const auto &seg : segments) {
+            NSMutableDictionary *segmentMap = [@{
+                @"text": [NSString stringWithUTF8String:seg.text.c_str()] ?: @"",
+                @"source": [NSString stringWithUTF8String:seg.source.c_str()] ?: @"unknown",
+                @"segmentIndex": @(seg.segmentIndex),
+            } mutableCopy];
+
+            if (includeTokens) {
+                NSMutableArray *tokenArr = [NSMutableArray arrayWithCapacity:seg.tokens.size()];
+                for (const auto &tok : seg.tokens) {
+                    [tokenArr addObject:[NSString stringWithUTF8String:tok.c_str()] ?: @""];
+                }
+                segmentMap[@"tokens"] = tokenArr;
+            }
+
+            if (includeTimestamps) {
+                NSMutableArray *tsArr = [NSMutableArray arrayWithCapacity:seg.timestamps.size()];
+                for (float ts : seg.timestamps) {
+                    [tsArr addObject:@(ts)];
+                }
+                segmentMap[@"timestamps"] = tsArr;
+            }
+
+            [segmentArray addObject:segmentMap];
+        }
+
+        resolve(@{ @"segments": segmentArray });
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        reject(kTxtErrInternalError, [NSString stringWithUTF8String:e.what()], nil);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown getLiveTextBufferSegments error", nil);
+    }
+}
+
+- (void)getLiveTextBufferSegmentCount:(NSString *)liveBufferId
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::lock_guard<std::mutex> lock(g_txt_mutex);
+        auto it = g_txt_live.find(lid);
+        if (it == g_txt_live.end()) {
+            reject(kTxtErrBufferNotFound,
+                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+            return;
+        }
+        resolve(@(it->second->segmentCount()));
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
