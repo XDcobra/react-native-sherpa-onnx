@@ -4,6 +4,7 @@ On-device speech denoising (**GTCRN**, **DPDFNet**) with:
 
 - **Offline (batch):** `OfflineAudioBuffer` → `OfflineAudioBuffer` — input populated, output empty at model rate.
 - **Online (streaming):** chunk-based API for low-latency paths (unchanged in this chapter).
+- **Live pipeline:** `LiveAudioBuffer` → `LiveAudioBuffer` — native background thread reads from input, denoises, writes to output. Zero JS bridging overhead.
 
 **Import path (facade):** `react-native-sherpa-onnx/enhancement`
 
@@ -116,6 +117,47 @@ See **API reference** below for `feedSamples`, `flush`, `reset`, **`getFrameShif
 
 ---
 
+## Quick start (live pipeline)
+
+The live pipeline runs enhancement entirely on the native side. Audio flows from a **`LiveAudioBuffer`** (e.g. mic input) through the denoiser into a second **`LiveAudioBuffer`** — no JS bridge overhead per chunk.
+
+```ts
+import {
+  createLiveEnhancement,
+} from 'react-native-sherpa-onnx/enhancement';
+import {
+  createLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const engine = await createLiveEnhancement({
+  modelPath: { type: 'file', path: '/absolute/path/to/enhancement-model-dir' },
+  modelType: 'auto',
+});
+
+const sr = await engine.getSampleRate();
+const inputBuf = await createLiveAudioBuffer({ sampleRate: sr });
+const outputBuf = await createLiveAudioBuffer({ sampleRate: sr });
+
+// Start the native pipeline thread
+const pipeline = await engine.enhance(inputBuf.bufferId, outputBuf.bufferId);
+
+// Mic or other source feeds inputBuf via startRecording() or appendSamples().
+// Enhanced audio appears automatically in outputBuf with source "enhancement".
+
+// When done:
+await pipeline.stop();
+await releasePipelineAudioBuffer(inputBuf.bufferId);
+await releasePipelineAudioBuffer(outputBuf.bufferId);
+await engine.destroy();
+```
+
+The pipeline also supports **`flush()`** (drains internal denoiser state without stopping), **`reset()`** (clears denoiser state without stopping), and **`getStatus()`** for monitoring.
+
+When the input buffer is **finalized** (e.g. mic stops), the pipeline automatically flushes remaining samples and exits.
+
+---
+
 ## Data model and lifetime
 
 | Item | Behaviour |
@@ -125,6 +167,8 @@ See **API reference** below for `feedSamples`, `flush`, `reset`, **`getFrameShif
 | **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, save via **`saveOfflineAudioBufferToWav()`**. |
 | **`EnhancedAudio`** | `{ samples: Float32Array; sampleRate: number }` returned by streaming **`feedSamples`** / **`flush`**. Only used in the streaming API. |
 | **Streaming engine** | **`createStreamingEnhancement`**. **`reset`** clears internal state; **`destroy`** releases native **`OnlineSpeechDenoiser`**. |
+| **Live engine** | **`createLiveEnhancement`**. Extends streaming engine with **`enhance(in, out)`** that starts a native pipeline thread. The pipeline auto-stops when the input buffer finalizes. |
+| **Pipeline handle** | Returned by **`enhance()`**. **`stop()`** / **`flush()`** / **`reset()`** / **`getStatus()`**. Registered in a generic **`StreamingPipelineRegistry`**. |
 
 ---
 
@@ -337,6 +381,95 @@ await streaming.destroy();
 
 ---
 
+### `createLiveEnhancement(options)`
+
+```ts
+function createLiveEnhancement(
+  options: StreamingEnhancementInitializeOptions
+): Promise<LiveEnhancementEngine>;
+```
+
+Returns a **`LiveEnhancementEngine`** that extends `OnlineEnhancementEngine` with a native live pipeline capability. You can still call `feedSamples`/`flush`/`reset` manually, **or** use `enhance()` to let the native side handle the audio flow.
+
+---
+
+### Live engine (`LiveEnhancementEngine`)
+
+#### `engine.enhance(inputBufferId, outputBufferId)`
+
+```ts
+enhance(inputBufferId: string, outputBufferId: string): Promise<StreamingPipelineHandle>;
+```
+
+Starts a native background thread that:
+1. Creates a cursor on the input `LiveAudioBuffer`.
+2. Drains `frameShiftInSamples` samples per iteration.
+3. Runs them through the denoiser.
+4. Appends enhanced output to the output `LiveAudioBuffer` with source `"enhancement"`.
+5. When the input buffer finalizes → auto-flushes and stops.
+
+**Requirements:**
+- Both buffers must be **`LiveAudioBuffer`** (kind `livePcmBuffer`).
+- The input buffer must be in **`recording`** state.
+- The input buffer's `sampleRate` must match the model's sample rate.
+
+```ts
+const pipeline = await engine.enhance(inputBuf.bufferId, outputBuf.bufferId);
+```
+
+---
+
+### Pipeline handle (`StreamingPipelineHandle`)
+
+#### `pipeline.stop()`
+
+```ts
+stop(): Promise<void>;
+```
+
+Stops the pipeline thread and removes it from the registry.
+
+---
+
+#### `pipeline.flush()`
+
+```ts
+flush(): Promise<void>;
+```
+
+Flushes the denoiser's internal state (appends tail samples to output). The pipeline **continues running** after flush.
+
+---
+
+#### `pipeline.reset()`
+
+```ts
+reset(): Promise<void>;
+```
+
+Resets the denoiser's internal state. The pipeline **continues running** after reset.
+
+---
+
+#### `pipeline.getStatus()`
+
+```ts
+getStatus(): Promise<StreamingPipelineStatus>;
+```
+
+```ts
+interface StreamingPipelineStatus {
+  pipelineId: string;
+  isRunning: boolean;
+  chunksProcessed: number;
+  samplesRead: number;
+  samplesWritten: number;
+  error: string | null;
+}
+```
+
+---
+
 ## Types and constants
 
 ```ts
@@ -348,7 +481,10 @@ import {
   type EnhancementDetectResult,
   type EnhancedAudio,
   type OnlineEnhancementEngine,
+  type LiveEnhancementEngine,
   type StreamingEnhancementInitializeOptions,
+  type StreamingPipelineHandle,
+  type StreamingPipelineStatus,
 } from 'react-native-sherpa-onnx/enhancement';
 ```
 
@@ -373,6 +509,9 @@ Typical **promise rejection `code`** strings from the native layer (offline vs o
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty (same contract as TTS `synthesize`) |
 | `ONLINE_ENHANCEMENT_INIT_ERROR` | Streaming init: missing ids, detection/init failure |
 | `ONLINE_ENHANCEMENT_ERROR` | Streaming: instance not found, feed/flush/reset failure |
+| `PIPELINE_NOT_FOUND` | Pipeline id not registered (already stopped or never started) |
+| `PIPELINE_FLUSH_ERROR` | Flush command failed on a running pipeline |
+| `PIPELINE_RESET_ERROR` | Reset command failed on a running pipeline |
 
 ---
 
