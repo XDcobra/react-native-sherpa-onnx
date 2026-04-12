@@ -1,22 +1,18 @@
 package com.sherpaonnx
 
-import android.media.MediaExtractor
-import android.net.Uri
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
-import com.k2fsa.sherpa.onnx.WaveReader
-import java.io.File
-import java.io.FileOutputStream
+import com.sherpaonnx.audio.pipeline.OfflineEntry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.ArrayList
 import java.util.HashMap
 import java.util.concurrent.Executors
-import kotlin.math.roundToInt
 
 internal data class AlignmentTtsSinkSnapshot(
   val samples: FloatArray,
@@ -30,10 +26,19 @@ internal data class SttAlignmentSegment(
   val endSec: Double,
 )
 
-internal class SherpaOnnxAlignmentHelper(
-  private val context: ReactApplicationContext,
-  private val getTtsSinkSnapshot: (instanceId: String, generation: Long) -> AlignmentTtsSinkSnapshot,
-) {
+internal class SherpaOnnxAlignmentHelper {
+  companion object {
+    private const val TAG = "SherpaOnnxAlignment"
+
+    private const val ERR_ALIGNMENT = "ALIGNMENT_ERROR"
+    private const val ERR_TEXT_NOT_FOUND = "ALIGNMENT_TEXT_BUFFER_NOT_FOUND"
+    private const val ERR_TEXT_KIND_MISMATCH = "ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH"
+    private const val ERR_TEXT_EMPTY = "ALIGNMENT_TEXT_BUFFER_EMPTY"
+    private const val ERR_AUDIO_NOT_FOUND = "ALIGNMENT_AUDIO_BUFFER_NOT_FOUND"
+    private const val ERR_AUDIO_KIND_MISMATCH = "ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH"
+    private const val ERR_AUDIO_EMPTY = "ALIGNMENT_AUDIO_BUFFER_EMPTY"
+  }
+
   private val executor = Executors.newSingleThreadExecutor()
 
   fun shutdown() {
@@ -69,73 +74,9 @@ internal class SherpaOnnxAlignmentHelper(
     granularity: String,
   ): HashMap<String, Any>
 
-  fun alignTextToAudioFromPath(
-    text: String,
-    audioPath: String,
-    mode: String,
-    granularity: String,
-    options: ReadableMap?,
-    promise: Promise,
-  ) {
-    executor.execute {
-      var cleanupPath: String? = null
-      try {
-        if (text.isBlank()) {
-          promise.reject("ALIGNMENT_ERROR", "text is required")
-          return@execute
-        }
-        if (audioPath.isBlank()) {
-          promise.reject("ALIGNMENT_ERROR", "audioPath is required")
-          return@execute
-        }
-
-        val resolved = resolveAudioPath(audioPath)
-        cleanupPath = resolved.second
-        val normalizedMode = normalizeMode(mode)
-        val normalizedGranularity = normalizeGranularity(granularity)
-
-        val raw = when (normalizedMode) {
-          "proportional" -> {
-            val (sampleRate, totalSamples) = readAudioDuration(resolved.first)
-            nativeAlignProportional(text, totalSamples, sampleRate, normalizedGranularity)
-          }
-          "estimated" -> {
-            val fallbackRate = readAudioDuration(resolved.first).first
-            val sampleRate = parseEstimatedSampleRate(options, fallbackRate)
-            val counts = parseSegmentSampleCounts(options)
-            nativeAlignEstimated(text, counts, sampleRate, normalizedGranularity)
-          }
-          "accurate" -> {
-            val modelPath = parseAlignmentModelPath(options)
-            nativeAlignAccurateFromFile(
-              modelPath,
-              text,
-              resolved.first,
-              normalizedGranularity,
-            )
-          }
-          else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")
-        }
-
-        promise.resolve(alignmentResultToWritable(raw))
-      } catch (e: Exception) {
-        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
-        promise.reject("ALIGNMENT_ERROR", e.message ?: "Alignment failed", e)
-      } finally {
-        if (cleanupPath != null) {
-          try {
-            File(cleanupPath).delete()
-          } catch (_: Exception) {
-          }
-        }
-      }
-    }
-  }
-
-  fun alignTextToAudioFromPcm(
-    text: String,
-    samples: ReadableArray,
-    sampleRate: Double,
+  fun alignOfflineTextToAudio(
+    textInBufferId: String,
+    audioInBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
@@ -143,108 +84,94 @@ internal class SherpaOnnxAlignmentHelper(
   ) {
     executor.execute {
       try {
-        if (text.isBlank()) {
-          promise.reject("ALIGNMENT_ERROR", "text is required")
+        val textId = textInBufferId.trim()
+        if (textId.isEmpty()) {
+          promise.reject(ERR_TEXT_NOT_FOUND, "textInBufferId is required")
           return@execute
         }
-
-        val sr = sampleRate.toInt()
-        if (sr <= 0) {
-          promise.reject("ALIGNMENT_ERROR", "sampleRate must be positive")
-          return@execute
-        }
-
-        val normalizedMode = normalizeMode(mode)
-        val normalizedGranularity = normalizeGranularity(granularity)
-        val rawSamples = readableArrayToFloatArray(samples)
-
-        if (rawSamples.isEmpty()) {
-          promise.reject("ALIGNMENT_ERROR", "samples array is empty")
-          return@execute
-        }
-
-        val raw = when (normalizedMode) {
-          "proportional" -> nativeAlignProportional(
-            text,
-            rawSamples.size,
-            sr,
-            normalizedGranularity,
-          )
-          "estimated" -> {
-            val estimatedRate = parseEstimatedSampleRate(options, sr)
-            val counts = parseSegmentSampleCounts(options)
-            nativeAlignEstimated(text, counts, estimatedRate, normalizedGranularity)
-          }
-          "accurate" -> {
-            val modelPath = parseAlignmentModelPath(options)
-            nativeAlignAccurateFromFloatPcm(
-              modelPath,
-              text,
-              rawSamples,
-              sr,
-              normalizedGranularity,
-            )
-          }
-          else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")
-        }
-
-        promise.resolve(alignmentResultToWritable(raw))
-      } catch (e: Exception) {
-        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
-        promise.reject("ALIGNMENT_ERROR", e.message ?: "Alignment failed", e)
-      }
-    }
-  }
-
-  fun alignTextToTtsSink(
-    generatedAudio: ReadableMap,
-    text: String,
-    mode: String,
-    granularity: String,
-    options: ReadableMap?,
-    promise: Promise,
-  ) {
-    executor.execute {
-      try {
-        if (text.isBlank()) {
-          promise.reject("ALIGNMENT_ERROR", "text is required")
-          return@execute
-        }
-
-        val instanceId = generatedAudio.getString("_instanceId")?.trim()
-          ?: generatedAudio.getString("instanceId")?.trim()
-          ?: ""
-        if (instanceId.isBlank()) {
+        if (!textId.startsWith("txt_off_")) {
           promise.reject(
-            "ALIGNMENT_ERROR",
-            "generatedAudio._instanceId is required",
+            ERR_TEXT_KIND_MISMATCH,
+            "Expected offline text buffer (txt_off_*), got: $textInBufferId",
           )
           return@execute
         }
 
-        if (!generatedAudio.hasKey("generation")) {
-          promise.reject("ALIGNMENT_ERROR", "generatedAudio.generation is required")
-          return@execute
-        }
-        val generation = generatedAudio.getDouble("generation").toLong()
-        if (generation <= 0L) {
-          promise.reject("ALIGNMENT_ERROR", "generatedAudio.generation must be > 0")
+        val textEntry = TextPipelineRegistry.getOffline(textId)
+        if (textEntry == null) {
+          if (TextPipelineRegistry.getLive(textId) != null) {
+            promise.reject(
+              ERR_TEXT_KIND_MISMATCH,
+              "Expected offline text buffer (txt_off_*), got live buffer: $textInBufferId",
+            )
+          } else {
+            promise.reject(
+              ERR_TEXT_NOT_FOUND,
+              "Offline text buffer not found: $textInBufferId",
+            )
+          }
           return@execute
         }
 
-        val snapshot = getTtsSinkSnapshot(instanceId, generation)
+        val text = textEntry.text
+        if (!textEntry.populated || text.isBlank()) {
+          promise.reject(
+            ERR_TEXT_EMPTY,
+            "Offline text buffer is empty or not populated: $textInBufferId",
+          )
+          return@execute
+        }
+
+        val audioId = audioInBufferId.trim()
+        if (audioId.isEmpty()) {
+          promise.reject(ERR_AUDIO_NOT_FOUND, "audioInBufferId is required")
+          return@execute
+        }
+        if (!audioId.startsWith("off_")) {
+          promise.reject(
+            ERR_AUDIO_KIND_MISMATCH,
+            "Expected offline audio buffer (off_*), got: $audioInBufferId",
+          )
+          return@execute
+        }
+
+        val audioEntry = PipelineAudioRegistry.getOffline(audioId)
+        if (audioEntry == null) {
+          if (PipelineAudioRegistry.getLive(audioId) != null) {
+            promise.reject(
+              ERR_AUDIO_KIND_MISMATCH,
+              "Expected offline audio buffer (off_*), got live buffer: $audioInBufferId",
+            )
+          } else {
+            promise.reject(
+              ERR_AUDIO_NOT_FOUND,
+              "Offline audio buffer not found: $audioInBufferId",
+            )
+          }
+          return@execute
+        }
+
+        if (audioEntry.sampleRate <= 0 || audioEntry.numSamples <= 0) {
+          promise.reject(
+            ERR_AUDIO_EMPTY,
+            "Offline audio buffer is empty: $audioInBufferId",
+          )
+          return@execute
+        }
+
         val normalizedMode = normalizeMode(mode)
         val normalizedGranularity = normalizeGranularity(granularity)
 
         val raw = when (normalizedMode) {
           "proportional" -> nativeAlignProportional(
             text,
-            snapshot.numSamples,
-            snapshot.sampleRate,
+            audioEntry.numSamples,
+            audioEntry.sampleRate,
             normalizedGranularity,
           )
+
           "estimated" -> {
-            val estimatedRate = parseEstimatedSampleRate(options, snapshot.sampleRate)
+            val estimatedRate = parseEstimatedSampleRate(options, audioEntry.sampleRate)
             val counts = parseSegmentSampleCounts(options)
             nativeAlignEstimated(
               text,
@@ -253,23 +180,43 @@ internal class SherpaOnnxAlignmentHelper(
               normalizedGranularity,
             )
           }
+
           "accurate" -> {
             val modelPath = parseAlignmentModelPath(options)
-            nativeAlignAccurateFromFloatPcm(
-              modelPath,
-              text,
-              snapshot.samples,
-              snapshot.sampleRate,
-              normalizedGranularity,
-            )
+            when (audioEntry) {
+              is OfflineEntry.FileBacked -> nativeAlignAccurateFromFile(
+                modelPath,
+                text,
+                audioEntry.filePath,
+                normalizedGranularity,
+              )
+
+              is OfflineEntry.InMemory -> {
+                if (audioEntry.samples.isEmpty()) {
+                  promise.reject(
+                    ERR_AUDIO_EMPTY,
+                    "Offline audio buffer is empty: $audioInBufferId",
+                  )
+                  return@execute
+                }
+                nativeAlignAccurateFromFloatPcm(
+                  modelPath,
+                  text,
+                  audioEntry.samples,
+                  audioEntry.sampleRate,
+                  normalizedGranularity,
+                )
+              }
+            }
           }
+
           else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")
         }
 
         promise.resolve(alignmentResultToWritable(raw))
       } catch (e: Exception) {
-        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
-        promise.reject("ALIGNMENT_ERROR", e.message ?: "Alignment failed", e)
+        Log.e(TAG, "ALIGNMENT_ERROR: ${e.message}", e)
+        rejectWithEmbeddedCode(promise, ERR_ALIGNMENT, e.message ?: "Alignment failed", e)
       }
     }
   }
@@ -309,6 +256,7 @@ internal class SherpaOnnxAlignmentHelper(
             sampleRate,
             normalizedGranularity,
           )
+
           "accurate" -> {
             val modelPath = alignmentModelPath?.trim().orEmpty()
             if (modelPath.isEmpty()) {
@@ -322,6 +270,7 @@ internal class SherpaOnnxAlignmentHelper(
               normalizedGranularity,
             )
           }
+
           else -> throw IllegalArgumentException("Unsupported alignment mode for STT stage: $normalizedMode")
         }
 
@@ -341,42 +290,8 @@ internal class SherpaOnnxAlignmentHelper(
 
         onSuccess(segments, timingMode)
       } catch (e: Exception) {
-        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
+        Log.e(TAG, "ALIGNMENT_ERROR: ${e.message}", e)
         onError(e.message ?: "Alignment failed", e)
-      }
-    }
-  }
-
-  fun getAudioDuration(
-    audioPath: String,
-    promise: Promise,
-  ) {
-    executor.execute {
-      var cleanupPath: String? = null
-      try {
-        if (audioPath.isBlank()) {
-          promise.reject("ALIGNMENT_ERROR", "audioPath is required")
-          return@execute
-        }
-
-        val resolvedAudio = resolveAudioPath(audioPath)
-        cleanupPath = resolvedAudio.second
-        val metrics = readAudioDuration(resolvedAudio.first)
-
-        val map = Arguments.createMap()
-        map.putInt("sampleRate", metrics.first)
-        map.putInt("totalSamples", metrics.second)
-        promise.resolve(map)
-      } catch (e: Exception) {
-        Log.e("SherpaOnnxAlignment", "ALIGNMENT_ERROR: ${e.message}", e)
-        promise.reject("ALIGNMENT_ERROR", e.message ?: "Could not read audio duration", e)
-      } finally {
-        if (cleanupPath != null) {
-          try {
-            File(cleanupPath).delete()
-          } catch (_: Exception) {
-          }
-        }
       }
     }
   }
@@ -473,15 +388,6 @@ internal class SherpaOnnxAlignmentHelper(
     return out
   }
 
-  private fun readableArrayToFloatArray(samples: ReadableArray): FloatArray {
-    val n = samples.size()
-    val out = FloatArray(n)
-    for (i in 0 until n) {
-      out[i] = samples.getDouble(i).toFloat()
-    }
-    return out
-  }
-
   @Suppress("UNCHECKED_CAST")
   private fun alignmentResultToWritable(raw: HashMap<String, Any>): WritableMap {
     val subtitles = raw["subtitles"] as? ArrayList<HashMap<String, Any>>
@@ -513,69 +419,19 @@ internal class SherpaOnnxAlignmentHelper(
     return array
   }
 
-  private fun resolveAudioPath(audioPath: String): Pair<String, String?> {
-    if (!audioPath.startsWith("content://")) {
-      return Pair(audioPath, null)
+  private fun rejectWithEmbeddedCode(
+    promise: Promise,
+    fallbackCode: String,
+    rawMessage: String,
+    error: Throwable? = null,
+  ) {
+    val message = rawMessage.trim()
+    val embeddedCode = message.substringBefore(':').trim()
+    val code = if (embeddedCode.startsWith("ALIGNMENT_")) {
+      embeddedCode
+    } else {
+      fallbackCode
     }
-
-    val uri = Uri.parse(audioPath)
-    val tempFile = File.createTempFile("alignment_input_", ".wav", context.cacheDir)
-    context.contentResolver.openInputStream(uri)?.use { input ->
-      FileOutputStream(tempFile).use { output ->
-        input.copyTo(output)
-      }
-    } ?: throw IllegalStateException("Could not open content URI: $audioPath")
-
-    return Pair(tempFile.absolutePath, tempFile.absolutePath)
-  }
-
-  private fun readAudioDuration(path: String): Pair<Int, Int> {
-    val wavMetrics = WavAudioMetricsReader.readMetrics(path)
-    if (wavMetrics != null && wavMetrics.sampleRate > 0 && wavMetrics.totalSamples >= 0) {
-      return Pair(wavMetrics.sampleRate, wavMetrics.totalSamples)
-    }
-
-    val extractor = MediaExtractor()
-    try {
-      extractor.setDataSource(path)
-      for (i in 0 until extractor.trackCount) {
-        val format = extractor.getTrackFormat(i)
-        val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: ""
-        if (!mime.startsWith("audio/")) {
-          continue
-        }
-
-        val sampleRate = if (format.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE)) {
-          format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
-        } else {
-          0
-        }
-        val durationUs = if (format.containsKey(android.media.MediaFormat.KEY_DURATION)) {
-          format.getLong(android.media.MediaFormat.KEY_DURATION)
-        } else {
-          0L
-        }
-
-        if (sampleRate > 0 && durationUs > 0L) {
-          val totalSamples = (durationUs.toDouble() / 1_000_000.0 * sampleRate.toDouble()).roundToInt()
-          return Pair(sampleRate, totalSamples.coerceAtLeast(0))
-        }
-      }
-    } catch (_: Exception) {
-      // fall through to decode fallback
-    } finally {
-      try {
-        extractor.release()
-      } catch (_: Exception) {
-      }
-    }
-
-    val wave = WaveReader.readWave(path)
-    val sr = wave.sampleRate
-    val total = wave.samples?.size ?: 0
-    if (sr <= 0 || total <= 0) {
-      throw IllegalStateException("Could not read audio duration from: $path")
-    }
-    return Pair(sr, total)
+    promise.reject(code, message, error)
   }
 }

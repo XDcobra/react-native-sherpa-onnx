@@ -1,14 +1,12 @@
 #import "SherpaOnnx.h"
-#import <AVFoundation/AVFoundation.h>
+#import "SherpaOnnx+PipelineAudioGlobals.h"
+#import "SherpaOnnx+TextBufferGlobals.h"
 
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa_onnx_alignment_engine.hpp"
-#include "tts/engine/TtsEngineStore.h"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstring>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -16,11 +14,13 @@
 
 namespace {
 
-struct TtsSinkSnapshot {
-  std::vector<float> samples;
-  int32_t sampleRate = 0;
-  int32_t numSamples = 0;
-};
+static NSString *const kAlignmentErrCode = @"ALIGNMENT_ERROR";
+static NSString *const kAlignmentErrTextBufferNotFound = @"ALIGNMENT_TEXT_BUFFER_NOT_FOUND";
+static NSString *const kAlignmentErrTextBufferKindMismatch = @"ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH";
+static NSString *const kAlignmentErrTextBufferEmpty = @"ALIGNMENT_TEXT_BUFFER_EMPTY";
+static NSString *const kAlignmentErrAudioBufferNotFound = @"ALIGNMENT_AUDIO_BUFFER_NOT_FOUND";
+static NSString *const kAlignmentErrAudioBufferKindMismatch = @"ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH";
+static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_EMPTY";
 
 static NSString *alignmentKindToNSString(sherpaonnx::AlignmentModelKind kind) {
   using K = sherpaonnx::AlignmentModelKind;
@@ -56,7 +56,6 @@ static NSDictionary *alignmentDetectResultToDict(
     dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Alignment model detection failed";
   }
 
-  // Detection sources
   if (!result.detectionSources.empty()) {
     NSMutableArray *sources = [NSMutableArray arrayWithCapacity:result.detectionSources.size()];
     for (auto s : result.detectionSources) {
@@ -65,7 +64,6 @@ static NSDictionary *alignmentDetectResultToDict(
     dict[@"detectionSources"] = sources;
   }
 
-  // Derived languages
   if (!result.derivedLanguages.empty()) {
     NSMutableArray *langs = [NSMutableArray arrayWithCapacity:result.derivedLanguages.size()];
     for (const auto &lang : result.derivedLanguages) {
@@ -74,7 +72,6 @@ static NSDictionary *alignmentDetectResultToDict(
     dict[@"languages"] = langs;
   }
 
-  // Quantization
   if (!result.quantization.empty()) {
     dict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()] ?: @"";
   }
@@ -101,141 +98,6 @@ static NSDictionary *AlignmentResultToNSDictionary(
     @"subtitles": SubtitleItemsToNSArray(r.subtitles),
     @"timingMode": [NSString stringWithUTF8String:r.timing_mode.c_str()] ?: @"",
   };
-}
-
-static uint32_t ReadLE32File(FILE *f) {
-  uint8_t b[4];
-  if (fread(b, 1, 4, f) != 4) {
-    return 0;
-  }
-  return static_cast<uint32_t>(b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24));
-}
-
-static uint16_t ReadLE16File(FILE *f) {
-  uint8_t b[2];
-  if (fread(b, 1, 2, f) != 2) {
-    return 0;
-  }
-  return static_cast<uint16_t>(b[0] | (b[1] << 8));
-}
-
-/** 16-bit mono PCM WAV only; returns false if unsupported. */
-static bool ReadPcmWavFileMetrics(const std::string &path, int32_t *outRate, int32_t *outTotalSamples) {
-  FILE *fp = fopen(path.c_str(), "rb");
-  if (!fp) {
-    return false;
-  }
-  char riff[4];
-  if (fread(riff, 1, 4, fp) != 4 || memcmp(riff, "RIFF", 4) != 0) {
-    fclose(fp);
-    return false;
-  }
-  (void)ReadLE32File(fp);
-  char wave[4];
-  if (fread(wave, 1, 4, fp) != 4 || memcmp(wave, "WAVE", 4) != 0) {
-    fclose(fp);
-    return false;
-  }
-
-  int32_t sampleRate = 0;
-  int32_t blockAlign = 1;
-  int64_t dataSize = -1;
-
-  while (!feof(fp)) {
-    char id[4];
-    if (fread(id, 1, 4, fp) != 4) {
-      break;
-    }
-    uint32_t cs = ReadLE32File(fp);
-    long chunkDataStart = ftell(fp);
-
-    if (memcmp(id, "fmt ", 4) == 0) {
-      if (cs < 16) {
-        fseek(fp, chunkDataStart + static_cast<long>(cs) + static_cast<long>(cs & 1), SEEK_SET);
-        continue;
-      }
-      uint16_t audioFormat = ReadLE16File(fp);
-      uint16_t numChannels = ReadLE16File(fp);
-      uint32_t sr = ReadLE32File(fp);
-      (void)ReadLE32File(fp);
-      uint16_t ba = ReadLE16File(fp);
-      uint16_t bps = ReadLE16File(fp);
-      if (audioFormat != 1 || numChannels != 1 || bps != 16) {
-        fclose(fp);
-        return false;
-      }
-      sampleRate = static_cast<int32_t>(sr);
-      blockAlign = static_cast<int32_t>(ba);
-      if (blockAlign <= 0) {
-        fclose(fp);
-        return false;
-      }
-      fseek(fp, chunkDataStart + static_cast<long>(cs) + static_cast<long>(cs & 1), SEEK_SET);
-    } else if (memcmp(id, "data", 4) == 0) {
-      dataSize = static_cast<int64_t>(cs);
-      break;
-    } else {
-      fseek(fp, chunkDataStart + static_cast<long>(cs) + static_cast<long>(cs & 1), SEEK_SET);
-    }
-  }
-  fclose(fp);
-  if (sampleRate <= 0 || dataSize < 0 || blockAlign <= 0) {
-    return false;
-  }
-  *outRate = sampleRate;
-  *outTotalSamples = static_cast<int32_t>(dataSize / blockAlign);
-  return true;
-}
-
-static std::string NormalizeAudioPathToLocalFile(NSString *audioPath) {
-  if (audioPath == nil) {
-    return "";
-  }
-  NSString *trimmed = [audioPath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (trimmed == nil || trimmed.length == 0) {
-    return "";
-  }
-  if ([trimmed hasPrefix:@"file://"]) {
-    NSURL *url = [NSURL URLWithString:trimmed];
-    NSString *p = url.path;
-    if (p != nil && p.length > 0) {
-      return std::string([p UTF8String]);
-    }
-  }
-  return std::string([trimmed UTF8String]);
-}
-
-static bool ReadAudioDurationAny(
-    const std::string &path,
-    int32_t *outRate,
-    int32_t *outTotalSamples) {
-  if (ReadPcmWavFileMetrics(path, outRate, outTotalSamples)) {
-    return true;
-  }
-
-  @autoreleasepool {
-    NSString *nsPath = [NSString stringWithUTF8String:path.c_str()];
-    if (nsPath == nil || nsPath.length == 0) {
-      return false;
-    }
-    NSURL *url = [NSURL fileURLWithPath:nsPath];
-    NSError *err = nil;
-    AVAudioFile *audioFile = [[AVAudioFile alloc] initForReading:url error:&err];
-    if (audioFile == nil || err != nil) {
-      return false;
-    }
-    double sr = audioFile.fileFormat.sampleRate;
-    if (sr <= 0) {
-      sr = audioFile.processingFormat.sampleRate;
-    }
-    AVAudioFramePosition frameLength = audioFile.length;
-    if (sr <= 0 || frameLength <= 0) {
-      return false;
-    }
-    *outRate = static_cast<int32_t>(llround(sr));
-    *outTotalSamples = static_cast<int32_t>(std::max<int64_t>(0, static_cast<int64_t>(frameLength)));
-    return *outRate > 0 && *outTotalSamples >= 0;
-  }
 }
 
 static std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
@@ -334,42 +196,6 @@ static std::string NormalizeGranularity(NSString *granularity) {
   throw std::runtime_error("Unsupported alignment granularity");
 }
 
-static std::string TtsStaleGenerationUserMessage(uint64_t requested, uint64_t current) {
-  return std::string("Generation ") + std::to_string(requested) +
-         " is no longer available; the native sink now holds generation " + std::to_string(current) +
-         ". Each TTS engine keeps only the latest synthesis in that sink - call getSamples() or "
-         "saveAudioFromGeneration() before the next generateSpeech on the same engine, or use a "
-         "second createTTS() instance. See docs/tts-offline.md (Data lifetime).";
-}
-
-static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generation) {
-  if (instanceId == nil || instanceId.length == 0) {
-    throw std::runtime_error("generatedAudio._instanceId is required");
-  }
-
-  std::string instanceIdStr([instanceId UTF8String]);
-  std::lock_guard<std::mutex> lock(g_tts_mutex);
-  auto it = g_tts_instances.find(instanceIdStr);
-  if (it == g_tts_instances.end()) {
-    throw std::runtime_error("TTS instance not found");
-  }
-
-  auto &sink = it->second->sink;
-  uint64_t requestedGen = static_cast<uint64_t>(generation);
-  if (sink.generation == 0 || sink.samples.empty()) {
-    throw std::runtime_error("No batch synthesis result available for this TTS instance");
-  }
-  if (requestedGen != sink.generation) {
-    throw std::runtime_error(TtsStaleGenerationUserMessage(requestedGen, sink.generation));
-  }
-
-  TtsSinkSnapshot out;
-  out.samples = sink.samples;
-  out.sampleRate = sink.sampleRate;
-  out.numSamples = sink.numSamples;
-  return out;
-}
-
 }  // namespace
 
 @implementation SherpaOnnx (Alignment)
@@ -394,199 +220,135 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
   }
 }
 
-- (void)alignTextToAudioFromPath:(NSString *)text
-                    audioPath:(NSString *)audioPath
-                             mode:(NSString *)mode
-                      granularity:(NSString *)granularity
-                          options:(NSDictionary *)options
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
-{
-  if (text == nil || [text length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
-    return;
-  }
-  if (audioPath == nil || [audioPath length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"audioPath is required", nil);
-    return;
-  }
-
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    try {
-      std::string textStr([text UTF8String]);
-      std::string audioPathStr = NormalizeAudioPathToLocalFile(audioPath);
-      std::string modeStr = NormalizeMode(mode);
-      std::string granularityStr = NormalizeGranularity(granularity);
-
-      sherpa_onnx::alignment::AlignmentResult result;
-
-      if (modeStr == "proportional") {
-        int32_t sr = 0;
-        int32_t total = 0;
-        if (!ReadAudioDurationAny(audioPathStr, &sr, &total)) {
-          throw std::runtime_error("Could not read audio duration");
-        }
-        result = sherpa_onnx::alignment::AlignProportional(textStr, total, sr, granularityStr);
-      } else if (modeStr == "estimated") {
-        int32_t sr = 0;
-        int32_t total = 0;
-        if (!ReadAudioDurationAny(audioPathStr, &sr, &total)) {
-          throw std::runtime_error("Could not read audio duration");
-        }
-        (void)total;
-        sr = ParseEstimatedSampleRate(options, sr);
-        auto counts = ParseSegmentSampleCounts(options);
-        result = sherpa_onnx::alignment::AlignEstimated(textStr, counts, sr, granularityStr);
-      } else if (modeStr == "accurate") {
-        std::string modelPathStr = ParseAlignmentModelPath(options);
-        result = sherpa_onnx::alignment::AlignAccurateFromFile(
-            modelPathStr,
-            textStr,
-            audioPathStr,
-            granularityStr);
-      } else {
-        throw std::runtime_error("Unsupported alignment mode");
-      }
-
-      resolve(AlignmentResultToNSDictionary(result));
-    } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-      reject(@"ALIGNMENT_ERROR", errorMsg, nil);
-    } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
-    }
-  });
-}
-
-- (void)alignTextToAudioFromPcm:(NSString *)text
-                         samples:(NSArray *)samples
-                      sampleRate:(double)sampleRate
+- (void)alignOfflineTextToAudio:(NSString *)textInBufferId
+                 audioInBufferId:(NSString *)audioInBufferId
                             mode:(NSString *)mode
                      granularity:(NSString *)granularity
                          options:(NSDictionary *)options
                          resolve:(RCTPromiseResolveBlock)resolve
                           reject:(RCTPromiseRejectBlock)reject
 {
-  if (text == nil || [text length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
+  if (textInBufferId == nil || [textInBufferId length] == 0) {
+    reject(kAlignmentErrTextBufferNotFound, @"textInBufferId is required", nil);
     return;
   }
-  if (samples == nil || [samples count] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"samples is required", nil);
-    return;
-  }
-  if (sampleRate <= 0.0) {
-    reject(@"ALIGNMENT_ERROR", @"sampleRate must be positive", nil);
+  if (audioInBufferId == nil || [audioInBufferId length] == 0) {
+    reject(kAlignmentErrAudioBufferNotFound, @"audioInBufferId is required", nil);
     return;
   }
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
-      std::string textStr([text UTF8String]);
-      std::string modeStr = NormalizeMode(mode);
-      std::string granularityStr = NormalizeGranularity(granularity);
+      std::string textId = [textInBufferId UTF8String];
+      std::string audioId = [audioInBufferId UTF8String];
 
-      std::vector<float> raw;
-      raw.reserve([samples count]);
-      for (id x in samples) {
-        raw.push_back(static_cast<float>([x doubleValue]));
-      }
-
-      int32_t sr = static_cast<int32_t>(sampleRate);
-      sherpa_onnx::alignment::AlignmentResult result;
-
-      if (modeStr == "proportional") {
-        result = sherpa_onnx::alignment::AlignProportional(
-            textStr,
-            static_cast<int32_t>(raw.size()),
-            sr,
-            granularityStr);
-      } else if (modeStr == "estimated") {
-        sr = ParseEstimatedSampleRate(options, sr);
-        auto counts = ParseSegmentSampleCounts(options);
-        result = sherpa_onnx::alignment::AlignEstimated(textStr, counts, sr, granularityStr);
-      } else if (modeStr == "accurate") {
-        std::string modelPathStr = ParseAlignmentModelPath(options);
-        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
-            modelPathStr,
-            textStr,
-            raw.data(),
-            raw.size(),
-            sr,
-            granularityStr);
-        } else {
-        throw std::runtime_error("Unsupported alignment mode");
-      }
-
-      resolve(AlignmentResultToNSDictionary(result));
-    } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-      reject(@"ALIGNMENT_ERROR", errorMsg, nil);
-    } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
-    }
-  });
-}
-
-- (void)alignTextToTtsSink:(NSDictionary *)generatedAudio
-                      text:(NSString *)text
-                      mode:(NSString *)mode
-               granularity:(NSString *)granularity
-                   options:(NSDictionary *)options
-                   resolve:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject
-{
-  if (text == nil || [text length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"text is required", nil);
-        return;
-      }
-  if (generatedAudio == nil || ![generatedAudio isKindOfClass:[NSDictionary class]]) {
-    reject(@"ALIGNMENT_ERROR", @"generatedAudio is required", nil);
+      if (textId.find("txt_off_") != 0) {
+        reject(kAlignmentErrTextBufferKindMismatch,
+               [NSString stringWithFormat:@"Expected offline text buffer (txt_off_*), got: %@", textInBufferId],
+               nil);
         return;
       }
 
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    try {
-      NSString *instanceId = [generatedAudio[@"_instanceId"] isKindOfClass:[NSString class]]
-          ? generatedAudio[@"_instanceId"]
-          : ([generatedAudio[@"instanceId"] isKindOfClass:[NSString class]] ? generatedAudio[@"instanceId"] : nil);
-      NSNumber *generationNum = [generatedAudio[@"generation"] isKindOfClass:[NSNumber class]]
-          ? generatedAudio[@"generation"]
-          : nil;
-      if (instanceId == nil || generationNum == nil) {
-        throw std::runtime_error("generatedAudio._instanceId and generatedAudio.generation are required");
+      std::shared_ptr<TxtOfflineEntry> textEntry;
+      {
+        std::lock_guard<std::mutex> txtLock(g_txt_mutex);
+        auto it = g_txt_offline.find(textId);
+        if (it == g_txt_offline.end()) {
+          if (g_txt_live.find(textId) != g_txt_live.end()) {
+            reject(kAlignmentErrTextBufferKindMismatch,
+                   [NSString stringWithFormat:@"Expected offline text buffer (txt_off_*), got live buffer: %@", textInBufferId],
+                   nil);
+          } else {
+            reject(kAlignmentErrTextBufferNotFound,
+                   [NSString stringWithFormat:@"Offline text buffer not found: %@", textInBufferId],
+                   nil);
+          }
+          return;
+        }
+        textEntry = it->second;
       }
 
-      std::string textStr([text UTF8String]);
+      if (!textEntry->populated || textEntry->text.empty()) {
+        reject(kAlignmentErrTextBufferEmpty,
+               [NSString stringWithFormat:@"Offline text buffer is empty or not populated: %@", textInBufferId],
+               nil);
+        return;
+      }
+
+      if (audioId.find("off_") != 0) {
+        reject(kAlignmentErrAudioBufferKindMismatch,
+               [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioInBufferId],
+               nil);
+        return;
+      }
+
+      std::shared_ptr<PaOfflineEntry> audioEntry;
+      {
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+        auto it = g_pa_offline.find(audioId);
+        if (it == g_pa_offline.end()) {
+          if (g_pa_live.find(audioId) != g_pa_live.end()) {
+            reject(kAlignmentErrAudioBufferKindMismatch,
+                   [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got live buffer: %@", audioInBufferId],
+                   nil);
+          } else {
+            reject(kAlignmentErrAudioBufferNotFound,
+                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInBufferId],
+                   nil);
+          }
+          return;
+        }
+        audioEntry = it->second;
+      }
+
+      if (audioEntry->sampleRate <= 0 || audioEntry->numSamples() <= 0) {
+        reject(kAlignmentErrAudioBufferEmpty,
+               [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
+               nil);
+        return;
+      }
+
       std::string modeStr = NormalizeMode(mode);
       std::string granularityStr = NormalizeGranularity(granularity);
-      TtsSinkSnapshot sink = ReadTtsSinkSnapshot(instanceId, [generationNum doubleValue]);
 
       sherpa_onnx::alignment::AlignmentResult result;
       if (modeStr == "proportional") {
         result = sherpa_onnx::alignment::AlignProportional(
-            textStr,
-            sink.numSamples,
-            sink.sampleRate,
+            textEntry->text,
+            audioEntry->numSamples(),
+            audioEntry->sampleRate,
             granularityStr);
       } else if (modeStr == "estimated") {
-        const int32_t estimatedRate =
-            ParseEstimatedSampleRate(options, sink.sampleRate);
+        int32_t sr = ParseEstimatedSampleRate(options, audioEntry->sampleRate);
         auto counts = ParseSegmentSampleCounts(options);
         result = sherpa_onnx::alignment::AlignEstimated(
-            textStr,
+            textEntry->text,
             counts,
-            estimatedRate,
+            sr,
             granularityStr);
       } else if (modeStr == "accurate") {
         std::string modelPathStr = ParseAlignmentModelPath(options);
-        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
-            modelPathStr,
-            textStr,
-            sink.samples.data(),
-            sink.samples.size(),
-            sink.sampleRate,
-            granularityStr);
+        if (audioEntry->isFileBacked) {
+          result = sherpa_onnx::alignment::AlignAccurateFromFile(
+              modelPathStr,
+              textEntry->text,
+              audioEntry->filePath,
+              granularityStr);
+        } else {
+          if (audioEntry->samples.empty()) {
+            reject(kAlignmentErrAudioBufferEmpty,
+                   [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
+                   nil);
+            return;
+          }
+          result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+              modelPathStr,
+              textEntry->text,
+              audioEntry->samples.data(),
+              audioEntry->samples.size(),
+              audioEntry->sampleRate,
+              granularityStr);
+        }
       } else {
         throw std::runtime_error("Unsupported alignment mode");
       }
@@ -594,39 +356,9 @@ static TtsSinkSnapshot ReadTtsSinkSnapshot(NSString *instanceId, double generati
       resolve(AlignmentResultToNSDictionary(result));
     } catch (const std::exception &e) {
       NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-      reject(@"ALIGNMENT_ERROR", errorMsg, nil);
+      reject(kAlignmentErrCode, errorMsg, nil);
     } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"Alignment failed", nil);
-    }
-  });
-}
-
-- (void)getAudioDuration:(NSString *)audioPath
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject
-{
-  if (audioPath == nil || [audioPath length] == 0) {
-    reject(@"ALIGNMENT_ERROR", @"audioPath is required", nil);
-    return;
-  }
-
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    try {
-      std::string pathStr = NormalizeAudioPathToLocalFile(audioPath);
-      int32_t rate = 0;
-      int32_t total = 0;
-      if (!ReadAudioDurationAny(pathStr, &rate, &total)) {
-        throw std::runtime_error("Could not read audio duration");
-      }
-      resolve(@{
-        @"sampleRate": @(rate),
-        @"totalSamples": @(total),
-      });
-    } catch (const std::exception &e) {
-      NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Audio duration failed";
-      reject(@"ALIGNMENT_ERROR", errorMsg, nil);
-    } catch (...) {
-      reject(@"ALIGNMENT_ERROR", @"Audio duration failed", nil);
+      reject(kAlignmentErrCode, @"Alignment failed", nil);
     }
   });
 }

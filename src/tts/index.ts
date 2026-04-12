@@ -134,7 +134,10 @@ export async function detectTtsModel(
  *   modelType: 'vits',
  *   modelOptions: { vits: { noiseScale: 0.667 } },
  * });
- * const audio = await tts.generateSpeech('Hello world');
+ * const sr = await tts.getSampleRate();
+ * const textBuf = await createOfflineTextBufferFromText('Hello world');
+ * const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+ * await tts.synthesize(textBuf, audioBuf);
  * await tts.destroy();
  * ```
  */
@@ -236,14 +239,29 @@ export async function createTTS(
       opts?: TtsSynthesisOptions
     ): Promise<void> {
       guard();
-      const textInId =
+      const textInIdRaw =
         typeof textIn === 'string'
           ? textIn
           : (textIn as OfflineTextBufferRef).bufferId;
-      const audioOutId =
+      const audioOutIdRaw =
         typeof audioOut === 'string'
           ? audioOut
           : (audioOut as OfflineAudioBufferRef).bufferId;
+
+      const textInId = textInIdRaw.trim();
+      if (textInId.length === 0) {
+        throw new Error(
+          '[TTS] synthesize requires a non-empty offline text buffer id (textIn).'
+        );
+      }
+
+      const audioOutId = audioOutIdRaw.trim();
+      if (audioOutId.length === 0) {
+        throw new Error(
+          '[TTS] synthesize requires a non-empty offline audio buffer id (audioOut).'
+        );
+      }
+
       await SherpaOnnx.synthesizeTts(
         instanceId,
         textInId,

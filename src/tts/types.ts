@@ -592,7 +592,7 @@ export type TtsGenerationOptions = TtsGenerationBase &
 
 /**
  * Generated audio handle from legacy sink-based TTS.
- * Kept for alignment module compatibility (alignTextToTtsSink).
+ * Kept for streaming/sink compatibility paths.
  */
 export interface GeneratedAudio {
   sampleRate: number;

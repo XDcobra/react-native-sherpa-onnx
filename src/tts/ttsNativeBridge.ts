@@ -201,20 +201,27 @@ export function toNativeSynthesisOptions(
     const vc = options.voiceClone;
     // Resolve buffer ID from ref or handle
     const refAudio = vc.referenceAudio;
-    const refBufferId =
+    const refBufferIdRaw =
       typeof refAudio === 'string'
         ? refAudio
         : (refAudio as OfflineAudioBufferRef).bufferId;
+    const refBufferId = refBufferIdRaw.trim();
+    if (refBufferId.length === 0) {
+      throw new Error(
+        '[TTS] voiceClone.referenceAudio must resolve to a non-empty offline audio buffer id.'
+      );
+    }
     out.referenceAudioBufferId = refBufferId;
     if (vc.kind === 'zipvoice') {
-      if (!vc.referenceText || vc.referenceText.trim().length === 0) {
+      const referenceText = vc.referenceText?.trim() ?? '';
+      if (referenceText.length === 0) {
         throw new Error(
           '[TTS] Zipvoice voice cloning requires a non-empty referenceText in voiceClone options.'
         );
       }
-      out.referenceText = vc.referenceText;
+      out.referenceText = referenceText;
     } else if (vc.referenceText !== undefined) {
-      out.referenceText = vc.referenceText;
+      out.referenceText = vc.referenceText.trim();
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;

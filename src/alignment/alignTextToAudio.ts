@@ -1,10 +1,16 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
-  AlignAudioInput,
+  OfflineAudioBufferIdSource,
+  OfflineAudioBufferRef,
+} from '../audiobuffer/types';
+import type {
+  OfflineTextBufferIdSource,
+  OfflineTextBufferRef,
+} from '../textbuffer/types';
+import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
   AlignTextToAudioResult,
-  AlignTextToTtsSinkFn,
   AlignmentGranularity,
   AlignmentTimingMode,
   SubtitleTimingItem,
@@ -12,11 +18,6 @@ import type {
 
 type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate';
 type NativeGranularity = 'sentence' | 'word' | 'character';
-type NativeTtsSinkHandle = {
-  generation: number;
-  _instanceId?: string;
-  instanceId?: string;
-};
 
 function normalizeAlignmentItems(
   items: Array<{ text: string; start: number; end: number }> | null | undefined
@@ -94,6 +95,9 @@ function toNativeMode(
 function buildNativeOptions(
   options: AlignTextToAudioOptions
 ): Record<string, unknown> {
+  const language =
+    typeof options.language === 'string' ? options.language.trim() : '';
+
   if (options.mode === 'accurate') {
     const alignmentModelPath = options.alignmentModelPath?.trim();
     if (!alignmentModelPath) {
@@ -101,7 +105,10 @@ function buildNativeOptions(
         'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.'
       );
     }
-    return { alignmentModelPath };
+    return {
+      alignmentModelPath,
+      ...(language.length > 0 ? { language } : {}),
+    };
   }
 
   if (options.mode === 'estimated') {
@@ -121,10 +128,11 @@ function buildNativeOptions(
         sampleRate: options.chunks.sampleRate,
         segmentSampleCounts,
       },
+      ...(language.length > 0 ? { language } : {}),
     };
   }
 
-  return {};
+  return language.length > 0 ? { language } : {};
 }
 
 function normalizeAlignmentResult(
@@ -140,26 +148,28 @@ function normalizeAlignmentResult(
   };
 }
 
-function toSamplesArray(audio: AlignAudioInput): number[] {
-  if (typeof audio === 'string') {
-    return [];
+function resolveOfflineTextBufferId(source: OfflineTextBufferIdSource): string {
+  if (typeof source === 'object' && source !== null && 'info' in source) {
+    return (source as OfflineTextBufferRef).bufferId;
   }
+  return source as string;
+}
 
-  const { samples } = audio;
-  if (samples instanceof Float32Array) {
-    return Array.from(samples);
+function resolveOfflineAudioBufferId(
+  source: OfflineAudioBufferIdSource
+): string {
+  if (typeof source === 'object' && source !== null && 'info' in source) {
+    return (source as OfflineAudioBufferRef).bufferId;
   }
-
-  // Runtime fallback for callers still passing number[].
-  return Array.from(samples as unknown as ArrayLike<number>);
+  return source as string;
 }
 
 /**
- * Build subtitle timelines from transcript + audio by delegating all modes to native.
+ * Build subtitle timelines from offline text/audio buffers by delegating all modes to native.
  */
 export const alignTextToAudio: AlignTextToAudioFn = async (
-  text,
-  audio,
+  textIn,
+  audioIn,
   options
 ) => {
   const mode = toNativeMode(options.mode);
@@ -169,67 +179,25 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
     granularity
   );
 
-  const nativeOptions = buildNativeOptions(options);
-
-  if (typeof audio === 'string') {
-    const raw = await SherpaOnnx.alignTextToAudioFromPath(
-      text,
-      audio,
-      mode,
-      granularity,
-      nativeOptions
-    );
-    return normalizeAlignmentResult(mode, raw);
-  }
-
-  const raw = await SherpaOnnx.alignTextToAudioFromPcm(
-    text,
-    toSamplesArray(audio),
-    audio.sampleRate,
-    mode,
-    granularity,
-    nativeOptions
-  );
-
-  return normalizeAlignmentResult(mode, raw);
-};
-
-/**
- * Align directly from native TTS sink data (no PCM round-trip through JS).
- */
-export const alignTextToTtsSink: AlignTextToTtsSinkFn = async (
-  text,
-  generatedAudio,
-  options
-) => {
-  const mode = toNativeMode(options.mode);
-  const granularity = normalizeGranularity(options.granularity);
-  assertAlignmentGranularityForMode(
-    mode === 'accurate' ? 'aligned' : mode,
-    granularity
-  );
-
-  const nativeOptions = buildNativeOptions(options);
-  const source = generatedAudio as unknown as NativeTtsSinkHandle;
-  const privateId =
-    typeof source._instanceId === 'string' ? source._instanceId.trim() : '';
-  const publicId =
-    typeof source.instanceId === 'string' ? source.instanceId.trim() : '';
-  const instanceId = privateId.length > 0 ? privateId : publicId || null;
-  if (instanceId == null) {
+  const textInBufferId = resolveOfflineTextBufferId(textIn).trim();
+  if (textInBufferId.length === 0) {
     throw new Error(
-      'ALIGNMENT_TTS_HANDLE_MISSING: alignTextToTtsSink expects GeneratedAudio returned by createTTS.generateSpeech().'
+      'ALIGNMENT_TEXT_BUFFER_NOT_FOUND: textInBufferId is required.'
     );
   }
 
-  const handle: NativeTtsSinkHandle = {
-    generation: generatedAudio.generation,
-    _instanceId: instanceId,
-  };
+  const audioInBufferId = resolveOfflineAudioBufferId(audioIn).trim();
+  if (audioInBufferId.length === 0) {
+    throw new Error(
+      'ALIGNMENT_AUDIO_BUFFER_NOT_FOUND: audioInBufferId is required.'
+    );
+  }
 
-  const raw = await SherpaOnnx.alignTextToTtsSink(
-    handle,
-    text,
+  const nativeOptions = buildNativeOptions(options);
+
+  const raw = await SherpaOnnx.alignOfflineTextToAudio(
+    textInBufferId,
+    audioInBufferId,
     mode,
     granularity,
     nativeOptions

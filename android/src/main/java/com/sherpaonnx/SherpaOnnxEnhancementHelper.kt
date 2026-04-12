@@ -300,7 +300,7 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise
   ) {
     try {
-      val result = nativeDetectEnhancementModel(modelDir, modelType ?: "auto")
+      val result = nativeDetectEnhancementModel(modelDir, null, modelType ?: "auto")
       if (result == null || result["success"] as? Boolean != true) {
         val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
         promise.reject("ONLINE_ENHANCEMENT_INIT_ERROR", reason)

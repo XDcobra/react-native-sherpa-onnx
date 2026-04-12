@@ -708,48 +708,16 @@ export interface Spec extends TurboModule {
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
-   * Read audio duration/sample metrics for common formats (WAV fast path + decoder/metadata fallback).
+   * Standalone offline alignment from pipeline buffers (all modes).
+   *
+   * - `textInBufferId`: offline text buffer (`txt_off_*`)
+   * - `audioInBufferId`: offline audio buffer (`off_*`)
+   *
+   * Both buffers are read-only for alignment.
    */
-  getAudioDuration(audioPath: string): Promise<{
-    sampleRate: number;
-    totalSamples: number;
-  }>;
-
-  /**
-   * Standalone alignment from audio path (all modes).
-   */
-  alignTextToAudioFromPath(
-    text: string,
-    audioPath: string,
-    mode: 'proportional' | 'estimated' | 'accurate',
-    granularity: 'sentence' | 'word' | 'character',
-    options?: Object
-  ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-  }>;
-
-  /**
-   * Standalone alignment from in-memory PCM (all modes).
-   */
-  alignTextToAudioFromPcm(
-    text: string,
-    samples: number[],
-    sampleRate: number,
-    mode: 'proportional' | 'estimated' | 'accurate',
-    granularity: 'sentence' | 'word' | 'character',
-    options?: Object
-  ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-  }>;
-
-  /**
-   * Sink-based alignment from generated TTS audio (zero PCM round-trip for accurate mode).
-   */
-  alignTextToTtsSink(
-    generatedAudio: Object,
-    text: string,
+  alignOfflineTextToAudio(
+    textInBufferId: string,
+    audioInBufferId: string,
     mode: 'proportional' | 'estimated' | 'accurate',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object

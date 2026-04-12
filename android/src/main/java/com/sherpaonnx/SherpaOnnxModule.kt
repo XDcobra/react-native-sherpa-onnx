@@ -74,10 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val filesHelper = SherpaOnnxFilesHelper(reactApplicationContext)
-  private val alignmentHelper = SherpaOnnxAlignmentHelper(
-    reactApplicationContext,
-    { instanceId, generation -> ttsHelper.getBatchSinkSnapshot(instanceId, generation) }
-  )
+  private val alignmentHelper = SherpaOnnxAlignmentHelper()
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
@@ -108,8 +105,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun onCatalystInstanceDestroy() {
     super.onCatalystInstanceDestroy()
-    pcmCapture?.stop()
-    pcmCapture = null
+    micToLiveSink?.stop()
+    micToLiveSink = null
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
@@ -938,13 +935,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
   }
-      promise.resolve(entry.toWritableMap())
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
-    }
-  }
 
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
@@ -1438,62 +1428,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
   }
 
-  override fun getAudioDuration(
-    audioPath: String,
-    promise: Promise,
-  ) {
-    alignmentHelper.getAudioDuration(audioPath, promise)
-  }
-
-  override fun alignTextToAudioFromPath(
-    text: String,
-    audioPath: String,
+  override fun alignOfflineTextToAudio(
+    textInBufferId: String,
+    audioInBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
     promise: Promise,
   ) {
-    alignmentHelper.alignTextToAudioFromPath(
-      text,
-      audioPath,
-      mode,
-      granularity,
-      options,
-      promise
-    )
-  }
-
-  override fun alignTextToAudioFromPcm(
-    text: String,
-    samples: ReadableArray,
-    sampleRate: Double,
-    mode: String,
-    granularity: String,
-    options: ReadableMap?,
-    promise: Promise,
-  ) {
-    alignmentHelper.alignTextToAudioFromPcm(
-      text,
-      samples,
-      sampleRate,
-      mode,
-      granularity,
-      options,
-      promise
-    )
-  }
-
-  override fun alignTextToTtsSink(
-    generatedAudio: ReadableMap,
-    text: String,
-    mode: String,
-    granularity: String,
-    options: ReadableMap?,
-    promise: Promise,
-  ) {
-    alignmentHelper.alignTextToTtsSink(
-      generatedAudio,
-      text,
+    alignmentHelper.alignOfflineTextToAudio(
+      textInBufferId,
+      audioInBufferId,
       mode,
       granularity,
       options,
