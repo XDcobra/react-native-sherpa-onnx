@@ -1,6 +1,5 @@
 package com.sherpaonnx
 
-import android.net.Uri
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -15,8 +14,8 @@ import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserGtcrnModelConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserModelConfig
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiserConfig
-import com.k2fsa.sherpa.onnx.WaveReader
-import java.io.File
+import com.sherpaonnx.audio.pipeline.OfflineEntry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxEnhancementHelper(
@@ -74,16 +73,6 @@ internal class SherpaOnnxEnhancementHelper(
       out[i] = samples.getDouble(i).toFloat()
     }
     return out
-  }
-
-  private fun copyContentUriToTemp(path: String, prefix: String): Pair<String, File?> {
-    if (!path.startsWith("content://")) return Pair(path, null)
-    val uri = Uri.parse(path)
-    val tmp = File(context.cacheDir, "${prefix}_${System.nanoTime()}.wav")
-    context.contentResolver.openInputStream(uri)?.use { input ->
-      tmp.outputStream().use { output -> input.copyTo(output) }
-    } ?: throw IllegalStateException("File is not readable: $path")
-    return Pair(tmp.absolutePath, tmp)
   }
 
   fun detectEnhancementModel(
@@ -225,30 +214,10 @@ internal class SherpaOnnxEnhancementHelper(
     }
   }
 
-  fun enhanceSamples(
+  fun enhanceOfflineAudioBuffers(
     instanceId: String,
-    samples: ReadableArray,
-    sampleRate: Double,
-    promise: Promise
-  ) {
-    val inst = instances[instanceId]
-    val denoiser = inst?.denoiser
-    if (denoiser == null) {
-      promise.reject("ENHANCEMENT_ERROR", "Enhancement instance not found: $instanceId")
-      return
-    }
-    try {
-      val audio = denoiser.run(readableArrayToFloatArray(samples), sampleRate.toInt())
-      promise.resolve(toEnhancedAudioMap(audio))
-    } catch (e: Exception) {
-      promise.reject("ENHANCEMENT_ERROR", "Failed to enhance samples: ${e.message}", e)
-    }
-  }
-
-  fun enhanceFile(
-    instanceId: String,
-    inputPath: String,
-    outputPath: String?,
+    audioInBufferId: String,
+    audioOutBufferId: String,
     promise: Promise
   ) {
     val inst = instances[instanceId]
@@ -258,20 +227,58 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
-    var tmpInput: File? = null
+    // Validate input buffer
+    if (!audioInBufferId.startsWith("off_")) {
+      promise.reject("ENHANCEMENT_BUFFER_KIND_MISMATCH",
+        "Expected offline audio buffer (off_*) for audioIn, got: $audioInBufferId")
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioInBufferId)
+    if (audioInEntry == null) {
+      promise.reject("ENHANCEMENT_BUFFER_NOT_FOUND",
+        "Offline audio buffer not found: $audioInBufferId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject("ENHANCEMENT_BUFFER_EMPTY",
+        "Input offline audio buffer is empty: $audioInBufferId")
+      return
+    }
+
+    // Validate output buffer
+    if (!audioOutBufferId.startsWith("off_")) {
+      promise.reject("ENHANCEMENT_BUFFER_KIND_MISMATCH",
+        "Expected offline audio buffer (off_*) for audioOut, got: $audioOutBufferId")
+      return
+    }
+    val audioOutEntry = PipelineAudioRegistry.getOffline(audioOutBufferId)
+    if (audioOutEntry == null) {
+      promise.reject("ENHANCEMENT_BUFFER_NOT_FOUND",
+        "Offline audio buffer not found: $audioOutBufferId")
+      return
+    }
+    if (audioOutEntry !is OfflineEntry.InMemory) {
+      promise.reject("ENHANCEMENT_OUTPUT_NOT_EMPTY",
+        "Output buffer must be an in-memory offline buffer: $audioOutBufferId")
+      return
+    }
+    if (audioOutEntry.numSamples != 0) {
+      promise.reject("ENHANCEMENT_OUTPUT_NOT_EMPTY",
+        "Output offline audio buffer must be empty: $audioOutBufferId")
+      return
+    }
+
     try {
-      val (resolvedInputPath, tmp) = copyContentUriToTemp(inputPath, "enhancement_in")
-      tmpInput = tmp
-      val wave = WaveReader.readWave(resolvedInputPath)
-      val audio = denoiser.run(wave.samples, wave.sampleRate)
-      if (!outputPath.isNullOrBlank()) {
-        audio.save(outputPath)
+      val inputSamples = audioInEntry.readAllSamples()
+      val audio = denoiser.run(inputSamples, audioInEntry.sampleRate)
+      if (!audioOutEntry.tryAdoptSamples(audio.samples)) {
+        promise.reject("ENHANCEMENT_OUTPUT_NOT_EMPTY",
+          "Output buffer was populated concurrently: $audioOutBufferId")
+        return
       }
-      promise.resolve(toEnhancedAudioMap(audio))
+      promise.resolve(null)
     } catch (e: Exception) {
-      promise.reject("ENHANCEMENT_ERROR", "Failed to enhance file: ${e.message}", e)
-    } finally {
-      tmpInput?.delete()
+      promise.reject("ENHANCEMENT_ERROR", "Failed to enhance audio: ${e.message}", e)
     }
   }
 

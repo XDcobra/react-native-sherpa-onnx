@@ -1697,22 +1697,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
-  override fun enhanceFile(
+  override fun enhanceOfflineAudioBuffers(
     instanceId: String,
-    inputPath: String,
-    outputPath: String?,
+    audioInBufferId: String,
+    audioOutBufferId: String,
     promise: Promise
   ) {
-    enhancementHelper.enhanceFile(instanceId, inputPath, outputPath, promise)
-  }
-
-  override fun enhanceSamples(
-    instanceId: String,
-    samples: ReadableArray,
-    sampleRate: Double,
-    promise: Promise
-  ) {
-    enhancementHelper.enhanceSamples(instanceId, samples, sampleRate, promise)
+    enhancementHelper.enhanceOfflineAudioBuffers(instanceId, audioInBufferId, audioOutBufferId, promise)
   }
 
   override fun getEnhancementSampleRate(instanceId: String, promise: Promise) {

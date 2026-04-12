@@ -4,6 +4,7 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
+#include "SherpaOnnx+PipelineAudioGlobals.h"
 
 #include <memory>
 #include <mutex>
@@ -188,85 +189,117 @@ static NSDictionary *enhancementDetectResultToDict(const sherpaonnx::Enhancement
     }
 }
 
-- (void)enhanceSamples:(NSString *)instanceId
-               samples:(NSArray *)samples
-            sampleRate:(double)sampleRate
-               resolve:(RCTPromiseResolveBlock)resolve
-                reject:(RCTPromiseRejectBlock)reject
+- (void)enhanceOfflineAudioBuffers:(NSString *)instanceId
+                  audioInBufferId:(NSString *)audioInBufferId
+                 audioOutBufferId:(NSString *)audioOutBufferId
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"ENHANCEMENT_ERROR", @"instanceId is required", nil);
         return;
     }
-
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::vector<float> floatSamples;
-    floatSamples.reserve([samples count]);
-    for (NSNumber *n in samples) {
-        floatSamples.push_back([n floatValue]);
+    if (audioInBufferId == nil || [audioInBufferId length] == 0) {
+        reject(@"ENHANCEMENT_BUFFER_NOT_FOUND", @"audioInBufferId is required", nil);
+        return;
+    }
+    if (audioOutBufferId == nil || [audioOutBufferId length] == 0) {
+        reject(@"ENHANCEMENT_BUFFER_NOT_FOUND", @"audioOutBufferId is required", nil);
+        return;
     }
 
-    @try {
-        std::lock_guard<std::mutex> lock(g_enhancement_mutex);
-        auto it = g_enhancement_instances.find(instanceIdStr);
-        if (it == g_enhancement_instances.end() || it->second->wrapper == nullptr) {
-            reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
-            return;
-        }
-        auto out = it->second->wrapper->runSamples(floatSamples, static_cast<int32_t>(sampleRate));
-        resolve(enhancedAudioToDict(out));
-    } @catch (NSException *exception) {
-        reject(@"ENHANCEMENT_ERROR",
-               [NSString stringWithFormat:@"Enhance samples failed: %@", exception.reason],
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::string audioInId = [audioInBufferId UTF8String];
+    std::string audioOutId = [audioOutBufferId UTF8String];
+
+    // Validate input buffer is offline
+    if (audioInId.find("off_") != 0) {
+        reject(@"ENHANCEMENT_BUFFER_KIND_MISMATCH",
+               [NSString stringWithFormat:@"Expected offline audio buffer (off_*) for audioIn, got: %@", audioInBufferId],
                nil);
-    }
-}
-
-- (void)enhanceFile:(NSString *)instanceId
-          inputPath:(NSString *)inputPath
-         outputPath:(NSString *)outputPath
-            resolve:(RCTPromiseResolveBlock)resolve
-             reject:(RCTPromiseRejectBlock)reject
-{
-    if (instanceId == nil || [instanceId length] == 0) {
-        reject(@"ENHANCEMENT_ERROR", @"instanceId is required", nil);
-        return;
-    }
-    if (inputPath == nil || [inputPath length] == 0) {
-        reject(@"ENHANCEMENT_ERROR", @"inputPath is required", nil);
         return;
     }
 
-    std::string instanceIdStr = [instanceId UTF8String];
-    std::string inputPathStr = [inputPath UTF8String];
+    // Validate output buffer is offline
+    if (audioOutId.find("off_") != 0) {
+        reject(@"ENHANCEMENT_BUFFER_KIND_MISMATCH",
+               [NSString stringWithFormat:@"Expected offline audio buffer (off_*) for audioOut, got: %@", audioOutBufferId],
+               nil);
+        return;
+    }
+
+    // Resolve input buffer from registry
+    std::shared_ptr<PaOfflineEntry> audioInEntry;
+    std::shared_ptr<PaOfflineEntry> audioOutEntry;
+    {
+        std::lock_guard<std::mutex> paLock(g_pa_mutex);
+        auto inIt = g_pa_offline.find(audioInId);
+        if (inIt == g_pa_offline.end()) {
+            reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInBufferId],
+                   nil);
+            return;
+        }
+        audioInEntry = inIt->second;
+
+        auto outIt = g_pa_offline.find(audioOutId);
+        if (outIt == g_pa_offline.end()) {
+            reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioOutBufferId],
+                   nil);
+            return;
+        }
+        audioOutEntry = outIt->second;
+    }
+
+    // Validate input is populated
+    if (audioInEntry->sampleRate <= 0 || audioInEntry->numSamples() <= 0) {
+        reject(@"ENHANCEMENT_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
+               nil);
+        return;
+    }
+
+    // Validate output is empty
+    if (audioOutEntry->isFileBacked || !audioOutEntry->samples.empty()) {
+        reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
+               [NSString stringWithFormat:@"Output offline audio buffer must be empty: %@", audioOutBufferId],
+               nil);
+        return;
+    }
 
     @try {
-        sherpa_onnx::cxx::Wave wave = sherpa_onnx::cxx::ReadWave(inputPathStr);
-        if (wave.samples.empty() || wave.sample_rate <= 0) {
-            reject(@"ENHANCEMENT_ERROR", @"Failed to read input wave file", nil);
-            return;
+        // Read input samples
+        std::vector<float> inputSamples = audioInEntry->readAllSamples();
+
+        // Run denoiser
+        sherpaonnx::EnhancedAudioResult enhancedResult;
+        {
+            std::lock_guard<std::mutex> lock(g_enhancement_mutex);
+            auto it = g_enhancement_instances.find(instanceIdStr);
+            if (it == g_enhancement_instances.end() || it->second->wrapper == nullptr) {
+                reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
+                return;
+            }
+            enhancedResult = it->second->wrapper->runSamples(inputSamples, audioInEntry->sampleRate);
         }
 
-        std::lock_guard<std::mutex> lock(g_enhancement_mutex);
-        auto it = g_enhancement_instances.find(instanceIdStr);
-        if (it == g_enhancement_instances.end() || it->second->wrapper == nullptr) {
-            reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
-            return;
-        }
-        auto out = it->second->wrapper->runSamples(wave.samples, wave.sample_rate);
-
-        if (outputPath != nil && [outputPath length] > 0) {
-            sherpa_onnx::cxx::Wave outputWave;
-            outputWave.samples = out.samples;
-            outputWave.sample_rate = out.sampleRate;
-            std::string outputPathStr = [outputPath UTF8String];
-            sherpa_onnx::cxx::WriteWave(outputPathStr, outputWave);
+        // Write result into output buffer
+        {
+            std::lock_guard<std::mutex> paLock(g_pa_mutex);
+            if (!audioOutEntry->samples.empty()) {
+                reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
+                       [NSString stringWithFormat:@"Output buffer was populated concurrently: %@", audioOutBufferId],
+                       nil);
+                return;
+            }
+            audioOutEntry->samples = std::move(enhancedResult.samples);
         }
 
-        resolve(enhancedAudioToDict(out));
+        resolve(nil);
     } @catch (NSException *exception) {
         reject(@"ENHANCEMENT_ERROR",
-               [NSString stringWithFormat:@"Enhance file failed: %@", exception.reason],
+               [NSString stringWithFormat:@"Enhancement failed: %@", exception.reason],
                nil);
     }
 }
