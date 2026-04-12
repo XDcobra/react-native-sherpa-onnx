@@ -205,6 +205,18 @@ if (detection.success && detection.modelType) {
 
 ```typescript
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
@@ -213,8 +225,29 @@ const engine = await createStreamingSTT({
   hotwordsScore: 2.0,
 });
 
-const stream = await engine.createStream();
-// Feed audio chunks...
+const audioIn = await createLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+await startMicToLiveAudioBuffer(audioIn);
+// ... recording session ...
+await stopMicToLiveAudioBuffer();
+
+await pipeline.flush();
+
+const count = await getLiveTextBufferSegmentCount(textOut);
+const segments =
+  count > 0
+    ? await getLiveTextBufferSegments(textOut, 0, count, { includeTokens: true })
+    : [];
+
+console.log(segments.map((s) => s.text).join(' '));
+
+await pipeline.stop();
+await engine.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
 ```
 
 ### Dynamic hotwords (per-session)

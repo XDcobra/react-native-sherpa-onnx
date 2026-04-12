@@ -881,7 +881,7 @@ These lifecycle events are accessible via `getStatus()` polling. If needed in th
 | **P5** | **TurboModule:** Add `startEnhancementPipeline`. Add generic `stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`. Remove `feedEnhancementSamples`, `flushOnlineEnhancement`, `resetOnlineEnhancement`. |
 | **P6** | **TypeScript:** Generic `StreamingPipelineHandle` / `StreamingPipelineStatus` types. Rewrite `LiveEnhancementEngine` interface + `streaming.ts` with `enhance()`. Add `"enhancement"` to `LiveBufferAppendSource`. Update exports. |
 | **P7** | **Example app:** Streaming enhancement screen using buffer pipeline (mic → enhance → save). |
-| **P8** | **Documentation:** Update `docs/speech-enhancement.md` with online buffer pipeline examples. |
+| **P8** | **Documentation:** Online buffer pipeline examples live in `docs/enhancement-online.md` (overview: `docs/speech-enhancement.md`). |
 | **P9** | **Cleanup:** Remove dead native code paths (old `feedSamples` JNI/ObjC selectors, `normalizeEnhancedAudio`, old TurboModule methods). |
 
 ---
@@ -966,5 +966,5 @@ No `feedSamples` in the public API. Buffer-only. Breaking changes are OK (SDK no
 
 - [Offline enhancement buffer pipeline spec](../enhancement/offline-enhancement-buffer-pipeline-spec.md) — reference for offline `enhance()` naming and buffer pattern
 - [Pipeline audio buffers (`audiobuffer`)](../../audiobuffer.md)
-- [Speech enhancement (user doc)](../../speech-enhancement.md)
+- [Speech enhancement — streaming / live](../../enhancement-online.md) · [overview](../../speech-enhancement.md)
 - [STT buffer-only plan](../stt/stt-pipeline-buffer-only-api-plan.md) — will reuse `StreamingPipelineWorker` + `StreamingPipelineRegistry`

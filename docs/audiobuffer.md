@@ -28,7 +28,7 @@ The hook is centralized in the native live append path. This gives one contract 
 
 ---
 
-## Quick start: live mic + streaming STT (callback path)
+## Quick start: live mic + streaming STT (pipeline path)
 
 ```typescript
 import {
@@ -38,6 +38,13 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const SAMPLE_RATE = 16000;
 
@@ -45,31 +52,54 @@ const engine = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/my-streaming-model' },
   modelType: 'transducer',
 });
-const stream = await engine.createStream();
+const textOut = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+});
 
 const live = await createLiveAudioBuffer({
   sampleRate: SAMPLE_RATE,
   channelCount: 1,
   windowSeconds: 120,
   emitAppendedEvents: true,
-  emitAppendedSamples: true,
+  emitAppendedSamples: false,
   appendEventMinIntervalMs: 0,
-  onFramesAppended: async (e) => {
-    if (!e.samples?.length) return;
-    const { result } = await stream.processAudioChunk(e.samples, e.sampleRate ?? SAMPLE_RATE);
-    console.log(result.text);
+  onFramesAppended: (e) => {
+    // Producer-agnostic audio append callback (mic, append, append_offline, ...)
+    console.log(`[${e.source}] +${e.frameCount} frames`);
   },
   onError: (e) => {
     console.error('Live buffer error:', e.message, e.liveBufferId);
   },
 });
 
+const pipeline = await engine.transcribe(live, textOut, {
+  chunkSize: 3200,
+});
+
+const previewTimer = setInterval(async () => {
+  const partial = await getLiveTextBufferPartialSlice(textOut, 0, 4096);
+  const segmentCount = await getLiveTextBufferSegmentCount(textOut);
+  const segments =
+    segmentCount > 0
+      ? await getLiveTextBufferSegments(textOut, 0, segmentCount)
+      : [];
+  const committed = segments.map((s) => s.text).join(' ');
+  const text = [committed, partial].filter(Boolean).join(' ').trim();
+  console.log(text);
+}, 150);
+
 await startMicToLiveAudioBuffer(live);
 // … recording …
 await stopMicToLiveAudioBuffer();
+clearInterval(previewTimer);
+
+await pipeline.flush();
+
 live.unsubscribeEvents();
-await stream.release();
+await pipeline.stop();
 await engine.destroy();
+await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(live);
 ```
 

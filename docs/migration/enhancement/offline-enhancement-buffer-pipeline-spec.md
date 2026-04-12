@@ -47,7 +47,7 @@ No pipeline **`bufferId`** parameters today.
 
 ### 2.4 Documentation
 
-- [`docs/speech-enhancement.md`](../../speech-enhancement.md) — mixed offline file/samples + online streaming; to be aligned with **buffer-first offline** narrative and an **API reference** + **error table** (see acceptance criteria / related docs).
+- [`docs/enhancement-offline.md`](../../enhancement-offline.md) (and overview [`speech-enhancement.md`](../../speech-enhancement.md)); streaming/live: [`enhancement-online.md`](../../enhancement-online.md).
 
 ---
 
@@ -154,7 +154,7 @@ Exact spellings should match constants exported from **`src/enhancement/types.ts
 
 | Phase | Work |
 | --- | --- |
-| **P0** | Spec + docs ([`speech-enhancement.md`](../../speech-enhancement.md)); agree on method names (`enhance` vs `enhanceOffline`). |
+| **P0** | Spec + docs ([`enhancement-offline.md`](../../enhancement-offline.md)); agree on method names (`enhance` vs `enhanceOffline`). |
 | **P1** | TurboModule: add **`enhanceOfflineAudioBuffers`**; Android: registry read/write + tests or manual checklist; iOS: same. |
 | **P2** | TypeScript: **`EnhancementEngine.enhance(in, out)`**; remove **`enhanceFile`** / **`enhanceSamples`** from types and implementation; update **`NativeSherpaOnnx.ts`**; **codegen**. |
 | **P3** | Example app [`EnhancementScreen.tsx`](../../../example/src/screens/enhancement/EnhancementScreen.tsx): buffer-only flow. |
@@ -168,14 +168,14 @@ Exact spellings should match constants exported from **`src/enhancement/types.ts
 
 - No public **`enhanceFile`** / **`enhanceSamples`** on **`EnhancementEngine`**.  
 - Offline denoise entry uses **only** offline pipeline buffer ids on the wire.  
-- **`docs/speech-enhancement.md`**: offline quick start uses **audiobuffer** + **`enhance`**, structure mirrors **`stt-offline.md`** (quick start, data model, API reference, error table, see also).  
+- **`docs/enhancement-offline.md`**: offline quick start uses **audiobuffer** + **`enhance`**, structure mirrors **`stt-offline.md`** (quick start, data model, API reference, error table, see also).  
 - Android and iOS behave identically for success and buffer error codes.
 
 ---
 
 ## 9. Related documents
 
-- [Speech enhancement (user doc)](../../speech-enhancement.md)  
+- [Speech enhancement — offline](../../enhancement-offline.md) · [overview](../../speech-enhancement.md)
 - [Pipeline audio buffers (`audiobuffer`)](../../audiobuffer.md)  
 - [STT buffer-only plan](../stt/stt-pipeline-buffer-only-api-plan.md)  
 - [Offline alignment pipeline](../alignment/offline-alignment-pipeline-spec.md)

@@ -128,7 +128,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Speech Enhancement | ✅ **Supported** | [Speech Enhancement](./docs/speech-enhancement.md) | API and initialization covered in docs. |
+| Speech Enhancement | ✅ **Supported** | [Overview](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md), [Streaming / live](./docs/enhancement-online.md) | Batch offline buffers; chunk streaming and native live pipeline. |
 | VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.1.0 |
 | Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.2.0 |
 | Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.3.0 |
@@ -198,7 +198,7 @@ Speech enhancement improves noisy or degraded speech using ONNX models from the 
 | **GTCRN**    | `'gtcrn'`         | Lightweight speech enhancement (e.g. `gtcrn_simple.onnx`).                  | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 | **DPDFNet**  | `'dpdfnet'`       | Deep speech enhancement variants (e.g. `dpdfnet2.onnx`, `dpdfnet4.onnx`, `dpdfnet8.onnx`, `dpdfnet_baseline.onnx`, `dpdfnet2_48khz_hr.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 
-APIs, batch vs online processing, and initialization are covered in [Speech Enhancement](./docs/speech-enhancement.md).
+APIs and initialization: [Speech enhancement overview](./docs/speech-enhancement.md), [offline batch](./docs/enhancement-offline.md), [streaming / live](./docs/enhancement-online.md).
 
 ## Documentation
 
@@ -213,7 +213,7 @@ APIs, batch vs online processing, and initialization are covered in [Speech Enha
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
-- [Speech Enhancement](./docs/speech-enhancement.md)
+- [Speech enhancement](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md) · [Streaming / live](./docs/enhancement-online.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)

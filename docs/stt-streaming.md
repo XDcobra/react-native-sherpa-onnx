@@ -1,15 +1,20 @@
 # Streaming Speech-to-Text (STT)
 
-Low-latency online recognition with partial results and endpoint detection.
-
-- Create one streaming engine (`createStreamingSTT`)
-- Create one or more streams (`engine.createStream`)
-- Feed chunks (`acceptWaveform` or `processAudioChunk`)
-- Read incremental text (`getResult`) and endpoint state (`isEndpoint`)
+Low-latency online recognition in pipeline mode.
 
 Import path: `react-native-sherpa-onnx/stt`
 
-For full-file/batch transcription and alignment stage APIs, see [Offline STT](stt-offline.md).
+For full-file/batch transcription, see [Offline STT](stt-offline.md).
+
+## Pipeline model
+
+Streaming STT now runs as a native worker pipeline:
+
+- Input: one live audio buffer (`livePcmBuffer`)
+- Output: one live text buffer (`liveTextBuffer`)
+- Runtime: one STT pipeline handle (`SttPipelineHandle`)
+
+There is no per-chunk stream object in the JS API anymore.
 
 ## Models and paths
 
@@ -18,9 +23,7 @@ For full-file/batch transcription and alignment stage APIs, see [Offline STT](st
 - If your model is offline-only (for example Whisper), use [Offline STT](stt-offline.md)
 - Model setup details: [model-setup.md](model-setup.md)
 
-## Quick Start
-
-### 1) Auto-detect model, map to online type, process chunks
+## Quick start
 
 ```ts
 import {
@@ -28,13 +31,29 @@ import {
   detectSttModel,
   getOnlineTypeOrNull,
 } from 'react-native-sherpa-onnx/stt';
+import {
+  createLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
-const modelPath = { type: 'asset' as const, path: 'models/my-stt-model' };
+const modelPath = { type: 'asset' as const, path: 'models/my-streaming-model' };
+
 const det = await detectSttModel(modelPath);
 if (!det.success) throw new Error(det.error ?? 'detectSttModel failed');
 
 const onlineType = getOnlineTypeOrNull(det.modelType);
-if (!onlineType) throw new Error('Detected model is not streaming-capable');
+if (!onlineType) {
+  throw new Error('Detected model is not streaming-capable');
+}
 
 const engine = await createStreamingSTT({
   modelPath,
@@ -42,256 +61,213 @@ const engine = await createStreamingSTT({
   enableEndpoint: true,
 });
 
-const stream = await engine.createStream();
-const { result, isEndpoint } = await stream.processAudioChunk(floatSamples, 16000);
-console.log(result.text, result.isFinal, isEndpoint);
-
-await stream.release();
-await engine.destroy();
-```
-
-### 2) Manual decode loop (`isReady` + `decode` + `getResult`)
-
-```ts
-const engine = await createStreamingSTT({
-  modelPath: { type: 'file', path: '/absolute/path/to/streaming-model' },
-  modelType: 'transducer',
+const audioIn = await createLiveAudioBuffer({
+  sampleRate: 16000,
+  channelCount: 1,
+  windowSeconds: 120,
 });
 
-const stream = await engine.createStream();
-await stream.acceptWaveform(chunk1, 16000);
-await stream.acceptWaveform(chunk2, 16000);
+const textOut = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+});
 
-while (await stream.isReady()) {
-  await stream.decode();
-  const partial = await stream.getResult();
-  console.log(partial.text);
-}
+const pipeline = await engine.transcribe(audioIn, textOut, {
+  chunkSize: 3200,
+});
 
-await stream.inputFinished();
-await stream.release();
+await startMicToLiveAudioBuffer(audioIn.bufferId);
+
+// UI polling example
+const tick = setInterval(async () => {
+  const partial = await getLiveTextBufferPartialSlice(textOut.bufferId, 0, 4096);
+  const count = await getLiveTextBufferSegmentCount(textOut.bufferId);
+  const segments =
+    count > 0
+      ? await getLiveTextBufferSegments(textOut.bufferId, 0, count)
+      : [];
+
+  const committed = segments.map((s) => s.text).join(' ');
+  const text = [committed, partial].filter(Boolean).join(' ').trim();
+  console.log(text);
+}, 150);
+
+// stop recording session
+await stopMicToLiveAudioBuffer();
+clearInterval(tick);
+
+// force final decode + commit pending partial as final segment
+await pipeline.flush();
+
+const finalCount = await getLiveTextBufferSegmentCount(textOut.bufferId);
+const finalSegments =
+  finalCount > 0
+    ? await getLiveTextBufferSegments(textOut.bufferId, 0, finalCount, {
+        includeTokens: true,
+        includeTimestamps: true,
+      })
+    : [];
+
+await pipeline.stop();
 await engine.destroy();
+await releasePipelineTextBuffer(textOut.bufferId);
+await releasePipelineAudioBuffer(audioIn.bufferId);
 ```
 
-### 3) Endpoint tuning
+## Endpoint tuning
 
 ```ts
 const engine = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
   modelType: 'zipformer2_ctc',
   endpointConfig: {
-    rule1: { mustContainNonSilence: false, minTrailingSilence: 1.2, minUtteranceLength: 0 },
-    rule2: { mustContainNonSilence: true, minTrailingSilence: 0.8, minUtteranceLength: 0 },
-    rule3: { mustContainNonSilence: false, minTrailingSilence: 0, minUtteranceLength: 25 },
+    rule1: {
+      mustContainNonSilence: false,
+      minTrailingSilence: 1.2,
+      minUtteranceLength: 0,
+    },
+    rule2: {
+      mustContainNonSilence: true,
+      minTrailingSilence: 0.8,
+      minUtteranceLength: 0,
+    },
+    rule3: {
+      mustContainNonSilence: false,
+      minTrailingSilence: 0,
+      minUtteranceLength: 25,
+    },
   },
 });
 ```
 
-### 4) Multiple streams on one engine
-
-```ts
-const engine = await createStreamingSTT({
-  modelPath: { type: 'file', path: '/absolute/path/to/model' },
-  modelType: 'paraformer',
-});
-
-const a = await engine.createStream();
-const b = await engine.createStream('optional inline hotwords');
-
-await a.acceptWaveform(samplesA, 16000);
-await b.acceptWaveform(samplesB, 16000);
-
-await a.release();
-await b.release();
-await engine.destroy();
-```
-
-## Streaming flow in one table
+## Pipeline flow
 
 | Step | Method | Result |
 | --- | --- | --- |
-| 1 | `createStreamingSTT(...)` | Engine allocated |
-| 2 | `engine.createStream(...)` | New stream session |
-| 3 | `stream.acceptWaveform(...)` | PCM buffered |
-| 4 | `stream.isReady()` -> `stream.decode()` | Decoder advances |
-| 5 | `stream.getResult()` | Partial/final text snapshot |
-| 6 | `stream.isEndpoint()` | Utterance-end signal |
-| 7 | `stream.reset()` or `stream.release()` | Reuse or teardown |
-| 8 | `engine.destroy()` | Full cleanup |
+| 1 | `createStreamingSTT(...)` | STT engine allocated |
+| 2 | `createLiveAudioBuffer(...)` | Live audio input buffer |
+| 3 | `createLiveTextBuffer(...)` | Live text output buffer |
+| 4 | `engine.transcribe(audioIn, textOut, options?)` | Native STT pipeline starts |
+| 5 | `startMicToLiveAudioBuffer(...)` / append samples | Audio enters pipeline |
+| 6 | `getLiveTextBufferPartialSlice(...)` + segment reads | Partial + committed text |
+| 7 | `pipeline.flush()` / `pipeline.reset()` / `pipeline.stop()` | Pipeline control |
+| 8 | `engine.destroy()` + release buffers | Cleanup |
 
 ## Setup (iOS and Android)
 
 | Topic | Requirement |
 | --- | --- |
-| Input source | Feed float PCM `[-1, 1]` plus sample rate |
-| Live microphone | Use [audiobuffer.md](audiobuffer.md) (`startMicToLiveAudioBuffer` + optional `emitToJs` for `processAudioChunk`) |
-| Execution provider | Optional `provider`; see [execution-providers.md](execution-providers.md) |
-| Lifecycle | Always `release()` streams and `destroy()` engine |
+| Input format | Float PCM `[-1, 1]` at buffer sample rate |
+| Live microphone | [audiobuffer.md](audiobuffer.md): `startMicToLiveAudioBuffer` / `stopMicToLiveAudioBuffer` |
+| Text output | [textbuffer.md](textbuffer.md): partial slice + segment log getters |
+| Sample rate | Live audio buffer sample rate must match STT model sample rate |
+| Lifecycle | Stop pipeline, destroy engine, and release both buffers |
 
 ## API reference
 
-All signatures below are exported from `react-native-sherpa-onnx/stt`.
+All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`detectSttModel`** from the same package for model detection before creating a streaming engine (see [Offline STT — Detection and factory](stt-offline.md#detection-and-factory)).
 
-## Factory and helpers
+### Factory
 
-### `createStreamingSTT(options)`
-
-```ts
-function createStreamingSTT(options: StreamingSttInitOptions): Promise<StreamingSttEngine>;
-```
+#### `createStreamingSTT(options)`
 
 ```ts
-const engine = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming' },
-  modelType: 'transducer',
-});
+function createStreamingSTT(options: StreamingSttInitOptions): Promise<LiveSttEngine>;
 ```
 
-### `mapDetectedToOnlineType(detectedType)`
+#### `createLiveSTT(options)`
+
+Alias of `createStreamingSTT`.
+
+```ts
+function createLiveSTT(options: StreamingSttInitOptions): Promise<LiveSttEngine>;
+```
+
+### Online type helpers
+
+Use after **`detectSttModel`** when you need a streaming-capable `modelType` or must reject offline-only models.
+
+#### `mapDetectedToOnlineType(detectedType)`
 
 ```ts
 function mapDetectedToOnlineType(detectedType: string | undefined): OnlineSTTModelType;
 ```
 
-```ts
-const onlineType = mapDetectedToOnlineType('zipformer_ctc'); // -> 'zipformer2_ctc'
-```
-
-### `getOnlineTypeOrNull(detectedType)`
+#### `getOnlineTypeOrNull(detectedType)`
 
 ```ts
 function getOnlineTypeOrNull(detectedType: string | undefined): OnlineSTTModelType | null;
 ```
 
-```ts
-const maybeOnline = getOnlineTypeOrNull(det.modelType);
-if (!maybeOnline) console.log('offline-only model');
-```
+### Engine (`LiveSttEngine`)
 
-## Engine API (`StreamingSttEngine`)
-
-### `engine.createStream(hotwords?)`
+#### `engine.transcribe(audioIn, textOut, options?)`
 
 ```ts
-createStream(hotwords?: string): Promise<SttStream>;
+transcribe(
+  audioIn: LiveAudioBufferIdSource,
+  textOut: LiveTextBufferIdSource,
+  options?: SttPipelineOptions
+): Promise<SttPipelineHandle>;
 ```
 
-```ts
-const stream = await engine.createStream('flight number AB123');
-```
+Starts one native STT pipeline for this engine instance.
 
-### `engine.destroy()`
+#### `engine.destroy()`
 
 ```ts
 destroy(): Promise<void>;
 ```
 
-```ts
-await engine.destroy();
-```
+Stops any active pipeline and unloads the native online recognizer instance.
 
-## Stream API (`SttStream`)
+### Pipeline handle (`SttPipelineHandle`)
 
-### `stream.acceptWaveform(samples, sampleRate)`
+`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent **`LiveSttEngine`**.
 
-```ts
-acceptWaveform(samples: number[], sampleRate: number): Promise<void>;
-```
+#### `pipeline.stop()`
 
 ```ts
-await stream.acceptWaveform(chunk, 16000);
+stop(): Promise<void>;
 ```
 
-### `stream.inputFinished()`
+#### `pipeline.flush()`
 
 ```ts
-inputFinished(): Promise<void>;
+flush(): Promise<void>;
 ```
 
-```ts
-await stream.inputFinished();
-```
+Forces decode of currently buffered audio and commits pending final text.
 
-### `stream.decode()`
-
-```ts
-decode(): Promise<void>;
-```
-
-```ts
-await stream.decode();
-```
-
-### `stream.isReady()`
-
-```ts
-isReady(): Promise<boolean>;
-```
-
-```ts
-if (await stream.isReady()) await stream.decode();
-```
-
-### `stream.getResult()`
-
-```ts
-getResult(): Promise<StreamingSttResult>;
-```
-
-```ts
-const r = await stream.getResult();
-console.log(r.text, r.isFinal);
-```
-
-### `stream.isEndpoint()`
-
-```ts
-isEndpoint(): Promise<boolean>;
-```
-
-```ts
-if (await stream.isEndpoint()) console.log('end of utterance');
-```
-
-### `stream.reset()`
+#### `pipeline.reset()`
 
 ```ts
 reset(): Promise<void>;
 ```
 
-```ts
-await stream.reset();
-```
+Resets recognizer stream state and clears current partial text.
 
-### `stream.release()`
+#### `pipeline.getStatus()`
 
 ```ts
-release(): Promise<void>;
+getStatus(): Promise<StreamingPipelineStatus>;
 ```
 
-```ts
-await stream.release();
-```
+Status fields:
 
-### `stream.processAudioChunk(samples, sampleRate)`
+- `isRunning`
+- `chunksProcessed`
+- `unitsRead` (audio samples)
+- `unitsWritten` (text units)
+- `error`
 
-```ts
-processAudioChunk(
-  samples: number[] | Float32Array,
-  sampleRate: number
-): Promise<{ result: StreamingSttResult; isEndpoint: boolean }>;
-```
-
-```ts
-const { result, isEndpoint } = await stream.processAudioChunk(chunk, 16000);
-```
-
-## Streaming-relevant types and constants
+## Streaming-relevant exports
 
 ```ts
 import {
   ONLINE_STT_MODEL_TYPES,
   createStreamingSTT,
+  createLiveSTT,
   mapDetectedToOnlineType,
   getOnlineTypeOrNull,
 } from 'react-native-sherpa-onnx/stt';
@@ -299,27 +275,30 @@ import {
 import type {
   OnlineSTTModelType,
   StreamingSttInitOptions,
-  StreamingSttEngine,
-  SttStream,
-  StreamingSttResult,
+  LiveSttEngine,
+  SttPipelineHandle,
+  SttPipelineOptions,
   EndpointConfig,
   EndpointRule,
 } from 'react-native-sherpa-onnx/stt';
 ```
 
-## Streaming error quick table
+## Error quick table
 
 | Code | Typical reason |
 | --- | --- |
-| `STT_STREAM_INSTANCE_NOT_FOUND` | Unknown or destroyed streaming engine |
-| `STT_STREAM_NOT_FOUND` | Invalid/released stream id |
-| `STT_STREAM_DECODE_FAILED` | Native streaming operation failed |
-| `STT_INVALID_ARGUMENT` | Invalid stream creation arguments (for example duplicate stream id) |
+| `STT_STREAM_INSTANCE_NOT_FOUND` | Unknown or destroyed STT engine instance |
+| `AUDIO_BUFFER_NOT_FOUND` | Input live audio buffer id is invalid |
+| `TEXT_BUFFER_NOT_FOUND` | Output live text buffer id is invalid |
+| `STT_INVALID_STATE` | Pipeline already running for this engine |
+| `PIPELINE_NOT_FOUND` | Invalid/stopped pipeline handle id |
+| `STT_INVALID_ARGUMENT` | Model/options mismatch or unsupported setup |
 | `STT_INTERNAL_ERROR` | Unexpected native failure |
 
 ## See also
 
 - [Offline STT](stt-offline.md)
 - [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline text buffers (`textbuffer`)](textbuffer.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)

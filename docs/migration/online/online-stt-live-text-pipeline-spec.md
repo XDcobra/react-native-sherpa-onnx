@@ -394,7 +394,7 @@ struct TxtLiveEntry {
 
 ### 5.3 Generic streaming pipeline types (relocated)
 
-`StreamingPipelineStatus` and `StreamingPipelineHandle` are **generic pipeline orchestration types** — not enhancement-specific. They are currently exported from `src/enhancement/streaming.ts` but semantically belong to the audio buffer / pipeline infrastructure. As part of this spec, they are **relocated** to `src/audiobuffer/streamingPipelineTypes.ts` (new file). Enhancement and STT both import from there. This is a **breaking change** for consumers that import these types from `enhancement`.
+`StreamingPipelineStatus` and `StreamingPipelineHandle` are **generic pipeline orchestration types** — not enhancement-specific. They live in `src/audiobuffer/streamingPipelineTypes.ts` and are exported only from **`react-native-sherpa-onnx/audiobuffer`**. Enhancement and STT import from there; **`react-native-sherpa-onnx/enhancement`** does not re-export them (use **`EnhancementPipelineHandle`** from enhancement for live denoise pipelines).
 
 ```ts
 // ── src/audiobuffer/streamingPipelineTypes.ts (NEW — relocated + renamed fields) ──

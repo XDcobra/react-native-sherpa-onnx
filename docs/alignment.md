@@ -185,9 +185,11 @@ try {
 }
 ```
 
-## API Reference
+## API reference
 
-### `alignTextToAudio(textIn, audioIn, options)`
+### Alignment
+
+#### `alignTextToAudio(textIn, audioIn, options)`
 
 ```ts
 function alignTextToAudio(
@@ -204,7 +206,9 @@ const result = await alignTextToAudio(textBuf, audioBuf, {
 });
 ```
 
-### `detectAlignmentModel(modelPath, options?)`
+### Detection
+
+#### `detectAlignmentModel(modelPath, options?)`
 
 ```ts
 function detectAlignmentModel(
@@ -223,7 +227,9 @@ if (det.success) {
 }
 ```
 
-### `assertAlignmentGranularityForMode(mode, granularity)`
+### Validation
+
+#### `assertAlignmentGranularityForMode(mode, granularity)`
 
 ```ts
 function assertAlignmentGranularityForMode(
