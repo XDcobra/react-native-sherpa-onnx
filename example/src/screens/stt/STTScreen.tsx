@@ -35,8 +35,8 @@ import {
 } from 'react-native-sherpa-onnx/stt';
 import type {
   SttEngine,
-  StreamingSttEngine,
-  SttStream,
+  LiveSttEngine,
+  SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
 import {
@@ -55,6 +55,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineTextBuffer,
+  createLiveTextBuffer,
   getPipelineTextBufferInfo,
   getOfflineTextBufferTextSlice,
   getOfflineTextBufferTokensSlice,
@@ -63,6 +64,9 @@ import {
   getOfflineTextBufferLang,
   getOfflineTextBufferEmotion,
   getOfflineTextBufferEvent,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
@@ -121,19 +125,111 @@ export default function STTScreen() {
 
   const sttEngineRef = useRef<SttEngine | null>(null);
   const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
-  const streamingEngineRef = useRef<StreamingSttEngine | null>(null);
-  const liveStreamRef = useRef<SttStream | null>(null);
-  const liveProcessPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  const streamingEngineRef = useRef<LiveSttEngine | null>(null);
   const livePipelineRef = useRef<{
-    liveBufferId: string;
-    unsubChunk: { remove: () => void };
-    unsubErr: { remove: () => void };
+    liveAudioBufferId: string;
+    liveTextBufferId: string;
+    pipelineHandle: SttPipelineHandle;
+    micErrorSubscription: { remove: () => void };
+    audioUnsubscribe: () => void;
+    textUnsubscribe: () => void;
   } | null>(null);
+  const livePreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  const livePreviewInFlightRef = useRef(false);
+  const liveAccumulatorRef = useRef<{
+    segmentCount: number;
+    segmentTexts: string[];
+  }>({ segmentCount: 0, segmentTexts: [] });
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
 
   const isLiveSupported =
     getOnlineTypeOrNull(selectedModelType ?? undefined) !== null;
+
+  const buildTranscriptionResult = (
+    text: string,
+    tokens: string[] = [],
+    timestamps: number[] = []
+  ) => ({
+    text,
+    tokens,
+    timestamps,
+    lang: '',
+    emotion: '',
+    event: '',
+    durations: [],
+  });
+
+  const composeLiveText = (segmentTexts: string[], partialText: string) => {
+    const parts = segmentTexts
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    const trimmedPartial = partialText.trim();
+    if (trimmedPartial.length > 0) {
+      parts.push(trimmedPartial);
+    }
+    return parts.join(' ').trim();
+  };
+
+  const stopLivePreviewPolling = () => {
+    if (livePreviewTimerRef.current != null) {
+      clearInterval(livePreviewTimerRef.current);
+      livePreviewTimerRef.current = null;
+    }
+    livePreviewInFlightRef.current = false;
+  };
+
+  const syncLivePreview = async (liveTextBufferId: string) => {
+    if (livePreviewInFlightRef.current) return;
+    livePreviewInFlightRef.current = true;
+    try {
+      const accumulator = liveAccumulatorRef.current;
+      const segmentCount = await getLiveTextBufferSegmentCount(
+        liveTextBufferId
+      );
+
+      if (segmentCount < accumulator.segmentCount) {
+        const fullSegments =
+          segmentCount > 0
+            ? await getLiveTextBufferSegments(liveTextBufferId, 0, segmentCount)
+            : [];
+        accumulator.segmentCount = segmentCount;
+        accumulator.segmentTexts = fullSegments
+          .map((segment) => segment.text)
+          .filter((segment) => segment.trim().length > 0);
+      } else if (segmentCount > accumulator.segmentCount) {
+        const newSegments = await getLiveTextBufferSegments(
+          liveTextBufferId,
+          accumulator.segmentCount,
+          segmentCount - accumulator.segmentCount
+        );
+        for (const segment of newSegments) {
+          if (segment.text.trim().length > 0) {
+            accumulator.segmentTexts.push(segment.text);
+          }
+        }
+        accumulator.segmentCount = segmentCount;
+      }
+
+      const partialText = await getLiveTextBufferPartialSlice(
+        liveTextBufferId,
+        0,
+        4096
+      );
+      const previewText = composeLiveText(
+        accumulator.segmentTexts,
+        partialText
+      );
+
+      setTranscriptionResult(buildTranscriptionResult(previewText));
+    } catch {
+      // Ignore polling race conditions during teardown.
+    } finally {
+      livePreviewInFlightRef.current = false;
+    }
+  };
 
   // Load available models on mount
   useEffect(() => {
@@ -157,6 +253,12 @@ export default function STTScreen() {
           .join(', ')}`
       );
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopLivePreviewPolling();
+    };
   }, []);
 
   const loadAvailableModels = async () => {
@@ -461,6 +563,10 @@ export default function STTScreen() {
   };
 
   const handleFree = async () => {
+    if (isLiveRecording || livePipelineRef.current) {
+      await handleLivePressOut();
+    }
+
     const engine = sttEngineRef.current;
     if (!engine) return;
     try {
@@ -553,9 +659,21 @@ export default function STTScreen() {
       handleLivePressOut();
       return;
     }
+    if (livePipelineRef.current) {
+      await handleLivePressOut();
+    }
+
     setError(null);
     setErrorSource(null);
     setTranscriptionResult(null);
+
+    let engine: LiveSttEngine | null = null;
+    let liveAudioBufferId: string | null = null;
+    let liveTextBufferId: string | null = null;
+    let pipelineHandle: SttPipelineHandle | null = null;
+    let micErrorSubscription: { remove: () => void } | null = null;
+    let audioUnsubscribe = () => {};
+    let textUnsubscribe = () => {};
 
     try {
       const useFilePath = padModelIds.includes(currentModelFolder);
@@ -572,64 +690,40 @@ export default function STTScreen() {
       const onlineType = getOnlineTypeOrNull(selectedModelType);
       if (!onlineType) return;
 
-      const engine = await createStreamingSTT({
+      engine = await createStreamingSTT({
         modelPath: modelPathConfig,
         modelType: onlineType,
         numThreads: STT_NUM_THREADS,
       });
       streamingEngineRef.current = engine;
-      const stream = await engine.createStream();
-      liveStreamRef.current = stream;
 
-      const { bufferId: liveBufferId } = await createLiveAudioBuffer({
+      const liveAudioBuffer = await createLiveAudioBuffer({
         sampleRate: LIVE_SAMPLE_RATE,
         channelCount: 1,
         windowSeconds: 120,
+        emitAppendedEvents: false,
       });
+      liveAudioBufferId = liveAudioBuffer.bufferId;
+      audioUnsubscribe = liveAudioBuffer.unsubscribeEvents;
 
-      const unsubChunk = DeviceEventEmitter.addListener(
-        'pipelineLiveAudioChunk',
-        (event: {
-          samples?: number[];
-          sampleRate?: number;
-          liveBufferId?: string;
-        }) => {
-          if (event.liveBufferId !== liveBufferId) return;
-          const samples = event.samples;
-          if (!samples?.length) return;
-          const streamCurrent = liveStreamRef.current;
-          if (!streamCurrent) return;
-          const sr = event.sampleRate ?? LIVE_SAMPLE_RATE;
-          const prev = liveProcessPromiseRef.current;
-          liveProcessPromiseRef.current = (async () => {
-            await prev;
-            if (!liveStreamRef.current) return;
-            try {
-              const { result } = await streamCurrent.processAudioChunk(
-                samples,
-                sr
-              );
-              setTranscriptionResult({
-                text: result.text,
-                tokens: result.tokens,
-                timestamps: result.timestamps,
-                lang: '',
-                emotion: '',
-                event: '',
-                durations: [],
-              });
-            } catch {
-              // ignore chunk errors (e.g. after release)
-            }
-          })();
-        }
+      const liveTextBuffer = await createLiveTextBuffer({
+        windowMaxChars: 65536,
+        maxSegments: 2048,
+      });
+      liveTextBufferId = liveTextBuffer.bufferId;
+      textUnsubscribe = liveTextBuffer.unsubscribeEvents;
+
+      pipelineHandle = await engine.transcribe(
+        liveAudioBuffer.bufferId,
+        liveTextBuffer.bufferId
       );
-      const unsubErr = DeviceEventEmitter.addListener(
+
+      micErrorSubscription = DeviceEventEmitter.addListener(
         'pipelineLiveAudioError',
         (event: { message?: string; liveBufferId?: string }) => {
           if (
             event.liveBufferId != null &&
-            event.liveBufferId !== liveBufferId
+            event.liveBufferId !== liveAudioBuffer.bufferId
           ) {
             return;
           }
@@ -637,22 +731,64 @@ export default function STTScreen() {
           setError(event.message ?? 'Microphone error');
         }
       );
-      livePipelineRef.current = {
-        liveBufferId,
-        unsubChunk,
-        unsubErr,
+
+      liveAccumulatorRef.current = {
+        segmentCount: 0,
+        segmentTexts: [],
       };
+      stopLivePreviewPolling();
+      livePreviewTimerRef.current = setInterval(() => {
+        void syncLivePreview(liveTextBuffer.bufferId);
+      }, 150);
+      void syncLivePreview(liveTextBuffer.bufferId);
+
+      livePipelineRef.current = {
+        liveAudioBufferId: liveAudioBuffer.bufferId,
+        liveTextBufferId: liveTextBuffer.bufferId,
+        pipelineHandle,
+        micErrorSubscription,
+        audioUnsubscribe,
+        textUnsubscribe,
+      };
+
       try {
-        await startMicToLiveAudioBuffer(liveBufferId, { emitToJs: true });
+        await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
+          emitToJs: false,
+        });
       } catch (startErr) {
-        unsubChunk.remove();
-        unsubErr.remove();
-        livePipelineRef.current = null;
-        await releasePipelineAudioBuffer(liveBufferId).catch(() => {});
         throw startErr;
       }
+
       setIsLiveRecording(true);
     } catch (err) {
+      stopLivePreviewPolling();
+      await stopMicToLiveAudioBuffer().catch(() => {});
+
+      micErrorSubscription?.remove();
+      audioUnsubscribe();
+      textUnsubscribe();
+
+      if (pipelineHandle) {
+        await pipelineHandle.stop().catch(() => {});
+      }
+
+      if (engine) {
+        await engine.destroy().catch(() => {});
+        if (streamingEngineRef.current === engine) {
+          streamingEngineRef.current = null;
+        }
+      }
+
+      if (liveTextBufferId) {
+        await releasePipelineTextBuffer(liveTextBufferId).catch(() => {});
+      }
+      if (liveAudioBufferId) {
+        await releasePipelineAudioBuffer(liveAudioBufferId).catch(() => {});
+      }
+
+      livePipelineRef.current = null;
+      liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
+
       const msg = err instanceof Error ? err.message : String(err);
       setErrorSource('transcribe');
       setError(msg);
@@ -660,64 +796,78 @@ export default function STTScreen() {
   };
 
   const handleLivePressOut = async () => {
-    if (!isLiveRecording) return;
+    if (!isLiveRecording && !livePipelineRef.current) return;
     setIsLiveRecording(false);
 
-    const pip = livePipelineRef.current;
-    let liveBufferIdForRelease: string | null = null;
-    if (pip) {
-      liveBufferIdForRelease = pip.liveBufferId;
-      await stopMicToLiveAudioBuffer().catch(() => {});
-      pip.unsubChunk.remove();
-      pip.unsubErr.remove();
-      livePipelineRef.current = null;
-    }
+    const pipelineState = livePipelineRef.current;
+    livePipelineRef.current = null;
 
-    const stream = liveStreamRef.current;
-    const engine = streamingEngineRef.current;
+    stopLivePreviewPolling();
+    await stopMicToLiveAudioBuffer().catch(() => {});
 
-    try {
-      await Promise.race([
-        liveProcessPromiseRef.current,
-        new Promise<void>((r) => setTimeout(r, 3000)),
-      ]);
-    } catch {
-      // ignore
-    }
-
-    if (stream && engine) {
+    if (pipelineState) {
       try {
-        await stream.inputFinished();
-        while (await stream.isReady()) {
-          await stream.decode();
-          const result = await stream.getResult();
-          setTranscriptionResult({
-            text: result.text,
-            tokens: result.tokens,
-            timestamps: result.timestamps,
-            lang: '',
-            emotion: '',
-            event: '',
-            durations: [],
-          });
-        }
+        await pipelineState.pipelineHandle.flush();
       } catch {
-        // ignore
-      } finally {
-        try {
-          await stream.release();
-        } catch {}
-        try {
-          await engine.destroy();
-        } catch {}
+        // ignore flush races during teardown
+      }
+
+      try {
+        const segmentCount = await getLiveTextBufferSegmentCount(
+          pipelineState.liveTextBufferId
+        );
+        const segments =
+          segmentCount > 0
+            ? await getLiveTextBufferSegments(
+                pipelineState.liveTextBufferId,
+                0,
+                segmentCount,
+                { includeTokens: true, includeTimestamps: true }
+              )
+            : [];
+        const partialText = await getLiveTextBufferPartialSlice(
+          pipelineState.liveTextBufferId,
+          0,
+          4096
+        );
+        const segmentTexts = segments
+          .map((segment) => segment.text)
+          .filter((segment) => segment.trim().length > 0);
+        const text = composeLiveText(segmentTexts, partialText);
+        const tokens = segments.flatMap((segment) => segment.tokens ?? []);
+        const timestamps = segments.flatMap(
+          (segment) => segment.timestamps ?? []
+        );
+
+        setTranscriptionResult(
+          buildTranscriptionResult(text, tokens, timestamps)
+        );
+      } catch {
+        // ignore result-read errors during teardown
+      }
+
+      await pipelineState.pipelineHandle.stop().catch(() => {});
+      pipelineState.micErrorSubscription.remove();
+      pipelineState.audioUnsubscribe();
+      pipelineState.textUnsubscribe();
+
+      await releasePipelineTextBuffer(pipelineState.liveTextBufferId).catch(
+        () => {}
+      );
+      await releasePipelineAudioBuffer(pipelineState.liveAudioBufferId).catch(
+        () => {}
+      );
+    }
+
+    const engine = streamingEngineRef.current;
+    if (engine) {
+      await engine.destroy().catch(() => {});
+      if (streamingEngineRef.current === engine) {
         streamingEngineRef.current = null;
-        liveStreamRef.current = null;
       }
     }
 
-    if (liveBufferIdForRelease) {
-      await releasePipelineAudioBuffer(liveBufferIdForRelease).catch(() => {});
-    }
+    liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
   };
 
   const showLiveNotSupportedMessage = () => {
