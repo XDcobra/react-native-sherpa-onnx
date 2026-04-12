@@ -4,7 +4,7 @@ On-device **batch** speech denoising (**GTCRN**, **DPDFNet**): a populated **`Of
 
 **Import path:** `react-native-sherpa-onnx/enhancement`
 
-For **chunk-based streaming** (`feedSamples` / `flush`) and **live pipelines** (`LiveAudioBuffer` → `LiveAudioBuffer`), see [Speech enhancement (streaming / live)](enhancement-online.md).
+For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`enhance`**), see [Speech enhancement (streaming)](enhancement-streaming.md).
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
 
@@ -79,12 +79,6 @@ try {
 } finally {
   await enhancement.destroy();
 }
-```
-
-Typical composition:
-
-```text
-File / mic → OfflineAudioBuffer₁ → [Offline Enhancement] → OfflineAudioBuffer₂ → STT / Alignment / export
 ```
 
 ---
@@ -232,7 +226,7 @@ import {
 - **`EnhancementModelType`:** `'gtcrn' | 'dpdfnet'`
 - **`EnhancementDetectResult`:** shared detection base (`success`, `error`, `detectedModels`, `modelType`, optional `languages`, `quantization`, `detectionSources`)
 
-Streaming types (`EnhancedAudio`, **`OnlineEnhancementEngine`**, **`LiveEnhancementEngine`**, **`StreamingEnhancementInitializeOptions`**, **`EnhancementPipelineHandle`**) are documented in [enhancement-online.md](enhancement-online.md#types-and-constants).
+Streaming types (**`StreamingEnhancementEngine`**, **`StreamingEnhancementInitializeOptions`**, **`EnhancementPipelineHandle`**) are documented in [enhancement-streaming.md](enhancement-streaming.md#types-and-constants).
 
 ---
 
@@ -250,20 +244,13 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer has no samples |
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty (same contract as TTS `synthesize`) |
 
-For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-online.md — Error code quick table](enhancement-online.md#error-code-quick-table).
-
----
-
-## Platform notes
-
-- **Android:** `OfflineSpeechDenoiser` (sherpa-onnx Kotlin API).
-- **iOS:** C++ wrapper + sherpa-onnx cxx API (`SherpaOnnx+Enhancement.mm`, `enhancement/sherpa-onnx-enhancement-wrapper.*`).
+For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md — Error code quick table](enhancement-streaming.md#error-code-quick-table).
 
 ---
 
 ## See also
 
-- [Speech enhancement (streaming / live)](enhancement-online.md)
+- [Speech enhancement (streaming / live)](enhancement-streaming.md)
 - [Speech enhancement (overview)](speech-enhancement.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [TTS offline](tts-offline.md)

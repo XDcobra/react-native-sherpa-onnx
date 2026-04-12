@@ -8,12 +8,7 @@
 
 ## 1. Problem statement
 
-The current online enhancement API (`feedSamples` / `flush` / `reset`) forces **every PCM chunk** through the JS ↔ native bridge **twice** per processing step:
-
-1. JS → native: `number[]` input samples
-2. Native → JS: `{ samples: number[], sampleRate }` denoised output
-
-For a real-world pipeline such as **Mic → Enhancement → STT**, each chunk triggers **four** bridge crossings (two for enhancement, two for STT). At 16 kHz with 512-sample chunks, that means **~31 round-trips per second per processing stage** — serializing work that could run entirely in parallel on native threads.
+Historically, a per-chunk JS API forced **every PCM chunk** through the JS ↔ native bridge twice (input `number[]` and denoised output map). That path has been **removed**; streaming enhancement is **`enhance` + `LiveAudioBuffer`** only (see current TypeScript in §3.1).
 
 ### Goal
 
@@ -58,55 +53,44 @@ Mic ──→ LiveAudioBuffer₁ ──→ [Online Enhancement] ──→ LiveAu
 ### 3.1 Public TypeScript
 
 ```ts
-// src/enhancement/streamingTypes.ts
-interface OnlineEnhancementEngine {
+// src/enhancement/streamingTypes.ts (public)
+interface StreamingEnhancementEngine {
   readonly instanceId: string;
-  feedSamples(samples: number[], sampleRate: number): Promise<EnhancedAudio>;
-  flush(): Promise<EnhancedAudio>;
-  reset(): Promise<void>;
   getSampleRate(): Promise<number>;
   getFrameShiftInSamples(): Promise<number>;
   destroy(): Promise<void>;
+  enhance(
+    inputBufferId: string,
+    outputBufferId: string
+  ): Promise<EnhancementPipelineHandle>;
 }
-
-// src/enhancement/types.ts
-type EnhancedAudio = { samples: Float32Array; sampleRate: number };
 ```
 
-**Problems:**
-- `feedSamples` accepts `number[]` (not `Float32Array`, not buffer id).
-- Returns `EnhancedAudio` with full sample data — forces bridge traffic on every call.
-- No way to wire enhancement output directly to STT input without JS mediation.
+**Initialization:** `createStreamingEnhancement()` returns **`StreamingEnhancementEngine`** (user docs call this the **`denoiser`**; buffer pipeline **`enhance`** only; no JS chunk feed).
+
+**Resolved (removed):** prior `feedSamples` / `flush` / `reset` returning audio over the bridge — replaced by **`LiveAudioBuffer`** → **`LiveAudioBuffer`** pipeline only.
 
 ### 3.2 TurboModule (`src/NativeSherpaOnnx.ts`)
 
 ```ts
 initializeOnlineEnhancement(instanceId, modelDir, modelType?, numThreads?, provider?, debug?)
   → Promise<{ success, error?, sampleRate?, frameShiftInSamples? }>
-feedEnhancementSamples(instanceId, samples: number[], sampleRate)
-  → Promise<{ samples: number[]; sampleRate: number }>
-flushOnlineEnhancement(instanceId)
-  → Promise<{ samples: number[]; sampleRate: number }>
-resetOnlineEnhancement(instanceId) → Promise<void>
 unloadOnlineEnhancement(instanceId) → Promise<void>
 getEnhancementSampleRate(instanceId) → Promise<number>
+startEnhancementPipeline(instanceId, inputBufferId, outputBufferId) → Promise<{ pipelineId }>
+stopStreamingPipeline / flushStreamingPipeline / resetStreamingPipeline / getStreamingPipelineStatus
 ```
 
 ### 3.3 Native Android (`SherpaOnnxEnhancementHelper.kt`)
 
 - `OnlineSpeechDenoiser` wraps sherpa-onnx C++ `OnlineSpeechDenoiser`.
-- `denoiser.run(samples, sampleRate)` → `DenoisedAudio` (samples + sampleRate).
-- `denoiser.flush()` → remaining buffered samples.
-- `denoiser.reset()` → clear internal state for a new stream.
+- **`EnhancementPipelineWorker`** calls `denoiser.run` / `flush` / `reset` on the worker thread; output goes to **`LiveEntry.appendSamples`** — not over the TurboModule as bulk PCM.
 - `denoiser.sampleRate` / `denoiser.frameShiftInSamples` → model intrinsics.
-- Results converted to `WritableMap` with `number[]` for bridge.
 
 ### 3.4 Native iOS (`SherpaOnnx+Enhancement.mm`)
 
 - `OnlineEnhancementWrapper` wraps C++ `OnlineSpeechDenoiser`.
-- `wrapper->runSamples(vector<float>, sampleRate)` → `EnhancedAudioResult`.
-- `wrapper->flush()` / `wrapper->reset()` / `wrapper->getSampleRate()` / `wrapper->getFrameShiftInSamples()`.
-- Results converted to NSDictionary with NSArray for bridge.
+- **`EnhancementPipelineWorker`** calls `wrapper->runSamples` / `flush` / `reset` on the worker thread; output is appended to the live output buffer — no JS return of full denoised arrays for streaming.
 
 ### 3.5 Existing `LiveEntry` infrastructure
 
@@ -223,16 +207,13 @@ export interface EnhancementPipelineHandle extends StreamingPipelineHandle {
 }
 
 /**
- * Handle returned by `createStreamingEnhancement`.
- * Represents a loaded online denoiser model instance.
+ * Returned by `createStreamingEnhancement`. Online denoiser: native live-buffer path (`enhance`) only.
  *
- * Two engine types exist — this is the **online / streaming** variant:
+ * Offline batch remains separate:
  * - `EnhancementEngine.enhance(offline, offline)` → `Promise<void>` (batch, resolves when done).
- * - `LiveEnhancementEngine.enhance(live, live)` → `Promise<EnhancementPipelineHandle>` (resolves when pipeline started).
- *
- * The receiver type and return type disambiguate statically.
+ * - `StreamingEnhancementEngine.enhance(liveIn, liveOut)` → `Promise<EnhancementPipelineHandle>` (pipeline started).
  */
-export interface LiveEnhancementEngine {
+export interface StreamingEnhancementEngine {
   readonly instanceId: string;
 
   /**
@@ -266,12 +247,12 @@ export interface LiveEnhancementEngine {
 }
 ```
 
-**Naming rationale:** `enhance()` mirrors the offline `EnhancementEngine.enhance()`. The two engines are separate types returned by separate factories (`createEnhancement` vs `createStreamingEnhancement`). Receiver type + return type provide full disambiguation:
+**Naming rationale:** Offline vs streaming are separate types from separate entry points (`createEnhancement` vs `createStreamingEnhancement`). On the streaming denoiser (`StreamingEnhancementEngine`), **`enhance(live, live)`** return type disambiguates from offline **`enhance(offline, offline)`** (`Promise<void>`).
 
-| Engine | Method | Return | Semantics |
+| Type | Method | Return | Semantics |
 |---|---|---|---|
 | `EnhancementEngine` | `enhance(offlineIn, offlineOut)` | `Promise<void>` | Batch; resolves **when complete** |
-| `LiveEnhancementEngine` | `enhance(liveIn, liveOut)` | `Promise<EnhancementPipelineHandle>` | Streaming; resolves **when started** |
+| `StreamingEnhancementEngine` | `enhance(liveIn, liveOut)` | `Promise<EnhancementPipelineHandle>` | Native pipeline; resolves **when started** |
 
 ### 4.3 TurboModule methods
 
@@ -700,18 +681,18 @@ import {
   saveLiveAudioBufferToWav,
 } from 'react-native-sherpa-onnx';
 
-// 1. Create enhancement engine (loads model)
-const engine = await createStreamingEnhancement({
+// 1. Create streaming denoiser (loads model)
+const denoiser = await createStreamingEnhancement({
   modelPath: { modelDir: '/models/gtcrn' },
 });
-const sampleRate = await engine.getSampleRate(); // e.g. 16000
+const sampleRate = await denoiser.getSampleRate(); // e.g. 16000
 
 // 2. Create live buffers (must match denoiser sample rate)
 const micBuffer = await createLiveAudioBuffer({ sampleRate });
 const enhancedBuffer = await createLiveAudioBuffer({ sampleRate });
 
 // 3. Start native pipeline (background thread: micBuffer → denoise → enhancedBuffer)
-const pipeline = await engine.enhance(micBuffer, enhancedBuffer);
+const pipeline = await denoiser.enhance(micBuffer, enhancedBuffer);
 
 // 4. Start mic capture (writes directly to micBuffer, no JS involvement)
 await startMicToLiveAudioBuffer(micBuffer.bufferId);
@@ -731,7 +712,7 @@ await finalizeLiveAudioBuffer(enhancedBuffer.bufferId);
 await saveLiveAudioBufferToWav(enhancedBuffer.bufferId, '/path/to/enhanced.wav');
 
 // 7. Cleanup
-await engine.destroy();
+await denoiser.destroy();
 ```
 
 ### Parallel composition: Mic → Enhancement → STT (all native-native)
@@ -744,8 +725,8 @@ const enhancer = await createStreamingEnhancement({ modelPath: { modelDir: '...'
 const enhancePipeline = await enhancer.enhance(micBuffer, enhancedBuffer);
 
 // Future STT streaming pipeline (same pattern, same generic infrastructure):
-// const sttEngine = await createStreamingSTT({ ... });
-// const sttPipeline = await sttEngine.transcribe(enhancedBuffer);
+// const recognizer = await createStreamingSTT({ ... });
+// const sttPipeline = await recognizer.transcribe(enhancedBuffer, textOut);
 
 await startMicToLiveAudioBuffer(micBuffer.bufferId);
 
@@ -768,13 +749,13 @@ await offlineEngine.enhance(inBuf, outBuf);  // ← resolves when COMPLETE
 await saveOfflineAudioBufferToWav(outBuf.bufferId, '/path/to/clean.wav');
 
 // ── Online (streaming) ──
-const liveEngine = await createStreamingEnhancement({ modelPath: { modelDir: '...' } });
+const denoiser = await createStreamingEnhancement({ modelPath: { modelDir: '...' } });
 const micBuf = await createLiveAudioBuffer({ sampleRate: 16000 });
 const outLive = await createLiveAudioBuffer({ sampleRate: 16000 });
-const handle = await liveEngine.enhance(micBuf, outLive);  // ← resolves when STARTED
+const pipeline = await denoiser.enhance(micBuf, outLive);  // ← resolves when STARTED
 // ... mic writes chunks, enhancement processes in parallel, downstream drains ...
-await handle.flush();
-await handle.stop();
+await pipeline.flush();
+await pipeline.stop();
 ```
 
 ---
@@ -784,7 +765,7 @@ await handle.stop();
 | Code | Meaning |
 | --- | --- |
 | `ONLINE_ENHANCEMENT_INIT_ERROR` | Model dir invalid / unsupported type / native init failure (existing) |
-| `ENHANCEMENT_PIPELINE_ALREADY_RUNNING` | `enhance()` called while a pipeline on this engine is already active |
+| `ENHANCEMENT_PIPELINE_ALREADY_RUNNING` | `enhance()` called while a pipeline on this denoiser instance is already active |
 | `ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND` | Live buffer id not found in registry |
 | `ENHANCEMENT_PIPELINE_BUFFER_KIND_MISMATCH` | Non-live buffer passed (must be `live_*`) |
 | `ENHANCEMENT_PIPELINE_BUFFER_NOT_RECORDING` | Buffer already finalized; cannot start pipeline on it |
@@ -879,9 +860,9 @@ These lifecycle events are accessible via `getStatus()` polling. If needed in th
 | **P3** | **Enhancement worker (Android):** `EnhancementPipelineWorker` implementing `StreamingPipelineWorker`. Condition variable wakeup, command queue for blocking flush/reset, sample rate validation. Wire `startEnhancementPipeline` into `SherpaOnnxModule`. |
 | **P4** | **Enhancement worker (iOS):** Mirror P3 — `EnhancementPipelineWorker` subclass, `std::thread` + `std::condition_variable`, same command queue pattern. |
 | **P5** | **TurboModule:** Add `startEnhancementPipeline`. Add generic `stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`. Remove `feedEnhancementSamples`, `flushOnlineEnhancement`, `resetOnlineEnhancement`. |
-| **P6** | **TypeScript:** Generic `StreamingPipelineHandle` / `StreamingPipelineStatus` types. Rewrite `LiveEnhancementEngine` interface + `streaming.ts` with `enhance()`. Add `"enhancement"` to `LiveBufferAppendSource`. Update exports. |
+| **P6** | **TypeScript:** Generic `StreamingPipelineHandle` / `StreamingPipelineStatus` types. `StreamingEnhancementEngine` + `createStreamingEnhancement` include `enhance()`. Add `"enhancement"` to `LiveBufferAppendSource`. Update exports. |
 | **P7** | **Example app:** Streaming enhancement screen using buffer pipeline (mic → enhance → save). |
-| **P8** | **Documentation:** Online buffer pipeline examples live in `docs/enhancement-online.md` (overview: `docs/speech-enhancement.md`). |
+| **P8** | **Documentation:** Online buffer pipeline examples live in `docs/enhancement-streaming.md` (overview: `docs/speech-enhancement.md`). |
 | **P9** | **Cleanup:** Remove dead native code paths (old `feedSamples` JNI/ObjC selectors, `normalizeEnhancedAudio`, old TurboModule methods). |
 
 ---
@@ -890,7 +871,7 @@ These lifecycle events are accessible via `getStatus()` polling. If needed in th
 
 - [ ] Generic `StreamingPipelineWorker` interface exists on Android and iOS; generic `StreamingPipelineRegistry` manages all pipeline types.
 - [ ] No `feedEnhancementSamples` / `flushOnlineEnhancement` / `resetOnlineEnhancement` on public API.
-- [ ] `LiveEnhancementEngine.enhance(liveIn, liveOut)` returns `Promise<EnhancementPipelineHandle>`.
+- [ ] `StreamingEnhancementEngine.enhance(liveIn, liveOut)` returns `Promise<EnhancementPipelineHandle>`.
 - [ ] Streaming enhancement uses **only** live buffer IDs on the TurboModule wire.
 - [ ] PCM data **never** crosses the JS ↔ native bridge during steady-state pipeline operation.
 - [ ] Generic `stopStreamingPipeline` / `flushStreamingPipeline` / `resetStreamingPipeline` / `getStreamingPipelineStatus` work via `pipelineId` regardless of feature type.
@@ -940,12 +921,12 @@ New constant `LIVE_APPEND_SOURCE_ENHANCEMENT = "enhancement"` on both platforms.
 
 The worker waits on a condition variable when no data is available. `LiveEntry.appendSamples()` signals via `addAppendListener` (new multi-listener mechanism on `LiveEntry`). A 10 ms safety timeout guards against missed signals. This achieves zero-latency wakeup in the common case.
 
-### Q8: Naming → **`enhance()` on both engine types**
+### Q8: Naming → **`enhance()` on both enhancement types**
 
-| Factory | Engine type | Method | Return |
+| Initialization | Type | Method | Return |
 |---|---|---|---|
 | `createEnhancement()` | `EnhancementEngine` | `enhance(offlineIn, offlineOut)` | `Promise<void>` (done) |
-| `createStreamingEnhancement()` | `LiveEnhancementEngine` | `enhance(liveIn, liveOut)` | `Promise<EnhancementPipelineHandle>` (started) |
+| `createStreamingEnhancement()` | `StreamingEnhancementEngine` | `enhance(liveIn, liveOut)` | `Promise<EnhancementPipelineHandle>` (started) |
 
 Receiver type + return type disambiguate statically. This is idiomatic TypeScript (same method name, different types).
 
@@ -966,5 +947,5 @@ No `feedSamples` in the public API. Buffer-only. Breaking changes are OK (SDK no
 
 - [Offline enhancement buffer pipeline spec](../enhancement/offline-enhancement-buffer-pipeline-spec.md) — reference for offline `enhance()` naming and buffer pattern
 - [Pipeline audio buffers (`audiobuffer`)](../../audiobuffer.md)
-- [Speech enhancement — streaming / live](../../enhancement-online.md) · [overview](../../speech-enhancement.md)
+- [Speech enhancement — streaming](../../enhancement-streaming.md) · [overview](../../speech-enhancement.md)
 - [STT buffer-only plan](../stt/stt-pipeline-buffer-only-api-plan.md) — will reuse `StreamingPipelineWorker` + `StreamingPipelineRegistry`

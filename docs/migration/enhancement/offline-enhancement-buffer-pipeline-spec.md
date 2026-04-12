@@ -1,7 +1,7 @@
 # Offline speech enhancement: `OfflineAudioBuffer` pipeline
 
 **Status:** Specification (implementation pending).  
-**Scope:** **Offline** batch denoising only (`gtcrn`, `dpdfnet`). **Online / streaming enhancement** stays on its own native path (`initializeOnlineEnhancement`, `feedEnhancementSamples`, …); this document does **not** redefine streaming behaviour beyond noting **iOS parity** when offline registry work touches shared modules.
+**Scope:** **Offline** batch denoising only (`gtcrn`, `dpdfnet`). **Online / streaming enhancement** uses `initializeOnlineEnhancement` + live-buffer **`enhance`** pipeline only; this document does **not** redefine streaming behaviour beyond noting **iOS parity** when offline registry work touches shared modules.
 
 ---
 
@@ -47,7 +47,7 @@ No pipeline **`bufferId`** parameters today.
 
 ### 2.4 Documentation
 
-- [`docs/enhancement-offline.md`](../../enhancement-offline.md) (and overview [`speech-enhancement.md`](../../speech-enhancement.md)); streaming/live: [`enhancement-online.md`](../../enhancement-online.md).
+- [`docs/enhancement-offline.md`](../../enhancement-offline.md) (and overview [`speech-enhancement.md`](../../speech-enhancement.md)); streaming/live: [`enhancement-streaming.md`](../../enhancement-streaming.md).
 
 ---
 

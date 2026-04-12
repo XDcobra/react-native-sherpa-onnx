@@ -5,6 +5,8 @@
 **Prerequisite:** The generic `StreamingPipelineWorker` / `StreamingPipelineRegistry` infrastructure from the [online enhancement pipeline spec](./online-enhancement-live-pipeline-spec.md) is already implemented.  
 **Breaking changes in this spec:** `StreamingPipelineStatus` fields renamed (`samplesRead` → `unitsRead`, `samplesWritten` → `unitsWritten`). Generic pipeline types relocated from `src/enhancement/` to `src/audiobuffer/`. Per-chunk STT bridge methods (`acceptSttWaveform`, `decodeSttStream`, `getSttStreamResult`, `processSttAudioChunk`, etc.) removed entirely.
 
+**User-facing docs:** [`docs/stt-streaming.md`](../../stt-streaming.md) uses **`recognizer`** for `LiveSttEngine` and **`pipeline`** for `SttPipelineHandle` (same pattern as speech enhancement: denoiser + pipeline).
+
 ---
 
 ## 1. Problem statement
@@ -463,10 +465,9 @@ export interface SttPipelineOptions {
 }
 
 /**
- * Handle returned by `createStreamingStt`.
- * Represents a loaded online recognizer model instance.
+ * Loaded online recognizer (`createStreamingSTT` / `createLiveSTT`).
  *
- * Two engine types:
+ * Two STT entry-point types:
  * - `SttEngine.transcribe(offline, offline)` → `Promise<void>` (batch, resolves when done).
  * - `LiveSttEngine.transcribe(live, live)` → `Promise<SttPipelineHandle>` (resolves when pipeline started).
  */
@@ -482,7 +483,7 @@ export interface LiveSttEngine {
    * - `audioIn` must be a live audio buffer in `recording` state.
    * - `audioIn.sampleRate` must equal the recognizer's expected sample rate (strict validation).
    * - `textOut` must be a live text buffer in `recording` state.
-   * - Only one pipeline per engine instance at a time (recognizer has internal state).
+   * - Only one pipeline per recognizer instance at a time (online model has internal state).
    *
    * Returns a handle to control and inspect the running pipeline.
    */
@@ -493,7 +494,7 @@ export interface LiveSttEngine {
   ): Promise<SttPipelineHandle>;
 
   /**
-   * Destroy the engine. Stops any running pipeline first.
+   * Destroy the recognizer. Stops any running pipeline first.
    */
   destroy(): Promise<void>;
 }
@@ -1050,7 +1051,7 @@ The STT worker writes segments with `source = "stt_stream"`. Downstream consumer
 | **P3** | **STT pipeline worker (Android):** `SttPipelineWorker` implementing `StreamingPipelineWorker`. Audio cursor on input, configurable `chunkSize`, commitSegment on endpoint, writePartial for UI, sample rate validation. Wire `startSttPipeline` into `SherpaOnnxModule`. |
 | **P4** | **STT pipeline worker (iOS):** Mirror P3 — `SttPipelineWorker` subclass. |
 | **P5** | **TurboModule:** Add `startSttPipeline` (with optional `chunkSize`). Add `appendLiveTextSegment`, `getLiveTextBufferSegments` (with optional `includeTokens`/`includeTimestamps`), `getLiveTextBufferSegmentCount`. Update `LiveTextBufferInfo` with `segmentCount`. Update `createLiveTextBuffer` to accept `maxSegments`. **Remove** per-chunk STT bridge methods: `createSttStream`, `acceptSttWaveform`, `decodeSttStream`, `isSttStreamReady`, `getSttStreamResult`, `isSttStreamEndpoint`, `resetSttStream`, `releaseSttStream`, `processSttAudioChunk`. |
-| **P6** | **TypeScript:** `LiveSttEngine` interface + `SttPipelineHandle` + `SttPipelineOptions`. `createStreamingStt` factory. Update `CreateLiveTextBufferOptions` with `maxSegments`. Update `LiveTextBufferInfo` type. Export new types from `audiobuffer/` and `stt/`. |
+| **P6** | **TypeScript:** `LiveSttEngine` interface + `SttPipelineHandle` + `SttPipelineOptions`. `createStreamingSTT` / `createLiveSTT`. Update `CreateLiveTextBufferOptions` with `maxSegments`. Update `LiveTextBufferInfo` type. Export new types from `audiobuffer/` and `stt/`. |
 | **P7** | **Example app:** Streaming STT screen using pipeline (mic → STT → text display from committed segments + partial UI). |
 | **P8** | **Documentation:** Update `docs/stt-streaming.md`. |
 | **P9** | **Cleanup:** Remove dead native code paths (old per-chunk STT JNI/ObjC selectors, `SttStream` maps on native side, old TurboModule methods). Remove old `StreamingPipelineStatus`/`Handle` exports from `enhancement/`. |
@@ -1104,11 +1105,11 @@ All per-chunk bridge methods are removed: `createSttStream`, `acceptSttWaveform`
 
 ### Q5: Chunk size for STT audio drain → **Configurable at pipeline start with sensible default (Option B)**
 
-`transcribe(audioIn, textOut, { chunkSize: 4800 })`. Default: 3200 samples (~200ms at 16kHz). Passed through TurboModule as optional `chunkSize` parameter on `startSttPipeline`. Allows tuning the latency/overhead trade-off without requiring a new engine.
+`transcribe(audioIn, textOut, { chunkSize: 4800 })`. Default: 3200 samples (~200ms at 16kHz). Passed through TurboModule as optional `chunkSize` parameter on `startSttPipeline`. Allows tuning the latency/overhead trade-off without requiring a new recognizer instance.
 
-### Q6: Endpoint configuration per pipeline → **Engine config only (Option A)**
+### Q6: Endpoint configuration per pipeline → **Recognizer init only (Option A)**
 
-Endpoint rules are set at `initializeOnlineSttWithOptions` time. If different rules are needed, create a different engine instance. Endpoint tuning is rarely changed mid-session.
+Endpoint rules are set at `initializeOnlineSttWithOptions` time. If different rules are needed, create a different recognizer instance. Endpoint tuning is rarely changed mid-session.
 
 ### Q7: Partial text emission for pipeline use → **Keep existing behavior (Option A)**
 
