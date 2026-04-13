@@ -301,7 +301,6 @@ import {
   createLiveAudioBuffer,
   getPipelineAudioBufferInfo,
   getLiveAudioBufferSamplesSlice,
-  saveLiveAudioBufferToWav,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
@@ -332,31 +331,31 @@ Offline **`createEnhancement`** / **`EnhancementEngine`** are documented in [enh
 
 ---
 
-## Error code quick table
-
-Typical **promise rejection `code`** strings from the native layer (offline vs online). Message text varies; use **`code`** for branching when catching.
-
-| Code | Typical reason |
-| --- | --- |
-| `DETECT_ERROR` | Detection failed or returned null (Android) |
-| `ENHANCEMENT_INIT_ERROR` | Missing `instanceId` / `modelDir`, detection failed, unsupported model type, native init error |
-| `ENHANCEMENT_ERROR` | Instance not found, denoise run failed (generic) |
-| `ENHANCEMENT_BUFFER_NOT_FOUND` | Unknown or released audio buffer id |
-| `ENHANCEMENT_BUFFER_KIND_MISMATCH` | Non-offline buffer passed to offline enhance |
-| `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer has no samples |
-| `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty (same contract as TTS `synthesize`) |
-| `ONLINE_ENHANCEMENT_INIT_ERROR` | Streaming init: missing ids, detection/init failure |
-| `ONLINE_ENHANCEMENT_ERROR` | Online instance not found, unload conflict with active pipeline, etc. |
-| `PIPELINE_NOT_FOUND` | Pipeline id not registered (already stopped or never started) |
-| `PIPELINE_FLUSH_ERROR` | Flush command failed on a running pipeline |
-| `PIPELINE_RESET_ERROR` | Reset command failed on a running pipeline |
-
----
-
 ## Platform notes
 
 - **Android:** `OnlineSpeechDenoiser` (sherpa-onnx Kotlin API).
 - **iOS:** C++ wrapper + sherpa-onnx cxx API (`SherpaOnnx+Enhancement.mm`, `enhancement/sherpa-onnx-enhancement-wrapper.*`).
+
+---
+
+## Error codes
+
+Typical **promise rejection `code`** strings from the native layer (offline + streaming). Message text varies; use **`code`** for branching when catching.
+
+| Error code | Explanation |
+| --- | --- |
+| `DETECT_ERROR` | Model detection failed or returned no usable result. |
+| `ENHANCEMENT_INIT_ERROR` | Offline engine initialization failed (e.g. invalid model path/type or native init failure). |
+| `ENHANCEMENT_ERROR` | Generic offline enhancement runtime failure. |
+| `ENHANCEMENT_BUFFER_NOT_FOUND` | Referenced audio buffer id was not found (missing or already released). |
+| `ENHANCEMENT_BUFFER_KIND_MISMATCH` | Buffer kind does not match expected offline/streaming input contract. |
+| `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
+| `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Offline output buffer must be empty before `enhance(...)`. |
+| `ONLINE_ENHANCEMENT_INIT_ERROR` | Streaming engine initialization failed (missing ids, detection/init failure, invalid setup). |
+| `ONLINE_ENHANCEMENT_ERROR` | Streaming runtime failure (e.g. missing online instance, unload conflict with active pipeline). |
+| `PIPELINE_NOT_FOUND` | Pipeline id is not registered (already stopped or never started). |
+| `PIPELINE_FLUSH_ERROR` | `flush()` failed for the running pipeline. |
+| `PIPELINE_RESET_ERROR` | `reset()` failed for the running pipeline. |
 
 ---
 
@@ -367,3 +366,4 @@ Typical **promise rejection `code`** strings from the native layer (offline vs o
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
+

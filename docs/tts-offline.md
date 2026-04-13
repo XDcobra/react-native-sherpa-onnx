@@ -8,7 +8,8 @@ On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as a
 ```ts
 import { createTTS, detectTtsModel, ... } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
-import { createEmptyOfflineAudioBuffer, saveOfflineAudioBufferToWav, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 ```
 
 ## Quick Start
@@ -22,10 +23,10 @@ import { createTTS, detectTtsModel } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 import {
   createEmptyOfflineAudioBuffer,
-  saveOfflineAudioBufferToWav,
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
 
@@ -56,7 +57,7 @@ const info = await getPipelineAudioBufferInfo(audioBuf);
 console.log(info.numSamples, info.sampleRate); // e.g. 44100, 22050
 
 // Step 5: save to WAV
-await saveOfflineAudioBufferToWav(audioBuf, '/path/to/output.wav');
+await convertAudioToFormat(audioBuf, '/path/to/output.wav', 'wav');
 
 // Step 6: release buffers (free native memory)
 await releasePipelineTextBuffer(textBuf);
@@ -118,7 +119,7 @@ const textBuf = await createOfflineTextBufferFromText(inputText);
 const audioBuf = await createEmptyOfflineAudioBuffer(modelSampleRate);
 try {
   await tts.synthesize(textBuf, audioBuf);
-  await saveOfflineAudioBufferToWav(audioBuf, outputPath);
+  await convertAudioToFormat(audioBuf, outputPath, 'wav');
 } finally {
   await releasePipelineTextBuffer(textBuf).catch(() => {});
   await releasePipelineAudioBuffer(audioBuf).catch(() => {});
@@ -260,14 +261,16 @@ const buf = await createEmptyOfflineAudioBuffer(22050);
 // buf.info.numSamples === 0 — synthesis fills it exactly once
 ```
 
-### `saveOfflineAudioBufferToWav(bufferId, outputPath)`
+### Convert output buffer to file
+
+Use conversion helpers from `react-native-sherpa-onnx/audio`:
 
 ```ts
-saveOfflineAudioBufferToWav(bufferId: OfflineAudioBufferIdSource, outputPath: string): Promise<void>
-```
+import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
 
-```ts
-await saveOfflineAudioBufferToWav(audioBuf, `${DocumentDirectoryPath}/speech.wav`);
+await convertAudioToFormat(audioBuf, `${DocumentDirectoryPath}/speech.wav`, 'wav');
+await convertAudioToFormat(audioBuf, `${DocumentDirectoryPath}/speech.mp3`, 'mp3', 44100);
+await convertAudioToWav16k(audioBuf, `${DocumentDirectoryPath}/speech_16k.wav`);
 ```
 
 ### `createOfflineAudioBufferFromFile(path)`
@@ -328,7 +331,7 @@ await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 | `DetectionSource` | Trace literals from native detection |
 | `SubtitleMode` | `'off' \| 'proportional' \| 'estimated' \| 'accurate'` (streaming path only) |
 | `SubtitleGranularity` | `'sentence' \| 'word' \| 'character'` (streaming path only) |
-| `SaveAudioTarget` / `SaveAudioTargetFile` / `SaveAudioTargetAndroidContent` | File-path or Android SAF targets (for direct WAV save use `saveOfflineAudioBufferToWav`) |
+| `SaveAudioTarget` / `SaveAudioTargetFile` / `SaveAudioTargetAndroidContent` | File-path or Android SAF targets used by app-level persistence flows |
 
 ### Buffer types (`react-native-sherpa-onnx/audiobuffer` / `react-native-sherpa-onnx/textbuffer`)
 

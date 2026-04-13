@@ -1,6 +1,8 @@
 # Files (persistence & sharing)
 
-Helpers for **Android Storage Access Framework (SAF)**, copying **`content://`** URIs to cache, sharing files, and writing text — **not** tied to the TTS engine. Saving synthesized audio as WAV/MP3/… uses **`saveAudioFromGeneration`** / **`saveAudioFromPCM`** on [`react-native-sherpa-onnx/tts`](tts-offline.md); use this module for everything else in the same pipelines.
+Helpers for **Android Storage Access Framework (SAF)**, copying **`content://`** URIs to cache, sharing files, and writing text.
+
+This module does not encode audio itself. For audio export, first convert a pipeline buffer to a local file via [`react-native-sherpa-onnx/audio`](audio-conversion.md), then use this module for SAF copy/share operations.
 
 **Import path:** `react-native-sherpa-onnx/files`
 
@@ -8,7 +10,7 @@ The package root also re-exports **`copyFileToContentUri`** for convenience (`im
 
 ## Peer / platform notes
 
-- **Android:** SAF directory URIs (`content://…`) for `saveTextToContentUri`, `copyFileToContentUri`, and (via TTS) `saveAudioFromGeneration` / `saveAudioFromPCM` with `{ kind: 'androidContent', … }`.
+- **Android:** SAF directory URIs (`content://…`) for `saveTextToContentUri` and `copyFileToContentUri`.
 - **iOS:** `copyFileToContentUri` is not supported (rejects). `saveTextToContentUri` writes into a normal filesystem directory path or `file://` URL. `copyContentUriToCache` copies **file paths** (not `content://`). `shareAudioFile` uses `UIActivityViewController`.
 
 ## Quick start
@@ -24,7 +26,7 @@ import {
 // User-picked audio on Android → cache path for native code
 const path = await copyContentUriToCache(uri, 'reference.wav');
 
-// After convertAudioToFormat → copy encoded file into SAF tree
+// After convertAudioToFormat -> copy encoded file into SAF tree
 await copyFileToContentUri('/cache/out.mp3', dirUri, 'out.mp3', 'audio/mpeg');
 
 await shareAudioFile('/path/to/out.wav', 'audio/wav');
@@ -84,6 +86,6 @@ function saveTextToContentUri(
 
 ## Related
 
-- [Offline TTS — save helpers](tts-offline.md#persistence--sharing)
+- [Offline TTS](tts-offline.md)
 - [`convertAudioToFormat`](audio-conversion.md) (`react-native-sherpa-onnx/audio`)
 - [Migration: imports & TurboModule names](migration.md#files-api-persistence--sharing-helpers)

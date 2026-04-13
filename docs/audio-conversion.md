@@ -1,169 +1,162 @@
-# Audio conversion API
+# Audio conversion (`react-native-sherpa-onnx/audio`)
 
-This document describes the SDK's audio conversion helpers used to produce WAV (and optionally MP3/FLAC) in the format expected by sherpa-onnx (16 kHz mono 16-bit PCM for STT) or for saving TTS output in different formats.
+This module converts pipeline audio buffers to encoded audio files.
+
+The conversion input is always a pipeline buffer id/reference (offline or finalized live), not a file path.
 
 ## Overview
 
-The conversion API is exposed from the **`react-native-sherpa-onnx/audio`** module:
+Exports:
 
-- **Android**: Implemented with FFmpeg (prebuilts or AAR). All formats (WAV, MP3, FLAC) share a single conversion pipeline with proper resampling, accumulator-buffered encoding, and monotonic PTS handling. Input can be a file path or a `content://` URI; content URIs are transparently copied to a temporary file. Decoding to float PCM (`decodeAudioFileToFloatSamples`) uses the same FFmpeg decode path; WAV files may use a fast path via sherpa-onnx `WaveReader` when no resampling is requested.
-- **iOS**: Implemented with FFmpeg when linked (same family as conversion). Supports common input formats (MP3, AAC, FLAC, WAV, WebM, etc.). When FFmpeg is disabled, decode/conversion helpers fail at runtime; see [disable-ffmpeg.md](disable-ffmpeg.md).
+- `convertAudioToFormat(input, outputPath, format, outputSampleRateHz?)`
+- `convertAudioToWav16k(input, outputPath)`
+- `AudioOutputFormat`
+- `ConversionErrorCode`
+- `ConversionErrorCodeValue`
+
+Key behavior:
+
+- Conversion uses FFmpeg for all formats, including WAV.
+- Input accepts `PipelineAudioBufferIdSource` (buffer ref, handle, info, or raw id string).
+- Live buffers must be finalized before conversion.
+- Buffer contents are not modified by conversion.
+
+## Examples
+
+### Offline buffer -> MP3
+
+```ts
+import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+
+const buf = await createOfflineAudioBufferFromFile('/tmp/in.wav');
+try {
+  await convertAudioToFormat(buf, '/tmp/out.mp3', 'mp3', 44100);
+} finally {
+  await releasePipelineAudioBuffer(buf).catch(() => {});
+}
+```
+
+### Finalized live buffer -> FLAC
+
+```ts
+import {
+  createLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+
+const live = await createLiveAudioBuffer({ sampleRate: 44100 });
+await startMicToLiveAudioBuffer(live);
+// recording...
+await stopMicToLiveAudioBuffer();
+await finalizeLiveAudioBuffer(live);
+
+try {
+  await convertAudioToFormat(live, '/tmp/recording.flac', 'flac');
+} finally {
+  await releasePipelineAudioBuffer(live).catch(() => {});
+}
+```
+
+### Buffer -> WAV 16 kHz
+
+```ts
+import { convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
+
+await convertAudioToWav16k(buffer, '/tmp/stt_input.wav');
+```
 
 ## API reference
 
-### `convertAudioToFormat(inputPath, outputPath, format, outputSampleRateHz?)`
+### `convertAudioToFormat(input, outputPath, format, outputSampleRateHz?)`
 
-Converts an audio file to a requested format.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `inputPath` | `string` | Absolute file path, or on Android a `content://` URI. |
-| `outputPath` | `string` | Absolute path for the output file. |
-| `format` | `string` | Target format: `"wav"`, `"mp3"`, `"flac"`, `"m4a"`, `"aac"`, `"opus"`, `"oggm"`, `"webm"`, `"mkv"`. |
-| `outputSampleRateHz` | `number` (optional) | For MP3: 32000, 44100, or 48000. For Opus: 8000, 12000, 16000, 24000, or 48000. Ignored for WAV/FLAC. WAV output is always 16 kHz mono. |
-
-**Returns:** `Promise<void>` — resolves on success, rejects with an error message on failure.
-
-**Platform notes:**
-
-- **Android**: All three output formats supported. Requires FFmpeg (see [Disabling FFmpeg](disable-ffmpeg.md) if you need to avoid it).
-- **iOS**: Only `format === "wav"` is supported. For `"mp3"` or `"flac"` the promise rejects.
-
-### `convertAudioToWav16k(inputPath, outputPath)`
-
-Converts any supported audio file to WAV 16 kHz mono 16-bit PCM — the format expected by sherpa-onnx for offline STT. Internally delegates to `convertAudioToFormat(inputPath, outputPath, "wav")`.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `inputPath` | `string` | Absolute file path, or on Android a `content://` URI. |
-| `outputPath` | `string` | Absolute path for the output WAV file. |
-
-**Returns:** `Promise<void>` — resolves on success, rejects with an error message on failure.
-
-### `decodeAudioFileToFloatSamples(inputPath, targetSampleRateHz?)`
-
-Decodes an audio file to **mono float samples** (approximately in `[-1, 1]`) and the **effective sample rate** of those samples. Same input coverage as `convertAudioToFormat` (FFmpeg-backed where applicable).
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `inputPath` | `string` | Absolute file path, or on Android a `content://` URI. |
-| `targetSampleRateHz` | `number` (optional) | If `> 0`, resample to this rate after decode (mono). If `0` or omitted, keep the stream’s native decoded rate. |
-
-**Returns:** `Promise<{ samples: number[]; sampleRate: number }>` — rejects with an error message on failure.
-
-**Platform notes:**
-
-- **Android**: Non-WAV formats require FFmpeg. WAV may use `WaveReader` when `targetSampleRateHz` is `0` or matches the file rate; otherwise FFmpeg is used (e.g. resampling or unsupported WAV features).
-- **iOS**: Requires FFmpeg in the build. Returns an error if FFmpeg is not linked.
-
-## Platform support matrix
-
-| Feature | Android | iOS |
-|---------|---------|-----|
-| Input: file path | Yes | Yes |
-| Input: `content://` URI | Yes (auto-copied to temp) | N/A (picker returns `file://`) |
-| Output: WAV 16 kHz mono | Yes (FFmpeg) | Yes (FFmpeg; unavailable if FFmpeg is disabled or not linked) |
-| Output: MP3 | Yes (libshine) | Yes (libshine) |
-| Output: FLAC | Yes (FFmpeg) | Yes (FFmpeg) |
-| Output: AAC / M4A | Yes (FFmpeg) | Yes (FFmpeg) |
-| Output: OPUS / WEBM / MKV | Yes (libopus) | Yes (libopus) |
-| Decode to float PCM (`decodeAudioFileToFloatSamples`) | Yes (FFmpeg; WAV fast path when applicable) | Yes (FFmpeg) |
-| Disable conversion | Yes, see [disable-ffmpeg.md](disable-ffmpeg.md) | Yes |
-
-## Content URI support (Android)
-
-On Android, both functions accept `content://` URIs. The SDK:
-
-1. Copies the URI content to a temporary cache file via `ContentResolver`.
-2. Passes the temp file to the native converter.
-3. Deletes the temp file after conversion.
-
-You do not need to copy the file yourself before calling. However, for reliability (some content providers have transient reads), copying to local cache right after the user picks a file is recommended.
-
-## STT integration example
-
-Pick file --> copy to cache --> validate --> convert to 16 kHz WAV if non-WAV --> transcribe --> cleanup.
+Convert an offline or finalized live buffer to an output file.
 
 ```ts
-import * as DocumentPicker from '@react-native-documents/picker';
-import { convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
-import { CachesDirectoryPath, copyFile, stat, unlink } from '@dr.pogodin/react-native-fs';
-
-// 1. Pick audio file
-const res = await DocumentPicker.pick({ type: [DocumentPicker.types.audio] });
-const file = Array.isArray(res) ? res[0] : res;
-const uri = file.uri;
-const name = file.name || 'audio.wav';
-const ext = name.toLowerCase().endsWith('.mp3') ? 'mp3'
-          : name.toLowerCase().endsWith('.flac') ? 'flac' : 'wav';
-
-// 2. Copy to local cache (content:// or file path)
-const cacheFileName = `stt_picked_${Date.now()}.${ext}`;
-const cachePath = uri.startsWith('content://')
-  ? await copyContentUriToCache(uri, cacheFileName)
-  : await (async () => {
-      const dest = `${CachesDirectoryPath}/${cacheFileName}`;
-      await copyFile(uri, dest);
-      return dest;
-    })();
-
-// 3. Validate
-const info = await stat(cachePath);
-if (info.size < 1024) {
-  await unlink(cachePath).catch(() => {});
-  throw new Error('File too small — may be corrupt.');
-}
-
-// 4. Convert to 16 kHz WAV if non-WAV, then transcribe
-let pathToTranscribe = cachePath;
-let tempWavPath: string | null = null;
-if (ext === 'mp3' || ext === 'flac') {
-  tempWavPath = `${CachesDirectoryPath}/stt_${Date.now()}_16k.wav`;
-  await convertAudioToWav16k(cachePath, tempWavPath);
-  pathToTranscribe = tempWavPath;
-}
-
-try {
-  const bufferId = await createOfflineAudioBufferFromFile(pathToTranscribe);
-  try {
-    const ref = await engine.transcribe(bufferId);
-    // use ref...
-  } finally {
-    await releasePipelineAudioBuffer(bufferId);
-  }
-} finally {
-  if (tempWavPath) await unlink(tempWavPath).catch(() => {});
-}
+export function convertAudioToFormat(
+  input: PipelineAudioBufferIdSource,
+  outputPath: string,
+  format: AudioOutputFormat,
+  outputSampleRateHz?: number,
+): Promise<void>;
 ```
-
-> **Tip:** WAV files can be loaded directly into an audio buffer — sherpa-onnx's `WaveReader` handles any WAV sample rate natively. Only MP3/FLAC need conversion.
-
-## TTS save example
-
-**Recommended:** encode and write in one step with **`saveAudioFromGeneration`** (native PCM → codec; no app-managed WAV temp file).
 
 ```ts
-import { CachesDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { saveAudioFromGeneration } from 'react-native-sherpa-onnx/tts';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
-// Android SAF — MP3 (requires FFmpeg)
-const savedUri = await saveAudioFromGeneration(
-  audio,
-  { kind: 'androidContent', directoryUri, filename: 'output.mp3' },
-  { format: 'mp3' }
-);
-
-// Local file — FLAC
-const path = await saveAudioFromGeneration(
-  audio,
-  { kind: 'file', path: `${CachesDirectoryPath}/out.flac` },
-  { format: 'flac' }
-);
+await convertAudioToFormat(buffer, '/tmp/out.mp3', 'mp3', 44100);
 ```
 
-**Alternative (still valid):** file-based pipeline using `react-native-sherpa-onnx/audio` — save WAV, `convertAudioToFormat`, then `copyFileToContentUri` from [`react-native-sherpa-onnx/files`](files.md) for SAF. See [TTS offline — Persistence](tts-offline.md#persistence--sharing).
+Parameters:
 
-## Disabling FFmpeg (Android)
+- `input`: `PipelineAudioBufferIdSource`
+- `outputPath`: absolute local file path
+- `format`: `AudioOutputFormat`
+- `outputSampleRateHz`: optional target sample rate (`0` or omitted = format default)
 
-If you need to avoid shipping FFmpeg (e.g. symbol clashes), see [disable-ffmpeg.md](disable-ffmpeg.md). When disabled, `convertAudioToFormat` and `convertAudioToWav16k` reject at runtime; you must use WAV or another conversion path.
+Returns:
+
+- `Promise<void>`
+
+### `convertAudioToWav16k(input, outputPath)`
+
+Shortcut for:
+
+```ts
+convertAudioToFormat(input, outputPath, 'wav', 16000)
+```
+
+Use this for STT-prepared WAV output.
+
+## Sample-rate semantics
+
+- `wav`: `0` uses buffer native rate, explicit value resamples.
+- `mp3`: `0` -> `44100`; allowed: `32000`, `44100`, `48000`.
+- `opus` / `webm` / `mkv` / `ogg`: `0` -> `48000`; allowed: `8000`, `12000`, `16000`, `24000`, `48000`.
+- `flac` / `aac` / `m4a`: `0` uses buffer native rate, explicit value resamples.
+
+## Error codes
+
+Promise rejections use conversion-specific codes:
+
+| Error code | Explanation |
+| --- | --- |
+| `CONVERSION_INVALID_ARGUMENT` | Invalid input arguments (e.g. malformed buffer id or invalid path input). |
+| `CONVERSION_BUFFER_NOT_FOUND` | The provided buffer id/reference does not exist in the native registry. |
+| `CONVERSION_BUFFER_NOT_FINALIZED` | A live buffer is still recording and must be finalized before conversion. |
+| `CONVERSION_BUFFER_EMPTY` | The resolved input buffer contains no samples. |
+| `CONVERSION_UNSUPPORTED_FORMAT` | The requested output format is not supported by the conversion pipeline. |
+| `CONVERSION_INVALID_SAMPLE_RATE` | The provided `outputSampleRateHz` is invalid for the selected output format. |
+| `CONVERSION_CONVERT_ERROR` | Native conversion/encoding failed during processing. |
+| `CONVERSION_FILE_WRITE_ERROR` | Output file could not be created or written. |
+
+Use `ConversionErrorCode` from `react-native-sherpa-onnx/audio` for stable comparisons.
+
+## Platform notes
+
+- Android and iOS both support all documented output formats through the same conversion API.
+- FFmpeg is required for all conversions, including WAV.
+- If FFmpeg is disabled, conversion calls reject at runtime.
+
+## Output-path rules
+
+- `outputPath` must be an absolute local file path.
+- Parent directory must already exist.
+- Existing file may be overwritten.
+- `content://` is not accepted as `outputPath`.
+
+For Android SAF:
+
+1. convert to local path
+2. copy with `copyFileToContentUri` from `react-native-sherpa-onnx/files`
+
+## Related
+
+- [docs/audiobuffer-offline.md](audiobuffer-offline.md)
+- [docs/audiobuffer-streaming.md](audiobuffer-streaming.md)
+- [docs/files.md](files.md)
+- [docs/disable-ffmpeg.md](disable-ffmpeg.md)

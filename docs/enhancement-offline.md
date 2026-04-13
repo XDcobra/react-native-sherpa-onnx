@@ -4,7 +4,7 @@ On-device batch speech denoising with a **pipeline-first** API:
 
 - **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — populated noisy PCM (file-backed or in-memory).
 - **Output:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — empty buffer at the denoiser sample rate (`createEmptyOfflineAudioBuffer`); **`enhance`** writes denoised PCM once.
-- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut)`** (plus `getSampleRate` / `destroy`). There is **no** JS-side API that returns denoised samples; read the result from **`audioOut`** through **audiobuffer** (`getPipelineAudioBufferInfo`, `saveOfflineAudioBufferToWav`, etc.).
+- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut)`** (plus `getSampleRate` / `destroy`). There is **no** JS-side API that returns denoised samples; read the result from **`audioOut`** through buffer info and conversion helpers.
 
 Import path: `react-native-sherpa-onnx/enhancement`
 
@@ -50,9 +50,9 @@ import {
 import {
   createOfflineAudioBufferFromFile,
   createEmptyOfflineAudioBuffer,
-  saveOfflineAudioBufferToWav,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { type: 'file' as const, path: '/absolute/path/to/enhancement-model-dir' };
 
@@ -75,7 +75,7 @@ try {
   await enhancement.enhance(audioIn, audioOut);
 
   // Save denoised audio to WAV
-  await saveOfflineAudioBufferToWav(audioOut, '/absolute/path/out.wav');
+  await convertAudioToFormat(audioOut, '/absolute/path/out.wav', 'wav');
 
   // Release buffers
   await releasePipelineAudioBuffer(audioIn);
@@ -93,7 +93,7 @@ try {
 | --- | --- |
 | **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
 | **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
-| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, save via **`saveOfflineAudioBufferToWav()`**. |
+| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `convertAudioToFormat(...)`. |
 
 ---
 
@@ -186,7 +186,7 @@ await enhancement.enhance(audioIn, audioOut);
 
 - **`audioIn`:** populated **`OfflineAudioBuffer`** (file-backed or RAM); must be **mono** at a rate the denoiser accepts.
 - **`audioOut`:** **empty** offline buffer with **`sampleRate`** matching the denoiser's rate (from **`getSampleRate()`**).
-- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** or save via **`saveOfflineAudioBufferToWav()`**.
+- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `convertAudioToFormat(...)`.
 
 ---
 
@@ -234,9 +234,9 @@ See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer
 import {
   createEmptyOfflineAudioBuffer,
   getPipelineAudioBufferInfo,
-  saveOfflineAudioBufferToWav,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 ```
 
 See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
@@ -260,21 +260,21 @@ Streaming types (**`StreamingEnhancementEngine`**, **`StreamingEnhancementInitia
 
 ---
 
-## Error code quick table
+## Error codes
 
 Typical **promise rejection `code`** strings from the native layer. Message text varies; use **`code`** for branching when catching.
 
-| Code | Typical reason |
+| Error code | Explanation |
 | --- | --- |
-| `DETECT_ERROR` | Detection failed or returned null (Android) |
-| `ENHANCEMENT_INIT_ERROR` | Missing `instanceId` / `modelDir`, detection failed, unsupported model type, native init error |
-| `ENHANCEMENT_ERROR` | Instance not found, denoise run failed (generic) |
-| `ENHANCEMENT_BUFFER_NOT_FOUND` | Unknown or released audio buffer id |
-| `ENHANCEMENT_BUFFER_KIND_MISMATCH` | Non-offline buffer passed to offline enhance |
-| `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer has no samples |
-| `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty (same contract as TTS `synthesize`) |
+| `DETECT_ERROR` | Model detection failed or returned no usable result. |
+| `ENHANCEMENT_INIT_ERROR` | Engine initialization failed (e.g. invalid model path/type or native init failure). |
+| `ENHANCEMENT_ERROR` | Generic runtime failure during enhancement or instance handling. |
+| `ENHANCEMENT_BUFFER_NOT_FOUND` | Input/output audio buffer id was not found (missing or already released). |
+| `ENHANCEMENT_BUFFER_KIND_MISMATCH` | A non-offline buffer was passed to offline `enhance(...)`. |
+| `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
+| `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty before calling `enhance(...)`. |
 
-For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md — Error code quick table](enhancement-streaming.md#error-code-quick-table).
+For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md](enhancement-streaming.md).
 
 ---
 

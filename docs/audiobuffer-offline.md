@@ -29,7 +29,7 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 ### Offline buffer
 
-- `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`, `saveOfflineAudioBufferToWav`
+- `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`). Buffer parameters use **`OfflineAudioBufferIdSource`** or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
 
@@ -97,17 +97,16 @@ function createOfflineAudioBufferFromSamples(
 const offline = await createOfflineAudioBufferFromSamples([0.1, 0.2, 0.3], 16000, 1);
 ```
 
-#### `saveOfflineAudioBufferToWav(buffer, outputPath)`
+#### Convert offline buffer to file
+
+Use the audio conversion module for all output formats, including WAV:
 
 ```ts
-function saveOfflineAudioBufferToWav(
-  buffer: OfflineAudioBufferIdSource,
-  outputPath: string
-): Promise<void>;
-```
+import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
 
-```ts
-await saveOfflineAudioBufferToWav(offline, '/tmp/offline.wav');
+await convertAudioToFormat(offline, '/tmp/offline.wav', 'wav');
+await convertAudioToWav16k(offline, '/tmp/offline_16k.wav');
+await convertAudioToFormat(offline, '/tmp/offline.flac', 'flac');
 ```
 
 ### Conversion: Offline buffer <--> Online buffer

@@ -169,7 +169,7 @@ await releasePipelineAudioBuffer(live);
 - `createLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
 - `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
 - `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
-- `getLiveAudioBufferSamplesSlice`, `saveLiveAudioBufferToWav`
+- `getLiveAudioBufferSamplesSlice`
 - Callbacks: `onFramesAppended` / `onError` on `createLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
@@ -298,17 +298,16 @@ function getLiveAudioBufferSamplesSlice(
 const chunk = await getLiveAudioBufferSamplesSlice(live, 0, 320);
 ```
 
-#### `saveLiveAudioBufferToWav(liveBuffer, outputPath)`
+#### Convert finalized live buffer to file
+
+After `finalizeLiveAudioBuffer`, use `react-native-sherpa-onnx/audio`:
 
 ```ts
-function saveLiveAudioBufferToWav(
-  liveBuffer: LiveAudioBufferIdSource,
-  outputPath: string
-): Promise<void>;
-```
+import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
 
-```ts
-await saveLiveAudioBufferToWav(live, '/tmp/live.wav');
+await finalizeLiveAudioBuffer(live);
+await convertAudioToFormat(live, '/tmp/live.opus', 'opus', 16000);
+await convertAudioToWav16k(live, '/tmp/live_16k.wav');
 ```
 
 ### Conversion: Online buffer <--> Offline buffer
