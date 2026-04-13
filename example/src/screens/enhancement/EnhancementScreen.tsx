@@ -34,10 +34,10 @@ import {
 import {
   createOfflineAudioBufferFromFile,
   createEmptyOfflineAudioBuffer,
-  saveOfflineAudioBufferToWav,
   releasePipelineAudioBuffer,
   getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -175,9 +175,10 @@ export default function EnhancementScreen() {
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       const saveBufferToPath = async (path: string) => {
-        await saveOfflineAudioBufferToWav(
+        await convertAudioToFormat(
           lastEnhancedAudio.outputBufferId,
-          path
+          path,
+          'wav'
         );
       };
 
@@ -464,7 +465,7 @@ export default function EnhancementScreen() {
         const outSr = outInfo.sampleRate ?? sr;
         const sec = outSr > 0 ? (n / outSr).toFixed(2) : '?';
         const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-        await saveOfflineAudioBufferToWav(outputBuf.bufferId, outPath);
+        await convertAudioToFormat(outputBuf.bufferId, outPath, 'wav');
         // Release input buffer (output kept for save feature)
         await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
         setOutputWavPath(outPath);

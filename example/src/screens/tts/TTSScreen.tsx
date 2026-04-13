@@ -32,11 +32,10 @@ import type {
 } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyOfflineAudioBuffer,
-  createOfflineAudioBufferFromSamples,
+  createOfflineAudioBufferFromFile,
   createLiveAudioBuffer,
   createOfflineAudioBufferFromLive,
   finalizeLiveAudioBuffer,
-  saveOfflineAudioBufferToWav,
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
@@ -75,7 +74,7 @@ import { AudioContext } from 'react-native-audio-api';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { decodeAudioFileToFloatSamples } from 'react-native-sherpa-onnx/audio';
+import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 import {
   loadAudioAsArrayBuffer,
   stopWebAudioPlayback,
@@ -95,6 +94,13 @@ type GeneratedResult = {
   bufferId: string;
   sampleRate: number;
   numSamples: number;
+};
+
+type ReferenceAudioState = {
+  buffer: OfflineAudioBufferRef;
+  sampleRate: number;
+  numSamples: number;
+  ownedTempPath: string | null;
 };
 
 export default function TTSScreen() {
@@ -148,10 +154,8 @@ export default function TTSScreen() {
   const [numSteps, setNumSteps] = useState('');
   const [extraOptions, setExtraOptions] = useState('');
   const [referenceText, setReferenceText] = useState('');
-  const [referenceAudio, setReferenceAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [referenceAudio, setReferenceAudio] =
+    useState<ReferenceAudioState | null>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(
     null
   );
@@ -179,6 +183,7 @@ export default function TTSScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
+  const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
   const streamPipelineRef = useRef<TtsPipelineHandle | null>(null);
   const streamTextBufferIdRef = useRef<string | null>(null);
@@ -358,6 +363,27 @@ export default function TTSScreen() {
     setIsPlaying(false);
   }, []);
 
+  const releaseReferenceAudio = useCallback(
+    async (refAudio: ReferenceAudioState | null) => {
+      if (!refAudio) return;
+      await releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(
+        () => {}
+      );
+      if (refAudio.ownedTempPath) {
+        await unlink(refAudio.ownedTempPath).catch(() => {});
+      }
+    },
+    []
+  );
+
+  const clearReferenceAudio = useCallback(async () => {
+    const previous = referenceAudioRef.current;
+    referenceAudioRef.current = null;
+    setReferenceAudio(null);
+    setReferenceFileName(null);
+    await releaseReferenceAudio(previous);
+  }, [releaseReferenceAudio]);
+
   // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
@@ -385,6 +411,14 @@ export default function TTSScreen() {
       if (streamingEngine) {
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
+      }
+      const refAudio = referenceAudioRef.current;
+      referenceAudioRef.current = null;
+      if (refAudio) {
+        releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(() => {});
+        if (refAudio.ownedTempPath) {
+          unlink(refAudio.ownedTempPath).catch(() => {});
+        }
       }
     };
   }, []);
@@ -452,7 +486,6 @@ export default function TTSScreen() {
 
   const handlePickReferenceWav = useCallback(async () => {
     setError(null);
-    let tempCopiedPath: string | null = null;
     try {
       const picked = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
@@ -465,13 +498,35 @@ export default function TTSScreen() {
         return;
       }
       let path = uri.replace(/^file:\/\//, '');
+      let ownedTempPath: string | null = null;
       if (uri.startsWith('content://')) {
         path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
-        tempCopiedPath = path;
+        ownedTempPath = path;
       }
-      const { samples, sampleRate } = await decodeAudioFileToFloatSamples(path);
-      setReferenceAudio({ samples, sampleRate });
+
+      const refBuffer = await createOfflineAudioBufferFromFile(path);
+      const info = await getPipelineAudioBufferInfo(refBuffer.bufferId);
+      const numSamples = info.numSamples ?? 0;
+      if (numSamples <= 0 || info.sampleRate <= 0) {
+        await releasePipelineAudioBuffer(refBuffer.bufferId).catch(() => {});
+        if (ownedTempPath) {
+          await unlink(ownedTempPath).catch(() => {});
+        }
+        setError('Reference audio is empty or invalid');
+        return;
+      }
+
+      const nextRef: ReferenceAudioState = {
+        buffer: refBuffer,
+        sampleRate: info.sampleRate,
+        numSamples,
+        ownedTempPath,
+      };
+      const previousRef = referenceAudioRef.current;
+      referenceAudioRef.current = nextRef;
+      setReferenceAudio(nextRef);
       setReferenceFileName(name);
+      await releaseReferenceAudio(previousRef);
     } catch (err: unknown) {
       if (
         (DocumentPicker as { isCancel?: (e: unknown) => boolean }).isCancel?.(
@@ -483,16 +538,8 @@ export default function TTSScreen() {
       setError(
         err instanceof Error ? err.message : 'Failed to load reference audio'
       );
-    } finally {
-      if (tempCopiedPath) {
-        try {
-          await unlink(tempCopiedPath);
-        } catch {
-          /* ignore */
-        }
-      }
     }
-  }, []);
+  }, [releaseReferenceAudio]);
 
   const enqueueStreamingText = useCallback((text: string) => {
     const lastText = streamLastTextRef.current;
@@ -605,8 +652,7 @@ export default function TTSScreen() {
     setNumSteps('');
     setExtraOptions('');
     setReferenceText('');
-    setReferenceAudio(null);
-    setReferenceFileName(null);
+    await clearReferenceAudio();
     if (streaming) {
       resetStreamingState();
     }
@@ -759,7 +805,7 @@ export default function TTSScreen() {
 
     const hasValidRefAudioForClone =
       referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
+      referenceAudio.numSamples > 0 &&
       referenceAudio.sampleRate > 0;
     if (
       selectedModelType === 'zipvoice' &&
@@ -826,16 +872,13 @@ export default function TTSScreen() {
       let refAudioBuf: OfflineAudioBufferRef | undefined;
       const hasRefAudio =
         referenceAudio != null &&
-        referenceAudio.samples.length > 0 &&
+        referenceAudio.numSamples > 0 &&
         referenceAudio.sampleRate > 0;
       if (
         hasRefAudio &&
         (selectedModelType === 'zipvoice' || selectedModelType === 'pocket')
       ) {
-        refAudioBuf = await createOfflineAudioBufferFromSamples(
-          referenceAudio.samples,
-          referenceAudio.sampleRate
-        );
+        refAudioBuf = referenceAudio.buffer;
         if (selectedModelType === 'zipvoice') {
           options.voiceClone = {
             kind: 'zipvoice',
@@ -876,11 +919,6 @@ export default function TTSScreen() {
       } finally {
         // Release text buffer (audio buffer kept for save/playback)
         await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
-        if (refAudioBuf) {
-          await releasePipelineAudioBuffer(refAudioBuf.bufferId).catch(
-            () => {}
-          );
-        }
       }
     } catch (err) {
       console.error('TTS Generation error:', err);
@@ -935,7 +973,7 @@ export default function TTSScreen() {
     if (Platform.OS === 'android') {
       const hasValidRef =
         referenceAudio != null &&
-        referenceAudio.samples.length > 0 &&
+        referenceAudio.numSamples > 0 &&
         referenceAudio.sampleRate > 0;
       if (selectedModelType === 'zipvoice' && hasValidRef) {
         setError(
@@ -1132,7 +1170,7 @@ export default function TTSScreen() {
 
   /** Save a GeneratedResult to a WAV file path. */
   const saveResultToWav = async (audio: GeneratedResult, path: string) => {
-    await saveOfflineAudioBufferToWav(audio.bufferId, path);
+    await convertAudioToFormat(audio.bufferId, path, 'wav');
   };
 
   const saveAudioWithData = async (audio: GeneratedResult) => {
@@ -1370,8 +1408,7 @@ export default function TTSScreen() {
       setNumSteps('');
       setExtraOptions('');
       setReferenceText('');
-      setReferenceAudio(null);
-      setReferenceFileName(null);
+      await clearReferenceAudio();
       setError(null);
       Alert.alert('Success', 'TTS model released');
     } catch (err) {
@@ -1709,13 +1746,12 @@ export default function TTSScreen() {
                       <Text style={styles.resultText} numberOfLines={2}>
                         Loaded: {referenceFileName ?? 'reference.wav'} (
                         {referenceAudio.sampleRate} Hz,{' '}
-                        {referenceAudio.samples.length} samples)
+                        {referenceAudio.numSamples} samples)
                       </Text>
                       <TouchableOpacity
                         style={styles.cancelStreamButton}
                         onPress={() => {
-                          setReferenceAudio(null);
-                          setReferenceFileName(null);
+                          void clearReferenceAudio();
                         }}
                       >
                         <Text style={styles.generateButtonText}>
