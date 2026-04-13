@@ -68,7 +68,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
-  private val filesHelper = SherpaOnnxFilesHelper(reactApplicationContext)
+  private val fileIOHelper = com.sherpaonnx.fileio.FileIOHelper(reactApplicationContext)
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
@@ -604,14 +604,23 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Pipeline Audio Buffers ====================
 
-  override fun createOfflineAudioBufferFromFile(sourcePath: String, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
+  override fun createOfflineAudioBufferFromSource(source: ReadableMap, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
     try {
+      // Resolve FileSource to a local file path (copies content:// streams to temp if needed)
+      val file = fileIOHelper.resolveSourceToFilePath(source)
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFile(
-        sourcePath,
+        file.absolutePath,
         targetSampleRateHz?.toInt(),
         forceMono
       )
+      // Clean up temp file if it was created for a stream source
+      val kind = source.getString("kind")
+      if (kind == "contentUri" && file.absolutePath.startsWith(reactApplicationContext.cacheDir.absolutePath + "/fileio_tmp_")) {
+        file.delete()
+      }
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: Exception) {
@@ -757,14 +766,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun convertPipelineAudioBufferToFormat(
+  override fun convertPipelineAudioToDestination(
     bufferId: String,
-    outputPath: String,
+    destination: ReadableMap,
     format: String,
-    outputSampleRateHz: Double?,
+    outputSampleRateHz: Double,
+    operationId: String,
     promise: Promise
   ) {
-    val rate = outputSampleRateHz?.toInt() ?: 0
+    val rate = outputSampleRateHz.toInt()
 
     // Format validation
     val supportedFormats = setOf("wav", "mp3", "flac", "aac", "m4a", "opus", "webm", "mkv", "ogg")
@@ -788,15 +798,57 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
 
     try {
+      // Resolve destination to determine output path
+      val writeHandle = fileIOHelper.resolveDestination(destination, overwrite = true, createParentDirectories = false)
+      val outputPath: String
+      val outputKind: String
+      var tmpPath: String? = null
+
+      when (writeHandle) {
+        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FilePath -> {
+          outputPath = writeHandle.file.absolutePath
+          outputKind = "fs"
+        }
+        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
+          // For stream destinations, encode to temp file then copy
+          tmpPath = java.io.File(reactApplicationContext.cacheDir, "fileio_conv_${java.util.UUID.randomUUID()}.$fmt").absolutePath
+          outputPath = tmpPath
+          outputKind = "contentUri"
+        }
+      }
+
+      // Perform conversion to local path
       if (bufferId.startsWith("off_")) {
         convertOfflineBuffer(bufferId, outputPath, fmt, rate)
       } else if (bufferId.startsWith("live_")) {
         convertLiveBuffer(bufferId, outputPath, fmt, rate)
       } else {
+        writeHandle.close()
         promise.reject("CONVERSION_INVALID_ARGUMENT", "Invalid buffer ID prefix: expected off_ or live_")
         return
       }
-      promise.resolve(null)
+
+      // If we used a temp path, copy to the stream destination
+      val finalPath: String
+      if (tmpPath != null && writeHandle is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream) {
+        java.io.FileInputStream(java.io.File(tmpPath)).use { input ->
+          com.sherpaonnx.fileio.FileIOStreamCopy.copy(input, writeHandle.outputStream)
+        }
+        writeHandle.close()
+        java.io.File(tmpPath).delete()
+        finalPath = writeHandle.resultUri.toString()
+      } else {
+        writeHandle.close()
+        finalPath = outputPath
+      }
+
+      val result = com.facebook.react.bridge.Arguments.createMap().apply {
+        putString("outputKind", outputKind)
+        putString("outputPath", if (tmpPath != null) (writeHandle as? com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream)?.resultUri?.toString() ?: finalPath else finalPath)
+      }
+      promise.resolve(result)
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
       val code = if (e.message?.contains("empty", ignoreCase = true) == true)
         "CONVERSION_BUFFER_EMPTY" else "CONVERSION_BUFFER_NOT_FOUND"
@@ -1727,39 +1779,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /**
-   * Copy a local file into a document under a SAF directory URI (format-agnostic).
-   */
-  override fun copyFileToContentUri(
-    filePath: String,
-    directoryUri: String,
-    filename: String,
-    mimeType: String,
-    promise: Promise
+  // ==================== File I/O ====================
+
+  override fun copyFile(
+    source: ReadableMap,
+    destination: ReadableMap,
+    overwrite: Boolean,
+    createParentDirectories: Boolean,
+    operationId: String,
+    promise: Promise,
   ) {
-    filesHelper.copyFileToContentUri(filePath, directoryUri, filename, mimeType, promise)
+    fileIOHelper.copyFile(source, destination, overwrite, createParentDirectories, operationId, promise)
   }
 
-  override fun saveTextToContentUri(
+  override fun saveText(
     text: String,
-    directoryUri: String,
-    filename: String,
+    destination: ReadableMap,
+    encoding: String,
+    overwrite: Boolean,
+    promise: Promise,
+  ) {
+    fileIOHelper.saveText(text, destination, encoding, overwrite, promise)
+  }
+
+  override fun shareFile(
+    source: ReadableMap,
     mimeType: String,
-    promise: Promise
+    title: String,
+    promise: Promise,
   ) {
-    filesHelper.saveTextToContentUri(text, directoryUri, filename, mimeType, promise)
+    fileIOHelper.shareFile(source, mimeType, title, promise)
   }
 
-  override fun copyContentUriToCache(
-    fileUri: String,
-    filename: String,
-    promise: Promise
-  ) {
-    filesHelper.copyContentUriToCache(fileUri, filename, promise)
-  }
-
-  override fun shareAudioFile(fileUri: String, mimeType: String, promise: Promise) {
-    filesHelper.shareAudioFile(fileUri, mimeType, promise)
+  override fun cancelFileIO(operationId: String, promise: Promise) {
+    fileIOHelper.cancelFileIO(operationId, promise)
   }
 
   /**

@@ -15,6 +15,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import "audio/SherpaOnnxAudioConvert.h"
+#import "fileio/FileIOResolver.h"
+#import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "PaLiveEntry.h"
 #include <mutex>
@@ -309,24 +311,56 @@ static void paMicAQInputCallback(void *inUserData,
 
 @implementation SherpaOnnx (PipelineAudio)
 
-// ---- Offline: from file ----
+// ---- Offline: from source ----
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
-- (void)createOfflineAudioBufferFromFile:(NSString *)sourcePath
+- (void)createOfflineAudioBufferFromSource:(NSDictionary *)source
                       targetSampleRateHz:(NSNumber *)targetSampleRateHz
                                forceMono:(NSNumber *)forceMono
                                  resolve:(RCTPromiseResolveBlock)resolve
                                   reject:(RCTPromiseRejectBlock)reject
 {
   @try {
+    // Resolve FileSource to a local file path
+    NSString *errCode = nil, *errMsg = nil;
+    FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+    if (!readHandle) {
+      reject(errCode, errMsg, nil);
+      return;
+    }
+
+    NSString *sourcePath = nil;
+    NSString *tmpPath = nil;
+    if (readHandle.isFilePath) {
+      sourcePath = readHandle.filePath;
+    } else {
+      // Stream → copy to temp
+      tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                 [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
+      NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+      [out open];
+      [readHandle.stream open];
+      uint8_t buf[65536];
+      NSInteger bytesRead;
+      while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+        [out write:buf maxLength:bytesRead];
+      }
+      [out close];
+      sourcePath = tmpPath;
+    }
+
     std::string path = [sourcePath UTF8String];
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:sourcePath]) {
+      [readHandle cleanup];
+      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
       reject(kPAErrFileNotFound, @"Audio file does not exist", nil);
       return;
     }
     NSDictionary *attrs = [fm attributesOfItemAtPath:sourcePath error:nil];
     long long fileSize = [attrs[NSFileSize] longLongValue];
     if (fileSize == 0) {
+      [readHandle cleanup];
+      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
       reject(kPAErrInvalidArgument, @"Audio file is empty", nil);
       return;
     }
@@ -337,10 +371,15 @@ static void paMicAQInputCallback(void *inUserData,
     entry->channelCount = 1;
 
     int targetRate = targetSampleRateHz ? [targetSampleRateHz intValue] : 0;
-    if (targetRate < 0) { reject(kPAErrInvalidArgument, @"targetSampleRateHz must be > 0", nil); return; }
+    if (targetRate < 0) {
+      [readHandle cleanup];
+      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+      reject(kPAErrInvalidArgument, @"targetSampleRateHz must be > 0", nil);
+      return;
+    }
 
     // For large files without resampling, try file-backed
-    if (fileSize > kPaFileBackedThreshold && targetRate == 0) {
+    if (fileSize > kPaFileBackedThreshold && targetRate == 0 && !tmpPath) {
       PaWavHeader hdr;
       if (pa_parseWavHeader(path, hdr)) {
         entry->isFileBacked = true;
@@ -352,6 +391,7 @@ static void paMicAQInputCallback(void *inUserData,
           std::lock_guard<std::mutex> lock(g_pa_mutex);
           g_pa_offline[bufferId] = entry;
         }
+        [readHandle cleanup];
         resolve(entry->toDict());
         return;
       }
@@ -359,6 +399,11 @@ static void paMicAQInputCallback(void *inUserData,
 
     // In-memory via sherpa-onnx ReadWave
     auto wave = sherpa_onnx::cxx::ReadWave(path);
+
+    // Clean up temp and security-scoped access
+    [readHandle cleanup];
+    if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+
     if (wave.samples.empty()) {
       reject(kPAErrFileReadError, @"Could not read audio samples", nil);
       return;
@@ -658,15 +703,16 @@ static void paMicAQInputCallback(void *inUserData,
   }
 }
 
-// ---- Convert pipeline buffer to format ----
-- (void)convertPipelineAudioBufferToFormat:(NSString *)bufferId
-                                outputPath:(NSString *)outputPath
-                                    format:(NSString *)format
-                        outputSampleRateHz:(NSNumber *)outputSampleRateHz
-                                   resolve:(RCTPromiseResolveBlock)resolve
-                                    reject:(RCTPromiseRejectBlock)reject
+// ---- Convert pipeline buffer to destination ----
+- (void)convertPipelineAudioToDestination:(NSString *)bufferId
+                              destination:(NSDictionary *)destination
+                                   format:(NSString *)format
+                       outputSampleRateHz:(double)outputSampleRateHz
+                              operationId:(NSString *)operationId
+                                  resolve:(RCTPromiseResolveBlock)resolve
+                                   reject:(RCTPromiseRejectBlock)reject
 {
-  int rate = outputSampleRateHz ? [outputSampleRateHz intValue] : 0;
+  int rate = (int)outputSampleRateHz;
   std::string fmt = [[format lowercaseString] UTF8String];
 
   // Format validation
@@ -693,6 +739,19 @@ static void paMicAQInputCallback(void *inUserData,
     return;
   }
 
+  // Resolve destination
+  NSString *errCode = nil, *errMsg = nil;
+  FileIOWriteHandle *wh = [FileIOResolver resolveDestination:destination overwrite:YES
+                                     createParentDirectories:NO error:&errCode message:&errMsg];
+  if (!wh) {
+    reject(errCode, errMsg, nil);
+    return;
+  }
+
+  NSString *outputPath = wh.filePath;
+  NSString *outputKind = @"fs";
+  NSString *resultPath = wh.resultPath;
+
   std::string bid = [bufferId UTF8String];
 
   std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -701,10 +760,12 @@ static void paMicAQInputCallback(void *inUserData,
   if (bid.rfind("off_", 0) == 0) {
     auto it = g_pa_offline.find(bid);
     if (it == g_pa_offline.end()) {
+      [wh cleanup];
       reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Offline buffer not found", nil); return;
     }
     auto &entry = it->second;
     if (entry->numSamples() == 0) {
+      [wh cleanup];
       reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
     }
 
@@ -716,6 +777,7 @@ static void paMicAQInputCallback(void *inUserData,
                                                  format:[NSString stringWithUTF8String:fmt.c_str()]
                                      outputSampleRateHz:rate
                                                   error:&error]) {
+        [wh cleanup];
         reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
         return;
       }
@@ -728,11 +790,13 @@ static void paMicAQInputCallback(void *inUserData,
                                                format:[NSString stringWithUTF8String:fmt.c_str()]
                                    outputSampleRateHz:rate
                                                 error:&error]) {
+        [wh cleanup];
         reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
         return;
       }
     }
-    resolve(nil);
+    [wh cleanup];
+    resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
     return;
   }
 
@@ -740,13 +804,16 @@ static void paMicAQInputCallback(void *inUserData,
   if (bid.rfind("live_", 0) == 0) {
     auto it = g_pa_live.find(bid);
     if (it == g_pa_live.end()) {
+      [wh cleanup];
       reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Live buffer not found", nil); return;
     }
     auto &entry = it->second;
     if (entry->state != PaLiveEntry::FINISHED) {
+      [wh cleanup];
       reject(@"CONVERSION_BUFFER_NOT_FINALIZED", @"Live buffer must be finalized before conversion", nil); return;
     }
     if (entry->totalSamplesWritten == 0) {
+      [wh cleanup];
       reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
     }
 
@@ -758,6 +825,7 @@ static void paMicAQInputCallback(void *inUserData,
                                                  format:[NSString stringWithUTF8String:fmt.c_str()]
                                      outputSampleRateHz:rate
                                                   error:&error]) {
+        [wh cleanup];
         reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
         return;
       }
@@ -771,14 +839,17 @@ static void paMicAQInputCallback(void *inUserData,
                                                format:[NSString stringWithUTF8String:fmt.c_str()]
                                    outputSampleRateHz:rate
                                                 error:&error]) {
+        [wh cleanup];
         reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
         return;
       }
     }
-    resolve(nil);
+    [wh cleanup];
+    resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
     return;
   }
 
+  [wh cleanup];
   reject(@"CONVERSION_INVALID_ARGUMENT", @"Invalid buffer ID prefix: expected off_ or live_", nil);
 }
 
