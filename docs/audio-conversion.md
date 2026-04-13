@@ -3,14 +3,16 @@
 This module converts pipeline audio buffers to encoded audio files.
 
 The conversion input is always a pipeline buffer id/reference (offline or finalized live), not a file path.
+The output is a **`FileDestination`** descriptor (from `react-native-sherpa-onnx/fileio`) — filesystem path, app directory, content URI, SAF tree, or security-scoped URL.
 
 ## Overview
 
 Exports:
 
-- `convertAudioToFormat(input, outputPath, format, outputSampleRateHz?)`
-- `convertAudioToWav16k(input, outputPath)`
+- `convertAudioToFormat(input, output, format, options?)` → `Promise<ResolvedFileRef>`
+- `convertAudioToWav16k(input, output)` → `Promise<ResolvedFileRef>`
 - `AudioOutputFormat`
+- `AudioConversionOptions`
 - `ConversionErrorCode`
 - `ConversionErrorCodeValue`
 
@@ -18,8 +20,10 @@ Key behavior:
 
 - Conversion uses FFmpeg for all formats, including WAV.
 - Input accepts `PipelineAudioBufferIdSource` (buffer ref, handle, info, or raw id string).
+- Output accepts `FileDestination` (see [fileio.md](fileio.md) for kinds).
 - Live buffers must be finalized before conversion.
 - Buffer contents are not modified by conversion.
+- Returns `ResolvedFileRef` describing the written output location.
 
 ## Examples
 
@@ -29,9 +33,10 @@ Key behavior:
 import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
-const buf = await createOfflineAudioBufferFromFile('/tmp/in.wav');
+const buf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/in.wav' });
 try {
-  await convertAudioToFormat(buf, '/tmp/out.mp3', 'mp3', 44100);
+  const ref = await convertAudioToFormat(buf, { kind: 'fs', path: '/tmp/out.mp3' }, 'mp3', { outputSampleRateHz: 44100 });
+  console.log('Written to:', ref);
 } finally {
   await releasePipelineAudioBuffer(buf).catch(() => {});
 }
@@ -56,7 +61,7 @@ await stopMicToLiveAudioBuffer();
 await finalizeLiveAudioBuffer(live);
 
 try {
-  await convertAudioToFormat(live, '/tmp/recording.flac', 'flac');
+  await convertAudioToFormat(live, { kind: 'fs', path: '/tmp/recording.flac' }, 'flac');
 } finally {
   await releasePipelineAudioBuffer(live).catch(() => {});
 }
@@ -67,47 +72,78 @@ try {
 ```ts
 import { convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
 
-await convertAudioToWav16k(buffer, '/tmp/stt_input.wav');
+await convertAudioToWav16k(buffer, { kind: 'fs', path: '/tmp/stt_input.wav' });
+```
+
+### Encode to SAF directory (Android)
+
+```ts
+const ref = await convertAudioToFormat(
+  buffer,
+  { kind: 'contentTree', treeUri: safDirUri, displayName: 'speech.wav' },
+  'wav'
+);
+console.log(ref); // { kind: 'contentUri', uri: 'content://...' }
+```
+
+### Progress & cancellation
+
+```ts
+const controller = new AbortController();
+
+const ref = await convertAudioToFormat(
+  buffer,
+  { kind: 'fs', path: '/tmp/out.mp3' },
+  'mp3',
+  {
+    outputSampleRateHz: 44100,
+    signal: controller.signal,
+    onProgress: (e) => console.log(`${e.percent}%`),
+  }
+);
 ```
 
 ## API reference
 
-### `convertAudioToFormat(input, outputPath, format, outputSampleRateHz?)`
+### `convertAudioToFormat(input, output, format, options?)`
 
-Convert an offline or finalized live buffer to an output file.
+Convert an offline or finalized live buffer to an encoded audio file at the given destination.
 
 ```ts
 export function convertAudioToFormat(
   input: PipelineAudioBufferIdSource,
-  outputPath: string,
+  output: FileDestination,
   format: AudioOutputFormat,
-  outputSampleRateHz?: number,
-): Promise<void>;
+  options?: AudioConversionOptions,
+): Promise<ResolvedFileRef>;
 ```
 
 ```ts
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
-await convertAudioToFormat(buffer, '/tmp/out.mp3', 'mp3', 44100);
+const ref = await convertAudioToFormat(buffer, { kind: 'fs', path: '/tmp/out.mp3' }, 'mp3', { outputSampleRateHz: 44100 });
 ```
 
 Parameters:
 
 - `input`: `PipelineAudioBufferIdSource`
-- `outputPath`: absolute local file path
+- `output`: `FileDestination` — where to write the encoded file
 - `format`: `AudioOutputFormat`
-- `outputSampleRateHz`: optional target sample rate (`0` or omitted = format default)
+- `options`: `AudioConversionOptions` (optional)
+  - `outputSampleRateHz?: number` — target sample rate (`0` or omitted = format default)
+  - `signal?: AbortSignal` — cancel the operation
+  - `onProgress?: (event: FileIOProgressEvent) => void` — progress updates
 
 Returns:
 
-- `Promise<void>`
+- `Promise<ResolvedFileRef>` — `{ kind: 'fs', path }` or `{ kind: 'contentUri', uri }`
 
-### `convertAudioToWav16k(input, outputPath)`
+### `convertAudioToWav16k(input, output)`
 
 Shortcut for:
 
 ```ts
-convertAudioToFormat(input, outputPath, 'wav', 16000)
+convertAudioToFormat(input, output, 'wav', { outputSampleRateHz: 16000 })
 ```
 
 Use this for STT-prepared WAV output.
@@ -142,21 +178,15 @@ Use `ConversionErrorCode` from `react-native-sherpa-onnx/audio` for stable compa
 - FFmpeg is required for all conversions, including WAV.
 - If FFmpeg is disabled, conversion calls reject at runtime.
 
-## Output-path rules
+## Output destination
 
-- `outputPath` must be an absolute local file path.
-- Parent directory must already exist.
-- Existing file may be overwritten.
-- `content://` is not accepted as `outputPath`.
+`output` accepts any `FileDestination` kind. For stream-based destinations (Android `contentUri`, `contentTree`), the native side encodes to a temp file first, then stream-copies to the destination.
 
-For Android SAF:
-
-1. convert to local path
-2. copy with `copyFileToContentUri` from `react-native-sherpa-onnx/files`
+See [fileio.md](fileio.md) for platform support per kind.
 
 ## Related
 
 - [docs/audiobuffer-offline.md](audiobuffer-offline.md)
 - [docs/audiobuffer-streaming.md](audiobuffer-streaming.md)
-- [docs/files.md](files.md)
+- [docs/fileio.md](fileio.md)
 - [docs/disable-ffmpeg.md](disable-ffmpeg.md)

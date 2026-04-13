@@ -68,19 +68,22 @@ await releasePipelineAudioBuffer(offline);
 
 ### Offline buffer
 
-#### `createOfflineAudioBufferFromFile(sourcePath, targetSampleRateHz?, forceMono?)`
+#### `createOfflineAudioBufferFromFile(source, targetSampleRateHz?, forceMono?)`
 
 ```ts
 function createOfflineAudioBufferFromFile(
-  sourcePath: string,
+  source: FileSource,
   targetSampleRateHz?: number,
   forceMono?: boolean
 ): Promise<OfflineAudioBufferRef>;
 ```
 
 ```ts
-const offline = await createOfflineAudioBufferFromFile('/tmp/input.wav', 16000, true);
+const offline = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/input.wav' }, 16000, true);
 console.log(offline.info.sampleRate, offline.info.bufferId);
+
+// From a content URI (Android):
+const fromUri = await createOfflineAudioBufferFromFile({ kind: 'contentUri', uri: pickedUri });
 ```
 
 #### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
@@ -104,9 +107,9 @@ Use the audio conversion module for all output formats, including WAV:
 ```ts
 import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
 
-await convertAudioToFormat(offline, '/tmp/offline.wav', 'wav');
-await convertAudioToWav16k(offline, '/tmp/offline_16k.wav');
-await convertAudioToFormat(offline, '/tmp/offline.flac', 'flac');
+await convertAudioToFormat(offline, { kind: 'fs', path: '/tmp/offline.wav' }, 'wav');
+await convertAudioToWav16k(offline, { kind: 'fs', path: '/tmp/offline_16k.wav' });
+await convertAudioToFormat(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac');
 ```
 
 ### Conversion: Offline buffer <--> Online buffer

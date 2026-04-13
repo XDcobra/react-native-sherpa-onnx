@@ -271,7 +271,7 @@ If you call the native module directly (bypassing the JS helpers), method names 
 | `copyFileToContentUri` | *(unchanged)* |
 | `saveTtsAudio` | *(unchanged; TTS PCM export)* |
 
-See [docs/files.md](./files.md).
+See [docs/fileio.md](./fileio.md).
 
 ## Breaking changes (upgrading to 0.3.0)
 
