@@ -330,20 +330,6 @@ object PipelineAudioRegistry {
     return false
   }
 
-  // ==================== Save ====================
-
-  fun saveOfflineToWav(bufferId: String, outputPath: String) {
-    val entry = offlineEntries[bufferId]
-      ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
-    entry.saveToWav(outputPath)
-  }
-
-  fun saveLiveToWav(bufferId: String, outputPath: String) {
-    val entry = liveEntries[bufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $bufferId")
-    entry.saveToWav(outputPath)
-  }
-
   // ==================== Accessors for pipeline stages ====================
 
   fun getOffline(bufferId: String): OfflineEntry? = offlineEntries[bufferId]

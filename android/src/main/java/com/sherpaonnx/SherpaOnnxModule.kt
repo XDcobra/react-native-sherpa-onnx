@@ -757,25 +757,91 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun saveOfflineAudioBufferToWav(bufferId: String, outputPath: String, promise: Promise) {
+  override fun convertPipelineAudioBufferToFormat(
+    bufferId: String,
+    outputPath: String,
+    format: String,
+    outputSampleRateHz: Double?,
+    promise: Promise
+  ) {
+    val rate = outputSampleRateHz?.toInt() ?: 0
+
+    // Format validation
+    val supportedFormats = setOf("wav", "mp3", "flac", "aac", "m4a", "opus", "webm", "mkv", "ogg")
+    if (!supportedFormats.contains(format.lowercase())) {
+      promise.reject("CONVERSION_UNSUPPORTED_FORMAT", "Unsupported format: $format")
+      return
+    }
+    // Sample-rate validation
+    if (rate < 0) {
+      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "outputSampleRateHz must be >= 0")
+      return
+    }
+    val fmt = format.lowercase()
+    if (fmt == "mp3" && rate != 0 && rate != 32000 && rate != 44100 && rate != 48000) {
+      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "MP3 output sample rate must be 32000, 44100, 48000, or 0. Received: $rate")
+      return
+    }
+    if ((fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") && rate != 0 && rate !in setOf(8000, 12000, 16000, 24000, 48000)) {
+      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "Opus output sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Received: $rate")
+      return
+    }
+
     try {
-      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.saveOfflineToWav(bufferId, outputPath)
+      if (bufferId.startsWith("off_")) {
+        convertOfflineBuffer(bufferId, outputPath, fmt, rate)
+      } else if (bufferId.startsWith("live_")) {
+        convertLiveBuffer(bufferId, outputPath, fmt, rate)
+      } else {
+        promise.reject("CONVERSION_INVALID_ARGUMENT", "Invalid buffer ID prefix: expected off_ or live_")
+        return
+      }
       promise.resolve(null)
     } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+      val code = if (e.message?.contains("empty", ignoreCase = true) == true)
+        "CONVERSION_BUFFER_EMPTY" else "CONVERSION_BUFFER_NOT_FOUND"
+      promise.reject(code, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject("CONVERSION_BUFFER_NOT_FINALIZED", e.message, e)
     } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.FILE_WRITE_ERROR, e.message, e)
+      promise.reject("CONVERSION_CONVERT_ERROR", e.message, e)
     }
   }
 
-  override fun saveLiveAudioBufferToWav(liveBufferId: String, outputPath: String, promise: Promise) {
-    try {
-      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.saveLiveToWav(liveBufferId, outputPath)
-      promise.resolve(null)
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.FILE_WRITE_ERROR, e.message, e)
+  private fun convertOfflineBuffer(bufferId: String, outputPath: String, format: String, rate: Int) {
+    val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getOffline(bufferId)
+      ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
+    if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
+
+    when (entry) {
+      is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked -> {
+        val err = Companion.nativeConvertAudioToFormat(entry.filePath, outputPath, format, rate)
+        if (err.isNotEmpty()) throw RuntimeException(err)
+      }
+      is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
+        val err = Companion.nativeConvertPcmToFormat(
+          entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate)
+        if (err.isNotEmpty()) throw RuntimeException(err)
+      }
+    }
+  }
+
+  private fun convertLiveBuffer(bufferId: String, outputPath: String, format: String, rate: Int) {
+    val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
+      ?: throw IllegalArgumentException("Live buffer not found: $bufferId")
+    if (entry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED)
+      throw IllegalStateException("Live buffer must be finalized before conversion")
+    if (entry.numSamples == 0L) throw IllegalArgumentException("Buffer is empty")
+
+    val spoolPath = entry.spoolFilePath
+    if (spoolPath != null) {
+      val err = Companion.nativeConvertAudioToFormat(spoolPath, outputPath, format, rate)
+      if (err.isNotEmpty()) throw RuntimeException(err)
+    } else {
+      val snapshot = entry.snapshotRing()
+      val err = Companion.nativeConvertPcmToFormat(
+        snapshot, entry.sampleRate, 1, outputPath, format, rate)
+      if (err.isNotEmpty()) throw RuntimeException(err)
     }
   }
 
@@ -1316,161 +1382,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     sttHelper.setSttConfig(instanceId, options, promise)
   }
 
-  /**
-   * If inputPath is a content:// URI, copies it to a temp file via ContentResolver.openInputStream.
-   * Caller deletes the returned temp file in a finally block.
-   */
-  private fun resolveInputForConvert(inputPath: String): Pair<String, java.io.File?> {
-    if (!inputPath.startsWith("content://")) return Pair(inputPath, null)
-    val uri = Uri.parse(inputPath)
-    val resolver = reactApplicationContext.contentResolver
-    val ext = android.webkit.MimeTypeMap.getSingleton()
-      .getExtensionFromMimeType(resolver.getType(uri)) ?: "tmp"
-    val tmp = java.io.File(reactApplicationContext.cacheDir, "convert_${System.nanoTime()}.$ext")
-    resolver.openInputStream(uri)?.use { input ->
-      tmp.outputStream().use { output -> input.copyTo(output) }
-    } ?: throw IllegalStateException("Content URI not readable: $inputPath")
-    return Pair(tmp.absolutePath, tmp)
-  }
-
-  /**
-   * Convert any supported audio file to a requested format using native FFmpeg prebuilts.
-   * Accepts file paths and content:// URIs. Content URIs are transparently copied to a
-   * temp file first (via ContentResolver), converted, then the temp file is deleted.
-   */
-  override fun convertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Double?, promise: Promise) {
-    var tmpFile: java.io.File? = null
-    try {
-      var rate = outputSampleRateHz?.toInt() ?: 0
-
-      if (rate < 0) {
-        promise.reject("CONVERT_ERROR", "Invalid outputSampleRateHz: must be >= 0")
-        return
-      }
-
-      if (format.equals("mp3", ignoreCase = true)) {
-        val allowed = setOf(0, 32000, 44100, 48000)
-        if (!allowed.contains(rate)) {
-          promise.reject("CONVERT_ERROR", "MP3 output sample rate must be one of 32000, 44100, 48000, or 0 (default). Received: $rate")
-          return
-        }
-      } else if (format.equals("opus", ignoreCase = true) || format.equals("oggm", ignoreCase = true) || format.equals("webm", ignoreCase = true) || format.equals("mkv", ignoreCase = true) || format.equals("ogg", ignoreCase = true)) {
-        val allowed = setOf(0, 8000, 12000, 16000, 24000, 48000)
-        if (!allowed.contains(rate)) {
-          promise.reject("CONVERT_ERROR", "Opus output sample rate must be 8000, 12000, 16000, 24000, 48000, or 0 (default). Received: $rate")
-          return
-        }
-      } else {
-        rate = rate.coerceIn(0, 48000)
-      }
-
-      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
-      tmpFile = tmp
-      val err = Companion.nativeConvertAudioToFormat(pathToUse, outputPath, format, rate)
-      if (err.isEmpty()) {
-        promise.resolve(null)
-      } else {
-        android.util.Log.e(NAME, "CONVERT_ERROR: $err (inputPath=$inputPath)")
-        promise.reject("CONVERT_ERROR", err)
-      }
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio: ${e.message}", e)
-      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio: ${e.message}", e)
-    } finally {
-      tmpFile?.delete()
-    }
-  }
-
-  /**
-   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM using native FFmpeg prebuilts.
-   * Accepts file paths and content:// URIs. Content URIs are copied to a temp file first.
-   */
-  override fun convertAudioToWav16k(inputPath: String, outputPath: String, promise: Promise) {
-    var tmpFile: java.io.File? = null
-    try {
-      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
-      tmpFile = tmp
-      val err = Companion.nativeConvertAudioToWav16k(pathToUse, outputPath)
-      if (err.isEmpty()) {
-        promise.resolve(null)
-      } else {
-        android.util.Log.e(NAME, "CONVERT_ERROR: $err")
-        promise.reject("CONVERT_ERROR", err)
-      }
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "CONVERT_EXCEPTION: Failed to convert audio to WAV16k: ${e.message}", e)
-      promise.reject("CONVERT_EXCEPTION", "Failed to convert audio to WAV16k: ${e.message}", e)
-    } finally {
-      tmpFile?.delete()
-    }
-  }
-
-  /**
-   * Decode audio to mono float samples (approx. [-1, 1]) and effective sample rate.
-   * Same path/URI handling as [convertAudioToFormat]. WAV may use [WaveReader] when no resample is requested.
-   */
-  override fun decodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Double?, promise: Promise) {
-    var tmpFile: java.io.File? = null
-    try {
-      val targetHz = (targetSampleRateHz ?: 0.0).toInt()
-      if (targetHz < 0) {
-        promise.reject("DECODE_ERROR", "targetSampleRateHz must be >= 0")
-        return
-      }
-      val (pathToUse, tmp) = resolveInputForConvert(inputPath)
-      tmpFile = tmp
-
-      if (pathToUse.endsWith(".wav", ignoreCase = true)) {
-        try {
-          val wave = WaveReader.readWave(pathToUse)
-          val s = wave.samples
-          if (s != null && s.isNotEmpty() && wave.sampleRate > 0 && (targetHz == 0 || targetHz == wave.sampleRate)) {
-            val map = Arguments.createMap()
-            val arr = Arguments.createArray()
-            for (i in s.indices) {
-              arr.pushDouble(s[i].toDouble())
-            }
-            map.putArray("samples", arr)
-            map.putInt("sampleRate", wave.sampleRate)
-            promise.resolve(map)
-            return
-          }
-        } catch (_: Throwable) {
-          // Fall through to FFmpeg/native path (e.g. odd WAV or resample requested).
-        }
-      }
-
-      val result = Companion.nativeDecodeAudioFileToFloatSamples(pathToUse, targetHz)
-      if (result.size == 1 && result[0] is String) {
-        promise.reject("DECODE_ERROR", result[0] as String)
-        return
-      }
-      if (result.size != 2 || result[0] !is FloatArray) {
-        promise.reject("DECODE_ERROR", "Unexpected native decode result")
-        return
-      }
-      val floats = result[0] as FloatArray
-      val rateObj = result.getOrNull(1) as? Number ?: run {
-        promise.reject("DECODE_ERROR", "Unexpected sample rate in native decode result")
-        return
-      }
-      val sr = rateObj.toInt()
-      val map = Arguments.createMap()
-      val arr = Arguments.createArray()
-      for (i in floats.indices) {
-        arr.pushDouble(floats[i].toDouble())
-      }
-      map.putArray("samples", arr)
-      map.putInt("sampleRate", sr)
-      promise.resolve(map)
-    } catch (e: Exception) {
-      android.util.Log.e(NAME, "DECODE_EXCEPTION: ${e.message}", e)
-      promise.reject("DECODE_EXCEPTION", e.message ?: "Failed to decode audio", e)
-    } finally {
-      tmpFile?.delete()
-    }
-  }
-
   // ==================== TTS Methods ====================
 
   /**
@@ -1980,21 +1891,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Int): String
 
-    /** Convert any supported audio file to WAV 16 kHz mono 16-bit PCM. Returns empty string on success, error message otherwise. Requires FFmpeg prebuilts. */
-    @JvmStatic
-    private external fun nativeConvertAudioToWav16k(inputPath: String, outputPath: String): String
-
-    /**
-     * On success: [FloatArray samples, Integer sampleRate]. On error: [String message].
-     */
-    @JvmStatic
-    private external fun nativeDecodeAudioFileToFloatSamples(inputPath: String, targetSampleRateHz: Int): Array<Any>
-
     /** Mono float32 little-endian raw PCM file to output format (requires FFmpeg). Empty = success. */
     @JvmStatic
     private external fun nativeConvertFloat32MonoFileToFormat(
       rawPath: String,
       pcmSampleRate: Int,
+      outputPath: String,
+      format: String,
+      outputSampleRateHz: Int
+    ): String
+
+    /** Encode raw float32 PCM buffer to output format (requires FFmpeg). Empty = success. */
+    @JvmStatic
+    private external fun nativeConvertPcmToFormat(
+      samples: FloatArray,
+      sampleRate: Int,
+      channelCount: Int,
       outputPath: String,
       format: String,
       outputSampleRateHz: Int

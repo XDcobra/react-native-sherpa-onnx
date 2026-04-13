@@ -14,12 +14,14 @@
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import "audio/SherpaOnnxAudioConvert.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "PaLiveEntry.h"
 #include <mutex>
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <set>
 #include <fstream>
 #include <functional>
 #include <cmath>
@@ -656,48 +658,128 @@ static void paMicAQInputCallback(void *inUserData,
   }
 }
 
-// ---- Save: offline ----
-- (void)saveOfflineAudioBufferToWav:(NSString *)bufferId
-                         outputPath:(NSString *)outputPath
-                            resolve:(RCTPromiseResolveBlock)resolve
-                             reject:(RCTPromiseRejectBlock)reject
+// ---- Convert pipeline buffer to format ----
+- (void)convertPipelineAudioBufferToFormat:(NSString *)bufferId
+                                outputPath:(NSString *)outputPath
+                                    format:(NSString *)format
+                        outputSampleRateHz:(NSNumber *)outputSampleRateHz
+                                   resolve:(RCTPromiseResolveBlock)resolve
+                                    reject:(RCTPromiseRejectBlock)reject
 {
-  @try {
-    std::string bid = [bufferId UTF8String];
-    std::shared_ptr<PaOfflineEntry> entry;
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      auto it = g_pa_offline.find(bid);
-      if (it == g_pa_offline.end()) { reject(kPAErrBufferNotFound, @"Offline buffer not found", nil); return; }
-      entry = it->second;
-    }
-    entry->saveToWav([outputPath UTF8String]);
-    resolve(nil);
-  } @catch (NSException *e) {
-    reject(kPAErrFileWriteError, e.reason, nil);
-  }
-}
+  int rate = outputSampleRateHz ? [outputSampleRateHz intValue] : 0;
+  std::string fmt = [[format lowercaseString] UTF8String];
 
-// ---- Save: live ----
-- (void)saveLiveAudioBufferToWav:(NSString *)liveBufferId
-                      outputPath:(NSString *)outputPath
-                         resolve:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject
-{
-  @try {
-    std::string liveId = [liveBufferId UTF8String];
-    std::shared_ptr<PaLiveEntry> live;
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      auto it = g_pa_live.find(liveId);
-      if (it == g_pa_live.end()) { reject(kPAErrBufferNotFound, @"Live buffer not found", nil); return; }
-      live = it->second;
-    }
-    live->saveToWav([outputPath UTF8String]);
-    resolve(nil);
-  } @catch (NSException *e) {
-    reject(kPAErrFileWriteError, e.reason, nil);
+  // Format validation
+  static const std::set<std::string> supportedFormats = {"wav","mp3","flac","aac","m4a","opus","webm","mkv","ogg"};
+  if (supportedFormats.find(fmt) == supportedFormats.end()) {
+    reject(@"CONVERSION_UNSUPPORTED_FORMAT",
+           [NSString stringWithFormat:@"Unsupported format: %@", format], nil);
+    return;
   }
+  // Sample-rate validation
+  if (rate < 0) {
+    reject(@"CONVERSION_INVALID_SAMPLE_RATE", @"outputSampleRateHz must be >= 0", nil);
+    return;
+  }
+  if (fmt == "mp3" && rate != 0 && rate != 32000 && rate != 44100 && rate != 48000) {
+    reject(@"CONVERSION_INVALID_SAMPLE_RATE",
+           [NSString stringWithFormat:@"MP3 sample rate must be 32000, 44100, 48000, or 0. Got: %d", rate], nil);
+    return;
+  }
+  if ((fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") &&
+      rate != 0 && rate != 8000 && rate != 12000 && rate != 16000 && rate != 24000 && rate != 48000) {
+    reject(@"CONVERSION_INVALID_SAMPLE_RATE",
+           [NSString stringWithFormat:@"Opus sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Got: %d", rate], nil);
+    return;
+  }
+
+  std::string bid = [bufferId UTF8String];
+
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+
+  // Offline buffer?
+  if (bid.rfind("off_", 0) == 0) {
+    auto it = g_pa_offline.find(bid);
+    if (it == g_pa_offline.end()) {
+      reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Offline buffer not found", nil); return;
+    }
+    auto &entry = it->second;
+    if (entry->numSamples() == 0) {
+      reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
+    }
+
+    NSError *error = nil;
+    if (entry->isFileBacked) {
+      NSString *inPath = [NSString stringWithUTF8String:entry->filePath.c_str()];
+      if (![SherpaOnnxAudioConvert convertAudioToFormat:inPath
+                                             outputPath:outputPath
+                                                 format:[NSString stringWithUTF8String:fmt.c_str()]
+                                     outputSampleRateHz:rate
+                                                  error:&error]) {
+        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
+        return;
+      }
+    } else {
+      if (![SherpaOnnxAudioConvert convertPcmToFormat:entry->samples.data()
+                                           numSamples:(int)entry->samples.size()
+                                           sampleRate:entry->sampleRate
+                                         channelCount:entry->channelCount
+                                           outputPath:outputPath
+                                               format:[NSString stringWithUTF8String:fmt.c_str()]
+                                   outputSampleRateHz:rate
+                                                error:&error]) {
+        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
+        return;
+      }
+    }
+    resolve(nil);
+    return;
+  }
+
+  // Live buffer?
+  if (bid.rfind("live_", 0) == 0) {
+    auto it = g_pa_live.find(bid);
+    if (it == g_pa_live.end()) {
+      reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Live buffer not found", nil); return;
+    }
+    auto &entry = it->second;
+    if (entry->state != PaLiveEntry::FINISHED) {
+      reject(@"CONVERSION_BUFFER_NOT_FINALIZED", @"Live buffer must be finalized before conversion", nil); return;
+    }
+    if (entry->totalSamplesWritten == 0) {
+      reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
+    }
+
+    NSError *error = nil;
+    if (entry->hasActiveSpool) {
+      NSString *spoolPath = [NSString stringWithUTF8String:entry->spoolPath.c_str()];
+      if (![SherpaOnnxAudioConvert convertAudioToFormat:spoolPath
+                                             outputPath:outputPath
+                                                 format:[NSString stringWithUTF8String:fmt.c_str()]
+                                     outputSampleRateHz:rate
+                                                  error:&error]) {
+        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
+        return;
+      }
+    } else {
+      auto snapshot = entry->snapshotRing();
+      if (![SherpaOnnxAudioConvert convertPcmToFormat:snapshot.data()
+                                           numSamples:(int)snapshot.size()
+                                           sampleRate:entry->sampleRate
+                                         channelCount:1
+                                           outputPath:outputPath
+                                               format:[NSString stringWithUTF8String:fmt.c_str()]
+                                   outputSampleRateHz:rate
+                                                error:&error]) {
+        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
+        return;
+      }
+    }
+    resolve(nil);
+    return;
+  }
+
+  reject(@"CONVERSION_INVALID_ARGUMENT", @"Invalid buffer ID prefix: expected off_ or live_", nil);
 }
 
 // ---- Info ----

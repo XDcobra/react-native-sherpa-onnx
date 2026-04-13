@@ -1,7 +1,18 @@
 #pragma once
 #include <string>
-#include <vector>
 
 std::string sherpa_audio_convert_to_format(const char* inputPath, const char* outputPath, const char* formatHint, int outputSampleRateHz);
-std::string sherpa_audio_decode_file_to_float_mono(const char* inputPath, int targetSampleRateHz, std::vector<float>* outSamples, int* outSampleRate);
-std::string sherpa_audio_convert_to_wav16k_mono(const char* inputPath, const char* outputPath);
+
+/**
+ * Encode raw float32 PCM samples to an output file in the requested format.
+ * Bypasses FFmpeg's input demuxer/decoder — samples are fed directly
+ * to SwrContext (resampling) → encoder → output muxer.
+ */
+std::string sherpa_audio_convert_pcm_to_format(
+    const float *samples,
+    int numSamples,
+    int sampleRate,
+    int channelCount,
+    const char *outputPath,
+    const char *formatHint,
+    int outputSampleRateHz);
