@@ -3,7 +3,6 @@ import type {
   TTSInitializeOptions,
   TTSModelType,
   TtsSynthesisOptions,
-  TtsGenerationOptions,
   TtsKittenModelOptions,
   TtsKokoroModelOptions,
   TtsMatchaModelOptions,
@@ -225,52 +224,4 @@ export function toNativeSynthesisOptions(
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;
-}
-
-/**
- * Flatten legacy TtsGenerationOptions for streaming TTS native bridge.
- * Uses raw-sample voice clone (not buffer-based). Kept for streaming compat.
- */
-export function toNativeTtsGenerationOptions(
-  options?: TtsGenerationOptions,
-  extras?: Record<string, unknown>
-): Record<string, unknown> {
-  if (options == null) return { ...(extras ?? {}) };
-  const out: Record<string, unknown> = {};
-  if (options.sid !== undefined) out.sid = options.sid;
-  if (options.speed !== undefined) out.speed = options.speed;
-  if (options.silenceScale !== undefined) {
-    out.silenceScale = options.silenceScale;
-  }
-  if (options.voiceClone != null) {
-    const vc = options.voiceClone;
-    const sr = vc.referenceAudio.sampleRate;
-    if (
-      typeof __DEV__ !== 'undefined' &&
-      __DEV__ &&
-      (!Number.isFinite(sr) || sr <= 0)
-    ) {
-      console.warn(
-        '[react-native-sherpa-onnx] TTS voiceClone.referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
-      );
-    }
-    out.referenceAudio = vc.referenceAudio.samples;
-    out.referenceSampleRate = vc.referenceAudio.sampleRate;
-    if (vc.kind === 'zipvoice') {
-      out.referenceText = vc.referenceText;
-    } else if (vc.referenceText !== undefined) {
-      out.referenceText = vc.referenceText;
-    }
-  }
-  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
-  if (options.extra != null && Object.keys(options.extra).length > 0) {
-    out.extra = options.extra;
-  }
-  if (options.subtitles?.mode !== undefined) {
-    out.subtitleMode = options.subtitles.mode;
-  }
-  if (options.subtitles?.granularity !== undefined) {
-    out.subtitleGranularity = options.subtitles.granularity;
-  }
-  return extras != null ? { ...out, ...extras } : out;
 }

@@ -513,10 +513,11 @@ export async function appendLiveTextSegment(
   liveBufferId: LiveTextBufferIdSource,
   text: string,
   tokens?: string[],
-  timestamps?: number[]
+  timestamps?: number[],
+  meta?: Record<string, unknown>
 ): Promise<{ segmentIndex: number }> {
   const id = resolveLiveTextBufferId(liveBufferId);
-  return getNative().appendLiveTextSegment(id, text, tokens, timestamps);
+  return getNative().appendLiveTextSegment(id, text, tokens, timestamps, meta);
 }
 
 /**
@@ -527,7 +528,11 @@ export async function getLiveTextBufferSegments(
   liveBufferId: LiveTextBufferIdSource,
   startIndex: number,
   maxCount: number,
-  options?: { includeTokens?: boolean; includeTimestamps?: boolean }
+  options?: {
+    includeTokens?: boolean;
+    includeTimestamps?: boolean;
+    includeMeta?: boolean;
+  }
 ): Promise<LiveTextSegment[]> {
   const id = resolveLiveTextBufferId(liveBufferId);
   const raw = await getNative().getLiveTextBufferSegments(
@@ -550,6 +555,9 @@ export async function getLiveTextBufferSegments(
     ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
     ...(Array.isArray(segment.timestamps)
       ? { timestamps: segment.timestamps }
+      : {}),
+    ...(segment.meta != null
+      ? { meta: segment.meta as Record<string, unknown> }
       : {}),
   }));
 }

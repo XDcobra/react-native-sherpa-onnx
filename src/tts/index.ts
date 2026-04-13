@@ -334,9 +334,13 @@ export async function createTTS(
   return engine;
 }
 
-// Streaming TTS (separate engine; use createStreamingTTS for chunk callbacks and PCM playback)
+// Streaming TTS (pipeline-based; use createStreamingTTS for native pipeline streaming)
 export { createStreamingTTS } from './streaming';
-export type { StreamingTtsEngine } from './streamingTypes';
+export type {
+  StreamingTtsEngine,
+  TtsPipelineHandle,
+  TtsPipelineOptions,
+} from './streamingTypes';
 
 // Incremental streaming TTS (higher-level: progressive text feeding + auto-segmentation)
 export { createIncrementalStreamingTTS } from './incremental';
@@ -345,9 +349,7 @@ export type {
   IncrementalStreamingTtsFactoryOptions,
   IncrementalStreamingTtsSource,
   IncrementalStreamController,
-  IncrementalStreamFileController,
   IncrementalStreamHandlers,
-  IncrementalStreamToFileHandlers,
   IncrementalRequestOptions,
   IncrementalMetrics,
   SessionId,
@@ -394,29 +396,11 @@ export type {
   TtsVoiceClonePocket,
   SubtitleMode,
   SubtitleGranularity,
-  SubtitleOptions,
-  SubtitleOptionsAccurate,
-  SubtitleOptionsProportionalOrEstimated,
-  TtsGenerationOptions,
-  TtsReferenceAudio,
-  GeneratedAudio,
   TTSModelInfo,
   SaveAudioTarget,
   SaveAudioTargetFile,
   SaveAudioTargetAndroidContent,
   TtsEngine,
-  TtsStreamController,
-  TtsStreamHandlers,
-  TtsStreamOptions,
-  TtsStreamChunk,
-  TtsStreamEnd,
-  TtsStreamError,
-  TtsStreamFileOutput,
-  TtsStreamToFileOptions,
-  TtsStreamToFileHandlers,
-  TtsStreamFileController,
-  TtsStreamFileEnd,
-  TtsStreamFileError,
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';
 export {

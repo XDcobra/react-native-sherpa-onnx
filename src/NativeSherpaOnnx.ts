@@ -555,7 +555,8 @@ export interface Spec extends TurboModule {
     liveBufferId: string,
     text: string,
     tokens?: string[],
-    timestamps?: number[]
+    timestamps?: number[],
+    meta?: Object
   ): Promise<{ segmentIndex: number }>;
 
   /** Read committed text segments from a live text buffer by index window. */
@@ -566,6 +567,7 @@ export interface Spec extends TurboModule {
     options?: {
       includeTokens?: boolean;
       includeTimestamps?: boolean;
+      includeMeta?: boolean;
     }
   ): Promise<{
     segments: Array<{
@@ -574,6 +576,7 @@ export interface Spec extends TurboModule {
       segmentIndex: number;
       tokens?: string[];
       timestamps?: number[];
+      meta?: Object;
     }>;
   }>;
 
@@ -735,36 +738,17 @@ export interface Spec extends TurboModule {
   // ==================== Online (streaming) TTS Methods ====================
 
   /**
-   * Generate speech in streaming mode (emits chunk events).
-   * @param instanceId - Unique ID for this engine instance
-   * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
-   * @param text - Text to convert to speech
-   * @param options - Same shape as batch TTS; reference streaming is **Pocket-only** (Zipvoice cloning uses non-streaming generate).
+   * Start a streaming TTS pipeline worker.
+   * Reads committed segments from a LiveTextBuffer, synthesizes each one
+   * (using per-segment meta overrides where available), and writes PCM
+   * samples to a LiveAudioBuffer.
    */
-  generateTtsStream(
+  startTtsPipeline(
     instanceId: string,
-    requestId: string,
-    text: string,
-    options: Object
-  ): Promise<void>;
-
-  /**
-   * Generate speech in streaming mode and write directly to file in native.
-   * Emits `ttsStreamFileEnd` / `ttsStreamFileError` and optionally `ttsStreamChunk`.
-   */
-  generateTtsStreamToFile(
-    instanceId: string,
-    requestId: string,
-    text: string,
-    options: Object,
-    fileOptions: Object
-  ): Promise<void>;
-
-  /**
-   * Cancel an ongoing streaming TTS generation.
-   * @param instanceId - Unique ID for this engine instance
-   */
-  cancelTtsStream(instanceId: string): Promise<void>;
+    textInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
 
   /**
    * Create a standalone PCM player session.

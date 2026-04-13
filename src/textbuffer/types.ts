@@ -59,6 +59,13 @@ export interface LiveTextSegment {
   segmentIndex: number;
   tokens?: string[];
   timestamps?: number[];
+  /**
+   * Opaque metadata dictionary attached to this segment.
+   * Pipeline workers interpret feature-specific keys and fall back to pipeline defaults.
+   *
+   * TTS worker keys: { sid?: number; speed?: number; extra?: Record<string, string> }
+   */
+  meta?: Record<string, unknown>;
 }
 
 /** Discriminated union of all pipeline text buffer info types. */
