@@ -310,23 +310,6 @@ export interface Spec extends TurboModule {
   finalizeLiveAudioBuffer(liveBufferId: string): Promise<void>;
 
   /**
-   * Save an offline audio buffer as 16-bit PCM WAV.
-   */
-  saveOfflineAudioBufferToWav(
-    bufferId: string,
-    outputPath: string
-  ): Promise<void>;
-
-  /**
-   * Save a live audio buffer as 16-bit PCM WAV.
-   * If spool active and finalized, copies the spool file. Otherwise writes ring snapshot.
-   */
-  saveLiveAudioBufferToWav(
-    liveBufferId: string,
-    outputPath: string
-  ): Promise<void>;
-
-  /**
    * Get info for any pipeline audio buffer (offline or live).
    */
   getPipelineAudioBufferInfo(bufferId: string): Promise<{
@@ -1044,34 +1027,19 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Audio conversion ====================
 
   /**
-   * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
-   * Requires FFmpeg prebuilts when called on Android.
-   * For MP3 (libshine), outputSampleRateHz can be 32000, 44100, or 48000; 0 or omitted = 44100.
-   * WAV output is always 16 kHz mono (sherpa-onnx). Resolves when conversion succeeds, rejects with an error message on failure.
+   * Convert any pipeline audio buffer (offline or finalized live) to an encoded audio file.
+   * All formats including WAV go through FFmpeg.
+   * @param bufferId           - off_UUID or live_UUID
+   * @param outputPath         - Absolute local file path
+   * @param format             - "wav", "mp3", "flac", "aac", "m4a", "opus", "webm", "mkv", "ogg"
+   * @param outputSampleRateHz - 0 = format-dependent default
    */
-  convertAudioToFormat(
-    inputPath: string,
+  convertPipelineAudioBufferToFormat(
+    bufferId: string,
     outputPath: string,
     format: string,
     outputSampleRateHz?: number
   ): Promise<void>;
-
-  /**
-   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM.
-   * Requires FFmpeg prebuilts when called on Android.
-   */
-  convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
-
-  /**
-   * Decode an audio file to mono float samples in [-1, 1] and the effective sample rate.
-   * Supports the same inputs as convertAudioToFormat (file paths and Android content:// URIs).
-   * On Android, non-WAV formats require FFmpeg prebuilts; WAV may use a fast path via WaveReader.
-   * @param targetSampleRateHz - If > 0, resample to this rate; if 0 or omitted, keep the decoded stream rate.
-   */
-  decodeAudioFileToFloatSamples(
-    inputPath: string,
-    targetSampleRateHz?: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
 
   // ==================== Execution Provider Methods ====================
 

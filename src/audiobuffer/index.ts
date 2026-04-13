@@ -433,34 +433,6 @@ export async function finalizeLiveAudioBuffer(
   return id as LiveBufferHandleFinished;
 }
 
-// ==================== Save ====================
-
-/**
- * Save an offline audio buffer as 16-bit PCM WAV.
- */
-export async function saveOfflineAudioBufferToWav(
-  bufferId: OfflineAudioBufferIdSource,
-  outputPath: string
-): Promise<void> {
-  await getNative().saveOfflineAudioBufferToWav(
-    resolveOfflineAudioBufferId(bufferId),
-    outputPath
-  );
-}
-
-/**
- * Save a live audio buffer as 16-bit PCM WAV.
- */
-export async function saveLiveAudioBufferToWav(
-  liveBufferId: LiveAudioBufferIdSource,
-  outputPath: string
-): Promise<void> {
-  await getNative().saveLiveAudioBufferToWav(
-    resolveLiveAudioBufferId(liveBufferId),
-    outputPath
-  );
-}
-
 // ==================== Info / Release ====================
 
 /**
