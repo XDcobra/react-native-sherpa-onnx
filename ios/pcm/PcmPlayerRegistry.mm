@@ -51,16 +51,6 @@ std::shared_ptr<PcmPlayerSession> pcmPlayerGet(const std::string &playerId) {
     return it->second;
 }
 
-std::shared_ptr<PcmPlayerSession> pcmPlayerFindByTtsInstanceId(const std::string &ttsInstanceId) {
-    std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
-    for (auto &pair : g_pcm_players) {
-        if (!pair.second->destroyed && pair.second->ttsInstanceId == ttsInstanceId) {
-            return pair.second;
-        }
-    }
-    return nullptr;
-}
-
 void pcmPlayerDestroyAll() {
     std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
     for (auto &pair : g_pcm_players) {

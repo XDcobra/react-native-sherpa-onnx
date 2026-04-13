@@ -1575,17 +1575,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun createPcmPlayer(
     playerId: String,
-    sampleRate: Double,
-    channels: Double,
-    feed: String,
-    ttsInstanceId: String?,
+    audioBufferId: String,
+    volume: Double,
     promise: Promise
   ) {
-    pcmPlayerService.create(playerId, sampleRate, channels, feed, ttsInstanceId, promise)
-  }
-
-  override fun writePcmChunk(playerId: String, samples: ReadableArray, promise: Promise) {
-    pcmPlayerService.write(playerId, samples, promise)
+    pcmPlayerService.create(playerId, audioBufferId, volume, promise)
   }
 
   override fun pausePcmPlayer(playerId: String, promise: Promise) {

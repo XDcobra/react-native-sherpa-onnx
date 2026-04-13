@@ -195,6 +195,39 @@ std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
 static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB
 
+std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_live.find(bufferId);
+  if (it == g_pa_live.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+bool pa_read_offline_samples(
+  const std::string &bufferId,
+  std::vector<float> *samples,
+  int *sampleRate
+) {
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end() || !it->second) {
+      return false;
+    }
+    entry = it->second;
+  }
+
+  if (sampleRate != nullptr) {
+    *sampleRate = entry->sampleRate;
+  }
+  if (samples != nullptr) {
+    *samples = entry->readAllSamples();
+  }
+  return true;
+}
+
 static std::string pa_generateId(const char *prefix) {
   return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }

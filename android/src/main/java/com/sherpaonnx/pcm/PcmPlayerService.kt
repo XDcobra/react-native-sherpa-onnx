@@ -7,17 +7,15 @@ import android.media.AudioTrack
 import android.os.Build
 import android.util.Log
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 
 internal class PcmPlayerService {
   private val registry = PcmPlayerRegistry()
 
   fun create(
     playerId: String,
-    sampleRate: Double,
-    channels: Double,
-    feed: String,
-    ttsInstanceId: String?,
+    audioBufferId: String,
+    volume: Double,
     promise: Promise
   ) {
     try {
@@ -25,8 +23,21 @@ internal class PcmPlayerService {
         promise.reject("PCM_PLAYER_INVALID_CONFIG", "PCM playback requires API 21+")
         return
       }
-      val sr = sampleRate.toInt()
-      val ch = channels.toInt()
+
+      if (playerId.isBlank()) {
+        promise.reject("PCM_PLAYER_INVALID_CONFIG", "playerId is required")
+        return
+      }
+
+      val liveEntry = PipelineAudioRegistry.getLive(audioBufferId)
+      val offlineEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+      if (liveEntry == null && offlineEntry == null) {
+        promise.reject("AUDIO_BUFFER_NOT_FOUND", "Audio buffer not found: $audioBufferId")
+        return
+      }
+
+      val sr = liveEntry?.sampleRate ?: offlineEntry!!.sampleRate
+      val ch = liveEntry?.channelCount ?: offlineEntry!!.channelCount
       if (sr <= 0) {
         promise.reject("PCM_PLAYER_INVALID_CONFIG", "sampleRate must be > 0")
         return
@@ -35,14 +46,7 @@ internal class PcmPlayerService {
         promise.reject("PCM_PLAYER_INVALID_CONFIG", "PCM playback supports mono only (channels=1)")
         return
       }
-      val parsedFeed = when (feed) {
-        "js" -> PcmPlayerFeed.JS
-        "native" -> PcmPlayerFeed.NATIVE
-        else -> {
-          promise.reject("PCM_PLAYER_INVALID_CONFIG", "Invalid feed: '$feed' (expected 'js' or 'native')")
-          return
-        }
-      }
+      val clampedVolume = volume.toFloat().coerceIn(0f, 1f)
 
       val channelConfig = AudioFormat.CHANNEL_OUT_MONO
       val audioFormat = AudioFormat.Builder()
@@ -63,33 +67,25 @@ internal class PcmPlayerService {
         attributes, audioFormat, minBufferSize,
         AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
       )
-      val session = PcmPlayerSession(playerId, sr, ch, parsedFeed, ttsInstanceId, track)
+
+      // Replace an existing player with the same ID to avoid leaking native resources.
+      registry.remove(playerId)?.destroy()
+
+      track.setVolume(clampedVolume)
+      val session = PcmPlayerSession(playerId, sr, ch, track)
       registry.put(session)
       track.play()
+
+      if (liveEntry != null) {
+        session.startLiveDrain(liveEntry)
+      } else if (offlineEntry != null) {
+        session.startOfflineDrain(offlineEntry)
+      }
+
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(TAG, "Failed to create PCM player: $playerId", e)
       promise.reject("PCM_PLAYER_INVALID_CONFIG", "Failed to create PCM player: ${e.message}", e)
-    }
-  }
-
-  fun write(playerId: String, samples: ReadableArray, promise: Promise) {
-    val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
-    if (session.destroyed) return rejectDestroyed(playerId, promise)
-    if (session.feed == PcmPlayerFeed.NATIVE) {
-      promise.reject("PCM_PLAYER_FEED_NATIVE", "writePcmChunk not allowed; player feed is 'native'")
-      return
-    }
-    try {
-      val buffer = FloatArray(samples.size())
-      for (i in 0 until samples.size()) {
-        buffer[i] = samples.getDouble(i).toFloat()
-      }
-      session.enqueueMonoFloat32(buffer)
-      promise.resolve(null)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to write PCM chunk: $playerId", e)
-      promise.reject("PCM_PLAYER_ERROR", "Failed to write PCM chunk: ${e.message}", e)
     }
   }
 
@@ -130,59 +126,6 @@ internal class PcmPlayerService {
       Log.e(TAG, "Failed to destroy PCM player: $playerId", e)
       promise.reject("PCM_PLAYER_ERROR", "Failed to destroy PCM player: ${e.message}", e)
     }
-  }
-
-  // ---- internal (no promise) for native TTS playback ----
-
-  /** Create a native-feed player programmatically (called from TtsStreamingService). */
-  fun createInternal(playerId: String, sampleRate: Int, channels: Int, ttsInstanceId: String?) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-      Log.w(TAG, "createInternal: PCM playback requires API 21+; skipping player $playerId")
-      return
-    }
-    if (sampleRate <= 0) {
-      Log.w(TAG, "createInternal: invalid sampleRate $sampleRate; skipping player $playerId")
-      return
-    }
-    val channelConfig = AudioFormat.CHANNEL_OUT_MONO
-    val audioFormat = AudioFormat.Builder()
-      .setSampleRate(sampleRate)
-      .setChannelMask(channelConfig)
-      .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-      .build()
-    val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, AudioFormat.ENCODING_PCM_FLOAT)
-    if (minBufferSize == AudioTrack.ERROR || minBufferSize == AudioTrack.ERROR_BAD_VALUE) {
-      Log.w(TAG, "createInternal: invalid buffer size for sampleRate $sampleRate; skipping player $playerId")
-      return
-    }
-    val attributes = AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_MEDIA)
-      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-      .build()
-    try {
-      val track = AudioTrack(
-        attributes, audioFormat, minBufferSize,
-        AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
-      )
-      val session = PcmPlayerSession(playerId, sampleRate, channels, PcmPlayerFeed.NATIVE, ttsInstanceId, track)
-      registry.put(session)
-      track.play()
-    } catch (e: Exception) {
-      Log.e(TAG, "createInternal: failed to create AudioTrack for player $playerId", e)
-    }
-  }
-
-  /** Enqueue samples from native code (TTS synthesis callback). No promise, best-effort. */
-  fun enqueueFromNative(playerId: String, samples: FloatArray) {
-    val session = registry[playerId] ?: return
-    if (!session.destroyed) session.enqueueMonoFloat32(samples)
-  }
-
-  /** Destroy without promise (for auto-destroy / cancel). Returns true if session existed. */
-  fun destroyInternal(playerId: String): Boolean {
-    val session = registry.remove(playerId) ?: return false
-    session.destroy()
-    return true
   }
 
   fun shutdown() {

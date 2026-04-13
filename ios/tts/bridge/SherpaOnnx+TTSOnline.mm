@@ -13,16 +13,10 @@ static std::mutex g_tts_pipeline_mutex;
 
 @interface SherpaOnnx (TTSOnlineInternal)
 - (void)so_createPcmPlayer:(NSString *)playerId
-                 sampleRate:(double)sampleRate
-                   channels:(double)channels
-                       feed:(NSString *)feed
-              ttsInstanceId:(NSString *)ttsInstanceId
+          audioBufferId:(NSString *)audioBufferId
+              volume:(double)volume
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject;
-- (void)so_writePcmChunk:(NSString *)playerId
-                  samples:(NSArray<NSNumber *> *)samples
-                  resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject;
 - (void)so_pausePcmPlayer:(NSString *)playerId
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject;
@@ -227,26 +221,15 @@ static std::mutex g_tts_pipeline_mutex;
 }
 
 - (void)createPcmPlayer:(NSString *)playerId
-              sampleRate:(double)sampleRate
-                channels:(double)channels
-                    feed:(NSString *)feed
-           ttsInstanceId:(NSString *)ttsInstanceId
+         audioBufferId:(NSString *)audioBufferId
+             volume:(double)volume
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject {
   [self so_createPcmPlayer:playerId
-                sampleRate:sampleRate
-                  channels:channels
-                      feed:feed
-             ttsInstanceId:ttsInstanceId
+         audioBufferId:audioBufferId
+             volume:volume
                    resolve:resolve
                     reject:reject];
-}
-
-- (void)writePcmChunk:(NSString *)playerId
-              samples:(NSArray<NSNumber *> *)samples
-              resolve:(RCTPromiseResolveBlock)resolve
-               reject:(RCTPromiseRejectBlock)reject {
-  [self so_writePcmChunk:playerId samples:samples resolve:resolve reject:reject];
 }
 
 - (void)pausePcmPlayer:(NSString *)playerId
