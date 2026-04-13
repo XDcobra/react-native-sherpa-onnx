@@ -16,10 +16,11 @@ import {
   createStreamingTTS,
   detectTtsModel,
   type TTSModelType,
-  type TtsGenerationOptions,
   type TtsSynthesisOptions,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
+  type TtsPipelineHandle,
+  type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
 import {
   copyContentUriToCache,
@@ -28,18 +29,26 @@ import {
 import type {
   TtsEngine,
   StreamingTtsEngine,
-  TtsStreamController,
 } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyOfflineAudioBuffer,
   createOfflineAudioBufferFromSamples,
+  createLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  finalizeLiveAudioBuffer,
   saveOfflineAudioBufferToWav,
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
+import type {
+  OfflineAudioBufferRef,
+  LiveAudioBufferRef,
+} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createOfflineTextBufferFromText,
+  createLiveTextBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
@@ -78,18 +87,15 @@ const PAD_PACK_NAME = 'sherpa_models';
 type TtsSavedAudioPlayback = ActiveWebAudioPlayback & { resolvedPath: string };
 
 /**
- * Union type for generated audio results.
- * - buffer: OfflineAudioBuffer from batch TTS synthesis
- * - pcm: Raw PCM samples from streaming TTS
+ * Generated audio results from either batch or streaming TTS.
+ * Both now produce an OfflineAudioBuffer (buffer-to-buffer pipeline).
  */
-type GeneratedResult =
-  | { kind: 'buffer'; bufferId: string; sampleRate: number; numSamples: number }
-  | {
-      kind: 'pcm';
-      samples: Float32Array;
-      sampleRate: number;
-      numSamples: number;
-    };
+type GeneratedResult = {
+  kind: 'buffer';
+  bufferId: string;
+  sampleRate: number;
+  numSamples: number;
+};
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -173,17 +179,13 @@ export default function TTSScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
-  const streamChunksRef = useRef<Float32Array[]>([]);
-  const streamSampleRateRef = useRef<number | null>(null);
-  const streamControllerRef = useRef<TtsStreamController | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
-  const streamQueueRef = useRef<string[]>([]);
-  const streamInFlightRef = useRef(false);
+  const streamPipelineRef = useRef<TtsPipelineHandle | null>(null);
+  const streamTextBufferIdRef = useRef<string | null>(null);
+  const streamAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const streamLastTextRef = useRef('');
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamInitialScheduleRef = useRef(false);
-  const streamProcessSchedulePendingRef = useRef(false);
-  const streamProcessCallSourceRef = useRef<string>('');
   const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showNoiseScale = useMemo(
@@ -363,10 +365,21 @@ export default function TTSScreen() {
         stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
         ttsSavedAudioPlaybackRef.current = null;
       }
-      const controller = streamControllerRef.current;
-      if (controller) {
-        controller.cancel().catch(() => {});
-        streamControllerRef.current = null;
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        pipeline.stop().catch(() => {});
+        streamPipelineRef.current = null;
+      }
+      const textBufferId = streamTextBufferIdRef.current;
+      if (textBufferId) {
+        releasePipelineTextBuffer(textBufferId).catch(() => {});
+        streamTextBufferIdRef.current = null;
+      }
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        audioBuffer.unsubscribeEvents();
+        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
+        streamAudioBufferRef.current = null;
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
@@ -377,62 +390,44 @@ export default function TTSScreen() {
   }, []);
 
   const resetStreamingState = useCallback(
-    (clearBuffer = true, options?: { resetScheduleRef?: boolean }) => {
-      const controller = streamControllerRef.current;
-      if (controller) {
-        controller.cancel().catch(() => {});
-        streamControllerRef.current = null;
+    (options?: { resetScheduleRef?: boolean }) => {
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        pipeline.stop().catch(() => {});
+        streamPipelineRef.current = null;
+      }
+      const textBufferId = streamTextBufferIdRef.current;
+      if (textBufferId) {
+        releasePipelineTextBuffer(textBufferId).catch(() => {});
+        streamTextBufferIdRef.current = null;
+      }
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        audioBuffer.unsubscribeEvents();
+        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
+        streamAudioBufferRef.current = null;
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
-      streamQueueRef.current = [];
-      streamInFlightRef.current = false;
       streamLastTextRef.current = '';
       if (options?.resetScheduleRef !== false) {
         streamInitialScheduleRef.current = false;
       }
-      streamProcessSchedulePendingRef.current = false;
       if (streamDebounceRef.current) {
         clearTimeout(streamDebounceRef.current);
         streamDebounceRef.current = null;
       }
-      if (clearBuffer) {
-        streamChunksRef.current = [];
-        streamSampleRateRef.current = null;
-        setStreamSampleCount(0);
-      }
+      setStreamSampleCount(0);
       setStreamProgress(null);
       setStreaming(false);
     },
     []
   );
 
-  const buildStreamedAudio = useCallback((): GeneratedResult | null => {
-    const chunks = streamChunksRef.current;
-    if (chunks.length === 0) {
-      return null;
-    }
-    const total = chunks.reduce((sum, part) => sum + part.length, 0);
-    const combined = new Float32Array(total);
-    let offset = 0;
-    for (const part of chunks) {
-      combined.set(part, offset);
-      offset += part.length;
-    }
-    const sampleRate =
-      streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-    return {
-      kind: 'pcm',
-      samples: combined,
-      sampleRate,
-      numSamples: combined.length,
-    };
-  }, [modelInfo?.sampleRate]);
-
-  const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
+  const getPipelineOptions = useCallback((): TtsPipelineOptions => {
     const sid = parseInt(speakerId, 10);
     const speedValue = parseFloat(speed);
     if (isNaN(sid) || sid < 0) {
@@ -449,84 +444,11 @@ export default function TTSScreen() {
     if (isNaN(speedValue) || speedValue <= 0) {
       throw new Error('Invalid speed value');
     }
-    const silenceScaleVal = silenceScale.trim();
-    const numStepsVal = numSteps.trim();
-    let extra: Record<string, string> | undefined;
-    if (extraOptions.trim().length > 0) {
-      const ex: Record<string, string> = {};
-      extraOptions
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .forEach((pair) => {
-          const idx = pair.indexOf(':');
-          if (idx > 0) {
-            const k = pair.slice(0, idx).trim();
-            const v = pair.slice(idx + 1).trim();
-            if (k && v) ex[k] = v;
-          }
-        });
-      if (Object.keys(ex).length > 0) extra = ex;
-    }
-    const hasValidRefAudio =
-      referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
-      referenceAudio.sampleRate > 0;
-    const refTrim = referenceText.trim();
-
-    const base: TtsGenerationOptions = {
-      sid,
-      speed: speedValue,
-      ...(silenceScaleVal.length > 0
-        ? (() => {
-            const v = parseFloat(silenceScaleVal);
-            return !isNaN(v) && v > 0 ? { silenceScale: v } : {};
-          })()
-        : {}),
-      ...(numStepsVal.length > 0
-        ? (() => {
-            const v = parseInt(numStepsVal, 10);
-            return !isNaN(v) && v > 0 ? { numSteps: v } : {};
-          })()
-        : {}),
-      ...(extra != null ? { extra } : {}),
-    };
-
-    if (hasValidRefAudio && selectedModelType === 'zipvoice') {
-      if (!refTrim) {
-        throw new Error('Zipvoice voice cloning requires reference text');
-      }
-      return {
-        ...base,
-        voiceClone: {
-          kind: 'zipvoice',
-          referenceAudio,
-          referenceText: refTrim,
-        },
-      };
-    }
-    if (hasValidRefAudio && selectedModelType === 'pocket') {
-      return {
-        ...base,
-        voiceClone: {
-          kind: 'pocket',
-          referenceAudio,
-          ...(refTrim.length > 0 ? { referenceText: refTrim } : {}),
-        },
-      };
-    }
-    return base;
-  }, [
-    speakerId,
-    speed,
-    silenceScale,
-    numSteps,
-    referenceText,
-    referenceAudio,
-    extraOptions,
-    modelInfo?.numSpeakers,
-    selectedModelType,
-  ]);
+    const opts: TtsPipelineOptions = { sid, speed: speedValue };
+    // silenceScale, numSteps, and extra are not supported on TtsPipelineOptions in the streaming pipeline API.
+    // Set them at engine init time via modelOptions if needed.
+    return opts;
+  }, [speakerId, speed, modelInfo?.numSpeakers]);
 
   const handlePickReferenceWav = useCallback(async () => {
     setError(null);
@@ -572,105 +494,23 @@ export default function TTSScreen() {
     }
   }, []);
 
-  const processStreamQueue = useCallback(async () => {
-    if (streamInFlightRef.current) {
+  const enqueueStreamingText = useCallback((text: string) => {
+    const lastText = streamLastTextRef.current;
+    if (!text.startsWith(lastText)) {
+      streamLastTextRef.current = text;
       return;
     }
-    const engine = streamingTtsEngineRef.current;
-    if (!engine) {
-      return;
-    }
-    streamInFlightRef.current = true;
-    const nextText = streamQueueRef.current.shift();
-    if (!nextText?.trim()) {
-      streamInFlightRef.current = false;
-      return;
-    }
+    const delta = text.slice(lastText.length);
+    if (!delta.trim()) return;
+    streamLastTextRef.current = text;
 
-    let options: TtsGenerationOptions;
-    try {
-      options = getSynthesisOptions();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      setError(msg);
-      return;
-    }
+    const textBufferId = streamTextBufferIdRef.current;
+    if (!textBufferId) return;
 
-    try {
-      const controller = await engine.generateSpeechStream(
-        nextText,
-        options,
-        {
-          onChunk: (chunk) => {
-            streamSampleRateRef.current = chunk.sampleRate;
-            streamChunksRef.current.push(chunk.samples);
-            setStreamSampleCount((prev) => prev + chunk.samples.length);
-            setStreamProgress(chunk.progress);
-          },
-          onEnd: (event) => {
-            streamInFlightRef.current = false;
-            streamControllerRef.current = null;
-            if (event.cancelled) {
-              const eng = streamingTtsEngineRef.current;
-              if (eng) {
-                eng.destroy().catch(() => {});
-              }
-              streamingTtsEngineRef.current = null;
-              setStreamProgress(null);
-              setStreaming(false);
-              const audio = buildStreamedAudio();
-              if (audio) setGeneratedAudio(audio);
-            } else {
-              setStreamProgress(null);
-              streamProcessCallSourceRef.current = 'onEnd';
-              processStreamQueue().catch((err) => {
-                console.warn('processStreamQueue:', err);
-              });
-            }
-          },
-          onError: (event) => {
-            streamInFlightRef.current = false;
-            streamControllerRef.current = null;
-            const eng = streamingTtsEngineRef.current;
-            if (eng) {
-              eng.destroy().catch(() => {});
-            }
-            streamingTtsEngineRef.current = null;
-            setError(event.message);
-            setStreamProgress(null);
-            setStreaming(false);
-          },
-        },
-        { playback: true }
-      );
-      streamControllerRef.current = controller;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      streamInFlightRef.current = false;
-      setError(msg);
-      setStreaming(false);
-    }
-  }, [getSynthesisOptions, buildStreamedAudio]);
-
-  const enqueueStreamingText = useCallback(
-    (text: string) => {
-      const trimmed = text;
-      const lastText = streamLastTextRef.current;
-      if (trimmed.startsWith(lastText)) {
-        const delta = trimmed.slice(lastText.length);
-        if (!delta.trim()) return;
-        streamLastTextRef.current = trimmed;
-        streamQueueRef.current.push(delta);
-        streamProcessCallSourceRef.current = 'enqueueStreamingText';
-        processStreamQueue().catch((err) => {
-          console.warn('processStreamQueue:', err);
-        });
-      } else {
-        streamLastTextRef.current = trimmed;
-      }
-    },
-    [processStreamQueue]
-  );
+    appendLiveTextSegment(textBufferId, delta).catch((err) => {
+      console.warn('appendLiveTextSegment failed:', err);
+    });
+  }, []);
 
   useEffect(() => {
     if (!streaming) {
@@ -768,7 +608,7 @@ export default function TTSScreen() {
     setReferenceAudio(null);
     setReferenceFileName(null);
     if (streaming) {
-      resetStreamingState(true);
+      resetStreamingState();
     }
     stopTtsSavedAudioPlayback();
 
@@ -939,7 +779,7 @@ export default function TTSScreen() {
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
     if (streaming) {
-      resetStreamingState(true);
+      resetStreamingState();
     }
     stopTtsSavedAudioPlayback();
 
@@ -1123,10 +963,9 @@ export default function TTSScreen() {
     setSavedAudioPath(null);
     setCachedPlaybackPath(null);
     setCachedPlaybackSource(null);
-    resetStreamingState(true, { resetScheduleRef: false });
-    // Do NOT set streaming=true here: the useEffect would start a 400ms debounce and
-    // enqueueStreamingText(inputText) could run before we set streamLastTextRef below,
-    // causing a duplicate processStreamQueue. Set streaming only after queue + ref are set.
+    resetStreamingState({ resetScheduleRef: false });
+    // Do NOT set streaming=true here: the useEffect debounce could run before refs are set.
+    // Set streaming only after the pipeline is started.
     stopTtsSavedAudioPlayback();
 
     const useFilePath = padModelIds.includes(currentModelFolder);
@@ -1158,33 +997,61 @@ export default function TTSScreen() {
 
       streamingTtsEngineRef.current = streamingEngine;
 
-      streamChunksRef.current = [];
-      streamSampleRateRef.current = null;
-      streamQueueRef.current = [inputText.trim()];
+      // Create a live audio buffer for streaming output
+      const sr = modelInfo?.sampleRate ?? 16000;
+      const liveAudioBuf = await createLiveAudioBuffer({
+        sampleRate: sr,
+        channelCount: 1,
+        emitAppendedEvents: true,
+        onFramesAppended: (event) => {
+          setStreamSampleCount((prev) => prev + event.frameCount);
+        },
+      });
+      streamAudioBufferRef.current = liveAudioBuf;
+
+      // Create a live text buffer and commit the initial text
+      const liveTextBuf = await createLiveTextBuffer({
+        emitPartialEvents: false,
+      });
+      streamTextBufferIdRef.current = liveTextBuf.bufferId;
+
+      // Append the initial text as a segment
+      await appendLiveTextSegment(liveTextBuf.bufferId, inputText.trim());
       streamLastTextRef.current = inputText.trim();
-      streamInFlightRef.current = false;
+
+      // Finalize immediately since we have the full text
+      await finalizeLiveTextBuffer(liveTextBuf.bufferId);
+
+      // Build pipeline options
+      let pipelineOpts: TtsPipelineOptions | undefined;
+      try {
+        pipelineOpts = getPipelineOptions();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        setError(msg);
+        resetStreamingState();
+        streamInitialScheduleRef.current = false;
+        return;
+      }
+
+      // Start the TTS pipeline
+      const pipelineHandle = await streamingEngine.synthesize(
+        liveTextBuf.bufferId,
+        liveAudioBuf.bufferId,
+        pipelineOpts
+      );
+      streamPipelineRef.current = pipelineHandle;
 
       setStreaming(true);
       setStreamProgress(0);
       setStreamSampleCount(0);
-      if (!streamProcessSchedulePendingRef.current) {
-        streamProcessSchedulePendingRef.current = true;
-        setTimeout(() => {
-          streamProcessSchedulePendingRef.current = false;
-          streamProcessCallSourceRef.current =
-            'handleStartStreaming-setTimeout';
-          processStreamQueue();
-        }, 0);
-      }
     } catch (err) {
       streamInitialScheduleRef.current = false;
-      streamProcessSchedulePendingRef.current = false;
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
       setStreamProgress(null);
       setStreaming(false);
-      streamingTtsEngineRef.current = null;
-      streamControllerRef.current = null;
+      resetStreamingState();
     }
   };
 
@@ -1193,18 +1060,36 @@ export default function TTSScreen() {
       return;
     }
     try {
-      const controller = streamControllerRef.current;
-      if (controller) {
-        await controller.cancel();
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        await pipeline.stop();
       }
     } catch (err) {
       console.warn('Failed to cancel streaming:', err);
     } finally {
-      const streamedAudio = buildStreamedAudio();
-      if (streamedAudio) {
-        setGeneratedAudio(streamedAudio);
+      // Convert live audio buffer to an offline buffer for save/playback
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        try {
+          audioBuffer.unsubscribeEvents();
+          await finalizeLiveAudioBuffer(audioBuffer.bufferId);
+          const offlineBuf = await createOfflineAudioBufferFromLive(
+            audioBuffer.bufferId
+          );
+          const info = await getPipelineAudioBufferInfo(offlineBuf.bufferId);
+          if (info.numSamples && info.numSamples > 0) {
+            setGeneratedAudio({
+              kind: 'buffer',
+              bufferId: offlineBuf.bufferId,
+              sampleRate: info.sampleRate,
+              numSamples: info.numSamples,
+            });
+          }
+        } catch {
+          // ignore — buffer may have been released
+        }
       }
-      resetStreamingState(false);
+      resetStreamingState();
     }
   };
 
@@ -1245,21 +1130,9 @@ export default function TTSScreen() {
     );
   };
 
-  /** Save a GeneratedResult (buffer or pcm) to a WAV file path. */
+  /** Save a GeneratedResult to a WAV file path. */
   const saveResultToWav = async (audio: GeneratedResult, path: string) => {
-    if (audio.kind === 'buffer') {
-      await saveOfflineAudioBufferToWav(audio.bufferId, path);
-    } else {
-      const tmp = await createOfflineAudioBufferFromSamples(
-        Array.from(audio.samples),
-        audio.sampleRate
-      );
-      try {
-        await saveOfflineAudioBufferToWav(tmp.bufferId, path);
-      } finally {
-        await releasePipelineAudioBuffer(tmp.bufferId).catch(() => {});
-      }
-    }
+    await saveOfflineAudioBufferToWav(audio.bufferId, path);
   };
 
   const saveAudioWithData = async (audio: GeneratedResult) => {
@@ -1472,7 +1345,7 @@ export default function TTSScreen() {
   const handleFree = async () => {
     try {
       if (streaming) {
-        resetStreamingState(true);
+        resetStreamingState();
       }
       stopTtsSavedAudioPlayback();
       const engine = ttsEngineRef.current;
