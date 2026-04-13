@@ -65,10 +65,10 @@
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
     },
-    "./files": {
-      "source": "./src/files/index.ts",
-      "types": "./lib/typescript/src/files/index.d.ts",
-      "default": "./lib/module/files/index.js"
+    "./fileio": {
+      "source": "./src/fileio/index.ts",
+      "types": "./lib/typescript/src/fileio/index.d.ts",
+      "default": "./lib/module/fileio/index.js"
     },
     "./pcm": {
       "source": "./src/pcm/index.ts",
