@@ -116,6 +116,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
 | TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Standalone API: **`alignTextToAudio`** (`react-native-sherpa-onnx/alignment`). |
 | Speech Enhancement | ✅ **Supported** | [Overview](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md), [Streaming](./docs/enhancement-streaming.md) | Batch offline buffers; streaming via native live-buffer pipeline only (`createStreamingEnhancement` → `enhance`). |
+| Build-in Audio Player | ✅ **Supported** | [PCM Player](./docs/pcm-player.md) | Play any generated speech (offline/streaming) directly by using the built in pcm player. Easy use and higher performance. |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
 | Play Asset Delivery (PAD) | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Android only. Archives: [Extraction API](./docs/extraction.md). |
@@ -275,7 +276,7 @@ For accurate alignment model setup and detection, see [Alignment / subtitles](./
 - [Speech-to-Text (STT)](./docs/stt-offline.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [Pipeline audio buffers (`audiobuffer`)](./docs/audiobuffer.md) – Overview; [offline](./docs/audiobuffer-offline.md), [live / streaming](./docs/audiobuffer-streaming.md)
-- [PCM stream import (`pcm-stream`)](./docs/pcm-stream.md) – Re-export of the PCM player (`createPcmPlayer`); same as `./pcm`
+- [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
 - [Alignment / subtitles](./docs/alignment.md) – `alignTextToAudio`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
 - [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)

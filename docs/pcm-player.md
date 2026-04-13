@@ -1,81 +1,96 @@
-# PCM Player
+# PCM Player (Pipeline Audio Buffers)
 
-Standalone PCM playback — play mono float audio from any source.
+Play mono float audio from pipeline buffers (offline or live) via native audio backend.
 
-**Import:** `react-native-sherpa-onnx/pcm` (equivalent: **`react-native-sherpa-onnx/pcm-stream`** — same API; see [pcm-stream.md](pcm-stream.md)).
+**Import:** `react-native-sherpa-onnx/pcm`
 
 ## Quick Start
 
-### Manual feed (JS → player)
+### Play offline buffer (file-based)
 
 ```ts
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
-const player = await createPcmPlayer({ sampleRate: 22050, feed: 'js' });
-await player.writePcmChunk(myFloat32Samples);
-// ... feed more chunks ...
+const audioBuffer = await createOfflineAudioBufferFromFile('file:///path/to/audio.wav');
+const player = await createPcmPlayer(audioBuffer.bufferId);
+
 await player.pause();
 await player.resume();
 await player.destroy();
 ```
 
-### With TTS streaming (native playback)
+### Play live buffer (streaming)
 
 ```ts
-import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import {
+  createLiveAudioBuffer,
+  appendSamplesToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 
-const tts = await createStreamingTTS(opts);
-const ctrl = await tts.generateSpeechStream(text, genOpts, {
-  onEnd: () => { /* playback finished */ },
-}, { playback: true, emitChunks: false });
+const audioBuffer = await createLiveAudioBuffer({ sampleRate: 22050 });
+const player = await createPcmPlayer(audioBuffer.bufferId);
 
-// Pause / resume during playback:
-await ctrl.player?.pause();
-await ctrl.player?.resume();
+// Append samples from your source
+await appendSamplesToLiveAudioBuffer(audioBuffer.bufferId, myFloat32Samples);
+// ... continue feeding ...
 
-// ctrl.cancel() stops synthesis + destroys player in one call
+// Playback starts immediately as samples are appended.
+// Finalize only signals end-of-stream (EOS).
+await finalizeLiveAudioBuffer(audioBuffer.bufferId);
+
+await player.pause();
+await player.resume();
+await player.destroy();
 ```
 
-No `createPcmPlayer` call needed — `playback: true` manages the player internally.
-
-### Batch TTS playback (native sink)
+### Play TTS-generated audio (pipeline model)
 
 ```ts
-import { createTTS } from 'react-native-sherpa-onnx/tts';
+import { createIncrementalStreamingTTS } from 'react-native-sherpa-onnx/tts';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { createLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
-const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/vits' } });
-const audio = await tts.generateSpeech('Hello world');
+const audioOut = await createLiveAudioBuffer({ sampleRate: 22050 });
+const tts = await createIncrementalStreamingTTS({
+  modelPath: { type: 'asset', path: 'models/vits' },
+  audioOutLiveBufferId: audioOut.bufferId,
+});
 
-// Play directly from native sink — no getSamples() needed
-// Returns a controller with a .player handle
-const playback = await tts.playFromSink(audio.generation);
+// TTS writes to audioOut automatically
+// Create player to play it
+const player = await createPcmPlayer(audioOut.bufferId);
 
-// Pause / resume / destroy via player handle
-await playback.player.pause();
-await playback.player.resume();
-await playback.player.destroy();
-
+// ... Pause/resume/destroy as needed ...
+await player.destroy();
 await tts.destroy();
 ```
 
+## Architecture
+
+The PCM Player plays audio from **pipeline buffers**:
+- **Offline buffer**: fully populated, immutable audio (file-based)
+- **Live buffer**: streaming, mutable audio with append/finalize API
+
+Audio is streamed **directly from native buffer→native playback** — no JS bridge traffic for audio samples.
+
 ## API Reference
 
-### `createPcmPlayer(options)`
+### `createPcmPlayer(audioBuffer, options?)`
 
 Creates a player session. Returns `PcmPlayer`.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `sampleRate` | `number` | required | Sample rate in Hz |
-| `channels` | `number` | `1` | Only mono supported in v1 |
-| `feed` | `'js' \| 'native'` | `'js'` | How PCM reaches the player |
-| `ttsInstanceId` | `string?` | `undefined` | Optional TTS engine binding |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| string` | required | Buffer ref or ID |
+| `options?.volume` | `number` | `1.0` | Volume scale [0, 1] |
 
 ### `PcmPlayer`
 
 | Method | Description |
 |--------|-------------|
-| `writePcmChunk(samples)` | Enqueue float PCM. Only when `feed='js'`. |
 | `pause()` | Pause playback. Buffered samples are retained. |
 | `resume()` | Resume paused playback. |
 | `destroy()` | Stop + release resources. |
@@ -84,21 +99,26 @@ Creates a player session. Returns `PcmPlayer`.
 |----------|------|-------------|
 | `playerId` | `string` | Unique player identifier |
 
-### Feed modes
+### Buffer sources
 
-- **`'js'`**: App feeds samples via `writePcmChunk()`. Typical for mic PCM, test audio, or manual relay from `onChunk`.
-- **`'native'`**: Only native producers may enqueue. `writePcmChunk()` from JS is rejected. Used internally by `playback: true` streaming.
+The player accepts **any pipeline audio buffer**:
+- **OfflineAudioBufferRef**: File-based buffers from `createOfflineAudioBufferFromFile`
+- **LiveAudioBufferRef**: Streaming buffers from `createLiveAudioBuffer`
+- **String**: Raw buffer ID (`off_…` or `live_…`)
 
 ## Platform details
 
 | | Android | iOS |
 |---|---------|-----|
-| Audio backend | `AudioTrack` (`MODE_STREAM`, `ENCODING_PCM_FLOAT`) | `AVAudioEngine` + `AVAudioPlayerNode` |
+| Audio backend | `AudioTrack` (pipeline buffer consumer) | `AVAudioEngine` + `AVAudioPlayerNode` (pipeline buffer consumer) |
 | Category | `USAGE_MEDIA` / `CONTENT_TYPE_SPEECH` | `AVAudioSessionCategoryPlayback` |
-| Thread safety | `ConcurrentHashMap` registry | `std::mutex` + `std::unordered_map` |
+| Native playback | Cursor-based draining from ring buffer | Cursor-based draining from ring buffer |
 
 ## See also
 
-- [tts-streaming.md](tts-streaming.md) — streaming TTS with `playback` option
-- [tts-offline.md](tts-offline.md) — batch TTS with `playFromSink`
+- [Pipeline Audio Buffers — Overview](audiobuffer.md)
+- [Offline Audio Buffers](audiobuffer-offline.md)
+- [Live / Streaming Audio Buffers](audiobuffer-streaming.md)
+- [Incremental Streaming TTS](../tts/incremental.md)
+
 - [migration.md](migration.md) — migrating from old PCM player API
