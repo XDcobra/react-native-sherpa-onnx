@@ -1,28 +1,32 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { PcmPlayer, PcmPlayerOptions, PcmPlayerFeed } from './types';
+import type {
+  PcmPlayer,
+  PcmPlayerOptions,
+  PcmPlayerAudioBuffer,
+} from './types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer/index';
 
 let pcmPlayerCounter = 0;
 
 /**
- * Create a standalone PCM player session for mono float audio playback.
+ * Create a pipeline audio buffer player session for mono float audio playback.
  *
- * @param options - Player configuration (sampleRate, feed mode, optional TTS binding)
+ * The player consumes audio frames from a pipeline buffer (offline or live)
+ * and plays them via native audio backend (AudioTrack on Android, AVAudioEngine on iOS).
+ *
+ * @param audioBuffer - Live or offline audio buffer to play from
+ * @param options - Player configuration (volume, etc.)
  * @returns Promise resolving to a PcmPlayer handle
  */
 export async function createPcmPlayer(
-  options: PcmPlayerOptions
+  audioBuffer: PcmPlayerAudioBuffer,
+  options?: PcmPlayerOptions
 ): Promise<PcmPlayer> {
   const playerId = `pcm_player_${++pcmPlayerCounter}`;
-  const feed: PcmPlayerFeed = options.feed ?? 'js';
-  const channels = options.channels ?? 1;
+  const bufferId = resolvePipelineAudioBufferId(audioBuffer);
+  const volume = options?.volume ?? 1.0;
 
-  await SherpaOnnx.createPcmPlayer(
-    playerId,
-    options.sampleRate,
-    channels,
-    feed,
-    options.ttsInstanceId ?? null
-  );
+  await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume);
 
   let destroyed = false;
   const guard = () => {
@@ -32,22 +36,6 @@ export async function createPcmPlayer(
   return {
     get playerId() {
       return playerId;
-    },
-    get feed() {
-      return feed;
-    },
-
-    async writePcmChunk(samples: Float32Array | number[]): Promise<void> {
-      guard();
-      if (feed === 'native') {
-        throw new Error(
-          `PcmPlayer ${playerId} has feed 'native'; writePcmChunk() is not allowed from JS. ` +
-            `Use feed 'js' for manual PCM writes.`
-        );
-      }
-      const arr =
-        samples instanceof Float32Array ? Array.from(samples) : samples;
-      return SherpaOnnx.writePcmChunk(playerId, arr);
     },
 
     async pause(): Promise<void> {

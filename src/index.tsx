@@ -35,7 +35,7 @@ export { getModelLicenses, type ModelLicense } from './licenses';
 // - import { ... } from 'react-native-sherpa-onnx/enhancement'
 // - import { ... } from 'react-native-sherpa-onnx/separation'
 // - import { ... } from 'react-native-sherpa-onnx/audiobuffer'  // offline/live pipeline buffers
-// - import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm-stream'  // alias of ./pcm (playback)
+// - import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'  // play from pipeline buffers
 
 /**
  * Test method to verify sherpa-onnx native library is loaded.

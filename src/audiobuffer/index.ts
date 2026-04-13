@@ -525,3 +525,9 @@ export type {
   StreamingPipelineStatus,
   StreamingPipelineHandle,
 } from './streamingPipelineTypes';
+
+/**
+ * Resolve an audio buffer source to a native buffer ID string.
+ * Accepts buffer references, info objects, handles, or raw strings.
+ */
+export { resolvePipelineAudioBufferId };
