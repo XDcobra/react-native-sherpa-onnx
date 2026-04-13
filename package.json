@@ -85,11 +85,6 @@
       "types": "./lib/typescript/src/textbuffer/index.d.ts",
       "default": "./lib/module/textbuffer/index.js"
     },
-    "./pcm-stream": {
-      "source": "./src/pcm-stream/index.ts",
-      "types": "./lib/typescript/src/pcm-stream/index.d.ts",
-      "default": "./lib/module/pcm-stream/index.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [
