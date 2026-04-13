@@ -1,14 +1,16 @@
 # Speech enhancement (offline)
 
-On-device **batch** speech denoising (**GTCRN**, **DPDFNet**): a populated **`OfflineAudioBuffer`** is denoised into an **empty** **`OfflineAudioBuffer`** at the model sample rate.
+On-device batch speech denoising with a **pipeline-first** API:
 
-**Import path:** `react-native-sherpa-onnx/enhancement`
+- **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — populated noisy PCM (file-backed or in-memory).
+- **Output:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — empty buffer at the denoiser sample rate (`createEmptyOfflineAudioBuffer`); **`enhance`** writes denoised PCM once.
+- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut)`** (plus `getSampleRate` / `destroy`). There is **no** JS-side API that returns denoised samples; read the result from **`audioOut`** through **audiobuffer** (`getPipelineAudioBufferInfo`, `saveOfflineAudioBufferToWav`, etc.).
+
+Import path: `react-native-sherpa-onnx/enhancement`
 
 For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`enhance`**), see [Speech enhancement (streaming)](enhancement-streaming.md).
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
-
----
 
 ## Models and paths
 
@@ -36,7 +38,7 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Quick start
 
-Offline enhancement uses **`OfflineAudioBuffer`** handles for both input and output. The input buffer is populated (from a file, samples, or live snapshot); the output buffer is created empty at the denoiser's sample rate.
+**`audioIn`** / **`audioOut`** below are the pipeline buffers from the intro (same module for both sides).
 
 ```ts
 import {
@@ -209,7 +211,33 @@ destroy(): Promise<void>;
 await enhancement.destroy();
 ```
 
----
+## Pipeline buffers (audio input + audio output)
+
+**Audio input**
+
+```ts
+import {
+  createOfflineAudioBufferFromFile,
+  createOfflineAudioBufferFromSamples,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+
+**Audio output**
+
+```ts
+import {
+  createEmptyOfflineAudioBuffer,
+  getPipelineAudioBufferInfo,
+  saveOfflineAudioBufferToWav,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
 
 ## Types and constants
 
@@ -254,6 +282,6 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 - [Speech enhancement (overview)](speech-enhancement.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [TTS offline](tts-offline.md)
-- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)

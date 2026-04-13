@@ -1,16 +1,16 @@
 # Speech enhancement (streaming)
 
-On-device speech denoising (**GTCRN**, **DPDFNet**) via **`createStreamingEnhancement`** and **`LiveAudioBuffer`** only: **`enhance(inputBufferId, outputBufferId)`** runs a native worker that reads the input buffer and appends denoised PCM to the output buffer (`source: "enhancement"`). There is **no** JS API to push raw sample arrays into the online denoiser.
+On-device streaming speech denoising with a **pipeline-first** API:
 
-**Naming in this guide:** **`denoiser`** = the object returned by **`createStreamingEnhancement`** (`StreamingEnhancementEngine`, holds the native online denoiser). **`pipeline`** = the handle returned by **`denoiser.enhance(...)`** (`EnhancementPipelineHandle`, controls one running native worker).
+- **Input:** live pipeline audio buffer ([`audiobuffer` — live / streaming](audiobuffer-streaming.md)) — ring/spool buffer the denoiser **drains** (mic, append, or upstream native pipeline).
+- **Output:** live pipeline audio buffer ([`audiobuffer` — live / streaming](audiobuffer-streaming.md)) — separate live buffer; native worker **appends** denoised PCM (`source: "enhancement"` on append events).
+- **Engine:** `createStreamingEnhancement` exposes **`enhance(audioIn, audioOut)`** → `Promise<EnhancementPipelineHandle>` (plus `getSampleRate` / `getFrameShiftInSamples` / `destroy`). There is **no** JS API to push raw sample arrays into the online denoiser; control the running worker via **`EnhancementPipelineHandle`** (`flush`, `stop`, `reset`, `getStatus`). In this guide **`denoiser`** means the returned `StreamingEnhancementEngine` and **`pipeline`** means that handle.
 
-**Import path:** `react-native-sherpa-onnx/enhancement`
+Import path: `react-native-sherpa-onnx/enhancement`
 
 For **offline batch** enhancement (`OfflineAudioBuffer` → `OfflineAudioBuffer`), see [Speech enhancement (offline)](enhancement-offline.md).
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
-
----
 
 ## Models and paths
 
@@ -38,7 +38,7 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Quick start
 
-The native pipeline runs enhancement on a background thread. Audio flows from a **`LiveAudioBuffer`** (e.g. mic input) through the denoiser into a second **`LiveAudioBuffer`** — no per-chunk JS bridging for PCM.
+**`inputBuf`** / **`outputBuf`** below are the **input** and **output** live pipeline buffers from the intro; PCM moves natively between them while the worker runs — no per-chunk JS bridging for steady-state audio.
 
 ```ts
 import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -276,7 +276,35 @@ interface StreamingPipelineStatus {
 }
 ```
 
----
+## Pipeline buffers (audio input + audio output)
+
+**Audio input**
+
+```ts
+import {
+  createLiveAudioBuffer,
+  appendSamplesToLiveAudioBuffer,
+  appendOfflineToLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
+
+**Audio output**
+
+```ts
+import {
+  createLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
+  getLiveAudioBufferSamplesSlice,
+  saveLiveAudioBufferToWav,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
 
 ## Types and constants
 
@@ -334,6 +362,6 @@ Typical **promise rejection `code`** strings from the native layer (offline vs o
 
 - [Speech enhancement (offline)](enhancement-offline.md)
 - [Speech enhancement (overview)](speech-enhancement.md)
-- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)

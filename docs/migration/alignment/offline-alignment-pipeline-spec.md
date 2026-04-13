@@ -75,7 +75,7 @@ Alignment is **read-only** on both buffers: it must not mutate transcript or PCM
 
 - **Online** alignment API surface.  
 - Writing subtitle JSON **into** a text buffer (optional follow-up).  
-- UI / player integration (see **`pcm-player.md`**, **`audiobuffer.md`**).
+- UI / player integration (see **`pcm-player.md`**, **`audiobuffer.md`** / **`audiobuffer-offline.md`**).
 
 ---
 
@@ -160,4 +160,4 @@ function alignTextToAudio(
 - [TextBuffer pipeline spec](../textbuffer/textbuffer-pipeline-spec.md)  
 - [Offline TTS buffer spec](../tts/tts-offline-buffer-pipeline-spec.md)  
 - [Offline STT](../../stt-offline.md)  
-- [`audiobuffer`](../../audiobuffer.md), [`textbuffer`](../../textbuffer.md)
+- [`audiobuffer` (overview)](../../audiobuffer.md), [`audiobuffer-offline`](../../audiobuffer-offline.md), [`textbuffer`](../../textbuffer.md)

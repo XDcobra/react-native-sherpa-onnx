@@ -946,6 +946,6 @@ No `feedSamples` in the public API. Buffer-only. Breaking changes are OK (SDK no
 ## 11. Related documents
 
 - [Offline enhancement buffer pipeline spec](../enhancement/offline-enhancement-buffer-pipeline-spec.md) — reference for offline `enhance()` naming and buffer pattern
-- [Pipeline audio buffers (`audiobuffer`)](../../audiobuffer.md)
+- [Pipeline audio buffers — live / streaming](../../audiobuffer-streaming.md) · [overview](../../audiobuffer.md)
 - [Speech enhancement — streaming](../../enhancement-streaming.md) · [overview](../../speech-enhancement.md)
 - [STT buffer-only plan](../stt/stt-pipeline-buffer-only-api-plan.md) — will reuse `StreamingPipelineWorker` + `StreamingPipelineRegistry`

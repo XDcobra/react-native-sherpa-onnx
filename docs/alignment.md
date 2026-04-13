@@ -243,6 +243,10 @@ function assertAlignmentGranularityForMode(
 assertAlignmentGranularityForMode('aligned', 'character');
 ```
 
+## Pipeline buffers (audio + text)
+See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [textbuffer.md](textbuffer.md).
+
 ## Types (core)
 
 | Type | Description |

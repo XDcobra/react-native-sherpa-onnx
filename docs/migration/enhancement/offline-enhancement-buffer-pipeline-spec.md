@@ -176,6 +176,6 @@ Exact spellings should match constants exported from **`src/enhancement/types.ts
 ## 9. Related documents
 
 - [Speech enhancement — offline](../../enhancement-offline.md) · [overview](../../speech-enhancement.md)
-- [Pipeline audio buffers (`audiobuffer`)](../../audiobuffer.md)  
+- [Pipeline audio buffers — offline](../../audiobuffer-offline.md) · [overview](../../audiobuffer.md)  
 - [STT buffer-only plan](../stt/stt-pipeline-buffer-only-api-plan.md)  
 - [Offline alignment pipeline](../alignment/offline-alignment-pipeline-spec.md)

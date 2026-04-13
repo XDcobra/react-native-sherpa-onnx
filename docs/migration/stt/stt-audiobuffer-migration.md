@@ -103,7 +103,7 @@ Audio von einem **`live_…`**-Buffer wird vor Offline-STT **immer** über **`cr
 ### 4. Tests und User-Doku
 
 - Unit-/Integrationstests: In-Memory- und **file-backed** Offline (Reader-Pfad), Fehlerfälle (`recording`, nicht gefunden, leer).
-- [`docs/stt-offline.md`](../../stt-offline.md), [`docs/audiobuffer.md`](../../audiobuffer.md): nur neues Modell; Kurz-Hinweis **Offline vs. Streaming** wie oben (kein Migrationskapitel für Altnutzer).
+- [`docs/stt-offline.md`](../../stt-offline.md), [`docs/audiobuffer.md`](../../audiobuffer.md) / [`audiobuffer-offline.md`](../../audiobuffer-offline.md): nur neues Modell; Kurz-Hinweis **Offline vs. Streaming** wie oben (kein Migrationskapitel für Altnutzer).
 
 ### 5. Optional (separates Epic)
 
@@ -124,5 +124,5 @@ Audio von einem **`live_…`**-Buffer wird vor Offline-STT **immer** über **`cr
 
 - Pipeline-Architektur: [audio_pipeline_buffers_7605bf7f.plan.md](../audio_pipeline_buffers_7605bf7f.plan.md)
 - Ältere STT-Pipeline-Notiz: [stt-native-pipeline-spec-implementation-plan.md](../stt-native-pipeline-spec-implementation-plan.md)
-- Pipeline-Buffers: [audiobuffer.md](../../audiobuffer.md); PCM-Player-Alias: [pcm-stream.md](../../pcm-stream.md)
+- Pipeline-Buffers: [audiobuffer.md](../../audiobuffer.md), [audiobuffer-offline.md](../../audiobuffer-offline.md), [audiobuffer-streaming.md](../../audiobuffer-streaming.md); PCM-Player-Alias: [pcm-stream.md](../../pcm-stream.md)
 - STT nur noch über Buffer + Alignment entkoppeln: [stt-pipeline-buffer-only-api-plan.md](./stt-pipeline-buffer-only-api-plan.md)

@@ -103,7 +103,7 @@ This work is intentionally **backward compatible** at the TypeScript boundary:
 
 ## 7. Related documentation
 
-- [Pipeline audio buffers (`audiobuffer`)](../audiobuffer.md) — offline vs live concepts.
+- [Pipeline audio buffers — overview](../audiobuffer.md); [offline](../audiobuffer-offline.md) — concepts and API.
 - [Offline STT (`stt-offline.md`)](../stt-offline.md) — transcribe into text buffers.
 - [TextBuffer pipeline spec](../migration/textbuffer/textbuffer-pipeline-spec.md) — pipeline direction for text output.
 

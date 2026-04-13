@@ -218,7 +218,7 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 
-const engine = await createStreamingSTT({
+const recognizer = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
@@ -228,7 +228,7 @@ const engine = await createStreamingSTT({
 const audioIn = await createLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 
-const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
+const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });
 
 await startMicToLiveAudioBuffer(audioIn);
 // ... recording session ...
@@ -245,7 +245,7 @@ const segments =
 console.log(segments.map((s) => s.text).join(' '));
 
 await pipeline.stop();
-await engine.destroy();
+await recognizer.destroy();
 await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
 ```

@@ -420,4 +420,4 @@ Die Offline-TTS Doku soll nach Migration folgende Form haben:
 - [ios/SherpaOnnx+TextBuffer.mm](../../../ios/SherpaOnnx+TextBuffer.mm)
 - [docs/stt-offline.md](../../stt-offline.md)
 - [docs/textbuffer.md](../../textbuffer.md)
-- [docs/audiobuffer.md](../../audiobuffer.md)
+- [docs/audiobuffer-offline.md](../../audiobuffer-offline.md) · [overview](../../audiobuffer.md)

@@ -278,4 +278,4 @@ const partial = await getLiveTextBufferPartialSlice(live, 0, 256);
 
 - [Offline STT](stt-offline.md)
 - [Streaming STT](stt-streaming.md)
-- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline audio buffers — overview](audiobuffer.md) · [offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)

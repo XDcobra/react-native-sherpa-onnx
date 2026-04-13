@@ -15,11 +15,11 @@ import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm-stream';
 
 **Offline / live registry buffers** (`off_…`, `live_…`, mic → ring, spool, `createOfflineAudioBufferFromFile`, …) are **not** part of this module. Use:
 
-**`react-native-sherpa-onnx/audiobuffer`** — see [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md).
+**`react-native-sherpa-onnx/audiobuffer`** — see [Pipeline audio buffers — overview](audiobuffer.md); [offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md).
 
 ---
 
 ## See also
 
 - [PCM Player](pcm-player.md) — full options and TTS integration
-- [Pipeline buffers](audiobuffer.md) — live/offline handles for STT and pipelines
+- [Pipeline buffers — overview](audiobuffer.md) — offline and live handles for STT and pipelines

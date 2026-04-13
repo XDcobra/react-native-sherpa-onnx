@@ -16,6 +16,8 @@ Streaming STT now runs as a native worker pipeline:
 
 There is no per-chunk stream object in the JS API anymore.
 
+**Naming in this doc:** **`engine`** is the value returned by **`createStreamingSTT`** / **`createLiveSTT`** (`LiveSttEngine`). **`pipeline`** is the handle returned by **`engine.transcribe(...)`** (`SttPipelineHandle`).
+
 ## Models and paths
 
 - `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
@@ -144,7 +146,7 @@ const engine = await createStreamingSTT({
 
 | Step | Method | Result |
 | --- | --- | --- |
-| 1 | `createStreamingSTT(...)` | STT engine allocated |
+| 1 | `createStreamingSTT(...)` | Engine (`LiveSttEngine`) allocated |
 | 2 | `createLiveAudioBuffer(...)` | Live audio input buffer |
 | 3 | `createLiveTextBuffer(...)` | Live text output buffer |
 | 4 | `engine.transcribe(audioIn, textOut, options?)` | Native STT pipeline starts |
@@ -158,7 +160,7 @@ const engine = await createStreamingSTT({
 | Topic | Requirement |
 | --- | --- |
 | Input format | Float PCM `[-1, 1]` at buffer sample rate |
-| Live microphone | [audiobuffer.md](audiobuffer.md): `startMicToLiveAudioBuffer` / `stopMicToLiveAudioBuffer` |
+| Live microphone | [audiobuffer-streaming.md](audiobuffer-streaming.md): `startMicToLiveAudioBuffer` / `stopMicToLiveAudioBuffer` |
 | Text output | [textbuffer.md](textbuffer.md): partial slice + segment log getters |
 | Sample rate | Live audio buffer sample rate must match STT model sample rate |
 | Lifecycle | Stop pipeline, destroy engine, and release both buffers |
@@ -167,12 +169,35 @@ const engine = await createStreamingSTT({
 
 All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`detectSttModel`** from the same package for model detection before creating a streaming engine (see [Offline STT — Detection and factory](stt-offline.md#detection-and-factory)).
 
-### Factory
+### Detection and initialization
+
+#### `detectSttModel(modelPath, options?)`
+
+```ts
+function detectSttModel(
+  modelPath: ModelPathConfig,
+  options?: { preferInt8?: boolean; modelType?: STTModelType; assetName?: string; debug?: boolean }
+): Promise<SttDetectModelResult>;
+```
+
+```ts
+const det = await detectSttModel({ type: 'asset', path: 'models/streaming-zipformer-en' });
+console.log(det.success, det.modelType);
+```
+
+Use this first when you need robust model-type selection before creating a streaming engine.
 
 #### `createStreamingSTT(options)`
 
 ```ts
 function createStreamingSTT(options: StreamingSttInitOptions): Promise<LiveSttEngine>;
+```
+
+```ts
+const engine = await createStreamingSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelType: 'zipformer2_ctc',
+});
 ```
 
 #### `createLiveSTT(options)`
@@ -183,7 +208,14 @@ Alias of `createStreamingSTT`.
 function createLiveSTT(options: StreamingSttInitOptions): Promise<LiveSttEngine>;
 ```
 
-### Online type helpers
+```ts
+const engine = await createLiveSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelType: 'transducer',
+});
+```
+
+### Streaming model-type helpers
 
 Use after **`detectSttModel`** when you need a streaming-capable `modelType` or must reject offline-only models.
 
@@ -193,10 +225,19 @@ Use after **`detectSttModel`** when you need a streaming-capable `modelType` or 
 function mapDetectedToOnlineType(detectedType: string | undefined): OnlineSTTModelType;
 ```
 
+```ts
+const onlineType = mapDetectedToOnlineType(det.modelType);
+```
+
 #### `getOnlineTypeOrNull(detectedType)`
 
 ```ts
 function getOnlineTypeOrNull(detectedType: string | undefined): OnlineSTTModelType | null;
+```
+
+```ts
+const onlineType = getOnlineTypeOrNull(det.modelType);
+if (!onlineType) throw new Error('Detected model is not streaming-capable');
 ```
 
 ### Engine (`LiveSttEngine`)
@@ -211,6 +252,10 @@ transcribe(
 ): Promise<SttPipelineHandle>;
 ```
 
+```ts
+const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
+```
+
 Starts one native STT pipeline for this engine instance.
 
 #### `engine.destroy()`
@@ -219,11 +264,15 @@ Starts one native STT pipeline for this engine instance.
 destroy(): Promise<void>;
 ```
 
-Stops any active pipeline and unloads the native online recognizer instance.
+```ts
+await engine.destroy();
+```
+
+Stops any active pipeline and unloads the native online engine instance.
 
 ### Pipeline handle (`SttPipelineHandle`)
 
-`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent **`LiveSttEngine`**.
+`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`).
 
 #### `pipeline.stop()`
 
@@ -231,10 +280,18 @@ Stops any active pipeline and unloads the native online recognizer instance.
 stop(): Promise<void>;
 ```
 
+```ts
+await pipeline.stop();
+```
+
 #### `pipeline.flush()`
 
 ```ts
 flush(): Promise<void>;
+```
+
+```ts
+await pipeline.flush();
 ```
 
 Forces decode of currently buffered audio and commits pending final text.
@@ -245,12 +302,21 @@ Forces decode of currently buffered audio and commits pending final text.
 reset(): Promise<void>;
 ```
 
-Resets recognizer stream state and clears current partial text.
+```ts
+await pipeline.reset();
+```
+
+Resets engine stream state and clears current partial text.
 
 #### `pipeline.getStatus()`
 
 ```ts
 getStatus(): Promise<StreamingPipelineStatus>;
+```
+
+```ts
+const status = await pipeline.getStatus();
+console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ```
 
 Status fields:
@@ -261,7 +327,40 @@ Status fields:
 - `unitsWritten` (text units)
 - `error`
 
-## Streaming-relevant exports
+## Pipeline buffers (audio + text)
+
+**Audio input**
+
+```ts
+import {
+  createLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  appendSamplesToLiveAudioBuffer,
+  appendOfflineToLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
+
+**Text output**
+
+```ts
+import {
+  createLiveTextBuffer,
+  getPipelineTextBufferInfo,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+```
+
+See [textbuffer.md](textbuffer.md).
+
+## Types and constants
 
 ```ts
 import {
@@ -284,6 +383,7 @@ import type {
 ```
 
 ## Error quick table
+Typical `SttErrorCode` values from the Streaming STT layer (exact strings match native):
 
 | Code | Typical reason |
 | --- | --- |
@@ -298,7 +398,7 @@ import type {
 ## See also
 
 - [Offline STT](stt-offline.md)
-- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
 - [Pipeline text buffers (`textbuffer`)](textbuffer.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)

@@ -2,7 +2,7 @@
 
 On-device batch transcription with a **pipeline-first** API:
 
-- **Input:** offline pipeline audio buffer ([`audiobuffer`](audiobuffer.md)) — file-backed or in-memory PCM.
+- **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — file-backed or in-memory PCM.
 - **Output:** offline pipeline text buffer ([`textbuffer`](textbuffer.md)) — STT writes the hypothesis and optional token/timestamp metadata into a buffer you allocate (`createEmptyOfflineTextBuffer`).
 - **Engine:** `createSTT` exposes **`transcribe(audio, textOut)`** (plus `setConfig` / `destroy`). There are **no** JS-side `getSttResult*` methods or `resultId`-based lazy getters anymore; all transcript payload access goes through **textbuffer** slice APIs.
 
@@ -37,54 +37,9 @@ If validation fails, `success` is `false` and `error` contains the missing-file 
 
 ## Quick start
 
-### 1) Detect, create engine, transcribe into a text buffer
+### `createSTT`, `modelOptions`, and `setConfig`
 
-```ts
-import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
-import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  createEmptyOfflineTextBuffer,
-  getPipelineTextBufferInfo,
-  getOfflineTextBufferTextSlice,
-  releasePipelineTextBuffer,
-  type OfflineTextBufferInfo,
-} from 'react-native-sherpa-onnx/textbuffer';
-
-const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
-
-const det = await detectSttModel(modelPath);
-if (!det.success) throw new Error(det.error ?? 'STT detection failed');
-
-const stt = await createSTT({
-  modelPath,
-  modelType: (det.modelType as any) ?? 'auto',
-  preferInt8: true,
-  numThreads: 2,
-});
-
-const audio = await createOfflineAudioBufferFromFile('/absolute/path/audio.wav');
-const textOut = await createEmptyOfflineTextBuffer();
-
-try {
-  await stt.transcribe(audio, textOut);
-
-  const info = (await getPipelineTextBufferInfo(textOut)) as OfflineTextBufferInfo;
-  const text = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
-  console.log(text);
-} finally {
-  await releasePipelineAudioBuffer(audio);
-  await releasePipelineTextBuffer(textOut);
-}
-
-await stt.destroy();
-```
-
-`transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string** for the first argument; the same idea applies to **`textOut`** (`OfflineTextBufferRef` | handle | string). Prefer passing **refs** so call sites stay typed (see [audiobuffer](audiobuffer.md) / [textbuffer](textbuffer.md)).
-
-### 2) Read tokens (and other slices)
+This example skips most buffer ceremony; it shows **how to initialize** the offline engine and **where model-specific knobs live**. Only the `modelOptions.*` block that matches **`modelType`** is applied (e.g. `modelOptions.whisper` is ignored for a paraformer pack).
 
 ```ts
 import { createSTT } from 'react-native-sherpa-onnx/stt';
@@ -94,35 +49,125 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
-  getOfflineTextBufferTokensSlice,
   releasePipelineTextBuffer,
   type OfflineTextBufferInfo,
 } from 'react-native-sherpa-onnx/textbuffer';
 
-const stt = await createSTT({
-  modelPath: { type: 'file', path: '/absolute/path/to/model' },
-  modelType: 'auto',
+// --- Init-time: paths, hardware, hotwords (transducer / NeMo transducer), rules, debug ---
+const engine = await createSTT({
+  modelPath: { type: 'file', path: '/absolute/path/to/stt-model-dir' },
+  modelType: 'whisper', // or 'transducer', 'paraformer', … — see STTInitializeOptions / STT_MODEL_TYPES
+  preferInt8: true,
+  numThreads: 4,
+  provider: 'cpu',
+  debug: false,
+  // hotwordsFile / hotwordsScore / modelingUnit / bpeVocab — when model supports hotwords; see hotwords.md
+  // ruleFsts / ruleFars — optional WFST resources
+  modelOptions: {
+    // Only the branch matching `modelType` is read by native (others ignored).
+    whisper: {
+      language: 'en',
+      task: 'transcribe', // or 'translate' → English text for multilingual Whisper
+      enableTokenTimestamps: false,
+      enableSegmentTimestamps: false,
+    },
+    // senseVoice: { language: 'auto', useItn: true },
+    // canary: { srcLang: 'en', tgtLang: 'en', usePnc: true },
+    // … see SttModelOptions in `react-native-sherpa-onnx/stt`
+  },
 });
 
-const audio = await createOfflineAudioBufferFromFile('/absolute/path/input.wav');
+// --- Runtime (same engine): decoding / hotwords / rules without reloading weights ---
+// Relevant for transducer / CTC-style decoders; some fields no-op on other families.
+await engine.setConfig({
+  decodingMethod: 'modified_beam_search',
+  maxActivePaths: 8,
+  blankPenalty: 0.0,
+  // hotwordsFile / hotwordsScore / ruleFsts / ruleFars can also be updated here
+});
+
+const audio = await createOfflineAudioBufferFromFile('/absolute/path/audio.wav');
 const textOut = await createEmptyOfflineTextBuffer();
-
 try {
-  await stt.transcribe(audio, textOut);
-
+  await engine.transcribe(audio, textOut);
   const info = (await getPipelineTextBufferInfo(textOut)) as OfflineTextBufferInfo;
-  const tokens = await getOfflineTextBufferTokensSlice(textOut, 0, info.tokenCount);
-  console.log(tokens.slice(0, 8));
+  const text = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
+  console.log(text);
 } finally {
   await releasePipelineAudioBuffer(audio);
   await releasePipelineTextBuffer(textOut);
 }
 
-await stt.destroy();
+await engine.destroy();
 ```
 
-Other dimensions (timestamps, durations, lang, emotion, event) use the matching **`getOfflineTextBuffer*`** helpers from **`react-native-sherpa-onnx/textbuffer`**; see [textbuffer.md](textbuffer.md).
+Types: **`STTInitializeOptions`** (init), **`SttModelOptions`** / per-family options (**`SttWhisperModelOptions`**, …), **`SttRuntimeConfig`** (**`setConfig`**). Full signatures: [API reference](#api-reference) below; hotword fields: [hotwords.md](hotwords.md).
+
+### Detect, transcribe, read text (tokens optional)
+
+```ts
+import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+  getOfflineTextBufferTokensSlice,
+  type OfflineTextBufferInfo,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+// Same shape as createSTT / detectSttModel expect (bundled assets vs filesystem).
+const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
+
+// Cheap check of required files / model type before loading weights.
+const det = await detectSttModel(modelPath);
+if (!det.success) throw new Error(det.error ?? 'STT detection failed');
+
+// Loads the offline recognizer; tune threads / int8 / provider per device.
+const engine = await createSTT({
+  modelPath,
+  modelType: (det.modelType as any) ?? 'auto',
+  preferInt8: true,
+  numThreads: 2,
+});
+
+// Native decode: WAV (etc.) → immutable offline PCM handle (not a giant JS float[]).
+const audio = await createOfflineAudioBufferFromFile('/absolute/path/audio.wav');
+// Empty sink; transcribe will reject if you reuse a buffer that already has text.
+const textOut = await createEmptyOfflineTextBuffer();
+
+try {
+  // Blocks until decode finishes; fills textOut on the native side.
+  await engine.transcribe(audio, textOut);
+
+  // Lengths for slices (utf16 code units, token ids, timestamp rows, …).
+  const info = (await getPipelineTextBufferInfo(textOut)) as OfflineTextBufferInfo;
+  const text = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
+  console.log(text);
+  // Example output: Hello world.
+
+  // Alternative — token ids (same `info`; use getOfflineTextBuffer* for timestamps, etc.):
+  const tokens = await getOfflineTextBufferTokensSlice(textOut, 0, info.tokenCount);
+  console.log(tokens.slice(0, 8));
+  // Example output: [50258, 50363, 2425, 11, 2326, 11, 728, 628]
+
+} finally {
+  // transcribe does not take ownership; release native buffers when JS is done reading.
+  await releasePipelineAudioBuffer(audio);
+  await releasePipelineTextBuffer(textOut);
+}
+
+// Unloads model; does not release pipeline buffers (handled above).
+await engine.destroy();
+```
+
+`transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string** for the first argument; the same idea applies to **`textOut`** (`OfflineTextBufferRef` | handle | string). Prefer passing **refs** so call sites stay typed (see [audiobuffer — offline](audiobuffer-offline.md) / [textbuffer](textbuffer.md)). Timestamps, durations, lang, emotion, and other dimensions use the matching **`getOfflineTextBuffer*`** helpers; see [textbuffer.md](textbuffer.md).
 
 ## Data model and lifetime
 
@@ -176,7 +221,7 @@ function createSTT(options: STTInitializeOptions | ModelPathConfig): Promise<Stt
 ```
 
 ```ts
-const stt = await createSTT({
+const engine = await createSTT({
   modelPath: { type: 'file', path: '/absolute/path/model' },
   modelType: 'auto',
 });
@@ -184,7 +229,7 @@ const stt = await createSTT({
 
 ### Engine (`SttEngine`)
 
-#### `stt.transcribe(audio, textOut)`
+#### `engine.transcribe(audio, textOut)`
 
 Writes recognition output into the given **offline text buffer**. Resolves when native transcription finished (or throws on failure).
 
@@ -196,30 +241,30 @@ transcribe(
 ```
 
 ```ts
-await stt.transcribe(audio, textOut);
+await engine.transcribe(audio, textOut);
 ```
 
-#### `stt.setConfig(options)`
+#### `engine.setConfig(options)`
 
 ```ts
 setConfig(options: SttRuntimeConfig): Promise<void>;
 ```
 
 ```ts
-await stt.setConfig({ decodingMethod: 'modified_beam_search', maxActivePaths: 8 });
+await engine.setConfig({ decodingMethod: 'modified_beam_search', maxActivePaths: 8 });
 ```
 
-#### `stt.destroy()`
+#### `engine.destroy()`
 
 ```ts
 destroy(): Promise<void>;
 ```
 
 ```ts
-await stt.destroy();
+await engine.destroy();
 ```
 
-## Pipeline modules (audio + text)
+## Pipeline buffers (audio + text)
 
 **Audio input**
 
@@ -232,7 +277,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer.md](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
 
 **Text output**
 
@@ -253,7 +298,7 @@ import {
 
 See [textbuffer.md](textbuffer.md).
 
-## Types and constants (STT package)
+## Types and constants
 
 ```ts
 import {
@@ -277,7 +322,7 @@ import type {
 
 For buffer/ref unions (`OfflineAudioBufferIdSource`, `OfflineTextBufferIdSource`, …), import from **`audiobuffer`** / **`textbuffer`** as needed.
 
-## Error code quick table (offline STT)
+## Error code quick table
 
 Typical `SttErrorCode` values from the STT layer (exact strings match native):
 
@@ -297,7 +342,7 @@ Text slice / validation errors (e.g. invalid UTF-16 range) are reported via the 
 ## See also
 
 - [Streaming STT](stt-streaming.md)
-- [Pipeline audio buffers (`audiobuffer`)](audiobuffer.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
 - [Pipeline text buffers (`textbuffer`)](textbuffer.md)
 - [TextBuffer pipeline spec (migration)](migration/textbuffer/textbuffer-pipeline-spec.md)
 - [Alignment](alignment.md)
