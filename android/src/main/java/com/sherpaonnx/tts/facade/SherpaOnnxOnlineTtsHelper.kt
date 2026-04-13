@@ -10,30 +10,11 @@ import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
 internal class SherpaOnnxOnlineTtsHelper(
   private val core: SherpaOnnxTtsHelper
 ) {
-  fun generateTtsStream(
+  fun startTtsPipeline(
     instanceId: String,
-    requestId: String,
-    text: String,
+    textInLiveBufferId: String,
+    audioOutLiveBufferId: String,
     options: ReadableMap?,
     promise: Promise
-  ) = core.generateTtsStream(instanceId, requestId, text, options, promise)
-
-  fun generateTtsStreamToFile(
-    instanceId: String,
-    requestId: String,
-    text: String,
-    options: ReadableMap?,
-    fileOptions: ReadableMap?,
-    promise: Promise
-  ) = core.generateTtsStreamToFile(
-    instanceId,
-    requestId,
-    text,
-    options,
-    fileOptions,
-    promise
-  )
-
-  fun cancelTtsStream(instanceId: String, promise: Promise) =
-    core.cancelTtsStream(instanceId, promise)
+  ) = core.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
 }

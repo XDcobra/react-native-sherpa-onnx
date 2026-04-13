@@ -38,7 +38,7 @@
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"ttsStreamFileEnd", @"ttsStreamFileError", @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config

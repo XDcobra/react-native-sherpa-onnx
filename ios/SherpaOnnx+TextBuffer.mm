@@ -96,6 +96,7 @@ struct TextSegment {
     std::vector<float> timestamps;
     std::string source;
     int segmentIndex;
+    NSDictionary *meta = nil;
 };
 
 // ==================== Live Text Entry ====================
@@ -241,7 +242,8 @@ struct TxtLiveEntry {
     int commitSegment(const std::string &text,
                       const std::vector<std::string> &tokens = {},
                       const std::vector<float> &timestamps = {},
-                      const std::string &source = "unknown") {
+                      const std::string &source = "unknown",
+                      NSDictionary *meta = nil) {
         if (state == FINISHED) {
             throw std::runtime_error("Live text buffer is finalized: " + bufferId);
         }
@@ -254,6 +256,7 @@ struct TxtLiveEntry {
             seg.timestamps = timestamps;
             seg.source = source;
             seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
+            seg.meta = meta;
             committedSegmentIndex = seg.segmentIndex;
             segments.push_back(std::move(seg));
             // Evict oldest if over capacity
@@ -349,6 +352,7 @@ bool txt_live_commit_segment(
     const std::vector<std::string> &tokens,
     const std::vector<float> &timestamps,
     const std::string &source,
+    NSDictionary *meta,
     std::string *error
 ) {
     if (!entry) {
@@ -356,7 +360,7 @@ bool txt_live_commit_segment(
         return false;
     }
     try {
-        entry->commitSegment(text, tokens, timestamps, source);
+        entry->commitSegment(text, tokens, timestamps, source, meta);
         return true;
     } catch (const std::exception &e) {
         if (error) *error = e.what();
@@ -877,6 +881,7 @@ static std::string txt_generateId(const char *prefix) {
                           text:(NSString *)text
                         tokens:(NSArray<NSString *> *)tokens
                     timestamps:(NSArray<NSNumber *> *)timestamps
+                          meta:(NSDictionary *)meta
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
@@ -916,7 +921,7 @@ static std::string txt_generateId(const char *prefix) {
             }
         }
 
-        int segmentIndex = entry->commitSegment(textStr, tokenVec, timestampVec, "append");
+        int segmentIndex = entry->commitSegment(textStr, tokenVec, timestampVec, "append", meta);
         resolve(@{ @"segmentIndex": @(segmentIndex) });
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
@@ -969,6 +974,9 @@ static std::string txt_generateId(const char *prefix) {
         BOOL includeTimestamps = options != nil && options[@"includeTimestamps"] != nil
             ? [options[@"includeTimestamps"] boolValue]
             : NO;
+        BOOL includeMeta = options != nil && options[@"includeMeta"] != nil
+            ? [options[@"includeMeta"] boolValue]
+            : NO;
 
         auto segments = entry->getSegments(s, m);
         NSMutableArray *segmentArray = [NSMutableArray arrayWithCapacity:segments.size()];
@@ -993,6 +1001,10 @@ static std::string txt_generateId(const char *prefix) {
                     [tsArr addObject:@(ts)];
                 }
                 segmentMap[@"timestamps"] = tsArr;
+            }
+
+            if (includeMeta && seg.meta != nil) {
+                segmentMap[@"meta"] = seg.meta;
             }
 
             [segmentArray addObject:segmentMap];

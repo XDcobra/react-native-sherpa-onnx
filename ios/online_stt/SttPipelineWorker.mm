@@ -90,6 +90,7 @@ void SttPipelineWorker::runLoop() {
                 result.tokens,
                 result.timestamps,
                 "stt_stream",
+                nil,
                 &err
               )) {
             throw std::runtime_error("Failed to commit text segment: " + err);
@@ -146,6 +147,7 @@ void SttPipelineWorker::autoFlushAndCommit() {
           result.tokens,
           result.timestamps,
           "stt_stream",
+          nil,
           &err
         )) {
       throw std::runtime_error("Failed to commit flushed text segment: " + err);

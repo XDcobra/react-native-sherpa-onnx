@@ -29,6 +29,7 @@ static const char *kPaAppendSourceMic = "mic";
 static const char *kPaAppendSourceAppend = "append";
 static const char *kPaAppendSourceAppendOffline = "append_offline";
 static const char *kPaAppendSourceEnhancement = "enhancement";
+static const char *kPaAppendSourceTts = "tts";
 static const char *kPaAppendSourceUnknown = "unknown";
 static const char *kPaAppendSourceMixed = "mixed";
 

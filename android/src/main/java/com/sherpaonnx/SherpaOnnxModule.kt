@@ -64,12 +64,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
-    { instanceId, requestId, samples, sampleRate, progress, isFinal -> emitTtsStreamChunk(instanceId, requestId, samples, sampleRate, progress, isFinal) },
-    { instanceId, requestId, message -> emitTtsStreamError(instanceId, requestId, message) },
-    { instanceId, requestId, cancelled -> emitTtsStreamEnd(instanceId, requestId, cancelled) },
-    { instanceId, requestId, message, path -> emitTtsStreamFileError(instanceId, requestId, message, path) },
-    { instanceId, requestId, cancelled, path, bytesWritten, sampleRate -> emitTtsStreamFileEnd(instanceId, requestId, cancelled, path, bytesWritten, sampleRate) },
-    pcmPlayerService
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
@@ -1176,6 +1170,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     text: String,
     tokens: ReadableArray?,
     timestamps: ReadableArray?,
+    meta: ReadableMap?,
     promise: Promise
   ) {
     try {
@@ -1197,11 +1192,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         floatArrayOf()
       }
 
+      val metaMap: Map<String, Any?>? = if (meta != null) {
+        meta.toHashMap()
+      } else {
+        null
+      }
+
       val segmentIndex = entry.commitSegment(
         text = text,
         tokens = tokenArray,
         timestamps = timestampArray,
         source = "append",
+        meta = metaMap,
       )
 
       val out = Arguments.createMap()
@@ -1244,6 +1246,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val includeTokens = options?.hasKey("includeTokens") == true && options.getBoolean("includeTokens")
       val includeTimestamps = options?.hasKey("includeTimestamps") == true && options.getBoolean("includeTimestamps")
+      val includeMeta = options?.hasKey("includeMeta") == true && options.getBoolean("includeMeta")
 
       val segments = entry.getSegments(start, count)
       val outSegments = Arguments.createArray()
@@ -1261,6 +1264,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             val tsArr = Arguments.createArray()
             segment.timestamps.forEach { tsArr.pushDouble(it.toDouble()) }
             putArray("timestamps", tsArr)
+          }
+          if (includeMeta && segment.meta != null) {
+            val metaMap = Arguments.createMap()
+            for ((key, value) in segment.meta) {
+              when (value) {
+                is String -> metaMap.putString(key, value)
+                is Int -> metaMap.putInt(key, value)
+                is Double -> metaMap.putDouble(key, value)
+                is Float -> metaMap.putDouble(key, value.toDouble())
+                is Boolean -> metaMap.putBoolean(key, value)
+                is Number -> metaMap.putDouble(key, value.toDouble())
+                null -> metaMap.putNull(key)
+                else -> metaMap.putString(key, value.toString())
+              }
+            }
+            putMap("meta", metaMap)
           }
         }
         outSegments.pushMap(map)
@@ -1542,35 +1561,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Generate speech in streaming mode (emits chunk events).
+   * Start a streaming TTS pipeline worker.
    */
-  override fun generateTtsStream(instanceId: String, requestId: String, text: String, options: ReadableMap?, promise: Promise) {
-    onlineTtsHelper.generateTtsStream(instanceId, requestId, text, options, promise)
-  }
-
-  override fun generateTtsStreamToFile(
+  override fun startTtsPipeline(
     instanceId: String,
-    requestId: String,
-    text: String,
+    textInLiveBufferId: String,
+    audioOutLiveBufferId: String,
     options: ReadableMap?,
-    fileOptions: ReadableMap?,
     promise: Promise
   ) {
-    onlineTtsHelper.generateTtsStreamToFile(
-      instanceId,
-      requestId,
-      text,
-      options,
-      fileOptions,
-      promise
-    )
-  }
-
-  /**
-   * Cancel ongoing streaming TTS.
-   */
-  override fun cancelTtsStream(instanceId: String, promise: Promise) {
-    onlineTtsHelper.cancelTtsStream(instanceId, promise)
+    onlineTtsHelper.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
   }
 
   override fun createPcmPlayer(
@@ -1598,93 +1598,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun destroyPcmPlayer(playerId: String, promise: Promise) {
     pcmPlayerService.destroy(playerId, promise)
-  }
-
-  private fun emitTtsStreamChunk(
-    instanceId: String,
-    requestId: String,
-    samples: FloatArray,
-    sampleRate: Int,
-    progress: Float,
-    isFinal: Boolean
-  ) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    // Encode float PCM as base64 little-endian bytes (4 bytes per sample).
-    // This replaces per-element pushDouble and avoids O(n) bridge marshalling.
-    val pcmBase64 = if (samples.isNotEmpty()) {
-      val bb = java.nio.ByteBuffer.allocate(samples.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-      bb.asFloatBuffer().put(samples)
-      Base64.encodeToString(bb.array(), Base64.NO_WRAP)
-    } else {
-      ""
-    }
-    val payload = Arguments.createMap()
-    payload.putString("instanceId", instanceId)
-    payload.putString("requestId", requestId)
-    payload.putString("pcmBase64", pcmBase64)
-    payload.putInt("sampleRate", sampleRate)
-    payload.putDouble("progress", progress.toDouble())
-    payload.putBoolean("isFinal", isFinal)
-    eventEmitter.emit("ttsStreamChunk", payload)
-  }
-
-  private fun emitTtsStreamError(instanceId: String, requestId: String, message: String) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("instanceId", instanceId)
-    payload.putString("requestId", requestId)
-    payload.putString("message", message)
-    eventEmitter.emit("ttsStreamError", payload)
-  }
-
-  private fun emitTtsStreamEnd(instanceId: String, requestId: String, cancelled: Boolean) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("instanceId", instanceId)
-    payload.putString("requestId", requestId)
-    payload.putBoolean("cancelled", cancelled)
-    eventEmitter.emit("ttsStreamEnd", payload)
-  }
-
-  private fun emitTtsStreamFileError(
-    instanceId: String,
-    requestId: String,
-    message: String,
-    path: String?
-  ) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("instanceId", instanceId)
-    payload.putString("requestId", requestId)
-    payload.putString("message", message)
-    if (!path.isNullOrBlank()) {
-      payload.putString("path", path)
-    }
-    eventEmitter.emit("ttsStreamFileError", payload)
-  }
-
-  private fun emitTtsStreamFileEnd(
-    instanceId: String,
-    requestId: String,
-    cancelled: Boolean,
-    path: String,
-    bytesWritten: Long,
-    sampleRate: Int
-  ) {
-    val eventEmitter = reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-    val payload = Arguments.createMap()
-    payload.putString("instanceId", instanceId)
-    payload.putString("requestId", requestId)
-    payload.putBoolean("cancelled", cancelled)
-    payload.putString("path", path)
-    payload.putDouble("bytesWritten", bytesWritten.toDouble())
-    payload.putInt("sampleRate", sampleRate)
-    eventEmitter.emit("ttsStreamFileEnd", payload)
   }
 
   /**

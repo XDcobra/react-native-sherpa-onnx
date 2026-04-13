@@ -15,6 +15,7 @@ data class TextSegment(
   val timestamps: FloatArray,
   val source: String,
   val segmentIndex: Int,
+  val meta: Map<String, Any?>? = null,
 )
 
 /**
@@ -113,6 +114,7 @@ class LiveTextEntry(
     tokens: Array<String> = emptyArray(),
     timestamps: FloatArray = floatArrayOf(),
     source: String = "unknown",
+    meta: Map<String, Any?>? = null,
   ): Int {
     var committedSegmentIndex = -1
     synchronized(segmentLock) {
@@ -124,6 +126,7 @@ class LiveTextEntry(
         timestamps = timestamps,
         source = source,
         segmentIndex = segmentIndex,
+        meta = meta,
       )
       segments.add(segment)
       committedSegmentIndex = segmentIndex

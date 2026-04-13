@@ -31,6 +31,7 @@ bool txt_live_commit_segment(
 	const std::vector<std::string> &tokens,
 	const std::vector<float> &timestamps,
 	const std::string &source,
+	NSDictionary *meta = nil,
 	std::string *error = nullptr
 );
 #endif

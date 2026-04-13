@@ -40,6 +40,7 @@ const val LIVE_APPEND_SOURCE_MIC = "mic"
 const val LIVE_APPEND_SOURCE_APPEND = "append"
 const val LIVE_APPEND_SOURCE_APPEND_OFFLINE = "append_offline"
 const val LIVE_APPEND_SOURCE_ENHANCEMENT = "enhancement"
+const val LIVE_APPEND_SOURCE_TTS = "tts"
 const val LIVE_APPEND_SOURCE_UNKNOWN = "unknown"
 const val LIVE_APPEND_SOURCE_MIXED = "mixed"
 
