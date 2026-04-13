@@ -15,6 +15,7 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import { PipelineTextErrorCode } from './types';
 import type {
   OfflineTextBufferInfo,
   OfflineTextBufferRef,
@@ -39,18 +40,44 @@ import type {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
+const TEXT_BUFFER_ID_PATTERN =
+  /^(txt_off|txt_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function createInvalidTextBufferIdError(
+  sourceName: string,
+  rawValue: string
+): Error {
+  return new Error(
+    `${PipelineTextErrorCode.INVALID_ARGUMENT}: ${sourceName} must be a pipeline text buffer id in the form txt_off_<uuid> or txt_live_<uuid>; received "${rawValue}".`
+  );
+}
+
+function assertValidTextBufferId(value: string, sourceName: string): string {
+  const id = value.trim();
+  if (!TEXT_BUFFER_ID_PATTERN.test(id)) {
+    throw createInvalidTextBufferIdError(sourceName, value);
+  }
+  return id;
+}
+
 function resolveOfflineTextBufferId(source: OfflineTextBufferIdSource): string {
   if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as OfflineTextBufferRef).bufferId;
+    return assertValidTextBufferId(
+      String((source as OfflineTextBufferRef).bufferId),
+      'offline text buffer source'
+    );
   }
-  return source as string;
+  return assertValidTextBufferId(String(source), 'offline text buffer source');
 }
 
 function resolveLiveTextBufferId(source: LiveTextBufferIdSource): string {
   if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveTextBufferRef).bufferId;
+    return assertValidTextBufferId(
+      String((source as LiveTextBufferRef).bufferId),
+      'live text buffer source'
+    );
   }
-  return source as string;
+  return assertValidTextBufferId(String(source), 'live text buffer source');
 }
 
 function resolvePipelineTextBufferId(
@@ -58,13 +85,19 @@ function resolvePipelineTextBufferId(
 ): string {
   if (typeof source === 'object' && source !== null) {
     if ('info' in source) {
-      return (source as OfflineTextBufferRef | LiveTextBufferRef).bufferId;
+      return assertValidTextBufferId(
+        String((source as OfflineTextBufferRef | LiveTextBufferRef).bufferId),
+        'pipeline text buffer source'
+      );
     }
     if ('kind' in source && 'bufferId' in source) {
-      return (source as PipelineTextBufferInfo).bufferId;
+      return assertValidTextBufferId(
+        String((source as PipelineTextBufferInfo).bufferId),
+        'pipeline text buffer source'
+      );
     }
   }
-  return source as string;
+  return assertValidTextBufferId(String(source), 'pipeline text buffer source');
 }
 
 type NativeSubscription = { remove: () => void };
@@ -605,3 +638,9 @@ export {
   TEXT_DEFAULT_SLICE_COUNT,
   TEXT_MAX_SLICE_COUNT,
 } from './types';
+
+/**
+ * Resolve a text buffer source to a native buffer ID string.
+ * Accepts buffer references, info objects, handles, or raw strings.
+ */
+export { resolvePipelineTextBufferId };

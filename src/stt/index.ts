@@ -1,4 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolvePipelineTextBufferId } from '../textbuffer';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
@@ -27,14 +29,11 @@ import {
 
 let sttInstanceCounter = 0;
 
-// TODO: Not only string check but also if string is a valid buffer id
 function normalizeOfflineBufferInput(
   buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
 ): string {
-  if (typeof buffer === 'string') {
-    return buffer;
-  }
-  return buffer.bufferId;
+  const rawId = typeof buffer === 'string' ? buffer : buffer.bufferId;
+  return resolvePipelineAudioBufferId(rawId);
 }
 
 /**
@@ -244,8 +243,9 @@ export async function createSTT(
     ): Promise<void> {
       guard();
       const bufferId = normalizeOfflineBufferInput(buffer);
-      const textOutBufferId =
-        typeof textOut === 'string' ? textOut : textOut.bufferId;
+      const textOutBufferId = resolvePipelineTextBufferId(
+        typeof textOut === 'string' ? textOut : textOut.bufferId
+      );
       await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
     },
 

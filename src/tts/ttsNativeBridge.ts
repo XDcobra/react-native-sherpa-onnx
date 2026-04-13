@@ -10,7 +10,8 @@ import type {
   TtsUpdateOptions,
   TtsVitsModelOptions,
 } from './types';
-import type { OfflineAudioBufferRef } from '../audiobuffer/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 
 export type FlattenedTtsModelNativeOptions = {
   noiseScale: number | undefined;
@@ -198,18 +199,9 @@ export function toNativeSynthesisOptions(
   }
   if (options.voiceClone != null) {
     const vc = options.voiceClone;
-    // Resolve buffer ID from ref or handle
-    const refAudio = vc.referenceAudio;
-    const refBufferIdRaw =
-      typeof refAudio === 'string'
-        ? refAudio
-        : (refAudio as OfflineAudioBufferRef).bufferId;
-    const refBufferId = refBufferIdRaw.trim();
-    if (refBufferId.length === 0) {
-      throw new Error(
-        '[TTS] voiceClone.referenceAudio must resolve to a non-empty offline audio buffer id.'
-      );
-    }
+    const refBufferId = resolvePipelineAudioBufferId(
+      vc.referenceAudio as OfflineAudioBufferIdSource
+    );
     out.referenceAudioBufferId = refBufferId;
     if (vc.kind === 'zipvoice') {
       const referenceText = vc.referenceText?.trim() ?? '';

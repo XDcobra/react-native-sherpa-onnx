@@ -34,6 +34,8 @@ LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ 
 
 ## Quick Start
 
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
+
 ### 1) Direct pipeline control (`synthesize`)
 
 Use when you manage text segments and audio buffers yourself.
@@ -79,17 +81,17 @@ const pipeline = await tts.synthesize(textIn, audioOut, {
 });
 
 // Push text segments (pipeline synthesizes each as it arrives)
-await appendLiveTextSegment(textIn.bufferId, 'Hello world. ');
-await appendLiveTextSegment(textIn.bufferId, 'How are you today?');
+await appendLiveTextSegment(textIn, 'Hello world. ');
+await appendLiveTextSegment(textIn, 'How are you today?');
 
 // Signal no more text
-await finalizeLiveTextBuffer(textIn.bufferId);
+await finalizeLiveTextBuffer(textIn);
 
 // Wait for pipeline to finish processing all segments
 await pipeline.flush();
 
 // Finalize audio buffer (if downstream consumers need an end signal)
-await finalizeLiveAudioBuffer(audioOut.bufferId);
+await finalizeLiveAudioBuffer(audioOut);
 
 // Cleanup
 await pipeline.stop();
@@ -102,8 +104,8 @@ Override `sid` and `speed` per segment via the `meta` parameter:
 
 ```ts
 // Different speaker for each segment
-await appendLiveTextSegment(textIn.bufferId, 'Hello!', undefined, undefined, { sid: 0, speed: 1.0 });
-await appendLiveTextSegment(textIn.bufferId, 'Hi there!', undefined, undefined, { sid: 1, speed: 0.9 });
+await appendLiveTextSegment(textIn, 'Hello!', undefined, undefined, { sid: 0, speed: 1.0 });
+await appendLiveTextSegment(textIn, 'Hi there!', undefined, undefined, { sid: 1, speed: 0.9 });
 ```
 
 The worker resolves per call:
@@ -176,7 +178,7 @@ ctrl.commit();
 await ctrl.flush();
 
 // Finalize audio output
-await finalizeLiveAudioBuffer(audioOut.bufferId);
+await finalizeLiveAudioBuffer(audioOut);
 
 // Cancel (alternative to flush — discards remaining)
 // await ctrl.cancel({ scope: 'all' });

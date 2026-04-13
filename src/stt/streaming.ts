@@ -6,14 +6,8 @@ import type {
   StreamingSttInitOptions,
   SttPipelineHandle,
 } from './streamingTypes';
-import type {
-  LiveAudioBufferIdSource,
-  LiveAudioBufferRef,
-} from '../audiobuffer/types';
-import type {
-  LiveTextBufferIdSource,
-  LiveTextBufferRef,
-} from '../textbuffer/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolvePipelineTextBufferId } from '../textbuffer';
 
 let streamingSttInstanceCounter = 0;
 
@@ -48,20 +42,6 @@ export function getOnlineTypeOrNull(
   } catch {
     return null;
   }
-}
-
-function resolveLiveAudioBufferId(source: LiveAudioBufferIdSource): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveAudioBufferRef).bufferId;
-  }
-  return source as string;
-}
-
-function resolveLiveTextBufferId(source: LiveTextBufferIdSource): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveTextBufferRef).bufferId;
-  }
-  return source as string;
 }
 
 function flattenInitOptionsForNative(options: StreamingSttInitOptions): {
@@ -240,8 +220,8 @@ export async function createStreamingSTT(
         }
       }
 
-      const audioInLiveBufferId = resolveLiveAudioBufferId(audioIn);
-      const textOutLiveBufferId = resolveLiveTextBufferId(textOut);
+      const audioInLiveBufferId = resolvePipelineAudioBufferId(audioIn);
+      const textOutLiveBufferId = resolvePipelineTextBufferId(textOut);
 
       const started = await SherpaOnnx.startSttPipeline(
         instanceId,

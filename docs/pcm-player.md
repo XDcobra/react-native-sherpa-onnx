@@ -13,7 +13,7 @@ import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
 const audioBuffer = await createOfflineAudioBufferFromFile('file:///path/to/audio.wav');
-const player = await createPcmPlayer(audioBuffer.bufferId);
+const player = await createPcmPlayer(audioBuffer);
 
 await player.pause();
 await player.resume();
@@ -31,15 +31,15 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 
 const audioBuffer = await createLiveAudioBuffer({ sampleRate: 22050 });
-const player = await createPcmPlayer(audioBuffer.bufferId);
+const player = await createPcmPlayer(audioBuffer);
 
 // Append samples from your source
-await appendSamplesToLiveAudioBuffer(audioBuffer.bufferId, myFloat32Samples);
+await appendSamplesToLiveAudioBuffer(audioBuffer, myFloat32Samples, 22050);
 // ... continue feeding ...
 
 // Playback starts immediately as samples are appended.
 // Finalize only signals end-of-stream (EOS).
-await finalizeLiveAudioBuffer(audioBuffer.bufferId);
+await finalizeLiveAudioBuffer(audioBuffer);
 
 await player.pause();
 await player.resume();
@@ -55,13 +55,18 @@ import { createLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
 const audioOut = await createLiveAudioBuffer({ sampleRate: 22050 });
 const tts = await createIncrementalStreamingTTS({
-  modelPath: { type: 'asset', path: 'models/vits' },
-  audioOutLiveBufferId: audioOut.bufferId,
+  source: {
+    engineOptions: { modelPath: { type: 'asset', path: 'models/vits' } },
+  },
 });
+
+const session = await tts.startSession(audioOut);
+session.pushText('Hello from streaming TTS.');
+await session.flush();
 
 // TTS writes to audioOut automatically
 // Create player to play it
-const player = await createPcmPlayer(audioOut.bufferId);
+const player = await createPcmPlayer(audioOut);
 
 // ... Pause/resume/destroy as needed ...
 await player.destroy();
@@ -86,6 +91,8 @@ Creates a player session. Returns `PcmPlayer`.
 |-----------|------|---------|-------------|
 | `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| string` | required | Buffer ref or ID |
 | `options?.volume` | `number` | `1.0` | Volume scale [0, 1] |
+
+Prefer passing refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.
 
 ### `PcmPlayer`
 

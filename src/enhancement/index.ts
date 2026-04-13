@@ -4,6 +4,7 @@ import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type {
   DetectedModelEntry,
   DetectionSource,
@@ -14,15 +15,6 @@ import type {
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 
 let enhancementInstanceCounter = 0;
-
-function resolveOfflineAudioBufferId(
-  source: OfflineAudioBufferIdSource
-): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as { bufferId: string }).bufferId;
-  }
-  return source as string;
-}
 
 export async function detectEnhancementModel(
   modelPath: ModelPathConfig,
@@ -125,8 +117,8 @@ export async function createEnhancement(
       audioOut: OfflineAudioBufferIdSource
     ): Promise<void> {
       guard();
-      const inId = resolveOfflineAudioBufferId(audioIn);
-      const outId = resolveOfflineAudioBufferId(audioOut);
+      const inId = resolvePipelineAudioBufferId(audioIn);
+      const outId = resolvePipelineAudioBufferId(audioOut);
       await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
     },
     async getSampleRate(): Promise<number> {

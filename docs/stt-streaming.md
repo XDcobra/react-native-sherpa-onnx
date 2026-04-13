@@ -78,15 +78,15 @@ const pipeline = await engine.transcribe(audioIn, textOut, {
   chunkSize: 3200,
 });
 
-await startMicToLiveAudioBuffer(audioIn.bufferId);
+await startMicToLiveAudioBuffer(audioIn);
 
 // UI polling example
 const tick = setInterval(async () => {
-  const partial = await getLiveTextBufferPartialSlice(textOut.bufferId, 0, 4096);
-  const count = await getLiveTextBufferSegmentCount(textOut.bufferId);
+  const partial = await getLiveTextBufferPartialSlice(textOut, 0, 4096);
+  const count = await getLiveTextBufferSegmentCount(textOut);
   const segments =
     count > 0
-      ? await getLiveTextBufferSegments(textOut.bufferId, 0, count)
+      ? await getLiveTextBufferSegments(textOut, 0, count)
       : [];
 
   const committed = segments.map((s) => s.text).join(' ');
@@ -101,10 +101,10 @@ clearInterval(tick);
 // force final decode + commit pending partial as final segment
 await pipeline.flush();
 
-const finalCount = await getLiveTextBufferSegmentCount(textOut.bufferId);
+const finalCount = await getLiveTextBufferSegmentCount(textOut);
 const finalSegments =
   finalCount > 0
-    ? await getLiveTextBufferSegments(textOut.bufferId, 0, finalCount, {
+    ? await getLiveTextBufferSegments(textOut, 0, finalCount, {
         includeTokens: true,
         includeTimestamps: true,
       })
@@ -112,9 +112,11 @@ const finalSegments =
 
 await pipeline.stop();
 await engine.destroy();
-await releasePipelineTextBuffer(textOut.bufferId);
-await releasePipelineAudioBuffer(audioIn.bufferId);
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
 ```
+
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
 
 ## Endpoint tuning
 

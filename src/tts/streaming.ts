@@ -12,34 +12,18 @@ import type {
 } from './streamingTypes';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
-import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
-import type { LiveTextBufferRef } from '../textbuffer/types';
-import type { LiveAudioBufferRef } from '../audiobuffer/types';
+import { resolvePipelineTextBufferId } from '../textbuffer';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
 import type { ModelPathConfig } from '../types';
-import type { OfflineAudioBufferRef } from '../audiobuffer/types';
 import { resolveModelPath } from '../utils';
 import {
   expandTtsInitializeOptions,
   flattenTtsModelOptionsForNative,
 } from './ttsNativeBridge';
-
-// ---------------------------------------------------------------------------
-// Buffer ID resolvers (local — same pattern as STT streaming)
-// ---------------------------------------------------------------------------
-
-function resolveLiveTextBufferId(source: LiveTextBufferIdSource): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveTextBufferRef).bufferId;
-  }
-  return source as string;
-}
-
-function resolveLiveAudioBufferId(source: LiveAudioBufferIdSource): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveAudioBufferRef).bufferId;
-  }
-  return source as string;
-}
 
 // ---------------------------------------------------------------------------
 // Pipeline options → native bridge mapper
@@ -54,17 +38,9 @@ function toNativePipelineOptions(
   if (options.speed !== undefined) out.speed = options.speed;
   if (options.voiceClone != null) {
     const vc = options.voiceClone;
-    const refAudio = vc.referenceAudio;
-    const refBufferIdRaw =
-      typeof refAudio === 'string'
-        ? refAudio
-        : (refAudio as OfflineAudioBufferRef).bufferId;
-    const refBufferId = refBufferIdRaw.trim();
-    if (refBufferId.length === 0) {
-      throw new Error(
-        '[TTS] voiceClone.referenceAudio must resolve to a non-empty offline audio buffer id.'
-      );
-    }
+    const refBufferId = resolvePipelineAudioBufferId(
+      vc.referenceAudio as OfflineAudioBufferIdSource
+    );
     out.referenceAudioBufferId = refBufferId;
     if (vc.kind === 'zipvoice') {
       const referenceText = vc.referenceText?.trim() ?? '';
@@ -210,8 +186,8 @@ export async function createStreamingTTS(
         activePipelineId = null;
       }
 
-      const textInLiveBufferId = resolveLiveTextBufferId(textIn);
-      const audioOutLiveBufferId = resolveLiveAudioBufferId(audioOut);
+      const textInLiveBufferId = resolvePipelineTextBufferId(textIn);
+      const audioOutLiveBufferId = resolvePipelineAudioBufferId(audioOut);
 
       const started = await SherpaOnnx.startTtsPipeline(
         instanceId,

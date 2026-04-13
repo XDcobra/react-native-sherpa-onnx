@@ -22,6 +22,8 @@ Granularity rules:
 
 ## Quick Start
 
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `TEXT_INVALID_ARGUMENT` or `AUDIO_INVALID_ARGUMENT`.
+
 ### 1) Proportional alignment (buffer-to-buffer)
 
 ```ts
@@ -47,8 +49,8 @@ try {
   console.log(r.timingMode); // 'proportional'
   console.log(r.subtitles);  // [{ text, start, end }, ...]
 } finally {
-  await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
-  await releasePipelineAudioBuffer(audioBuf.bufferId).catch(() => {});
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 }
 ```
 
@@ -143,8 +145,8 @@ try {
 
   console.log(r.timingMode, r.subtitles);
 } finally {
-  await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
-  await releasePipelineAudioBuffer(audioBuf.bufferId).catch(() => {});
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
   await stt.destroy();
 }
 ```
@@ -179,8 +181,8 @@ try {
   });
   console.log(aligned.subtitles);
 } finally {
-  await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
-  await releasePipelineAudioBuffer(audioBuf.bufferId).catch(() => {});
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
   await tts.destroy();
 }
 ```

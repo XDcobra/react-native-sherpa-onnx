@@ -14,6 +14,7 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import { PipelineAudioErrorCode } from './types';
 import type {
   OfflineAudioBufferInfo,
   OfflineAudioBufferRef,
@@ -38,20 +39,49 @@ import type {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
+const AUDIO_BUFFER_ID_PATTERN =
+  /^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function createInvalidAudioBufferIdError(
+  sourceName: string,
+  rawValue: string
+): Error {
+  return new Error(
+    `${PipelineAudioErrorCode.INVALID_ARGUMENT}: ${sourceName} must be a pipeline audio buffer id in the form off_<uuid> or live_<uuid>; received "${rawValue}".`
+  );
+}
+
+function assertValidAudioBufferId(value: string, sourceName: string): string {
+  const id = value.trim();
+  if (!AUDIO_BUFFER_ID_PATTERN.test(id)) {
+    throw createInvalidAudioBufferIdError(sourceName, value);
+  }
+  return id;
+}
+
 function resolveOfflineAudioBufferId(
   source: OfflineAudioBufferIdSource
 ): string {
   if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as OfflineAudioBufferRef).bufferId;
+    return assertValidAudioBufferId(
+      String((source as OfflineAudioBufferRef).bufferId),
+      'offline audio buffer source'
+    );
   }
-  return source as string;
+  return assertValidAudioBufferId(
+    String(source),
+    'offline audio buffer source'
+  );
 }
 
 function resolveLiveAudioBufferId(source: LiveAudioBufferIdSource): string {
   if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as LiveAudioBufferRef).bufferId;
+    return assertValidAudioBufferId(
+      String((source as LiveAudioBufferRef).bufferId),
+      'live audio buffer source'
+    );
   }
-  return source as string;
+  return assertValidAudioBufferId(String(source), 'live audio buffer source');
 }
 
 function resolvePipelineAudioBufferId(
@@ -59,13 +89,22 @@ function resolvePipelineAudioBufferId(
 ): string {
   if (typeof source === 'object' && source !== null) {
     if ('info' in source) {
-      return (source as OfflineAudioBufferRef | LiveAudioBufferRef).bufferId;
+      return assertValidAudioBufferId(
+        String((source as OfflineAudioBufferRef | LiveAudioBufferRef).bufferId),
+        'pipeline audio buffer source'
+      );
     }
     if ('kind' in source && 'bufferId' in source) {
-      return (source as PipelineAudioBufferInfo).bufferId;
+      return assertValidAudioBufferId(
+        String((source as PipelineAudioBufferInfo).bufferId),
+        'pipeline audio buffer source'
+      );
     }
   }
-  return source as string;
+  return assertValidAudioBufferId(
+    String(source),
+    'pipeline audio buffer source'
+  );
 }
 
 type NativeSubscription = { remove: () => void };

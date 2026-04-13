@@ -91,6 +91,8 @@ Types: see [`src/textbuffer/types.ts`](../src/textbuffer/types.ts). Buffer param
 
 All signatures below are exported from `react-native-sherpa-onnx/textbuffer`. Unless noted, the first buffer argument accepts the matching `*IdSource` union (ref, info snapshot, handle, or string).
 
+Ref-first usage is recommended: pass the buffer ref directly. Raw string ids are optional; malformed ids are rejected early with `TEXT_INVALID_ARGUMENT`.
+
 ### General
 
 #### `getPipelineTextBufferInfo(buffer)`

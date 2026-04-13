@@ -13,6 +13,8 @@ import { createEmptyOfflineAudioBuffer, saveOfflineAudioBufferToWav, releasePipe
 
 ## Quick Start
 
+All buffer parameters accept refs directly. Prefer refs over raw string ids. If you pass raw ids, malformed values are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
+
 ### 1) Synthesize and save to WAV
 
 ```ts
@@ -50,15 +52,15 @@ const audioBuf = await createEmptyOfflineAudioBuffer(sr); // empty output target
 await tts.synthesize(textBuf, audioBuf, { sid: 0, speed: 1.0 });
 
 // Step 4: inspect result
-const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
+const info = await getPipelineAudioBufferInfo(audioBuf);
 console.log(info.numSamples, info.sampleRate); // e.g. 44100, 22050
 
 // Step 5: save to WAV
-await saveOfflineAudioBufferToWav(audioBuf.bufferId, '/path/to/output.wav');
+await saveOfflineAudioBufferToWav(audioBuf, '/path/to/output.wav');
 
 // Step 6: release buffers (free native memory)
-await releasePipelineTextBuffer(textBuf.bufferId);
-await releasePipelineAudioBuffer(audioBuf.bufferId);
+await releasePipelineTextBuffer(textBuf);
+await releasePipelineAudioBuffer(audioBuf);
 
 await tts.destroy();
 ```
@@ -85,8 +87,8 @@ await tts.synthesize(textBuf, audioBuf, {
   numSteps: 5,
 });
 
-await releasePipelineAudioBuffer(refAudio.bufferId);
-await releasePipelineTextBuffer(textBuf.bufferId);
+await releasePipelineAudioBuffer(refAudio);
+await releasePipelineTextBuffer(textBuf);
 // keep audioBuf until you've saved/played it, then release
 ```
 
@@ -101,9 +103,9 @@ const audioBuf = await createEmptyOfflineAudioBuffer(22050);
 
 await tts.synthesize(textBuf, audioBuf, { sid: 2, speed: 1.0 }); // sid 0..numSpeakers-1
 
-await releasePipelineTextBuffer(textBuf.bufferId);
+await releasePipelineTextBuffer(textBuf);
 // save / play audioBuf, then:
-await releasePipelineAudioBuffer(audioBuf.bufferId);
+await releasePipelineAudioBuffer(audioBuf);
 ```
 
 ### 4) Buffer lifecycle & cleanup pattern
@@ -116,10 +118,10 @@ const textBuf = await createOfflineTextBufferFromText(inputText);
 const audioBuf = await createEmptyOfflineAudioBuffer(modelSampleRate);
 try {
   await tts.synthesize(textBuf, audioBuf);
-  await saveOfflineAudioBufferToWav(audioBuf.bufferId, outputPath);
+  await saveOfflineAudioBufferToWav(audioBuf, outputPath);
 } finally {
-  await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
-  await releasePipelineAudioBuffer(audioBuf.bufferId).catch(() => {});
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 }
 ```
 
@@ -243,7 +245,7 @@ createOfflineTextBufferFromText(
 const buf = await createOfflineTextBufferFromText('Hello.');
 // buf.bufferId → 'txt_off_...'
 // buf.info.utf16Length → character count
-await releasePipelineTextBuffer(buf.bufferId); // when done
+await releasePipelineTextBuffer(buf); // when done
 ```
 
 ### `createEmptyOfflineAudioBuffer(sampleRate)`
@@ -265,7 +267,7 @@ saveOfflineAudioBufferToWav(bufferId: OfflineAudioBufferIdSource, outputPath: st
 ```
 
 ```ts
-await saveOfflineAudioBufferToWav(audioBuf.bufferId, `${DocumentDirectoryPath}/speech.wav`);
+await saveOfflineAudioBufferToWav(audioBuf, `${DocumentDirectoryPath}/speech.wav`);
 ```
 
 ### `createOfflineAudioBufferFromFile(path)`
@@ -277,7 +279,7 @@ createOfflineAudioBufferFromFile(sourcePath: string, targetSampleRateHz?: number
 ```ts
 // Load reference audio for voice cloning
 const refBuf = await createOfflineAudioBufferFromFile('/path/to/ref.wav');
-await releasePipelineAudioBuffer(refBuf.bufferId); // after synthesize
+await releasePipelineAudioBuffer(refBuf); // after synthesize
 ```
 
 ### `getPipelineAudioBufferInfo(bufferId)`
@@ -287,15 +289,15 @@ getPipelineAudioBufferInfo(bufferId: PipelineAudioBufferIdSource): Promise<Pipel
 ```
 
 ```ts
-const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
+const info = await getPipelineAudioBufferInfo(audioBuf);
 // info.numSamples, info.sampleRate, info.durationMs, info.channelCount
 ```
 
 ### `releasePipelineAudioBuffer(bufferId)` / `releasePipelineTextBuffer(bufferId)`
 
 ```ts
-await releasePipelineAudioBuffer(audioBuf.bufferId); // frees native audio buffer
-await releasePipelineTextBuffer(textBuf.bufferId);   // frees native text buffer
+await releasePipelineAudioBuffer(audioBuf); // frees native audio buffer
+await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 ```
 
 ## Types

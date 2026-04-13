@@ -1,12 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type {
-  OfflineAudioBufferIdSource,
-  OfflineAudioBufferRef,
-} from '../audiobuffer/types';
-import type {
-  OfflineTextBufferIdSource,
-  OfflineTextBufferRef,
-} from '../textbuffer/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolvePipelineTextBufferId } from '../textbuffer';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -148,22 +142,6 @@ function normalizeAlignmentResult(
   };
 }
 
-function resolveOfflineTextBufferId(source: OfflineTextBufferIdSource): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as OfflineTextBufferRef).bufferId;
-  }
-  return source as string;
-}
-
-function resolveOfflineAudioBufferId(
-  source: OfflineAudioBufferIdSource
-): string {
-  if (typeof source === 'object' && source !== null && 'info' in source) {
-    return (source as OfflineAudioBufferRef).bufferId;
-  }
-  return source as string;
-}
-
 /**
  * Build subtitle timelines from offline text/audio buffers by delegating all modes to native.
  */
@@ -179,19 +157,8 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
     granularity
   );
 
-  const textInBufferId = resolveOfflineTextBufferId(textIn).trim();
-  if (textInBufferId.length === 0) {
-    throw new Error(
-      'ALIGNMENT_TEXT_BUFFER_NOT_FOUND: textInBufferId is required.'
-    );
-  }
-
-  const audioInBufferId = resolveOfflineAudioBufferId(audioIn).trim();
-  if (audioInBufferId.length === 0) {
-    throw new Error(
-      'ALIGNMENT_AUDIO_BUFFER_NOT_FOUND: audioInBufferId is required.'
-    );
-  }
+  const textInBufferId = resolvePipelineTextBufferId(textIn);
+  const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
 
   const nativeOptions = buildNativeOptions(options);
 

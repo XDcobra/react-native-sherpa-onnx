@@ -38,6 +38,8 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Quick start
 
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.
+
 **`audioIn`** / **`audioOut`** below are the pipeline buffers from the intro (same module for both sides).
 
 ```ts
@@ -73,11 +75,11 @@ try {
   await enhancement.enhance(audioIn, audioOut);
 
   // Save denoised audio to WAV
-  await saveOfflineAudioBufferToWav(audioOut.bufferId, '/absolute/path/out.wav');
+  await saveOfflineAudioBufferToWav(audioOut, '/absolute/path/out.wav');
 
   // Release buffers
-  await releasePipelineAudioBuffer(audioIn.bufferId);
-  await releasePipelineAudioBuffer(audioOut.bufferId);
+  await releasePipelineAudioBuffer(audioIn);
+  await releasePipelineAudioBuffer(audioOut);
 } finally {
   await enhancement.destroy();
 }

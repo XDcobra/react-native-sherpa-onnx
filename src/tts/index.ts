@@ -25,6 +25,8 @@ import {
 } from './ttsNativeBridge';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolvePipelineTextBufferId } from '../textbuffer';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
@@ -239,28 +241,8 @@ export async function createTTS(
       opts?: TtsSynthesisOptions
     ): Promise<void> {
       guard();
-      const textInIdRaw =
-        typeof textIn === 'string'
-          ? textIn
-          : (textIn as OfflineTextBufferRef).bufferId;
-      const audioOutIdRaw =
-        typeof audioOut === 'string'
-          ? audioOut
-          : (audioOut as OfflineAudioBufferRef).bufferId;
-
-      const textInId = textInIdRaw.trim();
-      if (textInId.length === 0) {
-        throw new Error(
-          '[TTS] synthesize requires a non-empty offline text buffer id (textIn).'
-        );
-      }
-
-      const audioOutId = audioOutIdRaw.trim();
-      if (audioOutId.length === 0) {
-        throw new Error(
-          '[TTS] synthesize requires a non-empty offline audio buffer id (audioOut).'
-        );
-      }
+      const textInId = resolvePipelineTextBufferId(textIn);
+      const audioOutId = resolvePipelineAudioBufferId(audioOut);
 
       await SherpaOnnx.synthesizeTts(
         instanceId,

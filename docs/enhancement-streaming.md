@@ -38,6 +38,8 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Quick start
 
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.
+
 **`inputBuf`** / **`outputBuf`** below are the **input** and **output** live pipeline buffers from the intro; PCM moves natively between them while the worker runs — no per-chunk JS bridging for steady-state audio.
 
 ```ts
@@ -71,15 +73,15 @@ const outputBuf = await createLiveAudioBuffer({
   },
 });
 
-const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
+const pipeline = await denoiser.enhance(inputBuf, outputBuf);
 
 // Mic or other source feeds inputBuf; the pipeline appends to outputBuf and fires onFramesAppended.
 
 await pipeline.stop();
 outputBuf.unsubscribeEvents();
 inputBuf.unsubscribeEvents();
-await releasePipelineAudioBuffer(inputBuf.bufferId);
-await releasePipelineAudioBuffer(outputBuf.bufferId);
+await releasePipelineAudioBuffer(inputBuf);
+await releasePipelineAudioBuffer(outputBuf);
 await denoiser.destroy();
 ```
 
@@ -160,12 +162,12 @@ Creates the native online denoiser instance. Use **`denoiser.enhance`** with **`
 
 ### Denoiser instance (`StreamingEnhancementEngine`)
 
-#### `denoiser.enhance(inputBufferId, outputBufferId)`
+#### `denoiser.enhance(inputBuffer, outputBuffer)`
 
 ```ts
 enhance(
-  inputBufferId: string,
-  outputBufferId: string
+  inputBuffer: LiveAudioBufferIdSource,
+  outputBuffer: LiveAudioBufferIdSource
 ): Promise<EnhancementPipelineHandle>;
 ```
 
@@ -184,7 +186,7 @@ Starts a native background thread that:
 - The input buffer's `sampleRate` must match the model's sample rate.
 
 ```ts
-const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
+const pipeline = await denoiser.enhance(inputBuf, outputBuf);
 ```
 
 ---
