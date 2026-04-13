@@ -19,7 +19,19 @@ export {
   resolveModelPath,
 } from './utils';
 
-export { copyFileToContentUri } from './files';
+export { copyFile, saveText, shareFile } from './fileio';
+export type {
+  FileSource,
+  FileDestination,
+  AppBaseDir,
+  ResolvedFileRef,
+  CopyFileOptions,
+  CopyFileResult,
+  SaveTextOptions,
+  ShareFileOptions,
+  FileIOProgressEvent,
+} from './fileio';
+export { FileIOErrorCode } from './fileio';
 export * from './alignment';
 
 export { getModelLicenses, type ModelLicense } from './licenses';
@@ -28,7 +40,7 @@ export { getModelLicenses, type ModelLicense } from './licenses';
 // - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'
 // - import { detectAlignmentModel, ... } from 'react-native-sherpa-onnx/alignment'
 // - import { ... } from 'react-native-sherpa-onnx/download'
-// - import { copyFileToContentUri, ... } from 'react-native-sherpa-onnx/files'
+// - import { copyFile, saveText, shareFile, ... } from 'react-native-sherpa-onnx/fileio'
 // - import { getBundledArchives, listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction'
 // - import { ... } from 'react-native-sherpa-onnx/vad'
 // - import { ... } from 'react-native-sherpa-onnx/diarization'

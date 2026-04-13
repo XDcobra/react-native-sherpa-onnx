@@ -183,11 +183,12 @@ export interface Spec extends TurboModule {
   // ==================== Pipeline Audio Buffers ====================
 
   /**
-   * Create an offline audio buffer from a WAV file.
+   * Create an offline audio buffer from a FileSource.
+   * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
    * Small files are loaded into memory; large files (>10 MB) stay file-backed.
    */
-  createOfflineAudioBufferFromFile(
-    sourcePath: string,
+  createOfflineAudioBufferFromSource(
+    source: Object,
     targetSampleRateHz?: number,
     forceMono?: boolean
   ): Promise<{
@@ -865,52 +866,52 @@ export interface Spec extends TurboModule {
     error: string | null;
   }>;
 
-  // ==================== File / persistence (shared) ====================
+  // ==================== File I/O ====================
 
   /**
-   * Save a text file via Android SAF directory URI, or a regular directory path on iOS.
-   * @param text - Text content to write
-   * @param directoryUri - Directory content URI (tree or document) on Android; file URL or path on iOS
-   * @param filename - Desired file name (e.g. note.txt)
-   * @param mimeType - MIME type (e.g. text/plain)
-   * @returns The content URI of the saved file (Android) or file path (iOS)
+   * Copy file from source to destination.
+   * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
+   * @param destination - Serialized FileDestination (ReadableMap with `kind` discriminator)
+   * @param overwrite - Overwrite existing file at destination
+   * @param createParentDirectories - Create parent dirs for fs/app destinations
+   * @param operationId - Unique ID for progress events and cancellation
+   * @returns { bytesCopied: number, outputKind: string, outputPath: string }
    */
-  saveTextToContentUri(
+  copyFile(
+    source: Object,
+    destination: Object,
+    overwrite: boolean,
+    createParentDirectories: boolean,
+    operationId: string
+  ): Promise<{
+    bytesCopied: number;
+    outputKind: string;
+    outputPath: string;
+  }>;
+
+  /**
+   * Write text to a destination.
+   * @returns { outputKind: string, outputPath: string }
+   */
+  saveText(
     text: string,
-    directoryUri: string,
-    filename: string,
-    mimeType: string
-  ): Promise<string>;
+    destination: Object,
+    encoding: string,
+    overwrite: boolean
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
 
   /**
-   * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
-   * @param filePath - Absolute path to an existing file on disk
-   * @param directoryUri - SAF directory tree or document URI
-   * @param filename - Display name for the new document
-   * @param mimeType - MIME type for the created document
-   * @returns The content URI of the created document
+   * Open system share sheet for source file.
    */
-  copyFileToContentUri(
-    filePath: string,
-    directoryUri: string,
-    filename: string,
-    mimeType: string
-  ): Promise<string>;
+  shareFile(source: Object, mimeType: string, title: string): Promise<void>;
 
   /**
-   * Copy a content URI (or file path) to an app cache file for native consumers.
-   * @param fileUri - content:// URI or file path
-   * @param filename - Desired cache file name
-   * @returns Absolute file path to the cached copy
+   * Cancel an in-progress file I/O operation by operationId.
    */
-  copyContentUriToCache(fileUri: string, filename: string): Promise<string>;
-
-  /**
-   * Open the system share sheet for an audio file (file path or content URI).
-   * @param fileUri - File path or content URI
-   * @param mimeType - MIME type (e.g. audio/wav)
-   */
-  shareAudioFile(fileUri: string, mimeType: string): Promise<void>;
+  cancelFileIO(operationId: string): Promise<void>;
 
   // ==================== Helper - Assets ====================
 
@@ -1027,19 +1028,24 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Audio conversion ====================
 
   /**
-   * Convert any pipeline audio buffer (offline or finalized live) to an encoded audio file.
-   * All formats including WAV go through FFmpeg.
-   * @param bufferId           - off_UUID or live_UUID
-   * @param outputPath         - Absolute local file path
-   * @param format             - "wav", "mp3", "flac", "aac", "m4a", "opus", "webm", "mkv", "ogg"
+   * Convert pipeline audio buffer to encoded file at destination.
+   * @param bufferId - off_UUID or live_UUID
+   * @param destination - Serialized FileDestination
+   * @param format - Target format string
    * @param outputSampleRateHz - 0 = format-dependent default
+   * @param operationId - For progress/cancel
+   * @returns { outputKind: string, outputPath: string }
    */
-  convertPipelineAudioBufferToFormat(
+  convertPipelineAudioToDestination(
     bufferId: string,
-    outputPath: string,
+    destination: Object,
     format: string,
-    outputSampleRateHz?: number
-  ): Promise<void>;
+    outputSampleRateHz: number,
+    operationId: string
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
 
   // ==================== Execution Provider Methods ====================
 

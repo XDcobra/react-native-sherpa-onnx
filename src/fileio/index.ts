@@ -1,13 +1,31 @@
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
-import type { AudioOutputFormat, AudioConversionOptions } from './types';
 import type {
+  FileSource,
   FileDestination,
+  CopyFileOptions,
+  CopyFileResult,
   ResolvedFileRef,
+  SaveTextOptions,
+  ShareFileOptions,
   FileIOProgressEvent,
-} from '../fileio/types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+} from './types';
+
+// Re-export all types
+export type {
+  FileSource,
+  FileDestination,
+  AppBaseDir,
+  ResolvedFileRef,
+  CopyFileOptions,
+  CopyFileResult,
+  SaveTextOptions,
+  ShareFileOptions,
+  FileIOProgressEvent,
+  FileIOErrorCodeValue,
+} from './types';
+
+export { FileIOErrorCode } from './types';
 
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
@@ -19,7 +37,7 @@ function getEventEmitter(): NativeEventEmitter {
 
 let idCounter = 0;
 function generateOperationId(): string {
-  return `conv_${Date.now()}_${++idCounter}`;
+  return `fio_${Date.now()}_${++idCounter}`;
 }
 
 function parseResolvedFileRef(result: {
@@ -33,24 +51,21 @@ function parseResolvedFileRef(result: {
 }
 
 /**
- * Convert a pipeline audio buffer to an encoded audio file at the given destination.
+ * Copy a file from source to destination.
  *
- * The native encoder streams output directly to the destination.
- * Returns a ResolvedFileRef pointing to the written file.
+ * All source/destination resolution, streaming, and error handling happens natively.
+ * A single TurboModule call — no intermediate JS bridge hops.
  *
- * @param input       - Offline or finalized live audio buffer (ref, handle, or raw ID string).
- * @param output      - Destination for the encoded audio file.
- * @param format      - Target audio format.
- * @param options     - Optional conversion options (sample rate, progress, cancel).
+ * @throws FileIOError with code FILEIO_CANCELLED if signal is aborted.
  */
-export async function convertAudioToFormat(
-  input: PipelineAudioBufferIdSource,
+export async function copyFile(
+  input: FileSource,
   output: FileDestination,
-  format: AudioOutputFormat,
-  options?: AudioConversionOptions
-): Promise<ResolvedFileRef> {
+  options?: CopyFileOptions
+): Promise<CopyFileResult> {
   const operationId = generateOperationId();
-  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+  const overwrite = options?.overwrite ?? true;
+  const createParentDirectories = options?.createParentDirectories ?? false;
 
   let progressSubscription: { remove: () => void } | null = null;
   let abortHandler: (() => void) | null = null;
@@ -86,15 +101,18 @@ export async function convertAudioToFormat(
       options.signal.addEventListener('abort', abortHandler);
     }
 
-    const result = await SherpaOnnx.convertPipelineAudioToDestination(
-      resolvePipelineAudioBufferId(input),
+    const result = await SherpaOnnx.copyFile(
+      input as any,
       output as any,
-      format,
-      outputSampleRateHz,
+      overwrite,
+      createParentDirectories,
       operationId
     );
 
-    return parseResolvedFileRef(result);
+    return {
+      bytesCopied: result.bytesCopied,
+      output: parseResolvedFileRef(result),
+    };
   } finally {
     progressSubscription?.remove();
     if (abortHandler && options?.signal) {
@@ -104,20 +122,41 @@ export async function convertAudioToFormat(
 }
 
 /**
- * Convert a pipeline audio buffer to WAV 16 kHz mono 16-bit PCM.
- * Shortcut for convertAudioToFormat(input, output, 'wav', { outputSampleRateHz: 16000 }).
+ * Write a string to a file destination.
  *
- * Now accepts a FileDestination instead of a plain string path.
+ * For contentTree destinations, the mimeType from the destination is used
+ * for SAF document creation.
  */
-export function convertAudioToWav16k(
-  input: PipelineAudioBufferIdSource,
-  output: FileDestination
+export async function saveText(
+  text: string,
+  output: FileDestination,
+  options?: SaveTextOptions
 ): Promise<ResolvedFileRef> {
-  return convertAudioToFormat(input, output, 'wav', {
-    outputSampleRateHz: 16000,
-  });
+  const encoding = options?.encoding ?? 'utf8';
+  const overwrite = options?.overwrite ?? true;
+
+  const result = await SherpaOnnx.saveText(
+    text,
+    output as any,
+    encoding,
+    overwrite
+  );
+
+  return parseResolvedFileRef(result);
 }
 
-export type { AudioOutputFormat, AudioConversionOptions } from './types';
-export { ConversionErrorCode } from './types';
-export type { ConversionErrorCodeValue } from './types';
+/**
+ * Open the system share sheet for a file.
+ *
+ * Side-effect only — returns void.
+ */
+export async function shareFile(
+  input: FileSource,
+  options?: ShareFileOptions
+): Promise<void> {
+  await SherpaOnnx.shareFile(
+    input as any,
+    options?.mimeType ?? '',
+    options?.title ?? ''
+  );
+}

@@ -279,16 +279,24 @@ export function subscribeLiveAudioBufferEvents(
 // ==================== Offline Audio Buffer ====================
 
 /**
- * Create an offline audio buffer from a WAV file.
+ * Create an offline audio buffer from an audio file.
  * Small files are loaded into memory; large files (>10 MB) stay file-backed.
+ *
+ * The native resolver handles all FileSource kinds:
+ * - fs/app: direct file access
+ * - contentUri: Android ContentResolver stream → temp file → decode
+ * - securityScoped: iOS security-scoped URL access → decode
+ * - pad: PAD path resolution → decode
+ *
+ * Single TurboModule call. No JS-side file copying.
  */
 export async function createOfflineAudioBufferFromFile(
-  sourcePath: string,
+  source: import('../fileio/types').FileSource,
   targetSampleRateHz?: number,
   forceMono?: boolean
 ): Promise<OfflineAudioBufferRef> {
-  const result = await getNative().createOfflineAudioBufferFromFile(
-    sourcePath,
+  const result = await getNative().createOfflineAudioBufferFromSource(
+    source as any,
     targetSampleRateHz,
     forceMono
   );
