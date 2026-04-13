@@ -177,7 +177,7 @@ export default function EnhancementScreen() {
       const saveBufferToPath = async (path: string) => {
         await convertAudioToFormat(
           lastEnhancedAudio.outputBufferId,
-          path,
+          { kind: 'fs', path },
           'wav'
         );
       };
@@ -453,7 +453,10 @@ export default function EnhancementScreen() {
       }
 
       // Create input buffer from file
-      const inputBuf = await createOfflineAudioBufferFromFile(inputPath);
+      const inputBuf = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path: inputPath,
+      });
       const sr = await engine.getSampleRate();
       // Create empty output buffer at model sample rate
       const outputBuf = await createEmptyOfflineAudioBuffer(sr);
@@ -465,7 +468,11 @@ export default function EnhancementScreen() {
         const outSr = outInfo.sampleRate ?? sr;
         const sec = outSr > 0 ? (n / outSr).toFixed(2) : '?';
         const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-        await convertAudioToFormat(outputBuf.bufferId, outPath, 'wav');
+        await convertAudioToFormat(
+          outputBuf.bufferId,
+          { kind: 'fs', path: outPath },
+          'wav'
+        );
         // Release input buffer (output kept for save feature)
         await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
         setOutputWavPath(outPath);

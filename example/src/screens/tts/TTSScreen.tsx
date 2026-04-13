@@ -8,7 +8,6 @@ import {
   TextInput,
   Alert,
   Platform,
-  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -22,10 +21,7 @@ import {
   type TtsPipelineHandle,
   type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
-import {
-  copyContentUriToCache,
-  shareAudioFile,
-} from 'react-native-sherpa-onnx/files';
+import { copyFile, shareFile } from 'react-native-sherpa-onnx/fileio';
 import type {
   TtsEngine,
   StreamingTtsEngine,
@@ -170,16 +166,6 @@ export default function TTSScreen() {
     }
   };
 
-  const getShareUrl = (path: string) => {
-    const decoded = getDisplayPath(path);
-    if (decoded.startsWith('content://') || decoded.startsWith('file://')) {
-      return decoded;
-    }
-    if (path.startsWith('content://') || path.startsWith('file://')) {
-      return path;
-    }
-    return Platform.OS === 'android' ? `file://${path}` : path;
-  };
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
@@ -500,11 +486,19 @@ export default function TTSScreen() {
       let path = uri.replace(/^file:\/\//, '');
       let ownedTempPath: string | null = null;
       if (uri.startsWith('content://')) {
-        path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
+        const result = await copyFile(
+          { kind: 'contentUri', uri },
+          { kind: 'app', base: 'cache', path: `tts_ref_${Date.now()}.wav` }
+        );
+        path =
+          result.output.kind === 'fs' ? result.output.path : result.output.uri;
         ownedTempPath = path;
       }
 
-      const refBuffer = await createOfflineAudioBufferFromFile(path);
+      const refBuffer = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path,
+      });
       const info = await getPipelineAudioBufferInfo(refBuffer.bufferId);
       const numSamples = info.numSamples ?? 0;
       if (numSamples <= 0 || info.sampleRate <= 0) {
@@ -1170,7 +1164,7 @@ export default function TTSScreen() {
 
   /** Save a GeneratedResult to a WAV file path. */
   const saveResultToWav = async (audio: GeneratedResult, path: string) => {
-    await convertAudioToFormat(audio.bufferId, path, 'wav');
+    await convertAudioToFormat(audio.bufferId, { kind: 'fs', path }, 'wav');
   };
 
   const saveAudioWithData = async (audio: GeneratedResult) => {
@@ -1280,10 +1274,14 @@ export default function TTSScreen() {
         ) {
           playbackPath = cachedPlaybackPath;
         } else {
-          const cachedPath = await copyContentUriToCache(
-            savedAudioPath,
-            cacheName
+          const result = await copyFile(
+            { kind: 'contentUri', uri: savedAudioPath },
+            { kind: 'app', base: 'cache', path: cacheName }
           );
+          const cachedPath =
+            result.output.kind === 'fs'
+              ? result.output.path
+              : result.output.uri;
           setCachedPlaybackPath(cachedPath);
           setCachedPlaybackSource(savedAudioPath);
           playbackPath = cachedPath;
@@ -1358,21 +1356,14 @@ export default function TTSScreen() {
         return;
       }
 
-      const shareUrl = getShareUrl(savedAudioPath);
-
       // We use WAV for saved files.
       const mimeType = 'audio/wav';
 
-      if (Platform.OS === 'android') {
-        await shareAudioFile(shareUrl, mimeType);
-        return;
-      }
+      const source = savedAudioPath.startsWith('content://')
+        ? { kind: 'contentUri' as const, uri: savedAudioPath }
+        : { kind: 'fs' as const, path: savedAudioPath };
 
-      await Share.share({
-        title: 'Share TTS Audio',
-        message: 'TTS audio file',
-        url: shareUrl,
-      });
+      await shareFile(source, { mimeType });
     } catch (err) {
       console.error('Share audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';

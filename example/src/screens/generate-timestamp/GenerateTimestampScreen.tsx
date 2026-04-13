@@ -18,7 +18,7 @@ import {
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
+import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
   alignTextToAudio,
   detectAlignmentModel,
@@ -480,10 +480,13 @@ export default function GenerateTimestampScreen() {
     try {
       let audioPath = normalizeUriToPath(selectedAudioUri);
       if (selectedAudioUri.startsWith('content://')) {
-        audioPath = await copyContentUriToCache(
-          selectedAudioUri,
-          `timestamp_input_${Date.now()}.wav`
+        const cacheName = `timestamp_input_${Date.now()}.wav`;
+        const result = await copyFile(
+          { kind: 'contentUri', uri: selectedAudioUri },
+          { kind: 'app', base: 'cache', path: cacheName }
         );
+        audioPath =
+          result.output.kind === 'fs' ? result.output.path : audioPath;
         cleanupPath = audioPath;
       }
 
@@ -493,7 +496,10 @@ export default function GenerateTimestampScreen() {
       const textBuffer = await createOfflineTextBufferFromText(text);
       textBufferId = textBuffer.bufferId;
 
-      const audioBuffer = await createOfflineAudioBufferFromFile(audioPath);
+      const audioBuffer = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path: audioPath,
+      });
       audioBufferId = audioBuffer.bufferId;
 
       const subtitleResult =

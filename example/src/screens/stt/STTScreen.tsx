@@ -472,9 +472,10 @@ export default function STTScreen() {
         setError('STT engine not initialized');
         return;
       }
-      const { bufferId } = await createOfflineAudioBufferFromFile(
-        pathToTranscribe
-      );
+      const { bufferId } = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path: pathToTranscribe,
+      });
       const textRef = await createEmptyOfflineTextBuffer();
       const textBufferId = textRef.bufferId;
       try {

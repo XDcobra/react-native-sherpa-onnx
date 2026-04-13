@@ -5,7 +5,8 @@
 
 import { AudioContext, AudioBufferSourceNode } from 'react-native-audio-api';
 import { readFile } from '@dr.pogodin/react-native-fs';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
+import { copyFile } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
 import { Buffer } from 'buffer';
 
@@ -22,7 +23,14 @@ export async function resolveAudioPathForRead(
   pathOrUri: string
 ): Promise<string> {
   if (pathOrUri.startsWith('content://')) {
-    return copyContentUriToCache(pathOrUri, `example_audio_${Date.now()}.wav`);
+    const source: FileSource = { kind: 'contentUri', uri: pathOrUri };
+    const dest: import('react-native-sherpa-onnx/fileio').FileDestination = {
+      kind: 'app',
+      base: 'cache',
+      path: `example_audio_${Date.now()}.wav`,
+    };
+    const result = await copyFile(source, dest);
+    return result.output.kind === 'fs' ? result.output.path : pathOrUri;
   }
   if (pathOrUri.startsWith('file://')) {
     return pathOrUri.replace(/^file:\/\//, '');
