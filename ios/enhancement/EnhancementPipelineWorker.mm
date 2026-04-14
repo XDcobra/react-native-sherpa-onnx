@@ -210,7 +210,3 @@ StreamingPipelineStatus EnhancementPipelineWorker::getStatus() {
 void EnhancementPipelineWorker::release() {
   stop();
 }
-
-void EnhancementPipelineWorker::release() {
-  stop();
-}

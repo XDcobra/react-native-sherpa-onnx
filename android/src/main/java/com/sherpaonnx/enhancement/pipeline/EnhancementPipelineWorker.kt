@@ -1,6 +1,11 @@
-package com.sherpaonnx.audio.pipeline
+package com.sherpaonnx.enhancement.pipeline
 
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
+import com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_ENHANCEMENT
+import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
+import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
+import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -21,8 +26,8 @@ class EnhancementPipelineWorker(
   override var isRunning: Boolean = false
     private set
 
-  private val executor = Executors.newSingleThreadExecutor { r ->
-    Thread(r, "enhancement-pipeline-$pipelineId").apply { isDaemon = true }
+  private val executor = Executors.newSingleThreadExecutor { runnable ->
+    Thread(runnable, "enhancement-pipeline-$pipelineId").apply { isDaemon = true }
   }
 
   @Volatile
@@ -35,12 +40,10 @@ class EnhancementPipelineWorker(
   private var error: String? = null
   private var cursorId: Int = -1
 
-  // Condition variable: zero-latency wakeup when input has data
   private val lock = ReentrantLock()
   private val dataAvailable = lock.newCondition()
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
 
-  // Command queue for blocking flush/reset
   private val commandQueue = LinkedBlockingQueue<PipelineCommand>()
 
   private sealed class PipelineCommand {
@@ -52,7 +55,7 @@ class EnhancementPipelineWorker(
     isRunning = true
     cursorId = inputEntry.createCursorHandle()
 
-    appendListener = { _ ->
+    appendListener = {
       lock.withLock { dataAvailable.signal() }
     }
     inputEntry.addAppendListener(appendListener!!)
@@ -62,34 +65,29 @@ class EnhancementPipelineWorker(
 
   private fun runLoop() {
     val chunkSize = denoiser.frameShiftInSamples
-    val sr = denoiser.sampleRate
+    val sampleRate = denoiser.sampleRate
     try {
       while (isRunning) {
-        // 1. Process pending commands (flush/reset)
         processCommands()
 
-        // 2. Drain input
         val chunk = inputEntry.drainCursor(cursorId, chunkSize)
         if (chunk.isEmpty()) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
-            // Input stream ended → auto-flush and stop
             val flushed = denoiser.flush()
             if (flushed.samples.isNotEmpty()) {
-              outputEntry.appendSamples(flushed.samples, sr, LIVE_APPEND_SOURCE_ENHANCEMENT)
+              outputEntry.appendSamples(flushed.samples, sampleRate, LIVE_APPEND_SOURCE_ENHANCEMENT)
               unitsWritten += flushed.samples.size
             }
             break
           }
-          // Wait for signal from input buffer (zero-latency wakeup)
           lock.withLock {
             dataAvailable.await(10, TimeUnit.MILLISECONDS)
           }
           continue
         }
 
-        // 3. Denoise and write to output
-        val denoised = denoiser.run(chunk, sr)
-        outputEntry.appendSamples(denoised.samples, sr, LIVE_APPEND_SOURCE_ENHANCEMENT)
+        val denoised = denoiser.run(chunk, sampleRate)
+        outputEntry.appendSamples(denoised.samples, sampleRate, LIVE_APPEND_SOURCE_ENHANCEMENT)
 
         unitsRead += chunk.size
         unitsWritten += denoised.samples.size
@@ -102,9 +100,7 @@ class EnhancementPipelineWorker(
       inputEntry.releaseCursor(cursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      // Complete any remaining flush/reset commands
       drainRemainingCommands()
-      // Ensure executor is shut down (handles auto-stop path)
       executor.shutdown()
     }
   }
@@ -125,6 +121,7 @@ class EnhancementPipelineWorker(
             cmd.completion.completeExceptionally(e)
           }
         }
+
         is PipelineCommand.Reset -> {
           try {
             denoiser.reset()
@@ -142,10 +139,11 @@ class EnhancementPipelineWorker(
       val cmd = commandQueue.poll() ?: return
       when (cmd) {
         is PipelineCommand.Flush -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before flush could complete")
+          IllegalStateException("Pipeline stopped before flush could complete"),
         )
+
         is PipelineCommand.Reset -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before reset could complete")
+          IllegalStateException("Pipeline stopped before reset could complete"),
         )
       }
     }
@@ -154,7 +152,6 @@ class EnhancementPipelineWorker(
   override fun stop() {
     if (!isRunning) return
     isRunning = false
-    // Wake worker so it exits
     lock.withLock { dataAvailable.signal() }
     executor.shutdown()
     if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
