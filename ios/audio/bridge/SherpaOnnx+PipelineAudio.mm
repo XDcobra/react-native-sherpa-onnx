@@ -7,13 +7,12 @@
  * - LiveEntry: streaming PCM with ring buffer, optional WAV spool, consumer cursors
  *
  * Implements all TurboModule methods for createOfflineAudioBuffer*, createEmptyLiveAudioBuffer,
- * appendSamples*, finalize, save, info, release, mic capture.
+ * appendSamples*, finalize, save, info, release, and file ingest.
+ * Mic capture methods are implemented in SherpaOnnx+PipelineAudioMic.mm.
  */
 
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
-#import <AVFoundation/AVFoundation.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import "fileio/FileIOResolver.h"
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
@@ -40,29 +39,9 @@ static NSString *const kPAErrFileNotFound     = @"AUDIO_FILE_NOT_FOUND";
 static NSString *const kPAErrFileReadError    = @"AUDIO_FILE_READ_ERROR";
 static NSString *const kPAErrFileWriteError   = @"AUDIO_FILE_WRITE_ERROR";
 static NSString *const kPAErrAlreadyFinalized = @"AUDIO_ALREADY_FINALIZED";
-static NSString *const kPAErrCaptureError     = @"AUDIO_CAPTURE_ERROR";
 static NSString *const kPAErrInternalError    = @"AUDIO_INTERNAL_ERROR";
 
 // Source constants, pa_resampleLinear, pa_writeWavHeaderToStream, and PaLiveEntry are defined in PaLiveEntry.h (included above).
-
-// ==================== Resampler (int16 variant, not in header) ====================
-static std::vector<int16_t> pa_resampleInt16(const int16_t *input, size_t inputSize, int fromRate, int toRate) {
-  if (fromRate == toRate) return std::vector<int16_t>(input, input + inputSize);
-  double ratio = (double)fromRate / (double)toRate;
-  size_t outLen = (size_t)round((double)inputSize / ratio);
-  std::vector<int16_t> result(outLen);
-  for (size_t i = 0; i < outLen; i++) {
-    double srcIdx = i * ratio;
-    size_t idx0 = std::min((size_t)srcIdx, inputSize - 1);
-    size_t idx1 = std::min(idx0 + 1, inputSize - 1);
-    float frac = (float)(srcIdx - idx0);
-    int v = (int)((int)input[idx0] + ((int)input[idx1] - (int)input[idx0]) * frac);
-    if (v < -32768) v = -32768;
-    if (v > 32767) v = 32767;
-    result[i] = (int16_t)v;
-  }
-  return result;
-}
 
 // ==================== WAV Utilities ====================
 
@@ -409,77 +388,6 @@ bool pa_append_samples_to_live(
 
 static std::string pa_generateId(const char *prefix) {
   return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
-}
-
-// ==================== Mic Capture ====================
-
-static const int kPaMicCaptureRates[] = { 16000, 44100, 48000 };
-static const size_t kPaMicCaptureRatesCount = 3;
-static const UInt32 kPaMicAQNumberBuffers = 3;
-
-static std::shared_ptr<PaLiveEntry> _paMicLiveEntry = nullptr;
-static AudioQueueRef _paMicAudioQueue = NULL;
-static AudioQueueBufferRef _paMicAQBuffers[kPaMicAQNumberBuffers];
-static volatile BOOL _paMicAQRunning = NO;
-static NSInteger _paMicCaptureRate = 16000;
-
-static void paMicStopQueue(void) {
-  if (_paMicAudioQueue == NULL) return;
-  _paMicAQRunning = NO;
-  AudioQueueStop(_paMicAudioQueue, true);
-  for (UInt32 i = 0; i < kPaMicAQNumberBuffers; i++) {
-    if (_paMicAQBuffers[i] != NULL) {
-      AudioQueueFreeBuffer(_paMicAudioQueue, _paMicAQBuffers[i]);
-      _paMicAQBuffers[i] = NULL;
-    }
-  }
-  AudioQueueDispose(_paMicAudioQueue, true);
-  _paMicAudioQueue = NULL;
-  if (_paMicLiveEntry) {
-    _paMicLiveEntry->flushPendingFramesAppended();
-  }
-  _paMicLiveEntry = nullptr;
-}
-
-static void paMicAQInputCallback(void *inUserData,
-                                  AudioQueueRef inAQ,
-                                  AudioQueueBufferRef inBuffer,
-                                  const AudioTimeStamp *inStartTime,
-                                  UInt32 inNumPackets,
-                                  const AudioStreamPacketDescription *inPacketDesc) {
-  (void)inUserData; (void)inStartTime; (void)inNumPackets; (void)inPacketDesc;
-  if (!_paMicAQRunning) return;
-  auto liveEntry = _paMicLiveEntry;
-  if (!liveEntry || liveEntry->state != PaLiveEntry::RECORDING) return;
-
-  UInt32 byteSize = inBuffer->mAudioDataByteSize;
-  if (byteSize == 0) {
-    AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
-    return;
-  }
-
-  const int16_t *rawSamples = (const int16_t *)inBuffer->mAudioData;
-  NSUInteger rawCount = byteSize / sizeof(int16_t);
-  int targetRate = liveEntry->sampleRate;
-
-  // Resample if needed
-  std::vector<int16_t> resampledBuf;
-  const int16_t *samples16 = rawSamples;
-  size_t count16 = rawCount;
-  if ((int)_paMicCaptureRate != targetRate) {
-    resampledBuf = pa_resampleInt16(rawSamples, rawCount, (int)_paMicCaptureRate, targetRate);
-    samples16 = resampledBuf.data();
-    count16 = resampledBuf.size();
-  }
-
-  // Convert to float and write to live entry
-  std::vector<float> floatSamples(count16);
-  for (size_t i = 0; i < count16; i++) {
-    floatSamples[i] = (float)samples16[i] / 32768.0f;
-  }
-  liveEntry->appendSamples(floatSamples.data(), floatSamples.size(), targetRate, kPaAppendSourceMic);
-
-  AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 }
 
 // ==================== Category Implementation ====================
@@ -1197,113 +1105,6 @@ static std::string pa_encodeViaDecodeFile(
     return;
   }
   resolve(nil); // idempotent
-}
-
-// ---- Mic: start ----
-- (void)startMicToLiveAudioBuffer:(NSString *)liveBufferId
-                          options:(NSDictionary *)options
-                          resolve:(RCTPromiseResolveBlock)resolve
-                           reject:(RCTPromiseRejectBlock)reject
-{
-  @try {
-    paMicStopQueue();
-
-    std::string liveId = [liveBufferId UTF8String];
-    std::shared_ptr<PaLiveEntry> live;
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      auto it = g_pa_live.find(liveId);
-      if (it == g_pa_live.end()) { reject(kPAErrBufferNotFound, @"Live buffer not found", nil); return; }
-      live = it->second;
-    }
-    if (live->state != PaLiveEntry::RECORDING) {
-      reject(kPAErrInvalidState, @"Live buffer is finalized", nil);
-      return;
-    }
-
-    _paMicLiveEntry = live;
-
-    // Compatibility option: emitToJs now toggles centralized append-event emission.
-    if (options[@"emitToJs"] != nil) {
-      bool emitToJs = [options[@"emitToJs"] boolValue];
-      live->configureAppendEvents(emitToJs, live->appendEventMinIntervalMs);
-    }
-
-    // Audio session
-    NSError *error = nil;
-    AVAudioSession *session = [AVAudioSession sharedInstance];
-    if (![session setCategory:AVAudioSessionCategoryPlayAndRecord
-                         mode:AVAudioSessionModeDefault
-                      options:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth
-                        error:&error]) {
-      reject(kPAErrCaptureError, error.localizedDescription, error);
-      return;
-    }
-    if (![session setActive:YES withOptions:0 error:&error]) {
-      reject(kPAErrCaptureError, error.localizedDescription, error);
-      return;
-    }
-
-    AudioStreamBasicDescription fmt;
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.mFormatID = kAudioFormatLinearPCM;
-    fmt.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
-    fmt.mChannelsPerFrame = 1;
-    fmt.mBitsPerChannel = 16;
-    fmt.mBytesPerPacket = 2;
-    fmt.mBytesPerFrame = 2;
-    fmt.mFramesPerPacket = 1;
-
-    OSStatus status = noErr;
-    int chosenRate = 16000;
-    for (size_t r = 0; r < kPaMicCaptureRatesCount; r++) {
-      chosenRate = kPaMicCaptureRates[r];
-      fmt.mSampleRate = (Float64)chosenRate;
-      status = AudioQueueNewInput(&fmt, paMicAQInputCallback, NULL, NULL, NULL, 0, &_paMicAudioQueue);
-      if (status == noErr) break;
-      _paMicAudioQueue = NULL;
-    }
-    if (status != noErr || _paMicAudioQueue == NULL) {
-      [session setActive:NO withOptions:0 error:nil];
-      reject(kPAErrCaptureError, @"AudioQueueNewInput failed", nil);
-      return;
-    }
-    _paMicCaptureRate = chosenRate;
-
-    UInt32 bufferByteSize = 2048;
-    for (UInt32 i = 0; i < kPaMicAQNumberBuffers; i++) {
-      status = AudioQueueAllocateBuffer(_paMicAudioQueue, bufferByteSize, &_paMicAQBuffers[i]);
-      if (status != noErr) {
-        paMicStopQueue();
-        [session setActive:NO withOptions:0 error:nil];
-        reject(kPAErrCaptureError, @"AudioQueueAllocateBuffer failed", nil);
-        return;
-      }
-      AudioQueueEnqueueBuffer(_paMicAudioQueue, _paMicAQBuffers[i], 0, NULL);
-    }
-
-    _paMicAQRunning = YES;
-    status = AudioQueueStart(_paMicAudioQueue, NULL);
-    if (status != noErr) {
-      paMicStopQueue();
-      [session setActive:NO withOptions:0 error:nil];
-      reject(kPAErrCaptureError, @"AudioQueueStart failed", nil);
-      return;
-    }
-
-    resolve(nil);
-  } @catch (NSException *e) {
-    reject(kPAErrCaptureError, e.reason, nil);
-  }
-}
-
-// ---- Mic: stop ----
-- (void)stopMicToLiveAudioBuffer:(RCTPromiseResolveBlock)resolve
-                          reject:(RCTPromiseRejectBlock)reject
-{
-  paMicStopQueue();
-  [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
-  resolve(nil);
 }
 
 // ---- File Ingest to Live Buffer ----
