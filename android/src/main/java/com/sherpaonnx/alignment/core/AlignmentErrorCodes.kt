@@ -1,0 +1,13 @@
+package com.sherpaonnx.alignment.core
+
+internal object AlignmentErrorCodes {
+  const val TAG = "SherpaOnnxAlignment"
+
+  const val ERR_ALIGNMENT = "ALIGNMENT_ERROR"
+  const val ERR_TEXT_NOT_FOUND = "ALIGNMENT_TEXT_BUFFER_NOT_FOUND"
+  const val ERR_TEXT_KIND_MISMATCH = "ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH"
+  const val ERR_TEXT_EMPTY = "ALIGNMENT_TEXT_BUFFER_EMPTY"
+  const val ERR_AUDIO_NOT_FOUND = "ALIGNMENT_AUDIO_BUFFER_NOT_FOUND"
+  const val ERR_AUDIO_KIND_MISMATCH = "ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH"
+  const val ERR_AUDIO_EMPTY = "ALIGNMENT_AUDIO_BUFFER_EMPTY"
+}

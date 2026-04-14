@@ -1,26 +1,17 @@
-#import "SherpaOnnx.h"
-#import "SherpaOnnx+PipelineAudioGlobals.h"
-#import "SherpaOnnx+TextBufferGlobals.h"
+#import "../../SherpaOnnx.h"
+#import "../../SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../SherpaOnnx+TextBufferGlobals.h"
 
-#include "sherpa-onnx-model-detect.h"
-#include "sherpa_onnx_alignment_engine.hpp"
+#include "../core/AlignmentBridgeUtils.h"
+#include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
-
-static NSString *const kAlignmentErrCode = @"ALIGNMENT_ERROR";
-static NSString *const kAlignmentErrTextBufferNotFound = @"ALIGNMENT_TEXT_BUFFER_NOT_FOUND";
-static NSString *const kAlignmentErrTextBufferKindMismatch = @"ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH";
-static NSString *const kAlignmentErrTextBufferEmpty = @"ALIGNMENT_TEXT_BUFFER_EMPTY";
-static NSString *const kAlignmentErrAudioBufferNotFound = @"ALIGNMENT_AUDIO_BUFFER_NOT_FOUND";
-static NSString *const kAlignmentErrAudioBufferKindMismatch = @"ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH";
-static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_EMPTY";
 
 static NSString *alignmentKindToNSString(sherpaonnx::AlignmentModelKind kind) {
   using K = sherpaonnx::AlignmentModelKind;
@@ -79,122 +70,13 @@ static NSDictionary *alignmentDetectResultToDict(
   return dict;
 }
 
-static NSArray *SubtitleItemsToNSArray(
-    const std::vector<sherpa_onnx::alignment::SubtitleItem> &items) {
-  NSMutableArray *array = [NSMutableArray arrayWithCapacity:items.size()];
-  for (const auto &item : items) {
-    [array addObject:@{
-      @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
-      @"start": @(item.start_s),
-      @"end": @(item.end_s),
-    }];
-  }
-  return array;
-}
-
-static NSDictionary *AlignmentResultToNSDictionary(
-    const sherpa_onnx::alignment::AlignmentResult &r) {
-  return @{
-    @"subtitles": SubtitleItemsToNSArray(r.subtitles),
-    @"timingMode": [NSString stringWithUTF8String:r.timing_mode.c_str()] ?: @"",
-  };
-}
-
-static std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
-  if (options == nil) {
-    throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");
-  }
-
-  id raw = options[@"segmentSampleCounts"];
-  if (raw == nil) {
-    id chunks = options[@"chunks"];
-    if ([chunks isKindOfClass:[NSDictionary class]]) {
-      raw = ((NSDictionary *)chunks)[@"segmentSampleCounts"];
-    }
-  }
-
-  if (![raw isKindOfClass:[NSArray class]]) {
-    throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");
-  }
-
-  NSArray *arr = (NSArray *)raw;
-  std::vector<int32_t> out;
-  out.reserve(arr.count);
-  for (id v in arr) {
-    if (![v isKindOfClass:[NSNumber class]]) {
-      out.push_back(0);
-      continue;
-    }
-    double x = [(NSNumber *)v doubleValue];
-    if (!std::isfinite(x)) {
-      out.push_back(0);
-      continue;
-    }
-    int32_t n = static_cast<int32_t>(x);
-    out.push_back(std::max<int32_t>(0, n));
-  }
-  return out;
-}
-
-static int32_t ParseEstimatedSampleRate(
-    NSDictionary *options,
-    int32_t fallbackSampleRate) {
-  if (options != nil) {
-    id direct = options[@"sampleRate"];
-    if ([direct isKindOfClass:[NSNumber class]]) {
-      double v = [(NSNumber *)direct doubleValue];
-      if (std::isfinite(v) && v > 0) {
-        return static_cast<int32_t>(v);
-      }
-    }
-
-    id chunks = options[@"chunks"];
-    if ([chunks isKindOfClass:[NSDictionary class]]) {
-      id nested = ((NSDictionary *)chunks)[@"sampleRate"];
-      if ([nested isKindOfClass:[NSNumber class]]) {
-        double v = [(NSNumber *)nested doubleValue];
-        if (std::isfinite(v) && v > 0) {
-          return static_cast<int32_t>(v);
-        }
-      }
-    }
-  }
-
-  return fallbackSampleRate;
-}
-
-static std::string ParseAlignmentModelPath(NSDictionary *options) {
-  NSString *path = [options[@"alignmentModelPath"] isKindOfClass:[NSString class]]
-      ? options[@"alignmentModelPath"]
-      : nil;
-  NSString *trimmed = path != nil
-      ? [path stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-      : @"";
-  if (trimmed == nil || trimmed.length == 0) {
-    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.");
-  }
-  return std::string([trimmed UTF8String]);
-}
-
-static std::string NormalizeMode(NSString *mode) {
-  NSString *m = [mode isKindOfClass:[NSString class]]
-      ? [[mode lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-      : @"";
-  if ([m isEqualToString:@"proportional"]) return "proportional";
-  if ([m isEqualToString:@"estimated"]) return "estimated";
-  if ([m isEqualToString:@"accurate"]) return "accurate";
-  throw std::runtime_error("Unsupported alignment mode");
-}
-
-static std::string NormalizeGranularity(NSString *granularity) {
-  NSString *g = [granularity isKindOfClass:[NSString class]]
-      ? [[granularity lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-      : @"";
-  if (g == nil || g.length == 0 || [g isEqualToString:@"sentence"]) return "sentence";
-  if ([g isEqualToString:@"word"]) return "word";
-  if ([g isEqualToString:@"character"]) return "character";
-  throw std::runtime_error("Unsupported alignment granularity");
-}
+static NSString *const kAlignmentErrCode = @"ALIGNMENT_ERROR";
+static NSString *const kAlignmentErrTextBufferNotFound = @"ALIGNMENT_TEXT_BUFFER_NOT_FOUND";
+static NSString *const kAlignmentErrTextBufferKindMismatch = @"ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH";
+static NSString *const kAlignmentErrTextBufferEmpty = @"ALIGNMENT_TEXT_BUFFER_EMPTY";
+static NSString *const kAlignmentErrAudioBufferNotFound = @"ALIGNMENT_AUDIO_BUFFER_NOT_FOUND";
+static NSString *const kAlignmentErrAudioBufferKindMismatch = @"ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH";
+static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_EMPTY";
 
 }  // namespace
 
@@ -308,8 +190,8 @@ static std::string NormalizeGranularity(NSString *granularity) {
         return;
       }
 
-      std::string modeStr = NormalizeMode(mode);
-      std::string granularityStr = NormalizeGranularity(granularity);
+      std::string modeStr = sherpaonnx::alignment::bridge::NormalizeMode(mode);
+      std::string granularityStr = sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
 
       sherpa_onnx::alignment::AlignmentResult result;
       if (modeStr == "proportional") {
@@ -319,15 +201,15 @@ static std::string NormalizeGranularity(NSString *granularity) {
             audioEntry->sampleRate,
             granularityStr);
       } else if (modeStr == "estimated") {
-        int32_t sr = ParseEstimatedSampleRate(options, audioEntry->sampleRate);
-        auto counts = ParseSegmentSampleCounts(options);
+        int32_t sr = sherpaonnx::alignment::bridge::ParseEstimatedSampleRate(options, audioEntry->sampleRate);
+        auto counts = sherpaonnx::alignment::bridge::ParseSegmentSampleCounts(options);
         result = sherpa_onnx::alignment::AlignEstimated(
             textEntry->text,
             counts,
             sr,
             granularityStr);
       } else if (modeStr == "accurate") {
-        std::string modelPathStr = ParseAlignmentModelPath(options);
+        std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
         if (audioEntry->isFileBacked) {
           result = sherpa_onnx::alignment::AlignAccurateFromFile(
               modelPathStr,
@@ -353,7 +235,7 @@ static std::string NormalizeGranularity(NSString *granularity) {
         throw std::runtime_error("Unsupported alignment mode");
       }
 
-      resolve(AlignmentResultToNSDictionary(result));
+      resolve(sherpaonnx::alignment::bridge::AlignmentResultToNSDictionary(result));
     } catch (const std::exception &e) {
       NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
       reject(kAlignmentErrCode, errorMsg, nil);
