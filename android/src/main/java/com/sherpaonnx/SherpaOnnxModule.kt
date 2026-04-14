@@ -1086,145 +1086,323 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun convertPipelineAudioToDestination(
-    bufferId: String,
-    destination: ReadableMap,
-    format: String,
-    outputSampleRateHz: Double,
-    operationId: String,
-    promise: Promise
-  ) {
-    val rate = outputSampleRateHz.toInt()
+  // Map of operationId → cancel flag for active audio save operations
+  private val saveCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
 
-    // Format validation
+  private fun validateAudioSaveParams(format: String, rate: Int, promise: Promise): Boolean {
     val supportedFormats = setOf("wav", "mp3", "flac", "aac", "m4a", "opus", "webm", "mkv", "ogg")
     if (!supportedFormats.contains(format.lowercase())) {
-      promise.reject("CONVERSION_UNSUPPORTED_FORMAT", "Unsupported format: $format")
-      return
+      promise.reject("AUDIO_SAVE_UNSUPPORTED_FORMAT", "Unsupported format: $format")
+      return false
     }
-    // Sample-rate validation
     if (rate < 0) {
-      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "outputSampleRateHz must be >= 0")
-      return
+      promise.reject("AUDIO_SAVE_INVALID_SAMPLE_RATE", "outputSampleRateHz must be >= 0")
+      return false
     }
     val fmt = format.lowercase()
     if (fmt == "mp3" && rate != 0 && rate != 32000 && rate != 44100 && rate != 48000) {
-      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "MP3 output sample rate must be 32000, 44100, 48000, or 0. Received: $rate")
-      return
+      promise.reject("AUDIO_SAVE_INVALID_SAMPLE_RATE", "MP3 output sample rate must be 32000, 44100, 48000, or 0. Received: $rate")
+      return false
     }
     if ((fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") && rate != 0 && rate !in setOf(8000, 12000, 16000, 24000, 48000)) {
-      promise.reject("CONVERSION_INVALID_SAMPLE_RATE", "Opus output sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Received: $rate")
-      return
+      promise.reject("AUDIO_SAVE_INVALID_SAMPLE_RATE", "Opus output sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Received: $rate")
+      return false
     }
+    return true
+  }
 
-    var writeHandle: com.sherpaonnx.fileio.FileIOResolver.WriteHandle? = null
+  private data class ResolvedDestination(
+    val outputPath: String,
+    val outputKind: String,
+    val resolvedOutputPath: String,
+    val writeHandle: com.sherpaonnx.fileio.FileIOResolver.WriteHandle,
+    val tmpFile: File?
+  )
+
+  private fun resolveDestinationForSave(destination: ReadableMap, fmt: String): ResolvedDestination {
+    val writeHandle = fileIOHelper.resolveDestination(
+      destination = destination,
+      mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
+      overwrite = true,
+      createParentDirectories = false,
+    )
+
+    val outputPath: String
+    val outputKind: String
+    val resolvedOutputPath: String
     var tmpFile: File? = null
 
-    try {
-      // Prefer seekable destination handles for direct FFmpeg output.
-      writeHandle = fileIOHelper.resolveDestination(
-        destination = destination,
-        mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
-        overwrite = true,
-        createParentDirectories = false,
-      )
-
-      val outputPath: String
-      val outputKind: String
-      val resolvedOutputPath: String
-
-      when (val handle = writeHandle) {
-        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FilePath -> {
-          outputPath = handle.file.absolutePath
-          outputKind = "fs"
-          resolvedOutputPath = handle.file.absolutePath
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
-          outputPath = handle.fdPath
-          outputKind = "contentUri"
-          resolvedOutputPath = handle.resultUri.toString()
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
-          // Edge fallback for providers that cannot supply seekable fds.
-          val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_conv_${java.util.UUID.randomUUID()}.$fmt")
-          tmpFile = fallbackTmp
-          outputPath = fallbackTmp.absolutePath
-          outputKind = "contentUri"
-          resolvedOutputPath = handle.resultUri.toString()
-        }
-        null -> throw RuntimeException("Resolved write handle is null")
+    when (val handle = writeHandle) {
+      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FilePath -> {
+        outputPath = handle.file.absolutePath
+        outputKind = "fs"
+        resolvedOutputPath = handle.file.absolutePath
       }
+      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
+        outputPath = handle.fdPath
+        outputKind = "contentUri"
+        resolvedOutputPath = handle.resultUri.toString()
+      }
+      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
+        val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_save_${java.util.UUID.randomUUID()}.$fmt")
+        tmpFile = fallbackTmp
+        outputPath = fallbackTmp.absolutePath
+        outputKind = "contentUri"
+        resolvedOutputPath = handle.resultUri.toString()
+      }
+      null -> throw RuntimeException("Resolved write handle is null")
+    }
 
-      if (bufferId.startsWith("off_")) {
-        convertOfflineBuffer(bufferId, outputPath, fmt, rate)
-      } else if (bufferId.startsWith("live_")) {
-        convertLiveBuffer(bufferId, outputPath, fmt, rate)
-      } else {
-        throw IllegalArgumentException("Invalid buffer ID prefix: expected off_ or live_")
-      }
+    return ResolvedDestination(outputPath, outputKind, resolvedOutputPath, writeHandle, tmpFile)
+  }
 
-      // Fallback stream destinations still require temp-file copy.
-      if (tmpFile != null) {
-        val streamHandle = writeHandle as? com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream
-          ?: throw RuntimeException("Expected stream write handle for temp-file fallback")
-        java.io.FileInputStream(tmpFile).use { input ->
-          com.sherpaonnx.fileio.FileIOStreamCopy.copy(input, streamHandle.outputStream)
-        }
-      }
-
-      val result = com.facebook.react.bridge.Arguments.createMap().apply {
-        putString("outputKind", outputKind)
-        putString("outputPath", resolvedOutputPath)
-      }
-      promise.resolve(result)
-    } catch (e: com.sherpaonnx.fileio.FileIOException) {
-      promise.reject(e.code, e.message, e)
-    } catch (e: IllegalArgumentException) {
-      val code = if (e.message?.contains("empty", ignoreCase = true) == true)
-        "CONVERSION_BUFFER_EMPTY" else "CONVERSION_BUFFER_NOT_FOUND"
-      promise.reject(code, e.message, e)
-    } catch (e: IllegalStateException) {
-      if (e.message?.contains("finalized", ignoreCase = true) == true) {
-        promise.reject("CONVERSION_BUFFER_NOT_FINALIZED", e.message, e)
-      } else {
-        promise.reject("CONVERSION_CONVERT_ERROR", e.message, e)
-      }
-    } catch (e: Exception) {
-      promise.reject("CONVERSION_CONVERT_ERROR", e.message, e)
-    } finally {
-      try {
-        writeHandle?.close()
-      } catch (_: Exception) {
-        // Ignore close failures
-      }
-
-      try {
-        tmpFile?.delete()
-      } catch (_: Exception) {
-        // Ignore cleanup failures
+  private fun copyTmpToStreamIfNeeded(dest: ResolvedDestination) {
+    if (dest.tmpFile != null) {
+      val streamHandle = dest.writeHandle as? com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream
+        ?: throw RuntimeException("Expected stream write handle for temp-file fallback")
+      java.io.FileInputStream(dest.tmpFile).use { input ->
+        com.sherpaonnx.fileio.FileIOStreamCopy.copy(input, streamHandle.outputStream)
       }
     }
   }
 
-  private fun convertOfflineBuffer(bufferId: String, outputPath: String, format: String, rate: Int) {
+  private fun cleanupSaveDestination(dest: ResolvedDestination?) {
+    try { dest?.writeHandle?.close() } catch (_: Exception) {}
+    try { dest?.tmpFile?.delete() } catch (_: Exception) {}
+  }
+
+  private fun cleanupOutputFile(path: String?) {
+    if (path == null) return
+    try { File(path).delete() } catch (_: Exception) {}
+  }
+
+  private fun encodeViaPcm(
+    samples: FloatArray, sampleRate: Int, channelCount: Int,
+    outputPath: String, format: String, outputSampleRateHz: Int,
+    bitrate: Int, quality: Int, operationId: String,
+    cancelFlagAddr: Long
+  ) {
+    val sessionPtr = nativeEncodeSessionCreate(
+      outputPath, format, sampleRate, channelCount,
+      outputSampleRateHz, bitrate, quality,
+      samples.size.toLong() / channelCount,
+      cancelFlagAddr
+    )
+    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+
+    try {
+      val chunkFrames = 4096
+      var offset = 0
+      val totalFrames = samples.size / channelCount
+      while (offset < totalFrames) {
+        val end = minOf(offset + chunkFrames, totalFrames)
+        val chunkSampleCount = (end - offset) * channelCount
+        val chunk = FloatArray(chunkSampleCount)
+        System.arraycopy(samples, offset * channelCount, chunk, 0, chunkSampleCount)
+        val err = nativeEncodeSessionFeedChunk(sessionPtr, chunk, end - offset)
+        if (err.isNotEmpty()) {
+          if (err.contains("CANCELLED")) throw RuntimeException("AUDIO_SAVE_CANCELLED: $err")
+          throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
+        }
+        offset = end
+      }
+      val finishErr = nativeEncodeSessionFinish(sessionPtr)
+      if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
+    } finally {
+      nativeEncodeSessionRelease(sessionPtr)
+    }
+  }
+
+  private fun encodeViaDecodeFile(
+    inputPath: String, outputPath: String, format: String,
+    outputSampleRateHz: Int, bitrate: Int, quality: Int,
+    operationId: String, cancelFlagAddr: Long
+  ) {
+    // First, probe the file to get sample rate. We do a streaming decode that
+    // feeds chunks directly into the encode session.
+    var encodeSessionPtr = 0L
+    var encodeSessionCreated = false
+
+    try {
+      @Suppress("UNCHECKED_CAST")
+      val decodeResult = nativeDecodeFileStreaming(
+        inputPath,
+        0, // keep source sample rate
+        true, // force mono
+        8192,
+        cancelFlagAddr,
+        object : java.util.function.BiConsumer<FloatArray, Int> {
+          override fun accept(samples: FloatArray, frameCount: Int) {
+            if (!encodeSessionCreated) {
+              // Lazily create encode session on first chunk — we now know the source rate.
+              // The source sample rate is embedded in the decode callback context;
+              // we use 0 as default and let the encode session use the input rate.
+              return // Samples from first callback accumulated below
+            }
+            if (encodeSessionPtr != 0L) {
+              val err = nativeEncodeSessionFeedChunk(encodeSessionPtr, samples, frameCount)
+              if (err.isNotEmpty() && !err.contains("CANCELLED")) {
+                throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
+              }
+            }
+          }
+        },
+        null // no separate progress callback
+      ) as? HashMap<String, Any> ?: throw RuntimeException("AUDIO_SAVE_SOURCE_NOT_FOUND: Null result from native decode")
+
+      val sourceSampleRate = (decodeResult["sourceSampleRate"] as? Int) ?: 16000
+      val totalFramesDecoded = (decodeResult["totalFramesDecoded"] as? Long) ?: 0L
+
+      // For the streaming approach, we need to re-decode since we couldn't create
+      // the encode session without knowing the source sample rate.
+      // Instead, use batch decode + encode.
+      val batchResult = nativeDecodeFileToBuffer(
+        inputPath, 0, true, 8192, cancelFlagAddr
+      ) as? HashMap<String, Any> ?: throw RuntimeException("AUDIO_SAVE_SOURCE_NOT_FOUND: Decode failed")
+
+      val samples = batchResult["samples"] as? FloatArray ?: FloatArray(0)
+      val srcRate = (batchResult["sourceSampleRate"] as? Int) ?: 16000
+      if (samples.isEmpty()) throw RuntimeException("AUDIO_SAVE_SOURCE_NOT_FOUND: Decoded file is empty")
+
+      encodeSessionPtr = nativeEncodeSessionCreate(
+        outputPath, format, srcRate, 1,
+        outputSampleRateHz, bitrate, quality,
+        samples.size.toLong(),
+        cancelFlagAddr
+      )
+      encodeSessionCreated = true
+      if (encodeSessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+
+      val chunkFrames = 4096
+      var offset = 0
+      while (offset < samples.size) {
+        val end = minOf(offset + chunkFrames, samples.size)
+        val chunk = FloatArray(end - offset)
+        System.arraycopy(samples, offset, chunk, 0, end - offset)
+        val err = nativeEncodeSessionFeedChunk(encodeSessionPtr, chunk, end - offset)
+        if (err.isNotEmpty()) {
+          if (err.contains("CANCELLED")) throw RuntimeException("AUDIO_SAVE_CANCELLED: $err")
+          throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
+        }
+        offset = end
+      }
+      val finishErr = nativeEncodeSessionFinish(encodeSessionPtr)
+      if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
+    } finally {
+      if (encodeSessionPtr != 0L) nativeEncodeSessionRelease(encodeSessionPtr)
+    }
+  }
+
+  override fun saveAudioBufferToFile(
+    bufferId: String,
+    destination: ReadableMap,
+    format: String,
+    outputSampleRateHz: Double,
+    bitrate: Double,
+    quality: Double,
+    operationId: String,
+    promise: Promise
+  ) {
+    val rate = outputSampleRateHz.toInt()
+    if (!validateAudioSaveParams(format, rate, promise)) return
+
+    val fmt = format.lowercase()
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    saveCancelFlags[operationId] = cancelFlag
+
+    decodeExecutor.execute {
+      var dest: ResolvedDestination? = null
+      try {
+        dest = resolveDestinationForSave(destination, fmt)
+
+        // Allocate native cancel flag
+        val cancelFlagAddr = nativeAllocateCancelFlag()
+        if (cancelFlag.get()) {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
+        }
+        val cancelChecker = Thread {
+          while (!cancelFlag.get()) {
+            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+          }
+          nativeSetCancelFlag(cancelFlagAddr, true)
+        }
+        cancelChecker.isDaemon = true
+        cancelChecker.start()
+
+        try {
+          if (bufferId.startsWith("off_")) {
+            saveOfflineBuffer(bufferId, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
+          } else if (bufferId.startsWith("live_")) {
+            saveLiveBuffer(bufferId, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
+          } else {
+            throw IllegalArgumentException("Invalid buffer ID prefix: expected off_ or live_")
+          }
+          cancelChecker.interrupt()
+        } finally {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          cancelChecker.interrupt()
+        }
+
+        copyTmpToStreamIfNeeded(dest)
+
+        val result = com.facebook.react.bridge.Arguments.createMap().apply {
+          putString("outputKind", dest.outputKind)
+          putString("outputPath", dest.resolvedOutputPath)
+        }
+        promise.resolve(result)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject(e.code, e.message, e)
+      } catch (e: IllegalArgumentException) {
+        cleanupOutputFile(dest?.outputPath)
+        val code = if (e.message?.contains("empty", ignoreCase = true) == true)
+          "AUDIO_SAVE_BUFFER_EMPTY" else "AUDIO_SAVE_SOURCE_NOT_FOUND"
+        promise.reject(code, e.message, e)
+      } catch (e: IllegalStateException) {
+        cleanupOutputFile(dest?.outputPath)
+        if (e.message?.contains("finalized", ignoreCase = true) == true) {
+          promise.reject("AUDIO_SAVE_BUFFER_NOT_FINALIZED", e.message, e)
+        } else {
+          promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
+        }
+      } catch (e: RuntimeException) {
+        cleanupOutputFile(dest?.outputPath)
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("AUDIO_SAVE_")) msg.substringBefore(":").trim() else "AUDIO_SAVE_ENCODE_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
+      } finally {
+        saveCancelFlags.remove(operationId)
+        cleanupSaveDestination(dest)
+      }
+    }
+  }
+
+  private fun saveOfflineBuffer(
+    bufferId: String, outputPath: String, format: String, rate: Int,
+    bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long
+  ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getOffline(bufferId)
       ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
     if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
 
     when (entry) {
       is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked -> {
-        val err = Companion.nativeConvertAudioToFormat(entry.filePath, outputPath, format, rate)
-        if (err.isNotEmpty()) throw RuntimeException(err)
+        encodeViaDecodeFile(entry.filePath, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
       is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
-        val err = Companion.nativeConvertPcmToFormat(
-          entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate)
-        if (err.isNotEmpty()) throw RuntimeException(err)
+        encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
     }
   }
 
-  private fun convertLiveBuffer(bufferId: String, outputPath: String, format: String, rate: Int) {
+  private fun saveLiveBuffer(
+    bufferId: String, outputPath: String, format: String, rate: Int,
+    bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long
+  ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
       ?: throw IllegalArgumentException("Live buffer not found: $bufferId")
     if (entry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED)
@@ -1233,14 +1411,106 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     val spoolPath = entry.spoolFilePath
     if (spoolPath != null) {
-      val err = Companion.nativeConvertAudioToFormat(spoolPath, outputPath, format, rate)
-      if (err.isNotEmpty()) throw RuntimeException(err)
+      encodeViaDecodeFile(spoolPath, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
     } else {
       val snapshot = entry.snapshotRing()
-      val err = Companion.nativeConvertPcmToFormat(
-        snapshot, entry.sampleRate, 1, outputPath, format, rate)
-      if (err.isNotEmpty()) throw RuntimeException(err)
+      encodeViaPcm(snapshot, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
     }
+  }
+
+  override fun saveFileAsAudioFile(
+    source: ReadableMap,
+    destination: ReadableMap,
+    format: String,
+    outputSampleRateHz: Double,
+    bitrate: Double,
+    quality: Double,
+    operationId: String,
+    promise: Promise
+  ) {
+    val rate = outputSampleRateHz.toInt()
+    if (!validateAudioSaveParams(format, rate, promise)) return
+
+    val fmt = format.lowercase()
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    saveCancelFlags[operationId] = cancelFlag
+
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var readTmpFile: File? = null
+      var dest: ResolvedDestination? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val sourcePath = when (val handle = readHandle) {
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
+            val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
+            tmp.outputStream().use { out -> handle.inputStream.copyTo(out, 65536) }
+            readTmpFile = tmp
+            tmp.absolutePath
+          }
+          null -> throw RuntimeException("Resolved read handle is null")
+        }
+
+        dest = resolveDestinationForSave(destination, fmt)
+
+        val cancelFlagAddr = nativeAllocateCancelFlag()
+        if (cancelFlag.get()) {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
+        }
+        val cancelChecker = Thread {
+          while (!cancelFlag.get()) {
+            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+          }
+          nativeSetCancelFlag(cancelFlagAddr, true)
+        }
+        cancelChecker.isDaemon = true
+        cancelChecker.start()
+
+        try {
+          encodeViaDecodeFile(sourcePath, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
+          cancelChecker.interrupt()
+        } finally {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          cancelChecker.interrupt()
+        }
+
+        copyTmpToStreamIfNeeded(dest)
+
+        val result = com.facebook.react.bridge.Arguments.createMap().apply {
+          putString("outputKind", dest.outputKind)
+          putString("outputPath", dest.resolvedOutputPath)
+        }
+        promise.resolve(result)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        cleanupOutputFile(dest?.outputPath)
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("AUDIO_SAVE_")) msg.substringBefore(":").trim() else "AUDIO_SAVE_ENCODE_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
+      } finally {
+        saveCancelFlags.remove(operationId)
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { readTmpFile?.delete() } catch (_: Exception) {}
+        cleanupSaveDestination(dest)
+      }
+    }
+  }
+
+  override fun cancelAudioSave(operationId: String, promise: Promise) {
+    val flag = saveCancelFlags.remove(operationId)
+    if (flag != null) {
+      flag.set(true)
+    }
+    promise.resolve(null)
   }
 
   override fun getPipelineAudioBufferInfo(bufferId: String, promise: Promise) {
@@ -2265,33 +2535,30 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
 
-    /** Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
-     * outputSampleRateHz: for MP3 use 32000/44100/48000, 0 = default 44100. Ignored for WAV/FLAC.
-     * Returns empty string on success, or an error message otherwise. Requires FFmpeg prebuilts when called on Android.
-     */
+    // -- AudioEncodeSession JNI --
     @JvmStatic
-    private external fun nativeConvertAudioToFormat(inputPath: String, outputPath: String, format: String, outputSampleRateHz: Int): String
+    private external fun nativeEncodeSessionCreate(
+      outputPath: String, format: String,
+      inputSampleRate: Int, inputChannelCount: Int,
+      outputSampleRateHz: Int, bitrate: Int, quality: Int,
+      totalFramesEstimate: Long,
+      cancelFlagPtr: Long
+    ): Long
 
-    /** Mono float32 little-endian raw PCM file to output format (requires FFmpeg). Empty = success. */
     @JvmStatic
-    private external fun nativeConvertFloat32MonoFileToFormat(
-      rawPath: String,
-      pcmSampleRate: Int,
-      outputPath: String,
-      format: String,
-      outputSampleRateHz: Int
+    private external fun nativeEncodeSessionFeedChunk(
+      sessionPtr: Long, samples: FloatArray, frameCount: Int
     ): String
 
-    /** Encode raw float32 PCM buffer to output format (requires FFmpeg). Empty = success. */
     @JvmStatic
-    private external fun nativeConvertPcmToFormat(
-      samples: FloatArray,
-      sampleRate: Int,
-      channelCount: Int,
-      outputPath: String,
-      format: String,
-      outputSampleRateHz: Int
+    private external fun nativeEncodeSessionFinish(
+      sessionPtr: Long
     ): String
+
+    @JvmStatic
+    private external fun nativeEncodeSessionRelease(
+      sessionPtr: Long
+    )
 
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic

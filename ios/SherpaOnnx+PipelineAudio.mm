@@ -14,12 +14,12 @@
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
-#import "audio/SherpaOnnxAudioConvert.h"
 #import "fileio/FileIOResolver.h"
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "PaLiveEntry.h"
 #include "AudioDecodeSession.h"
+#include "AudioEncodeSession.h"
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -194,6 +194,10 @@ static std::string pa_generateId(const char *prefix);
 // Decode cancel registry: operationId → atomic cancel flag
 static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_decodeCancelFlags;
 static std::mutex g_pa_decodeCancelMutex;
+
+// Audio save cancel registry: operationId → atomic cancel flag
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_saveCancelFlags;
+static std::mutex g_pa_saveCancelMutex;
 
 // File ingest status registry
 struct PaFileIngestStatus {
@@ -834,40 +838,122 @@ static void paMicAQInputCallback(void *inUserData,
   }
 }
 
-// ---- Convert pipeline buffer to destination ----
-- (void)convertPipelineAudioToDestination:(NSString *)bufferId
-                              destination:(NSDictionary *)destination
-                                   format:(NSString *)format
-                       outputSampleRateHz:(double)outputSampleRateHz
-                              operationId:(NSString *)operationId
-                                  resolve:(RCTPromiseResolveBlock)resolve
-                                   reject:(RCTPromiseRejectBlock)reject
+// ---- Audio save helpers ----
+
+static bool pa_validateSaveParams(const std::string &fmt, int rate,
+                                   RCTPromiseRejectBlock reject) {
+  static const std::set<std::string> supportedFormats = {"wav","mp3","flac","aac","m4a","opus","webm","mkv","ogg"};
+  if (supportedFormats.find(fmt) == supportedFormats.end()) {
+    reject(@"AUDIO_SAVE_UNSUPPORTED_FORMAT",
+           [NSString stringWithFormat:@"Unsupported format: %s", fmt.c_str()], nil);
+    return false;
+  }
+  if (rate < 0) {
+    reject(@"AUDIO_SAVE_INVALID_SAMPLE_RATE", @"outputSampleRateHz must be >= 0", nil);
+    return false;
+  }
+  if (fmt == "mp3" && rate != 0 && rate != 32000 && rate != 44100 && rate != 48000) {
+    reject(@"AUDIO_SAVE_INVALID_SAMPLE_RATE",
+           [NSString stringWithFormat:@"MP3 sample rate must be 32000, 44100, 48000, or 0. Got: %d", rate], nil);
+    return false;
+  }
+  if ((fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") &&
+      rate != 0 && rate != 8000 && rate != 12000 && rate != 16000 && rate != 24000 && rate != 48000) {
+    reject(@"AUDIO_SAVE_INVALID_SAMPLE_RATE",
+           [NSString stringWithFormat:@"Opus sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Got: %d", rate], nil);
+    return false;
+  }
+  return true;
+}
+
+static void pa_cleanupOutputFile(NSString *path) {
+  if (path) {
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+  }
+}
+
+static std::string pa_encodeViaPcm(
+    const float *samples, int numSamples, int sampleRate, int channelCount,
+    const char *outputPath, const char *format, int outputSampleRateHz,
+    int bitrate, int quality, std::atomic<bool> &cancelFlag) {
+  sherpa::AudioEncodeConfig config{};
+  config.outputPath = outputPath;
+  config.formatHint = format;
+  config.inputSampleRate = sampleRate;
+  config.inputChannelCount = channelCount;
+  config.outputSampleRateHz = outputSampleRateHz;
+  config.bitrate = bitrate;
+  config.quality = quality;
+
+  std::string errorOut;
+  int totalFrames = numSamples / channelCount;
+  auto session = sherpa::AudioEncodeSession::create(config, totalFrames, nullptr, cancelFlag, errorOut);
+  if (!session) return errorOut;
+
+  const int chunkFrames = 4096;
+  int offset = 0;
+  while (offset < totalFrames) {
+    int chunk = std::min(chunkFrames, totalFrames - offset);
+    std::string err = session->feedChunk(samples + offset * channelCount, chunk);
+    if (!err.empty()) return err;
+    offset += chunk;
+  }
+  return session->finish();
+}
+
+static std::string pa_encodeViaDecodeFile(
+    const char *inputPath, const char *outputPath, const char *format,
+    int outputSampleRateHz, int bitrate, int quality,
+    std::atomic<bool> &cancelFlag) {
+  // Batch decode the file first
+  sherpa::AudioDecodeConfig decConfig{};
+  decConfig.targetSampleRate = 0; // keep source rate
+  decConfig.forceMono = true;
+  decConfig.chunkSize = 8192;
+
+  std::vector<float> allSamples;
+  auto onChunk = [&allSamples](const float *samples, int frameCount) {
+    allSamples.insert(allSamples.end(), samples, samples + frameCount);
+  };
+
+  sherpa::AudioDecodeResult decResult;
+  try {
+    decResult = sherpa::decodeFile(inputPath, decConfig, onChunk, nullptr, cancelFlag);
+  } catch (const std::exception &e) {
+    return std::string("AUDIO_SAVE_SOURCE_NOT_FOUND: ") + e.what();
+  }
+
+  if (allSamples.empty()) {
+    return "AUDIO_SAVE_SOURCE_NOT_FOUND: Decoded file is empty";
+  }
+
+  int srcRate = decResult.sourceSampleRate > 0 ? decResult.sourceSampleRate : 16000;
+  return pa_encodeViaPcm(allSamples.data(), (int)allSamples.size(), srcRate, 1,
+                         outputPath, format, outputSampleRateHz, bitrate, quality, cancelFlag);
+}
+
+// ---- Save audio buffer to file ----
+- (void)saveAudioBufferToFile:(NSString *)bufferId
+                  destination:(NSDictionary *)destination
+                       format:(NSString *)format
+           outputSampleRateHz:(double)outputSampleRateHz
+                      bitrate:(double)bitrate
+                      quality:(double)quality
+                  operationId:(NSString *)operationId
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
 {
   int rate = (int)outputSampleRateHz;
   std::string fmt = [[format lowercaseString] UTF8String];
 
-  // Format validation
-  static const std::set<std::string> supportedFormats = {"wav","mp3","flac","aac","m4a","opus","webm","mkv","ogg"};
-  if (supportedFormats.find(fmt) == supportedFormats.end()) {
-    reject(@"CONVERSION_UNSUPPORTED_FORMAT",
-           [NSString stringWithFormat:@"Unsupported format: %@", format], nil);
-    return;
-  }
-  // Sample-rate validation
-  if (rate < 0) {
-    reject(@"CONVERSION_INVALID_SAMPLE_RATE", @"outputSampleRateHz must be >= 0", nil);
-    return;
-  }
-  if (fmt == "mp3" && rate != 0 && rate != 32000 && rate != 44100 && rate != 48000) {
-    reject(@"CONVERSION_INVALID_SAMPLE_RATE",
-           [NSString stringWithFormat:@"MP3 sample rate must be 32000, 44100, 48000, or 0. Got: %d", rate], nil);
-    return;
-  }
-  if ((fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") &&
-      rate != 0 && rate != 8000 && rate != 12000 && rate != 16000 && rate != 24000 && rate != 48000) {
-    reject(@"CONVERSION_INVALID_SAMPLE_RATE",
-           [NSString stringWithFormat:@"Opus sample rate must be 8000, 12000, 16000, 24000, 48000, or 0. Got: %d", rate], nil);
-    return;
+  if (!pa_validateSaveParams(fmt, rate, reject)) return;
+
+  // Register cancel flag
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+    g_pa_saveCancelFlags[opId] = cancelFlag;
   }
 
   // Resolve destination
@@ -875,6 +961,10 @@ static void paMicAQInputCallback(void *inUserData,
   FileIOWriteHandle *wh = [FileIOResolver resolveDestination:destination overwrite:YES
                                      createParentDirectories:NO error:&errCode message:&errMsg];
   if (!wh) {
+    {
+      std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+      g_pa_saveCancelFlags.erase(opId);
+    }
     reject(errCode, errMsg, nil);
     return;
   }
@@ -884,6 +974,8 @@ static void paMicAQInputCallback(void *inUserData,
   NSString *resultPath = wh.resultPath;
 
   std::string bid = [bufferId UTF8String];
+  std::string outputPathStr = [outputPath UTF8String];
+  std::string err;
 
   std::lock_guard<std::mutex> lock(g_pa_mutex);
 
@@ -891,97 +983,177 @@ static void paMicAQInputCallback(void *inUserData,
   if (bid.rfind("off_", 0) == 0) {
     auto it = g_pa_offline.find(bid);
     if (it == g_pa_offline.end()) {
-      [wh cleanup];
-      reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Offline buffer not found", nil); return;
+      [wh cleanup]; pa_cleanupOutputFile(outputPath);
+      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+      reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Offline buffer not found", nil); return;
     }
     auto &entry = it->second;
     if (entry->numSamples() == 0) {
-      [wh cleanup];
-      reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
+      [wh cleanup]; pa_cleanupOutputFile(outputPath);
+      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+      reject(@"AUDIO_SAVE_BUFFER_EMPTY", @"Buffer is empty", nil); return;
     }
 
-    NSError *error = nil;
     if (entry->isFileBacked) {
-      NSString *inPath = [NSString stringWithUTF8String:entry->filePath.c_str()];
-      if (![SherpaOnnxAudioConvert convertAudioToFormat:inPath
-                                             outputPath:outputPath
-                                                 format:[NSString stringWithUTF8String:fmt.c_str()]
-                                     outputSampleRateHz:rate
-                                                  error:&error]) {
-        [wh cleanup];
-        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
-        return;
-      }
+      err = pa_encodeViaDecodeFile(entry->filePath.c_str(), outputPathStr.c_str(), fmt.c_str(),
+                                    rate, (int)bitrate, (int)quality, *cancelFlag);
     } else {
-      if (![SherpaOnnxAudioConvert convertPcmToFormat:entry->samples.data()
-                                           numSamples:(int)entry->samples.size()
-                                           sampleRate:entry->sampleRate
-                                         channelCount:entry->channelCount
-                                           outputPath:outputPath
-                                               format:[NSString stringWithUTF8String:fmt.c_str()]
-                                   outputSampleRateHz:rate
-                                                error:&error]) {
-        [wh cleanup];
-        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
-        return;
-      }
+      err = pa_encodeViaPcm(entry->samples.data(), (int)entry->samples.size(),
+                             entry->sampleRate, entry->channelCount,
+                             outputPathStr.c_str(), fmt.c_str(), rate,
+                             (int)bitrate, (int)quality, *cancelFlag);
     }
-    [wh cleanup];
-    resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
-    return;
   }
-
   // Live buffer?
-  if (bid.rfind("live_", 0) == 0) {
+  else if (bid.rfind("live_", 0) == 0) {
     auto it = g_pa_live.find(bid);
     if (it == g_pa_live.end()) {
-      [wh cleanup];
-      reject(@"CONVERSION_BUFFER_NOT_FOUND", @"Live buffer not found", nil); return;
+      [wh cleanup]; pa_cleanupOutputFile(outputPath);
+      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+      reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Live buffer not found", nil); return;
     }
     auto &entry = it->second;
     if (entry->state != PaLiveEntry::FINISHED) {
-      [wh cleanup];
-      reject(@"CONVERSION_BUFFER_NOT_FINALIZED", @"Live buffer must be finalized before conversion", nil); return;
+      [wh cleanup]; pa_cleanupOutputFile(outputPath);
+      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+      reject(@"AUDIO_SAVE_BUFFER_NOT_FINALIZED", @"Live buffer must be finalized before saving", nil); return;
     }
     if (entry->totalSamplesWritten == 0) {
-      [wh cleanup];
-      reject(@"CONVERSION_BUFFER_EMPTY", @"Buffer is empty", nil); return;
+      [wh cleanup]; pa_cleanupOutputFile(outputPath);
+      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+      reject(@"AUDIO_SAVE_BUFFER_EMPTY", @"Buffer is empty", nil); return;
     }
 
-    NSError *error = nil;
     if (entry->hasActiveSpool) {
-      NSString *spoolPath = [NSString stringWithUTF8String:entry->spoolPath.c_str()];
-      if (![SherpaOnnxAudioConvert convertAudioToFormat:spoolPath
-                                             outputPath:outputPath
-                                                 format:[NSString stringWithUTF8String:fmt.c_str()]
-                                     outputSampleRateHz:rate
-                                                  error:&error]) {
-        [wh cleanup];
-        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
-        return;
-      }
+      err = pa_encodeViaDecodeFile(entry->spoolPath.c_str(), outputPathStr.c_str(), fmt.c_str(),
+                                    rate, (int)bitrate, (int)quality, *cancelFlag);
     } else {
       auto snapshot = entry->snapshotRing();
-      if (![SherpaOnnxAudioConvert convertPcmToFormat:snapshot.data()
-                                           numSamples:(int)snapshot.size()
-                                           sampleRate:entry->sampleRate
-                                         channelCount:1
-                                           outputPath:outputPath
-                                               format:[NSString stringWithUTF8String:fmt.c_str()]
-                                   outputSampleRateHz:rate
-                                                error:&error]) {
-        [wh cleanup];
-        reject(@"CONVERSION_CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
-        return;
-      }
+      err = pa_encodeViaPcm(snapshot.data(), (int)snapshot.size(), entry->sampleRate, 1,
+                             outputPathStr.c_str(), fmt.c_str(), rate,
+                             (int)bitrate, (int)quality, *cancelFlag);
     }
-    [wh cleanup];
-    resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+  }
+  else {
+    [wh cleanup]; pa_cleanupOutputFile(outputPath);
+    { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
+    reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Invalid buffer ID prefix: expected off_ or live_", nil);
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
+    g_pa_saveCancelFlags.erase(opId);
+  }
+
+  if (!err.empty()) {
+    [wh cleanup]; pa_cleanupOutputFile(outputPath);
+    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
+    NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+    if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+    reject(code, nsErr, nil);
     return;
   }
 
   [wh cleanup];
-  reject(@"CONVERSION_INVALID_ARGUMENT", @"Invalid buffer ID prefix: expected off_ or live_", nil);
+  resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+}
+
+// ---- Save file as audio file (file-to-file, no buffer registry) ----
+- (void)saveFileAsAudioFile:(NSDictionary *)source
+                destination:(NSDictionary *)destination
+                     format:(NSString *)format
+         outputSampleRateHz:(double)outputSampleRateHz
+                    bitrate:(double)bitrate
+                    quality:(double)quality
+                operationId:(NSString *)operationId
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
+{
+  int rate = (int)outputSampleRateHz;
+  std::string fmt = [[format lowercaseString] UTF8String];
+
+  if (!pa_validateSaveParams(fmt, rate, reject)) return;
+
+  // Register cancel flag
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+    g_pa_saveCancelFlags[opId] = cancelFlag;
+  }
+
+  // Resolve source
+  NSString *srcErrCode = nil, *srcErrMsg = nil;
+  FileIOReadHandle *rh = [FileIOResolver resolveSource:source error:&srcErrCode message:&srcErrMsg];
+  if (!rh) {
+    {
+      std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+      g_pa_saveCancelFlags.erase(opId);
+    }
+    reject(srcErrCode, srcErrMsg, nil);
+    return;
+  }
+  NSString *inputPath = rh.filePath;
+
+  // Resolve destination
+  NSString *dstErrCode = nil, *dstErrMsg = nil;
+  FileIOWriteHandle *wh = [FileIOResolver resolveDestination:destination overwrite:YES
+                                     createParentDirectories:NO error:&dstErrCode message:&dstErrMsg];
+  if (!wh) {
+    [rh cleanup];
+    {
+      std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+      g_pa_saveCancelFlags.erase(opId);
+    }
+    reject(dstErrCode, dstErrMsg, nil);
+    return;
+  }
+
+  NSString *outputPath = wh.filePath;
+  NSString *outputKind = @"fs";
+  NSString *resultPath = wh.resultPath;
+
+  std::string inputPathStr = [inputPath UTF8String];
+  std::string outputPathStr = [outputPath UTF8String];
+
+  std::string err = pa_encodeViaDecodeFile(inputPathStr.c_str(), outputPathStr.c_str(), fmt.c_str(),
+                                            rate, (int)bitrate, (int)quality, *cancelFlag);
+
+  {
+    std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
+    g_pa_saveCancelFlags.erase(opId);
+  }
+
+  [rh cleanup];
+
+  if (!err.empty()) {
+    [wh cleanup]; pa_cleanupOutputFile(outputPath);
+    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
+    NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+    if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+    reject(code, nsErr, nil);
+    return;
+  }
+
+  [wh cleanup];
+  resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+}
+
+// ---- Cancel audio save ----
+- (void)cancelAudioSave:(NSString *)operationId
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject
+{
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_saveCancelMutex);
+    auto it = g_pa_saveCancelFlags.find(opId);
+    if (it != g_pa_saveCancelFlags.end()) {
+      it->second->store(true);
+    }
+  }
+  resolve(nil);
 }
 
 // ---- Info ----

@@ -36,7 +36,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp",
     # Shared audio decode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioDecodeSession.cpp",
-    "android/src/main/cpp/jni/audio/AudioDecodeSession.h"
+    "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    # Shared audio encode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.cpp",
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -47,7 +50,8 @@ Pod::Spec.new do |s|
     # Android JNI only (jni.h / JNIEnv). iOS compiles ObjC++ wrappers under ios/ instead.
     "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
     "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp",
-    "android/src/main/cpp/jni/audio/audio_decode_jni.cpp"
+    "android/src/main/cpp/jni/audio/audio_decode_jni.cpp",
+    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)

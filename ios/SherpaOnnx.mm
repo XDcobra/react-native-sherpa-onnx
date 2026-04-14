@@ -12,7 +12,6 @@
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
-#import "SherpaOnnxAudioConvert.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif

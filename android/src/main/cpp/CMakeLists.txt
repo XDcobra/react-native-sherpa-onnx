@@ -105,12 +105,11 @@ set(SOURCES
     jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
-    jni/audio/sherpa-onnx-audio-convert-jni.cpp
-    jni/audio/audio_convert_file.cpp
-    jni/audio/audio_pcm_to_format.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/audio_decode_jni.cpp
+    jni/audio/AudioEncodeSession.cpp
+    jni/audio/audio_encode_jni.cpp
     crypto/sha256.cpp
 )
 
