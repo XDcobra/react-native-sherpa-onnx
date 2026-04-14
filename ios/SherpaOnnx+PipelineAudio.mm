@@ -1158,6 +1158,17 @@ static void paMicAQInputCallback(void *inUserData,
     return;
   }
 
+  // Ensure spool is active — create a temporary one if the buffer was created without persistencePath
+  if (!liveEntry->hasActiveSpool) {
+    NSString *tmpSpoolPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+      [NSString stringWithFormat:@"ingest_spool_%@.wav", [[NSUUID UUID] UUIDString]]];
+    liveEntry->enableSpool([tmpSpoolPath UTF8String], false, true);
+    if (!liveEntry->hasActiveSpool) {
+      reject(@"AUDIO_SPOOL_ERROR", @"Failed to create temporary spool for file ingest", nil);
+      return;
+    }
+  }
+
   // Register cancel flag + ingest status
   auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
   std::string ingestId = pa_generateId("ingest");

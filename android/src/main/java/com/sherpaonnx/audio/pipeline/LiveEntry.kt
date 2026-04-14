@@ -89,8 +89,25 @@ class LiveEntry(
   private val rwLock = ReentrantReadWriteLock()
 
   // ---------- Spool (optional persistence) ----------
-  private val spoolWriter: SpoolWriter? = persistence?.let { SpoolWriter(it, sampleRate, channelCount) }
+  @Volatile
+  private var spoolWriter: SpoolWriter? = persistence?.let { SpoolWriter(it, sampleRate, channelCount) }
   val hasActiveSpool: Boolean get() = spoolWriter != null
+  @Volatile
+  private var isTemporarySpool: Boolean = false
+
+  /**
+   * Activate a spool on a live buffer that was created without one.
+   * Must be called while still in RECORDING state and before the first ingest chunk.
+   *
+   * @param config Persistence config with file path and format.
+   * @param temporary If true, the spool file is deleted on release().
+   */
+  fun enableSpool(config: PersistenceConfig, temporary: Boolean = false) {
+    check(state == State.RECORDING) { "Cannot enable spool on finalized buffer" }
+    check(spoolWriter == null) { "Spool already active" }
+    spoolWriter = SpoolWriter(config, sampleRate, channelCount)
+    isTemporarySpool = temporary
+  }
 
   // ---------- Consumer cursors ----------
   private var nextCursorId = 0
@@ -456,7 +473,11 @@ class LiveEntry(
       finalize_()
     }
     flushPendingFramesAppendedEvent()
+    val path = spoolWriter?.filePath
     spoolWriter?.release()
+    if (isTemporarySpool && path != null) {
+      try { File(path).delete() } catch (_: Exception) {}
+    }
     synchronized(cursors) { cursors.clear() }
   }
 

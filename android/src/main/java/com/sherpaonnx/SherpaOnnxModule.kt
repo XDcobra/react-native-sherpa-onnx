@@ -801,6 +801,23 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       return
     }
 
+    // Ensure spool is active — create a temporary one if the buffer was created without persistencePath
+    if (!liveEntry.hasActiveSpool) {
+      try {
+        val tmpSpoolPath = File(
+          reactApplicationContext.cacheDir,
+          "ingest_spool_${java.util.UUID.randomUUID()}.wav"
+        ).absolutePath
+        liveEntry.enableSpool(
+          com.sherpaonnx.audio.pipeline.PersistenceConfig(tmpSpoolPath, com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE),
+          temporary = true
+        )
+      } catch (e: Exception) {
+        promise.reject("AUDIO_SPOOL_ERROR", "Failed to create temporary spool for file ingest: ${e.message}", e)
+        return
+      }
+    }
+
     // Resolve file source synchronously, then run decode on background thread
     val readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
     val tmpFile: File?

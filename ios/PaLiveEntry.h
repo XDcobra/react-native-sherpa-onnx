@@ -97,6 +97,7 @@ struct PaLiveEntry {
   bool spoolIsFloat = false;
   std::ofstream spoolFile;
   int64_t spoolSamplesWritten = 0;
+  bool isTemporarySpool = false;
 
   // Cursors
   struct CursorHandle {
@@ -170,7 +171,6 @@ struct PaLiveEntry {
     ring.resize(windowCapacity, 0.0f);
 
     if (!spoolPathArg.empty()) {
-      hasActiveSpool = true;
       spoolPath = spoolPathArg;
       spoolIsFloat = spoolFloat;
       spoolFile.open(spoolPath, std::ios::binary | std::ios::trunc);
@@ -178,8 +178,38 @@ struct PaLiveEntry {
         int bytesPerSample = spoolFloat ? 4 : 2;
         int audioFormat = spoolFloat ? 3 : 1;
         pa_writeWavHeaderToStream(spoolFile, sr, bytesPerSample * 8, audioFormat, 0);
+        hasActiveSpool = true;
+      } else {
+        spoolPath.clear();
       }
     }
+  }
+
+  /**
+   * Activate a spool on a live buffer that was created without one.
+   * Must be called while still in RECORDING state and when no spool is active.
+   *
+   * @param path     Output WAV file path.
+   * @param isFloat  true = WAV FLOAT, false = WAV PCM S16LE.
+   * @param temporary  If true, the spool file is deleted on release().
+   */
+  void enableSpool(const std::string &path, bool isFloat, bool temporary = false) {
+    if (state != RECORDING) return;
+    if (hasActiveSpool) return;
+
+    spoolPath = path;
+    spoolIsFloat = isFloat;
+    isTemporarySpool = temporary;
+    spoolFile.open(spoolPath, std::ios::binary | std::ios::trunc);
+    if (!spoolFile) {
+      spoolPath.clear();
+      isTemporarySpool = false;
+      return;
+    }
+    int bytesPerSample = isFloat ? 4 : 2;
+    int audioFormat = isFloat ? 3 : 1;
+    pa_writeWavHeaderToStream(spoolFile, sampleRate, bytesPerSample * 8, audioFormat, 0);
+    hasActiveSpool = true;
   }
 
   int64_t numSamples() const {
@@ -422,6 +452,9 @@ struct PaLiveEntry {
     if (state == RECORDING) finalize_();
     flushPendingFramesAppended();
     if (spoolFile.is_open()) spoolFile.close();
+    if (isTemporarySpool && !spoolPath.empty()) {
+      std::remove(spoolPath.c_str());
+    }
     cursors.clear();
   }
 };
