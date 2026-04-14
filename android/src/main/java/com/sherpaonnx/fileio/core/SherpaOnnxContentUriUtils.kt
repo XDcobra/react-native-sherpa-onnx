@@ -1,4 +1,4 @@
-package com.sherpaonnx
+package com.sherpaonnx.fileio.core
 
 import android.content.ContentResolver
 import android.net.Uri
@@ -6,7 +6,7 @@ import android.provider.DocumentsContract
 import java.io.InputStream
 import java.io.OutputStream
 
-/** Shared SAF/document helpers for TTS save-to-SAF and [SherpaOnnxFilesHelper]. */
+/** Shared SAF/document helpers for FileIO and TTS save-to-SAF. */
 internal object SherpaOnnxContentUriUtils {
   fun createDocumentInDirectory(
     resolver: ContentResolver,

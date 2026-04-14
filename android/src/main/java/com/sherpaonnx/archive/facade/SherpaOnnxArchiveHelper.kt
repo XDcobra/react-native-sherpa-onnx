@@ -1,8 +1,9 @@
-package com.sherpaonnx
+package com.sherpaonnx.archive.facade
 
 import android.content.Context
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -12,7 +13,7 @@ import java.util.concurrent.Executors
  */
 class SherpaOnnxArchiveHelper {
   companion object {
-    /** Thread pool for extractions – allows up to 2 concurrent extractions. */
+    /** Thread pool for extractions - allows up to 2 concurrent extractions. */
     private val extractExecutor: ExecutorService = Executors.newFixedThreadPool(2)
 
     init {
@@ -25,7 +26,7 @@ class SherpaOnnxArchiveHelper {
   }
 
   /**
-   * Extract an archive (tar.bz2/tar.zst — auto-detected) to target directory.
+   * Extract an archive (tar.bz2/tar.zst - auto-detected) to target directory.
    * Runs on background thread. Promise resolves with result map containing:
    * success, paused, lastEntryIndex, lastEntryPath, bytesExtracted, path, sha256, reason.
    */
@@ -116,7 +117,7 @@ class SherpaOnnxArchiveHelper {
     nativeComputeFileSha256(filePath, promise)
   }
 
-  // ── Native JNI methods ──
+  // Native JNI methods
 
   private external fun nativeExtract(
     sourcePath: String,

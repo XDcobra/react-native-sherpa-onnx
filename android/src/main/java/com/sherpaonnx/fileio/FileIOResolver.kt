@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
+import com.sherpaonnx.fileio.core.SherpaOnnxContentUriUtils
 import java.io.Closeable
 import java.io.File
 import java.io.FileInputStream
@@ -245,7 +246,7 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         val resolver = context.contentResolver
 
         val docUri = try {
-          com.sherpaonnx.SherpaOnnxContentUriUtils.createDocumentInDirectory(resolver, treeUri, filename, mimeType)
+          SherpaOnnxContentUriUtils.createDocumentInDirectory(resolver, treeUri, filename, mimeType)
         } catch (e: SecurityException) {
           throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for tree URI: $treeUriStr", e)
         } catch (e: Exception) {

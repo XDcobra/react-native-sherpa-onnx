@@ -1,4 +1,4 @@
-package com.sherpaonnx
+package com.sherpaonnx.archive.core
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -26,7 +26,7 @@ class SherpaOnnxExtractionNotificationHelper private constructor(
     private val nextNotificationId = java.util.concurrent.atomic.AtomicInteger(9_200_000)
 
     private const val DEFAULT_TITLE = "Model extraction"
-    private const val DEFAULT_TEXT = "Extracting archive…"
+    private const val DEFAULT_TEXT = "Extracting archive..."
 
     fun maybeCreate(
       context: Context,

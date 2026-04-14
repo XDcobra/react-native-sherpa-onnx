@@ -6,7 +6,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.k2fsa.sherpa.onnx.GeneratedAudio
-import com.sherpaonnx.SherpaOnnxContentUriUtils
+import com.sherpaonnx.fileio.core.SherpaOnnxContentUriUtils
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

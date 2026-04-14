@@ -1,10 +1,10 @@
 # Consumer ProGuard rules for react-native-sherpa-onnx.
 # These are merged into the app's ProGuard config when the library is used in release builds.
 
-# JNI: native code looks up progress callback by class and method "invoke(JJD)V".
+# JNI: native code looks up progress callback by class and method "invoke(JJDI)V".
 # R8/ProGuard must not rename or remove the callback class or method.
--keep class com.sherpaonnx.SherpaOnnxArchiveHelper { *; }
--keep class com.sherpaonnx.SherpaOnnxArchiveHelper$* { *; }
+-keep class com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper { *; }
+-keep class com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper$* { *; }
 
 # ORT Java bridge: loaded via JNI from libonnxruntime4j_jni.so.
 -keep class ai.onnxruntime.** { *; }
