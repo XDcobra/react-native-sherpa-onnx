@@ -28,9 +28,9 @@ API und Verhalten ändern sich hart — das ist **beabsichtigt**.
 | Bereich | Wegmuss (Legacy) | Bleibt / Ziel |
 | --- | --- | --- |
 | **Android** | [`AudioBufferRegistry`](../../../android/src/main/java/com/sherpaonnx/stt/AudioBufferRegistry.kt), alle `buf_…`-Pfade | [`PipelineAudioRegistry`](../../../android/src/main/java/com/sherpaonnx/audio/pipeline/PipelineAudioRegistry.kt) |
-| **STT** | [`SherpaOnnxSttHelper`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt): nur `AudioBufferRegistry.get` | Nur `OfflineEntry` / `off_…` |
+| **STT** | [`SherpaOnnxSttHelper`](../../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt): nur `AudioBufferRegistry.get` | Nur `OfflineEntry` / `off_…` |
 | **Alignment** | [`SherpaOnnxModule`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt): `AudioBufferRegistry` | Dieselbe PCM-Beschaffung wie STT aus Pipeline |
-| **iOS** | `g_audio_buffers` und zugehörige Pfade in [`SherpaOnnx+STT.mm`](../../../ios/SherpaOnnx+STT.mm) | Pipeline wie in [`SherpaOnnx+PipelineAudio.mm`](../../../ios/SherpaOnnx+PipelineAudio.mm) |
+| **iOS** | `g_audio_buffers` und zugehörige Pfade in [`SherpaOnnx+STT.mm`](../../../ios/stt/bridge/SherpaOnnx+STT.mm) | Pipeline wie in [`SherpaOnnx+PipelineAudio.mm`](../../../ios/SherpaOnnx+PipelineAudio.mm) |
 | **TS / TurboModule** | `createAudioBufferFromFile`, `getAudioBufferInfo`, `releaseAudioBuffer`, alte Spec-Teile | Nur Pipeline-Methoden in [`NativeSherpaOnnx.ts`](../../../src/NativeSherpaOnnx.ts); JS-Fassaden unter [`audiobuffer`](../../../src/audiobuffer/index.ts); Legacy aus [`stt/index.ts`](../../../src/stt/index.ts) entfernen |
 
 ---
@@ -90,7 +90,7 @@ Audio von einem **`live_…`**-Buffer wird vor Offline-STT **immer** über **`cr
 
 ### 2. STT und Alignment umstellen
 
-- [`SherpaOnnxSttHelper`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt) `transcribeFromAudioBuffer`: nur noch Pipeline; **ein** Offline-`acceptWaveform`.
+- [`SherpaOnnxSttHelper`](../../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt) `transcribeFromAudioBuffer`: nur noch Pipeline; **ein** Offline-`acceptWaveform`.
 - [`SherpaOnnxModule`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt) / Alignment: gleiche PCM-Quelle.
 
 ### 3. Legacy und alte Oberfläche vernichten

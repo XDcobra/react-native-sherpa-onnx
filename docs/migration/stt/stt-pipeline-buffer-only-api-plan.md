@@ -34,7 +34,7 @@ Umstellung **feature für feature** auf die **AudioBuffer-Pipeline**. Dazwischen
 | Bereich | Aktuell |
 | --- | --- |
 | **STT-Engine (TS)** [`SttEngine`](../../../src/stt/types.ts) | `transcribeFile`, `transcribeSamples`, `transcribeFromAudioBuffer` |
-| **Native** | [`transcribeFile` / `transcribeSamples` / `transcribeFromAudioBuffer`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt) (Android), analog iOS [`SherpaOnnx+STT.mm`](../../../ios/SherpaOnnx+STT.mm) |
+| **Native** | [`transcribeFile` / `transcribeSamples` / `transcribeFromAudioBuffer`](../../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt) (Android), analog iOS [`SherpaOnnx+STT.mm`](../../../ios/stt/bridge/SherpaOnnx+STT.mm) |
 | **STT-Modul „Alignment Stage“** | [`alignSttResult`](../../../src/stt/index.ts), [`alignTextToBuffer`](../../../src/stt/index.ts), dazu Getter/Speichern/Release um `alignmentId` aus dem STT-Kontext |
 | **Alignment allgemein** | Eigenes Paket [`react-native-sherpa-onnx/alignment`](../../../src/alignment/index.ts) (`alignTextToAudio`, …) — **getrennte** Produkt-API |
 
@@ -94,7 +94,7 @@ Damit: **kein** `instanceId` + `resultId` + `bufferId` als Spezialweg in STT; st
 
 ### Phase 3 — Native Android / iOS
 
-- **STT:** eine Transkriptionsfunktion aus `PipelineAudioRegistry` / `OfflineEntry`; Entfernen der direkten Datei- und Sample-Pfade in [`SherpaOnnxSttHelper.kt`](../../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt) und iOS-Äquivalent.
+- **STT:** eine Transkriptionsfunktion aus `PipelineAudioRegistry` / `OfflineEntry`; Entfernen der direkten Datei- und Sample-Pfade in [`SherpaOnnxSttHelper.kt`](../../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt) und iOS-Äquivalent.
 - **Alignment (STT-Pfad):** Aufräumen parallel zu Phase 2/4.
 
 ### Phase 4 — Alignment auf Pipeline (eigenes Feature, darf zwischendurch brechen)

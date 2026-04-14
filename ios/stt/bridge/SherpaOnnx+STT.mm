@@ -5,12 +5,12 @@
  * Uses sherpa-onnx-stt-wrapper for native recognition and sherpa-onnx-model-detect for model detection.
  */
 
-#import "SherpaOnnx.h"
-#import "SherpaOnnx+PipelineAudioGlobals.h"
-#import "SherpaOnnx+TextBufferGlobals.h"
+#import "../../SherpaOnnx.h"
+#import "../../SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 
-#include "sherpa-onnx-stt-wrapper.h"
+#include "../native/sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include <atomic>

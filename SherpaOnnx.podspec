@@ -125,7 +125,6 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
     "\"#{pod_root}/ios/enhancement\"",
-    "\"#{pod_root}/ios/online_stt\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

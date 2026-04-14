@@ -7,15 +7,15 @@
  * - unloadOnlineStt
  */
 
-#import "SherpaOnnx.h"
+#import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "PaLiveEntry.h"
-#include "SherpaOnnx+PipelineAudioGlobals.h"
-#include "SherpaOnnx+StreamingPipeline.h"
-#include "SherpaOnnx+TextBufferGlobals.h"
-#include "online_stt/SttPipelineWorker.h"
-#include "sherpa-onnx-online-stt-wrapper.h"
+#include "../../PaLiveEntry.h"
+#include "../../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../SherpaOnnx+StreamingPipeline.h"
+#include "../../SherpaOnnx+TextBufferGlobals.h"
+#include "../pipeline/SttPipelineWorker.h"
+#include "../native/sherpa-onnx-online-stt-wrapper.h"
 
 #include <chrono>
 #include <memory>

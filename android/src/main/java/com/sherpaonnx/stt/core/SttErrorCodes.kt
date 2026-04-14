@@ -1,4 +1,4 @@
-package com.sherpaonnx.stt
+package com.sherpaonnx.stt.core
 
 /**
  * Unified STT error codes. Must match iOS and TypeScript.

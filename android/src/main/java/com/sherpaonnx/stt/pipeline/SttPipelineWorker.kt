@@ -1,7 +1,11 @@
-package com.sherpaonnx.audio.pipeline
+package com.sherpaonnx.stt.pipeline
 
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineStream
+import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
+import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
+import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors

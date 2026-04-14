@@ -26,10 +26,10 @@ Konsequenz:
 - Input ist bei `transcribeSamples` weiterhin O(n) ueber die Bridge (`number[]`).
 
 ## 1.2 Android heute
-- [android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt):
+- [android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt](../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt):
   - `transcribeFile`: liest WAV, decodiert, liefert volles `OfflineRecognizerResult` als `WritableMap`.
   - `transcribeSamples`: `ReadableArray` -> `FloatArray` -> volles Result zurueck.
-- [android/src/main/java/com/sherpaonnx/SherpaOnnxOnlineSttHelper.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxOnlineSttHelper.kt): Streaming-Result weiterhin als volle Arrays.
+- [android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxOnlineSttHelper.kt](../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxOnlineSttHelper.kt): Streaming-Result weiterhin als volle Arrays.
 - [android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt): expose unveraendert als full payload.
 
 Konsequenz:
@@ -37,9 +37,9 @@ Konsequenz:
 - Kein shared audio-buffer registry entrypoint fuer STT.
 
 ## 1.3 iOS heute
-- [ios/SherpaOnnx+STT.mm](../../ios/SherpaOnnx+STT.mm): `transcribeFile`/`transcribeSamples` liefern volles Result sofort.
-- [ios/SherpaOnnx+OnlineSTT.mm](../../ios/SherpaOnnx+OnlineSTT.mm): Streaming ebenfalls text/tokens/timestamps direkt.
-- [ios/stt/sherpa-onnx-stt-wrapper.mm](../../ios/stt/sherpa-onnx-stt-wrapper.mm): Wrapper ist auf direkte Materialisierung ausgelegt.
+- [ios/stt/bridge/SherpaOnnx+STT.mm](../../ios/stt/bridge/SherpaOnnx+STT.mm): `transcribeFile`/`transcribeSamples` liefern volles Result sofort.
+- [ios/stt/bridge/SherpaOnnx+OnlineSTT.mm](../../ios/stt/bridge/SherpaOnnx+OnlineSTT.mm): Streaming ebenfalls text/tokens/timestamps direkt.
+- [ios/stt/native/sherpa-onnx-stt-wrapper.mm](../../ios/stt/native/sherpa-onnx-stt-wrapper.mm): Wrapper ist auf direkte Materialisierung ausgelegt.
 
 Konsequenz:
 - Gleicher Skalierungsengpass wie auf Android.
@@ -367,9 +367,9 @@ Aufgaben:
 
 ## 5.2 Android (Kotlin-first)
 Dateien:
-- [android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxSttHelper.kt)
+- [android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt](../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxSttHelper.kt)
 - [android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt)
-- [android/src/main/java/com/sherpaonnx/SherpaOnnxOnlineSttHelper.kt](../../android/src/main/java/com/sherpaonnx/SherpaOnnxOnlineSttHelper.kt)
+- [android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxOnlineSttHelper.kt](../../android/src/main/java/com/sherpaonnx/stt/facade/SherpaOnnxOnlineSttHelper.kt)
 
 Neue interne Komponenten:
 - `SttRetainedResult` (data class)
@@ -387,8 +387,8 @@ Aufgaben:
 
 ## 5.3 iOS
 Dateien:
-- [ios/SherpaOnnx+STT.mm](../../ios/SherpaOnnx+STT.mm)
-- [ios/SherpaOnnx+OnlineSTT.mm](../../ios/SherpaOnnx+OnlineSTT.mm)
+- [ios/stt/bridge/SherpaOnnx+STT.mm](../../ios/stt/bridge/SherpaOnnx+STT.mm)
+- [ios/stt/bridge/SherpaOnnx+OnlineSTT.mm](../../ios/stt/bridge/SherpaOnnx+OnlineSTT.mm)
 - [ios/stt/sherpa-onnx-stt-wrapper.mm](../../ios/stt/sherpa-onnx-stt-wrapper.mm)
 
 Aufgaben:
