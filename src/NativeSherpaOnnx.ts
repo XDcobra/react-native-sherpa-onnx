@@ -26,6 +26,12 @@ export interface Spec extends TurboModule {
    */
   testSherpaInit(): Promise<string>;
 
+  /**
+   * Install JSI bindings for high-performance sample transport.
+   * Normally auto-installed during module init. Exposed as fallback.
+   */
+  installJSI(): boolean;
+
   // ==================== STT Methods ====================
 
   /**
@@ -202,23 +208,6 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Create an offline audio buffer from Float32 PCM samples.
-   */
-  createOfflineAudioBufferFromSamples(
-    samples: number[],
-    sampleRate: number,
-    channelCount?: number
-  ): Promise<{
-    bufferId: string;
-    kind: string;
-    state: string;
-    sampleRate: number;
-    channelCount: number;
-    numSamples: number;
-    durationMs: number;
-  }>;
-
-  /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
    * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).
@@ -262,7 +251,6 @@ export interface Spec extends TurboModule {
    * @param options.persistencePath - Optional file path for WAV spool.
    * @param options.persistenceFormat - "wav_pcm_s16le" (default) or "wav_pcm_float".
    * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
-   * @param options.emitAppendedSamples - If true, include Float32 samples in append events (default: true).
    * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
    */
   createLiveAudioBuffer(options: {
@@ -272,7 +260,6 @@ export interface Spec extends TurboModule {
     persistencePath?: string;
     persistenceFormat?: string;
     emitAppendedEvents?: boolean;
-    emitAppendedSamples?: boolean;
     appendEventMinIntervalMs?: number;
   }): Promise<{
     bufferId: string;
@@ -286,15 +273,6 @@ export interface Spec extends TurboModule {
     totalSamplesDropped: number;
     hasActiveSpool: boolean;
   }>;
-
-  /**
-   * Append Float32 samples to a live audio buffer (recording state only).
-   */
-  appendSamplesToLiveAudioBuffer(
-    liveBufferId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<void>;
 
   /**
    * Append all samples from an offline buffer to a live buffer.
@@ -330,15 +308,6 @@ export interface Spec extends TurboModule {
    * Release any pipeline audio buffer (offline or live).
    */
   releasePipelineAudioBuffer(bufferId: string): Promise<void>;
-
-  /**
-   * Get a slice of Float32 samples from a live buffer's ring (for debug/export).
-   */
-  getLiveAudioBufferSamplesSlice(
-    liveBufferId: string,
-    startFrame: number,
-    frameCount: number
-  ): Promise<number[]>;
 
   /**
    * Start microphone capture directly into a live audio buffer (no JS roundtrip).

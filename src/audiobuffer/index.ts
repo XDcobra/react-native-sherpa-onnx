@@ -14,6 +14,11 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import {
+  installJSI as installJSIBindings,
+  isJSIAvailable,
+  requireJSI,
+} from './jsi';
 import { PipelineAudioErrorCode } from './types';
 import type {
   OfflineAudioBufferInfo,
@@ -107,6 +112,22 @@ function resolvePipelineAudioBufferId(
   );
 }
 
+function getFloat32ArrayBuffer(samples: Float32Array): ArrayBuffer {
+  const backing = samples.buffer;
+  if (
+    backing instanceof ArrayBuffer &&
+    samples.byteOffset === 0 &&
+    samples.byteLength === backing.byteLength
+  ) {
+    return backing;
+  }
+
+  // Preserve only the visible view when caller passes a subarray.
+  const copy = new Float32Array(samples.length);
+  copy.set(samples);
+  return copy.buffer;
+}
+
 type NativeSubscription = { remove: () => void };
 
 const framesCallbacks = new Map<
@@ -135,7 +156,6 @@ function ensureLiveEventSubscriptions(): void {
         sampleRate?: number;
         frameCount?: number;
         totalSamplesWritten?: number;
-        samples?: number[];
       }) => {
         const liveBufferId = rawEvent?.liveBufferId;
         if (!liveBufferId) return;
@@ -156,9 +176,8 @@ function ensureLiveEventSubscriptions(): void {
           liveBufferId,
           source,
           sampleRate: rawEvent.sampleRate ?? 0,
-          frameCount: rawEvent.frameCount ?? rawEvent.samples?.length ?? 0,
+          frameCount: rawEvent.frameCount ?? 0,
           totalSamplesWritten: rawEvent.totalSamplesWritten ?? 0,
-          samples: rawEvent.samples,
         };
 
         for (const cb of callbacks) {
@@ -307,17 +326,27 @@ export async function createOfflineAudioBufferFromFile(
 /**
  * Create an offline audio buffer from Float32 PCM samples.
  */
-export async function createOfflineAudioBufferFromSamples(
-  samples: number[],
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
   sampleRate: number,
   channelCount?: number
-): Promise<OfflineAudioBufferRef> {
-  const result = await getNative().createOfflineAudioBufferFromSamples(
-    samples,
+): OfflineAudioBufferRef {
+  const jsi = requireJSI();
+  const json = jsi.createOfflineFromSamples(
+    getFloat32ArrayBuffer(samples),
     sampleRate,
-    channelCount
+    channelCount ?? 1
   );
-  const info = result as unknown as OfflineAudioBufferInfo;
+
+  let info: OfflineAudioBufferInfo;
+  try {
+    info = JSON.parse(json) as OfflineAudioBufferInfo;
+  } catch {
+    throw new Error(
+      `${PipelineAudioErrorCode.INTERNAL_ERROR}: Failed to parse offline buffer info from JSI.`
+    );
+  }
+
   return { info, bufferId: info.bufferId as OfflineBufferHandle };
 }
 
@@ -369,7 +398,6 @@ export async function createLiveAudioBuffer(
     onFramesAppended,
     onError,
     emitAppendedEvents,
-    emitAppendedSamples,
     appendEventMinIntervalMs,
   } = options;
 
@@ -383,7 +411,6 @@ export async function createLiveAudioBuffer(
     persistencePath: options.persistencePath,
     persistenceFormat: options.persistenceFormat,
     emitAppendedEvents: nativeEmitAppendedEvents,
-    emitAppendedSamples,
     appendEventMinIntervalMs,
   });
 
@@ -407,13 +434,14 @@ export async function createLiveAudioBuffer(
 /**
  * Append Float32 samples to a live audio buffer (recording state only).
  */
-export async function appendSamplesToLiveAudioBuffer(
+export function appendSamplesToLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource,
-  samples: number[],
+  samples: Float32Array,
   sampleRate: number
-): Promise<void> {
+): void {
+  const jsi = requireJSI();
   const id = resolveLiveAudioBufferId(liveBufferId);
-  await getNative().appendSamplesToLiveAudioBuffer(id, samples, sampleRate);
+  jsi.appendSamplesToLive(id, getFloat32ArrayBuffer(samples), sampleRate);
 }
 
 /**
@@ -465,23 +493,46 @@ export async function releasePipelineAudioBuffer(
   clearLiveAudioBufferCallbacks(id);
 }
 
-// ==================== Live Samples Slice (debug/export) ====================
+// ==================== Samples Slice (debug/export) ====================
+
+/**
+ * Get a slice of Float32 samples from an offline in-memory buffer.
+ */
+export function getOfflineAudioBufferSamplesSlice(
+  offlineBufferId: OfflineAudioBufferIdSource,
+  startFrame: number,
+  frameCount: number
+): Float32Array {
+  const jsi = requireJSI();
+  const id = resolveOfflineAudioBufferId(offlineBufferId);
+  const buffer = jsi.getOfflineBufferSamples(id, startFrame, frameCount);
+  return new Float32Array(buffer);
+}
 
 /**
  * Get a slice of Float32 samples from a live buffer's ring.
  * Useful for debug visualization or export.
  */
-export async function getLiveAudioBufferSamplesSlice(
+export function getLiveAudioBufferSamplesSlice(
   liveBufferId: LiveAudioBufferIdSource,
   startFrame: number,
   frameCount: number
-): Promise<number[]> {
+): Float32Array {
+  const jsi = requireJSI();
   const id = resolveLiveAudioBufferId(liveBufferId);
-  return await getNative().getLiveAudioBufferSamplesSlice(
-    id,
-    startFrame,
-    frameCount
-  );
+  const buffer = jsi.getLiveBufferSamples(id, startFrame, frameCount);
+  return new Float32Array(buffer);
+}
+
+/**
+ * Install JSI bindings manually as fallback.
+ * Usually not needed because native auto-installs during module setup.
+ */
+export function installJSI(): boolean {
+  if (isJSIAvailable()) {
+    return true;
+  }
+  return installJSIBindings();
 }
 
 // ==================== Mic Capture ====================
@@ -539,6 +590,7 @@ export type {
 } from './types';
 
 export { PipelineAudioErrorCode } from './types';
+export { isJSIAvailable } from './jsi';
 
 export type {
   StreamingPipelineStatus,

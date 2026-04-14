@@ -150,8 +150,6 @@ export interface LiveAudioBufferFramesAppendedEvent {
   sampleRate: number;
   frameCount: number;
   totalSamplesWritten: number;
-  /** Present when native emitAppendedSamples=true. */
-  samples?: number[];
 }
 
 /** Live-buffer related error event (for example mic capture failures). */
@@ -183,8 +181,6 @@ export interface CreateLiveAudioBufferOptions {
 
   /** If true, emit producer-agnostic append events for this live buffer. */
   emitAppendedEvents?: boolean;
-  /** If true, append events include Float32 samples. Default: true. */
-  emitAppendedSamples?: boolean;
   /** Optional native event throttle/coalesce interval in ms. Default: 0 (no throttle). */
   appendEventMinIntervalMs?: number;
 
