@@ -69,7 +69,6 @@ const outputBuf = await createLiveAudioBuffer({
       e.sampleRate
     );
     // Example line printed: enhanced frames 512 total 2048 16000
-    // e.samples is set when native emitAppendedSamples is enabled (default).
   },
 });
 

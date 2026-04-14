@@ -30,6 +30,8 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 ### Offline buffer
 
 - `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`
+- `getOfflineAudioBufferSamplesSlice`
+- `installJSI`, `isJSIAvailable`
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`). Buffer parameters use **`OfflineAudioBufferIdSource`** or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
 
@@ -94,15 +96,37 @@ For large WAV files that stay file-backed, native may retain underlying source r
 
 ```ts
 function createOfflineAudioBufferFromSamples(
-  samples: number[],
+  samples: Float32Array,
   sampleRate: number,
   channelCount?: number
-): Promise<OfflineAudioBufferRef>;
+): OfflineAudioBufferRef;
 ```
 
 ```ts
-const offline = await createOfflineAudioBufferFromSamples([0.1, 0.2, 0.3], 16000, 1);
+const offline = createOfflineAudioBufferFromSamples(
+  new Float32Array([0.1, 0.2, 0.3]),
+  16000,
+  1
+);
 ```
+
+This path is synchronous and uses JSI (`ArrayBuffer`/`Float32Array`) for bulk sample transport.
+
+#### `getOfflineAudioBufferSamplesSlice(offlineBuffer, startFrame, frameCount)`
+
+```ts
+function getOfflineAudioBufferSamplesSlice(
+  offlineBuffer: OfflineAudioBufferIdSource,
+  startFrame: number,
+  frameCount: number
+): Float32Array;
+```
+
+```ts
+const head = getOfflineAudioBufferSamplesSlice(offline, 0, 320);
+```
+
+Only in-memory offline buffers are supported. File-backed buffers throw `BUFFER_NOT_IN_MEMORY`.
 
 #### Convert offline buffer to file
 

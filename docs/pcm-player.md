@@ -34,7 +34,7 @@ const audioBuffer = await createLiveAudioBuffer({ sampleRate: 22050 });
 const player = await createPcmPlayer(audioBuffer);
 
 // Append samples from your source
-await appendSamplesToLiveAudioBuffer(audioBuffer, myFloat32Samples, 22050);
+appendSamplesToLiveAudioBuffer(audioBuffer, myFloat32Samples, 22050);
 // ... continue feeding ...
 
 // Playback starts immediately as samples are appended.

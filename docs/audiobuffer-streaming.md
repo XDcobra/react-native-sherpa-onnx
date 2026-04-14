@@ -69,7 +69,6 @@ const live = await createLiveAudioBuffer({
   channelCount: 1,
   windowSeconds: 120,
   emitAppendedEvents: true,
-  emitAppendedSamples: false,
   appendEventMinIntervalMs: 0,
   onFramesAppended: (e) => {
     // Producer-agnostic: mic, JS append, offline append, or native pipeline `source`.
@@ -116,7 +115,7 @@ await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(live);
 ```
 
-`onFramesAppended` receives producer metadata: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`, and optional `samples`.
+`onFramesAppended` receives producer metadata only: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`.
 
 ---
 
@@ -139,7 +138,6 @@ const offline = await createOfflineAudioBufferFromFile('/tmp/voice.wav');
 const live = await createLiveAudioBuffer({
   sampleRate: 16000,
   emitAppendedEvents: true,
-  emitAppendedSamples: false,
   appendEventMinIntervalMs: 50,
   onFramesAppended: (e) => {
     console.log(`[${e.source}] +${e.frameCount} frames, total=${e.totalSamplesWritten}`);
@@ -148,7 +146,7 @@ const live = await createLiveAudioBuffer({
   },
 });
 
-await appendSamplesToLiveAudioBuffer(live, [0.1, 0.2, 0.3], 16000); // source=append
+appendSamplesToLiveAudioBuffer(live, new Float32Array([0.1, 0.2, 0.3]), 16000); // source=append
 await appendOfflineToLiveAudioBuffer(live, offline); // source=append_offline
 
 live.unsubscribeEvents();
@@ -170,6 +168,7 @@ await releasePipelineAudioBuffer(live);
 - `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
 - `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
 - `getLiveAudioBufferSamplesSlice`
+- `installJSI`, `isJSIAvailable`
 - Callbacks: `onFramesAppended` / `onError` on `createLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
@@ -263,13 +262,13 @@ await stopMicToLiveAudioBuffer();
 ```ts
 function appendSamplesToLiveAudioBuffer(
   liveBuffer: LiveAudioBufferRecordingSource,
-  samples: number[],
+  samples: Float32Array,
   sampleRate: number
-): Promise<void>;
+): void;
 ```
 
 ```ts
-await appendSamplesToLiveAudioBuffer(live, [0.0, 0.1, 0.2], 16000);
+appendSamplesToLiveAudioBuffer(live, new Float32Array([0.0, 0.1, 0.2]), 16000);
 ```
 
 #### `finalizeLiveAudioBuffer(liveBuffer)`
@@ -291,11 +290,11 @@ function getLiveAudioBufferSamplesSlice(
   liveBuffer: LiveAudioBufferIdSource,
   startFrame: number,
   frameCount: number
-): Promise<number[]>;
+): Float32Array;
 ```
 
 ```ts
-const chunk = await getLiveAudioBufferSamplesSlice(live, 0, 320);
+const chunk = getLiveAudioBufferSamplesSlice(live, 0, 320);
 ```
 
 #### Convert finalized live buffer to file
