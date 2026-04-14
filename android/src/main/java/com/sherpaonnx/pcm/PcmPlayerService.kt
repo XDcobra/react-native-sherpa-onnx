@@ -12,6 +12,9 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 internal class PcmPlayerService {
   private val registry = PcmPlayerRegistry()
 
+  /** Callback to emit pcmPlayerEnded events to JS. Set by the module. */
+  var onPlayerEnded: ((playerId: String, bufferId: String) -> Unit)? = null
+
   fun create(
     playerId: String,
     audioBufferId: String,
@@ -72,14 +75,28 @@ internal class PcmPlayerService {
       registry.remove(playerId)?.destroy()
 
       track.setVolume(clampedVolume)
-      val session = PcmPlayerSession(playerId, sr, ch, track)
+      val session = PcmPlayerSession(
+        playerId = playerId,
+        bufferId = audioBufferId,
+        sampleRate = sr,
+        channels = ch,
+        track = track,
+        offlineEntry = offlineEntry,
+        liveEntry = liveEntry,
+      )
+
+      // Wire up the onEnded callback to emit events to JS
+      session.onEnded = {
+        onPlayerEnded?.invoke(session.playerId, session.bufferId)
+      }
+
       registry.put(session)
       track.play()
 
       if (liveEntry != null) {
-        session.startLiveDrain(liveEntry)
+        session.startLiveDrain()
       } else if (offlineEntry != null) {
-        session.startOfflineDrain(offlineEntry)
+        session.startOfflineDrain()
       }
 
       promise.resolve(null)
@@ -110,6 +127,75 @@ internal class PcmPlayerService {
     } catch (e: Exception) {
       Log.e(TAG, "Failed to resume PCM player: $playerId", e)
       promise.reject("PCM_PLAYER_ERROR", "Failed to resume PCM player: ${e.message}", e)
+    }
+  }
+
+  fun seekToMs(playerId: String, positionMs: Double, promise: Promise) {
+    val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (session.destroyed) return rejectDestroyed(playerId, promise)
+    try {
+      val sampleIndex = ((positionMs / 1000.0) * session.sampleRate).toLong().coerceAtLeast(0)
+
+      // Validate seek range for live buffers
+      val live = session.liveEntry
+      if (live != null) {
+        val oldest = live.oldestAvailablePos()
+        val newest = live.totalSamplesWritten
+        if (sampleIndex < oldest || sampleIndex > newest) {
+          promise.reject("PCM_PLAYER_SEEK_OUT_OF_RANGE",
+            "Seek position $positionMs ms (sample $sampleIndex) is outside available range [$oldest, $newest]")
+          return
+        }
+      }
+
+      // Validate seek range for offline buffers
+      val offline = session.offlineEntry
+      if (offline != null && sampleIndex > offline.numSamples) {
+        // Clamp to end rather than reject for offline
+        session.seekToSample(offline.numSamples.toLong())
+        promise.resolve(null)
+        return
+      }
+
+      if (!session.seekToSample(sampleIndex)) {
+        promise.reject("PCM_PLAYER_ERROR", "Seek failed for player: $playerId")
+        return
+      }
+      promise.resolve(null)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to seek PCM player: $playerId", e)
+      promise.reject("PCM_PLAYER_ERROR", "Failed to seek PCM player: ${e.message}", e)
+    }
+  }
+
+  fun restart(playerId: String, promise: Promise) {
+    val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (session.destroyed) return rejectDestroyed(playerId, promise)
+    try {
+      val startPos = if (session.liveEntry != null) {
+        session.liveEntry.oldestAvailablePos()
+      } else {
+        0L
+      }
+      if (!session.seekToSample(startPos)) {
+        promise.reject("PCM_PLAYER_ERROR", "Restart failed for player: $playerId")
+        return
+      }
+      promise.resolve(null)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to restart PCM player: $playerId", e)
+      promise.reject("PCM_PLAYER_ERROR", "Failed to restart PCM player: ${e.message}", e)
+    }
+  }
+
+  fun getPositionMs(playerId: String, promise: Promise) {
+    val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (session.destroyed) return rejectDestroyed(playerId, promise)
+    try {
+      promise.resolve(session.getPositionMs())
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to get position for PCM player: $playerId", e)
+      promise.reject("PCM_PLAYER_ERROR", "Failed to get position: ${e.message}", e)
     }
   }
 

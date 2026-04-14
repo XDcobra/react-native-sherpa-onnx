@@ -448,6 +448,18 @@ struct PaLiveEntry {
     cursors.erase(cursorId);
   }
 
+  void seekCursor(int cursorId, int64_t absolutePos) {
+    std::lock_guard<std::mutex> cLock(cursorMutex);
+    auto it = cursors.find(cursorId);
+    if (it != cursors.end()) {
+      it->second.absoluteReadPos = absolutePos;
+    }
+  }
+
+  int64_t oldestAvailablePos() {
+    return (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+  }
+
   void release() {
     if (state == RECORDING) finalize_();
     flushPendingFramesAppended();

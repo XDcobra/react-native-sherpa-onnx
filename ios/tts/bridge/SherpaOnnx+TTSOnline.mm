@@ -23,6 +23,16 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)so_resumePcmPlayer:(NSString *)playerId
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject;
+- (void)so_seekPcmPlayerToMs:(NSString *)playerId
+                  positionMs:(double)positionMs
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject;
+- (void)so_restartPcmPlayer:(NSString *)playerId
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject;
+- (void)so_getPcmPlayerPositionMs:(NSString *)playerId
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject;
 - (void)so_destroyPcmPlayer:(NSString *)playerId
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject;
@@ -242,6 +252,25 @@ static std::mutex g_tts_pipeline_mutex;
                 resolve:(RCTPromiseResolveBlock)resolve
                  reject:(RCTPromiseRejectBlock)reject {
   [self so_resumePcmPlayer:playerId resolve:resolve reject:reject];
+}
+
+- (void)seekPcmPlayerToMs:(NSString *)playerId
+               positionMs:(double)positionMs
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject {
+  [self so_seekPcmPlayerToMs:playerId positionMs:positionMs resolve:resolve reject:reject];
+}
+
+- (void)restartPcmPlayer:(NSString *)playerId
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject {
+  [self so_restartPcmPlayer:playerId resolve:resolve reject:reject];
+}
+
+- (void)getPcmPlayerPositionMs:(NSString *)playerId
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject {
+  [self so_getPcmPlayerPositionMs:playerId resolve:resolve reject:reject];
 }
 
 - (void)destroyPcmPlayer:(NSString *)playerId

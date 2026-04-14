@@ -61,7 +61,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
-  private val pcmPlayerService = PcmPlayerService()
+  private val pcmPlayerService = PcmPlayerService().also {
+    it.onPlayerEnded = { playerId, bufferId ->
+      try {
+        val eventEmitter = reactApplicationContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val payload = Arguments.createMap()
+        payload.putString("playerId", playerId)
+        payload.putString("bufferId", bufferId)
+        eventEmitter.emit("pcmPlayerEnded", payload)
+      } catch (_: Exception) {
+        // JS context may be torn down
+      }
+    }
+  }
   private val ttsHelper = SherpaOnnxTtsHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
@@ -2149,6 +2162,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun resumePcmPlayer(playerId: String, promise: Promise) {
     pcmPlayerService.resume(playerId, promise)
+  }
+
+  override fun seekPcmPlayerToMs(playerId: String, positionMs: Double, promise: Promise) {
+    pcmPlayerService.seekToMs(playerId, positionMs, promise)
+  }
+
+  override fun restartPcmPlayer(playerId: String, promise: Promise) {
+    pcmPlayerService.restart(playerId, promise)
+  }
+
+  override fun getPcmPlayerPositionMs(playerId: String, promise: Promise) {
+    pcmPlayerService.getPositionMs(playerId, promise)
   }
 
   override fun destroyPcmPlayer(playerId: String, promise: Promise) {

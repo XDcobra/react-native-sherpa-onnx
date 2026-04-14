@@ -440,6 +440,17 @@ class LiveEntry(
     synchronized(cursors) { cursors.remove(cursorId) }
   }
 
+  /** Seek a cursor to an absolute sample position. Clamped to available range. */
+  fun seekCursor(cursorId: Int, absolutePos: Long) {
+    synchronized(cursors) {
+      cursors[cursorId]?.absoluteReadPos = absolutePos
+    }
+  }
+
+  /** Get the oldest absolute sample position currently available in the ring. */
+  fun oldestAvailablePos(): Long =
+    if (totalSamplesWritten > windowCapacity) totalSamplesWritten - windowCapacity else 0L
+
   private fun readFromCursor(cursor: CursorHandle, maxSamples: Int, advance: Boolean): FloatArray {
     val oldestAvailable = if (totalSamplesWritten > windowCapacity) {
       totalSamplesWritten - windowCapacity

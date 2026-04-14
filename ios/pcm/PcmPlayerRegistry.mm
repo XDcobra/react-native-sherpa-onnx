@@ -18,7 +18,26 @@ void PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSampl
                                                              frameCapacity:(AVAudioFrameCount)numSamples];
     buffer.frameLength = (AVAudioFrameCount)numSamples;
     memcpy(buffer.floatChannelData[0], samples, numSamples * sizeof(float));
-    [playerNode scheduleBuffer:buffer completionHandler:nil];
+
+    int32_t gen = drainGeneration.load();
+    buffersInFlight.fetch_add(1);
+
+    [playerNode scheduleBuffer:buffer completionCallbackType:AVAudioPlayerNodeCompletionDataConsumed completionHandler:^(AVAudioPlayerNodeCompletionCallbackType callbackType) {
+        int32_t remaining = buffersInFlight.fetch_sub(1) - 1;
+        if (remaining == 0 && sourceExhausted.load() && gen == drainGeneration.load()) {
+            if (!endedEmitted.exchange(true)) {
+                if (onEndedCallback) onEndedCallback();
+            }
+        }
+    }];
+}
+
+void PcmPlayerSession::markSourceExhausted() {
+    sourceExhausted.store(true);
+    // Check if all buffers already consumed
+    if (buffersInFlight.load() == 0 && !endedEmitted.exchange(true)) {
+        if (onEndedCallback) onEndedCallback();
+    }
 }
 
 void PcmPlayerSession::pause() {
@@ -31,9 +50,47 @@ void PcmPlayerSession::resume() {
     [playerNode play];
 }
 
+void PcmPlayerSession::resetForSeek(int64_t newSeekPositionSamples) {
+    // Increment generation to invalidate in-flight completion handlers
+    drainGeneration.fetch_add(1);
+
+    // Stop and restart the player node to clear all scheduled buffers
+    if (playerNode != nil) {
+        [playerNode stop];
+    }
+
+    // Reset counters
+    buffersInFlight.store(0);
+    sourceExhausted.store(false);
+    endedEmitted.store(false);
+    seekPositionSamples.store(newSeekPositionSamples);
+
+    // Restart the player node
+    if (playerNode != nil) {
+        [playerNode play];
+    }
+}
+
+double PcmPlayerSession::getPositionMs() {
+    if (destroyed || playerNode == nil || sampleRate <= 0) return 0.0;
+
+    AVAudioTime *nodeTime = [playerNode lastRenderTime];
+    if (nodeTime == nil || !nodeTime.isSampleTimeValid) {
+        return (double)seekPositionSamples.load() / (double)sampleRate * 1000.0;
+    }
+    AVAudioTime *playerTime = [playerNode playerTimeForNodeTime:nodeTime];
+    if (playerTime == nil || !playerTime.isSampleTimeValid) {
+        return (double)seekPositionSamples.load() / (double)sampleRate * 1000.0;
+    }
+    int64_t samplePos = (int64_t)playerTime.sampleTime;
+    if (samplePos < 0) samplePos = 0;
+    return ((double)seekPositionSamples.load() + (double)samplePos) / (double)sampleRate * 1000.0;
+}
+
 void PcmPlayerSession::destroy() {
     if (destroyed) return;
     destroyed = true;
+    drainGeneration.fetch_add(1);
     if (playerNode != nil) [playerNode stop];
     if (audioEngine != nil) {
         [audioEngine stop];
@@ -42,6 +99,7 @@ void PcmPlayerSession::destroy() {
     playerNode = nil;
     audioEngine = nil;
     audioFormat = nil;
+    onEndedCallback = nullptr;
 }
 
 std::shared_ptr<PcmPlayerSession> pcmPlayerGet(const std::string &playerId) {
