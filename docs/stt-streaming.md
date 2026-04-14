@@ -34,7 +34,7 @@ import {
   getOnlineTypeOrNull,
 } from 'react-native-sherpa-onnx/stt';
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
@@ -63,7 +63,7 @@ const engine = await createStreamingSTT({
   enableEndpoint: true,
 });
 
-const audioIn = await createLiveAudioBuffer({
+const audioIn = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
   channelCount: 1,
   windowSeconds: 120,
@@ -149,7 +149,7 @@ const engine = await createStreamingSTT({
 | Step | Method | Result |
 | --- | --- | --- |
 | 1 | `createStreamingSTT(...)` | Engine (`LiveSttEngine`) allocated |
-| 2 | `createLiveAudioBuffer(...)` | Live audio input buffer |
+| 2 | `createEmptyLiveAudioBuffer(...)` | Live audio input buffer |
 | 3 | `createLiveTextBuffer(...)` | Live text output buffer |
 | 4 | `engine.transcribe(audioIn, textOut, options?)` | Native STT pipeline starts |
 | 5 | `startMicToLiveAudioBuffer(...)` / append samples | Audio enters pipeline |
@@ -335,7 +335,7 @@ Status fields:
 
 ```ts
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   appendSamplesToLiveAudioBuffer,

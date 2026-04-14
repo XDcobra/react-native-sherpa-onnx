@@ -15,9 +15,9 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 | **[Offline buffer](audiobuffer-offline.md)** | One-shot, **immutable** clip: full PCM decoded on the native side (small clips in memory, large WAVs often **file-backed**). | Batch STT/TTS/alignment, preparing a file once, then feeding it into APIs via a **buffer ref/id** (prefer refs) instead of a huge float array in JS. |
 | **[Live buffer](audiobuffer-streaming.md)** | **Rolling** window (ring) plus optional **spool** for long sessions; lifecycle **`recording` → `finished`**. Mic, file replay, and native pipeline workers all **append** on the native side. | Mic capture, streaming STT/enhancement, waveform UI, any stage that must grow over time while another native consumer **drains** the same buffer. |
 
-**Offline and live work together:** both use **stable buffer ids** and the same TurboModule surface. Use **`appendOfflineToLiveAudioBuffer`** to play an offline clip into a live stream, and **`createOfflineAudioBufferFromLive`** (on the [offline](audiobuffer-offline.md) page) to snapshot live audio for batch work. Native pipelines chain **live → live** so PCM **stays in native memory** between stages.
+**Offline and live work together:** both use **stable buffer ids** and the same TurboModule surface. Use **`appendOfflineToLiveAudioBuffer`** to play an offline clip into a live stream, **`ingestFileToLiveAudioBuffer`** to decode a file directly into a recording buffer, and **`createOfflineAudioBufferFromLive`** (on the [offline](audiobuffer-offline.md) page) to snapshot live audio for batch work. Native pipelines chain **live → live** so PCM **stays in native memory** between stages.
 
-**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended`) with metadata, independent of producer (`mic`, `append`, `append_offline`, or native pipeline **`source`**).
+**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended`) with metadata, independent of producer (`mic`, `append`, `append_offline`, `file_ingest`, or native pipeline **`source`**).
 
 `pipelineLiveAudioChunk` means: **new frames were appended to the live buffer** — one contract for waveform UI, logging, and streaming STT without tying those concerns to a specific producer.
 
@@ -37,7 +37,7 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 // Shows: append events (which producer wrote PCM) and a simple UI poll loop for partial + committed text.
 
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
@@ -64,7 +64,7 @@ const textOut = await createLiveTextBuffer({
 });
 
 // Live audio: mic and/or append paths all show up as `onFramesAppended` with a `source` tag.
-const live = await createLiveAudioBuffer({
+const live = await createEmptyLiveAudioBuffer({
   sampleRate: SAMPLE_RATE,
   channelCount: 1,
   windowSeconds: 120,
@@ -126,16 +126,19 @@ await releasePipelineAudioBuffer(live);
 // Same `onFramesAppended` callback sees different `source` values (`append` vs `append_offline`).
 
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   appendSamplesToLiveAudioBuffer,
   appendOfflineToLiveAudioBuffer,
   createOfflineAudioBufferFromFile,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
-const offline = await createOfflineAudioBufferFromFile('/tmp/voice.wav');
+const offline = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/voice.wav',
+});
 
-const live = await createLiveAudioBuffer({
+const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
   emitAppendedEvents: true,
   appendEventMinIntervalMs: 50,
@@ -164,14 +167,14 @@ await releasePipelineAudioBuffer(live);
 
 ### Live buffer
 
-- `createLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
+- `createEmptyLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
 - `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
-- `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
+- `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
-- Callbacks: `onFramesAppended` / `onError` on `createLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
+- Callbacks: `onFramesAppended` / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
 
-Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
+Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createEmptyLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
 
 ---
 
@@ -208,21 +211,55 @@ await releasePipelineAudioBuffer(live);
 
 ### Live buffer
 
-#### `createLiveAudioBuffer(options)`
+#### `createEmptyLiveAudioBuffer(options)`
 
 ```ts
-function createLiveAudioBuffer(
-  options: CreateLiveAudioBufferOptions
+function createEmptyLiveAudioBuffer(
+  options: CreateEmptyLiveAudioBufferOptions
 ): Promise<LiveAudioBufferRef>;
 ```
 
 ```ts
-const live = await createLiveAudioBuffer({
+const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
   emitAppendedEvents: true,
   onFramesAppended: (e) => console.log(e.frameCount),
 });
 ```
+
+#### `ingestFileToLiveAudioBuffer(liveBuffer, source, options?)`
+
+```ts
+function ingestFileToLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource,
+  source: FileSource,
+  options?: FileIngestOptions
+): Promise<FileIngestHandle>;
+```
+
+```ts
+const ingest = await ingestFileToLiveAudioBuffer(
+  live,
+  { kind: 'fs', path: '/tmp/voice.opus' },
+  {
+    targetSampleRateHz: 16000,
+    autoFinalize: true,
+    onProgress: (event) => console.log(event.percent),
+  }
+);
+
+await ingest.done;
+```
+
+Use this when the source audio is still a file and you want downstream native consumers to start processing before the whole file has been decoded.
+
+- Source kind: any `FileSource`
+- Buffer state: live buffer must still be `recording`
+- Progress: `options.onProgress` receives `DecodeProgressEvent`
+- Cancellation: `ingest.cancel()` or `options.signal`
+- Append source: `onFramesAppended` receives `source: 'file_ingest'`
+- Completion: `ingest.done` resolves with `FileIngestResult`
+
 
 #### `subscribeLiveAudioBufferEvents(liveBuffer, callbacks)`
 

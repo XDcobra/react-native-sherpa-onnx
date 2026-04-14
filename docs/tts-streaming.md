@@ -45,7 +45,7 @@ import {
   createStreamingTTS,
   detectTtsModel,
   createLiveTextBuffer,
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   appendLiveTextSegment,
   finalizeLiveTextBuffer,
   finalizeLiveAudioBuffer,
@@ -69,7 +69,7 @@ const tts = await createStreamingTTS({
 // Create buffers
 const sampleRate = await tts.getSampleRate();
 const textIn = await createLiveTextBuffer();
-const audioOut = await createLiveAudioBuffer({
+const audioOut = await createEmptyLiveAudioBuffer({
   sampleRate,
   channelCount: 1,
 });
@@ -138,7 +138,7 @@ Use this path when text arrives progressively (chat/LLM typing). The engine hand
 ```ts
 import {
   createIncrementalStreamingTTS,
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   finalizeLiveAudioBuffer,
 } from 'react-native-sherpa-onnx/tts';
 
@@ -156,7 +156,7 @@ const inc = await createIncrementalStreamingTTS({
 });
 
 const sampleRate = await inc.getSampleRate();
-const audioOut = await createLiveAudioBuffer({
+const audioOut = await createEmptyLiveAudioBuffer({
   sampleRate,
   channelCount: 1,
   onFramesAppended: (info) => {

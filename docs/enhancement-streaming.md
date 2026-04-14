@@ -45,7 +45,7 @@ All buffer parameters accept refs directly. Raw string ids are optional; malform
 ```ts
 import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
@@ -55,8 +55,8 @@ const denoiser = await createStreamingEnhancement({
 });
 
 const sr = await denoiser.getSampleRate();
-const inputBuf = await createLiveAudioBuffer({ sampleRate: sr });
-const outputBuf = await createLiveAudioBuffer({
+const inputBuf = await createEmptyLiveAudioBuffer({ sampleRate: sr });
+const outputBuf = await createEmptyLiveAudioBuffer({
   sampleRate: sr,
   onFramesAppended: (e) => {
     if (e.source !== 'enhancement') return;
@@ -283,7 +283,7 @@ interface StreamingPipelineStatus {
 
 ```ts
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   appendSamplesToLiveAudioBuffer,
   appendOfflineToLiveAudioBuffer,
   getPipelineAudioBufferInfo,
@@ -297,7 +297,7 @@ See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](
 
 ```ts
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   getPipelineAudioBufferInfo,
   getLiveAudioBufferSamplesSlice,
   releasePipelineAudioBuffer,

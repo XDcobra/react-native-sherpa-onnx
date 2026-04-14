@@ -88,7 +88,10 @@ await engine.setConfig({
   // hotwordsFile / hotwordsScore / ruleFsts / ruleFars can also be updated here
 });
 
-const audio = await createOfflineAudioBufferFromFile('/absolute/path/audio.wav');
+const audio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/absolute/path/audio.wav',
+});
 const textOut = await createEmptyOfflineTextBuffer();
 try {
   await engine.transcribe(audio, textOut);
@@ -138,7 +141,10 @@ const engine = await createSTT({
 });
 
 // Native decode: WAV (etc.) → immutable offline PCM handle (not a giant JS float[]).
-const audio = await createOfflineAudioBufferFromFile('/absolute/path/audio.wav');
+const audio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/absolute/path/audio.wav',
+});
 // Empty sink; transcribe will reject if you reuse a buffer that already has text.
 const textOut = await createEmptyOfflineTextBuffer();
 

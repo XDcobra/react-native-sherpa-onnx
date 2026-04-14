@@ -68,7 +68,10 @@ const enhancement = await createEnhancement({
 });
 
 try {
-  const audioIn = await createOfflineAudioBufferFromFile('/absolute/path/input.wav');
+  const audioIn = await createOfflineAudioBufferFromFile({
+    kind: 'fs',
+    path: '/absolute/path/input.wav',
+  });
   const sr = await enhancement.getSampleRate();
   const audioOut = await createEmptyOfflineAudioBuffer(sr);
 
@@ -177,7 +180,10 @@ import {
   createEmptyOfflineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
-const audioIn = await createOfflineAudioBufferFromFile('/tmp/noisy.wav');
+const audioIn = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/noisy.wav',
+});
 const sr = await enhancement.getSampleRate();
 const audioOut = await createEmptyOfflineAudioBuffer(sr);
 

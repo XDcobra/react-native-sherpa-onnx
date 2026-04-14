@@ -38,7 +38,10 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 
 const textBuf = await createOfflineTextBufferFromText('Hello world.');
-const audioBuf = await createOfflineAudioBufferFromFile('/path/to/audio.wav');
+const audioBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
 
 try {
   const r = await alignTextToAudio(textBuf, audioBuf, {
@@ -110,7 +113,10 @@ const stt = await createSTT({
   modelType: (det.modelType as any) ?? 'auto',
 });
 
-const audioBuf = await createOfflineAudioBufferFromFile('/path/to/audio.wav');
+const audioBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
 const textBuf = await createEmptyOfflineTextBuffer();
 
 try {

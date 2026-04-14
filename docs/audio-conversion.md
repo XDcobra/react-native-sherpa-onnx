@@ -47,7 +47,7 @@ try {
 
 ```ts
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   finalizeLiveAudioBuffer,
@@ -55,7 +55,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
 
-const live = await createLiveAudioBuffer({ sampleRate: 44100 });
+const live = await createEmptyLiveAudioBuffer({ sampleRate: 44100 });
 await startMicToLiveAudioBuffer(live);
 // recording...
 await stopMicToLiveAudioBuffer();

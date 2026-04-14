@@ -12,7 +12,10 @@ Play mono float audio from pipeline buffers (offline or live) via native audio b
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
-const audioBuffer = await createOfflineAudioBufferFromFile('file:///path/to/audio.wav');
+const audioBuffer = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
 const player = await createPcmPlayer(audioBuffer);
 
 await player.pause();
@@ -25,12 +28,12 @@ await player.destroy();
 ```ts
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   appendSamplesToLiveAudioBuffer,
   finalizeLiveAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
-const audioBuffer = await createLiveAudioBuffer({ sampleRate: 22050 });
+const audioBuffer = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
 const player = await createPcmPlayer(audioBuffer);
 
 // Append samples from your source
@@ -51,9 +54,9 @@ await player.destroy();
 ```ts
 import { createIncrementalStreamingTTS } from 'react-native-sherpa-onnx/tts';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import { createLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
-const audioOut = await createLiveAudioBuffer({ sampleRate: 22050 });
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
 const tts = await createIncrementalStreamingTTS({
   source: {
     engineOptions: { modelPath: { type: 'asset', path: 'models/vits' } },
@@ -110,7 +113,7 @@ Prefer passing refs directly. Raw string ids are optional; malformed ids are rej
 
 The player accepts **any pipeline audio buffer**:
 - **OfflineAudioBufferRef**: File-based buffers from `createOfflineAudioBufferFromFile`
-- **LiveAudioBufferRef**: Streaming buffers from `createLiveAudioBuffer`
+- **LiveAudioBufferRef**: Streaming buffers from `createEmptyLiveAudioBuffer`
 - **String**: Raw buffer ID (`off_…` or `live_…`)
 
 ## Platform details

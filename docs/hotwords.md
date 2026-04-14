@@ -206,7 +206,7 @@ if (detection.success && detection.modelType) {
 ```typescript
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
@@ -225,7 +225,7 @@ const recognizer = await createStreamingSTT({
   hotwordsScore: 2.0,
 });
 
-const audioIn = await createLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 
 const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });

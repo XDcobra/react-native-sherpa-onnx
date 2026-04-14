@@ -48,7 +48,10 @@ const stt = await createSTT({
   modelType: 'auto',
 });
 
-const audioBuffer = await createOfflineAudioBufferFromFile('/tmp/input.wav');
+const audioBuffer = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/input.wav',
+});
 const textBuffer = await createEmptyOfflineTextBuffer();
 
 try {

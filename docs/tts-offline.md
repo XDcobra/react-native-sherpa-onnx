@@ -72,7 +72,10 @@ await tts.destroy();
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 
 // Load reference audio into a buffer first
-const refAudio = await createOfflineAudioBufferFromFile('/path/to/reference.wav');
+const refAudio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/reference.wav',
+});
 
 const textBuf = await createOfflineTextBufferFromText('Clone this voice.');
 const audioBuf = await createEmptyOfflineAudioBuffer(sr);
@@ -273,15 +276,21 @@ await convertAudioToFormat(audioBuf, `${DocumentDirectoryPath}/speech.mp3`, 'mp3
 await convertAudioToWav16k(audioBuf, `${DocumentDirectoryPath}/speech_16k.wav`);
 ```
 
-### `createOfflineAudioBufferFromFile(path)`
+### `createOfflineAudioBufferFromFile(source, options?)`
 
 ```ts
-createOfflineAudioBufferFromFile(sourcePath: string, targetSampleRateHz?: number, forceMono?: boolean): Promise<OfflineAudioBufferRef>
+createOfflineAudioBufferFromFile(
+  source: FileSource,
+  options?: AudioDecodeOptions
+): Promise<OfflineAudioBufferRef>
 ```
 
 ```ts
 // Load reference audio for voice cloning
-const refBuf = await createOfflineAudioBufferFromFile('/path/to/ref.wav');
+const refBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/ref.wav',
+});
 await releasePipelineAudioBuffer(refBuf); // after synthesize
 ```
 

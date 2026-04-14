@@ -29,7 +29,7 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 ### Offline buffer
 
-- `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`
+- `createEmptyOfflineAudioBuffer`, `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`
 - `getOfflineAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 
@@ -70,27 +70,45 @@ await releasePipelineAudioBuffer(offline);
 
 ### Offline buffer
 
-#### `createOfflineAudioBufferFromFile(source, targetSampleRateHz?, forceMono?)`
+#### `createOfflineAudioBufferFromFile(source, options?)`
 
 ```ts
 function createOfflineAudioBufferFromFile(
   source: FileSource,
-  targetSampleRateHz?: number,
-  forceMono?: boolean
+  options?: AudioDecodeOptions
 ): Promise<OfflineAudioBufferRef>;
 ```
 
 ```ts
-const offline = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/input.wav' }, 16000, true);
+const offline = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/input.wav' },
+  { targetSampleRateHz: 16000, forceMono: true }
+);
 console.log(offline.info.sampleRate, offline.info.bufferId);
 
 // From a content URI (Android):
 const fromUri = await createOfflineAudioBufferFromFile({ kind: 'contentUri', uri: pickedUri });
+
+// With progress + cancellation:
+const controller = new AbortController();
+const decoded = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/input.flac' },
+  {
+    targetSampleRateHz: 16000,
+    onProgress: (event) => console.log(event.percent),
+    signal: controller.signal,
+  }
+);
 ```
 
-Android `contentUri` sources are resolved fd-first (`openFileDescriptor` -> `/proc/self/fd/<n>`) to avoid unnecessary temp copies in the primary path.
+The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
 
-For large WAV files that stay file-backed, native may retain underlying source resources until you call `releasePipelineAudioBuffer(...)`.
+Options:
+
+- `targetSampleRateHz`: resample during decode; omit or use `0` to keep the source rate
+- `forceMono`: downmix during decode; default `true`
+- `onProgress`: receives `DecodeProgressEvent`
+- `signal`: aborts decode and rejects with `DECODE_CANCELLED`
 
 #### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
 
@@ -111,6 +129,23 @@ const offline = createOfflineAudioBufferFromSamples(
 ```
 
 This path is synchronous and uses JSI (`ArrayBuffer`/`Float32Array`) for bulk sample transport.
+
+#### `createEmptyOfflineAudioBuffer(sampleRate, channelCount?)`
+
+```ts
+function createEmptyOfflineAudioBuffer(
+  sampleRate: number,
+  channelCount?: 1
+): Promise<OfflineAudioBufferRef>;
+```
+
+```ts
+const emptyOut = await createEmptyOfflineAudioBuffer(22050);
+console.log(emptyOut.info.numSamples); // 0
+```
+
+Creates an empty offline buffer that can be populated by native pipeline producers (for example TTS/Enhancement output).
+The buffer starts unpopulated (`numSamples = 0`) and remains immutable once native writing completes.
 
 #### `getOfflineAudioBufferSamplesSlice(offlineBuffer, startFrame, frameCount)`
 
