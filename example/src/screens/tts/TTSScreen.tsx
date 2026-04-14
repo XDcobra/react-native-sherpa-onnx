@@ -22,6 +22,7 @@ import {
   type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
 import { copyFile, shareFile } from 'react-native-sherpa-onnx/fileio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import type {
   TtsEngine,
   StreamingTtsEngine,
@@ -66,20 +67,12 @@ import {
   unlink,
   exists,
 } from '@dr.pogodin/react-native-fs';
-import { AudioContext } from 'react-native-audio-api';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
-import {
-  loadAudioAsArrayBuffer,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
 
 const PAD_PACK_NAME = 'sherpa_models';
-
-type TtsSavedAudioPlayback = ActiveWebAudioPlayback & { resolvedPath: string };
 
 /**
  * Generated audio results from either batch or streaming TTS.
@@ -133,13 +126,6 @@ export default function TTSScreen() {
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [loadingSound, setLoadingSound] = useState(false);
-  const [cachedPlaybackPath, setCachedPlaybackPath] = useState<string | null>(
-    null
-  );
-  const [cachedPlaybackSource, setCachedPlaybackSource] = useState<
-    string | null
-  >(null);
 
   const [speakerId, setSpeakerId] = useState('0');
   const [speed, setSpeed] = useState('1.0');
@@ -168,7 +154,7 @@ export default function TTSScreen() {
 
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
-  const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
+  const pcmPlayerRef = useRef<PcmPlayer | null>(null);
   const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
   const streamPipelineRef = useRef<TtsPipelineHandle | null>(null);
@@ -342,9 +328,10 @@ export default function TTSScreen() {
   }, []);
 
   const stopTtsSavedAudioPlayback = useCallback(() => {
-    if (ttsSavedAudioPlaybackRef.current) {
-      stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
-      ttsSavedAudioPlaybackRef.current = null;
+    const player = pcmPlayerRef.current;
+    if (player) {
+      pcmPlayerRef.current = null;
+      player.destroy().catch(() => {});
     }
     setIsPlaying(false);
   }, []);
@@ -373,9 +360,10 @@ export default function TTSScreen() {
   // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
-      if (ttsSavedAudioPlaybackRef.current) {
-        stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
-        ttsSavedAudioPlaybackRef.current = null;
+      const pcmPlayer = pcmPlayerRef.current;
+      if (pcmPlayer) {
+        pcmPlayerRef.current = null;
+        pcmPlayer.destroy().catch(() => {});
       }
       const pipeline = streamPipelineRef.current;
       if (pipeline) {
@@ -635,8 +623,6 @@ export default function TTSScreen() {
     setModelInfo(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
     setSpeakerId('0');
     setSpeed('1.0');
     setSilenceScale('');
@@ -816,8 +802,6 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
     if (streaming) {
       resetStreamingState();
     }
@@ -993,8 +977,6 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
     resetStreamingState({ resetScheduleRef: false });
     // Do NOT set streaming=true here: the useEffect debounce could run before refs are set.
     // Set streaming only after the pipeline is started.
@@ -1187,8 +1169,6 @@ export default function TTSScreen() {
         const tmpPath = `${DocumentDirectoryPath}/${filename}`;
         await saveResultToWav(audio, tmpPath);
         setSavedAudioPath(tmpPath);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
         Alert.alert('Success', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
@@ -1202,8 +1182,6 @@ export default function TTSScreen() {
       const filePath = `${targetDirectory}/${filename}`;
       await saveResultToWav(audio, filePath);
       setSavedAudioPath(filePath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
 
       Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
@@ -1243,8 +1221,6 @@ export default function TTSScreen() {
       const filePath = `${directoryPath}/${filename}`;
       await saveResultToWav(generatedAudio, filePath);
       setSavedAudioPath(filePath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
 
       Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
@@ -1258,80 +1234,38 @@ export default function TTSScreen() {
   };
 
   const handlePlayAudio = async () => {
-    if (!savedAudioPath) {
-      Alert.alert('Error', 'No audio file saved. Save audio first.');
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to play. Generate speech first.');
       return;
     }
 
     try {
-      let playbackPath = savedAudioPath;
-      if (savedAudioPath.startsWith('content://')) {
-        const cacheName = `tts_playback_${Date.now()}.wav`;
-        if (
-          cachedPlaybackPath &&
-          cachedPlaybackSource === savedAudioPath &&
-          (await exists(cachedPlaybackPath))
-        ) {
-          playbackPath = cachedPlaybackPath;
+      // If already have an active player, toggle pause/resume
+      const cur = pcmPlayerRef.current;
+      if (cur) {
+        if (isPlaying) {
+          await cur.pause();
+          setIsPlaying(false);
         } else {
-          const result = await copyFile(
-            { kind: 'contentUri', uri: savedAudioPath },
-            { kind: 'app', base: 'cache', path: cacheName }
-          );
-          const cachedPath =
-            result.output.kind === 'fs'
-              ? result.output.path
-              : result.output.uri;
-          setCachedPlaybackPath(cachedPath);
-          setCachedPlaybackSource(savedAudioPath);
-          playbackPath = cachedPath;
-        }
-      }
-
-      const cur = ttsSavedAudioPlaybackRef.current;
-      if (cur && cur.resolvedPath === playbackPath) {
-        if (cur.context.state === 'running') {
-          await cur.context.suspend();
-          setIsPlaying(false);
-          return;
-        }
-        if (cur.context.state === 'suspended') {
-          await cur.context.resume();
+          await cur.resume();
           setIsPlaying(true);
-          return;
         }
+        return;
       }
 
-      stopTtsSavedAudioPlayback();
-
-      setLoadingSound(true);
-      try {
-        const arrayBuffer = await loadAudioAsArrayBuffer(playbackPath);
-        const context = new AudioContext();
-        const audioBuffer = await context.decodeAudioData(arrayBuffer);
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(context.destination);
-        source.onEnded = () => {
-          ttsSavedAudioPlaybackRef.current = null;
+      // Create a new PCM player from the generated audio buffer
+      const player = await createPcmPlayer(generatedAudio.bufferId, {
+        onEnded: () => {
+          pcmPlayerRef.current = null;
           setIsPlaying(false);
-          context.close().catch(() => {});
-        };
-        source.start();
-        ttsSavedAudioPlaybackRef.current = {
-          context,
-          source,
-          resolvedPath: playbackPath,
-        };
-        setIsPlaying(true);
-      } finally {
-        setLoadingSound(false);
-      }
+        },
+      });
+      pcmPlayerRef.current = player;
+      setIsPlaying(true);
     } catch (err) {
       console.error('Play audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       Alert.alert('Error', `Failed to play audio: ${errorMessage}`);
-      setLoadingSound(false);
     }
   };
 
@@ -1895,28 +1829,23 @@ export default function TTSScreen() {
                   )}
                 </TouchableOpacity>
 
-                {savedAudioPath && (
+                {generatedAudio && (
                   <>
                     <TouchableOpacity
                       style={[styles.audioButton, styles.playButton]}
                       onPress={handlePlayAudio}
-                      disabled={loadingSound}
                     >
-                      {loadingSound ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <View style={styles.rowAlignCenter}>
-                          <Ionicons
-                            name={isPlaying ? 'pause' : 'play'}
-                            size={16}
-                            color="#fff"
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.audioButtonText}>
-                            {isPlaying ? 'Pause' : 'Play'}
-                          </Text>
-                        </View>
-                      )}
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name={isPlaying ? 'pause' : 'play'}
+                          size={16}
+                          color="#fff"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.audioButtonText}>
+                          {isPlaying ? 'Pause' : 'Play'}
+                        </Text>
+                      </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -1933,22 +1862,24 @@ export default function TTSScreen() {
                         <Text style={styles.audioButtonText}>Stop</Text>
                       </View>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.audioButton, styles.shareButton]}
-                      onPress={handleShareAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name="share-social"
-                          size={16}
-                          color="#fff"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.audioButtonText}>Share</Text>
-                      </View>
-                    </TouchableOpacity>
                   </>
+                )}
+
+                {savedAudioPath && (
+                  <TouchableOpacity
+                    style={[styles.audioButton, styles.shareButton]}
+                    onPress={handleShareAudio}
+                  >
+                    <View style={styles.rowAlignCenter}>
+                      <Ionicons
+                        name="share-social"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Share</Text>
+                    </View>
+                  </TouchableOpacity>
                 )}
               </View>
 

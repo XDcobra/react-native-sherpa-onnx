@@ -756,6 +756,25 @@ export interface Spec extends TurboModule {
   resumePcmPlayer(playerId: string): Promise<void>;
 
   /**
+   * Seek a PCM player to a position in milliseconds.
+   * @param playerId - Player session ID
+   * @param positionMs - Target position in milliseconds
+   */
+  seekPcmPlayerToMs(playerId: string, positionMs: number): Promise<void>;
+
+  /**
+   * Restart a PCM player from the beginning.
+   * @param playerId - Player session ID
+   */
+  restartPcmPlayer(playerId: string): Promise<void>;
+
+  /**
+   * Get the current playback position in milliseconds.
+   * @param playerId - Player session ID
+   */
+  getPcmPlayerPositionMs(playerId: string): Promise<number>;
+
+  /**
    * Destroy a PCM player session and release native resources.
    * @param playerId - Player session ID
    */

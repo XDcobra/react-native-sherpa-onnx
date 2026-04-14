@@ -7,7 +7,7 @@
       "react-native-sherpa-onnx": ["../src/index.tsx"],
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],
-      "react-native-sherpa-onnx/pcm-stream": ["../src/pcm-stream/index.ts"],
+      "react-native-sherpa-onnx/pcm": ["../src/pcm/index.ts"],
       "react-native-sherpa-onnx/audiobuffer": ["../src/audiobuffer/index.ts"],
       "react-native-sherpa-onnx/textbuffer": ["../src/textbuffer/index.ts"],
       "react-native-sherpa-onnx/stt": ["../src/stt/index.ts"],
