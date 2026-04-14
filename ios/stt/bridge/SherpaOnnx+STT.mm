@@ -7,7 +7,7 @@
 
 #import "../../SherpaOnnx.h"
 #import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#import "../../SherpaOnnx+TextBufferGlobals.h"
+#import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 
 #include "../native/sherpa-onnx-stt-wrapper.h"

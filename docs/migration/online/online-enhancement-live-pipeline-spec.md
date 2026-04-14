@@ -394,7 +394,7 @@ object StreamingPipelineRegistry {
 #### 4.4.3 iOS equivalents
 
 ```cpp
-// New or extended: ios/SherpaOnnx+StreamingPipeline.h
+// New or extended: ios/pipeline/core/SherpaOnnx+StreamingPipeline.h
 
 /**
  * Generic streaming pipeline worker interface.

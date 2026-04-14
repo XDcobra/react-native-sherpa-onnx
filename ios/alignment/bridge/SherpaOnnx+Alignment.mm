@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 #import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#import "../../SherpaOnnx+TextBufferGlobals.h"
+#import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include "../core/AlignmentBridgeUtils.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"

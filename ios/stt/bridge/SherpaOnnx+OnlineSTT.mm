@@ -12,8 +12,8 @@
 
 #include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../SherpaOnnx+StreamingPipeline.h"
-#include "../../SherpaOnnx+TextBufferGlobals.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/SttPipelineWorker.h"
 #include "../native/sherpa-onnx-online-stt-wrapper.h"
 

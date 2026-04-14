@@ -2,7 +2,7 @@
 
 #include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../EnhancementPipelineWorker.h"
 #include "../sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"

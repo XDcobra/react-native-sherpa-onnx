@@ -2,9 +2,9 @@
 #include "engine/TtsEngineStore.h"
 #include "pipeline/TtsPipelineWorker.h"
 #include "options/TtsGenerationOptionsHelpers.h"
-#include "../SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../SherpaOnnx+TextBufferGlobals.h"
+#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
 
 // Instance → active pipeline tracking

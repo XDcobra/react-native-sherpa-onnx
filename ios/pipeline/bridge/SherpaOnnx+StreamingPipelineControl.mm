@@ -6,9 +6,9 @@
  * regardless of the specific pipeline type (enhancement, STT, TTS, etc.).
  */
 
-#import "SherpaOnnx.h"
+#import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
-#include "SherpaOnnx+StreamingPipeline.h"
+#include "../core/SherpaOnnx+StreamingPipeline.h"
 #include <string>
 
 @implementation SherpaOnnx (StreamingPipelineControl)

@@ -9,7 +9,7 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../SherpaOnnx+TextBufferGlobals.h"
+#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include <memory>
 #include <optional>

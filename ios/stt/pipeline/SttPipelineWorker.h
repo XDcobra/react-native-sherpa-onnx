@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../../SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../SherpaOnnx+TextBufferGlobals.h"
+#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../native/sherpa-onnx-online-stt-wrapper.h"
 #include <condition_variable>
 #include <deque>

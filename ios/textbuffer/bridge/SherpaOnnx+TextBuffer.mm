@@ -9,8 +9,8 @@
  * Implements all TurboModule methods for text buffer lifecycle, getters, and release.
  */
 
-#import "SherpaOnnx.h"
-#import "SherpaOnnx+TextBufferGlobals.h"
+#import "../../SherpaOnnx.h"
+#import "../core/SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 #include <mutex>
 #include <unordered_map>
