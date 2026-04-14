@@ -30,37 +30,29 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 ---
 
-## Default spool + crash-safe cleanup
+## Ring window vs spool persistence
 
-Live buffers use a rolling ring window for low-latency streaming. To preserve full history for long sessions (and avoid data loss outside the active window), spool persistence is enabled by default.
+Live buffers are **window-first streaming buffers**:
 
-When `persistencePath` is not provided, the SDK creates an auto-temp spool file in a dedicated cache subdirectory:
+- the active ring window is the primary read source for streaming consumers
+- old frames are dropped from active reads once they leave the window
+- no hidden full-history replay is implied by default behavior
 
-- `cache/sherpa_live_spool/` (platform-equivalent app cache path)
+### Default behavior (recommended baseline)
 
-### How to use it safely (step by step)
+- `createEmptyLiveAudioBuffer(...)` does **not** auto-create a spool file
+- reads and pipeline drains operate on the currently available ring window
+- this keeps disk usage predictable for long-running sessions
 
-1. **Create live buffer normally**
-   - `createEmptyLiveAudioBuffer({ sampleRate, ... })`
-   - no custom `persistencePath` required for default spool behavior.
+### When to enable spool explicitly
 
-2. **Run recording / streaming pipelines**
-   - mic, append, file ingest, enhancement, STT, etc.
-   - ring powers realtime consumers; spool preserves full history.
+Provide `persistencePath` when you need full-history retention beyond the active window, for example:
 
-3. **Finalize when stream ends**
-   - `await finalizeLiveAudioBuffer(live)`
-   - patches spool header and marks EOS.
+- creating an offline buffer from the full finalized session via `createOfflineAudioBufferFromLive('fullIfSpooled')`
+- exporting long recordings where early segments may have left the ring
+- post-processing workflows that must not lose pre-window audio
 
-4. **Release when done**
-   - `await releasePipelineAudioBuffer(live)`
-   - auto-temp spool files are deleted on release.
-
-5. **Cleanup orphaned auto-temp spools at startup (crash-safe)**
-   - call `cleanupAutoTempLiveSpools()` once on app launch.
-   - this helper only deletes SDK-owned files in `cache/sherpa_live_spool/`.
-
-If you provide your own `persistencePath`, that file is treated as user-managed and is not auto-deleted by release/cleanup helpers.
+Without spool, APIs working on live reads/snapshots are window-bounded by design.
 
 ---
 

@@ -1,134 +1,128 @@
 # PCM Player (Pipeline Audio Buffers)
 
-Play mono float audio from pipeline buffers (offline or live) via native audio backend.
+Play mono float audio from pipeline buffers (offline or live) via native audio backends.
 
-**Import:** `react-native-sherpa-onnx/pcm`
+Import from `react-native-sherpa-onnx/pcm`.
 
 ## Quick Start
 
-### Play offline buffer (file-based)
+### Offline buffer (file -> buffer -> player)
 
 ```ts
-import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 
 const audioBuffer = await createOfflineAudioBufferFromFile({
   kind: 'fs',
   path: '/path/to/audio.wav',
 });
-const player = await createPcmPlayer(audioBuffer);
+
+const player = await createPcmPlayer(audioBuffer, {
+  onEnded: (e) => {
+    console.log('Playback ended', e.playerId, e.bufferId);
+  },
+});
 
 await player.pause();
+await player.seekToMs(1200);
 await player.resume();
+await player.restart();
+const posMs = await player.getPlaybackPositionMs();
+console.log('Position', posMs);
 await player.destroy();
 ```
 
-### Play live buffer (streaming)
+### Live buffer (streaming append/finalize)
 
 ```ts
-import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   createEmptyLiveAudioBuffer,
   appendSamplesToLiveAudioBuffer,
   finalizeLiveAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-
-const audioBuffer = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
-const player = await createPcmPlayer(audioBuffer);
-
-// Append samples from your source
-appendSamplesToLiveAudioBuffer(audioBuffer, myFloat32Samples, 22050);
-// ... continue feeding ...
-
-// Playback starts immediately as samples are appended.
-// Finalize only signals end-of-stream (EOS).
-await finalizeLiveAudioBuffer(audioBuffer);
-
-await player.pause();
-await player.resume();
-await player.destroy();
-```
-
-### Play TTS-generated audio (pipeline model)
-
-```ts
-import { createIncrementalStreamingTTS } from 'react-native-sherpa-onnx/tts';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
-const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
-const tts = await createIncrementalStreamingTTS({
-  source: {
-    engineOptions: { modelPath: { type: 'asset', path: 'models/vits' } },
+const live = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
+const player = await createPcmPlayer(live, {
+  onEnded: () => {
+    // Fired only after live buffer is finalized and playback reaches true EOF.
   },
 });
 
-const session = await tts.startSession(audioOut);
-session.pushText('Hello from streaming TTS.');
-await session.flush();
+appendSamplesToLiveAudioBuffer(live, myFloat32Chunk, 22050);
+appendSamplesToLiveAudioBuffer(live, myFloat32Chunk2, 22050);
 
-// TTS writes to audioOut automatically
-// Create player to play it
-const player = await createPcmPlayer(audioOut);
-
-// ... Pause/resume/destroy as needed ...
-await player.destroy();
-await tts.destroy();
+// Marks EOS for the source, does not destroy the player.
+await finalizeLiveAudioBuffer(live);
 ```
-
-## Architecture
-
-The PCM Player plays audio from **pipeline buffers**:
-- **Offline buffer**: fully populated, immutable audio (file-based)
-- **Live buffer**: streaming, mutable audio with append/finalize API
-
-Audio is streamed **directly from native buffer→native playback** — no JS bridge traffic for audio samples.
 
 ## API Reference
 
 ### `createPcmPlayer(audioBuffer, options?)`
 
-Creates a player session. Returns `PcmPlayer`.
+Creates and starts a native playback session that consumes from a pipeline audio buffer.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| string` | required | Buffer ref or ID |
-| `options?.volume` | `number` | `1.0` | Volume scale [0, 1] |
-
-Prefer passing refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.
+| `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| OfflineBufferHandle \| LiveBufferHandle \| string` | required | Buffer ref/handle or raw `bufferId` |
+| `options.volume` | `number` | `1.0` | Volume scale in range `[0, 1]` |
+| `options.onEnded` | `(event: { playerId: string; bufferId: string }) => void` | `undefined` | Called once when playback run reaches EOF |
 
 ### `PcmPlayer`
 
 | Method | Description |
 |--------|-------------|
-| `pause()` | Pause playback. Buffered samples are retained. |
+| `pause()` | Pause playback. Buffered data remains intact. |
 | `resume()` | Resume paused playback. |
-| `destroy()` | Stop + release resources. |
+| `seekToMs(positionMs)` | Seek to position in milliseconds. |
+| `restart()` | Restart playback from the beginning/start-of-available. |
+| `getPlaybackPositionMs()` | Return current playback position in milliseconds. |
+| `destroy()` | Stop playback and release native resources. |
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `playerId` | `string` | Unique player identifier |
 
-### Buffer sources
+## Playback Semantics
 
-The player accepts **any pipeline audio buffer**:
-- **OfflineAudioBufferRef**: File-based buffers from `createOfflineAudioBufferFromFile`
-- **LiveAudioBufferRef**: Streaming buffers from `createEmptyLiveAudioBuffer`
-- **String**: Raw buffer ID (`off_…` or `live_…`)
+### Offline buffer
 
-## Platform details
+- `seekToMs(positionMs)` is clamped to `[0, durationMs]`.
+- Seeking to exact EOF is valid and may lead to immediate `onEnded` when resumed.
+- `onEnded` fires once per playback run.
+- `restart()` resets to beginning and clears ended-state.
+
+### Live buffer
+
+- While recording, seek is only valid inside the currently retained ring window.
+- Out-of-range seek rejects with `PCM_PLAYER_SEEK_OUT_OF_RANGE`.
+- `onEnded` does not fire while recording.
+- `onEnded` fires after `finalizeLiveAudioBuffer(...)` and true EOF is reached.
+- `restart()` seeks to oldest currently available retained sample.
+
+## Error Codes
+
+Common player errors:
+
+- `PCM_PLAYER_NOT_FOUND`
+- `PCM_PLAYER_INVALID_STATE`
+- `PCM_PLAYER_SEEK_OUT_OF_RANGE`
+- `PCM_PLAYER_BUFFER_NOT_FOUND`
+- `PCM_PLAYER_BUFFER_INCOMPATIBLE_STATE`
+
+## Architecture Notes
+
+PCM player reads directly from native pipeline buffers; PCM sample data is not marshaled through JS during playback.
 
 | | Android | iOS |
 |---|---------|-----|
-| Audio backend | `AudioTrack` (pipeline buffer consumer) | `AVAudioEngine` + `AVAudioPlayerNode` (pipeline buffer consumer) |
-| Category | `USAGE_MEDIA` / `CONTENT_TYPE_SPEECH` | `AVAudioSessionCategoryPlayback` |
-| Native playback | Cursor-based draining from ring buffer | Cursor-based draining from ring buffer |
+| Backend | `AudioTrack` | `AVAudioEngine` + `AVAudioPlayerNode` |
+| EOS signaling | Drain + playback-head completion | Scheduled-buffer completion callbacks |
+| Live playback | Cursor-based ring-buffer draining | Cursor-based ring-buffer draining |
 
-## See also
+## See Also
 
 - [Pipeline Audio Buffers — Overview](audiobuffer.md)
 - [Offline Audio Buffers](audiobuffer-offline.md)
 - [Live / Streaming Audio Buffers](audiobuffer-streaming.md)
-- [Incremental Streaming TTS](../tts/incremental.md)
-
-- [migration.md](migration.md) — migrating from old PCM player API
+- [Migration guide](migration.md)

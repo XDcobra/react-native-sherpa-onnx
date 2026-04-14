@@ -22,68 +22,84 @@ All model-language data and helpers live under **`react-native-sherpa-onnx/model
 
 ## Standalone PCM player (replacing TTS-bound player)
 
-The PCM player is no longer attached to `StreamingTtsEngine`. Use `createPcmPlayer` from `react-native-sherpa-onnx/pcm` for manual feed, or `playback: true` on streaming options for native playback.
+The PCM player is no longer attached to `StreamingTtsEngine`. It now plays from pipeline audio buffers (offline/live) and exposes full player controls (`pause`, `resume`, `seekToMs`, `restart`, `getPlaybackPositionMs`, `destroy`).
 
 ### Removed methods
 
 | Removed from `StreamingTtsEngine` | Replacement |
 |-----------------------------------|-------------|
-| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer({ sampleRate, feed: 'js' })` or `{ playback: true }` stream option |
-| `writePcmChunk(samples)` | `player.writePcmChunk(samples)` |
+| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer(audioBuffer, options?)` |
+| `writePcmChunk(samples)` | `appendSamplesToLiveAudioBuffer(liveBuffer, samples, sampleRate)` |
 | `stopPcmPlayer()` | `player.destroy()` |
 
 ### TurboModule renames
 
 | Before | After |
 |--------|-------|
-| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, sampleRate, channels, feed, ttsInstanceId)` |
-| `writeTtsPcmChunk(instanceId, samples)` | `writePcmChunk(playerId, samples)` |
+| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, bufferId, volume)` |
+| `writeTtsPcmChunk(instanceId, samples)` | `appendSamplesToLiveAudioBuffer(...)` + live buffer cursor playback |
 | `stopTtsPcmPlayer(instanceId)` | `destroyPcmPlayer(playerId)` |
+
+Additional player controls:
+
+| New native method | Purpose |
+|-------------------|---------|
+| `seekPcmPlayerToMs(playerId, positionMs)` | Seek by milliseconds |
+| `restartPcmPlayer(playerId)` | Restart playback from beginning/start-of-available |
+| `getPcmPlayerPositionMs(playerId)` | Query current playback position |
 
 ### Before / After
 
-**Streaming + playback (preferred: native playback):**
+**Streaming + playback (native):**
 
 ```ts
 // Before
 await tts.startPcmPlayer(22050, 1);
 await tts.generateSpeechStream(text, opts, {
-  onChunk: (c) => tts.writePcmChunk(c.samples),
+  onChunk: (c) => {
+    // manual PCM push to deprecated TTS-bound player
+  },
   onEnd: () => tts.stopPcmPlayer(),
 });
 
-// After (native playback)
-const ctrl = await tts.generateSpeechStream(text, opts, {
-  onEnd: () => { /* done */ },
-}, { playback: true, emitChunks: false });
+// After (pipeline live buffer + standalone player)
+const liveAudio = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
+const player = await createPcmPlayer(liveAudio, {
+  onEnded: () => {
+    /* playback reached EOS */
+  },
+});
 
-// Pause / resume during playback:
-await ctrl.player?.pause();
-await ctrl.player?.resume();
-// ctrl.cancel() stops synthesis + destroys player
+await tts.generateSpeechStream(text, opts, {
+  onChunk: (c) => appendSamplesToLiveAudioBuffer(liveAudio, c.samples, c.sampleRate),
+  onEnd: async () => {
+    await finalizeLiveAudioBuffer(liveAudio);
+  },
+});
+
+await player.pause();
+await player.seekToMs(500);
+await player.resume();
 ```
 
-**Manual JS feed (non-TTS audio):**
+**Offline file playback with full controls:**
 
 ```ts
-// Before: not possible (PCM player was TTS-only)
-
-// After
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
-const player = await createPcmPlayer({ sampleRate: 16000, feed: 'js' });
-await player.writePcmChunk(someFloat32Samples);
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
+
+const audio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/input.wav',
+});
+
+const player = await createPcmPlayer(audio, {
+  onEnded: ({ playerId, bufferId }) => console.log(playerId, bufferId),
+});
+
+await player.seekToMs(1200);
+await player.restart();
 await player.destroy();
-```
-
-**Batch TTS playback (new):**
-
-```ts
-const audio = await tts.generateSpeech('Hello');
-const playback = await tts.playFromSink(audio.generation);
-// playback.player gives pause/resume/destroy control
-await playback.player.pause();
-await playback.player.resume();
-await playback.player.destroy();
 ```
 
 See [pcm-player.md](pcm-player.md) for standalone player details.
@@ -97,16 +113,16 @@ Streaming chunk payloads now deliver PCM as **`Float32Array`** instead of `numbe
 | Before | After |
 | --- | --- |
 | `chunk.samples` is `number[]` | `chunk.samples` is `Float32Array` |
-| `writePcmChunk(samples: number[])` | `writePcmChunk(samples: Float32Array \| number[])` |
+| Manual `number[]` processing | Typed-array-first (`Float32Array`) processing |
 
 ### Migration
 
-**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to `writePcmChunk` or another consumer that accepts `Float32Array`:
+**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to a `Float32Array` consumer (for example `appendSamplesToLiveAudioBuffer`):
 
 ```ts
 onChunk: (chunk) => {
-  // chunk.samples is now Float32Array — works directly
-  void tts.writePcmChunk(chunk.samples);
+  // chunk.samples is now Float32Array
+  appendSamplesToLiveAudioBuffer(liveAudioBuffer, chunk.samples, chunk.sampleRate);
 },
 ```
 

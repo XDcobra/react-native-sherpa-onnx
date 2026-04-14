@@ -1,5 +1,16 @@
 # PCM Player full-control high-level plan
 
+## Status (April 2026)
+
+Implemented.
+
+- `onEnded` event is wired end-to-end (`pcmPlayerEnded` native event -> JS callback).
+- `seekToMs`, `restart`, and `getPlaybackPositionMs` are available in the public `PcmPlayer` API.
+- Android and iOS native player backends support seek/restart semantics for offline and live buffers.
+- Example TTS playback in the app uses `createPcmPlayer(...)` from pipeline buffers.
+
+Note: `audioFileWebPlayback.ts` and `react-native-audio-api` still exist for non-TTS example screens.
+
 ## Purpose
 
 Extend the pipeline PCM player so it can replace file-based playback helpers in the example app and provide full playback controls:
@@ -184,9 +195,8 @@ Add player-specific error codes (JS + native alignment), for example:
 
 ### Phase 4 — example migration
 
-- replace `react-native-audio-api` playback helpers with PCM player usage
-- remove `audioFileWebPlayback.ts`
-- remove `react-native-audio-api` dependency from example app
+- migrate TTS example playback helpers to PCM player usage (done)
+- `audioFileWebPlayback.ts` and `react-native-audio-api` remain for STT/Enhancement screens
 
 ---
 
@@ -209,14 +219,14 @@ Native:
 
 ## Validation checklist
 
-- [ ] Offline playback triggers `onEnded` exactly once
-- [ ] Live recording playback never triggers `onEnded` before finalize
-- [ ] Live finalized playback triggers `onEnded` at true EOF
-- [ ] `seekToMs(0)` works for offline and finalized live
-- [ ] out-of-range seek on live recording fails with explicit code
-- [ ] `restart()` works from paused/playing/ended states
-- [ ] no memory leaks from event subscriptions after `destroy()`
-- [ ] example app playback works without `react-native-audio-api`
+- [x] Offline playback triggers `onEnded` exactly once
+- [x] Live recording playback never triggers `onEnded` before finalize
+- [x] Live finalized playback triggers `onEnded` at true EOF
+- [x] `seekToMs(0)` works for offline and finalized live
+- [x] out-of-range seek on live recording fails with explicit code
+- [x] `restart()` works from paused/playing/ended states
+- [x] no memory leaks from event subscriptions after `destroy()`
+- [ ] example app playback works without `react-native-audio-api` (still pending for STT/Enhancement screens)
 
 ---
 
