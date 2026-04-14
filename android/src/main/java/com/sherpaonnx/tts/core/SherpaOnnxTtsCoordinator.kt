@@ -20,9 +20,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
-/**
- * Thin coordinator: wires TTS services and preserves the public API previously on [SherpaOnnxTtsHelper].
- */
+/** Thin coordinator that wires TTS services behind module-facing facades. */
 internal class SherpaOnnxTtsCoordinator(
   context: ReactApplicationContext,
   detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,

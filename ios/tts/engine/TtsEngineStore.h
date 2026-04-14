@@ -9,7 +9,6 @@
 
 #include "native/sherpa-onnx-tts-wrapper.h"
 #include <atomic>
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -51,8 +50,6 @@ struct BatchPcmSink {
 
 struct TtsInstanceState {
     std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
-    std::atomic<bool> streamRunning{false};
-    std::atomic<bool> streamCancelled{false};
     __strong NSString *modelDir = nil;
     __strong NSString *modelType = nil;
     int32_t numThreads = 2;
@@ -72,4 +69,3 @@ struct TtsInstanceState {
 
 extern std::unordered_map<std::string, std::shared_ptr<TtsInstanceState>> g_tts_instances;
 extern std::mutex g_tts_mutex;
-extern std::condition_variable g_tts_stream_cv;

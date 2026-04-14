@@ -21,7 +21,7 @@ import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
-import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
+import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
@@ -82,7 +82,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
     }
   }
-  private val ttsHelper = SherpaOnnxTtsHelper(
+  private val ttsHelper = SherpaOnnxTtsCoordinator(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
   )

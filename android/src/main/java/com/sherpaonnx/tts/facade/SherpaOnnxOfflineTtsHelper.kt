@@ -2,14 +2,14 @@ package com.sherpaonnx.tts.facade
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
+import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 
 /**
  * Offline/batch-facing TTS facade.
- * Delegates to [SherpaOnnxTtsCoordinator] (see [SherpaOnnxTtsHelper] typealias).
+ * Delegates to [SherpaOnnxTtsCoordinator].
  */
 internal class SherpaOnnxOfflineTtsHelper(
-  private val core: SherpaOnnxTtsHelper
+  private val core: SherpaOnnxTtsCoordinator
 ) {
   fun updateTtsParams(
     instanceId: String,
