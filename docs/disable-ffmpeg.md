@@ -1,9 +1,9 @@
 # Disabling FFmpeg (Android & iOS)
 
-By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt FFmpeg binaries (`FFmpeg.xcframework` for iOS and `.so` libs for Android) to provide built-in audio conversion features for pipeline buffers.
+By default, the `react-native-sherpa-onnx` SDK includes and links prebuilt FFmpeg binaries (`FFmpeg.xcframework` for iOS and `.so` libs for Android) to provide built-in audio save and transcoding features.
 
 You can explicitly **disable FFmpeg** in this SDK if you want to:
-1. **Reduce App Size:** Omit FFmpeg binaries if you do not use conversion helpers (`convertAudioToWav16k`, `convertAudioToFormat`).
+1. **Reduce App Size:** Omit FFmpeg binaries if you do not use audio save helpers (`saveAudioAsWav16k`, `saveAudioAsFile`).
 2. **Prevent Symbol Clashes:** Avoid duplicate native symbols if another native module or library in your app already ships its own FFmpeg (e.g. `react-native-sound-api` or `ffmpeg-kit-react-native`). Having two copies of FFmpeg in the same process can cause runtime crashes or undefined behavior.
 
 ## How to disable FFmpeg
@@ -45,18 +45,18 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 
 | API | Description |
 |-----|-------------|
-| **`convertAudioToWav16k(input, outputPath)`** | Converts an offline/finalized live buffer to WAV 16 kHz mono 16-bit PCM. Without FFmpeg, rejects at runtime. |
-| **`convertAudioToFormat(input, outputPath, format, outputSampleRateHz?)`** | Converts an offline/finalized live buffer to the requested output format. Without FFmpeg, rejects at runtime. |
+| **`saveAudioAsWav16k(input, output)`** | Saves a buffer or `FileSource` as 16 kHz mono WAV. Builds without FFmpeg may reject when a backend path requires FFmpeg. |
+| **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
 
 The helpers above are exposed from **`react-native-sherpa-onnx/audio`**. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
 
 ## Risks and limitations of disabling FFmpeg
 
-1. **No built-in audio conversion**  
-   You must not call `convertAudioToWav16k` or `convertAudioToFormat` when FFmpeg is disabled, or handle the rejection gracefully.
+1. **No built-in FFmpeg-backed transcoding**  
+   You must not call `saveAudioAsFile` for formats that require FFmpeg when FFmpeg is disabled, or you must handle the rejection gracefully.
 
 2. **No runtime use of “the other” FFmpeg**  
-   Disabling FFmpeg here means this SDK’s native code is **compiled without** FFmpeg; the conversion helpers are stubbed and always return an error. The SDK does **not** call into another app’s FFmpeg. So you avoid symbol clashes by simply not using FFmpeg in this SDK at all; you do not get “shared” FFmpeg behavior.
+   Disabling FFmpeg here means this SDK’s native code is **compiled without** FFmpeg support. The SDK does **not** call into another app’s FFmpeg. So you avoid symbol clashes by simply not using FFmpeg in this SDK at all; you do not get “shared” FFmpeg behavior.
 
 3. **No version/ABI coupling**  
    Because this SDK no longer links or uses any FFmpeg when disabled, there is no risk of ABI or version mismatch with another FFmpeg in the process. You can safely have both this SDK (with FFmpeg disabled) and e.g. `ffmpeg-kit-react-native` (with its own FFmpeg) in the same app.
@@ -65,5 +65,5 @@ The helpers above are exposed from **`react-native-sherpa-onnx/audio`**. STT, ar
 
 | Setting | Effect |
 |--------|--------|
-| **Android:** `sherpaOnnxDisableFfmpeg=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_FFMPEG=1 pod install` | No FFmpeg linked or shipped. `convertAudioToWav16k` / `convertAudioToFormat` reject at runtime. Use to reduce app size or when you have another FFmpeg in the app to avoid symbol clashes. |
-| **Default (Flag unset / false)** | FFmpeg is required and bundled automatically. Conversion APIs work out of the box. Do not combine with another FFmpeg in the same process unless you accept the risk of symbol clashes. |
+| **Android:** `sherpaOnnxDisableFfmpeg=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_FFMPEG=1 pod install` | No FFmpeg linked or shipped. `saveAudioAsFile` rejects for FFmpeg-backed formats. Use to reduce app size or when you have another FFmpeg in the app to avoid symbol clashes. |
+| **Default (Flag unset / false)** | FFmpeg is bundled automatically. Audio save APIs work for all documented formats. Do not combine with another FFmpeg in the same process unless you accept the risk of symbol clashes. |

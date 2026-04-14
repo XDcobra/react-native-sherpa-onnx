@@ -9,7 +9,7 @@ On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as a
 import { createTTS, detectTtsModel, ... } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ import {
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
 
@@ -57,7 +57,7 @@ const info = await getPipelineAudioBufferInfo(audioBuf);
 console.log(info.numSamples, info.sampleRate); // e.g. 44100, 22050
 
 // Step 5: save to WAV
-await convertAudioToFormat(audioBuf, '/path/to/output.wav', 'wav');
+await saveAudioAsFile(audioBuf, { kind: 'fs', path: '/path/to/output.wav' }, 'wav');
 
 // Step 6: release buffers (free native memory)
 await releasePipelineTextBuffer(textBuf);
@@ -122,7 +122,7 @@ const textBuf = await createOfflineTextBufferFromText(inputText);
 const audioBuf = await createEmptyOfflineAudioBuffer(modelSampleRate);
 try {
   await tts.synthesize(textBuf, audioBuf);
-  await convertAudioToFormat(audioBuf, outputPath, 'wav');
+  await saveAudioAsFile(audioBuf, { kind: 'fs', path: outputPath }, 'wav');
 } finally {
   await releasePipelineTextBuffer(textBuf).catch(() => {});
   await releasePipelineAudioBuffer(audioBuf).catch(() => {});
@@ -266,14 +266,19 @@ const buf = await createEmptyOfflineAudioBuffer(22050);
 
 ### Convert output buffer to file
 
-Use conversion helpers from `react-native-sherpa-onnx/audio`:
+Use audio save helpers from `react-native-sherpa-onnx/audio`:
 
 ```ts
-import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile, saveAudioAsWav16k } from 'react-native-sherpa-onnx/audio';
 
-await convertAudioToFormat(audioBuf, `${DocumentDirectoryPath}/speech.wav`, 'wav');
-await convertAudioToFormat(audioBuf, `${DocumentDirectoryPath}/speech.mp3`, 'mp3', 44100);
-await convertAudioToWav16k(audioBuf, `${DocumentDirectoryPath}/speech_16k.wav`);
+await saveAudioAsFile(audioBuf, { kind: 'fs', path: `${DocumentDirectoryPath}/speech.wav` }, 'wav');
+await saveAudioAsFile(
+  audioBuf,
+  { kind: 'fs', path: `${DocumentDirectoryPath}/speech.mp3` },
+  'mp3',
+  { outputSampleRateHz: 44100 }
+);
+await saveAudioAsWav16k(audioBuf, { kind: 'fs', path: `${DocumentDirectoryPath}/speech_16k.wav` });
 ```
 
 ### `createOfflineAudioBufferFromFile(source, options?)`

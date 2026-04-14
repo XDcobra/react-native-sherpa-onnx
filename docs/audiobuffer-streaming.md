@@ -30,6 +30,40 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 ---
 
+## Default spool + crash-safe cleanup
+
+Live buffers use a rolling ring window for low-latency streaming. To preserve full history for long sessions (and avoid data loss outside the active window), spool persistence is enabled by default.
+
+When `persistencePath` is not provided, the SDK creates an auto-temp spool file in a dedicated cache subdirectory:
+
+- `cache/sherpa_live_spool/` (platform-equivalent app cache path)
+
+### How to use it safely (step by step)
+
+1. **Create live buffer normally**
+   - `createEmptyLiveAudioBuffer({ sampleRate, ... })`
+   - no custom `persistencePath` required for default spool behavior.
+
+2. **Run recording / streaming pipelines**
+   - mic, append, file ingest, enhancement, STT, etc.
+   - ring powers realtime consumers; spool preserves full history.
+
+3. **Finalize when stream ends**
+   - `await finalizeLiveAudioBuffer(live)`
+   - patches spool header and marks EOS.
+
+4. **Release when done**
+   - `await releasePipelineAudioBuffer(live)`
+   - auto-temp spool files are deleted on release.
+
+5. **Cleanup orphaned auto-temp spools at startup (crash-safe)**
+   - call `cleanupAutoTempLiveSpools()` once on app launch.
+   - this helper only deletes SDK-owned files in `cache/sherpa_live_spool/`.
+
+If you provide your own `persistencePath`, that file is treated as user-managed and is not auto-deleted by release/cleanup helpers.
+
+---
+
 ## Quick start: live mic + streaming STT (pipeline path)
 
 ```typescript
@@ -339,11 +373,13 @@ const chunk = getLiveAudioBufferSamplesSlice(live, 0, 320);
 After `finalizeLiveAudioBuffer`, use `react-native-sherpa-onnx/audio`:
 
 ```ts
-import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile, saveAudioAsWav16k } from 'react-native-sherpa-onnx/audio';
 
 await finalizeLiveAudioBuffer(live);
-await convertAudioToFormat(live, '/tmp/live.opus', 'opus', 16000);
-await convertAudioToWav16k(live, '/tmp/live_16k.wav');
+await saveAudioAsFile(live, { kind: 'fs', path: '/tmp/live.opus' }, 'opus', {
+  outputSampleRateHz: 16000,
+});
+await saveAudioAsWav16k(live, { kind: 'fs', path: '/tmp/live_16k.wav' });
 ```
 
 ### Conversion: Online buffer <--> Offline buffer

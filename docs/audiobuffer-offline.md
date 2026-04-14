@@ -165,14 +165,14 @@ Only in-memory offline buffers are supported. File-backed buffers throw `BUFFER_
 
 #### Convert offline buffer to file
 
-Use the audio conversion module for all output formats, including WAV:
+Use the audio save module for all output formats, including WAV:
 
 ```ts
-import { convertAudioToFormat, convertAudioToWav16k } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile, saveAudioAsWav16k } from 'react-native-sherpa-onnx/audio';
 
-await convertAudioToFormat(offline, { kind: 'fs', path: '/tmp/offline.wav' }, 'wav');
-await convertAudioToWav16k(offline, { kind: 'fs', path: '/tmp/offline_16k.wav' });
-await convertAudioToFormat(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac');
+await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.wav' }, 'wav');
+await saveAudioAsWav16k(offline, { kind: 'fs', path: '/tmp/offline_16k.wav' });
+await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac');
 ```
 
 ### Conversion: Offline buffer <--> Online buffer

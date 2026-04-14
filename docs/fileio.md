@@ -198,7 +198,7 @@ Error codes thrown by file I/O operations:
 `FileSource` and `FileDestination` are also accepted by:
 
 - [`createOfflineAudioBufferFromFile(source)`](audiobuffer-offline.md) — decode audio from any source
-- [`convertAudioToFormat(input, output, format, options?)`](audio-conversion.md) — encode audio to any destination
+- [`saveAudioAsFile(input, output, format, options?)`](audio-conversion.md) — save audio to any destination
 
 ## Related
 

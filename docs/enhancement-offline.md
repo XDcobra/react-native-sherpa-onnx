@@ -52,7 +52,7 @@ import {
   createEmptyOfflineAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { type: 'file' as const, path: '/absolute/path/to/enhancement-model-dir' };
 
@@ -78,7 +78,7 @@ try {
   await enhancement.enhance(audioIn, audioOut);
 
   // Save denoised audio to WAV
-  await convertAudioToFormat(audioOut, '/absolute/path/out.wav', 'wav');
+  await saveAudioAsFile(audioOut, { kind: 'fs', path: '/absolute/path/out.wav' }, 'wav');
 
   // Release buffers
   await releasePipelineAudioBuffer(audioIn);
@@ -96,7 +96,7 @@ try {
 | --- | --- |
 | **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
 | **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
-| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `convertAudioToFormat(...)`. |
+| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
 
 ---
 
@@ -192,7 +192,7 @@ await enhancement.enhance(audioIn, audioOut);
 
 - **`audioIn`:** populated **`OfflineAudioBuffer`** (file-backed or RAM); must be **mono** at a rate the denoiser accepts.
 - **`audioOut`:** **empty** offline buffer with **`sampleRate`** matching the denoiser's rate (from **`getSampleRate()`**).
-- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `convertAudioToFormat(...)`.
+- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
 
 ---
 
@@ -242,7 +242,7 @@ import {
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
 See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
