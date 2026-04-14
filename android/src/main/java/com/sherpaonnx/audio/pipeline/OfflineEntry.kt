@@ -2,6 +2,7 @@ package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import java.io.Closeable
 
 /**
  * Offline audio buffer entry in the pipeline registry.
@@ -28,6 +29,9 @@ sealed class OfflineEntry {
     map.putDouble("durationMs", durationMs)
     return map
   }
+
+  /** Optional hook for releasing resources owned by this entry. */
+  open fun releaseResources() {}
 
   /**
    * In-memory buffer. All samples are held in a FloatArray on the heap.
@@ -78,7 +82,29 @@ sealed class OfflineEntry {
     val filePath: String,
     val metadata: FileBackedMetadata
   ) : OfflineEntry() {
+    @Volatile
+    private var retainedResource: Closeable? = null
+
     override val numSamples: Int get() = metadata.numSamples
+
+    @Synchronized
+    fun retainResource(resource: Closeable) {
+      retainedResource?.close()
+      retainedResource = resource
+    }
+
+    override fun releaseResources() {
+      val toClose = synchronized(this) {
+        val current = retainedResource
+        retainedResource = null
+        current
+      }
+      try {
+        toClose?.close()
+      } catch (_: Exception) {
+        // Ignore cleanup failures
+      }
+    }
   }
 
   /**

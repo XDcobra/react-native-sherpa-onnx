@@ -1,11 +1,12 @@
 package com.sherpaonnx.fileio
 
 import android.net.Uri
-import android.provider.DocumentsContract
+import android.os.ParcelFileDescriptor
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import java.io.Closeable
 import java.io.File
+import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -15,11 +16,25 @@ import java.io.OutputStream
  */
 internal class FileIOResolver(private val context: ReactApplicationContext) {
 
+  enum class WriteMode {
+    SEQUENTIAL,
+    SEEKABLE,
+  }
+
   /** Resolved read handle. Caller must close. */
   sealed class ReadHandle : Closeable {
     /** Local file — can be passed to APIs that require a path. */
     class FilePath(val file: File) : ReadHandle() {
       override fun close() {}
+    }
+
+    /** Seekable file descriptor path (e.g. /proc/self/fd/<n>). */
+    class FileDescriptor(
+      val pfd: ParcelFileDescriptor,
+      val fdPath: String,
+      val length: Long?,
+    ) : ReadHandle() {
+      override fun close() = pfd.close()
     }
 
     /** Content stream — for streaming reads (no random access). */
@@ -33,6 +48,15 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     /** Local file path. */
     class FilePath(val file: File) : WriteHandle() {
       override fun close() {}
+    }
+
+    /** Seekable file descriptor path (e.g. /proc/self/fd/<n>). */
+    class FileDescriptor(
+      val pfd: ParcelFileDescriptor,
+      val fdPath: String,
+      val resultUri: Uri,
+    ) : WriteHandle() {
+      override fun close() = pfd.close()
     }
 
     /** SAF output stream — for streaming writes. */
@@ -74,26 +98,34 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'uri' in contentUri source")
         val uri = Uri.parse(uriStr)
         val resolver = context.contentResolver
-        val inputStream = try {
-          resolver.openInputStream(uri)
+        val knownLength = queryContentLength(uri)
+
+        var fdSecurityException: SecurityException? = null
+        val pfd = try {
+          resolver.openFileDescriptor(uri, "r")
         } catch (e: SecurityException) {
-          throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-        } ?: throw FileIOException(FileIOErrorCodes.NOT_FOUND, "Cannot open input stream for URI: $uriStr")
+          fdSecurityException = e
+          null
+        } catch (_: Exception) {
+          null
+        }
 
-        // Try to get content length
-        var length: Long? = null
-        try {
-          resolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-              val idx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-              if (idx >= 0 && !cursor.isNull(idx)) {
-                length = cursor.getLong(idx)
-              }
-            }
-          }
-        } catch (_: Exception) { /* ignore */ }
+        if (pfd != null) {
+          val fdLength = pfd.statSize.takeIf { it >= 0 } ?: knownLength
+          ReadHandle.FileDescriptor(
+            pfd = pfd,
+            fdPath = "/proc/self/fd/${pfd.fd}",
+            length = fdLength,
+          )
+        } else {
+          val inputStream = try {
+            resolver.openInputStream(uri)
+          } catch (e: SecurityException) {
+            throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", fdSecurityException ?: e)
+          } ?: throw FileIOException(FileIOErrorCodes.NOT_FOUND, "Cannot open input stream for URI: $uriStr")
 
-        ReadHandle.Stream(inputStream, length)
+          ReadHandle.Stream(inputStream, knownLength)
+        }
       }
 
       "securityScoped" -> throw FileIOException(
@@ -129,6 +161,7 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
 
   fun resolveDestination(
     destination: ReadableMap,
+    mode: WriteMode = WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
   ): WriteHandle {
@@ -169,12 +202,36 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'uri' in contentUri destination")
         val uri = Uri.parse(uriStr)
         val resolver = context.contentResolver
-        val outputStream = try {
-          resolver.openOutputStream(uri, "w")
-        } catch (e: SecurityException) {
-          throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
-        WriteHandle.Stream(outputStream, uri)
+
+        if (mode == WriteMode.SEEKABLE) {
+          val pfd = try {
+            resolver.openFileDescriptor(uri, "rw")
+          } catch (_: Exception) {
+            null
+          }
+
+          if (pfd != null) {
+            WriteHandle.FileDescriptor(
+              pfd = pfd,
+              fdPath = "/proc/self/fd/${pfd.fd}",
+              resultUri = uri,
+            )
+          } else {
+            val outputStream = try {
+              resolver.openOutputStream(uri, "w")
+            } catch (e: SecurityException) {
+              throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
+            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
+            WriteHandle.Stream(outputStream, uri)
+          }
+        } else {
+          val outputStream = try {
+            resolver.openOutputStream(uri, "w")
+          } catch (e: SecurityException) {
+            throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
+          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
+          WriteHandle.Stream(outputStream, uri)
+        }
       }
 
       "contentTree" -> {
@@ -195,12 +252,35 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Failed to create document in tree: ${e.message}", e)
         }
 
-        val outputStream = try {
-          resolver.openOutputStream(docUri, "w")
-        } catch (e: Exception) {
-          throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
-        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
-        WriteHandle.Stream(outputStream, docUri)
+        if (mode == WriteMode.SEEKABLE) {
+          val pfd = try {
+            resolver.openFileDescriptor(docUri, "rw")
+          } catch (_: Exception) {
+            null
+          }
+
+          if (pfd != null) {
+            WriteHandle.FileDescriptor(
+              pfd = pfd,
+              fdPath = "/proc/self/fd/${pfd.fd}",
+              resultUri = docUri,
+            )
+          } else {
+            val outputStream = try {
+              resolver.openOutputStream(docUri, "w")
+            } catch (e: Exception) {
+              throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
+            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
+            WriteHandle.Stream(outputStream, docUri)
+          }
+        } else {
+          val outputStream = try {
+            resolver.openOutputStream(docUri, "w")
+          } catch (e: Exception) {
+            throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
+          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
+          WriteHandle.Stream(outputStream, docUri)
+        }
       }
 
       "securityScoped" -> throw FileIOException(
@@ -223,6 +303,17 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     val handle = resolveSource(source)
     return when (handle) {
       is ReadHandle.FilePath -> handle.file
+      is ReadHandle.FileDescriptor -> {
+        handle.use { h ->
+          val tmpFile = File(context.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
+          FileInputStream(h.pfd.fileDescriptor).use { input ->
+            tmpFile.outputStream().use { out ->
+              input.copyTo(out, 65536)
+            }
+          }
+          tmpFile
+        }
+      }
       is ReadHandle.Stream -> {
         handle.use { h ->
           val tmpFile = File(context.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
@@ -250,5 +341,23 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "Path escapes base directory")
     }
     return resolved
+  }
+
+  private fun queryContentLength(uri: Uri): Long? {
+    val resolver = context.contentResolver
+    return try {
+      var length: Long? = null
+      resolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+          val idx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+          if (idx >= 0 && !cursor.isNull(idx)) {
+            length = cursor.getLong(idx)
+          }
+        }
+      }
+      length
+    } catch (_: Exception) {
+      null
+    }
   }
 }

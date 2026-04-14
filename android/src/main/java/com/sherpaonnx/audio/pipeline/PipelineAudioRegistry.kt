@@ -5,6 +5,7 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.WaveReader
 import java.io.File
+import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -322,12 +323,33 @@ object PipelineAudioRegistry {
    * Release any buffer (offline or live).
    */
   fun release(bufferId: String): Boolean {
-    offlineEntries.remove(bufferId)?.let { return true }
+    offlineEntries.remove(bufferId)?.let {
+      it.releaseResources()
+      return true
+    }
     liveEntries.remove(bufferId)?.let {
       it.release()
       return true
     }
     return false
+  }
+
+  /**
+   * Attach a retained resource to an offline file-backed entry.
+   * The resource is released automatically when the buffer is released.
+   */
+  fun attachOfflineRetainedResource(bufferId: String, resource: Closeable) {
+    val entry = offlineEntries[bufferId]
+      ?: run {
+        resource.close()
+        throw IllegalArgumentException("Offline buffer not found: $bufferId")
+      }
+
+    if (entry is OfflineEntry.FileBacked) {
+      entry.retainResource(resource)
+    } else {
+      resource.close()
+    }
   }
 
   // ==================== Accessors for pipeline stages ====================
@@ -383,6 +405,7 @@ object PipelineAudioRegistry {
   fun clear() {
     liveEntries.values.forEach { it.release() }
     liveEntries.clear()
+    offlineEntries.values.forEach { it.releaseResources() }
     offlineEntries.clear()
   }
 

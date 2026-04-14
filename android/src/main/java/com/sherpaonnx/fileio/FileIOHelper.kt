@@ -11,6 +11,8 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.OutputStream
 
 /**
  * Android file I/O helper implementing copyFile, saveText, shareFile, cancelFileIO.
@@ -32,10 +34,57 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     val cancelFlag = FileIOStreamCopy.registerOperation(operationId)
     try {
       val readHandle = resolver.resolveSource(source)
-      val writeHandle = resolver.resolveDestination(destination, overwrite, createParentDirectories)
+      val writeHandle = resolver.resolveDestination(
+        destination = destination,
+        mode = FileIOResolver.WriteMode.SEQUENTIAL,
+        overwrite = overwrite,
+        createParentDirectories = createParentDirectories,
+      )
 
       readHandle.use { rh ->
         writeHandle.use { wh ->
+          fun copyFromReadHandleToOutput(output: OutputStream): Long {
+            return when (rh) {
+              is FileIOResolver.ReadHandle.FilePath -> {
+                val totalBytes = rh.file.length()
+                FileInputStream(rh.file).use { input ->
+                  FileIOStreamCopy.copy(
+                    input,
+                    output,
+                    totalBytes,
+                    cancelFlag,
+                  ) { transferred, total, percent ->
+                    emitProgress(operationId, transferred, total, percent)
+                  }
+                }
+              }
+              is FileIOResolver.ReadHandle.FileDescriptor -> {
+                val totalBytes = rh.length ?: 0L
+                FileInputStream(rh.pfd.fileDescriptor).use { input ->
+                  FileIOStreamCopy.copy(
+                    input,
+                    output,
+                    totalBytes,
+                    cancelFlag,
+                  ) { transferred, total, percent ->
+                    emitProgress(operationId, transferred, total, percent)
+                  }
+                }
+              }
+              is FileIOResolver.ReadHandle.Stream -> {
+                val totalBytes = rh.length ?: 0L
+                FileIOStreamCopy.copy(
+                  rh.inputStream,
+                  output,
+                  totalBytes,
+                  cancelFlag,
+                ) { transferred, total, percent ->
+                  emitProgress(operationId, transferred, total, percent)
+                }
+              }
+            }
+          }
+
           val bytesCopied: Long
           val outputKind: String
           val outputPath: String
@@ -44,54 +93,21 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
             is FileIOResolver.WriteHandle.FilePath -> {
               outputKind = "fs"
               outputPath = wh.file.absolutePath
-              when (rh) {
-                is FileIOResolver.ReadHandle.FilePath -> {
-                  val totalBytes = rh.file.length()
-                  FileInputStream(rh.file).use { input ->
-                    wh.file.outputStream().use { output ->
-                      bytesCopied = FileIOStreamCopy.copy(
-                        input, output, totalBytes, cancelFlag
-                      ) { transferred, total, percent ->
-                        emitProgress(operationId, transferred, total, percent)
-                      }
-                    }
-                  }
-                }
-                is FileIOResolver.ReadHandle.Stream -> {
-                  val totalBytes = rh.length ?: 0L
-                  wh.file.outputStream().use { output ->
-                    bytesCopied = FileIOStreamCopy.copy(
-                      rh.inputStream, output, totalBytes, cancelFlag
-                    ) { transferred, total, percent ->
-                      emitProgress(operationId, transferred, total, percent)
-                    }
-                  }
-                }
+              wh.file.outputStream().use { output ->
+                bytesCopied = copyFromReadHandleToOutput(output)
+              }
+            }
+            is FileIOResolver.WriteHandle.FileDescriptor -> {
+              outputKind = "contentUri"
+              outputPath = wh.resultUri.toString()
+              FileOutputStream(wh.pfd.fileDescriptor).use { output ->
+                bytesCopied = copyFromReadHandleToOutput(output)
               }
             }
             is FileIOResolver.WriteHandle.Stream -> {
               outputKind = "contentUri"
               outputPath = wh.resultUri.toString()
-              when (rh) {
-                is FileIOResolver.ReadHandle.FilePath -> {
-                  val totalBytes = rh.file.length()
-                  FileInputStream(rh.file).use { input ->
-                    bytesCopied = FileIOStreamCopy.copy(
-                      input, wh.outputStream, totalBytes, cancelFlag
-                    ) { transferred, total, percent ->
-                      emitProgress(operationId, transferred, total, percent)
-                    }
-                  }
-                }
-                is FileIOResolver.ReadHandle.Stream -> {
-                  val totalBytes = rh.length ?: 0L
-                  bytesCopied = FileIOStreamCopy.copy(
-                    rh.inputStream, wh.outputStream, totalBytes, cancelFlag
-                  ) { transferred, total, percent ->
-                    emitProgress(operationId, transferred, total, percent)
-                  }
-                }
-              }
+              bytesCopied = copyFromReadHandleToOutput(wh.outputStream)
             }
           }
 
@@ -121,7 +137,12 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     promise: Promise,
   ) {
     try {
-      val writeHandle = resolver.resolveDestination(destination, overwrite, createParentDirectories = false)
+      val writeHandle = resolver.resolveDestination(
+        destination = destination,
+        mode = FileIOResolver.WriteMode.SEQUENTIAL,
+        overwrite = overwrite,
+        createParentDirectories = false,
+      )
       writeHandle.use { wh ->
         val outputKind: String
         val outputPath: String
@@ -132,6 +153,14 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
             outputKind = "fs"
             outputPath = wh.file.absolutePath
             wh.file.writeBytes(bytes)
+          }
+          is FileIOResolver.WriteHandle.FileDescriptor -> {
+            outputKind = "contentUri"
+            outputPath = wh.resultUri.toString()
+            FileOutputStream(wh.pfd.fileDescriptor).use { out ->
+              out.write(bytes)
+              out.flush()
+            }
           }
           is FileIOResolver.WriteHandle.Stream -> {
             outputKind = "contentUri"
@@ -168,6 +197,17 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
           readHandle.close()
           val authority = context.packageName + ".fileprovider"
           FileProvider.getUriForFile(context, authority, readHandle.file)
+        }
+        is FileIOResolver.ReadHandle.FileDescriptor -> {
+          readHandle.close()
+          val sourceKind = source.getString("kind")
+          if (sourceKind == "contentUri") {
+            Uri.parse(source.getString("uri")!!)
+          } else {
+            val tmpFile = resolver.resolveSourceToFilePath(source)
+            val authority = context.packageName + ".fileprovider"
+            FileProvider.getUriForFile(context, authority, tmpFile)
+          }
         }
         is FileIOResolver.ReadHandle.Stream -> {
           readHandle.close()
@@ -223,9 +263,16 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
    */
   fun resolveDestination(
     destination: ReadableMap,
+    mode: FileIOResolver.WriteMode = FileIOResolver.WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
-  ): FileIOResolver.WriteHandle = resolver.resolveDestination(destination, overwrite, createParentDirectories)
+  ): FileIOResolver.WriteHandle = resolver.resolveDestination(destination, mode, overwrite, createParentDirectories)
+
+  /**
+   * Resolve a FileSource to a ReadHandle.
+   * Used by audio buffer import to support direct fd-backed reads.
+   */
+  fun resolveSource(source: ReadableMap): FileIOResolver.ReadHandle = resolver.resolveSource(source)
 
   private fun emitProgress(operationId: String, bytesTransferred: Long, totalBytes: Long, percent: Int) {
     try {

@@ -605,19 +605,61 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   // ==================== Pipeline Audio Buffers ====================
 
   override fun createOfflineAudioBufferFromSource(source: ReadableMap, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
+    var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+    var tmpFile: File? = null
+    var readHandleTransferred = false
+    var tmpFileRetentionTransferred = false
+
     try {
-      // Resolve FileSource to a local file path (copies content:// streams to temp if needed)
-      val file = fileIOHelper.resolveSourceToFilePath(source)
+      // Resolve FileSource; contentUri prefers fd-backed access.
+      readHandle = fileIOHelper.resolveSource(source)
+
+      val sourcePath = when (val handle = readHandle) {
+        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
+        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
+        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
+          val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
+          tmp.outputStream().use { out ->
+            handle.inputStream.copyTo(out, 65536)
+          }
+          tmpFile = tmp
+          tmp.absolutePath
+        }
+        null -> throw IllegalStateException("Resolved read handle is null")
+      }
+
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFile(
-        file.absolutePath,
+        sourcePath,
         targetSampleRateHz?.toInt(),
         forceMono
       )
-      // Clean up temp file if it was created for a stream source
-      val kind = source.getString("kind")
-      if (kind == "contentUri" && file.absolutePath.startsWith(reactApplicationContext.cacheDir.absolutePath + "/fileio_tmp_")) {
-        file.delete()
+
+      // If the offline entry is file-backed by a transient source, transfer ownership so
+      // resources stay valid until releasePipelineAudioBuffer() is called.
+      if (entry is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked && entry.filePath == sourcePath) {
+        when (val handle = readHandle) {
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
+            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.attachOfflineRetainedResource(
+              entry.bufferId,
+              handle,
+            )
+            readHandleTransferred = true
+          }
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream,
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath,
+          null -> {
+            val tmp = tmpFile
+            if (tmp != null) {
+              com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.attachOfflineRetainedResource(
+                entry.bufferId,
+                java.io.Closeable { if (tmp.exists()) tmp.delete() },
+              )
+              tmpFileRetentionTransferred = true
+            }
+          }
+        }
       }
+
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       promise.reject(e.code, e.message, e)
@@ -625,6 +667,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    } finally {
+      if (!readHandleTransferred) {
+        try {
+          readHandle?.close()
+        } catch (_: Exception) {
+          // Ignore close failures
+        }
+      }
+
+      if (!tmpFileRetentionTransferred) {
+        try {
+          tmpFile?.delete()
+        } catch (_: Exception) {
+          // Ignore cleanup failures
+        }
+      }
     }
   }
 
@@ -797,54 +855,64 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       return
     }
 
+    var writeHandle: com.sherpaonnx.fileio.FileIOResolver.WriteHandle? = null
+    var tmpFile: File? = null
+
     try {
-      // Resolve destination to determine output path
-      val writeHandle = fileIOHelper.resolveDestination(destination, overwrite = true, createParentDirectories = false)
+      // Prefer seekable destination handles for direct FFmpeg output.
+      writeHandle = fileIOHelper.resolveDestination(
+        destination = destination,
+        mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
+        overwrite = true,
+        createParentDirectories = false,
+      )
+
       val outputPath: String
       val outputKind: String
-      var tmpPath: String? = null
+      val resolvedOutputPath: String
 
-      when (writeHandle) {
+      when (val handle = writeHandle) {
         is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FilePath -> {
-          outputPath = writeHandle.file.absolutePath
+          outputPath = handle.file.absolutePath
           outputKind = "fs"
+          resolvedOutputPath = handle.file.absolutePath
+        }
+        is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
+          outputPath = handle.fdPath
+          outputKind = "contentUri"
+          resolvedOutputPath = handle.resultUri.toString()
         }
         is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
-          // For stream destinations, encode to temp file then copy
-          tmpPath = java.io.File(reactApplicationContext.cacheDir, "fileio_conv_${java.util.UUID.randomUUID()}.$fmt").absolutePath
-          outputPath = tmpPath
+          // Edge fallback for providers that cannot supply seekable fds.
+          val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_conv_${java.util.UUID.randomUUID()}.$fmt")
+          tmpFile = fallbackTmp
+          outputPath = fallbackTmp.absolutePath
           outputKind = "contentUri"
+          resolvedOutputPath = handle.resultUri.toString()
         }
+        null -> throw RuntimeException("Resolved write handle is null")
       }
 
-      // Perform conversion to local path
       if (bufferId.startsWith("off_")) {
         convertOfflineBuffer(bufferId, outputPath, fmt, rate)
       } else if (bufferId.startsWith("live_")) {
         convertLiveBuffer(bufferId, outputPath, fmt, rate)
       } else {
-        writeHandle.close()
-        promise.reject("CONVERSION_INVALID_ARGUMENT", "Invalid buffer ID prefix: expected off_ or live_")
-        return
+        throw IllegalArgumentException("Invalid buffer ID prefix: expected off_ or live_")
       }
 
-      // If we used a temp path, copy to the stream destination
-      val finalPath: String
-      if (tmpPath != null && writeHandle is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream) {
-        java.io.FileInputStream(java.io.File(tmpPath)).use { input ->
-          com.sherpaonnx.fileio.FileIOStreamCopy.copy(input, writeHandle.outputStream)
+      // Fallback stream destinations still require temp-file copy.
+      if (tmpFile != null) {
+        val streamHandle = writeHandle as? com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream
+          ?: throw RuntimeException("Expected stream write handle for temp-file fallback")
+        java.io.FileInputStream(tmpFile).use { input ->
+          com.sherpaonnx.fileio.FileIOStreamCopy.copy(input, streamHandle.outputStream)
         }
-        writeHandle.close()
-        java.io.File(tmpPath).delete()
-        finalPath = writeHandle.resultUri.toString()
-      } else {
-        writeHandle.close()
-        finalPath = outputPath
       }
 
       val result = com.facebook.react.bridge.Arguments.createMap().apply {
         putString("outputKind", outputKind)
-        putString("outputPath", if (tmpPath != null) (writeHandle as? com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream)?.resultUri?.toString() ?: finalPath else finalPath)
+        putString("outputPath", resolvedOutputPath)
       }
       promise.resolve(result)
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
@@ -854,9 +922,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         "CONVERSION_BUFFER_EMPTY" else "CONVERSION_BUFFER_NOT_FOUND"
       promise.reject(code, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject("CONVERSION_BUFFER_NOT_FINALIZED", e.message, e)
+      if (e.message?.contains("finalized", ignoreCase = true) == true) {
+        promise.reject("CONVERSION_BUFFER_NOT_FINALIZED", e.message, e)
+      } else {
+        promise.reject("CONVERSION_CONVERT_ERROR", e.message, e)
+      }
     } catch (e: Exception) {
       promise.reject("CONVERSION_CONVERT_ERROR", e.message, e)
+    } finally {
+      try {
+        writeHandle?.close()
+      } catch (_: Exception) {
+        // Ignore close failures
+      }
+
+      try {
+        tmpFile?.delete()
+      } catch (_: Exception) {
+        // Ignore cleanup failures
+      }
     }
   }
 
