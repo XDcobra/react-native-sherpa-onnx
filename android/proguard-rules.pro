@@ -8,3 +8,7 @@
 
 # ORT Java bridge: loaded via JNI from libonnxruntime4j_jni.so.
 -keep class ai.onnxruntime.** { *; }
+
+# JSI/JNI audio buffer bridge: C++ resolves class + method names via JNI lookup.
+-keep class com.sherpaonnx.SherpaOnnxModule { *; }
+-keep class com.sherpaonnx.audio.pipeline.PipelineAudioRegistry { *; }
