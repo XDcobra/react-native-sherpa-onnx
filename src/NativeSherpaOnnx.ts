@@ -189,14 +189,18 @@ export interface Spec extends TurboModule {
   // ==================== Pipeline Audio Buffers ====================
 
   /**
-   * Create an offline audio buffer from a FileSource.
+   * Decode an audio file into an offline audio buffer.
+   * Uses AudioDecodeSession (FFmpeg + WAV fast path).
    * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
-   * Small files are loaded into memory; large files (>10 MB) stay file-backed.
+   * @param targetSampleRateHz - 0 = keep source rate
+   * @param forceMono - true = downmix to mono
+   * @param operationId - For progress events + cancellation
    */
-  createOfflineAudioBufferFromSource(
+  decodeFileToOfflineBuffer(
     source: Object,
-    targetSampleRateHz?: number,
-    forceMono?: boolean
+    targetSampleRateHz: number,
+    forceMono: boolean,
+    operationId: string
   ): Promise<{
     bufferId: string;
     kind: string;
@@ -245,7 +249,7 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Create a live audio buffer with a rolling-window ring buffer.
+   * Create an empty live audio buffer with a rolling-window ring buffer.
    * @param options.sampleRate - Sample rate in Hz.
    * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.persistencePath - Optional file path for WAV spool.
@@ -253,7 +257,7 @@ export interface Spec extends TurboModule {
    * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
    * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
    */
-  createLiveAudioBuffer(options: {
+  createEmptyLiveAudioBuffer(options: {
     sampleRate: number;
     channelCount?: number;
     windowSeconds?: number;
@@ -323,6 +327,30 @@ export interface Spec extends TurboModule {
    * Stop microphone capture to a live audio buffer.
    */
   stopMicToLiveAudioBuffer(): Promise<void>;
+
+  // ==================== File Ingest to Live Buffer ====================
+
+  /** Start streaming file decode into an existing live buffer. */
+  startFileIngestToLiveBuffer(
+    liveBufferId: string,
+    source: Object,
+    targetSampleRateHz: number,
+    forceMono: boolean,
+    autoFinalize: boolean,
+    operationId: string
+  ): Promise<{ ingestId: string }>;
+
+  /** Query file ingest status. */
+  getFileIngestStatus(ingestId: string): Promise<{
+    isRunning: boolean;
+    framesIngested: number;
+    totalFramesEstimate: number;
+    percent: number;
+    error?: string;
+  }>;
+
+  /** Cancel a running decode operation (offline or ingest). */
+  cancelDecode(operationId: string): Promise<void>;
 
   // ==================== Pipeline Text Buffers ====================
 

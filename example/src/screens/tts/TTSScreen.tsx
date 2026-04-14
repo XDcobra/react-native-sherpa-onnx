@@ -29,7 +29,7 @@ import type {
 import {
   createEmptyOfflineAudioBuffer,
   createOfflineAudioBufferFromFile,
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromLive,
   finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
@@ -1031,7 +1031,7 @@ export default function TTSScreen() {
 
       // Create a live audio buffer for streaming output
       const sr = modelInfo?.sampleRate ?? 16000;
-      const liveAudioBuf = await createLiveAudioBuffer({
+      const liveAudioBuf = await createEmptyLiveAudioBuffer({
         sampleRate: sr,
         channelCount: 1,
         emitAppendedEvents: true,

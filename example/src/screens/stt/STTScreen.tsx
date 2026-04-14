@@ -47,7 +47,7 @@ import {
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createLiveAudioBuffer,
+  createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromFile,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
@@ -698,7 +698,7 @@ export default function STTScreen() {
       });
       streamingEngineRef.current = engine;
 
-      const liveAudioBuffer = await createLiveAudioBuffer({
+      const liveAudioBuffer = await createEmptyLiveAudioBuffer({
         sampleRate: LIVE_SAMPLE_RATE,
         channelCount: 1,
         windowSeconds: 120,

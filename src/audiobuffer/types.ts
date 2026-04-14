@@ -41,7 +41,7 @@ export interface OfflineAudioBufferRef {
 }
 
 /**
- * Strongly-typed reference returned by `createLiveAudioBuffer` (recording state).
+ * Strongly-typed reference returned by `createEmptyLiveAudioBuffer` (recording state).
  * Includes metadata, branded recording handle, and event unsubscribe.
  */
 export interface LiveAudioBufferRef {
@@ -138,6 +138,7 @@ export type LiveBufferAppendSource =
   | 'mic'
   | 'append'
   | 'append_offline'
+  | 'file_ingest'
   | 'enhancement'
   | 'tts'
   | 'unknown'
@@ -166,8 +167,8 @@ export interface LiveAudioBufferCallbacks {
 
 // ========== Creation Options ==========
 
-/** Options for creating a live audio buffer. */
-export interface CreateLiveAudioBufferOptions {
+/** Options for creating an empty live audio buffer. */
+export interface CreateEmptyLiveAudioBufferOptions {
   /** Sample rate in Hz (e.g. 16000, 44100). */
   sampleRate: number;
   /** Number of channels. Only 1 (mono) is supported. */
@@ -218,3 +219,145 @@ export const PipelineAudioErrorCode = {
 
 export type PipelineAudioErrorCodeValue =
   (typeof PipelineAudioErrorCode)[keyof typeof PipelineAudioErrorCode];
+
+// ========== Audio Decode Types ==========
+
+/** Options for decoding an audio file into a pipeline buffer. */
+export interface AudioDecodeOptions {
+  /**
+   * Target sample rate in Hz. If omitted or 0, keeps the source file's native sample rate.
+   * When specified, FFmpeg SwrContext resamples during decode (no second pass).
+   */
+  targetSampleRateHz?: number;
+
+  /**
+   * Force mono downmix. Default: true.
+   * When true and source is stereo/multi-channel, downmixed during decode.
+   */
+  forceMono?: boolean;
+
+  /**
+   * Cancel the decode operation. When aborted, already-decoded data is retained
+   * (offline: promise rejects; live: buffer stays recording with partial data).
+   */
+  signal?: AbortSignal;
+
+  /**
+   * Progress callback. Fired periodically during decode.
+   * `percent` is always provided (estimated from file size when container
+   * does not declare duration).
+   */
+  onProgress?: (event: DecodeProgressEvent) => void;
+}
+
+/** Progress event emitted during audio file decode. */
+export interface DecodeProgressEvent {
+  /** Number of output frames decoded so far. */
+  framesDecoded: number;
+  /**
+   * Estimated total output frames. Exact when container provides duration,
+   * estimated from file size and bitrate otherwise.
+   */
+  totalFramesEstimate: number;
+  /** Progress 0–100. Always provided (estimated when exact value unavailable). */
+  percent: number;
+  /** Source file's original sample rate (before resampling). */
+  sourceSampleRate: number;
+  /** Source file's original channel count (before downmix). */
+  sourceChannels: number;
+}
+
+// ========== File Ingest Types (Live Buffer) ==========
+
+/**
+ * Handle for a running file ingest operation on a live buffer.
+ * Returned by `ingestFileToLiveAudioBuffer`.
+ */
+export interface FileIngestHandle {
+  /** Unique ingest operation id (native-generated). */
+  readonly ingestId: string;
+
+  /** The live buffer being ingested into. */
+  readonly liveBufferId: string;
+
+  /**
+   * Promise that resolves when ingest completes (all chunks decoded and appended).
+   * Rejects on decode error or cancellation.
+   */
+  readonly done: Promise<FileIngestResult>;
+
+  /**
+   * Cancel the ingest. Already-appended samples are retained.
+   * Buffer stays in `recording` state. Equivalent to aborting the signal.
+   */
+  cancel(): void;
+
+  /** Query ingest status. Non-blocking. */
+  getStatus(): Promise<FileIngestStatus>;
+}
+
+/** Result returned when file ingest completes successfully. */
+export interface FileIngestResult {
+  /** Total frames appended to the live buffer from this ingest. */
+  totalFramesIngested: number;
+  /** Source file's original sample rate. */
+  sourceSampleRate: number;
+  /** Source file's original channel count. */
+  sourceChannels: number;
+  /** Whether the buffer was auto-finalized after ingest. */
+  autoFinalized: boolean;
+}
+
+/** Status snapshot of a running file ingest operation. */
+export interface FileIngestStatus {
+  /** Whether the ingest is still running. */
+  isRunning: boolean;
+  /** Frames decoded and appended so far. */
+  framesIngested: number;
+  /** Estimated total frames (same semantics as DecodeProgressEvent). */
+  totalFramesEstimate: number;
+  /** Progress 0–100. */
+  percent: number;
+  /** Error message if ingest failed (undefined while running or on success). */
+  error?: string;
+}
+
+/** Options for `ingestFileToLiveAudioBuffer`. */
+export interface FileIngestOptions extends AudioDecodeOptions {
+  /**
+   * Automatically finalize the live buffer when file ingest completes.
+   * Default: `false`.
+   *
+   * When false, the buffer stays in `recording` state after ingest,
+   * allowing further appends (more files, mic, samples).
+   * When true, the buffer transitions to `finished` after the last chunk.
+   */
+  autoFinalize?: boolean;
+}
+
+// ========== Decode Error Codes ==========
+
+/** Error codes for audio decode operations (DECODE_* family). */
+export const DecodeErrorCode = {
+  /** File not found or fd invalid. */
+  NOT_FOUND: 'DECODE_NOT_FOUND',
+  /** FFmpeg could not open/probe the input (unsupported or corrupted container). */
+  OPEN_FAILED: 'DECODE_OPEN_FAILED',
+  /** No audio stream found in container. */
+  NO_AUDIO_STREAM: 'DECODE_NO_AUDIO_STREAM',
+  /** Decoder initialization failed (unsupported codec). */
+  CODEC_UNSUPPORTED: 'DECODE_CODEC_UNSUPPORTED',
+  /** Error during decode loop (corrupted frames, read error). */
+  DECODE_ERROR: 'DECODE_DECODE_ERROR',
+  /** Resampling/downmix configuration failed. */
+  RESAMPLE_ERROR: 'DECODE_RESAMPLE_ERROR',
+  /** Operation cancelled via AbortSignal. */
+  CANCELLED: 'DECODE_CANCELLED',
+  /** Permission denied accessing the source. */
+  PERMISSION_DENIED: 'DECODE_PERMISSION_DENIED',
+  /** Generic internal decode error. */
+  INTERNAL_ERROR: 'DECODE_INTERNAL_ERROR',
+} as const;
+
+export type DecodeErrorCodeValue =
+  (typeof DecodeErrorCode)[keyof typeof DecodeErrorCode];

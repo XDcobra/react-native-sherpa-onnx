@@ -33,7 +33,7 @@ import type {
   LiveAudioBufferIdSource,
   PipelineAudioBufferIdSource,
   LiveAudioBufferRecordingSource,
-  CreateLiveAudioBufferOptions,
+  CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
   LiveAudioBufferCallbacks,
@@ -46,6 +46,8 @@ const getNative = (): Spec =>
 
 const AUDIO_BUFFER_ID_PATTERN =
   /^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+let opIdCounter = 0;
 
 function createInvalidAudioBufferIdError(
   sourceName: string,
@@ -167,6 +169,7 @@ function ensureLiveEventSubscriptions(): void {
           rawEvent.source === 'mic' ||
           rawEvent.source === 'append' ||
           rawEvent.source === 'append_offline' ||
+          rawEvent.source === 'file_ingest' ||
           rawEvent.source === 'mixed' ||
           rawEvent.source === 'unknown'
             ? rawEvent.source
@@ -298,29 +301,78 @@ export function subscribeLiveAudioBufferEvents(
 // ==================== Offline Audio Buffer ====================
 
 /**
- * Create an offline audio buffer from an audio file.
- * Small files are loaded into memory; large files (>10 MB) stay file-backed.
+ * Decode an audio file into an immutable offline pipeline buffer.
  *
- * The native resolver handles all FileSource kinds:
- * - fs/app: direct file access
- * - contentUri: Android ContentResolver stream → temp file → decode
- * - securityScoped: iOS security-scoped URL access → decode
- * - pad: PAD path resolution → decode
+ * Accepts any audio format supported by FFmpeg (wav, mp3, flac, aac, opus, ogg, etc.).
+ * Format is auto-detected from file content (no format hint needed).
  *
- * Single TurboModule call. No JS-side file copying.
+ * Small files (<10 MB decoded PCM) are stored in memory.
+ * Large files are file-backed (streaming reader, no full memory load).
+ *
+ * File source resolution uses the fileio resolver for all FileSource kinds.
+ * Decode + resample + downmix happen in a single native pass (FFmpeg + SwrContext).
+ *
+ * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
+ * @param options - Decode options (sample rate, mono, cancellation, progress).
+ * @returns Immutable offline buffer reference.
  */
 export async function createOfflineAudioBufferFromFile(
   source: import('../fileio/types').FileSource,
-  targetSampleRateHz?: number,
-  forceMono?: boolean
+  options?: import('./types').AudioDecodeOptions
 ): Promise<OfflineAudioBufferRef> {
-  const result = await getNative().createOfflineAudioBufferFromSource(
-    source as any,
-    targetSampleRateHz,
-    forceMono
-  );
-  const info = result as unknown as OfflineAudioBufferInfo;
-  return { info, bufferId: info.bufferId as OfflineBufferHandle };
+  const operationId = `decode_${Date.now()}_${++opIdCounter}`;
+  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const forceMono = options?.forceMono ?? true;
+
+  let progressSubscription: NativeSubscription | null = null;
+  let abortHandler: (() => void) | null = null;
+
+  try {
+    if (options?.onProgress) {
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+      const onProgress = options.onProgress;
+      progressSubscription = emitter.addListener(
+        'decodeProgress',
+        (event: any) => {
+          if (event?.operationId === operationId) {
+            onProgress({
+              framesDecoded: event.framesDecoded,
+              totalFramesEstimate: event.totalFramesEstimate,
+              percent: event.percent,
+              sourceSampleRate: event.sourceSampleRate,
+              sourceChannels: event.sourceChannels,
+            });
+          }
+        }
+      );
+    }
+
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        throw Object.assign(new Error('Operation cancelled'), {
+          code: 'DECODE_CANCELLED',
+        });
+      }
+      abortHandler = () => {
+        getNative().cancelDecode(operationId);
+      };
+      options.signal.addEventListener('abort', abortHandler);
+    }
+
+    const result = await getNative().decodeFileToOfflineBuffer(
+      source as any,
+      targetSampleRateHz,
+      forceMono,
+      operationId
+    );
+    const info = result as unknown as OfflineAudioBufferInfo;
+    return { info, bufferId: info.bufferId as OfflineBufferHandle };
+  } finally {
+    progressSubscription?.remove();
+    if (abortHandler && options?.signal) {
+      options.signal.removeEventListener('abort', abortHandler);
+    }
+  }
 }
 
 /**
@@ -391,8 +443,8 @@ export async function createEmptyOfflineAudioBuffer(
 /**
  * Create a live audio buffer with a rolling-window ring buffer.
  */
-export async function createLiveAudioBuffer(
-  options: CreateLiveAudioBufferOptions
+export async function createEmptyLiveAudioBuffer(
+  options: CreateEmptyLiveAudioBufferOptions
 ): Promise<LiveAudioBufferRef> {
   const {
     onFramesAppended,
@@ -404,7 +456,7 @@ export async function createLiveAudioBuffer(
   const nativeEmitAppendedEvents =
     emitAppendedEvents ?? Boolean(onFramesAppended);
 
-  const result = await getNative().createLiveAudioBuffer({
+  const result = await getNative().createEmptyLiveAudioBuffer({
     sampleRate: options.sampleRate,
     channelCount: options.channelCount,
     windowSeconds: options.windowSeconds,
@@ -559,6 +611,134 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
   await getNative().stopMicToLiveAudioBuffer();
 }
 
+// ==================== File Ingest to Live Buffer ====================
+
+/**
+ * Decode an audio file and stream its PCM chunks into an existing live buffer.
+ *
+ * The live buffer must be in `recording` state. Chunks are appended as they
+ * are decoded — downstream pipeline consumers (STT, enhancement) can start
+ * processing before the file is fully decoded.
+ *
+ * Spool is automatically enabled for the duration of file ingest to prevent
+ * data loss (ring overwrite during fast decode).
+ *
+ * `onFramesAppended` fires per decoded chunk with `source: 'file_ingest'`.
+ *
+ * @param liveBuffer - Live buffer in recording state.
+ * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
+ * @param options - Decode + ingest options.
+ * @returns Handle to monitor/cancel the ingest operation.
+ */
+export async function ingestFileToLiveAudioBuffer(
+  liveBuffer: LiveAudioBufferRecordingSource,
+  source: import('../fileio/types').FileSource,
+  options?: import('./types').FileIngestOptions
+): Promise<import('./types').FileIngestHandle> {
+  const operationId = `ingest_${Date.now()}_${++opIdCounter}`;
+  const liveBufferId = resolveLiveAudioBufferId(liveBuffer);
+  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const forceMono = options?.forceMono ?? true;
+  const autoFinalize = options?.autoFinalize ?? false;
+
+  let progressSubscription: NativeSubscription | null = null;
+  let abortHandler: (() => void) | null = null;
+  const abortController = new AbortController();
+
+  if (options?.onProgress) {
+    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+    const onProgress = options.onProgress;
+    progressSubscription = emitter.addListener(
+      'decodeProgress',
+      (event: any) => {
+        if (event?.operationId === operationId) {
+          onProgress({
+            framesDecoded: event.framesDecoded,
+            totalFramesEstimate: event.totalFramesEstimate,
+            percent: event.percent,
+            sourceSampleRate: event.sourceSampleRate,
+            sourceChannels: event.sourceChannels,
+          });
+        }
+      }
+    );
+  }
+
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      progressSubscription?.remove();
+      throw Object.assign(new Error('Operation cancelled'), {
+        code: 'DECODE_CANCELLED',
+      });
+    }
+    abortHandler = () => {
+      abortController.abort();
+      getNative().cancelDecode(operationId);
+    };
+    options.signal.addEventListener('abort', abortHandler);
+  }
+
+  const { ingestId } = await getNative().startFileIngestToLiveBuffer(
+    liveBufferId,
+    source as any,
+    targetSampleRateHz,
+    forceMono,
+    autoFinalize,
+    operationId
+  );
+
+  // The done promise listens for the native completion event
+  const done = new Promise<import('./types').FileIngestResult>(
+    (resolve, reject) => {
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+      const sub = emitter.addListener('decodeComplete', (event: any) => {
+        if (event?.operationId !== operationId) return;
+        sub.remove();
+        progressSubscription?.remove();
+        if (abortHandler && options?.signal) {
+          options.signal.removeEventListener('abort', abortHandler);
+        }
+        if (event.success) {
+          resolve({
+            totalFramesIngested: event.totalFramesIngested ?? 0,
+            sourceSampleRate: event.sourceSampleRate ?? 0,
+            sourceChannels: event.sourceChannels ?? 0,
+            autoFinalized: event.autoFinalized ?? false,
+          });
+        } else {
+          reject(
+            Object.assign(new Error(event.error ?? 'File ingest failed'), {
+              code: event.errorCode ?? 'DECODE_INTERNAL_ERROR',
+            })
+          );
+        }
+      });
+
+      // Also listen to abort
+      abortController.signal.addEventListener('abort', () => {
+        sub.remove();
+        progressSubscription?.remove();
+        reject(
+          Object.assign(new Error('Operation cancelled'), {
+            code: 'DECODE_CANCELLED',
+          })
+        );
+      });
+    }
+  );
+
+  return {
+    ingestId,
+    liveBufferId,
+    done,
+    cancel: () => {
+      abortController.abort();
+      getNative().cancelDecode(operationId);
+    },
+    getStatus: () => getNative().getFileIngestStatus(ingestId),
+  };
+}
+
 // ==================== Re-exports ====================
 
 export type {
@@ -579,7 +759,7 @@ export type {
   PipelineBufferKind,
   OfflineBufferState,
   LiveBufferState,
-  CreateLiveAudioBufferOptions,
+  CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
   LiveBufferAppendSource,
@@ -587,9 +767,16 @@ export type {
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferErrorEvent,
   PipelineAudioErrorCodeValue,
+  AudioDecodeOptions,
+  DecodeProgressEvent,
+  FileIngestHandle,
+  FileIngestResult,
+  FileIngestStatus,
+  FileIngestOptions,
+  DecodeErrorCodeValue,
 } from './types';
 
-export { PipelineAudioErrorCode } from './types';
+export { PipelineAudioErrorCode, DecodeErrorCode } from './types';
 export { isJSIAvailable } from './jsi';
 
 export type {

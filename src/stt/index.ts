@@ -134,7 +134,10 @@ export async function detectSttModel(
  * const stt = await createSTT({
  *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
  * });
- * const audio = await createOfflineAudioBufferFromFile('/path/to.wav');
+ * const audio = await createOfflineAudioBufferFromFile({
+ *   kind: 'fs',
+ *   path: '/path/to.wav',
+ * });
  * const textOut = await createEmptyOfflineTextBuffer();
  * await stt.transcribe(audio, textOut);
  * const text = await getOfflineTextBufferTextSlice(textOut, 0, 4096);
