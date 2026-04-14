@@ -109,6 +109,8 @@ set(SOURCES
     jni/audio/audio_convert_file.cpp
     jni/audio/audio_pcm_to_format.cpp
     jni/audio/audio_f32le_to_format.cpp
+    jni/audio/AudioDecodeSession.cpp
+    jni/audio/audio_decode_jni.cpp
     crypto/sha256.cpp
 )
 
