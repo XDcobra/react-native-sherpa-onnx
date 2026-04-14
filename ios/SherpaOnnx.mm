@@ -17,6 +17,10 @@
 #import "SherpaOnnx-Swift.h"
 #endif
 
+@interface SherpaOnnx (JSI)
+- (BOOL)autoInstallJSI;
+@end
+
 @implementation SherpaOnnx
 
 + (NSString *)moduleName
@@ -27,7 +31,16 @@
 - (instancetype)init
 {
     self = [super initWithDisabledObservation];
+    if (self) {
+        [self autoInstallJSI];
+    }
     return self;
+}
+
+- (void)setBridge:(RCTBridge *)bridge
+{
+    [super setBridge:bridge];
+    [self autoInstallJSI];
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:

@@ -108,13 +108,11 @@ struct PaLiveEntry {
 
   // Append events (JS callback)
   bool appendEventsEnabled = false;
-  bool appendEventsIncludeSamples = true;
   int appendEventMinIntervalMs = 0;
-  std::function<void(const std::string &, const std::vector<float> &, int, int64_t)> onFramesAppended;
+  std::function<void(const std::string &, int, int64_t)> onFramesAppended;
   std::mutex appendEventMutex;
   uint64_t lastAppendEventAtMs = 0;
   int pendingFrames = 0;
-  std::vector<float> pendingSamples;
   std::string pendingSource;
 
   // Token-based native append listener system for pipeline workers.
@@ -160,12 +158,10 @@ struct PaLiveEntry {
   PaLiveEntry(const std::string &bid, int sr, int ch, double windowSec,
               const std::string &spoolPathArg, bool spoolFloat,
               bool emitAppendedEvents,
-              bool emitAppendedSamples,
               int appendEventMinIntervalMsArg,
-              std::function<void(const std::string &, const std::vector<float> &, int, int64_t)> onFramesAppendedArg)
+              std::function<void(const std::string &, int, int64_t)> onFramesAppendedArg)
     : bufferId(bid), sampleRate(sr), channelCount(ch) {
     appendEventsEnabled = emitAppendedEvents;
-    appendEventsIncludeSamples = emitAppendedSamples;
     appendEventMinIntervalMs = std::max(0, appendEventMinIntervalMsArg);
     onFramesAppended = std::move(onFramesAppendedArg);
 
@@ -251,31 +247,25 @@ struct PaLiveEntry {
       spoolSamplesWritten += appendCount;
     }
 
-    dispatchFramesAppended(toAppend, appendCount, source);
+    dispatchFramesAppended(appendCount, source);
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
   }
 
-  void configureAppendEvents(bool enabled, bool includeSamples, int minIntervalMs) {
+  void configureAppendEvents(bool enabled, int minIntervalMs) {
     std::lock_guard<std::mutex> lock(appendEventMutex);
     appendEventsEnabled = enabled;
-    appendEventsIncludeSamples = includeSamples;
     appendEventMinIntervalMs = std::max(0, minIntervalMs);
     if (!appendEventsEnabled) {
       pendingFrames = 0;
-      pendingSamples.clear();
       pendingSource.clear();
-    }
-    if (!appendEventsIncludeSamples) {
-      pendingSamples.clear();
     }
   }
 
-  void dispatchFramesAppended(const float *appendedSamples, size_t appendedCount, const std::string &source) {
+  void dispatchFramesAppended(size_t appendedCount, const std::string &source) {
     if (!appendEventsEnabled || !onFramesAppended) return;
 
-    std::vector<float> samplesToEmit;
     std::string sourceToEmit;
     int frameCountToEmit = 0;
     int64_t totalWrittenToEmit = 0;
@@ -288,10 +278,6 @@ struct PaLiveEntry {
         pendingSource = source;
       } else if (pendingSource != source) {
         pendingSource = kPaAppendSourceMixed;
-      }
-
-      if (appendEventsIncludeSamples && appendedSamples != nullptr && appendedCount > 0) {
-        pendingSamples.insert(pendingSamples.end(), appendedSamples, appendedSamples + appendedCount);
       }
 
 #ifdef __OBJC__
@@ -307,9 +293,6 @@ struct PaLiveEntry {
         frameCountToEmit = pendingFrames;
         sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
         totalWrittenToEmit = totalSamplesWritten;
-        if (appendEventsIncludeSamples) {
-          samplesToEmit.swap(pendingSamples);
-        }
         pendingFrames = 0;
         pendingSource.clear();
         lastAppendEventAtMs = nowMs;
@@ -318,14 +301,13 @@ struct PaLiveEntry {
     }
 
     if (shouldEmit && onFramesAppended) {
-      onFramesAppended(sourceToEmit, samplesToEmit, frameCountToEmit, totalWrittenToEmit);
+      onFramesAppended(sourceToEmit, frameCountToEmit, totalWrittenToEmit);
     }
   }
 
   void flushPendingFramesAppended() {
     if (!appendEventsEnabled || !onFramesAppended) return;
 
-    std::vector<float> samplesToEmit;
     std::string sourceToEmit;
     int frameCountToEmit = 0;
     int64_t totalWrittenToEmit = 0;
@@ -337,9 +319,6 @@ struct PaLiveEntry {
       frameCountToEmit = pendingFrames;
       sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
       totalWrittenToEmit = totalSamplesWritten;
-      if (appendEventsIncludeSamples) {
-        samplesToEmit.swap(pendingSamples);
-      }
 
       pendingFrames = 0;
       pendingSource.clear();
@@ -348,7 +327,7 @@ struct PaLiveEntry {
 #endif
     }
 
-    onFramesAppended(sourceToEmit, samplesToEmit, frameCountToEmit, totalWrittenToEmit);
+    onFramesAppended(sourceToEmit, frameCountToEmit, totalWrittenToEmit);
   }
 
   void finalize_() {

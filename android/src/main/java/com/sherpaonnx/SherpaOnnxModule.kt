@@ -49,6 +49,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
+    tryInstallJsiBindings()
   }
 
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
@@ -77,6 +78,27 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
 
+  private external fun nativeInstallJSI(jsiRuntimePointer: Long, registry: Any): Boolean
+
+  private fun tryInstallJsiBindings(): Boolean {
+    return try {
+      val jsContextHolder = reactApplicationContext.javaScriptContextHolder ?: return false
+      val jsContext = jsContextHolder.get()
+      if (jsContext == 0L) {
+        false
+      } else {
+        nativeInstallJSI(jsContext, PipelineAudioRegistry)
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  override fun initialize() {
+    super.initialize()
+    tryInstallJsiBindings()
+  }
+
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
     val eventEmitter = reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -86,12 +108,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     payload.putInt("sampleRate", event.sampleRate)
     payload.putInt("frameCount", event.frameCount)
     payload.putDouble("totalSamplesWritten", event.totalSamplesWritten.toDouble())
-    event.samples?.let { samples ->
-      val arr = Arguments.createArray()
-      for (s in samples) arr.pushDouble(s.toDouble())
-      payload.putArray("samples", arr)
-    }
     eventEmitter.emit("pipelineLiveAudioChunk", payload)
+  }
+
+  override fun installJSI(): Boolean {
+    return tryInstallJsiBindings()
   }
 
   override fun getName(): String {
@@ -686,22 +707,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun createOfflineAudioBufferFromSamples(samples: ReadableArray, sampleRate: Double, channelCount: Double?, promise: Promise) {
-    try {
-      val floats = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.readableArrayToFloatArray(samples)
-      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromSamples(
-        floats,
-        sampleRate.toInt(),
-        channelCount?.toInt() ?: 1
-      )
-      promise.resolve(entry.toWritableMap())
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
-    }
-  }
-
   override fun createOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
     try {
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromLive(
@@ -740,8 +745,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val emitAppendedEvents =
         options.hasKey("emitAppendedEvents") && !options.isNull("emitAppendedEvents") && options.getBoolean("emitAppendedEvents")
-      val emitAppendedSamples =
-        !options.hasKey("emitAppendedSamples") || options.isNull("emitAppendedSamples") || options.getBoolean("emitAppendedSamples")
       val appendEventMinIntervalMs =
         if (options.hasKey("appendEventMinIntervalMs") && !options.isNull("appendEventMinIntervalMs")) {
           options.getDouble("appendEventMinIntervalMs").toInt().coerceAtLeast(0)
@@ -766,7 +769,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         persistence = persistence,
         appendEventConfig = com.sherpaonnx.audio.pipeline.LiveAppendEventConfig(
           enabled = emitAppendedEvents,
-          includeSamples = emitAppendedSamples,
           minIntervalMs = appendEventMinIntervalMs,
         ),
         onFramesAppended = { event ->
@@ -776,25 +778,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
-    }
-  }
-
-  override fun appendSamplesToLiveAudioBuffer(liveBufferId: String, samples: ReadableArray, sampleRate: Double, promise: Promise) {
-    try {
-      val floats = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.readableArrayToFloatArray(samples)
-      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.appendSamplesToLive(
-        liveBufferId,
-        floats,
-        sampleRate.toInt(),
-        com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_APPEND,
-      )
-      promise.resolve(null)
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
-    } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -997,23 +980,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
-  override fun getLiveAudioBufferSamplesSlice(liveBufferId: String, startFrame: Double, frameCount: Double, promise: Promise) {
-    try {
-      val samples = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLiveSamplesSlice(
-        liveBufferId, startFrame.toInt(), frameCount.toInt()
-      )
-      val arr = Arguments.createArray()
-      for (s in samples) {
-        arr.pushDouble(s.toDouble())
-      }
-      promise.resolve(arr)
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
-    } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
-    }
-  }
-
   override fun startMicToLiveAudioBuffer(liveBufferId: String, options: ReadableMap?, promise: Promise) {
     try {
       // Stop any existing mic sink
@@ -1033,7 +999,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.configureLiveAppendEvents(
           liveBufferId = liveBufferId,
           enabled = emitToJs,
-          includeSamples = emitToJs,
         )
       }
 

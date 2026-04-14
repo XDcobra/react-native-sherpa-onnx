@@ -1,7 +1,6 @@
 package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
 import com.k2fsa.sherpa.onnx.WaveReader
 import java.io.File
@@ -283,12 +282,11 @@ object PipelineAudioRegistry {
   fun configureLiveAppendEvents(
     liveBufferId: String,
     enabled: Boolean? = null,
-    includeSamples: Boolean? = null,
     minIntervalMs: Int? = null,
   ) {
     val entry = liveEntries[liveBufferId]
       ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-    entry.configureAppendEvents(enabled, includeSamples, minIntervalMs)
+    entry.configureAppendEvents(enabled, minIntervalMs)
   }
 
   fun setLiveFramesAppendedListener(
@@ -374,6 +372,81 @@ object PipelineAudioRegistry {
     return entry.getSamplesSlice(startFrame, frameCount)
   }
 
+  /**
+   * Get a sample slice from an in-memory offline buffer for JSI/JNI callers.
+   */
+  fun getOfflineSamplesSliceJni(
+    bufferId: String,
+    startFrame: Int,
+    frameCount: Int,
+  ): FloatArray {
+    val entry = offlineEntries[bufferId]
+      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
+
+    if (frameCount <= 0) return FloatArray(0)
+
+    return when (entry) {
+      is OfflineEntry.InMemory -> {
+        val safeStart = startFrame.coerceAtLeast(0)
+        if (safeStart >= entry.samples.size) return FloatArray(0)
+        val endExclusive = (safeStart + frameCount).coerceAtMost(entry.samples.size)
+        entry.samples.copyOfRange(safeStart, endExclusive)
+      }
+      is OfflineEntry.FileBacked -> {
+        throw UnsupportedOperationException("[BUFFER_NOT_IN_MEMORY] $bufferId")
+      }
+    }
+  }
+
+  /**
+   * Get a sample slice from a live buffer ring for JSI/JNI callers.
+   */
+  fun getLiveSamplesSliceJni(
+    bufferId: String,
+    startFrame: Int,
+    frameCount: Int,
+  ): FloatArray {
+    val entry = liveEntries[bufferId]
+      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
+    return entry.getSamplesSlice(startFrame.coerceAtLeast(0), frameCount)
+  }
+
+  /**
+   * Create an offline buffer from Float32 samples and return info as JSON for JSI.
+   */
+  fun createOfflineFromFloatArrayJni(
+    samples: FloatArray,
+    sampleRate: Int,
+    channelCount: Int,
+  ): String {
+    val entry = createOfflineFromSamples(samples, sampleRate, channelCount)
+    return "{" +
+      "\"bufferId\":\"${entry.bufferId}\"," +
+      "\"kind\":\"offlinePcmBuffer\"," +
+      "\"state\":\"immutable\"," +
+      "\"sampleRate\":${entry.sampleRate}," +
+      "\"channelCount\":${entry.channelCount}," +
+      "\"numSamples\":${entry.numSamples}," +
+      "\"durationMs\":${entry.durationMs}" +
+      "}"
+  }
+
+  /**
+   * Append Float32 samples to a live buffer from JSI/JNI.
+   */
+  fun appendSamplesToLiveJni(
+    bufferId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ) {
+    val entry = liveEntries[bufferId]
+      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
+    if (entry.state != LiveEntry.State.RECORDING) {
+      throw IllegalStateException("[BUFFER_NOT_RECORDING] $bufferId")
+    }
+    entry.appendSamples(samples, sampleRate, LIVE_APPEND_SOURCE_APPEND)
+  }
+
   // ==================== Cursor management (for native pipeline stages) ====================
 
   fun createLiveCursor(liveBufferId: String): Int {
@@ -409,13 +482,4 @@ object PipelineAudioRegistry {
     offlineEntries.clear()
   }
 
-  /** Helper: convert ReadableArray of doubles to FloatArray. */
-  fun readableArrayToFloatArray(arr: ReadableArray): FloatArray {
-    val size = arr.size()
-    val out = FloatArray(size)
-    for (i in 0 until size) {
-      out[i] = arr.getDouble(i).toFloat()
-    }
-    return out
-  }
 }

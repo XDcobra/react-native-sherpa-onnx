@@ -46,7 +46,6 @@ const val LIVE_APPEND_SOURCE_MIXED = "mixed"
 
 data class LiveAppendEventConfig(
   val enabled: Boolean = false,
-  val includeSamples: Boolean = true,
   val minIntervalMs: Int = 0,
 )
 
@@ -56,7 +55,6 @@ data class LiveFramesAppendedEvent(
   val sampleRate: Int,
   val frameCount: Int,
   val totalSamplesWritten: Long,
-  val samples: FloatArray?,
 )
 
 class LiveEntry(
@@ -101,8 +99,6 @@ class LiveEntry(
   @Volatile
   private var appendEventsEnabled: Boolean = appendEventConfig.enabled
   @Volatile
-  private var appendEventsIncludeSamples: Boolean = appendEventConfig.includeSamples
-  @Volatile
   private var appendEventsMinIntervalMs: Int = appendEventConfig.minIntervalMs.coerceAtLeast(0)
   @Volatile
   private var onFramesAppendedListener: ((LiveFramesAppendedEvent) -> Unit)? = onFramesAppended
@@ -121,7 +117,6 @@ class LiveEntry(
   private val appendEventLock = Any()
   private var lastAppendEventAtMs: Long = 0L
   private var pendingFrames: Int = 0
-  private val pendingSampleChunks = mutableListOf<FloatArray>()
   private var pendingSource: String? = null
 
   /**
@@ -208,7 +203,6 @@ class LiveEntry(
         sampleRate = sampleRate,
         frameCount = toAppend.size,
         totalSamplesWritten = totalSamplesWritten,
-        samples = null,
       )
       for (listener in appendListeners) {
         listener(event)
@@ -218,20 +212,14 @@ class LiveEntry(
 
   fun configureAppendEvents(
     enabled: Boolean? = null,
-    includeSamples: Boolean? = null,
     minIntervalMs: Int? = null,
   ) {
     synchronized(appendEventLock) {
       enabled?.let { appendEventsEnabled = it }
-      includeSamples?.let {
-        appendEventsIncludeSamples = it
-        if (!it) pendingSampleChunks.clear()
-      }
       minIntervalMs?.let { appendEventsMinIntervalMs = it.coerceAtLeast(0) }
       if (!appendEventsEnabled) {
         pendingFrames = 0
         pendingSource = null
-        pendingSampleChunks.clear()
       }
     }
   }
@@ -257,10 +245,6 @@ class LiveEntry(
         null -> source
         source -> source
         else -> LIVE_APPEND_SOURCE_MIXED
-      }
-
-      if (appendEventsIncludeSamples) {
-        pendingSampleChunks.add(appendedSamples.copyOf())
       }
 
       val now = SystemClock.elapsedRealtime()
@@ -294,22 +278,8 @@ class LiveEntry(
     val frameCount = pendingFrames
     val totalWritten = totalSamplesWritten
 
-    val samples = if (appendEventsIncludeSamples && pendingSampleChunks.isNotEmpty()) {
-      val total = pendingSampleChunks.sumOf { it.size }
-      val merged = FloatArray(total)
-      var offset = 0
-      for (chunk in pendingSampleChunks) {
-        System.arraycopy(chunk, 0, merged, offset, chunk.size)
-        offset += chunk.size
-      }
-      merged
-    } else {
-      null
-    }
-
     pendingFrames = 0
     pendingSource = null
-    pendingSampleChunks.clear()
 
     return LiveFramesAppendedEvent(
       liveBufferId = bufferId,
@@ -317,7 +287,6 @@ class LiveEntry(
       sampleRate = sampleRate,
       frameCount = frameCount,
       totalSamplesWritten = totalWritten,
-      samples = samples,
     )
   }
 
@@ -342,7 +311,6 @@ class LiveEntry(
         sampleRate = sampleRate,
         frameCount = 0,
         totalSamplesWritten = totalSamplesWritten,
-        samples = null,
       )
       for (listener in appendListeners) {
         listener(event)

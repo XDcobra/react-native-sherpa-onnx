@@ -187,6 +187,7 @@ std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
 static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB
+static std::string pa_generateId(const char *prefix);
 
 std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
   std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -218,6 +219,170 @@ bool pa_read_offline_samples(
   if (samples != nullptr) {
     *samples = entry->readAllSamples();
   }
+  return true;
+}
+
+static std::string pa_offline_info_json(const std::shared_ptr<PaOfflineEntry> &entry) {
+  return std::string("{") +
+    "\"bufferId\":\"" + entry->bufferId + "\"," +
+    "\"kind\":\"offlinePcmBuffer\"," +
+    "\"state\":\"immutable\"," +
+    "\"sampleRate\":" + std::to_string(entry->sampleRate) + "," +
+    "\"channelCount\":" + std::to_string(entry->channelCount) + "," +
+    "\"numSamples\":" + std::to_string(entry->numSamples()) + "," +
+    "\"durationMs\":" + std::to_string(entry->durationMs()) +
+    "}";
+}
+
+bool pa_create_offline_from_samples(
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int channelCount,
+  std::string *json,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (samples == nullptr || count == 0) {
+    if (errorCode) *errorCode = "[INVALID_ARGS]";
+    if (errorMessage) *errorMessage = "samples must not be empty";
+    return false;
+  }
+  if (sampleRate <= 0) {
+    if (errorCode) *errorCode = "[INVALID_ARGS]";
+    if (errorMessage) *errorMessage = "sampleRate must be > 0";
+    return false;
+  }
+  if (channelCount != 1) {
+    if (errorCode) *errorCode = "[INVALID_ARGS]";
+    if (errorMessage) *errorMessage = "Only mono (channelCount=1) is supported";
+    return false;
+  }
+
+  std::string bufferId = pa_generateId("off");
+  auto entry = std::make_shared<PaOfflineEntry>();
+  entry->bufferId = bufferId;
+  entry->sampleRate = sampleRate;
+  entry->channelCount = channelCount;
+  entry->samples.assign(samples, samples + count);
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+
+  if (json) {
+    *json = pa_offline_info_json(entry);
+  }
+  return true;
+}
+
+bool pa_get_offline_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (out) out->clear();
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end() || !it->second) {
+      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  if (entry->isFileBacked) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_IN_MEMORY]";
+    if (errorMessage) *errorMessage = "Offline buffer is file-backed";
+    return false;
+  }
+
+  if (frameCount <= 0 || out == nullptr) {
+    return true;
+  }
+
+  const int safeStart = std::max(0, startFrame);
+  const int total = (int)entry->samples.size();
+  if (safeStart >= total) {
+    return true;
+  }
+
+  const int endExclusive = std::min(total, safeStart + frameCount);
+  out->assign(entry->samples.begin() + safeStart, entry->samples.begin() + endExclusive);
+  return true;
+}
+
+bool pa_get_live_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (out) out->clear();
+
+  std::shared_ptr<PaLiveEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_live.find(bufferId);
+    if (it == g_pa_live.end() || !it->second) {
+      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  if (frameCount <= 0 || out == nullptr) {
+    return true;
+  }
+
+  *out = entry->getSamplesSlice(std::max(0, startFrame), frameCount);
+  return true;
+}
+
+bool pa_append_samples_to_live(
+  const std::string &bufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (samples == nullptr || count == 0) {
+    if (errorCode) *errorCode = "[INVALID_ARGS]";
+    if (errorMessage) *errorMessage = "samples must not be empty";
+    return false;
+  }
+
+  std::shared_ptr<PaLiveEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_live.find(bufferId);
+    if (it == g_pa_live.end() || !it->second) {
+      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  if (entry->state != PaLiveEntry::RECORDING) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_RECORDING]";
+    if (errorMessage) *errorMessage = "Live buffer is finalized";
+    return false;
+  }
+
+  entry->appendSamples(samples, count, sampleRate, kPaAppendSourceAppend);
   return true;
 }
 
@@ -416,36 +581,6 @@ static void paMicAQInputCallback(void *inUserData,
   }
 }
 
-// ---- Offline: from samples ----
-- (void)createOfflineAudioBufferFromSamples:(NSArray<NSNumber *> *)samples
-                                 sampleRate:(double)sampleRate
-                               channelCount:(NSNumber *)channelCount
-                                    resolve:(RCTPromiseResolveBlock)resolve
-                                     reject:(RCTPromiseRejectBlock)reject
-{
-  @try {
-    if (sampleRate <= 0) { reject(kPAErrInvalidArgument, @"sampleRate must be > 0", nil); return; }
-    if (samples.count == 0) { reject(kPAErrInvalidArgument, @"samples must not be empty", nil); return; }
-
-    std::string bufferId = pa_generateId("off");
-    auto entry = std::make_shared<PaOfflineEntry>();
-    entry->bufferId = bufferId;
-    entry->sampleRate = (int)sampleRate;
-    entry->channelCount = channelCount ? [channelCount intValue] : 1;
-    entry->samples.resize(samples.count);
-    for (NSUInteger i = 0; i < samples.count; i++) {
-      entry->samples[i] = [samples[i] floatValue];
-    }
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      g_pa_offline[bufferId] = entry;
-    }
-    resolve(entry->toDict());
-  } @catch (NSException *e) {
-    reject(kPAErrInternalError, e.reason, nil);
-  }
-}
-
 // ---- Offline: empty (output target for TTS) ----
 - (void)createEmptyOfflineAudioBuffer:(double)sampleRate
                          channelCount:(NSNumber *)channelCount
@@ -545,7 +680,6 @@ static void paMicAQInputCallback(void *inUserData,
     }
 
     bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
-    bool emitAppendedSamples = options.emitAppendedSamples().has_value() ? options.emitAppendedSamples().value() : true;
     int appendEventMinIntervalMs = options.appendEventMinIntervalMs().has_value()
       ? std::max(0, (int)options.appendEventMinIntervalMs().value())
       : 0;
@@ -556,7 +690,6 @@ static void paMicAQInputCallback(void *inUserData,
 
     auto onFramesAppended = [weakSelf, liveBufferId, sr](
       const std::string &source,
-      const std::vector<float> &samples,
       int frameCount,
       int64_t totalSamplesWritten
     ) {
@@ -569,14 +702,6 @@ static void paMicAQInputCallback(void *inUserData,
       payload[@"sampleRate"] = @(sr);
       payload[@"frameCount"] = @(frameCount);
       payload[@"totalSamplesWritten"] = @((double)totalSamplesWritten);
-
-      if (!samples.empty()) {
-        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:samples.size()];
-        for (float s : samples) {
-          [arr addObject:@(s)];
-        }
-        payload[@"samples"] = arr;
-      }
 
       dispatch_async(dispatch_get_main_queue(), ^{
         [module sendEventWithName:@"pipelineLiveAudioChunk" body:payload];
@@ -591,7 +716,6 @@ static void paMicAQInputCallback(void *inUserData,
       spoolPath,
       spoolFloat,
       emitAppendedEvents,
-      emitAppendedSamples,
       appendEventMinIntervalMs,
       onFramesAppended
     );
@@ -600,40 +724,6 @@ static void paMicAQInputCallback(void *inUserData,
       g_pa_live[bufferId] = entry;
     }
     resolve(entry->toDict());
-  } @catch (NSException *e) {
-    reject(kPAErrInternalError, e.reason, nil);
-  }
-}
-
-// ---- Live: append samples ----
-- (void)appendSamplesToLiveAudioBuffer:(NSString *)liveBufferId
-                               samples:(NSArray<NSNumber *> *)samples
-                            sampleRate:(double)sampleRate
-                               resolve:(RCTPromiseResolveBlock)resolve
-                                reject:(RCTPromiseRejectBlock)reject
-{
-  @try {
-    std::string liveId = [liveBufferId UTF8String];
-    std::shared_ptr<PaLiveEntry> live;
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      auto it = g_pa_live.find(liveId);
-      if (it == g_pa_live.end()) {
-        reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
-        return;
-      }
-      live = it->second;
-    }
-    if (live->state != PaLiveEntry::RECORDING) {
-      reject(kPAErrAlreadyFinalized, @"Live buffer is finalized", nil);
-      return;
-    }
-    std::vector<float> floats(samples.count);
-    for (NSUInteger i = 0; i < samples.count; i++) {
-      floats[i] = [samples[i] floatValue];
-    }
-    live->appendSamples(floats.data(), floats.size(), (int)sampleRate, kPaAppendSourceAppend);
-    resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
   }
@@ -885,33 +975,6 @@ static void paMicAQInputCallback(void *inUserData,
   resolve(nil); // idempotent
 }
 
-// ---- Live: samples slice ----
-- (void)getLiveAudioBufferSamplesSlice:(NSString *)liveBufferId
-                            startFrame:(double)startFrame
-                            frameCount:(double)frameCount
-                               resolve:(RCTPromiseResolveBlock)resolve
-                                reject:(RCTPromiseRejectBlock)reject
-{
-  @try {
-    std::string liveId = [liveBufferId UTF8String];
-    std::shared_ptr<PaLiveEntry> live;
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      auto it = g_pa_live.find(liveId);
-      if (it == g_pa_live.end()) { reject(kPAErrBufferNotFound, @"Live buffer not found", nil); return; }
-      live = it->second;
-    }
-    auto samples = live->getSamplesSlice((int)startFrame, (int)frameCount);
-    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:samples.size()];
-    for (float s : samples) {
-      [arr addObject:@(s)];
-    }
-    resolve(arr);
-  } @catch (NSException *e) {
-    reject(kPAErrInternalError, e.reason, nil);
-  }
-}
-
 // ---- Mic: start ----
 - (void)startMicToLiveAudioBuffer:(NSString *)liveBufferId
                           options:(NSDictionary *)options
@@ -939,7 +1002,7 @@ static void paMicAQInputCallback(void *inUserData,
     // Compatibility option: emitToJs now toggles centralized append-event emission.
     if (options[@"emitToJs"] != nil) {
       bool emitToJs = [options[@"emitToJs"] boolValue];
-      live->configureAppendEvents(emitToJs, emitToJs, live->appendEventMinIntervalMs);
+      live->configureAppendEvents(emitToJs, live->appendEventMinIntervalMs);
     }
 
     // Audio session

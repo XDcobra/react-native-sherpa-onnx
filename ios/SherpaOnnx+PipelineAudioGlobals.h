@@ -22,3 +22,40 @@ bool pa_read_offline_samples(
 	std::vector<float> *samples,
 	int *sampleRate
 );
+
+bool pa_create_offline_from_samples(
+	const float *samples,
+	size_t count,
+	int sampleRate,
+	int channelCount,
+	std::string *json,
+	std::string *errorCode,
+	std::string *errorMessage
+);
+
+bool pa_get_offline_samples_slice(
+	const std::string &bufferId,
+	int startFrame,
+	int frameCount,
+	std::vector<float> *out,
+	std::string *errorCode,
+	std::string *errorMessage
+);
+
+bool pa_get_live_samples_slice(
+	const std::string &bufferId,
+	int startFrame,
+	int frameCount,
+	std::vector<float> *out,
+	std::string *errorCode,
+	std::string *errorMessage
+);
+
+bool pa_append_samples_to_live(
+	const std::string &bufferId,
+	const float *samples,
+	size_t count,
+	int sampleRate,
+	std::string *errorCode,
+	std::string *errorMessage
+);

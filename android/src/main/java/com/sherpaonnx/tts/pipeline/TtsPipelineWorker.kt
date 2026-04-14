@@ -36,7 +36,7 @@ data class TtsVoiceCloneConfig(
  * Follows the same pattern as SttPipelineWorker (dedicated thread + CV + command queue).
  * Processing unit: one text segment per iteration.
  */
-class TtsPipelineWorker(
+internal class TtsPipelineWorker(
   override val pipelineId: String,
   private val ttsInstance: TtsEngineInstance,
   private val inputEntry: LiveTextEntry,
