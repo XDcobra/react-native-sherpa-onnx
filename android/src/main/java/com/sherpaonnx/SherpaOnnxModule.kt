@@ -14,6 +14,7 @@ import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
+import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
