@@ -6,7 +6,7 @@
  * - OfflineEntry: immutable PCM (in-memory or file-backed)
  * - LiveEntry: streaming PCM with ring buffer, optional WAV spool, consumer cursors
  *
- * Implements all TurboModule methods for createOfflineAudioBuffer*, createLiveAudioBuffer,
+ * Implements all TurboModule methods for createOfflineAudioBuffer*, createEmptyLiveAudioBuffer,
  * appendSamples*, finalize, save, info, release, mic capture.
  */
 
@@ -19,6 +19,7 @@
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "PaLiveEntry.h"
+#include "AudioDecodeSession.h"
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +30,7 @@
 #include <cmath>
 #include <atomic>
 #include <cstring>
+#include <thread>
 
 // ==================== Error Codes ====================
 static NSString *const kPAErrBufferNotFound   = @"AUDIO_BUFFER_NOT_FOUND";
@@ -188,6 +190,21 @@ std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
 static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB
 static std::string pa_generateId(const char *prefix);
+
+// Decode cancel registry: operationId → atomic cancel flag
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_decodeCancelFlags;
+static std::mutex g_pa_decodeCancelMutex;
+
+// File ingest status registry
+struct PaFileIngestStatus {
+  bool isRunning = true;
+  int64_t framesIngested = 0;
+  int64_t totalFramesEstimate = 0;
+  int percent = 0;
+  std::string error;
+};
+static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
+static std::mutex g_pa_fileIngestMutex;
 
 std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
   std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -465,120 +482,155 @@ static void paMicAQInputCallback(void *inUserData,
 
 @implementation SherpaOnnx (PipelineAudio)
 
-// ---- Offline: from source ----
+// ---- Offline: from source (unified decode via AudioDecodeSession) ----
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
-- (void)createOfflineAudioBufferFromSource:(NSDictionary *)source
-                      targetSampleRateHz:(NSNumber *)targetSampleRateHz
-                               forceMono:(NSNumber *)forceMono
-                                 resolve:(RCTPromiseResolveBlock)resolve
-                                  reject:(RCTPromiseRejectBlock)reject
+- (void)decodeFileToOfflineBuffer:(NSDictionary *)source
+             targetSampleRateHz:(double)targetSampleRateHz
+                      forceMono:(BOOL)forceMono
+                    operationId:(NSString *)operationId
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
 {
-  @try {
-    // Resolve FileSource to a local file path
-    NSString *errCode = nil, *errMsg = nil;
-    FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
-    if (!readHandle) {
-      reject(errCode, errMsg, nil);
-      return;
-    }
+  // Register cancel flag
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+    g_pa_decodeCancelFlags[opId] = cancelFlag;
+  }
 
-    NSString *sourcePath = nil;
-    NSString *tmpPath = nil;
-    if (readHandle.isFilePath) {
-      sourcePath = readHandle.filePath;
-    } else {
-      // Stream → copy to temp
-      tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                 [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
-      NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
-      [out open];
-      [readHandle.stream open];
-      uint8_t buf[65536];
-      NSInteger bytesRead;
-      while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
-        [out write:buf maxLength:bytesRead];
-      }
-      [out close];
-      sourcePath = tmpPath;
-    }
+  __weak SherpaOnnx *weakSelf = self;
 
-    std::string path = [sourcePath UTF8String];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:sourcePath]) {
-      [readHandle cleanup];
-      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-      reject(kPAErrFileNotFound, @"Audio file does not exist", nil);
-      return;
-    }
-    NSDictionary *attrs = [fm attributesOfItemAtPath:sourcePath error:nil];
-    long long fileSize = [attrs[NSFileSize] longLongValue];
-    if (fileSize == 0) {
-      [readHandle cleanup];
-      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-      reject(kPAErrInvalidArgument, @"Audio file is empty", nil);
-      return;
-    }
-
-    std::string bufferId = pa_generateId("off");
-    auto entry = std::make_shared<PaOfflineEntry>();
-    entry->bufferId = bufferId;
-    entry->channelCount = 1;
-
-    int targetRate = targetSampleRateHz ? [targetSampleRateHz intValue] : 0;
-    if (targetRate < 0) {
-      [readHandle cleanup];
-      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-      reject(kPAErrInvalidArgument, @"targetSampleRateHz must be > 0", nil);
-      return;
-    }
-
-    // For large files without resampling, try file-backed
-    if (fileSize > kPaFileBackedThreshold && targetRate == 0 && !tmpPath) {
-      PaWavHeader hdr;
-      if (pa_parseWavHeader(path, hdr)) {
-        entry->isFileBacked = true;
-        entry->filePath = path;
-        entry->sampleRate = hdr.sampleRate;
-        entry->channelCount = hdr.channelCount;
-        entry->wavHeader = hdr;
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    @try {
+      // Resolve FileSource to a local file path
+      NSString *errCode = nil, *errMsg = nil;
+      FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+      if (!readHandle) {
         {
-          std::lock_guard<std::mutex> lock(g_pa_mutex);
-          g_pa_offline[bufferId] = entry;
+          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
         }
-        [readHandle cleanup];
-        resolve(entry->toDict());
+        reject(errCode, errMsg, nil);
         return;
       }
+
+      NSString *sourcePath = nil;
+      NSString *tmpPath = nil;
+      if (readHandle.isFilePath) {
+        sourcePath = readHandle.filePath;
+      } else {
+        // Stream → copy to temp
+        tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
+        NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+        [out open];
+        [readHandle.stream open];
+        uint8_t buf[65536];
+        NSInteger bytesRead;
+        while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+          [out write:buf maxLength:bytesRead];
+        }
+        [out close];
+        sourcePath = tmpPath;
+      }
+
+      std::string path = [sourcePath UTF8String];
+      if (![[NSFileManager defaultManager] fileExistsAtPath:sourcePath]) {
+        [readHandle cleanup];
+        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+        {
+          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        reject(kPAErrFileNotFound, @"Audio file does not exist", nil);
+        return;
+      }
+
+      // Configure decode
+      sherpa::AudioDecodeConfig config;
+      config.targetSampleRate = (int)targetSampleRateHz;
+      config.forceMono = forceMono;
+      config.chunkSize = 8192;
+
+      // Collect all decoded samples
+      std::vector<float> allSamples;
+      allSamples.reserve(8192 * 64);
+
+      auto onChunk = [&allSamples](const float *samples, int count) {
+        allSamples.insert(allSamples.end(), samples, samples + count);
+      };
+
+      auto onProgress = [weakSelf, operationId](int64_t framesDecoded, int64_t totalEstimate, int percent) {
+        SherpaOnnx *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeProgress" body:@{
+            @"operationId": operationId,
+            @"framesDecoded": @((double)framesDecoded),
+            @"totalFramesEstimate": @((double)totalEstimate),
+            @"percent": @(percent),
+          }];
+        });
+      };
+
+      sherpa::AudioDecodeResult result;
+      try {
+        result = sherpa::decodeFile(path, config, onChunk, onProgress, *cancelFlag);
+      } catch (const std::runtime_error &e) {
+        [readHandle cleanup];
+        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+        {
+          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"DECODE_INTERNAL_ERROR";
+        if (msg.find("DECODE_") == 0) {
+          auto colonPos = msg.find(':');
+          if (colonPos != std::string::npos) {
+            nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
+          }
+        }
+        reject(nsCode, nsMsg, nil);
+        return;
+      }
+
+      [readHandle cleanup];
+      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+      {
+        std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+        g_pa_decodeCancelFlags.erase(opId);
+      }
+
+      if (allSamples.empty()) {
+        reject(kPAErrFileReadError, @"Could not decode audio samples", nil);
+        return;
+      }
+
+      int outputRate = config.targetSampleRate > 0 ? config.targetSampleRate : result.sourceSampleRate;
+
+      std::string bufferId = pa_generateId("off");
+      auto entry = std::make_shared<PaOfflineEntry>();
+      entry->bufferId = bufferId;
+      entry->sampleRate = outputRate;
+      entry->channelCount = 1;
+      entry->samples = std::move(allSamples);
+
+      {
+        std::lock_guard<std::mutex> lock(g_pa_mutex);
+        g_pa_offline[bufferId] = entry;
+      }
+      resolve(entry->toDict());
+    } @catch (NSException *e) {
+      {
+        std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+        g_pa_decodeCancelFlags.erase(opId);
+      }
+      reject(kPAErrInternalError, e.reason, nil);
     }
-
-    // In-memory via sherpa-onnx ReadWave
-    auto wave = sherpa_onnx::cxx::ReadWave(path);
-
-    // Clean up temp and security-scoped access
-    [readHandle cleanup];
-    if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-
-    if (wave.samples.empty()) {
-      reject(kPAErrFileReadError, @"Could not read audio samples", nil);
-      return;
-    }
-
-    int outputRate = targetRate > 0 ? targetRate : wave.sample_rate;
-    if (outputRate != wave.sample_rate) {
-      entry->samples = pa_resampleLinear(wave.samples.data(), wave.samples.size(), wave.sample_rate, outputRate);
-    } else {
-      entry->samples = std::move(wave.samples);
-    }
-    entry->sampleRate = outputRate;
-
-    {
-      std::lock_guard<std::mutex> lock(g_pa_mutex);
-      g_pa_offline[bufferId] = entry;
-    }
-    resolve(entry->toDict());
-  } @catch (NSException *e) {
-    reject(kPAErrInternalError, e.reason, nil);
-  }
+  });
 }
 
 // ---- Offline: empty (output target for TTS) ----
@@ -658,7 +710,7 @@ static void paMicAQInputCallback(void *inUserData,
 }
 
 // ---- Live: create ----
-- (void)createLiveAudioBuffer:(JS::NativeSherpaOnnx::SpecCreateLiveAudioBufferOptions &)options
+- (void)createEmptyLiveAudioBuffer:(JS::NativeSherpaOnnx::SpecCreateEmptyLiveAudioBufferOptions &)options
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
@@ -1081,6 +1133,248 @@ static void paMicAQInputCallback(void *inUserData,
   [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
   resolve(nil);
 }
+
+// ---- File Ingest to Live Buffer ----
+- (void)startFileIngestToLiveBuffer:(NSString *)liveBufferId
+                             source:(NSDictionary *)source
+                   targetSampleRateHz:(double)targetSampleRateHz
+                          forceMono:(BOOL)forceMono
+                       autoFinalize:(BOOL)autoFinalize
+                        operationId:(NSString *)operationId
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
+{
+  std::string liveBufId = [liveBufferId UTF8String];
+  std::string opId = [operationId UTF8String];
+
+  // Validate live buffer
+  auto liveEntry = pa_get_live_entry(liveBufId);
+  if (!liveEntry) {
+    reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+    return;
+  }
+  if (liveEntry->state != PaLiveEntry::RECORDING) {
+    reject(kPAErrInvalidState, @"Live buffer must be in RECORDING state for file ingest", nil);
+    return;
+  }
+
+  // Register cancel flag + ingest status
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string ingestId = pa_generateId("ingest");
+  {
+    std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+    g_pa_decodeCancelFlags[opId] = cancelFlag;
+  }
+  auto status = std::make_shared<PaFileIngestStatus>();
+  {
+    std::lock_guard<std::mutex> lock(g_pa_fileIngestMutex);
+    g_pa_fileIngestStatuses[ingestId] = status;
+  }
+
+  // Resolve file source
+  NSString *errCode = nil, *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+  if (!readHandle) {
+    {
+      std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+      g_pa_decodeCancelFlags.erase(opId);
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_pa_fileIngestMutex);
+      g_pa_fileIngestStatuses.erase(ingestId);
+    }
+    reject(errCode, errMsg, nil);
+    return;
+  }
+
+  NSString *sourcePath = nil;
+  NSString *tmpPath = nil;
+  if (readHandle.isFilePath) {
+    sourcePath = readHandle.filePath;
+  } else {
+    tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+               [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
+    NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+    [out open];
+    [readHandle.stream open];
+    uint8_t buf[65536];
+    NSInteger bytesRead;
+    while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+      [out write:buf maxLength:bytesRead];
+    }
+    [out close];
+    sourcePath = tmpPath;
+  }
+
+  // Resolve immediately with ingestId
+  resolve(@{@"ingestId": [NSString stringWithUTF8String:ingestId.c_str()]});
+
+  __weak SherpaOnnx *weakSelf = self;
+  std::string path = [sourcePath UTF8String];
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    int srcSampleRate = 0;
+    int srcChannels = 0;
+
+    try {
+      sherpa::AudioDecodeConfig config;
+      config.targetSampleRate = (int)targetSampleRateHz;
+      config.forceMono = forceMono;
+      config.chunkSize = 8192;
+
+      auto onChunk = [&liveEntry, &status](const float *samples, int count) {
+        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest);
+        status->framesIngested += count;
+      };
+
+      auto onProgress = [weakSelf, operationId, &srcSampleRate, &srcChannels, &status](
+          int64_t framesDecoded, int64_t totalEstimate, int percent) {
+        status->totalFramesEstimate = totalEstimate;
+        status->percent = percent;
+        SherpaOnnx *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeProgress" body:@{
+            @"operationId": operationId,
+            @"framesDecoded": @((double)framesDecoded),
+            @"totalFramesEstimate": @((double)totalEstimate),
+            @"percent": @(percent),
+            @"sourceSampleRate": @(srcSampleRate),
+            @"sourceChannels": @(srcChannels),
+          }];
+        });
+      };
+
+      auto result = sherpa::decodeFile(path, config, onChunk, onProgress, *cancelFlag);
+      srcSampleRate = result.sourceSampleRate;
+      srcChannels = result.sourceChannels;
+
+      if (autoFinalize) {
+        liveEntry->finalize_();
+      }
+
+      status->isRunning = false;
+      status->percent = 100;
+
+      SherpaOnnx *strongSelf = weakSelf;
+      if (strongSelf) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeComplete" body:@{
+            @"operationId": operationId,
+            @"success": @YES,
+            @"totalFramesIngested": @((double)status->framesIngested),
+            @"sourceSampleRate": @(srcSampleRate),
+            @"sourceChannels": @(srcChannels),
+            @"autoFinalized": @(autoFinalize),
+          }];
+        });
+      }
+    } catch (const std::runtime_error &e) {
+      std::string msg = e.what();
+      status->isRunning = false;
+      status->error = msg;
+
+      NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+      NSString *nsCode = @"DECODE_INTERNAL_ERROR";
+      if (msg.find("DECODE_") == 0) {
+        auto colonPos = msg.find(':');
+        if (colonPos != std::string::npos) {
+          nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
+        }
+      }
+
+      SherpaOnnx *strongSelf = weakSelf;
+      if (strongSelf) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeComplete" body:@{
+            @"operationId": operationId,
+            @"success": @NO,
+            @"error": nsMsg,
+            @"errorCode": nsCode,
+          }];
+        });
+      }
+    } catch (...) {
+      status->isRunning = false;
+      status->error = "Unknown error";
+
+      SherpaOnnx *strongSelf = weakSelf;
+      if (strongSelf) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeComplete" body:@{
+            @"operationId": operationId,
+            @"success": @NO,
+            @"error": @"Unknown error during streaming decode",
+            @"errorCode": @"DECODE_INTERNAL_ERROR",
+          }];
+        });
+      }
+    }
+
+    // Cleanup
+    {
+      std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+      g_pa_decodeCancelFlags.erase(opId);
+    }
+    [readHandle cleanup];
+    if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+  });
+}
+
+// ---- File Ingest Status ----
+- (void)getFileIngestStatus:(NSString *)ingestId
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
+{
+  std::string iId = [ingestId UTF8String];
+  std::shared_ptr<PaFileIngestStatus> status;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_fileIngestMutex);
+    auto it = g_pa_fileIngestStatuses.find(iId);
+    if (it != g_pa_fileIngestStatuses.end()) {
+      status = it->second;
+    }
+  }
+
+  if (!status) {
+    resolve(@{
+      @"isRunning": @NO,
+      @"framesIngested": @(0.0),
+      @"totalFramesEstimate": @(0.0),
+      @"percent": @(0),
+      @"error": [NSString stringWithFormat:@"Ingest not found: %@", ingestId],
+    });
+    return;
+  }
+
+  NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"isRunning": @(status->isRunning),
+    @"framesIngested": @((double)status->framesIngested),
+    @"totalFramesEstimate": @((double)status->totalFramesEstimate),
+    @"percent": @(status->percent),
+  }];
+  if (!status->error.empty()) {
+    dict[@"error"] = [NSString stringWithUTF8String:status->error.c_str()];
+  }
+  resolve(dict);
+}
+
+// ---- Cancel Decode ----
+- (void)cancelDecode:(NSString *)operationId
+             resolve:(RCTPromiseResolveBlock)resolve
+              reject:(RCTPromiseRejectBlock)reject
+{
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+    auto it = g_pa_decodeCancelFlags.find(opId);
+    if (it != g_pa_decodeCancelFlags.end()) {
+      it->second->store(true);
+    }
+  }
+  resolve(nil);
+}
+
 #endif
 
 @end

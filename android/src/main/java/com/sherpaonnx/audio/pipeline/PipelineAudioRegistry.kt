@@ -2,8 +2,6 @@ package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import com.k2fsa.sherpa.onnx.WaveReader
-import java.io.File
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -18,76 +16,10 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object PipelineAudioRegistry {
 
-  /** Threshold in bytes: files larger than this are file-backed instead of loaded into RAM. */
-  private const val FILE_BACKED_THRESHOLD_BYTES = 10L * 1024 * 1024 // 10 MB
-
   private val offlineEntries = ConcurrentHashMap<String, OfflineEntry>()
   private val liveEntries = ConcurrentHashMap<String, LiveEntry>()
 
   // ==================== Offline Buffer Creation ====================
-
-  /**
-   * Create an offline buffer from a WAV file.
-   * Small files (< threshold) are loaded into memory; large files remain file-backed.
-   *
-   * @param filePath Absolute path to WAV file.
-   * @param targetSampleRateHz Target sample rate. If null, uses the file's native rate.
-   * @param forceMono If true, force mono output. Currently only mono is supported.
-   */
-  fun createOfflineFromFile(
-    filePath: String,
-    targetSampleRateHz: Int? = null,
-    forceMono: Boolean? = null
-  ): OfflineEntry {
-    val file = File(filePath)
-    if (!file.exists()) throw IllegalArgumentException("Audio file does not exist: $filePath")
-    if (file.length() == 0L) throw IllegalArgumentException("Audio file is empty: $filePath")
-    if (targetSampleRateHz != null && targetSampleRateHz <= 0) {
-      throw IllegalArgumentException("targetSampleRateHz must be > 0, got: $targetSampleRateHz")
-    }
-
-    val bufferId = "off_${UUID.randomUUID()}"
-
-    // Try file-backed first for large files
-    if (file.length() > FILE_BACKED_THRESHOLD_BYTES && targetSampleRateHz == null) {
-      val metadata = parseWavHeader(filePath)
-      if (metadata != null) {
-        val entry = OfflineEntry.FileBacked(
-          bufferId = bufferId,
-          sampleRate = metadata.sampleRate,
-          channelCount = metadata.channelCount,
-          filePath = filePath,
-          metadata = metadata
-        )
-        offlineEntries[bufferId] = entry
-        return entry
-      }
-      // Fall through to WaveReader if header parsing fails
-    }
-
-    // In-memory path: load via WaveReader (handles more formats, resamples if needed)
-    val wave = WaveReader.readWave(filePath)
-    val sourceSamples = wave.samples ?: FloatArray(0)
-    if (sourceSamples.isEmpty()) {
-      throw IllegalArgumentException("Could not read audio samples from: $filePath")
-    }
-
-    val outputSampleRate = targetSampleRateHz ?: wave.sampleRate
-    val outputSamples = if (outputSampleRate != wave.sampleRate) {
-      Resampler.resampleLinear(sourceSamples, wave.sampleRate, outputSampleRate)
-    } else {
-      sourceSamples
-    }
-
-    val entry = OfflineEntry.InMemory(
-      bufferId = bufferId,
-      sampleRate = outputSampleRate,
-      channelCount = 1, // WaveReader always returns mono
-      samples = outputSamples
-    )
-    offlineEntries[bufferId] = entry
-    return entry
-  }
 
   /**
    * Create an offline buffer from Float32 PCM samples provided from JS.

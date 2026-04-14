@@ -30,6 +30,7 @@ static const char *kPaAppendSourceAppend = "append";
 static const char *kPaAppendSourceAppendOffline = "append_offline";
 static const char *kPaAppendSourceEnhancement = "enhancement";
 static const char *kPaAppendSourceTts = "tts";
+static const char *kPaAppendSourceFileIngest = "file_ingest";
 static const char *kPaAppendSourceUnknown = "unknown";
 static const char *kPaAppendSourceMixed = "mixed";
 

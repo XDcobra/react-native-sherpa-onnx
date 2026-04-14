@@ -625,86 +625,348 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Pipeline Audio Buffers ====================
 
-  override fun createOfflineAudioBufferFromSource(source: ReadableMap, targetSampleRateHz: Double?, forceMono: Boolean?, promise: Promise) {
-    var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
-    var tmpFile: File? = null
-    var readHandleTransferred = false
-    var tmpFileRetentionTransferred = false
+  // Map of operationId → cancel flag for active decode operations
+  private val decodeCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
+  // Map of ingestId → ingest status for active file ingest operations
+  private val fileIngestStatuses = java.util.concurrent.ConcurrentHashMap<String, FileIngestStatus>()
+  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool()
 
+  private data class FileIngestStatus(
+    @Volatile var isRunning: Boolean = true,
+    @Volatile var framesIngested: Long = 0,
+    @Volatile var totalFramesEstimate: Long = 0,
+    @Volatile var percent: Int = 0,
+    @Volatile var error: String? = null,
+  )
+
+  private fun emitDecodeProgress(
+    operationId: String,
+    framesDecoded: Long,
+    totalFramesEstimate: Long,
+    percent: Int,
+    sourceSampleRate: Int,
+    sourceChannels: Int,
+  ) {
     try {
-      // Resolve FileSource; contentUri prefers fd-backed access.
-      readHandle = fileIOHelper.resolveSource(source)
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putDouble("framesDecoded", framesDecoded.toDouble())
+      payload.putDouble("totalFramesEstimate", totalFramesEstimate.toDouble())
+      payload.putInt("percent", percent)
+      payload.putInt("sourceSampleRate", sourceSampleRate)
+      payload.putInt("sourceChannels", sourceChannels)
+      eventEmitter.emit("decodeProgress", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures (e.g. bridge teardown)
+    }
+  }
 
-      val sourcePath = when (val handle = readHandle) {
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
+  private fun emitDecodeComplete(
+    operationId: String,
+    success: Boolean,
+    error: String? = null,
+    errorCode: String? = null,
+    totalFramesIngested: Long = 0,
+    sourceSampleRate: Int = 0,
+    sourceChannels: Int = 0,
+    autoFinalized: Boolean = false,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putBoolean("success", success)
+      if (error != null) payload.putString("error", error)
+      if (errorCode != null) payload.putString("errorCode", errorCode)
+      payload.putDouble("totalFramesIngested", totalFramesIngested.toDouble())
+      payload.putInt("sourceSampleRate", sourceSampleRate)
+      payload.putInt("sourceChannels", sourceChannels)
+      payload.putBoolean("autoFinalized", autoFinalized)
+      eventEmitter.emit("decodeComplete", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures
+    }
+  }
+
+  override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tmpFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+
+        val sourcePath = when (val handle = readHandle) {
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
+            val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
+            tmp.outputStream().use { out ->
+              handle.inputStream.copyTo(out, 65536)
+            }
+            tmpFile = tmp
+            tmp.absolutePath
+          }
+          null -> throw IllegalStateException("Resolved read handle is null")
+        }
+
+        val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
+
+        // Use AudioDecodeSession via JNI (C++ FFmpeg + WAV fast path)
+        val cancelFlagAddr = nativeAllocateCancelFlag()
+        if (cancelFlag.get()) {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          throw RuntimeException("DECODE_CANCELLED: Operation cancelled")
+        }
+        // Link our AtomicBoolean to the native flag
+        val cancelChecker = Thread {
+          while (!cancelFlag.get()) {
+            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+          }
+          nativeSetCancelFlag(cancelFlagAddr, true)
+        }
+        cancelChecker.isDaemon = true
+        cancelChecker.start()
+
+        try {
+          @Suppress("UNCHECKED_CAST")
+          val result = nativeDecodeFileToBuffer(
+            sourcePath,
+            targetRate,
+            forceMono,
+            8192,
+            cancelFlagAddr
+          ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
+
+          cancelChecker.interrupt()
+
+          val samples = result["samples"] as? FloatArray ?: FloatArray(0)
+          val srcSampleRate = (result["sourceSampleRate"] as? Int) ?: 0
+          val outputRate = if (targetRate > 0) targetRate else srcSampleRate
+
+          val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromSamples(
+            samples, outputRate, 1
+          )
+
+          promise.resolve(entry.toWritableMap())
+        } finally {
+          nativeFreeCancelFlag(cancelFlagAddr)
+          cancelChecker.interrupt()
+        }
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("DECODE_")) msg.substringBefore(":").trim() else "DECODE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("DECODE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        decodeCancelFlags.remove(operationId)
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tmpFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
+  override fun startFileIngestToLiveBuffer(
+    liveBufferId: String,
+    source: ReadableMap,
+    targetSampleRateHz: Double,
+    forceMono: Boolean,
+    autoFinalize: Boolean,
+    operationId: String,
+    promise: Promise
+  ) {
+    val ingestId = "ingest_${java.util.UUID.randomUUID()}"
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+    val status = FileIngestStatus()
+    fileIngestStatuses[ingestId] = status
+
+    // Validate buffer exists and is RECORDING before resolving file
+    val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
+    if (liveEntry == null) {
+      promise.reject("AUDIO_BUFFER_NOT_FOUND", "Live buffer not found: $liveBufferId")
+      return
+    }
+    if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
+      promise.reject("AUDIO_INVALID_STATE", "Live buffer must be in RECORDING state for file ingest")
+      return
+    }
+
+    // Resolve file source synchronously, then run decode on background thread
+    val readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+    val tmpFile: File?
+    val sourcePath: String
+    try {
+      readHandle = fileIOHelper.resolveSource(source)
+      when (val handle = readHandle) {
+        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
+          sourcePath = handle.file.absolutePath
+          tmpFile = null
+        }
+        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
+          sourcePath = handle.fdPath
+          tmpFile = null
+        }
         is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
           val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
           tmp.outputStream().use { out ->
             handle.inputStream.copyTo(out, 65536)
           }
+          sourcePath = tmp.absolutePath
           tmpFile = tmp
-          tmp.absolutePath
-        }
-        null -> throw IllegalStateException("Resolved read handle is null")
-      }
-
-      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFile(
-        sourcePath,
-        targetSampleRateHz?.toInt(),
-        forceMono
-      )
-
-      // If the offline entry is file-backed by a transient source, transfer ownership so
-      // resources stay valid until releasePipelineAudioBuffer() is called.
-      if (entry is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked && entry.filePath == sourcePath) {
-        when (val handle = readHandle) {
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.attachOfflineRetainedResource(
-              entry.bufferId,
-              handle,
-            )
-            readHandleTransferred = true
-          }
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream,
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath,
-          null -> {
-            val tmp = tmpFile
-            if (tmp != null) {
-              com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.attachOfflineRetainedResource(
-                entry.bufferId,
-                java.io.Closeable { if (tmp.exists()) tmp.delete() },
-              )
-              tmpFileRetentionTransferred = true
-            }
-          }
         }
       }
-
-      promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      decodeCancelFlags.remove(operationId)
+      fileIngestStatuses.remove(ingestId)
       promise.reject(e.code, e.message, e)
-    } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+      return
     } catch (e: Exception) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
-    } finally {
-      if (!readHandleTransferred) {
-        try {
-          readHandle?.close()
-        } catch (_: Exception) {
-          // Ignore close failures
-        }
-      }
+      decodeCancelFlags.remove(operationId)
+      fileIngestStatuses.remove(ingestId)
+      promise.reject("DECODE_INTERNAL_ERROR", e.message, e)
+      return
+    }
 
-      if (!tmpFileRetentionTransferred) {
-        try {
-          tmpFile?.delete()
-        } catch (_: Exception) {
-          // Ignore cleanup failures
+    // Resolve promise immediately with ingestId, then run decode on background
+    val resultMap = Arguments.createMap()
+    resultMap.putString("ingestId", ingestId)
+    promise.resolve(resultMap)
+
+    decodeExecutor.execute {
+      val cancelFlagAddr = nativeAllocateCancelFlag()
+      val cancelChecker = Thread {
+        while (!cancelFlag.get()) {
+          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
         }
+        nativeSetCancelFlag(cancelFlagAddr, true)
+      }
+      cancelChecker.isDaemon = true
+      cancelChecker.start()
+
+      var srcSampleRate = 0
+      var srcChannels = 0
+
+      try {
+        val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
+
+        // Streaming decode: chunks are appended to live buffer as they arrive
+        val chunkCallback = object {
+          fun onChunk(samples: FloatArray, frameCount: Int) {
+            liveEntry.appendSamples(samples, liveEntry.sampleRate, com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST)
+            status.framesIngested += frameCount
+          }
+        }
+
+        val progressCallback = object {
+          fun onProgress(framesDecoded: Long, totalEstimate: Long, percent: Int, sourceSr: Int, sourceCh: Int) {
+            srcSampleRate = sourceSr
+            srcChannels = sourceCh
+            status.totalFramesEstimate = totalEstimate
+            status.percent = percent
+            emitDecodeProgress(operationId, framesDecoded, totalEstimate, percent, sourceSr, sourceCh)
+          }
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val result = nativeDecodeFileStreaming(
+          sourcePath,
+          targetRate,
+          forceMono,
+          8192,
+          cancelFlagAddr,
+          chunkCallback,
+          progressCallback
+        ) as? HashMap<String, Any>
+
+        if (result != null) {
+          srcSampleRate = (result["sourceSampleRate"] as? Int) ?: srcSampleRate
+          srcChannels = (result["sourceChannels"] as? Int) ?: srcChannels
+        }
+
+        if (autoFinalize) {
+          liveEntry.finalize_()
+        }
+
+        status.isRunning = false
+        status.percent = 100
+
+        emitDecodeComplete(
+          operationId = operationId,
+          success = true,
+          totalFramesIngested = status.framesIngested,
+          sourceSampleRate = srcSampleRate,
+          sourceChannels = srcChannels,
+          autoFinalized = autoFinalize,
+        )
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "Unknown error"
+        val code = if (msg.startsWith("DECODE_")) msg.substringBefore(":").trim() else "DECODE_INTERNAL_ERROR"
+        status.isRunning = false
+        status.error = msg
+
+        emitDecodeComplete(
+          operationId = operationId,
+          success = false,
+          error = msg,
+          errorCode = code,
+        )
+      } catch (e: Exception) {
+        status.isRunning = false
+        status.error = e.message
+
+        emitDecodeComplete(
+          operationId = operationId,
+          success = false,
+          error = e.message,
+          errorCode = "DECODE_INTERNAL_ERROR",
+        )
+      } finally {
+        nativeFreeCancelFlag(cancelFlagAddr)
+        cancelChecker.interrupt()
+        decodeCancelFlags.remove(operationId)
+        try { readHandle.close() } catch (_: Exception) {}
+        try { tmpFile?.delete() } catch (_: Exception) {}
       }
     }
+  }
+
+  override fun getFileIngestStatus(ingestId: String, promise: Promise) {
+    val status = fileIngestStatuses[ingestId]
+    if (status == null) {
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("isRunning", false)
+      resultMap.putDouble("framesIngested", 0.0)
+      resultMap.putDouble("totalFramesEstimate", 0.0)
+      resultMap.putInt("percent", 0)
+      resultMap.putString("error", "Ingest not found: $ingestId")
+      promise.resolve(resultMap)
+      return
+    }
+    val resultMap = Arguments.createMap()
+    resultMap.putBoolean("isRunning", status.isRunning)
+    resultMap.putDouble("framesIngested", status.framesIngested.toDouble())
+    resultMap.putDouble("totalFramesEstimate", status.totalFramesEstimate.toDouble())
+    resultMap.putInt("percent", status.percent)
+    if (status.error != null) resultMap.putString("error", status.error)
+    promise.resolve(resultMap)
+  }
+
+  override fun cancelDecode(operationId: String, promise: Promise) {
+    val flag = decodeCancelFlags[operationId]
+    if (flag != null) {
+      flag.set(true)
+    }
+    promise.resolve(null)
   }
 
   override fun createOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
@@ -737,7 +999,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun createLiveAudioBuffer(options: ReadableMap, promise: Promise) {
+  override fun createEmptyLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
       val sampleRate = options.getDouble("sampleRate").toInt()
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
@@ -2013,5 +2275,39 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       format: String,
       outputSampleRateHz: Int
     ): String
+
+    /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
+    @JvmStatic
+    external fun nativeDecodeFileToBuffer(
+      path: String,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      cancelFlagPtr: Long
+    ): HashMap<String, Any>?
+
+    /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */
+    @JvmStatic
+    external fun nativeDecodeFileStreaming(
+      path: String,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      cancelFlagPtr: Long,
+      chunkCallback: Any,
+      progressCallback: Any?
+    ): HashMap<String, Any>?
+
+    /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */
+    @JvmStatic
+    external fun nativeAllocateCancelFlag(): Long
+
+    /** Set a native cancel flag to the given value. */
+    @JvmStatic
+    external fun nativeSetCancelFlag(ptr: Long, value: Boolean)
+
+    /** Free a previously allocated native cancel flag. */
+    @JvmStatic
+    external fun nativeFreeCancelFlag(ptr: Long)
   }
 }
