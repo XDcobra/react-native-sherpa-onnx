@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 
-#include "../../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 

@@ -1,5 +1,5 @@
 #import "../../SherpaOnnx.h"
-#import "../../SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #import "../../SherpaOnnx+TextBufferGlobals.h"
 
 #include "../core/AlignmentBridgeUtils.h"

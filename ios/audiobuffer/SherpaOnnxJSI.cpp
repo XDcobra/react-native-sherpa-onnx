@@ -1,6 +1,6 @@
 #include "SherpaOnnxJSI.h"
 
-#include "../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 
 #include <cstring>
 #include <string>

@@ -599,7 +599,7 @@ private:
 | `ios/PaRegistry.h` | Create | C++ singleton registry header |
 | `ios/PaRegistry.cpp` | Create | C++ singleton registry implementation |
 | `ios/SherpaOnnx.mm` | Modify | Call `[self autoInstallJSI]` in `init` |
-| `ios/SherpaOnnx+PipelineAudio.mm` | Modify | Delegate to `PaRegistry` for all entry storage |
+| `ios/audio/bridge/SherpaOnnx+PipelineAudio.mm` | Modify | Delegate to `PaRegistry` for all entry storage |
 | `SherpaOnnx.podspec` | Modify | Add new source files |
 
 ---

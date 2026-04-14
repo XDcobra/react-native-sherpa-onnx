@@ -416,7 +416,7 @@ Die Offline-TTS Doku soll nach Migration folgende Form haben:
 - [android/src/main/java/com/sherpaonnx/audio/pipeline/PipelineAudioRegistry.kt](../../../android/src/main/java/com/sherpaonnx/audio/pipeline/PipelineAudioRegistry.kt)
 - [android/src/main/java/com/sherpaonnx/text/pipeline/TextPipelineRegistry.kt](../../../android/src/main/java/com/sherpaonnx/text/pipeline/TextPipelineRegistry.kt)
 - [ios/tts/bridge/SherpaOnnx+TTSBatch.mm](../../../ios/tts/bridge/SherpaOnnx+TTSBatch.mm)
-- [ios/SherpaOnnx+PipelineAudio.mm](../../../ios/SherpaOnnx+PipelineAudio.mm)
+- [ios/audio/bridge/SherpaOnnx+PipelineAudio.mm](../../../ios/audio/bridge/SherpaOnnx+PipelineAudio.mm)
 - [ios/SherpaOnnx+TextBuffer.mm](../../../ios/SherpaOnnx+TextBuffer.mm)
 - [docs/stt-offline.md](../../stt-offline.md)
 - [docs/textbuffer.md](../../textbuffer.md)

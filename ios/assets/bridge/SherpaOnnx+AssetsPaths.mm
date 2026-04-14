@@ -1,4 +1,5 @@
 #import "../../SherpaOnnx.h"
+#import "SherpaOnnx+Assets.h"
 
 @implementation SherpaOnnx (Assets)
 

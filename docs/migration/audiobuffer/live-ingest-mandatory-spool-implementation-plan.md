@@ -199,7 +199,7 @@ if (!liveEntry->hasActiveSpool) {
 |------|--------|
 | `android/.../LiveEntry.kt` | `spoolWriter` val->var, add `enableSpool()`, add `isTemporarySpool`, extend `release()` |
 | `android/.../SherpaOnnxModule.kt` | Call `enableSpool` in `startFileIngestToLiveBuffer` before decode starts |
-| `ios/PaLiveEntry.h` | Add `enableSpool()`, add `isTemporarySpool`, extend `release()` |
-| `ios/SherpaOnnx+PipelineAudio.mm` | Call `enableSpool` in `startFileIngestToLiveBuffer` before decode starts |
+| `ios/audio/pipeline/PaLiveEntry.h` | Add `enableSpool()`, add `isTemporarySpool`, extend `release()` |
+| `ios/audio/bridge/SherpaOnnx+PipelineAudio.mm` | Call `enableSpool` in `startFileIngestToLiveBuffer` before decode starts |
 
 No TypeScript, doc, or public API changes required (behavior matches existing documented contract).

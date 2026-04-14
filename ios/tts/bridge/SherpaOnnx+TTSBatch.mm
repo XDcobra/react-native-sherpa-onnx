@@ -2,13 +2,13 @@
  * SherpaOnnx+TTSBatch.mm — Buffer-to-buffer offline TTS synthesis.
  */
 
-#import "SherpaOnnx.h"
+#import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
-#include "../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../SherpaOnnx+TextBufferGlobals.h"
 
 #include <memory>

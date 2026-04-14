@@ -1,11 +1,11 @@
-#import "SherpaOnnx.h"
+#import "../../SherpaOnnx.h"
 #include "engine/TtsEngineStore.h"
 #include "pipeline/TtsPipelineWorker.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "../SherpaOnnx+StreamingPipeline.h"
-#include "../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../SherpaOnnx+TextBufferGlobals.h"
-#include "../PaLiveEntry.h"
+#include "../../audio/pipeline/PaLiveEntry.h"
 
 // Instance → active pipeline tracking
 static std::unordered_map<std::string, std::string> g_tts_instance_to_pipeline;

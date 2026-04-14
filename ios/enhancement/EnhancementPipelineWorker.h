@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../SherpaOnnx+StreamingPipeline.h"
-#include "../PaLiveEntry.h"
+#include "../audio/pipeline/PaLiveEntry.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include <condition_variable>
 #include <deque>

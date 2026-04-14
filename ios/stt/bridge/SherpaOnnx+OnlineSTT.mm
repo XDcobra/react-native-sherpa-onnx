@@ -10,8 +10,8 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../PaLiveEntry.h"
-#include "../../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../audio/pipeline/PaLiveEntry.h"
+#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../SherpaOnnx+StreamingPipeline.h"
 #include "../../SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/SttPipelineWorker.h"

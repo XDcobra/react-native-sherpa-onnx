@@ -10,14 +10,14 @@
  * appendSamples*, finalize, save, info, release, mic capture.
  */
 
-#import "SherpaOnnx.h"
+#import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import "fileio/FileIOResolver.h"
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
-#include "PaLiveEntry.h"
+#include "../pipeline/PaLiveEntry.h"
 #include "AudioDecodeSession.h"
 #include "AudioEncodeSession.h"
 #include <mutex>

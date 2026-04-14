@@ -4,11 +4,11 @@
  * Supports: create, pause, resume, seek, restart, getPosition, destroy, onEnded events.
  */
 
-#import "SherpaOnnx.h"
+#import "../SherpaOnnx.h"
 #import <AVFoundation/AVFoundation.h>
 
-#include "../PaLiveEntry.h"
-#include "../SherpaOnnx+PipelineAudioGlobals.h"
+#include "../audio/pipeline/PaLiveEntry.h"
+#include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "PcmPlayerRegistry.h"
 
 #include <algorithm>
