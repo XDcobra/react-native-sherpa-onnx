@@ -70,7 +70,7 @@ import { AudioContext } from 'react-native-audio-api';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { convertAudioToFormat } from 'react-native-sherpa-onnx/audio';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 import {
   loadAudioAsArrayBuffer,
   stopWebAudioPlayback,
@@ -1164,7 +1164,7 @@ export default function TTSScreen() {
 
   /** Save a GeneratedResult to a WAV file path. */
   const saveResultToWav = async (audio: GeneratedResult, path: string) => {
-    await convertAudioToFormat(audio.bufferId, { kind: 'fs', path }, 'wav');
+    await saveAudioAsFile(audio.bufferId, { kind: 'fs', path }, 'wav');
   };
 
   const saveAudioWithData = async (audio: GeneratedResult) => {

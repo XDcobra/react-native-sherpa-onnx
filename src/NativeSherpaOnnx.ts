@@ -1022,27 +1022,63 @@ export interface Spec extends TurboModule {
    */
   computeFileSha256(filePath: string): Promise<string>;
 
-  // ==================== Helper - Audio conversion ====================
+  // ==================== Helper - Audio save ====================
 
   /**
-   * Convert pipeline audio buffer to encoded file at destination.
-   * @param bufferId - off_UUID or live_UUID
+   * Save a pipeline audio buffer to an encoded file via AudioEncodeSession.
+   * File-backed inputs are decoded via AudioDecodeSession first.
+   * Direct PCM inputs are fed to the encoder in chunks without decode.
+   *
+   * @param bufferId - "off_*" or "live_*" (must be finalized if live)
    * @param destination - Serialized FileDestination
-   * @param format - Target format string
+   * @param format - Target format string (wav, mp3, flac, etc.)
    * @param outputSampleRateHz - 0 = format-dependent default
-   * @param operationId - For progress/cancel
-   * @returns { outputKind: string, outputPath: string }
+   * @param bitrate - Target bitrate in kbps (0 = codec default or quality-derived)
+   * @param quality - 0=default, 1=low, 2=medium, 3=high
+   * @param operationId - For progress/cancel correlation
    */
-  convertPipelineAudioToDestination(
+  saveAudioBufferToFile(
     bufferId: string,
     destination: Object,
     format: string,
     outputSampleRateHz: number,
+    bitrate: number,
+    quality: number,
     operationId: string
   ): Promise<{
     outputKind: string;
     outputPath: string;
   }>;
+
+  /**
+   * Encode a source audio file to an output file via AudioDecodeSession → AudioEncodeSession.
+   * No buffer registry involvement — direct file-to-file pipeline.
+   *
+   * @param source - Serialized FileSource
+   * @param destination - Serialized FileDestination
+   * @param format - Target format string (wav, mp3, flac, etc.)
+   * @param outputSampleRateHz - 0 = format-dependent default
+   * @param bitrate - Target bitrate in kbps (0 = codec default or quality-derived)
+   * @param quality - 0=default, 1=low, 2=medium, 3=high
+   * @param operationId - For progress/cancel correlation
+   */
+  saveFileAsAudioFile(
+    source: Object,
+    destination: Object,
+    format: string,
+    outputSampleRateHz: number,
+    bitrate: number,
+    quality: number,
+    operationId: string
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
+
+  /**
+   * Cancel a running audio save operation.
+   */
+  cancelAudioSave(operationId: string): Promise<void>;
 
   // ==================== Execution Provider Methods ====================
 

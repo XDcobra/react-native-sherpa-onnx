@@ -1,11 +1,15 @@
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
-import type { AudioOutputFormat, AudioConversionOptions } from './types';
+import type {
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+} from './types';
 import type {
   FileDestination,
+  FileSource,
   ResolvedFileRef,
-  FileIOProgressEvent,
 } from '../fileio/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 
@@ -19,7 +23,7 @@ function getEventEmitter(): NativeEventEmitter {
 
 let idCounter = 0;
 function generateOperationId(): string {
-  return `conv_${Date.now()}_${++idCounter}`;
+  return `save_${Date.now()}_${++idCounter}`;
 }
 
 function parseResolvedFileRef(result: {
@@ -33,66 +37,114 @@ function parseResolvedFileRef(result: {
 }
 
 /**
- * Convert a pipeline audio buffer to an encoded audio file at the given destination.
- *
- * The native encoder streams output directly to the destination.
- * Returns a ResolvedFileRef pointing to the written file.
- *
- * @param input       - Offline or finalized live audio buffer (ref, handle, or raw ID string).
- * @param output      - Destination for the encoded audio file.
- * @param format      - Target audio format.
- * @param options     - Optional conversion options (sample rate, progress, cancel).
+ * Type guard: returns true if the input is a FileSource (has a `kind` property
+ * matching one of the FileSource discriminants).
  */
-export async function convertAudioToFormat(
-  input: PipelineAudioBufferIdSource,
+function isFileSource(input: AudioSaveInput): input is FileSource {
+  return (
+    typeof input === 'object' &&
+    input !== null &&
+    'kind' in input &&
+    typeof (input as any).kind === 'string' &&
+    ['fs', 'app', 'contentUri', 'securityScoped', 'pad'].includes(
+      (input as any).kind
+    )
+  );
+}
+
+/**
+ * Map quality string to internal numeric value (0=default, 1=low, 2=medium, 3=high).
+ */
+function mapQuality(quality?: 'low' | 'medium' | 'high'): number {
+  switch (quality) {
+    case 'low':
+      return 1;
+    case 'medium':
+      return 2;
+    case 'high':
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Save audio to an encoded file at the given destination.
+ *
+ * Input can be:
+ * - A pipeline audio buffer (offline or finalized live): ref, handle, info, or raw ID string.
+ * - A FileSource for direct file-to-file encoding without intermediate buffers.
+ *
+ * Output: FileDestination descriptor.
+ * Returns a ResolvedFileRef pointing to the written file.
+ */
+export async function saveAudioAsFile(
+  input: AudioSaveInput,
   output: FileDestination,
   format: AudioOutputFormat,
-  options?: AudioConversionOptions
+  options?: SaveAudioOptions
 ): Promise<ResolvedFileRef> {
   const operationId = generateOperationId();
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+  const bitrate = options?.bitrate ?? 0;
+  const quality = mapQuality(options?.quality);
 
   let progressSubscription: { remove: () => void } | null = null;
   let abortHandler: (() => void) | null = null;
 
   try {
-    // Set up progress listener
+    // Progress listener — listens to native "audioSaveProgress" events
     if (options?.onProgress) {
       const emitter = getEventEmitter();
       const onProgress = options.onProgress;
-      progressSubscription = emitter.addListener('fileIOProgress', ((
-        event: FileIOProgressEvent & { operationId: string }
+      progressSubscription = emitter.addListener('audioSaveProgress', ((
+        rawEvent: unknown
       ) => {
+        const event = rawEvent as AudioSaveProgressEvent;
         if (event.operationId === operationId) {
-          onProgress({
-            bytesTransferred: event.bytesTransferred,
-            totalBytes: event.totalBytes,
-            percent: event.percent,
-          });
+          onProgress(event);
         }
       }) as any);
     }
 
-    // Set up AbortSignal
+    // AbortSignal → native cancel
     if (options?.signal) {
       if (options.signal.aborted) {
         throw Object.assign(new Error('Operation cancelled'), {
-          code: 'FILEIO_CANCELLED',
+          code: 'AUDIO_SAVE_CANCELLED',
         });
       }
       abortHandler = () => {
-        SherpaOnnx.cancelFileIO(operationId);
+        SherpaOnnx.cancelAudioSave(operationId);
       };
       options.signal.addEventListener('abort', abortHandler);
     }
 
-    const result = await SherpaOnnx.convertPipelineAudioToDestination(
-      resolvePipelineAudioBufferId(input),
-      output as any,
-      format,
-      outputSampleRateHz,
-      operationId
-    );
+    let result: { outputKind: string; outputPath: string };
+
+    if (isFileSource(input)) {
+      // File-to-file path: AudioDecodeSession → AudioEncodeSession, no buffer registry
+      result = await SherpaOnnx.saveFileAsAudioFile(
+        input as any,
+        output as any,
+        format,
+        outputSampleRateHz,
+        bitrate,
+        quality,
+        operationId
+      );
+    } else {
+      // Buffer path: resolve to string bufferId, look up in native registry
+      result = await SherpaOnnx.saveAudioBufferToFile(
+        resolvePipelineAudioBufferId(input),
+        output as any,
+        format,
+        outputSampleRateHz,
+        bitrate,
+        quality,
+        operationId
+      );
+    }
 
     return parseResolvedFileRef(result);
   } finally {
@@ -104,20 +156,25 @@ export async function convertAudioToFormat(
 }
 
 /**
- * Convert a pipeline audio buffer to WAV 16 kHz mono 16-bit PCM.
- * Shortcut for convertAudioToFormat(input, output, 'wav', { outputSampleRateHz: 16000 }).
+ * Save audio as WAV 16 kHz mono 16-bit PCM.
+ * Shortcut for saveAudioAsFile(input, output, 'wav', { outputSampleRateHz: 16000 }).
  *
- * Now accepts a FileDestination instead of a plain string path.
+ * Accepts both buffer references and FileSource.
  */
-export function convertAudioToWav16k(
-  input: PipelineAudioBufferIdSource,
+export function saveAudioAsWav16k(
+  input: AudioSaveInput,
   output: FileDestination
 ): Promise<ResolvedFileRef> {
-  return convertAudioToFormat(input, output, 'wav', {
+  return saveAudioAsFile(input, output, 'wav', {
     outputSampleRateHz: 16000,
   });
 }
 
-export type { AudioOutputFormat, AudioConversionOptions } from './types';
-export { ConversionErrorCode } from './types';
-export type { ConversionErrorCodeValue } from './types';
+export type {
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+} from './types';
+export { AudioSaveErrorCode } from './types';
+export type { AudioSaveErrorCodeValue } from './types';
