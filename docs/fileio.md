@@ -1,6 +1,6 @@
 # File I/O (`react-native-sherpa-onnx/fileio`)
 
-Generic file operations using **`FileSource`** and **`FileDestination`** descriptors. Supports filesystem paths, app directories (cache/documents), Android `content://` URIs, Android SAF directory trees, and iOS security-scoped URLs.
+Generic file operations using **`FileSource`** and **`FileDestination`** descriptors. Supports filesystem paths, app directories, Android `content://` URIs, Android SAF directory trees, iOS security-scoped URLs, and Android Play Asset Delivery (`pad`) sources.
 
 **Import path:** `react-native-sherpa-onnx/fileio`
 
@@ -22,10 +22,10 @@ type FileDestination =
   | { kind: 'fs'; path: string }
   | { kind: 'app'; base: AppBaseDir; path: string }
   | { kind: 'contentUri'; uri: string }
-  | { kind: 'contentTree'; treeUri: string; displayName: string; mimeType?: string }
+  | { kind: 'contentTree'; treeUri: string; filename: string; mimeType: string }
   | { kind: 'securityScoped'; uri: string };
 
-type AppBaseDir = 'cache' | 'documents';
+type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles';
 ```
 
 ## Platform notes
@@ -33,7 +33,7 @@ type AppBaseDir = 'cache' | 'documents';
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | Cache or documents dir | Cache or documents dir |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
 | `contentUri` | SAF document URI | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
@@ -50,19 +50,26 @@ const result = await copyFile(
   { kind: 'contentUri', uri: pickedUri },
   { kind: 'app', base: 'cache', path: 'reference.wav' }
 );
-console.log(result.outputPath); // absolute cache path
+if (result.output.kind === 'fs') {
+  console.log(result.output.path); // absolute cache path
+}
 
 // Copy local file to SAF tree
 await copyFile(
   { kind: 'fs', path: '/data/.../out.mp3' },
-  { kind: 'contentTree', treeUri: dirUri, displayName: 'out.mp3', mimeType: 'audio/mpeg' }
+  { kind: 'contentTree', treeUri: dirUri, filename: 'out.mp3', mimeType: 'audio/mpeg' }
 );
 
 // Share a file
 await shareFile({ kind: 'fs', path: '/path/to/out.wav' }, { mimeType: 'audio/wav' });
 
 // Save text to SAF tree
-await saveText('Hello', { kind: 'contentTree', treeUri: dirUri, displayName: 'note.txt' });
+await saveText('Hello', {
+  kind: 'contentTree',
+  treeUri: dirUri,
+  filename: 'note.txt',
+  mimeType: 'text/plain',
+});
 ```
 
 ## Progress & cancellation
@@ -74,7 +81,7 @@ const controller = new AbortController();
 
 const result = await copyFile(
   { kind: 'fs', path: largePath },
-  { kind: 'contentTree', treeUri: dirUri, displayName: 'big.wav' },
+  { kind: 'contentTree', treeUri: dirUri, filename: 'big.wav', mimeType: 'audio/wav' },
   {
     signal: controller.signal,
     onProgress: (event) => {
@@ -98,7 +105,7 @@ function copyFile(
 ): Promise<CopyFileResult>;
 ```
 
-Copy bytes from source to destination. Returns `{ outputKind, outputPath }` describing the written location.
+Copy bytes from source to destination. Returns `{ bytesCopied, output }`.
 
 **Options:**
 
@@ -119,7 +126,8 @@ Write UTF-8 text to the destination. Returns a `ResolvedFileRef`.
 
 **Options:**
 
-- `mimeType?: string` — MIME type for `contentTree` destinations (default: `text/plain`)
+- `encoding?: 'utf8'` — text encoding (default: `utf8`)
+- `overwrite?: boolean` — overwrite destination if it already exists (default: `true`)
 
 ### `shareFile(source, options?)`
 
@@ -152,8 +160,8 @@ type ResolvedFileRef =
 
 ```ts
 interface CopyFileResult {
-  outputKind: string;
-  outputPath: string;
+  bytesCopied: number;
+  output: ResolvedFileRef;
 }
 ```
 
@@ -173,17 +181,17 @@ Error codes thrown by file I/O operations:
 
 | Code | Meaning |
 |------|---------|
-| `FILEIO_SOURCE_NOT_FOUND` | Source file/URI does not exist |
-| `FILEIO_DEST_NOT_WRITABLE` | Destination cannot be written |
+| `FILEIO_INVALID_ARGUMENT` | Argument validation failed |
+| `FILEIO_UNSUPPORTED_LOCATION_KIND` | Unknown source/destination kind |
+| `FILEIO_UNSUPPORTED_ON_PLATFORM` | Kind is valid but not supported on this platform |
 | `FILEIO_PERMISSION_DENIED` | Missing permission for the operation |
-| `FILEIO_UNSUPPORTED_KIND` | Source/destination kind not supported on this platform |
-| `FILEIO_INVALID_ARGUMENT` | Missing or malformed argument |
-| `FILEIO_COPY_FAILED` | Copy stream failed |
+| `FILEIO_NOT_FOUND` | Source file/URI does not exist |
+| `FILEIO_ALREADY_EXISTS` | Destination exists and overwrite=false |
+| `FILEIO_READ_ERROR` | Error while reading source |
+| `FILEIO_WRITE_ERROR` | Error while writing destination |
+| `FILEIO_RESOLVE_ERROR` | Resolver could not map source/destination |
 | `FILEIO_CANCELLED` | Operation cancelled via AbortSignal |
-| `FILEIO_SHARE_FAILED` | Share sheet failed to open |
-| `FILEIO_TEXT_WRITE_FAILED` | Text write failed |
-| `FILEIO_PATH_TRAVERSAL` | Path traversal detected (e.g. `../`) in app-relative paths |
-| `FILEIO_UNKNOWN` | Unexpected error |
+| `FILEIO_PATH_TRAVERSAL_BLOCKED` | App-relative path escaped base directory |
 
 ## Integration with other modules
 

@@ -608,7 +608,7 @@ Current behavior: if the process crashes between encoding and temp-file deletion
 ## 9. Acceptance criteria
 
 - [ ] `convertAudioToFormat(buf, { kind: 'contentUri', uri }, 'wav')` encodes directly to the SAF fd on Android — no temp file created.
-- [ ] `convertAudioToFormat(buf, { kind: 'contentTree', treeUri, displayName }, 'mp3')` encodes directly to the SAF fd — no temp file.
+- [ ] `convertAudioToFormat(buf, { kind: 'contentTree', treeUri, filename, mimeType }, 'mp3')` encodes directly to the SAF fd — no temp file.
 - [ ] `convertAudioToFormat(buf, { kind: 'fs', path }, 'wav')` works unchanged (direct file path).
 - [ ] `createOfflineAudioBufferFromFile({ kind: 'contentUri', uri })` decodes directly from the SAF fd — no temp copy to cache.
 - [ ] `copyFile` continues working with non-seekable streams (uses `SEQUENTIAL` mode, unchanged).

@@ -81,11 +81,11 @@ This document only distills:
 
 ## Gap summary
 
-Primary migration gap to close:
+Primary migration gap (now closed):
 
-1. Align runtime export behavior with the performance decision:
-   - move Android stream destinations from temp-first to direct-stream-first
-   - keep temp+copy as controlled fallback only
+1. Runtime export behavior is aligned with the performance decision:
+  - Android `contentUri` / `contentTree` destinations are now direct-stream-first via seekable fd paths
+  - temp+copy remains as controlled fallback only for providers that cannot supply a seekable fd
 
 Secondary alignment gaps:
 
@@ -98,16 +98,16 @@ Secondary alignment gaps:
 ## Rollout guidance (high-level)
 
 1. **Document reality clearly** while migration is in progress.
-2. **Implement direct-stream-first path** for Android stream destinations.
-3. **Retain fallback safety** only where required by encoder/container constraints.
-4. **Update docs to final semantics** after runtime behavior is fully aligned.
+2. ✅ **Implement direct-stream-first path** for Android stream destinations.
+3. ✅ **Retain fallback safety** only where required by encoder/container constraints.
+4. ✅ **Update docs to final semantics** after runtime behavior is fully aligned.
 
 ---
 
 ## Success criteria
 
-- Runtime behavior matches the strategic direction in `generic-file-io-high-level-plan.md`.
-- Stream destinations are direct-first in normal cases.
-- Temp+copy is no longer the default stream export behavior.
-- Public docs describe the same behavior the code executes.
+- ✅ Runtime behavior matches the strategic direction in `generic-file-io-high-level-plan.md`.
+- ✅ Stream destinations are direct-first in normal cases.
+- ✅ Temp+copy is no longer the default stream export behavior.
+- ✅ Public docs describe the same behavior the code executes.
 

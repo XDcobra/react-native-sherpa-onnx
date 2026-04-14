@@ -637,26 +637,26 @@ while (bytesRead = read(source, buffer, BUFFER_SIZE)) > 0:
 
 ### 7.3 Audio Conversion — Direct Streaming Output
 
-The primary path for audio conversion writes directly from the encoder to the destination stream:
+The primary path for audio conversion writes directly from the encoder to the destination:
 
 **Android:**
-- FFmpeg's custom `AVIOContext` callbacks write directly to the `WriteHandle.Stream.outputStream` (for `contentUri`/`contentTree` destinations).
-- For `fs`/`app` destinations, FFmpeg writes to the local path directly (no custom I/O needed).
-- The `SherpaOnnxAudioConvert` helper is extended to accept an `OutputStream` in addition to a file path.
+- For `fs`/`app` destinations, FFmpeg writes to the local path directly.
+- For `contentUri`/`contentTree` destinations, the resolver prefers a seekable `ParcelFileDescriptor` and passes `/proc/self/fd/<n>` to FFmpeg.
+- This keeps the existing C++ FFmpeg path-based converter unchanged while avoiding temp+copy in the primary path.
 
 **iOS:**
 - For `fs`/`app`/`securityScoped` destinations, the encoder writes to the resolved local path directly.
 - `securityScoped` destinations use `startAccessingSecurityScopedResource` before encoding and `stopAccessingSecurityScopedResource` after.
 
 **Fallback (internal only):**
-If a format requires seekable output and the destination is a non-seekable stream (e.g. SAF OutputStream for certain formats), the encoder writes to `app/cache/fileio_tmp_<uuid>.<ext>`, then the copy engine streams it to the destination and deletes the temp file. This is transparent to the caller.
+If a SAF provider cannot supply a seekable fd for a destination, the encoder writes to `app/cache/fileio_tmp_<uuid>.<ext>`, then the copy engine streams to the destination and deletes the temp file. This is transparent to the caller.
 
 ### 7.4 Audio Buffer Import — Source Resolution
 
 `createOfflineAudioBufferFromSource` resolves the `FileSource` natively:
 
 - `fs`/`app`/`pad`: resolved to local file path → passed directly to the existing WAV decoder / sherpa `ReadWave`.
-- `contentUri` (Android): `ContentResolver.openInputStream` → copy to temp file in cache → decode → delete temp. This is necessary because `sherpa::ReadWave` requires a file path (random access).
+- `contentUri` (Android): resolver prefers `openFileDescriptor(uri, "r")` and decodes via `/proc/self/fd/<n>` directly. Stream-to-temp is retained as fallback when fd access is unavailable.
 - `securityScoped` (iOS): `startAccessingSecurityScopedResource` → resolve to path → decode → `stopAccessingSecurityScopedResource`.
 
 ### 7.5 File Layout
@@ -913,7 +913,7 @@ The SDK does not manage bookmarks. It only consumes the URL provided per-operati
 - [ ] Add `createOfflineAudioBufferFromSource` to TurboModule.
 - [ ] Remove `createOfflineAudioBufferFromFile` (old string-based) from TurboModule.
 - [ ] Update `src/audiobuffer/index.ts` — new signature, delegate to new bridge method.
-- [ ] Android: `SherpaOnnxModule` dispatches to resolver → temp file (for contentUri) → existing decoder.
+- [ ] Android: `SherpaOnnxModule` dispatches to resolver → fd-first decode for `contentUri`, temp-file fallback only when fd access is unavailable.
 - [ ] iOS: `SherpaOnnx+PipelineAudio.mm` dispatches to resolver → existing decoder.
 - [ ] Tests: `createOfflineAudioBufferFromFile` with `fs`, `contentUri`, `pad`, `securityScoped`.
 
@@ -924,7 +924,7 @@ The SDK does not manage bookmarks. It only consumes the URL provided per-operati
 - [ ] Add `convertPipelineAudioToDestination` to TurboModule.
 - [ ] Remove `convertPipelineAudioBufferToFormat` from TurboModule.
 - [ ] Update `src/audio/index.ts` — new signatures with `FileDestination` + options.
-- [ ] Android: extend `SherpaOnnxAudioConvert` to accept `OutputStream` via FFmpeg custom I/O.
+- [ ] Android: use seekable fd-backed output (`/proc/self/fd/<n>`) for SAF destinations, with temp+copy fallback.
 - [ ] iOS: extend conversion helper for security-scoped destinations.
 - [ ] Wire progress/cancel for conversion operations.
 - [ ] Tests: conversion to `fs`, `contentTree`, `securityScoped`.

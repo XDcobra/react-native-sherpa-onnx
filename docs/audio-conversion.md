@@ -24,6 +24,7 @@ Key behavior:
 - Live buffers must be finalized before conversion.
 - Buffer contents are not modified by conversion.
 - Returns `ResolvedFileRef` describing the written output location.
+- Android SAF destinations (`contentUri`, `contentTree`) use **direct fd-backed output** first (`/proc/self/fd/<n>`), with temp-file fallback only when a provider cannot supply a seekable fd.
 
 ## Examples
 
@@ -80,7 +81,12 @@ await convertAudioToWav16k(buffer, { kind: 'fs', path: '/tmp/stt_input.wav' });
 ```ts
 const ref = await convertAudioToFormat(
   buffer,
-  { kind: 'contentTree', treeUri: safDirUri, displayName: 'speech.wav' },
+  {
+    kind: 'contentTree',
+    treeUri: safDirUri,
+    filename: 'speech.wav',
+    mimeType: 'audio/wav',
+  },
   'wav'
 );
 console.log(ref); // { kind: 'contentUri', uri: 'content://...' }
@@ -102,6 +108,8 @@ const ref = await convertAudioToFormat(
   }
 );
 ```
+
+`onProgress` is best-effort. In the current implementation, direct encoder writes do not emit intermediate progress events.
 
 ## API reference
 
@@ -180,7 +188,11 @@ Use `ConversionErrorCode` from `react-native-sherpa-onnx/audio` for stable compa
 
 ## Output destination
 
-`output` accepts any `FileDestination` kind. For stream-based destinations (Android `contentUri`, `contentTree`), the native side encodes to a temp file first, then stream-copies to the destination.
+`output` accepts any `FileDestination` kind.
+
+- Android `contentUri` / `contentTree`: native resolves a seekable `ParcelFileDescriptor` and FFmpeg writes directly to `/proc/self/fd/<n>`.
+- Fallback: if a SAF provider does not support seekable fd output, native falls back to temp-file + stream copy.
+- iOS: output remains path-based (`fs` / `app` / `securityScoped`).
 
 See [fileio.md](fileio.md) for platform support per kind.
 

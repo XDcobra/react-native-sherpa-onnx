@@ -86,6 +86,10 @@ console.log(offline.info.sampleRate, offline.info.bufferId);
 const fromUri = await createOfflineAudioBufferFromFile({ kind: 'contentUri', uri: pickedUri });
 ```
 
+Android `contentUri` sources are resolved fd-first (`openFileDescriptor` -> `/proc/self/fd/<n>`) to avoid unnecessary temp copies in the primary path.
+
+For large WAV files that stay file-backed, native may retain underlying source resources until you call `releasePipelineAudioBuffer(...)`.
+
 #### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
 
 ```ts
