@@ -72,17 +72,6 @@ inline void pa_writeWavHeaderToStream(std::ofstream &f, int sampleRate, int bits
   writeU32LE(dataSize);
 }
 
-inline void pa_writeFloat32AsInt16Wav(const float *samples, int numSamples, int sampleRate, const std::string &path) {
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  int dataSize = numSamples * 2;
-  pa_writeWavHeaderToStream(f, sampleRate, 16, 1, dataSize);
-  for (int i = 0; i < numSamples; i++) {
-    float c = std::max(-1.0f, std::min(1.0f, samples[i]));
-    int16_t s = (int16_t)std::max(-32768, std::min(32767, (int)(c * 32767.0f)));
-    f.write(reinterpret_cast<char*>(&s), 2);
-  }
-}
-
 // ==================== PaLiveEntry ====================
 
 struct PaLiveEntry {
@@ -387,6 +376,8 @@ struct PaLiveEntry {
     // Wake pipeline workers so they detect the FINISHED state immediately
     notifyAppendListeners();
   }
+
+  std::vector<float> snapshotRing() {
     std::lock_guard<std::mutex> lock(ringMutex);
     int used = (int)std::min(totalSamplesWritten, (int64_t)windowCapacity);
     if (used == 0) return {};
@@ -445,17 +436,6 @@ struct PaLiveEntry {
   void releaseCursor(int cursorId) {
     std::lock_guard<std::mutex> cLock(cursorMutex);
     cursors.erase(cursorId);
-  }
-
-  void saveToWav(const std::string &outputPath) {
-    if (hasActiveSpool && state == FINISHED && !spoolPath.empty()) {
-      std::ifstream src(spoolPath, std::ios::binary);
-      std::ofstream dst(outputPath, std::ios::binary | std::ios::trunc);
-      dst << src.rdbuf();
-    } else {
-      auto snapshot = snapshotRing();
-      pa_writeFloat32AsInt16Wav(snapshot.data(), (int)snapshot.size(), sampleRate, outputPath);
-    }
   }
 
   void release() {

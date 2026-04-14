@@ -41,8 +41,7 @@ static NSString *const kPAErrAlreadyFinalized = @"AUDIO_ALREADY_FINALIZED";
 static NSString *const kPAErrCaptureError     = @"AUDIO_CAPTURE_ERROR";
 static NSString *const kPAErrInternalError    = @"AUDIO_INTERNAL_ERROR";
 
-// Source constants, pa_resampleLinear, pa_writeWavHeaderToStream, pa_writeFloat32AsInt16Wav,
-// and PaLiveEntry are defined in PaLiveEntry.h (included above).
+// Source constants, pa_resampleLinear, pa_writeWavHeaderToStream, and PaLiveEntry are defined in PaLiveEntry.h (included above).
 
 // ==================== Resampler (int16 variant, not in header) ====================
 static std::vector<int16_t> pa_resampleInt16(const int16_t *input, size_t inputSize, int fromRate, int toRate) {
@@ -127,7 +126,7 @@ static bool pa_parseWavHeader(const std::string &filePath, PaWavHeader &hdr) {
   return true;
 }
 
-// pa_writeWavHeaderToStream and pa_writeFloat32AsInt16Wav are provided by PaLiveEntry.h
+// pa_writeWavHeaderToStream is provided by PaLiveEntry.h
 
 // ==================== Offline Entry ====================
 
@@ -176,16 +175,6 @@ struct PaOfflineEntry {
       f.read(reinterpret_cast<char*>(result.data()), wavHeader.numSamples * 4);
     }
     return result;
-  }
-
-  void saveToWav(const std::string &outputPath) const {
-    if (!isFileBacked) {
-      pa_writeFloat32AsInt16Wav(samples.data(), (int)samples.size(), sampleRate, outputPath);
-    } else {
-      // Stream-copy from file-backed source
-      auto allSamples = readAllSamples();
-      pa_writeFloat32AsInt16Wav(allSamples.data(), (int)allSamples.size(), sampleRate, outputPath);
-    }
   }
 };
 

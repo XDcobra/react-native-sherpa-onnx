@@ -480,25 +480,6 @@ class LiveEntry(
     return out
   }
 
-  // ========== Save ==========
-
-  /**
-   * Save current content to a WAV file.
-   * - If spool is active: uses spool file (no RAM duplication).
-   * - Otherwise: writes ring snapshot.
-   */
-  fun saveToWav(outputPath: String) {
-    val spool = spoolWriter
-    if (spool != null && state == State.FINISHED) {
-      // Copy spool file (already a valid WAV after finalize)
-      File(spool.filePath).copyTo(File(outputPath), overwrite = true)
-    } else {
-      // Write from ring snapshot
-      val snapshot = snapshotRing()
-      WavWriter.writeFloat32AsInt16Wav(snapshot, sampleRate, outputPath)
-    }
-  }
-
   // ========== Release ==========
 
   fun release() {

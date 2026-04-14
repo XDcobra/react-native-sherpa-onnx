@@ -140,14 +140,6 @@ sealed class OfflineEntry {
       is FileBacked -> FileBackedReaderAdapter(filePath, metadata)
     }
   }
-
-  /** Save buffer contents as 16-bit PCM WAV. */
-  fun saveToWav(outputPath: String) {
-    when (this) {
-      is InMemory -> WavWriter.writeFloat32AsInt16Wav(samples, sampleRate, outputPath)
-      is FileBacked -> WavWriter.copyFileBackedToInt16Wav(filePath, metadata, outputPath)
-    }
-  }
 }
 
 /**
