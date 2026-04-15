@@ -1,6 +1,7 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { ModelPathConfig } from '../types';
-import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
+import type { FileSource } from '../fileio/types';
+import { resolveModelPath } from '../utils';
+import { resolveFileSourceForDetect } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
@@ -17,20 +18,20 @@ import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 let enhancementInstanceCounter = 0;
 
 export async function detectEnhancementModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: {
     modelType?: EnhancementInitializeOptions['modelType'];
     assetName?: string;
   }
 ): Promise<EnhancementDetectResult> {
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolved = await resolveFileSourceForDetect(source);
   const optionAssetName = options?.assetName?.trim();
   const assetName =
     optionAssetName && optionAssetName.length > 0
       ? optionAssetName
-      : deriveAssetNameFromModelPath(modelPath);
+      : resolved.assetName;
   const raw = await SherpaOnnx.detectEnhancementModel(
-    resolvedPath,
+    resolved.modelDir,
     assetName,
     options?.modelType ?? null
   );
@@ -65,6 +66,7 @@ export async function detectEnhancementModel(
       : undefined;
   return {
     success: raw.success,
+    isStreaming: false,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
     ...(raw.modelType != null && raw.modelType !== ''

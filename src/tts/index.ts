@@ -16,7 +16,9 @@ import {
   type DetectedModelEntry,
 } from '../types/modelDetect';
 import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import { resolveModelPath } from '../utils';
+import { resolveFileSourceForDetect } from '../detect';
 import {
   expandTtsInitializeOptions,
   expandTtsUpdateOptions,
@@ -43,16 +45,13 @@ let ttsInstanceCounter = 0;
  * Uses the same native file-based detection as createTTS. Stateless; no instance required.
  * For Kokoro/Kitten multi-language models, the result includes lexiconLanguageCandidates (e.g. ["default"] or ["us-en", "gb-en", "zh"]) derived from lexicon.txt and lexicon-*.txt; use these for a language selection dropdown (language change requires re-initialization).
  *
- * @param modelPath - Model path configuration (asset, file, or auto)
+ * @param source - FileSource describing where to find the model
  * @param options - Optional modelType (default: 'auto')
- * @returns Object with success, detectedModels (array of { type, modelDir }),
- * modelType (primary detected type, narrowed to known `TTSModelType` literals),
- * optional error when success is false, optionally lexiconLanguageCandidates
- * (from lexicon files for Kokoro/Kitten), and optionally **languages**, **quantization**, **sizeTier**
- * (`languages`: normalized primary tags, mostly ISO 639-1 from folder/catalog heuristics plus optional SDK hints when empty — not lexicon keys)
+ * @returns Object with success, detectedModels, modelType, isStreaming (always true for TTS),
+ * optional error, lexiconLanguageCandidates, languages, quantization, sizeTier
  * @example
  * ```typescript
- * const result = await detectTtsModel({ type: 'asset', path: 'models/vits-piper-en' });
+ * const result = await detectTtsModel({ kind: 'fs', path: '/path/to/vits-piper-en' });
  * if (result.success) console.log('Detected type:', result.modelType, result.detectedModels);
  * if (result.lexiconLanguageCandidates?.length) {
  *   // Kokoro/Kitten multi-lang: show language dropdown (e.g. "us-en", "zh")
@@ -60,13 +59,13 @@ let ttsInstanceCounter = 0;
  * ```
  */
 export async function detectTtsModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: TTSModelType }
 ): Promise<TtsDetectModelResult> {
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolved = await resolveFileSourceForDetect(source);
   const raw = await SherpaOnnx.detectTtsModel(
-    resolvedPath,
-    null,
+    resolved.modelDir,
+    resolved.assetName,
     options?.modelType ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
@@ -108,6 +107,7 @@ export async function detectTtsModel(
       : undefined;
   return {
     success: raw.success,
+    isStreaming: true,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
     ...(modelType != null ? { modelType } : {}),

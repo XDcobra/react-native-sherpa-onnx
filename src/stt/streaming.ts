@@ -11,7 +11,11 @@ import { resolvePipelineTextBufferId } from '../textbuffer';
 
 let streamingSttInstanceCounter = 0;
 
-export function mapDetectedToOnlineType(
+/**
+ * Normalize a raw detected model type string to an {@link OnlineSTTModelType}.
+ * Used internally by `createStreamingSTT` for auto-detection.
+ */
+function normalizeToOnlineType(
   detectedType: string | undefined
 ): OnlineSTTModelType {
   const t = detectedType ?? '';
@@ -31,16 +35,6 @@ export function mapDetectedToOnlineType(
       throw new Error(
         `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
       );
-  }
-}
-
-export function getOnlineTypeOrNull(
-  detectedType: string | undefined
-): OnlineSTTModelType | null {
-  try {
-    return mapDetectedToOnlineType(detectedType);
-  } catch {
-    return null;
   }
 }
 
@@ -122,7 +116,7 @@ export async function createStreamingSTT(
         `Streaming STT auto-detection failed for ${resolvedPath}. ${errMsg}`
       );
     }
-    effectiveModelType = mapDetectedToOnlineType(detectResult.modelType);
+    effectiveModelType = normalizeToOnlineType(detectResult.modelType);
   } else {
     effectiveModelType = options.modelType;
   }

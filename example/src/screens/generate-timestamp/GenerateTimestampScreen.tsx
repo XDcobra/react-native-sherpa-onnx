@@ -44,6 +44,7 @@ import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../../modelConfig';
 import { styles } from './GenerateTimestampScreen.styles';
 
@@ -411,12 +412,14 @@ export default function GenerateTimestampScreen() {
 
     try {
       const detection = await detectAlignmentModel(
-        getAlignmentModelPathConfig(selectedModelId, {
-          padModelIds,
-          padModelsPath,
-          bundledFolders: bundledAlignmentFolders,
-          downloadedIds: new Set(downloadedAlignmentIds),
-        }),
+        await toDetectSource(
+          getAlignmentModelPathConfig(selectedModelId, {
+            padModelIds,
+            padModelsPath,
+            bundledFolders: bundledAlignmentFolders,
+            downloadedIds: new Set(downloadedAlignmentIds),
+          })
+        ),
         { modelType: 'auto' as AlignmentModelType }
       );
 

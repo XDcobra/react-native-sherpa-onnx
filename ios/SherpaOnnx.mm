@@ -11,6 +11,7 @@
 
 #import "SherpaOnnx.h"
 #import "assets/bridge/SherpaOnnx+Assets.h"
+#import "fileio/FileIOResolver.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
@@ -244,6 +245,61 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
 {
     // PAD APK_ASSETS listing is Android-only.
     resolve(@[]);
+}
+
+// ─── FileSource helpers ──────────────────────────────────────────────
+
+- (void)resolveAppBaseDir:(NSString *)base
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
+{
+    NSString *dirPath = nil;
+    if ([base isEqualToString:@"cache"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"documents"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"files"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"tmp"]) {
+        dirPath = NSTemporaryDirectory();
+    } else if ([base isEqualToString:@"externalFiles"]) {
+        reject(kFIOErrUnsupportedOnPlatform, @"externalFiles is not supported on iOS", nil);
+        return;
+    } else {
+        reject(kFIOErrUnsupportedLocationKind,
+               [NSString stringWithFormat:@"Unknown AppBaseDir: %@", base], nil);
+        return;
+    }
+    if (!dirPath) {
+        reject(kFIOErrResolveError, @"Could not resolve directory", nil);
+        return;
+    }
+
+    // Ensure the directory exists and reject if creation fails.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDirectory = NO;
+    BOOL exists = [fm fileExistsAtPath:dirPath isDirectory:&isDirectory];
+    if (exists && !isDirectory) {
+        reject(kFIOErrResolveError,
+               [NSString stringWithFormat:@"Resolved app base path is not a directory: %@", dirPath],
+               nil);
+        return;
+    }
+    if (!exists) {
+        NSError *createError = nil;
+        BOOL created = [fm createDirectoryAtPath:dirPath
+                     withIntermediateDirectories:YES
+                                      attributes:nil
+                                           error:&createError];
+        if (!created) {
+            reject(kFIOErrWriteError,
+                   [NSString stringWithFormat:@"Failed to create app base directory: %@", dirPath],
+                   createError);
+            return;
+        }
+    }
+
+    resolve(dirPath);
 }
 
 - (void)getAvailableProviders:(RCTPromiseResolveBlock)resolve

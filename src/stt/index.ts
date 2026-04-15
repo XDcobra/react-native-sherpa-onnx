@@ -17,9 +17,12 @@ import type {
   SttRuntimeConfig,
 } from './types';
 import type { ModelPathConfig } from '../types';
-import { resolveModelPath, deriveAssetNameFromModelPath } from '../utils';
+import type { FileSource } from '../fileio/types';
+import { resolveModelPath } from '../utils';
+import { resolveFileSourceForDetect } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
+import { ONLINE_STT_MODEL_TYPES } from './streamingTypes';
 import {
   isDetectionSource,
   type DetectionSource,
@@ -40,20 +43,19 @@ function normalizeOfflineBufferInput(
  * Detect STT model type and structure without initializing the recognizer.
  * Uses the same native file-based detection as createSTT. Stateless; no instance required.
  *
- * @param modelPath - Model path configuration (asset, file, or auto)
+ * @param source - FileSource describing where to find the model
  * @param options - Optional preferInt8/modelType plus optional assetName and debug flag
- * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), optional **languages** (`iso6391Hint` for coarse tags; **`id`** for `modelOptions` where applicable), optional error when success is false, and optionally isHardwareSpecificUnsupported
+ * @returns Object with success, detectedModels, modelType, isStreaming, optional languages, quantization, error, and isHardwareSpecificUnsupported
  * @example
  * ```typescript
- * const path = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
- * const result = await detectSttModel(path);
+ * const result = await detectSttModel({ kind: 'fs', path: '/path/to/sherpa-onnx-whisper-tiny-en' });
  * if (result.success && result.detectedModels.length > 0) {
- *   console.log('Detected type:', result.modelType, result.detectedModels);
+ *   console.log('Detected type:', result.modelType, 'streaming:', result.isStreaming);
  * }
  * ```
  */
 export async function detectSttModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: {
     preferInt8?: boolean;
     modelType?: STTModelType;
@@ -61,14 +63,14 @@ export async function detectSttModel(
     debug?: boolean;
   }
 ): Promise<SttDetectModelResult> {
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolved = await resolveFileSourceForDetect(source);
   const optionAssetName = options?.assetName?.trim();
   const assetName =
     optionAssetName && optionAssetName.length > 0
       ? optionAssetName
-      : deriveAssetNameFromModelPath(modelPath);
+      : resolved.assetName;
   const raw = await SherpaOnnx.detectSttModel(
-    resolvedPath,
+    resolved.modelDir,
     assetName,
     options?.modelType ?? null,
     options?.preferInt8,
@@ -105,8 +107,20 @@ export async function detectSttModel(
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
       : undefined;
+
+  // Derive isStreaming: the model supports streaming when its detected type is
+  // one of the canonical online STT model types.  Normalize ctc variants first.
+  const normalizedType =
+    modelType === 'ctc' || modelType === 'zipformer_ctc'
+      ? 'zipformer2_ctc'
+      : modelType;
+  const isStreaming =
+    normalizedType != null &&
+    (ONLINE_STT_MODEL_TYPES as readonly string[]).includes(normalizedType);
+
   return {
     success: raw.success,
+    isStreaming,
     ...(err.length > 0 ? { error: err } : {}),
     ...(raw.isHardwareSpecificUnsupported === true
       ? { isHardwareSpecificUnsupported: true }
@@ -279,12 +293,7 @@ export async function createSTT(
 }
 
 // Streaming (online) STT
-export {
-  createStreamingSTT,
-  createLiveSTT,
-  mapDetectedToOnlineType,
-  getOnlineTypeOrNull,
-} from './streaming';
+export { createStreamingSTT, createLiveSTT } from './streaming';
 export type {
   OnlineSTTModelType,
   LiveSttEngine,

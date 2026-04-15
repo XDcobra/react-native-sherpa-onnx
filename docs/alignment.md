@@ -66,7 +66,7 @@ import {
 } from 'react-native-sherpa-onnx/alignment';
 
 const det = await detectAlignmentModel({
-  type: 'file',
+  kind: 'fs',
   path: '/path/to/alignment-pack',
 });
 
@@ -105,7 +105,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
-const det = await detectSttModel(modelPath);
+const det = await detectSttModel({ kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' });
 if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
 const stt = await createSTT({
@@ -216,22 +216,26 @@ const result = await alignTextToAudio(textBuf, audioBuf, {
 
 ### Detection
 
-#### `detectAlignmentModel(modelPath, options?)`
+#### `detectAlignmentModel(source, options?)`
 
 ```ts
 function detectAlignmentModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: AlignmentModelType }
 ): Promise<AlignmentDetectModelResult>;
 ```
 
+The result includes `isStreaming: false` (alignment is always offline).
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+
 ```ts
 const det = await detectAlignmentModel({
-  type: 'asset',
-  path: 'models/alignment-wav2vec2',
+  kind: 'fs',
+  path: '/absolute/path/to/alignment-wav2vec2',
 });
 if (det.success) {
-  console.log(det.modelType, det.paths?.model);
+  console.log(det.modelType, det.isStreaming, det.paths?.model);
 }
 ```
 

@@ -47,18 +47,19 @@ import {
   listAssetModels,
   resolveModelPath,
 } from 'react-native-sherpa-onnx';
-import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
+import { detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 // 1) Discover bundled models
 const models = await listAssetModels();
 // [{ folder: 'sherpa-onnx-whisper-tiny-en', hint: 'stt' }, ...]
 
-// 2) Detect model type before loading
-const modelPath = assetModelPath('models/sherpa-onnx-whisper-tiny-en');
-const detection = await detectSttModel(modelPath);
-console.log(detection.modelType); // 'whisper'
+// 2) Detect model type before loading (FileSource)
+const detection = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/model' });
+console.log(detection.modelType);    // 'whisper'
+console.log(detection.isStreaming);   // false (whisper is offline-only)
 
 // 3) Create engine
+const modelPath = assetModelPath('models/sherpa-onnx-whisper-tiny-en');
 const stt = await createSTT({
   modelPath,
   modelType: 'auto', // uses detected type
@@ -185,13 +186,13 @@ if (padPath) {
 
 ### Model Detection
 
-#### `detectSttModel(modelPath, options?)`
+#### `detectSttModel(source, options?)`
 
 Detect the STT model type and validate required files without loading the model.
 
 ```ts
 function detectSttModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { preferInt8?: boolean; modelType?: STTModelType }
 ): Promise<{
   success: boolean;
@@ -201,18 +202,22 @@ function detectSttModel(
   isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
+  /** `true` when the detected model type is a streaming-capable online engine (transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc). */
+  isStreaming: boolean;
 }>;
 ```
 
 Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
 
-#### `detectTtsModel(modelPath, options?)`
+For `FileSource` resolution problems (unsupported location kind/platform, traversal, permissions, path resolution), the promise can reject with `FILEIO_*` errors before native model detection runs.
+
+#### `detectTtsModel(source, options?)`
 
 Detect the TTS model type without loading.
 
 ```ts
 function detectTtsModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
@@ -221,10 +226,14 @@ function detectTtsModel(
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
   lexiconLanguageCandidates?: string[];
+  /** Always `true` for TTS models. */
+  isStreaming: boolean;
 }>;
 ```
 
 Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors (for example `FILEIO_UNSUPPORTED_ON_PLATFORM`, `FILEIO_PATH_TRAVERSAL_BLOCKED`, `FILEIO_PERMISSION_DENIED`, `FILEIO_NOT_FOUND`, `FILEIO_RESOLVE_ERROR`).
 
 `lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
 
@@ -242,9 +251,9 @@ import { assetModelPath } from 'react-native-sherpa-onnx';
 import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 const modelPath = assetModelPath('models/my-pack');
-// detectSttModel --> resolveModelPath --> absolute dir on disk, then native file scan (no recognizer init).
+// detectSttModel resolves the FileSource internally, then runs native file scan (no recognizer init).
 
-const det = await detectSttModel(modelPath, {
+const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/my-pack' }, {
   // preferInt8 omitted: do not filter by int8 in filenames (native picks among matches by its own rule).
   // preferInt8: true  --> use int8-named ONNX where applicable (e.g. *-int8.onnx).
   // preferInt8: false --> skip int8-named ONNX files (float / full-precision variants).
@@ -279,7 +288,7 @@ if (!det.success) {
 ```typescript
 import { detectTtsModel, createTTS } from 'react-native-sherpa-onnx/tts';
 
-const det = await detectTtsModel(modelPath, {
+const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/tts-pack' }, {
   // 'auto' vs 'vits' | 'matcha' | 'kokoro' | 'kitten' | 'pocket' | 'zipvoice' — same idea as STT.
   modelType: 'auto',
 });
