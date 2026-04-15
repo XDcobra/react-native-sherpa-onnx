@@ -29,6 +29,7 @@ NSDictionary *EnhancementDetectResultToDict(const sherpaonnx::EnhancementDetectR
 
   NSMutableDictionary *dict = [@{
     @"success": @(result.ok),
+    @"isStreaming": @(result.isStreaming),
     @"detectedModels": detectedModelsArray,
     @"modelType": EnhancementKindToNSString(result.selectedKind),
   } mutableCopy];

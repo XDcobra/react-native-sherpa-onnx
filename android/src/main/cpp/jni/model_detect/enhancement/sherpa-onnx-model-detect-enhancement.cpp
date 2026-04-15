@@ -1,6 +1,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-enhancement-catalog-metadata.h"
+#include "sherpa-onnx-enhancement-online-guard.h"
 #include "sherpa-onnx-validate-enhancement.h"
 
 #include <optional>
@@ -11,6 +12,9 @@
 namespace {
 
 using namespace sherpaonnx::model_detect;
+using sherpaonnx::enhancement::online_guard::IsStreamingCandidate;
+using sherpaonnx::enhancement::online_guard::LooksLikeAbsolutePath;
+using sherpaonnx::enhancement::online_guard::RunOnlineCompatibilityGuard;
 
 sherpaonnx::EnhancementModelKind ParseEnhancementModelType(const std::string& modelType) {
     if (modelType == "gtcrn") return sherpaonnx::EnhancementModelKind::kGtcrn;
@@ -78,7 +82,7 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
             result.detectedModels.push_back({EnhancementKindToTag(k), modelDir});
         }
         static constexpr const char* kNameOnlyErr =
-            "Enhancement: Name-only detection cannot validate files; run a full directory scan before createEnhancement.";
+            "Enhancement: heuristic name-only detection cannot validate model files; run filesystem-backed detection for full validation and streaming guard checks.";
         if (requestedModelType != "auto") {
             sherpaonnx::EnhancementModelKind selected = ParseEnhancementModelType(requestedModelType);
             if (selected == sherpaonnx::EnhancementModelKind::kUnknown) {
@@ -87,6 +91,7 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
             }
             AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
             result.selectedKind = selected;
+            result.isStreaming = IsStreamingCandidate(selected);
             result.detectedModels.clear();
             result.detectedModels.push_back({EnhancementKindToTag(selected), modelDir});
             result.ok = false;
@@ -98,6 +103,7 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
             return result;
         }
         result.selectedKind = nameKinds[0];
+        result.isStreaming = IsStreamingCandidate(result.selectedKind);
         AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
@@ -155,6 +161,8 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
     }
 
+    result.selectedKind = selected;
+
     switch (selected) {
         case sherpaonnx::EnhancementModelKind::kGtcrn:
             result.paths.model = gtcrnModel;
@@ -171,11 +179,31 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
     auto validation =
         sherpaonnx::ValidateEnhancementPaths(selected, result.paths, modelDir);
     if (!validation.ok) {
+        result.isStreaming = false;
         result.error = validation.error;
         return result;
     }
 
-    result.selectedKind = selected;
+    result.isStreaming = IsStreamingCandidate(selected);
+    if (result.isStreaming) {
+        if (FileExists(result.paths.model)) {
+            const auto guard = RunOnlineCompatibilityGuard(selected, result.paths.model);
+            if (!guard.passed) {
+                result.isStreaming = false;
+                result.error = "Enhancement: online compatibility guard failed for " +
+                               std::string(EnhancementKindToTag(selected)) +
+                               " model '" + result.paths.model + "': " +
+                               (guard.error.empty() ? "unknown reason" : guard.error);
+                return result;
+            }
+        } else if (LooksLikeAbsolutePath(result.paths.model)) {
+            result.isStreaming = false;
+            result.error = "Enhancement: resolved model file does not exist: " +
+                           result.paths.model;
+            return result;
+        }
+    }
+
     result.ok = true;
     return result;
 }

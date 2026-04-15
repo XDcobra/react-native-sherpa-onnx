@@ -833,6 +833,7 @@ export interface Spec extends TurboModule {
     modelType?: string | null
   ): Promise<{
     success: boolean;
+    isStreaming?: boolean;
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;

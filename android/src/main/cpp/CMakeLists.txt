@@ -97,6 +97,7 @@ set(SOURCES
     jni/model_detect/tts/sherpa-onnx-validate-tts.cpp
     jni/model_detect/tts/sherpa-onnx-tts-wrapper.cpp
     jni/model_detect/enhancement/sherpa-onnx-enhancement-catalog-metadata.cpp
+    jni/model_detect/enhancement/sherpa-onnx-enhancement-online-guard.cpp
     jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp

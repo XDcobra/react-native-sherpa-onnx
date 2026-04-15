@@ -267,6 +267,8 @@ struct TtsDetectResult {
 
 struct EnhancementDetectResult {
     bool ok = false;
+    /** True when online-streaming compatibility is confirmed (or heuristically inferred in name-only mode). */
+    bool isStreaming = false;
     std::string error;
     std::vector<DetectedModel> detectedModels;
     EnhancementModelKind selectedKind = EnhancementModelKind::kUnknown;

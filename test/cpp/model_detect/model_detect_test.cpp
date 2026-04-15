@@ -659,6 +659,40 @@ TEST(ModelDetectValidation, EnhancementMissingOnnxRejected) {
     };
     auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
     EXPECT_FALSE(result.ok) << "Should fail when no gtcrn/dpdfnet onnx is present";
+    EXPECT_FALSE(result.isStreaming);
+}
+
+TEST(ModelDetectValidation, EnhancementNameOnlyGtcrnIsHeuristicStreaming) {
+    const std::string syntheticDir = "m/sherpa-onnx-speech-enhancement-gtcrn";
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList({}, syntheticDir, "auto");
+
+    EXPECT_FALSE(result.ok) << "Name-only detection must remain heuristic and not fully successful";
+    EXPECT_TRUE(result.isStreaming) << "Name-only gtcrn should be marked streaming as best effort";
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kGtcrn));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
+}
+
+TEST(ModelDetectValidation, EnhancementNameOnlyUnknownIsNotStreaming) {
+    const std::string syntheticDir = "m/some-random-enhancement-model";
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList({}, syntheticDir, "auto");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kUnknown));
+}
+
+TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
+    const std::string dir = "test-models/enhancement-gtcrn";
+    std::vector<FE> files = {
+        MakeEntry(dir, "speech-enhancement-gtcrn.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
 }
 
 }  // namespace
