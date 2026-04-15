@@ -63,7 +63,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
     };
 
     try {
-        auto result = sherpa::decodeFile(path, config, onChunk, nullptr, cancelFlag);
+        auto result = sherpa::decodeFile(path, config, onChunk, nullptr, nullptr, cancelFlag);
         env->ReleaseStringUTFChars(jPath, path);
 
         // Create result object: HashMap with samples, sourceSampleRate, sourceChannels
@@ -192,9 +192,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     };
 
     sherpa::DecodeProgressCallback onProgress = nullptr;
+    sherpa::DecodeStreamInfoCallback onStreamInfo = nullptr;
     int srcSampleRate = 0;
     int srcChannels = 0;
     if (progressCbGlobal && onProgressMethod) {
+        onStreamInfo = [&srcSampleRate, &srcChannels](int sr, int ch) {
+            srcSampleRate = sr;
+            srcChannels = ch;
+        };
         onProgress = [env, progressCbGlobal, onProgressMethod, &srcSampleRate, &srcChannels](
             int64_t framesDecoded, int64_t totalEstimate, int percent) {
             env->CallVoidMethod(progressCbGlobal, onProgressMethod,
@@ -204,7 +209,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     }
 
     try {
-        auto result = sherpa::decodeFile(path, config, onChunk, onProgress, cancelFlag);
+        auto result = sherpa::decodeFile(path, config, onChunk, onProgress, onStreamInfo, cancelFlag);
         env->ReleaseStringUTFChars(jPath, path);
         env->DeleteGlobalRef(chunkCbGlobal);
         if (progressCbGlobal) env->DeleteGlobalRef(progressCbGlobal);

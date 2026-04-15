@@ -157,9 +157,14 @@ AudioDecodeResult decodeWavFastPath(
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,
+    DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
   fseek(f, wav.dataOffset, SEEK_SET);
+
+  if (onStreamInfo) {
+    onStreamInfo(wav.sampleRate, wav.channels);
+  }
 
   int bytesPerSample = wav.bitsPerSample / 8;
   int64_t totalSamples = wav.dataSize / bytesPerSample;
@@ -228,6 +233,7 @@ AudioDecodeResult decodeFileFFmpeg(
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,
+    DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
   // Open input
@@ -294,6 +300,10 @@ AudioDecodeResult decodeFileFFmpeg(
   int srcSampleRate = decCtx->sample_rate;
   int srcChannels = decCtx->ch_layout.nb_channels;
   if (srcChannels <= 0) srcChannels = 1;
+
+  if (onStreamInfo) {
+    onStreamInfo(srcSampleRate, srcChannels);
+  }
 
   // Target config
   int outSampleRate = config.targetSampleRate > 0 ? config.targetSampleRate : srcSampleRate;
@@ -457,6 +467,7 @@ AudioDecodeResult decodeFile(
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,
+    DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
   if (!pathOrFd || pathOrFd[0] == '\0') {
@@ -472,7 +483,7 @@ AudioDecodeResult decodeFile(
   WavInfo wavInfo = parseWavHeaderForFastPath(f);
   if (canUseWavFastPath(wavInfo, config)) {
     LOGI("Using WAV fast path: rate=%d ch=%d bits=%d", wavInfo.sampleRate, wavInfo.channels, wavInfo.bitsPerSample);
-    auto result = decodeWavFastPath(f, wavInfo, config, onChunk, onProgress, cancelFlag);
+    auto result = decodeWavFastPath(f, wavInfo, config, onChunk, onProgress, onStreamInfo, cancelFlag);
     fclose(f);
     return result;
   }
@@ -481,7 +492,7 @@ AudioDecodeResult decodeFile(
   // FFmpeg path
 #ifdef HAVE_FFMPEG
   LOGI("Using FFmpeg decode path: %s targetRate=%d forceMono=%d", pathOrFd, config.targetSampleRate, config.forceMono);
-  return decodeFileFFmpeg(pathOrFd, config, onChunk, onProgress, cancelFlag);
+  return decodeFileFFmpeg(pathOrFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
 #else
   throw std::runtime_error("DECODE_INTERNAL_ERROR: FFmpeg not available in this build");
 #endif

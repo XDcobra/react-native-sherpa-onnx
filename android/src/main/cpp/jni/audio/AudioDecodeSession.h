@@ -25,6 +25,10 @@ using DecodeChunkCallback =
 using DecodeProgressCallback =
     std::function<void(int64_t framesDecoded, int64_t totalFramesEstimate, int percent)>;
 
+/** Invoked once when source stream layout is known, before any onChunk/onProgress. */
+using DecodeStreamInfoCallback =
+    std::function<void(int sourceSampleRate, int sourceChannels)>;
+
 /**
  * Decode an audio file to float32 PCM chunks.
  *
@@ -40,7 +44,8 @@ AudioDecodeResult decodeFile(
     const char* pathOrFd,
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
-    DecodeProgressCallback onProgress,   // may be nullptr
+    DecodeProgressCallback onProgress,       // may be nullptr
+    DecodeStreamInfoCallback onStreamInfo,   // may be nullptr
     std::atomic<bool>& cancelFlag
 );
 

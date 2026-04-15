@@ -488,7 +488,7 @@ static std::string pa_generateId(const char *prefix) {
 
       sherpa::AudioDecodeResult result;
       try {
-        result = sherpa::decodeFile(path, config, onChunk, onProgress, *cancelFlag);
+        result = sherpa::decodeFile(path, config, onChunk, onProgress, nullptr, *cancelFlag);
       } catch (const std::runtime_error &e) {
         [readHandle cleanup];
         if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
@@ -826,7 +826,7 @@ static std::string pa_encodeViaDecodeFile(
 
   sherpa::AudioDecodeResult decResult;
   try {
-    decResult = sherpa::decodeFile(inputPath, decConfig, onChunk, nullptr, cancelFlag);
+    decResult = sherpa::decodeFile(inputPath, decConfig, onChunk, nullptr, nullptr, cancelFlag);
   } catch (const std::exception &e) {
     return std::string("AUDIO_SAVE_SOURCE_NOT_FOUND: ") + e.what();
   }
@@ -1211,6 +1211,11 @@ static std::string pa_encodeViaDecodeFile(
         status->framesIngested += count;
       };
 
+      auto onStreamInfo = [&srcSampleRate, &srcChannels](int sr, int ch) {
+        srcSampleRate = sr;
+        srcChannels = ch;
+      };
+
       auto onProgress = [weakSelf, operationId, &srcSampleRate, &srcChannels, &status](
           int64_t framesDecoded, int64_t totalEstimate, int percent) {
         status->totalFramesEstimate = totalEstimate;
@@ -1229,7 +1234,7 @@ static std::string pa_encodeViaDecodeFile(
         });
       };
 
-      auto result = sherpa::decodeFile(path, config, onChunk, onProgress, *cancelFlag);
+      auto result = sherpa::decodeFile(path, config, onChunk, onProgress, onStreamInfo, *cancelFlag);
       srcSampleRate = result.sourceSampleRate;
       srcChannels = result.sourceChannels;
 
