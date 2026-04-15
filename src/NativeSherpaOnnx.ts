@@ -1099,6 +1099,19 @@ export interface Spec extends TurboModule {
    */
   cancelAudioSave(operationId: string): Promise<void>;
 
+  // ==================== FileSource helpers ====================
+
+  /**
+   * Return the absolute filesystem path for an {@link AppBaseDir} name.
+   * Used by detect utilities to resolve `{ kind: 'app', base, path }` sources.
+   *
+   * Android: cache → Context.cacheDir, documents → filesDir/Documents (/data/data/pkg/files/Documents),
+   *          files → filesDir, tmp → cacheDir/tmp, externalFiles → getExternalFilesDir(null).
+   * iOS:     cache → NSCachesDirectory, documents → NSDocumentDirectory,
+   *          files → NSLibraryDirectory, tmp → NSTemporaryDirectory, externalFiles → NSDocumentDirectory.
+   */
+  resolveAppBaseDir(base: string): Promise<string>;
+
   // ==================== Execution Provider Methods ====================
 
   /**

@@ -34,6 +34,13 @@ export interface ModelDetectResultBase {
   detectedModels: DetectedModelEntry[];
   /** Primary detected kind string. */
   modelType?: string;
+  /**
+   * Whether the detected model supports streaming inference.
+   * For STT: derived from canonical online model types (transducer, paraformer, …).
+   * For TTS: always `true`.
+   * For Enhancement and Alignment: always `false`.
+   */
+  isStreaming: boolean;
   /** Normalized primary hints (`iso6391Hint`); from native heuristics + SDK fallback. */
   languages?: PublicLanguageHint[];
   /** fp16, int8, int8-quantized, unknown — from name heuristics. */

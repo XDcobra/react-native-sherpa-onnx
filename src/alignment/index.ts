@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { ModelPathConfig } from '../types';
-import { resolveModelPath } from '../utils';
+import type { FileSource } from '../fileio/types';
+import { resolveFileSourceForDetect } from '../detect';
 import type { AlignmentModelType } from './types';
 import {
   isDetectionSource,
@@ -34,12 +34,12 @@ export type {
 export type { AlignmentDetectModelResult } from '../types/modelDetect';
 
 export async function detectAlignmentModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: AlignmentModelType }
 ): Promise<AlignmentDetectModelResult> {
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolved = await resolveFileSourceForDetect(source);
   const raw = await SherpaOnnx.detectAlignmentModel(
-    resolvedPath,
+    resolved.modelDir,
     options?.modelType
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
@@ -79,6 +79,7 @@ export async function detectAlignmentModel(
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   return {
     success: raw.success,
+    isStreaming: false,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
     ...(modelType != null ? { modelType } : {}),

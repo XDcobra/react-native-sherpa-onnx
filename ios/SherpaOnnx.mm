@@ -246,6 +246,38 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
     resolve(@[]);
 }
 
+// ─── FileSource helpers ──────────────────────────────────────────────
+
+- (void)resolveAppBaseDir:(NSString *)base
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
+{
+    NSString *dirPath = nil;
+    if ([base isEqualToString:@"cache"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"documents"] || [base isEqualToString:@"externalFiles"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"files"]) {
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+    } else if ([base isEqualToString:@"tmp"]) {
+        dirPath = NSTemporaryDirectory();
+    } else {
+        reject(@"RESOLVE_APP_BASE_DIR_ERROR",
+               [NSString stringWithFormat:@"Unknown AppBaseDir: %@", base], nil);
+        return;
+    }
+    if (!dirPath) {
+        reject(@"RESOLVE_APP_BASE_DIR_ERROR", @"Could not resolve directory", nil);
+        return;
+    }
+    // Ensure the directory exists
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:dirPath]) {
+        [fm createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    resolve(dirPath);
+}
+
 - (void)getAvailableProviders:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {

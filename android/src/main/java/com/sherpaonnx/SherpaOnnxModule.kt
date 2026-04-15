@@ -209,6 +209,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ─── FileSource helpers ──────────────────────────────────────────────
+
+  override fun resolveAppBaseDir(base: String, promise: Promise) {
+    try {
+      val dir = when (base) {
+        "cache" -> reactApplicationContext.cacheDir
+        "documents" -> java.io.File(reactApplicationContext.filesDir, "Documents")
+        "files" -> reactApplicationContext.filesDir
+        "tmp" -> java.io.File(reactApplicationContext.cacheDir, "tmp")
+        "externalFiles" -> reactApplicationContext.getExternalFilesDir(null)
+          ?: reactApplicationContext.filesDir
+        else -> throw IllegalArgumentException("Unknown AppBaseDir: $base")
+      }
+      if (!dir.exists()) dir.mkdirs()
+      promise.resolve(dir.absolutePath)
+    } catch (e: Exception) {
+      promise.reject("RESOLVE_APP_BASE_DIR_ERROR", e.message, e)
+    }
+  }
+
   override fun getAvailableProviders(promise: Promise) {
     try {
       val providers = ai.onnxruntime.OrtEnvironment.getAvailableProviders()
