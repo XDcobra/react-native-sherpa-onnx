@@ -24,7 +24,11 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import {
+  listDownloadedModels,
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   createSTT,
@@ -81,6 +85,7 @@ const PAD_PACK_NAME = 'sherpa_models';
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
@@ -236,6 +241,16 @@ export default function STTScreen() {
     loadAvailableModels();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Stt) return;
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
     const cached = getSttCache();
@@ -270,6 +285,8 @@ export default function STTScreen() {
       const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
+      const downloadedModels = await listDownloadedModels(ModelCategory.Stt);
+      const downloadedFolders = downloadedModels.map((model) => model.id);
 
       // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
       let padFolders: string[] = [];
@@ -301,9 +318,13 @@ export default function STTScreen() {
       const combined = [
         ...padFolders,
         ...sttFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedFolders.filter(
+          (f) => !padFolders.includes(f) && !sttFolders.includes(f)
+        ),
       ];
 
       setPadModelIds(padFolders);
+      setDownloadedModelIds(downloadedFolders);
       if (sttFolders.length > 0) {
         console.log('STTScreen: Found asset models:', sttFolders);
       }
@@ -312,7 +333,7 @@ export default function STTScreen() {
       if (combined.length === 0) {
         setErrorSource('init');
         setError(
-          'No STT models found. Use bundled assets or PAD models. See STT_MODEL_SETUP.md'
+          'No STT models found. Use bundled assets, downloaded models, or PAD models. See STT_MODEL_SETUP.md'
         );
       }
     } catch (err) {
@@ -323,6 +344,18 @@ export default function STTScreen() {
     } finally {
       setLoadingModels(false);
     }
+  };
+
+  const resolveSttModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
+        : getFileModelPath(modelFolder, ModelCategory.Stt);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Stt);
+    }
+    return getAssetModelPath(modelFolder);
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -343,12 +376,7 @@ export default function STTScreen() {
         clearSttCache();
       }
 
-      const useFilePath = padModelIds.includes(modelFolder);
-      const modelPath = useFilePath
-        ? padModelIds.includes(modelFolder) && padModelsPath
-          ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
-          : getFileModelPath(modelFolder, ModelCategory.Stt)
-        : getAssetModelPath(modelFolder);
+      const modelPath = resolveSttModelPath(modelFolder);
 
       const engine = await createSTT({
         modelPath,
@@ -681,16 +709,7 @@ export default function STTScreen() {
     let textUnsubscribe = () => {};
 
     try {
-      const useFilePath = padModelIds.includes(currentModelFolder);
-      const modelPathConfig = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(
-              currentModelFolder,
-              ModelCategory.Stt,
-              padModelsPath
-            )
-          : getFileModelPath(currentModelFolder, ModelCategory.Stt)
-        : getAssetModelPath(currentModelFolder);
+      const modelPathConfig = resolveSttModelPath(currentModelFolder);
 
       const onlineType: 'auto' = 'auto';
 

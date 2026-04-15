@@ -48,7 +48,11 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import {
+  listDownloadedModels,
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -96,6 +100,7 @@ type ReferenceAudioState = {
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
@@ -198,6 +203,16 @@ export default function TTSScreen() {
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Tts) return;
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -570,6 +585,8 @@ export default function TTSScreen() {
       const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
+      const downloadedModels = await listDownloadedModels(ModelCategory.Tts);
+      const downloadedFolders = downloadedModels.map((model) => model.id);
 
       // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
       let padFolders: string[] = [];
@@ -596,13 +613,17 @@ export default function TTSScreen() {
       const combined = [
         ...padFolders,
         ...ttsFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedFolders.filter(
+          (f) => !padFolders.includes(f) && !ttsFolders.includes(f)
+        ),
       ];
 
       setAvailableModels(combined);
+      setDownloadedModelIds(downloadedFolders);
 
       if (combined.length === 0) {
         setError(
-          'No TTS models found. Use bundled assets or PAD models. See TTS_MODEL_SETUP.md'
+          'No TTS models found. Use bundled assets, downloaded models, or PAD models. See TTS_MODEL_SETUP.md'
         );
       }
     } catch (err) {
@@ -612,6 +633,18 @@ export default function TTSScreen() {
     } finally {
       setLoadingModels(false);
     }
+  };
+
+  const resolveTtsModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(modelFolder, undefined, padModelsPath)
+        : getFileModelPath(modelFolder, ModelCategory.Tts);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Tts);
+    }
+    return getAssetModelPath(modelFolder);
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -647,12 +680,7 @@ export default function TTSScreen() {
         clearTtsCache();
       }
 
-      const useFilePath = padModelIds.includes(modelFolder);
-      const modelPath = useFilePath
-        ? padModelIds.includes(modelFolder) && padModelsPath
-          ? getFileModelPath(modelFolder, undefined, padModelsPath)
-          : getFileModelPath(modelFolder, ModelCategory.Tts)
-        : getAssetModelPath(modelFolder);
+      const modelPath = resolveTtsModelPath(modelFolder);
 
       let engine: TtsEngine;
       try {
@@ -985,12 +1013,7 @@ export default function TTSScreen() {
     // Set streaming only after the pipeline is started.
     stopTtsSavedAudioPlayback();
 
-    const useFilePath = padModelIds.includes(currentModelFolder);
-    const modelPath = useFilePath
-      ? padModelsPath
-        ? getFileModelPath(currentModelFolder, undefined, padModelsPath)
-        : getFileModelPath(currentModelFolder, ModelCategory.Tts)
-      : getAssetModelPath(currentModelFolder);
+    const modelPath = resolveTtsModelPath(currentModelFolder);
 
     try {
       let streamingEngine: StreamingTtsEngine;

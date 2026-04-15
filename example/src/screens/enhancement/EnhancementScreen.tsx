@@ -24,7 +24,11 @@ import {
   DownloadDirectoryPath,
   mkdir,
 } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import {
+  listDownloadedModels,
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import {
   createEnhancement,
   detectEnhancementModel,
@@ -82,6 +86,7 @@ const localStyles = StyleSheet.create({
 export default function EnhancementScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
@@ -214,6 +219,16 @@ export default function EnhancementScreen() {
     loadAvailableModels();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Enhancement) return;
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
@@ -223,6 +238,10 @@ export default function EnhancementScreen() {
       const enhancementFolders = assetModels
         .filter((m) => isEnhancementHint(m.folder, m.hint))
         .map((m) => m.folder);
+      const downloadedModels = await listDownloadedModels(
+        ModelCategory.Enhancement
+      );
+      const downloadedFolders = downloadedModels.map((model) => model.id);
 
       let padFolders: string[] = [];
       let resolvedPadPath: string | null = null;
@@ -246,14 +265,18 @@ export default function EnhancementScreen() {
       const combined = [
         ...padFolders,
         ...enhancementFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedFolders.filter(
+          (f) => !padFolders.includes(f) && !enhancementFolders.includes(f)
+        ),
       ];
       setPadModelIds(padFolders);
+      setDownloadedModelIds(downloadedFolders);
       setAvailableModels(combined);
 
       if (combined.length === 0) {
         setErrorSource('init');
         setError(
-          'No speech enhancement models found. Add a GTCRN or DPDFNet model under assets/models/ or PAD. See docs/speech-enhancement.md.'
+          'No speech enhancement models found. Add a GTCRN or DPDFNet model as a bundled asset, downloaded model, or PAD model. See docs/speech-enhancement.md.'
         );
       }
     } catch (err) {
@@ -264,6 +287,22 @@ export default function EnhancementScreen() {
     } finally {
       setLoadingModels(false);
     }
+  };
+
+  const resolveEnhancementModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(
+            modelFolder,
+            ModelCategory.Enhancement,
+            padModelsPath
+          )
+        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    return getAssetModelPath(modelFolder);
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -281,16 +320,7 @@ export default function EnhancementScreen() {
         engineRef.current = null;
       }
 
-      const useFilePath = padModelIds.includes(modelFolder);
-      const modelPath = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(
-              modelFolder,
-              ModelCategory.Enhancement,
-              padModelsPath
-            )
-          : getFileModelPath(modelFolder, ModelCategory.Enhancement)
-        : getAssetModelPath(modelFolder);
+      const modelPath = resolveEnhancementModelPath(modelFolder);
 
       const engine = await createEnhancement({
         modelPath,
@@ -384,12 +414,7 @@ export default function EnhancementScreen() {
         engineRef.current = null;
       }
 
-      const useFilePath = padModelIds.includes(folder);
-      const modelPath = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(folder, ModelCategory.Enhancement, padModelsPath)
-          : getFileModelPath(folder, ModelCategory.Enhancement)
-        : getAssetModelPath(folder);
+      const modelPath = resolveEnhancementModelPath(folder);
 
       const engine = await createEnhancement({
         modelPath,
