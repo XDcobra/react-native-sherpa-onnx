@@ -13,11 +13,13 @@
 #include "AudioDecodeSession.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 #ifdef __ANDROID__
@@ -229,19 +231,66 @@ AudioDecodeResult decodeWavFastPath(
 
 namespace {
 
+struct FdAvioContext {
+  int fd = -1;
+};
+
+int avioReadFromFd(void* opaque, uint8_t* buf, int bufSize) {
+  auto* ctx = reinterpret_cast<FdAvioContext*>(opaque);
+  if (!ctx || ctx->fd < 0) {
+    return AVERROR(EINVAL);
+  }
+
+  ssize_t n = read(ctx->fd, buf, static_cast<size_t>(bufSize));
+  if (n == 0) {
+    return AVERROR_EOF;
+  }
+  if (n < 0) {
+    return AVERROR(errno);
+  }
+
+  return static_cast<int>(n);
+}
+
+int64_t avioSeekFd(void* opaque, int64_t offset, int whence) {
+  auto* ctx = reinterpret_cast<FdAvioContext*>(opaque);
+  if (!ctx || ctx->fd < 0) {
+    return AVERROR(EINVAL);
+  }
+
+  if (whence == AVSEEK_SIZE) {
+    struct stat st;
+    if (fstat(ctx->fd, &st) != 0) {
+      return AVERROR(errno);
+    }
+    return static_cast<int64_t>(st.st_size);
+  }
+
+  const int origin = whence & ~AVSEEK_FORCE;
+  if (origin != SEEK_SET && origin != SEEK_CUR && origin != SEEK_END) {
+    return AVERROR(EINVAL);
+  }
+
+  off_t result = lseek(ctx->fd, static_cast<off_t>(offset), origin);
+  if (result < 0) {
+    return AVERROR(errno);
+  }
+  return static_cast<int64_t>(result);
+}
+
 AudioDecodeResult decodeFileFFmpeg(
     const char* path,
+    int inputFd,
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,
     DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
-  // Open input
   AVFormatContext* fmtCtx = nullptr;
-  if (avformat_open_input(&fmtCtx, path, nullptr, nullptr) < 0) {
-    throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input file");
-  }
+  AVIOContext* avioCtx = nullptr;
+  int ownedFd = -1;
+  FdAvioContext fdAvioContext{};
 
   // RAII cleanup
   struct Cleanup {
@@ -250,19 +299,79 @@ AudioDecodeResult decodeFileFFmpeg(
     SwrContext** swr;
     AVFrame** frame;
     AVPacket** pkt;
+    AVIOContext** avioCtx;
+    int* ownedFd;
     ~Cleanup() {
       if (pkt && *pkt) av_packet_free(pkt);
       if (frame && *frame) av_frame_free(frame);
       if (swr && *swr) swr_free(swr);
       if (decCtx && *decCtx) avcodec_free_context(decCtx);
       if (fmtCtx && *fmtCtx) avformat_close_input(fmtCtx);
+      if (avioCtx && *avioCtx) {
+        avio_context_free(avioCtx);
+      }
+      if (ownedFd && *ownedFd >= 0) {
+        close(*ownedFd);
+        *ownedFd = -1;
+      }
     }
   };
   AVCodecContext* decCtx = nullptr;
   SwrContext* swr = nullptr;
   AVFrame* frame = nullptr;
   AVPacket* pkt = nullptr;
-  Cleanup cleanup{&fmtCtx, &decCtx, &swr, &frame, &pkt};
+  Cleanup cleanup{&fmtCtx, &decCtx, &swr, &frame, &pkt, &avioCtx, &ownedFd};
+
+  // Open input from real FD when provided, otherwise from path
+  if (inputFd >= 0) {
+    ownedFd = dup(inputFd);
+    if (ownedFd < 0) {
+      throw std::runtime_error("DECODE_NOT_FOUND: Cannot duplicate input fd");
+    }
+
+    if (lseek(ownedFd, 0, SEEK_SET) < 0) {
+      throw std::runtime_error("DECODE_INVALID_SOURCE: Input fd is not seekable");
+    }
+
+    constexpr int kAvioBufferSize = 64 * 1024;
+    auto* avioBuffer = static_cast<unsigned char*>(av_malloc(kAvioBufferSize));
+    if (!avioBuffer) {
+      throw std::runtime_error("DECODE_INTERNAL_ERROR: Failed to allocate AVIO buffer");
+    }
+
+    fdAvioContext.fd = ownedFd;
+    avioCtx = avio_alloc_context(
+        avioBuffer,
+        kAvioBufferSize,
+        0,
+        &fdAvioContext,
+        avioReadFromFd,
+        nullptr,
+        avioSeekFd);
+    if (!avioCtx) {
+      av_free(avioBuffer);
+      throw std::runtime_error("DECODE_INTERNAL_ERROR: Failed to allocate AVIO context");
+    }
+
+    fmtCtx = avformat_alloc_context();
+    if (!fmtCtx) {
+      throw std::runtime_error("DECODE_INTERNAL_ERROR: Failed to allocate format context");
+    }
+    fmtCtx->pb = avioCtx;
+    fmtCtx->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+    if (avformat_open_input(&fmtCtx, nullptr, nullptr, nullptr) < 0) {
+      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input fd");
+    }
+  } else {
+    if (!path || path[0] == '\0') {
+      throw std::runtime_error("DECODE_NOT_FOUND: Empty file path");
+    }
+
+    if (avformat_open_input(&fmtCtx, path, nullptr, nullptr) < 0) {
+      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input file");
+    }
+  }
 
   if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
     throw std::runtime_error("DECODE_OPEN_FAILED: Failed to find stream info");
@@ -331,7 +440,10 @@ AudioDecodeResult decodeFileFFmpeg(
     totalFramesEstimate = (int64_t)(durationSec * outSampleRate);
   } else if (fmtCtx->bit_rate > 0) {
     struct stat st;
-    if (stat(path, &st) == 0 && st.st_size > 0) {
+    const bool hasSize =
+        (ownedFd >= 0 && fstat(ownedFd, &st) == 0 && st.st_size > 0) ||
+        (ownedFd < 0 && path && stat(path, &st) == 0 && st.st_size > 0);
+    if (hasSize) {
       double durationSec = (double)(st.st_size * 8) / (double)fmtCtx->bit_rate;
       totalFramesEstimate = (int64_t)(durationSec * outSampleRate);
     }
@@ -465,20 +577,34 @@ AudioDecodeResult decodeFileFFmpeg(
 
 AudioDecodeResult decodeFile(
     const char* pathOrFd,
+    int inputFd,
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,
     DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
-  if (!pathOrFd || pathOrFd[0] == '\0') {
-    throw std::runtime_error("DECODE_NOT_FOUND: Empty file path");
+  if ((!pathOrFd || pathOrFd[0] == '\0') && inputFd < 0) {
+    throw std::runtime_error("DECODE_NOT_FOUND: Empty file path and invalid fd");
   }
 
   // Try WAV fast path first
-  FILE* f = fopen(pathOrFd, "rb");
-  if (!f) {
-    throw std::runtime_error(std::string("DECODE_NOT_FOUND: Cannot open file: ") + pathOrFd);
+  FILE* f = nullptr;
+  if (inputFd >= 0) {
+    int probeFd = dup(inputFd);
+    if (probeFd < 0) {
+      throw std::runtime_error("DECODE_NOT_FOUND: Cannot duplicate input fd");
+    }
+    f = fdopen(probeFd, "rb");
+    if (!f) {
+      close(probeFd);
+      throw std::runtime_error("DECODE_NOT_FOUND: Cannot open input fd");
+    }
+  } else {
+    f = fopen(pathOrFd, "rb");
+    if (!f) {
+      throw std::runtime_error(std::string("DECODE_NOT_FOUND: Cannot open file: ") + pathOrFd);
+    }
   }
 
   WavInfo wavInfo = parseWavHeaderForFastPath(f);
@@ -490,10 +616,14 @@ AudioDecodeResult decodeFile(
   }
   fclose(f);
 
+  if (inputFd >= 0 && lseek(inputFd, 0, SEEK_SET) < 0) {
+    throw std::runtime_error("DECODE_INVALID_SOURCE: Input fd is not seekable");
+  }
+
   // FFmpeg path
 #ifdef HAVE_FFMPEG
-  LOGI("Using FFmpeg decode path: %s targetRate=%d forceMono=%d", pathOrFd, config.targetSampleRate, config.forceMono);
-  return decodeFileFFmpeg(pathOrFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
+  LOGI("Using FFmpeg decode path: %s targetRate=%d forceMono=%d", pathOrFd ? pathOrFd : "<fd>", config.targetSampleRate, config.forceMono);
+  return decodeFileFFmpeg(pathOrFd, inputFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
 #else
   throw std::runtime_error("DECODE_INTERNAL_ERROR: FFmpeg not available in this build");
 #endif

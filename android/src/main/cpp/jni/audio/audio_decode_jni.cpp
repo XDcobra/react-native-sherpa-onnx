@@ -30,22 +30,29 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
     JNIEnv* env,
     jclass /* clazz */,
     jstring jPath,
+        jint inputFd,
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
     jlong cancelFlagPtr
 ) {
-    if (!jPath) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                       "DECODE_NOT_FOUND: Null file path");
-        return nullptr;
-    }
+        const char* path = nullptr;
+        if (jPath) {
+            path = env->GetStringUTFChars(jPath, nullptr);
+            if (!path) {
+                    env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                                                 "DECODE_INTERNAL_ERROR: Failed to get path string");
+                    return nullptr;
+            }
+        }
 
-    const char* path = env->GetStringUTFChars(jPath, nullptr);
-    if (!path) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                       "DECODE_INTERNAL_ERROR: Failed to get path string");
-        return nullptr;
+        if ((!path || path[0] == '\0') && inputFd < 0) {
+            if (path && jPath) {
+                env->ReleaseStringUTFChars(jPath, path);
+            }
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                                         "DECODE_NOT_FOUND: Empty file path and invalid fd");
+            return nullptr;
     }
 
     sherpa::AudioDecodeConfig config;
@@ -63,8 +70,10 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
     };
 
     try {
-        auto result = sherpa::decodeFile(path, config, onChunk, nullptr, nullptr, cancelFlag);
-        env->ReleaseStringUTFChars(jPath, path);
+                auto result = sherpa::decodeFile(path, (int)inputFd, config, onChunk, nullptr, nullptr, cancelFlag);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
 
         // Create result object: HashMap with samples, sourceSampleRate, sourceChannels
         jclass hashMapClass = env->FindClass("java/util/HashMap");
@@ -133,11 +142,15 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
 
         return map;
     } catch (const std::runtime_error& e) {
-        env->ReleaseStringUTFChars(jPath, path);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
         return nullptr;
     } catch (...) {
-        env->ReleaseStringUTFChars(jPath, path);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                        "DECODE_INTERNAL_ERROR: Unknown error during decode");
         return nullptr;
@@ -160,6 +173,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     JNIEnv* env,
     jclass /* clazz */,
     jstring jPath,
+    jint inputFd,
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
@@ -167,22 +181,29 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jobject jChunkCallback,
     jobject jProgressCallback
 ) {
-    if (!jPath) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                       "DECODE_NOT_FOUND: Null file path");
-        return nullptr;
-    }
     if (!jChunkCallback) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                        "DECODE_INTERNAL_ERROR: Null chunk callback");
         return nullptr;
     }
 
-    const char* path = env->GetStringUTFChars(jPath, nullptr);
-    if (!path) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                       "DECODE_INTERNAL_ERROR: Failed to get path string");
-        return nullptr;
+    const char* path = nullptr;
+    if (jPath) {
+      path = env->GetStringUTFChars(jPath, nullptr);
+      if (!path) {
+          env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                         "DECODE_INTERNAL_ERROR: Failed to get path string");
+          return nullptr;
+      }
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+      if (path && jPath) {
+        env->ReleaseStringUTFChars(jPath, path);
+      }
+      env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                     "DECODE_NOT_FOUND: Empty file path and invalid fd");
+      return nullptr;
     }
 
     sherpa::AudioDecodeConfig config;
@@ -196,7 +217,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jclass chunkCbClass = env->GetObjectClass(jChunkCallback);
     jmethodID onChunkMethod = env->GetMethodID(chunkCbClass, "onChunk", "([FI)V");
     if (!onChunkMethod) {
-        env->ReleaseStringUTFChars(jPath, path);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                        "DECODE_INTERNAL_ERROR: Chunk callback missing onChunk method");
         return nullptr;
@@ -239,8 +262,10 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     }
 
     try {
-        auto result = sherpa::decodeFile(path, config, onChunk, onProgress, onStreamInfo, cancelFlag);
-        env->ReleaseStringUTFChars(jPath, path);
+                auto result = sherpa::decodeFile(path, (int)inputFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->DeleteGlobalRef(chunkCbGlobal);
         if (progressCbGlobal) env->DeleteGlobalRef(progressCbGlobal);
 
@@ -298,13 +323,17 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
 
         return map;
     } catch (const std::runtime_error& e) {
-        env->ReleaseStringUTFChars(jPath, path);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->DeleteGlobalRef(chunkCbGlobal);
         if (progressCbGlobal) env->DeleteGlobalRef(progressCbGlobal);
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
         return nullptr;
     } catch (...) {
-        env->ReleaseStringUTFChars(jPath, path);
+                if (path && jPath) {
+                    env->ReleaseStringUTFChars(jPath, path);
+                }
         env->DeleteGlobalRef(chunkCbGlobal);
         if (progressCbGlobal) env->DeleteGlobalRef(progressCbGlobal);
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
