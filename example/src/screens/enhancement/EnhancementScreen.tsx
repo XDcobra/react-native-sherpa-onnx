@@ -56,6 +56,12 @@ import {
   stopPcmFilePlayback,
   type ActivePcmFilePlayback,
 } from '../../utils/audioFilePcmPlayback';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  fetchOutputDevices,
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -127,6 +133,10 @@ export default function EnhancementScreen() {
   } | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const engineRef = useRef<EnhancementEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
@@ -144,6 +154,14 @@ export default function EnhancementScreen() {
     const activePlayback = pcmPlaybackRef.current;
     pcmPlaybackRef.current = null;
     await stopPcmFilePlayback(activePlayback);
+  };
+
+  const refreshOutputDevices = async () => {
+    const nextOutputDevices = await fetchOutputDevices();
+    setOutputDevices(nextOutputDevices);
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
   };
 
   const pickSaveDirectory = async (): Promise<{
@@ -225,6 +243,9 @@ export default function EnhancementScreen() {
 
   useEffect(() => {
     loadAvailableModels();
+    refreshOutputDevices().catch(() => {
+      // ignore unsupported-platform lookup failures
+    });
   }, []);
 
   useEffect(() => {
@@ -670,11 +691,17 @@ export default function EnhancementScreen() {
     try {
       await stopActivePlayback();
       let nextPlayback: ActivePcmFilePlayback | null = null;
-      nextPlayback = await startPcmFilePlayback(path, () => {
-        if (pcmPlaybackRef.current === nextPlayback) {
-          pcmPlaybackRef.current = null;
+      nextPlayback = await startPcmFilePlayback(
+        path,
+        () => {
+          if (pcmPlaybackRef.current === nextPlayback) {
+            pcmPlaybackRef.current = null;
+          }
+        },
+        {
+          outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
-      });
+      );
       pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -860,6 +887,14 @@ export default function EnhancementScreen() {
               WAV input (example clips or a file from disk). Output is float32
               WAV under the app documents directory.
             </Text>
+
+            <AudioDeviceDropdown
+              label="Output device"
+              devices={outputDevices}
+              selectedDeviceId={selectedOutputDeviceId}
+              onSelectDeviceId={setSelectedOutputDeviceId}
+              disabled={enhancing || loading}
+            />
 
             {!engineReady && (
               <View style={styles.warningContainer}>

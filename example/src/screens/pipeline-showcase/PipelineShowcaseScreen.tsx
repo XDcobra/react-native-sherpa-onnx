@@ -38,6 +38,7 @@ import {
   finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
   ingestFileToLiveAudioBuffer,
+  listAvailableInputDevices,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
@@ -53,7 +54,11 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import {
+  createPcmPlayer,
+  listAvailableOutputDevices,
+  type PcmPlayer,
+} from 'react-native-sherpa-onnx/pcm';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 import {
   listDownloadedModels,
@@ -68,6 +73,11 @@ import {
   toDetectSource,
 } from '../../modelConfig';
 import { styles } from './PipelineShowcaseScreen.styles';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -130,6 +140,14 @@ export default function PipelineShowcaseScreen() {
 
   const [pickedFileUri, setPickedFileUri] = useState<string | null>(null);
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
+  const [inputDevices, setInputDevices] = useState<AudioRouteDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<
+    string | null
+  >(null);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -214,6 +232,22 @@ export default function PipelineShowcaseScreen() {
       lastForwardedSegmentIndex: -1,
       committedSegments: [],
     };
+  }, []);
+
+  const refreshAudioDevices = useCallback(async () => {
+    const [nextInputDevices, nextOutputDevices] = await Promise.all([
+      listAvailableInputDevices().catch(() => []),
+      listAvailableOutputDevices().catch(() => []),
+    ]);
+
+    setInputDevices(nextInputDevices);
+    setOutputDevices(nextOutputDevices);
+    setSelectedInputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextInputDevices)
+    );
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -493,6 +527,12 @@ export default function PipelineShowcaseScreen() {
   }, [loadModels]);
 
   useEffect(() => {
+    refreshAudioDevices().catch(() => {
+      // ignore unsupported-platform lookup failures
+    });
+  }, [refreshAudioDevices]);
+
+  useEffect(() => {
     const unsubscribe = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Stt && category !== ModelCategory.Tts) {
         return;
@@ -648,6 +688,7 @@ export default function PipelineShowcaseScreen() {
       outputAudioBufferRef.current = outputLiveAudio;
 
       const player = await createPcmPlayer(outputLiveAudio, {
+        outputDeviceId: selectedOutputDeviceId ?? undefined,
         onEnded: () => {
           setStatusText((prev) => {
             if (prev.includes('Finalize complete')) {
@@ -691,7 +732,10 @@ export default function PipelineShowcaseScreen() {
       startPolling();
 
       if (sourceMode === 'mic') {
-        await startMicToLiveAudioBuffer(inputLiveAudio, { emitToJs: false });
+        await startMicToLiveAudioBuffer(inputLiveAudio, {
+          emitToJs: false,
+          inputDeviceId: selectedInputDeviceId ?? undefined,
+        });
         setStatusText(
           'Realtime loop is running. Headset is strongly recommended to avoid acoustic feedback.'
         );
@@ -750,6 +794,8 @@ export default function PipelineShowcaseScreen() {
     resolveTtsModelPath,
     selectedSttModel,
     selectedTtsModel,
+    selectedInputDeviceId,
+    selectedOutputDeviceId,
     sourceMode,
     startPolling,
   ]);
@@ -1038,6 +1084,24 @@ export default function PipelineShowcaseScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {sourceMode === 'mic' && (
+              <AudioDeviceDropdown
+                label="Input device"
+                devices={inputDevices}
+                selectedDeviceId={selectedInputDeviceId}
+                onSelectDeviceId={setSelectedInputDeviceId}
+                disabled={isRunning || isStarting || isStopping}
+              />
+            )}
+
+            <AudioDeviceDropdown
+              label="Output device"
+              devices={outputDevices}
+              selectedDeviceId={selectedOutputDeviceId}
+              onSelectDeviceId={setSelectedOutputDeviceId}
+              disabled={isRunning || isStarting || isStopping}
+            />
 
             {sourceMode === 'file' && (
               <TouchableOpacity

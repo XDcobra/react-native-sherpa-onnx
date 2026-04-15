@@ -81,6 +81,13 @@ import {
   stopPcmFilePlayback,
   type ActivePcmFilePlayback,
 } from '../../utils/audioFilePcmPlayback';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  fetchInputDevices,
+  fetchOutputDevices,
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -158,6 +165,14 @@ export default function STTScreen() {
   const [offlineBufferPlaying, setOfflineBufferPlaying] = useState(false);
   const [offlineInputBuffer, setOfflineInputBuffer] =
     useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
+  const [inputDevices, setInputDevices] = useState<AudioRouteDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<
+    string | null
+  >(null);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const sttEngineRef = useRef<SttEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
@@ -181,6 +196,22 @@ export default function STTScreen() {
   }>({ segmentCount: 0, segmentTexts: [] });
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
+
+  const refreshAudioDevices = useCallback(async () => {
+    const [nextInputDevices, nextOutputDevices] = await Promise.all([
+      fetchInputDevices(),
+      fetchOutputDevices(),
+    ]);
+
+    setInputDevices(nextInputDevices);
+    setOutputDevices(nextOutputDevices);
+    setSelectedInputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextInputDevices)
+    );
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
+  }, []);
 
   const isLiveSupported = isStreamingModel;
   const availableAudioFiles = useMemo(
@@ -285,6 +316,12 @@ export default function STTScreen() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    refreshAudioDevices().catch(() => {
+      // ignore missing device-list support on unsupported platforms
+    });
+  }, [refreshAudioDevices]);
 
   // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
@@ -961,11 +998,17 @@ export default function STTScreen() {
       }
 
       let nextPlayback: ActivePcmFilePlayback | null = null;
-      nextPlayback = await startPcmFilePlayback(customAudioPath, () => {
-        if (pcmPlaybackRef.current === nextPlayback) {
-          pcmPlaybackRef.current = null;
+      nextPlayback = await startPcmFilePlayback(
+        customAudioPath,
+        () => {
+          if (pcmPlaybackRef.current === nextPlayback) {
+            pcmPlaybackRef.current = null;
+          }
+        },
+        {
+          outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
-      });
+      );
       pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -987,6 +1030,7 @@ export default function STTScreen() {
 
     try {
       const player = await createPcmPlayer(buffer.bufferId as any, {
+        outputDeviceId: selectedOutputDeviceId ?? undefined,
         onEnded: () => {
           const current = offlineBufferPlayerRef.current;
           offlineBufferPlayerRef.current = null;
@@ -1096,6 +1140,7 @@ export default function STTScreen() {
       try {
         await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
           emitToJs: false,
+          inputDeviceId: selectedInputDeviceId ?? undefined,
         });
       } catch (startErr) {
         throw startErr;
@@ -1564,6 +1609,14 @@ export default function STTScreen() {
                   )}
                 </TouchableOpacity>
 
+                <AudioDeviceDropdown
+                  label="Output device"
+                  devices={outputDevices}
+                  selectedDeviceId={selectedOutputDeviceId}
+                  onSelectDeviceId={setSelectedOutputDeviceId}
+                  disabled={loading || transcribing || preparingAudioBuffer}
+                />
+
                 <TouchableOpacity
                   style={[
                     styles.playButton,
@@ -1672,6 +1725,14 @@ export default function STTScreen() {
                         {customAudioName}
                       </Text>
 
+                      <AudioDeviceDropdown
+                        label="Output device"
+                        devices={outputDevices}
+                        selectedDeviceId={selectedOutputDeviceId}
+                        onSelectDeviceId={setSelectedOutputDeviceId}
+                        disabled={loading}
+                      />
+
                       <TouchableOpacity
                         style={[styles.playButton]}
                         onPress={handlePlayAudio}
@@ -1704,7 +1765,13 @@ export default function STTScreen() {
             {selectedModelType && audioSourceType === 'live' && (
               <>
                 <Text style={styles.subsectionTitle}>Live Transcription</Text>
-                <Text style={styles.audioDeviceLabel}>Input: Default</Text>
+                <AudioDeviceDropdown
+                  label="Input device"
+                  devices={inputDevices}
+                  selectedDeviceId={selectedInputDeviceId}
+                  onSelectDeviceId={setSelectedInputDeviceId}
+                  disabled={isLiveRecording}
+                />
                 <View style={styles.rowCenter}>
                   <Pressable
                     style={[

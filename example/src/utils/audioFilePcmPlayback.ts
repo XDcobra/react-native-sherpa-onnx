@@ -23,9 +23,14 @@ export type ActivePcmFilePlayback = {
   stop: () => Promise<void>;
 };
 
+type PcmFilePlaybackOptions = {
+  outputDeviceId?: string;
+};
+
 export async function startPcmFilePlayback(
   pathOrUri: string,
-  onPlaybackEnded?: () => void
+  onPlaybackEnded?: () => void,
+  options?: PcmFilePlaybackOptions
 ): Promise<ActivePcmFilePlayback> {
   const source = toFileSource(pathOrUri);
   const audioBuffer = await createOfflineAudioBufferFromFile(source, {
@@ -50,6 +55,7 @@ export async function startPcmFilePlayback(
 
   try {
     player = await createPcmPlayer(bufferId, {
+      outputDeviceId: options?.outputDeviceId,
       onEnded: () => {
         stop()
           .finally(() => {

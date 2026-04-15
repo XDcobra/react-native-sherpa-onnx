@@ -76,6 +76,12 @@ import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  fetchOutputDevices,
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -137,6 +143,10 @@ export default function TTSScreen() {
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [playingBufferId, setPlayingBufferId] = useState<string | null>(null);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const [speakerId, setSpeakerId] = useState('0');
   const [speed, setSpeed] = useState('1.0');
@@ -205,6 +215,14 @@ export default function TTSScreen() {
     [selectedModelType]
   );
 
+  const refreshOutputDevices = useCallback(async () => {
+    const nextOutputDevices = await fetchOutputDevices();
+    setOutputDevices(nextOutputDevices);
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
+  }, []);
+
   // Load available models on mount
   useEffect(() => {
     loadAvailableModels();
@@ -219,6 +237,12 @@ export default function TTSScreen() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    refreshOutputDevices().catch(() => {
+      // ignore unsupported-platform lookup failures
+    });
+  }, [refreshOutputDevices]);
 
   useEffect(() => {
     currentModelFolderRef.current = currentModelFolder;
@@ -1291,6 +1315,7 @@ export default function TTSScreen() {
         }
 
         const player = await createPcmPlayer(bufferId, {
+          outputDeviceId: selectedOutputDeviceId ?? undefined,
           onEnded: () => {
             pcmPlayerRef.current = null;
             setPlayingBufferId(null);
@@ -1304,7 +1329,7 @@ export default function TTSScreen() {
         Alert.alert('Error', `Failed to play buffer: ${errorMessage}`);
       }
     },
-    [playingBufferId]
+    [playingBufferId, selectedOutputDeviceId]
   );
 
   const handleDeleteOfflineBuffer = useCallback(
@@ -1748,6 +1773,14 @@ export default function TTSScreen() {
           <>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>3. Generate Speech</Text>
+
+              <AudioDeviceDropdown
+                label="Output device"
+                devices={outputDevices}
+                selectedDeviceId={selectedOutputDeviceId}
+                onSelectDeviceId={setSelectedOutputDeviceId}
+                disabled={generating || streaming}
+              />
 
               <Text style={styles.inputLabel}>Text to Synthesize:</Text>
               <TextInput
