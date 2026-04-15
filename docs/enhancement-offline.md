@@ -128,7 +128,9 @@ function detectEnhancementModel(
 ): Promise<EnhancementDetectResult>;
 ```
 
-The result includes `isStreaming: false` (enhancement is always offline).
+The result includes `isStreaming` from native enhancement detection:
+- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly.
+- Name-only detection (asset/folder heuristics without files) can return `isStreaming: true` as best effort while `success` remains `false`.
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
