@@ -194,7 +194,7 @@ const stt = await createSTT({
 import { detectSttModel } from 'react-native-sherpa-onnx/stt';
 import { sttSupportsHotwords } from 'react-native-sherpa-onnx/stt';
 
-const detection = await detectSttModel(modelPath);
+const detection = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/model' });
 if (detection.success && detection.modelType) {
   const showHotwords = sttSupportsHotwords(detection.modelType);
   // showHotwords: true for transducer/nemo_transducer, false for others

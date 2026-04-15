@@ -2,7 +2,7 @@
 
 On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as an `OfflineTextBuffer`, audio comes out in an `OfflineAudioBuffer`. The engine is **instance-based** — create with `createTTS()`, call `destroy()` when done.
 
-**For streaming / incremental synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md).
+**For streaming synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md). **For incremental streaming sessions:** see [tts-streaming-incremental.md](tts-streaming-incremental.md).
 
 **Import paths:**
 ```ts
@@ -31,7 +31,7 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
 
 // Detect without loading the engine — cheap pre-check that gives you `modelType` and model info.
-const det = await detectTtsModel(modelPath);
+const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
 if (!det.success || det.modelType !== 'vits') throw new Error(det.error ?? 'Expected VITS model');
 
 // Create engine. Explicit modelType required when you want modelOptions.
@@ -140,20 +140,21 @@ try {
 
 ## API Reference
 
-### `detectTtsModel(modelPath, options?)`
+### `detectTtsModel(source, options?)`
 
 File-based detection **without** initializing the engine. Use before `createTTS` to get `modelType` and init the right `modelOptions`.
 
 ```ts
 function detectTtsModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: TTSModelType }
 ): Promise<TtsDetectModelResult>
 ```
 
 ```ts
-const det = await detectTtsModel({ type: 'asset', path: 'models/kokoro' });
+const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' });
 // det.modelType       → e.g. 'kokoro'
+// det.isStreaming     → true
 // det.lexiconLanguageCandidates → ['us-en', 'gb-en', 'zh'] (Kokoro/Kitten only)
 // det.languages       → [{ iso6391Hint: 'en', id: 'us-en' }, ...]
 // det.quantization    → 'int8' | 'fp32' | ...

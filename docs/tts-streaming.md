@@ -2,7 +2,7 @@
 
 Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
-**For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
+**For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Streaming TTS (Incremental)](tts-streaming-incremental.md). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -26,15 +26,29 @@ Downstream consumers (enhancement pipeline, PCM player, STT pipeline, WAV export
 LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ [Enhancement] ──→ LiveAudioBuffer₂ ──→ [Streaming STT]
 ```
 
+## Choosing a streaming API (decision matrix)
+
+Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text → wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. [Incremental TTS](tts-streaming-incremental.md) is the same engine underneath; it adds **automatic segmentation**, **queues**, and **session** semantics for *continuous* text input.
+
+| Criterion | Prefer **`createStreamingTTS` + `synthesize()`** | Prefer **`createIncrementalStreamingTTS`** |
+|-----------|---------------------------------------------------|--------------------------------------------|
+| You already emit **discrete, meaningful segments** (sentences, paragraphs, UI blocks) | Yes | No |
+| Text arrives as a **continuous stream** (e.g. LLM tokens, live captions) and you want the library to **cut segments** | No | Yes |
+| You need **segmentation policy** (punctuation, max chars, debounce, auto-commit timeout) | Roll your own before `appendLiveTextSegment` | Built-in (`SegmentationPolicy`) |
+| You need **queue behavior** (FIFO vs replace-tail vs latest-wins, overflow rules) | Roll your own | Built-in (`QueuePolicy`) |
+| You need **per-segment `meta`** (`sid`, `speed`) from your own pipeline | Straightforward via `appendLiveTextSegment(..., meta)` | Use segment events / policies; cloning is pipeline-wide |
+| You want the **smallest surface** (buffers + pipeline only) | Yes | No |
+| You want **session lifecycle** events (idle, draining, errors) and **metrics** | Build on top | Built-in |
+
+**Rule of thumb:** if you are comfortable **owning segment boundaries** and writing to a `LiveTextBuffer`, use **`createStreamingTTS`**. If text is **open-ended or token-sized** and you want **automatic boundaries and backpressure**, use **`createIncrementalStreamingTTS`** (it wraps `StreamingTtsEngine`) and follow [Streaming TTS (Incremental)](tts-streaming-incremental.md).
+
 ## Models & paths
 
 - **`ModelPathConfig`** (from `react-native-sherpa-onnx`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
-- **`detectTtsModel()`** below scans the model directory and returns kinds **without** initializing the engine (see [Detection](#detection)).
+- **`detectTtsModel()`** below accepts a `FileSource` and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
 ## Quick Start
-
-All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
 
 ### 1) Direct pipeline control (`synthesize`)
 
@@ -52,7 +66,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
-const det = await detectTtsModel(modelPath);
+const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
 if (!det.success || det.modelType !== 'vits') {
   throw new Error(det.error ?? 'Expected a VITS model for this example');
 }
@@ -131,60 +145,9 @@ const pipeline = await tts.synthesize(textIn, audioOut, {
 
 **Note:** Zipvoice cloning requires `referenceText` and is **not** supported in streaming on Android. For Zipvoice voice cloning, use batch `generateSpeech` on the offline path — [tts-offline.md](tts-offline.md).
 
-### 4) Incremental text feeding (`createIncrementalStreamingTTS`)
+### 4) Incremental text feeding
 
-Use this path when text arrives progressively (chat/LLM typing). The engine handles segmentation, queue management, and pipeline lifecycle internally.
-
-```ts
-import {
-  createIncrementalStreamingTTS,
-  createEmptyLiveAudioBuffer,
-  finalizeLiveAudioBuffer,
-} from 'react-native-sherpa-onnx/tts';
-
-const inc = await createIncrementalStreamingTTS({
-  source: {
-    engineOptions: {
-      modelPath: { type: 'asset', path: 'models/vits-piper-en_US-lessac-medium' },
-    },
-  },
-  segmentation: {
-    maxCharsPerSegment: 220,
-    minCharsPerSegment: 24,
-    maxWaitMs: 900,
-  },
-});
-
-const sampleRate = await inc.getSampleRate();
-const audioOut = await createEmptyLiveAudioBuffer({
-  sampleRate,
-  channelCount: 1,
-  onFramesAppended: (info) => {
-    // Track progress: info.totalFrames, info.source
-  },
-});
-
-// Start a session — creates an internal LiveTextBuffer + pipeline automatically
-const ctrl = await inc.startSession(audioOut, { sid: 0, speed: 1.0 });
-
-// Push progressive text chunks (auto-segmentation detects boundaries)
-ctrl.pushText('Hallo Michael. ');
-ctrl.pushText('Today, the weather was amazing. But tomorrow, I think it will rain instead. ');
-
-// commit() forces immediate enqueue even without boundary detection
-ctrl.commit();
-
-// Flush: commit remainder, finalize text buffer, wait until pipeline completes
-await ctrl.flush();
-
-// Finalize audio output
-await finalizeLiveAudioBuffer(audioOut);
-
-// Cancel (alternative to flush — discards remaining)
-// await ctrl.cancel({ scope: 'all' });
-
-await inc.destroy();
-```
+For progressive/tokenized text input (chat/LLM typing), use [Streaming TTS (Incremental)](tts-streaming-incremental.md).
 
 ## Setup (iOS & Android)
 
@@ -192,7 +155,7 @@ await inc.destroy();
 | --- | --- |
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
 | Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment.md](alignment.md) |
-| Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
+| Multi-instance | Each `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 | One pipeline per engine | `synthesize()` rejects with `TTS_PIPELINE_ALREADY_RUNNING` if a pipeline is already active on the same engine |
 | Sample rate match | `audioOut.sampleRate` must equal the TTS model's output sample rate (strict — no hidden resampling) |
 
@@ -200,17 +163,18 @@ await inc.destroy();
 
 ## Detection
 
-### `detectTtsModel(modelPath, options?)`
+### `detectTtsModel(source, options?)`
 
 ```ts
 function detectTtsModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { modelType?: TTSModelType }
 ): Promise<{
   success: boolean;
   error?: string;
   detectedModels: { type: string; modelDir: string }[];
   modelType?: TTSModelType;
+  isStreaming: boolean;
   lexiconLanguageCandidates?: string[];
   languages?: { iso6391Hint: string; id: string }[];
   quantization?: string;
@@ -221,8 +185,10 @@ function detectTtsModel(
 
 File-based detection and validation **without** initializing the TTS engine: no native synthesizer is created, so this call is comparatively cheap and suitable as a **pre-check** before **`createStreamingTTS`** or **`createTTS`** — for example to obtain a concrete `modelType` (and Kokoro/Kitten `lexiconLanguageCandidates`) so you can pass the right `modelOptions` on init.
 
+For TTS detections, `isStreaming` is always `true`.
+
 ```ts
-const result = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
+const result = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/my-tts-model' });
 if (!result.success) console.warn(result.error);
 ```
 
@@ -240,22 +206,7 @@ Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline
 const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
 ```
 
-### `createIncrementalStreamingTTS(options)`
-
-```ts
-function createIncrementalStreamingTTS(
-  options: IncrementalStreamingTtsFactoryOptions
-): Promise<IncrementalStreamingTtsEngine>;
-```
-
-High-level incremental layer over `StreamingTtsEngine`.
-It handles buffering, boundary detection, queue policy, and pipeline lifecycle internally.
-
-```ts
-const inc = await createIncrementalStreamingTTS({
-  source: { engineOptions: { modelPath: { type: 'asset', path: 'models/my-tts-model' } } },
-});
-```
+For `createIncrementalStreamingTTS(options)`, see [Streaming TTS (Incremental)](tts-streaming-incremental.md#api-reference).
 
 ## Streaming engine (`StreamingTtsEngine`)
 
@@ -353,94 +304,6 @@ Readonly string identifier for this pipeline instance.
 
 Readonly string — the TTS engine instance driving this pipeline.
 
-## Incremental engine (`IncrementalStreamingTtsEngine`)
-
-### `inc.startSession(audioOut, ttsOptions?, incrementalOptions?)`
-
-```ts
-startSession(
-  audioOut: LiveAudioBufferIdSource,
-  ttsOptions?: TtsPipelineOptions,
-  incrementalOptions?: IncrementalRequestOptions,
-): Promise<IncrementalStreamController>;
-```
-
-Starts an incremental speech synthesis session:
-1. Creates an internal `LiveTextBuffer` automatically.
-2. Starts a TTS pipeline (`synthesize()`) from the internal text buffer to `audioOut`.
-3. Returns a controller for pushing text incrementally.
-
-Only one active session per engine instance at a time.
-
-### `inc.getModelInfo()`, `inc.getSampleRate()`, `inc.getNumSpeakers()`, `inc.destroy()`
-
-Same semantics as `StreamingTtsEngine`.
-
-## Incremental stream controller (`IncrementalStreamController`)
-
-### `ctrl.pushText(text, meta?)`
-
-```ts
-pushText(text: string, meta?: { sid?: number; speed?: number }): void;
-```
-
-Adds incremental input text. Auto-segmentation detects boundaries based on the segmentation policy and commits segments to the internal `LiveTextBuffer`. The native pipeline worker picks them up automatically.
-
-### `ctrl.commit(options?)`
-
-```ts
-commit(options?: CommitOptions): void;
-```
-
-Force-commit the current buffer as a segment. Not required for normal operation — `pushText()` triggers auto-segmentation.
-
-Behavior matrix:
-
-- `pushText()` with detectable boundaries → speech generated automatically.
-- `pushText()` without boundaries + timeout enabled → speech starts after timeout.
-- `pushText()` without boundaries and no timeout → no generation until `commit()` or `flush()`.
-- `commit()` → immediate enqueue of current buffer, bypassing boundary detection.
-
-### `ctrl.flush(options?)`
-
-```ts
-flush(options?: FlushOptions): Promise<void>;
-```
-
-Commits remaining buffer, finalizes the internal text buffer, and resolves when all segments have been synthesized.
-
-### `ctrl.cancel(options?)`
-
-```ts
-cancel(options?: CancelOptions): Promise<void>;
-```
-
-Cancels by scope:
-
-- `all` (default): stops pipeline, discards active + queued, releases text buffer
-- `active`: stops active synthesis only
-- `queued`: discards queued segments, resets pipeline cursor; session continues
-
-### `ctrl.getMetrics()`
-
-```ts
-getMetrics(): IncrementalMetrics;
-```
-
-Returns a snapshot: queue depth, totals, and current active segment id.
-
-### `ctrl.pipeline`
-
-The underlying `TtsPipelineHandle` (for `getStatus()`, etc.).
-
-### `ctrl.textBuffer`
-
-`{ bufferId: string }` — the internal `LiveTextBuffer` used for segmented text input.
-
-### `ctrl.state`
-
-Current session state: `'idle' | 'active' | 'draining' | 'cancelled' | 'errored' | 'destroyed'`.
-
 ## Pipeline options (`TtsPipelineOptions`)
 
 | Option | Type | Default | Description |
@@ -458,6 +321,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 | Type | Notes |
 | --- | --- |
 | `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto'; path: string }` |
+| `FileSource` | `{ kind: 'fs' \| 'app' \| 'contentUri' \| 'securityScoped' \| 'pad', ... }` |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
 | `isTtsModelType` | Runtime guard for `TTSModelType` |
@@ -471,7 +335,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 
 | Type | Notes |
 | --- | --- |
-| `TTSInitializeOptions` | `createStreamingTTS()` / `IncrementalStreamingTtsSource.engineOptions` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
+| `TTSInitializeOptions` | `createStreamingTTS()` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
 | `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
 | `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
@@ -489,29 +353,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 | `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
 
-### Incremental streaming
-
-| Type | Notes |
-| --- | --- |
-| `IncrementalStreamingTtsEngine` | `startSession`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
-| `IncrementalStreamingTtsFactoryOptions` | `{ source, segmentation?, queue? }` |
-| `IncrementalStreamingTtsSource` | `{ engine: StreamingTtsEngine }` or `{ engineOptions: TTSInitializeOptions \| ModelPathConfig }` |
-| `IncrementalRequestOptions` | `{ segmentation?, queue? }` |
-| `IncrementalStreamHandlers` | `{ onSessionEvent?, onSegmentEvent?, onMetrics? }` |
-| `IncrementalStreamController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `pipeline`, `textBuffer`, `state` |
-| `SegmentationPolicy` | `boundaryChars?`, `maxCharsPerSegment?`, `maxWaitMs?`, `minCharsPerSegment?`, `debounceMs?` |
-| `QueuePolicy` | `mode?`, `maxSegments?`, `maxBufferedChars?`, `overflowStrategy?` |
-| `QueueMode` | `'fifo' \| 'replace-tail' \| 'latest-wins'` |
-| `OverflowStrategy` | `'drop-oldest' \| 'drop-newest' \| 'reject'` |
-| `CommitOptions` | `{ force?: boolean }` |
-| `FlushOptions` | Placeholder `{}` for `flush(options?)` |
-| `CancelOptions` | `{ scope?: CancelScope }` |
-| `CancelScope` | `'all' \| 'active' \| 'queued'` |
-| `SessionId`, `SegmentId` | Opaque string ids on session/segment events |
-| `SessionState` | `'idle' \| 'active' \| 'draining' \| 'cancelled' \| 'errored' \| 'destroyed'` |
-| `IncrementalMetrics` | `{ queueDepth, totalSegmentsQueued, totalSegmentsCompleted, totalSegmentsDropped, totalSegmentsReplaced, activeSegmentId }` |
-| `SessionEvent` | `session:started`, `session:idle`, `session:draining`, `session:cancelled`, `session:error` |
-| `SegmentEvent` | `segment:queued`, `segment:started`, `segment:ended`, `segment:dropped` |
+For incremental-only types (`IncrementalStreamingTtsEngine`, `IncrementalStreamController`, `SegmentationPolicy`, `QueuePolicy`, etc.), see [Streaming TTS (Incremental)](tts-streaming-incremental.md#types).
 
 ## Error codes
 
@@ -547,6 +389,7 @@ If you call the **`NativeSherpaOnnx`** TurboModule directly: `startTtsPipeline(i
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
+- [tts-streaming-incremental.md](tts-streaming-incremental.md) — incremental/session-based streaming TTS
 - [pcm-player.md](pcm-player.md) — standalone PCM player
 - [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
 - [execution-providers.md](execution-providers.md) — ORT execution providers

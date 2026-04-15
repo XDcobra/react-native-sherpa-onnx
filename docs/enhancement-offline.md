@@ -14,7 +14,7 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Models and paths
 
-- **`ModelPathConfig`:** `{ type: 'asset' | 'file' | 'auto', path: string }` (from `react-native-sherpa-onnx`, same as STT/TTS).
+- **`FileSource`:** `{ kind: 'fs' | 'app' | 'contentUri' | 'securityScoped' | 'pad', ... }` (from `react-native-sherpa-onnx`) — used by all detect functions.
 - In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
 - Model detection without loading the denoiser: **`detectEnhancementModel(...)`**.
 - File expectations per family: [model-setup.md](model-setup.md) where applicable.
@@ -56,7 +56,7 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { type: 'file' as const, path: '/absolute/path/to/enhancement-model-dir' };
 
-const det = await detectEnhancementModel(modelPath, { modelType: 'auto' });
+const det = await detectEnhancementModel({ kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' }, { modelType: 'auto' });
 if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 
 const enhancement = await createEnhancement({
@@ -116,11 +116,11 @@ Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. T
 
 ### Detection
 
-#### `detectEnhancementModel(modelPath, options?)`
+#### `detectEnhancementModel(source, options?)`
 
 ```ts
 function detectEnhancementModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: {
     modelType?: EnhancementModelType | 'auto';
     assetName?: string;
@@ -128,17 +128,19 @@ function detectEnhancementModel(
 ): Promise<EnhancementDetectResult>;
 ```
 
+The result includes `isStreaming: false` (enhancement is always offline).
+
 ```ts
 const det = await detectEnhancementModel(
-  { type: 'asset', path: 'models/sherpa-onnx-speech-enhancement-gtcrn' },
+  { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.detectedModels);
+console.log(det.success, det.modelType, det.isStreaming, det.detectedModels);
 ```
 
 ```ts
 const det2 = await detectEnhancementModel(
-  { type: 'file', path: '/data/enhancement-pack' },
+  { kind: 'fs', path: '/data/enhancement-pack' },
   { modelType: 'auto', assetName: 'sherpa-onnx-speech-enhancement-gtcrn-int8' }
 );
 ```

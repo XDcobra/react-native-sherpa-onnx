@@ -31,7 +31,6 @@ There is no per-chunk stream object in the JS API anymore.
 import {
   createStreamingSTT,
   detectSttModel,
-  getOnlineTypeOrNull,
 } from 'react-native-sherpa-onnx/stt';
 import {
   createEmptyLiveAudioBuffer,
@@ -46,20 +45,19 @@ import {
   getLiveTextBufferSegments,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
-const modelPath = { type: 'asset' as const, path: 'models/my-streaming-model' };
+const source: FileSource = { kind: 'fs', path: '/path/to/my-streaming-model' };
 
-const det = await detectSttModel(modelPath);
+const det = await detectSttModel(source);
 if (!det.success) throw new Error(det.error ?? 'detectSttModel failed');
-
-const onlineType = getOnlineTypeOrNull(det.modelType);
-if (!onlineType) {
+if (!det.isStreaming) {
   throw new Error('Detected model is not streaming-capable');
 }
 
 const engine = await createStreamingSTT({
-  modelPath,
-  modelType: onlineType,
+  modelPath: { type: 'file', path: '/path/to/my-streaming-model' },
+  modelType: 'auto',
   enableEndpoint: true,
 });
 
@@ -219,27 +217,11 @@ const engine = await createLiveSTT({
 
 ### Streaming model-type helpers
 
-Use after **`detectSttModel`** when you need a streaming-capable `modelType` or must reject offline-only models.
-
-#### `mapDetectedToOnlineType(detectedType)`
+Use after **`detectSttModel`** when you need to check whether a model supports streaming:
 
 ```ts
-function mapDetectedToOnlineType(detectedType: string | undefined): OnlineSTTModelType;
-```
-
-```ts
-const onlineType = mapDetectedToOnlineType(det.modelType);
-```
-
-#### `getOnlineTypeOrNull(detectedType)`
-
-```ts
-function getOnlineTypeOrNull(detectedType: string | undefined): OnlineSTTModelType | null;
-```
-
-```ts
-const onlineType = getOnlineTypeOrNull(det.modelType);
-if (!onlineType) throw new Error('Detected model is not streaming-capable');
+const det = await detectSttModel(source);
+if (!det.isStreaming) throw new Error('Detected model is not streaming-capable');
 ```
 
 ### Engine (`LiveSttEngine`)
@@ -369,8 +351,6 @@ import {
   ONLINE_STT_MODEL_TYPES,
   createStreamingSTT,
   createLiveSTT,
-  mapDetectedToOnlineType,
-  getOnlineTypeOrNull,
 } from 'react-native-sherpa-onnx/stt';
 
 import type {

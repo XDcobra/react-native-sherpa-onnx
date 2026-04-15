@@ -31,7 +31,7 @@ Enhancement is a **transform**: read mono PCM from the pipeline registry, run `O
   - **`enhanceFile(inputPath, outputPath?)`** — WAV path in; optional WAV path out; returns **`EnhancedAudio`** (`Float32Array` + `sampleRate`) built from native `number[]` (bridge cost).
   - **`enhanceSamples(samples: number[], sampleRate)`** — legacy array input (not `Float32Array`; not buffer id).
   - **`getSampleRate()`**, **`destroy()`**.
-- **`detectEnhancementModel(...)`** — unchanged responsibility (folder / asset detection); stays on **`ModelPathConfig`** resolved to absolute `modelDir` + optional `assetName`.
+- **`detectEnhancementModel(...)`** — unchanged responsibility (folder / asset detection); accepts **`FileSource`** resolved to absolute `modelDir` + optional `assetName`. Returns `isStreaming: false`.
 
 ### 2.2 TurboModule (`src/NativeSherpaOnnx.ts`)
 
