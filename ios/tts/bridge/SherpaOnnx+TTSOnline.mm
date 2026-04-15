@@ -15,6 +15,7 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)so_createPcmPlayer:(NSString *)playerId
           audioBufferId:(NSString *)audioBufferId
               volume:(double)volume
+                  options:(NSDictionary *)options
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject;
 - (void)so_pausePcmPlayer:(NSString *)playerId
@@ -36,6 +37,8 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)so_destroyPcmPlayer:(NSString *)playerId
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject;
+- (void)so_listAvailableOutputDevicesResolve:(RCTPromiseResolveBlock)resolve
+                                       reject:(RCTPromiseRejectBlock)reject;
 @end
 
 @implementation SherpaOnnx (TTSOnline)
@@ -233,13 +236,20 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)createPcmPlayer:(NSString *)playerId
          audioBufferId:(NSString *)audioBufferId
              volume:(double)volume
+            options:(NSDictionary *)options
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject {
   [self so_createPcmPlayer:playerId
          audioBufferId:audioBufferId
              volume:volume
+                  options:options
                    resolve:resolve
                     reject:reject];
+}
+
+- (void)listAvailableOutputDevices:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject {
+  [self so_listAvailableOutputDevicesResolve:resolve reject:reject];
 }
 
 - (void)pausePcmPlayer:(NSString *)playerId

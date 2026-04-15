@@ -19,12 +19,17 @@ import {
   resolveModelPath,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   DocumentDirectoryPath,
   DownloadDirectoryPath,
   mkdir,
 } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import {
+  listDownloadedModels,
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import {
   createEnhancement,
   detectEnhancementModel,
@@ -47,10 +52,16 @@ import {
 import { AUDIO_FILES, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  startWebAudioFilePlayback,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
+  startPcmFilePlayback,
+  stopPcmFilePlayback,
+  type ActivePcmFilePlayback,
+} from '../../utils/audioFilePcmPlayback';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  fetchOutputDevices,
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -82,6 +93,7 @@ const localStyles = StyleSheet.create({
 export default function EnhancementScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
@@ -121,9 +133,13 @@ export default function EnhancementScreen() {
   } | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const engineRef = useRef<EnhancementEngine | null>(null);
-  const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
+  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
 
   const getDisplayPath = (path: string) => {
     try {
@@ -131,6 +147,21 @@ export default function EnhancementScreen() {
     } catch {
       return path;
     }
+  };
+
+  const stopActivePlayback = async () => {
+    if (!pcmPlaybackRef.current) return;
+    const activePlayback = pcmPlaybackRef.current;
+    pcmPlaybackRef.current = null;
+    await stopPcmFilePlayback(activePlayback);
+  };
+
+  const refreshOutputDevices = async () => {
+    const nextOutputDevices = await fetchOutputDevices();
+    setOutputDevices(nextOutputDevices);
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
   };
 
   const pickSaveDirectory = async (): Promise<{
@@ -212,6 +243,28 @@ export default function EnhancementScreen() {
 
   useEffect(() => {
     loadAvailableModels();
+    refreshOutputDevices().catch(() => {
+      // ignore unsupported-platform lookup failures
+    });
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Enhancement) return;
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pcmPlaybackRef.current) {
+        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
+        pcmPlaybackRef.current = null;
+      }
+    };
   }, []);
 
   const loadAvailableModels = async () => {
@@ -223,6 +276,10 @@ export default function EnhancementScreen() {
       const enhancementFolders = assetModels
         .filter((m) => isEnhancementHint(m.folder, m.hint))
         .map((m) => m.folder);
+      const downloadedModels = await listDownloadedModels(
+        ModelCategory.Enhancement
+      );
+      const downloadedFolders = downloadedModels.map((model) => model.id);
 
       let padFolders: string[] = [];
       let resolvedPadPath: string | null = null;
@@ -246,14 +303,18 @@ export default function EnhancementScreen() {
       const combined = [
         ...padFolders,
         ...enhancementFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedFolders.filter(
+          (f) => !padFolders.includes(f) && !enhancementFolders.includes(f)
+        ),
       ];
       setPadModelIds(padFolders);
+      setDownloadedModelIds(downloadedFolders);
       setAvailableModels(combined);
 
       if (combined.length === 0) {
         setErrorSource('init');
         setError(
-          'No speech enhancement models found. Add a GTCRN or DPDFNet model under assets/models/ or PAD. See docs/speech-enhancement.md.'
+          'No speech enhancement models found. Add a GTCRN or DPDFNet model as a bundled asset, downloaded model, or PAD model. See docs/speech-enhancement.md.'
         );
       }
     } catch (err) {
@@ -264,6 +325,22 @@ export default function EnhancementScreen() {
     } finally {
       setLoadingModels(false);
     }
+  };
+
+  const resolveEnhancementModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(
+            modelFolder,
+            ModelCategory.Enhancement,
+            padModelsPath
+          )
+        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    return getAssetModelPath(modelFolder);
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -281,16 +358,7 @@ export default function EnhancementScreen() {
         engineRef.current = null;
       }
 
-      const useFilePath = padModelIds.includes(modelFolder);
-      const modelPath = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(
-              modelFolder,
-              ModelCategory.Enhancement,
-              padModelsPath
-            )
-          : getFileModelPath(modelFolder, ModelCategory.Enhancement)
-        : getAssetModelPath(modelFolder);
+      const modelPath = resolveEnhancementModelPath(modelFolder);
 
       const engine = await createEnhancement({
         modelPath,
@@ -384,12 +452,7 @@ export default function EnhancementScreen() {
         engineRef.current = null;
       }
 
-      const useFilePath = padModelIds.includes(folder);
-      const modelPath = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(folder, ModelCategory.Enhancement, padModelsPath)
-          : getFileModelPath(folder, ModelCategory.Enhancement)
-        : getAssetModelPath(folder);
+      const modelPath = resolveEnhancementModelPath(folder);
 
       const engine = await createEnhancement({
         modelPath,
@@ -440,12 +503,35 @@ export default function EnhancementScreen() {
     setLastEnhancedAudio(null);
 
     try {
-      let inputPath: string;
+      let inputSource: FileSource;
+      let inputPathForDisplay: string;
       if (customAudioPath) {
-        inputPath = customAudioPath;
+        const trimmed = customAudioPath.trim();
+        if (trimmed.startsWith('content://')) {
+          inputSource = { kind: 'contentUri', uri: trimmed };
+          inputPathForDisplay = trimmed;
+        } else if (trimmed.startsWith('file://')) {
+          const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
+          if (filePath.startsWith('/proc/self/fd/')) {
+            throw new Error(
+              'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+            );
+          }
+          inputSource = { kind: 'fs', path: filePath };
+          inputPathForDisplay = filePath;
+        } else if (trimmed.startsWith('/proc/self/fd/')) {
+          throw new Error(
+            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+          );
+        } else {
+          inputSource = { kind: 'fs', path: trimmed };
+          inputPathForDisplay = trimmed;
+        }
       } else {
         const audioPathConfig = autoModelPath(selectedAudio!.id);
-        inputPath = await resolveModelPath(audioPathConfig);
+        const resolvedPath = await resolveModelPath(audioPathConfig);
+        inputSource = { kind: 'fs', path: resolvedPath };
+        inputPathForDisplay = resolvedPath;
       }
 
       const engine = engineRef.current;
@@ -456,10 +542,7 @@ export default function EnhancementScreen() {
       }
 
       // Create input buffer from file
-      const inputBuf = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: inputPath,
-      });
+      const inputBuf = await createOfflineAudioBufferFromFile(inputSource);
       const sr = await engine.getSampleRate();
       // Create empty output buffer at model sample rate
       const outputBuf = await createEmptyOfflineAudioBuffer(sr);
@@ -479,7 +562,7 @@ export default function EnhancementScreen() {
         // Release input buffer (output kept for save feature)
         await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
         setOutputWavPath(outPath);
-        setLastInputPath(inputPath);
+        setLastInputPath(inputPathForDisplay);
         setLastEnhancedAudio({
           outputBufferId: outputBuf.bufferId as string,
           sampleRate: outSr,
@@ -546,10 +629,7 @@ export default function EnhancementScreen() {
     setLastEnhancedAudio(null);
     setError(null);
     setErrorSource(null);
-    if (webAudioPlaybackRef.current) {
-      stopWebAudioPlayback(webAudioPlaybackRef.current);
-      webAudioPlaybackRef.current = null;
-    }
+    await stopActivePlayback();
   };
 
   const handlePickLocalFile = async () => {
@@ -564,11 +644,28 @@ export default function EnhancementScreen() {
         type: [DocumentPicker.types.audio],
       });
       const file = Array.isArray(res) ? res[0] : res;
-      const uri = file.uri || file.name;
+      const uri =
+        file.uri ??
+        (file as any).fileCopyUri ??
+        (file as any).localUri ??
+        (file as any).nativeUri;
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
       if (!uri) {
         setErrorSource('enhance');
         setError('Could not get file URI from picker result');
+        return;
+      }
+      const fsPathProbe = uri.startsWith('file://')
+        ? decodeURI(uri.replace(/^file:\/\//, ''))
+        : uri;
+      if (
+        uri.startsWith('/proc/self/fd/') ||
+        fsPathProbe.startsWith('/proc/self/fd/')
+      ) {
+        setErrorSource('enhance');
+        setError(
+          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
+        );
         return;
       }
       setCustomAudioPath(uri);
@@ -592,16 +689,20 @@ export default function EnhancementScreen() {
   const playPath = async (path: string | null) => {
     if (!path) return;
     try {
-      if (webAudioPlaybackRef.current) {
-        stopWebAudioPlayback(webAudioPlaybackRef.current);
-        webAudioPlaybackRef.current = null;
-      }
-      webAudioPlaybackRef.current = await startWebAudioFilePlayback(
+      await stopActivePlayback();
+      let nextPlayback: ActivePcmFilePlayback | null = null;
+      nextPlayback = await startPcmFilePlayback(
         path,
         () => {
-          webAudioPlaybackRef.current = null;
+          if (pcmPlaybackRef.current === nextPlayback) {
+            pcmPlaybackRef.current = null;
+          }
+        },
+        {
+          outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
       );
+      pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -786,6 +887,14 @@ export default function EnhancementScreen() {
               WAV input (example clips or a file from disk). Output is float32
               WAV under the app documents directory.
             </Text>
+
+            <AudioDeviceDropdown
+              label="Output device"
+              devices={outputDevices}
+              selectedDeviceId={selectedOutputDeviceId}
+              onSelectDeviceId={setSelectedOutputDeviceId}
+              disabled={enhancing || loading}
+            />
 
             {!engineReady && (
               <View style={styles.warningContainer}>

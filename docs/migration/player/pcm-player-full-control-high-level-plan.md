@@ -7,9 +7,7 @@ Implemented.
 - `onEnded` event is wired end-to-end (`pcmPlayerEnded` native event -> JS callback).
 - `seekToMs`, `restart`, and `getPlaybackPositionMs` are available in the public `PcmPlayer` API.
 - Android and iOS native player backends support seek/restart semantics for offline and live buffers.
-- Example TTS playback in the app uses `createPcmPlayer(...)` from pipeline buffers.
-
-Note: `audioFileWebPlayback.ts` and `react-native-audio-api` still exist for non-TTS example screens.
+- Example app playback uses `createPcmPlayer(...)` from pipeline buffers (TTS/STT/Enhancement).
 
 ## Purpose
 
@@ -34,11 +32,7 @@ Today, PCM player provides:
 
 Missing for full-player UX:
 
-- no playback completion signal
-- no seek API
-- no restart API
-
-Example app still uses `react-native-audio-api` for convenient file playback controls/events.
+- none for the current example-app playback migration scope
 
 ---
 
@@ -196,7 +190,7 @@ Add player-specific error codes (JS + native alignment), for example:
 ### Phase 4 — example migration
 
 - migrate TTS example playback helpers to PCM player usage (done)
-- `audioFileWebPlayback.ts` and `react-native-audio-api` remain for STT/Enhancement screens
+- migrate STT/Enhancement file playback helpers to PCM player usage (done)
 
 ---
 
@@ -226,7 +220,7 @@ Native:
 - [x] out-of-range seek on live recording fails with explicit code
 - [x] `restart()` works from paused/playing/ended states
 - [x] no memory leaks from event subscriptions after `destroy()`
-- [ ] example app playback works without `react-native-audio-api` (still pending for STT/Enhancement screens)
+- [x] example app playback works without external WebAudio playback libraries
 
 ---
 

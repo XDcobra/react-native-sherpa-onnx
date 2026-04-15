@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Text,
   View,
@@ -24,7 +24,11 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
+import {
+  listDownloadedModels,
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   createSTT,
@@ -53,6 +57,7 @@ import {
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   createEmptyOfflineTextBuffer,
   createLiveTextBuffer,
@@ -70,17 +75,54 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
-  startWebAudioFilePlayback,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
+  startPcmFilePlayback,
+  stopPcmFilePlayback,
+  type ActivePcmFilePlayback,
+} from '../../utils/audioFilePcmPlayback';
+import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
+import {
+  fetchInputDevices,
+  fetchOutputDevices,
+  keepValidDeviceSelection,
+  type AudioRouteDevice,
+} from '../../utils/audioDevices';
 
 const PAD_PACK_NAME = 'sherpa_models';
+
+type SttOfflineInputBufferState = {
+  bufferId: string;
+  sourceType: 'example' | 'own';
+  sourceLabel: string;
+  selectedAudioId: string | null;
+  customAudioPath: string | null;
+  customAudioName: string | null;
+};
+
+type SttTranscriptionResult = {
+  text: string;
+  tokens: string[];
+  timestamps: number[];
+  lang: string;
+  emotion: string;
+  event: string;
+  durations: number[];
+  bufferId?: string;
+};
+
+type SttOfflineTextBufferState = SttTranscriptionResult & {
+  bufferId: string;
+  createdAt: number;
+};
+
+let gSttOfflineInputBuffer: SttOfflineInputBufferState | null = null;
+let gSttOfflineTextBuffers: SttOfflineTextBufferState[] = [];
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
@@ -110,22 +152,31 @@ export default function STTScreen() {
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [transcriptionResult, setTranscriptionResult] = useState<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    lang: string;
-    emotion: string;
-    event: string;
-    durations: number[];
-  } | null>(null);
+  const [transcriptionResult, setTranscriptionResult] =
+    useState<SttTranscriptionResult | null>(null);
+  const [offlineTextBuffers, setOfflineTextBuffers] = useState<
+    SttOfflineTextBufferState[]
+  >(gSttOfflineTextBuffers);
   const [tokensExpanded, setTokensExpanded] = useState(false);
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [preparingAudioBuffer, setPreparingAudioBuffer] = useState(false);
+  const [offlineBufferPlaying, setOfflineBufferPlaying] = useState(false);
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
+  const [inputDevices, setInputDevices] = useState<AudioRouteDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<
+    string | null
+  >(null);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+    string | null
+  >(null);
 
   const sttEngineRef = useRef<SttEngine | null>(null);
-  const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
+  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const offlineBufferPlayerRef = useRef<PcmPlayer | null>(null);
   const streamingEngineRef = useRef<LiveSttEngine | null>(null);
   const livePipelineRef = useRef<{
     liveAudioBufferId: string;
@@ -146,13 +197,33 @@ export default function STTScreen() {
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
 
+  const refreshAudioDevices = useCallback(async () => {
+    const [nextInputDevices, nextOutputDevices] = await Promise.all([
+      fetchInputDevices(),
+      fetchOutputDevices(),
+    ]);
+
+    setInputDevices(nextInputDevices);
+    setOutputDevices(nextOutputDevices);
+    setSelectedInputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextInputDevices)
+    );
+    setSelectedOutputDeviceId((prev) =>
+      keepValidDeviceSelection(prev, nextOutputDevices)
+    );
+  }, []);
+
   const isLiveSupported = isStreamingModel;
+  const availableAudioFiles = useMemo(
+    () => (currentModelFolder ? getAudioFilesForModel(currentModelFolder) : []),
+    [currentModelFolder]
+  );
 
   const buildTranscriptionResult = (
     text: string,
     tokens: string[] = [],
     timestamps: number[] = []
-  ) => ({
+  ): SttTranscriptionResult => ({
     text,
     tokens,
     timestamps,
@@ -236,6 +307,22 @@ export default function STTScreen() {
     loadAvailableModels();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Stt) return;
+      loadAvailableModels().catch(() => {
+        // ignore refresh errors
+      });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    refreshAudioDevices().catch(() => {
+      // ignore missing device-list support on unsupported platforms
+    });
+  }, [refreshAudioDevices]);
+
   // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
     const cached = getSttCache();
@@ -261,6 +348,44 @@ export default function STTScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (gSttOfflineInputBuffer == null) {
+      return;
+    }
+    setOfflineInputBuffer(gSttOfflineInputBuffer);
+    setAudioSourceType(gSttOfflineInputBuffer.sourceType);
+    setCustomAudioPath(gSttOfflineInputBuffer.customAudioPath);
+    setCustomAudioName(gSttOfflineInputBuffer.customAudioName);
+  }, []);
+
+  useEffect(() => {
+    if (
+      offlineInputBuffer == null ||
+      offlineInputBuffer.selectedAudioId == null
+    ) {
+      return;
+    }
+    const matched = availableAudioFiles.find(
+      (audio) => audio.id === offlineInputBuffer.selectedAudioId
+    );
+    if (matched) {
+      setSelectedAudio(matched);
+    }
+  }, [availableAudioFiles, offlineInputBuffer]);
+
+  useEffect(() => {
+    return () => {
+      if (pcmPlaybackRef.current) {
+        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
+        pcmPlaybackRef.current = null;
+      }
+      if (offlineBufferPlayerRef.current) {
+        offlineBufferPlayerRef.current.destroy().catch(() => {});
+        offlineBufferPlayerRef.current = null;
+      }
+    };
+  }, []);
+
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
@@ -270,6 +395,8 @@ export default function STTScreen() {
       const sttFolders = assetModels
         .filter((model) => model.hint === 'stt')
         .map((model) => model.folder);
+      const downloadedModels = await listDownloadedModels(ModelCategory.Stt);
+      const downloadedFolders = downloadedModels.map((model) => model.id);
 
       // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
       let padFolders: string[] = [];
@@ -301,9 +428,13 @@ export default function STTScreen() {
       const combined = [
         ...padFolders,
         ...sttFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedFolders.filter(
+          (f) => !padFolders.includes(f) && !sttFolders.includes(f)
+        ),
       ];
 
       setPadModelIds(padFolders);
+      setDownloadedModelIds(downloadedFolders);
       if (sttFolders.length > 0) {
         console.log('STTScreen: Found asset models:', sttFolders);
       }
@@ -312,7 +443,7 @@ export default function STTScreen() {
       if (combined.length === 0) {
         setErrorSource('init');
         setError(
-          'No STT models found. Use bundled assets or PAD models. See STT_MODEL_SETUP.md'
+          'No STT models found. Use bundled assets, downloaded models, or PAD models. See STT_MODEL_SETUP.md'
         );
       }
     } catch (err) {
@@ -322,6 +453,203 @@ export default function STTScreen() {
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
+    }
+  };
+
+  const resolveSttModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
+        : getFileModelPath(modelFolder, ModelCategory.Stt);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Stt);
+    }
+    return getAssetModelPath(modelFolder);
+  };
+
+  const resolveInputSource = async (
+    override?: {
+      selectedAudio?: AudioFileInfo | null;
+      customAudioPath?: string | null;
+      customAudioName?: string | null;
+    } | null
+  ): Promise<{
+    source: FileSource;
+    sourceType: 'example' | 'own';
+    sourceLabel: string;
+    selectedAudioId: string | null;
+    customAudioPath: string | null;
+    customAudioName: string | null;
+  }> => {
+    const effectiveCustomAudioPath =
+      override?.customAudioPath ?? customAudioPath;
+    const effectiveCustomAudioName =
+      override?.customAudioName ?? customAudioName;
+
+    if (effectiveCustomAudioPath) {
+      const trimmed = effectiveCustomAudioPath.trim();
+      if (trimmed.startsWith('content://')) {
+        return {
+          source: { kind: 'contentUri', uri: trimmed },
+          sourceType: 'own',
+          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+          selectedAudioId: null,
+          customAudioPath: effectiveCustomAudioPath,
+          customAudioName: effectiveCustomAudioName,
+        };
+      }
+      if (trimmed.startsWith('file://')) {
+        const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
+        if (filePath.startsWith('/proc/self/fd/')) {
+          throw new Error(
+            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+          );
+        }
+        return {
+          source: { kind: 'fs', path: filePath },
+          sourceType: 'own',
+          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+          selectedAudioId: null,
+          customAudioPath: effectiveCustomAudioPath,
+          customAudioName: effectiveCustomAudioName,
+        };
+      }
+      if (trimmed.startsWith('/proc/self/fd/')) {
+        throw new Error(
+          'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+        );
+      }
+      return {
+        source: { kind: 'fs', path: trimmed },
+        sourceType: 'own',
+        sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+        selectedAudioId: null,
+        customAudioPath: effectiveCustomAudioPath,
+        customAudioName: effectiveCustomAudioName,
+      };
+    }
+
+    const effectiveSelectedAudio = override?.selectedAudio ?? selectedAudio;
+    if (!effectiveSelectedAudio) {
+      throw new Error('Please select an audio file (example or local WAV)');
+    }
+
+    const audioPathConfig = autoModelPath(effectiveSelectedAudio.id);
+    const resolvedAudioPath = await resolveModelPath(audioPathConfig);
+    return {
+      source: { kind: 'fs', path: resolvedAudioPath },
+      sourceType: 'example',
+      sourceLabel: effectiveSelectedAudio.name,
+      selectedAudioId: effectiveSelectedAudio.id,
+      customAudioPath: null,
+      customAudioName: null,
+    };
+  };
+
+  const clearOfflineInputBuffer = async (resetSelection: boolean) => {
+    if (offlineBufferPlayerRef.current) {
+      await offlineBufferPlayerRef.current.destroy().catch(() => {});
+      offlineBufferPlayerRef.current = null;
+      setOfflineBufferPlaying(false);
+    }
+
+    if (pcmPlaybackRef.current) {
+      const activePlayback = pcmPlaybackRef.current;
+      pcmPlaybackRef.current = null;
+      await stopPcmFilePlayback(activePlayback);
+    }
+
+    const existing = gSttOfflineInputBuffer;
+    gSttOfflineInputBuffer = null;
+    setOfflineInputBuffer(null);
+
+    if (existing?.bufferId) {
+      await releasePipelineAudioBuffer(existing.bufferId).catch(() => {});
+    }
+
+    if (resetSelection) {
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
+      setTranscriptionResult(null);
+    }
+  };
+
+  const appendOfflineTextBuffer = useCallback(
+    (result: SttOfflineTextBufferState) => {
+      setOfflineTextBuffers((prev) => {
+        const next = [
+          ...prev.filter((item) => item.bufferId !== result.bufferId),
+          result,
+        ];
+        gSttOfflineTextBuffers = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const removeOfflineTextBuffer = useCallback(async (bufferId: string) => {
+    await releasePipelineTextBuffer(bufferId).catch(() => {});
+    let nextBuffers: SttOfflineTextBufferState[] = [];
+    setOfflineTextBuffers((prev) => {
+      nextBuffers = prev.filter((item) => item.bufferId !== bufferId);
+      gSttOfflineTextBuffers = nextBuffers;
+      return nextBuffers;
+    });
+    setTranscriptionResult((prev) => {
+      if (prev?.bufferId !== bufferId) return prev;
+      if (nextBuffers.length === 0) return null;
+      const latest = nextBuffers[nextBuffers.length - 1];
+      return latest ?? null;
+    });
+  }, []);
+
+  const prepareOfflineInputBuffer = async (
+    override?: {
+      selectedAudio?: AudioFileInfo | null;
+      customAudioPath?: string | null;
+      customAudioName?: string | null;
+    } | null
+  ) => {
+    setPreparingAudioBuffer(true);
+    setError(null);
+    setErrorSource(null);
+    setTranscriptionResult(null);
+
+    try {
+      const resolved = await resolveInputSource(override);
+
+      if (gSttOfflineInputBuffer?.bufferId) {
+        await releasePipelineAudioBuffer(gSttOfflineInputBuffer.bufferId).catch(
+          () => {}
+        );
+      }
+
+      const audioRef = await createOfflineAudioBufferFromFile(resolved.source, {
+        targetSampleRateHz: LIVE_SAMPLE_RATE,
+        forceMono: true,
+      });
+
+      const nextBufferState: SttOfflineInputBufferState = {
+        bufferId: audioRef.bufferId,
+        sourceType: resolved.sourceType,
+        sourceLabel: resolved.sourceLabel,
+        selectedAudioId: resolved.selectedAudioId,
+        customAudioPath: resolved.customAudioPath,
+        customAudioName: resolved.customAudioName,
+      };
+      gSttOfflineInputBuffer = nextBufferState;
+      setOfflineInputBuffer(nextBufferState);
+      setAudioSourceType(resolved.sourceType);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorSource('transcribe');
+      setError(msg);
+    } finally {
+      setPreparingAudioBuffer(false);
     }
   };
 
@@ -343,12 +671,7 @@ export default function STTScreen() {
         clearSttCache();
       }
 
-      const useFilePath = padModelIds.includes(modelFolder);
-      const modelPath = useFilePath
-        ? padModelIds.includes(modelFolder) && padModelsPath
-          ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
-          : getFileModelPath(modelFolder, ModelCategory.Stt)
-        : getAssetModelPath(modelFolder);
+      const modelPath = resolveSttModelPath(modelFolder);
 
       const engine = await createSTT({
         modelPath,
@@ -447,10 +770,11 @@ export default function STTScreen() {
       return;
     }
 
-    // If a custom audio file was chosen, prefer it
-    if (!selectedAudio && !customAudioPath) {
+    if (!offlineInputBuffer) {
       setErrorSource('transcribe');
-      setError('Please select an audio file (example or local WAV)');
+      setError(
+        'Please select an audio source and create an OfflineAudioBuffer first'
+      );
       return;
     }
 
@@ -460,77 +784,77 @@ export default function STTScreen() {
     setTranscriptionResult(null);
 
     try {
-      let pathToTranscribe: string;
-
-      if (customAudioPath) {
-        pathToTranscribe = customAudioPath;
-      } else {
-        // Resolve audio file path (using auto detection - tries asset first, then file system)
-        const audioPathConfig = autoModelPath(selectedAudio!.id);
-        pathToTranscribe = await resolveModelPath(audioPathConfig);
-      }
-
       const engine = sttEngineRef.current;
       if (!engine) {
         setErrorSource('transcribe');
         setError('STT engine not initialized');
         return;
       }
-      const { bufferId } = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: pathToTranscribe,
-      });
+
       const textRef = await createEmptyOfflineTextBuffer();
       const textBufferId = textRef.bufferId;
+      let keepTextBuffer = false;
       try {
-        await engine.transcribe(bufferId, textBufferId);
+        await engine.transcribe(offlineInputBuffer.bufferId as any, textRef);
+
+        const rawInfo = await getPipelineTextBufferInfo(textBufferId);
+        const info = rawInfo as OfflineTextBufferInfo;
+        const [text, tokens, timestamps, durations, lang, emotion, event] =
+          await Promise.all([
+            info.utf16Length > 0
+              ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
+              : Promise.resolve(''),
+            info.tokenCount > 0
+              ? getOfflineTextBufferTokensSlice(
+                  textBufferId,
+                  0,
+                  info.tokenCount
+                )
+              : Promise.resolve([]),
+            info.timestampCount > 0
+              ? getOfflineTextBufferTimestampsSlice(
+                  textBufferId,
+                  0,
+                  info.timestampCount
+                )
+              : Promise.resolve([]),
+            info.durationCount > 0
+              ? getOfflineTextBufferDurationsSlice(
+                  textBufferId,
+                  0,
+                  info.durationCount
+                )
+              : Promise.resolve([]),
+            info.hasLang
+              ? getOfflineTextBufferLang(textBufferId)
+              : Promise.resolve(''),
+            info.hasEmotion
+              ? getOfflineTextBufferEmotion(textBufferId)
+              : Promise.resolve(''),
+            info.hasEvent
+              ? getOfflineTextBufferEvent(textBufferId)
+              : Promise.resolve(''),
+          ]);
+
+        const nextResult: SttOfflineTextBufferState = {
+          text,
+          tokens,
+          timestamps,
+          durations,
+          lang,
+          emotion,
+          event,
+          bufferId: textBufferId,
+          createdAt: Date.now(),
+        };
+        setTranscriptionResult(nextResult);
+        appendOfflineTextBuffer(nextResult);
+        keepTextBuffer = true;
       } finally {
-        await releasePipelineAudioBuffer(bufferId);
+        if (!keepTextBuffer) {
+          await releasePipelineTextBuffer(textBufferId).catch(() => {});
+        }
       }
-      const rawInfo = await getPipelineTextBufferInfo(textBufferId);
-      const info = rawInfo as OfflineTextBufferInfo;
-      const [text, tokens, timestamps, durations, lang, emotion, event] =
-        await Promise.all([
-          info.utf16Length > 0
-            ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
-            : Promise.resolve(''),
-          info.tokenCount > 0
-            ? getOfflineTextBufferTokensSlice(textBufferId, 0, info.tokenCount)
-            : Promise.resolve([]),
-          info.timestampCount > 0
-            ? getOfflineTextBufferTimestampsSlice(
-                textBufferId,
-                0,
-                info.timestampCount
-              )
-            : Promise.resolve([]),
-          info.durationCount > 0
-            ? getOfflineTextBufferDurationsSlice(
-                textBufferId,
-                0,
-                info.durationCount
-              )
-            : Promise.resolve([]),
-          info.hasLang
-            ? getOfflineTextBufferLang(textBufferId)
-            : Promise.resolve(''),
-          info.hasEmotion
-            ? getOfflineTextBufferEmotion(textBufferId)
-            : Promise.resolve(''),
-          info.hasEvent
-            ? getOfflineTextBufferEvent(textBufferId)
-            : Promise.resolve(''),
-        ]);
-      await releasePipelineTextBuffer(textBufferId);
-      setTranscriptionResult({
-        text,
-        tokens,
-        timestamps,
-        durations,
-        lang,
-        emotion,
-        event,
-      });
     } catch (err) {
       const msg =
         (err instanceof Error ? err.message : (err as any)?.message) ?? '';
@@ -586,11 +910,14 @@ export default function STTScreen() {
     setDetectedModels([]);
     setSelectedModelType(null);
     setInitResult(null);
-    setAudioSourceType(null);
-    setSelectedAudio(null);
-    setCustomAudioPath(null);
-    setCustomAudioName(null);
+    await clearOfflineInputBuffer(true);
     setTranscriptionResult(null);
+    const textBuffersToRelease = gSttOfflineTextBuffers;
+    gSttOfflineTextBuffers = [];
+    setOfflineTextBuffers([]);
+    for (const item of textBuffersToRelease) {
+      await releasePipelineTextBuffer(item.bufferId).catch(() => {});
+    }
     setError(null);
     setErrorSource(null);
   };
@@ -607,7 +934,11 @@ export default function STTScreen() {
 
       // res may be an array or single object depending on version/config
       const file = Array.isArray(res) ? res[0] : res;
-      const uri = file.uri || file.name;
+      const uri =
+        file.uri ??
+        (file as any).fileCopyUri ??
+        (file as any).localUri ??
+        (file as any).nativeUri;
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
 
       if (!uri) {
@@ -615,11 +946,29 @@ export default function STTScreen() {
         setError('Could not get file URI from picker result');
         return;
       }
+      const fsPathProbe = uri.startsWith('file://')
+        ? decodeURI(uri.replace(/^file:\/\//, ''))
+        : uri;
+      if (
+        uri.startsWith('/proc/self/fd/') ||
+        fsPathProbe.startsWith('/proc/self/fd/')
+      ) {
+        setErrorSource('transcribe');
+        setError(
+          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
+        );
+        return;
+      }
 
       setCustomAudioPath(uri);
       setCustomAudioName(name);
       // clear example selection when choosing a local file
       setSelectedAudio(null);
+      setAudioSourceType('own');
+      await prepareOfflineInputBuffer({
+        customAudioPath: uri,
+        customAudioName: name,
+      });
     } catch (err: any) {
       const isCancel =
         (DocumentPicker &&
@@ -642,19 +991,61 @@ export default function STTScreen() {
   const handlePlayAudio = async () => {
     if (!customAudioPath) return;
     try {
-      if (webAudioPlaybackRef.current) {
-        stopWebAudioPlayback(webAudioPlaybackRef.current);
-        webAudioPlaybackRef.current = null;
+      if (pcmPlaybackRef.current) {
+        const activePlayback = pcmPlaybackRef.current;
+        pcmPlaybackRef.current = null;
+        await stopPcmFilePlayback(activePlayback);
       }
-      webAudioPlaybackRef.current = await startWebAudioFilePlayback(
+
+      let nextPlayback: ActivePcmFilePlayback | null = null;
+      nextPlayback = await startPcmFilePlayback(
         customAudioPath,
         () => {
-          webAudioPlaybackRef.current = null;
+          if (pcmPlaybackRef.current === nextPlayback) {
+            pcmPlaybackRef.current = null;
+          }
+        },
+        {
+          outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
       );
+      pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
+    }
+  };
+
+  const handleToggleOfflineBufferPlayback = async () => {
+    const buffer = offlineInputBuffer;
+    if (!buffer) return;
+
+    if (offlineBufferPlayerRef.current) {
+      const current = offlineBufferPlayerRef.current;
+      offlineBufferPlayerRef.current = null;
+      setOfflineBufferPlaying(false);
+      await current.destroy().catch(() => {});
+      return;
+    }
+
+    try {
+      const player = await createPcmPlayer(buffer.bufferId as any, {
+        outputDeviceId: selectedOutputDeviceId ?? undefined,
+        onEnded: () => {
+          const current = offlineBufferPlayerRef.current;
+          offlineBufferPlayerRef.current = null;
+          setOfflineBufferPlaying(false);
+          if (current) {
+            current.destroy().catch(() => {});
+          }
+        },
+      });
+      offlineBufferPlayerRef.current = player;
+      setOfflineBufferPlaying(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
+      setOfflineBufferPlaying(false);
     }
   };
 
@@ -681,16 +1072,7 @@ export default function STTScreen() {
     let textUnsubscribe = () => {};
 
     try {
-      const useFilePath = padModelIds.includes(currentModelFolder);
-      const modelPathConfig = useFilePath
-        ? padModelsPath
-          ? getFileModelPath(
-              currentModelFolder,
-              ModelCategory.Stt,
-              padModelsPath
-            )
-          : getFileModelPath(currentModelFolder, ModelCategory.Stt)
-        : getAssetModelPath(currentModelFolder);
+      const modelPathConfig = resolveSttModelPath(currentModelFolder);
 
       const onlineType: 'auto' = 'auto';
 
@@ -742,9 +1124,9 @@ export default function STTScreen() {
       };
       stopLivePreviewPolling();
       livePreviewTimerRef.current = setInterval(() => {
-        void syncLivePreview(liveTextBuffer.bufferId);
+        syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
       }, 150);
-      void syncLivePreview(liveTextBuffer.bufferId);
+      syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
 
       livePipelineRef.current = {
         liveAudioBufferId: liveAudioBuffer.bufferId,
@@ -758,6 +1140,7 @@ export default function STTScreen() {
       try {
         await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
           emitToJs: false,
+          inputDeviceId: selectedInputDeviceId ?? undefined,
         });
       } catch (startErr) {
         throw startErr;
@@ -884,11 +1267,6 @@ export default function STTScreen() {
     }
   };
 
-  // Get available audio files for current model
-  const availableAudioFiles = currentModelFolder
-    ? getAudioFilesForModel(currentModelFolder)
-    : [];
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.body}>
@@ -937,8 +1315,9 @@ export default function STTScreen() {
             ) : availableModels.length === 0 ? (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  No models found in assets/models/ folder. Please add STT
-                  models first. See STT_MODEL_SETUP.md for details.
+                  No models found. Please add STT models as bundled assets,
+                  downloaded models, or PAD models. See STT_MODEL_SETUP.md for
+                  details.
                 </Text>
               </View>
             ) : (
@@ -1103,7 +1482,12 @@ export default function STTScreen() {
                 : '2. Transcribe Audio'}
             </Text>
             <Text style={styles.hint}>
-              Select an audio source and transcribe it using the selected model.
+              Select an audio source, create an OfflineAudioBuffer once, and
+              transcribe it using the selected model.
+            </Text>
+            <Text style={styles.hint}>
+              SDK note: remember to release pipeline buffers when they are no
+              longer needed to avoid memory leaks.
             </Text>
 
             {!selectedModelType && (
@@ -1116,13 +1500,17 @@ export default function STTScreen() {
               </View>
             )}
 
-            {selectedModelType && !audioSourceType && (
+            {selectedModelType && !offlineInputBuffer && !audioSourceType && (
               <>
                 <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
                 <View style={styles.sourceChoiceRow}>
                   <TouchableOpacity
                     style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => setAudioSourceType('example')}
+                    onPress={() => {
+                      setAudioSourceType('example');
+                      setCustomAudioPath(null);
+                      setCustomAudioName(null);
+                    }}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
@@ -1179,8 +1567,83 @@ export default function STTScreen() {
               </>
             )}
 
+            {selectedModelType && offlineInputBuffer && (
+              <View style={styles.selectedFileContainer}>
+                <View style={styles.bufferHeaderRow}>
+                  <View style={styles.bufferHeaderTextWrap}>
+                    <Text style={styles.selectedFileLabel}>
+                      OfflineAudioBuffer ready:
+                    </Text>
+                    <Text style={styles.selectedFileName}>
+                      {offlineInputBuffer.sourceLabel}
+                    </Text>
+                    <Text style={styles.bufferIdText} selectable>
+                      {offlineInputBuffer.bufferId}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.bufferDeleteButton}
+                    onPress={() => {
+                      clearOfflineInputBuffer(true).catch(() => {});
+                    }}
+                    disabled={loading || transcribing || preparingAudioBuffer}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#b71c1c" />
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.mt12,
+                    (transcribing || loading || preparingAudioBuffer) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleTranscribe}
+                  disabled={transcribing || loading || preparingAudioBuffer}
+                >
+                  {transcribing ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Transcribe Audio</Text>
+                  )}
+                </TouchableOpacity>
+
+                <AudioDeviceDropdown
+                  label="Output device"
+                  devices={outputDevices}
+                  selectedDeviceId={selectedOutputDeviceId}
+                  onSelectDeviceId={setSelectedOutputDeviceId}
+                  disabled={loading || transcribing || preparingAudioBuffer}
+                />
+
+                <TouchableOpacity
+                  style={[
+                    styles.playButton,
+                    styles.mt12,
+                    (loading || transcribing || preparingAudioBuffer) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleToggleOfflineBufferPlayback}
+                  disabled={loading || transcribing || preparingAudioBuffer}
+                >
+                  <View style={styles.rowAlignCenter}>
+                    <Ionicons
+                      name={offlineBufferPlaying ? 'stop' : 'play'}
+                      size={16}
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.playButtonText}>
+                      {offlineBufferPlaying ? 'Stop Buffer' : 'Play Buffer'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {selectedModelType &&
               audioSourceType === 'example' &&
+              !offlineInputBuffer &&
               availableAudioFiles.length > 0 && (
                 <>
                   <Text style={styles.subsectionTitle}>Select Audio File:</Text>
@@ -1193,7 +1656,14 @@ export default function STTScreen() {
                           selectedAudio?.id === audioFile.id &&
                             styles.audioFileButtonActive,
                         ]}
-                        onPress={() => setSelectedAudio(audioFile)}
+                        onPress={async () => {
+                          setSelectedAudio(audioFile);
+                          setCustomAudioPath(null);
+                          setCustomAudioName(null);
+                          await prepareOfflineInputBuffer({
+                            selectedAudio: audioFile,
+                          });
+                        }}
                       >
                         <Text
                           style={[
@@ -1211,29 +1681,10 @@ export default function STTScreen() {
                     ))}
                   </View>
 
-                  {selectedAudio && (
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        (transcribing || loading) && styles.buttonDisabled,
-                      ]}
-                      onPress={handleTranscribe}
-                      disabled={transcribing || loading}
-                    >
-                      {transcribing ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.buttonText}>Transcribe Audio</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
                     onPress={() => {
-                      setAudioSourceType(null);
-                      setSelectedAudio(null);
-                      setTranscriptionResult(null);
+                      clearOfflineInputBuffer(true).catch(() => {});
                     }}
                   >
                     <Text style={styles.secondaryButtonText}>
@@ -1243,91 +1694,84 @@ export default function STTScreen() {
                 </>
               )}
 
-            {selectedModelType && audioSourceType === 'own' && (
-              <>
-                <Text style={styles.subsectionTitle}>
-                  Select Local WAV File:
-                </Text>
-                <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
-                  onPress={handlePickLocalFile}
-                  disabled={loading}
-                >
-                  <View style={styles.rowCenter}>
-                    <Ionicons
-                      name="folder-open-outline"
-                      size={16}
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.buttonText}>Choose Local WAV</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {customAudioName && (
-                  <View style={styles.selectedFileContainer}>
-                    <Text style={styles.selectedFileLabel}>Selected file:</Text>
-                    <Text style={styles.selectedFileName}>
-                      {customAudioName}
-                    </Text>
-
-                    <TouchableOpacity
-                      style={[styles.playButton]}
-                      onPress={handlePlayAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name="play"
-                          size={16}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.playButtonText}>Play Audio</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {customAudioPath && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (transcribing || loading) && styles.buttonDisabled,
-                      styles.mt12,
-                    ]}
-                    onPress={handleTranscribe}
-                    disabled={transcribing || loading}
-                  >
-                    {transcribing ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>Transcribe Audio</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.secondaryButton, styles.mt15]}
-                  onPress={() => {
-                    setAudioSourceType(null);
-                    setCustomAudioPath(null);
-                    setCustomAudioName(null);
-                    setTranscriptionResult(null);
-                    if (webAudioPlaybackRef.current) {
-                      stopWebAudioPlayback(webAudioPlaybackRef.current);
-                      webAudioPlaybackRef.current = null;
-                    }
-                  }}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    ← Change Audio Source
+            {selectedModelType &&
+              audioSourceType === 'own' &&
+              !offlineInputBuffer && (
+                <>
+                  <Text style={styles.subsectionTitle}>
+                    Select Local WAV File:
                   </Text>
-                </TouchableOpacity>
-              </>
-            )}
+                  <TouchableOpacity
+                    style={[styles.button, loading && styles.buttonDisabled]}
+                    onPress={handlePickLocalFile}
+                    disabled={loading}
+                  >
+                    <View style={styles.rowCenter}>
+                      <Ionicons
+                        name="folder-open-outline"
+                        size={16}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.buttonText}>Choose Local WAV</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {customAudioName && (
+                    <View style={styles.selectedFileContainer}>
+                      <Text style={styles.selectedFileLabel}>
+                        Selected file:
+                      </Text>
+                      <Text style={styles.selectedFileName}>
+                        {customAudioName}
+                      </Text>
+
+                      <AudioDeviceDropdown
+                        label="Output device"
+                        devices={outputDevices}
+                        selectedDeviceId={selectedOutputDeviceId}
+                        onSelectDeviceId={setSelectedOutputDeviceId}
+                        disabled={loading}
+                      />
+
+                      <TouchableOpacity
+                        style={[styles.playButton]}
+                        onPress={handlePlayAudio}
+                      >
+                        <View style={styles.rowAlignCenter}>
+                          <Ionicons
+                            name="play"
+                            size={16}
+                            style={styles.iconInline}
+                          />
+                          <Text style={styles.playButtonText}>Play Audio</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.mt15]}
+                    onPress={() => {
+                      clearOfflineInputBuffer(true).catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      ← Change Audio Source
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
 
             {selectedModelType && audioSourceType === 'live' && (
               <>
                 <Text style={styles.subsectionTitle}>Live Transcription</Text>
-                <Text style={styles.audioDeviceLabel}>Input: Default</Text>
+                <AudioDeviceDropdown
+                  label="Input device"
+                  devices={inputDevices}
+                  selectedDeviceId={selectedInputDeviceId}
+                  onSelectDeviceId={setSelectedInputDeviceId}
+                  disabled={isLiveRecording}
+                />
                 <View style={styles.rowCenter}>
                   <Pressable
                     style={[
@@ -1363,366 +1807,457 @@ export default function STTScreen() {
               (audioSourceType === 'example' ||
                 audioSourceType === 'own' ||
                 audioSourceType === 'live') &&
-              (audioSourceType === 'live' || transcriptionResult) && (
-                <View
-                  style={[
-                    styles.resultSection,
-                    audioSourceType === 'live' && styles.liveResultContainer,
-                  ]}
-                >
-                  {transcriptionResult ? (
-                    <>
-                      <View style={styles.resultLabelRow}>
-                        <Text style={styles.resultLabel}>Transcription:</Text>
-                        <View style={styles.resultLabelActions}>
+              (audioSourceType === 'live' ||
+                transcriptionResult != null ||
+                offlineTextBuffers.length > 0) && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>3. Result</Text>
+                  <Text style={styles.hint}>
+                    Transcription output is stored in OfflineTextBuffers. Remove
+                    buffers you no longer need to release memory.
+                  </Text>
+                  <View
+                    style={[
+                      styles.resultSection,
+                      audioSourceType === 'live' && styles.liveResultContainer,
+                    ]}
+                  >
+                    {transcriptionResult ? (
+                      <>
+                        <View style={styles.resultLabelRow}>
+                          <Text style={styles.resultLabel}>Transcription:</Text>
+                          <View style={styles.resultLabelActions}>
+                            <TouchableOpacity
+                              style={styles.copyIconButton}
+                              onPress={() => {
+                                const t = transcriptionResult.text ?? '';
+                                if (t) Clipboard.setString(t);
+                              }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Ionicons
+                                name="copy-outline"
+                                size={20}
+                                color="#2e7d32"
+                              />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.copyIconButton}
+                              onPress={() => {
+                                const t = transcriptionResult.text ?? '';
+                                if (t) {
+                                  Share.share({
+                                    message: t,
+                                    title: 'Transcription',
+                                  });
+                                }
+                              }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Ionicons
+                                name="share-outline"
+                                size={20}
+                                color="#2e7d32"
+                              />
+                            </TouchableOpacity>
+                            {transcriptionResult.bufferId ? (
+                              <TouchableOpacity
+                                style={styles.copyIconButton}
+                                onPress={() => {
+                                  removeOfflineTextBuffer(
+                                    transcriptionResult.bufferId as string
+                                  ).catch(() => {});
+                                }}
+                                hitSlop={{
+                                  top: 8,
+                                  bottom: 8,
+                                  left: 8,
+                                  right: 8,
+                                }}
+                              >
+                                <Ionicons
+                                  name="trash-outline"
+                                  size={20}
+                                  color="#b71c1c"
+                                />
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                        <Text style={styles.resultText} selectable>
+                          {transcriptionResult.text ?? ''}
+                        </Text>
+                        {(transcriptionResult.lang ||
+                          transcriptionResult.emotion ||
+                          transcriptionResult.event) && (
+                          <View style={styles.metaRow}>
+                            {transcriptionResult.lang ? (
+                              <Text style={styles.metaText}>
+                                Lang: {transcriptionResult.lang}
+                              </Text>
+                            ) : null}
+                            {transcriptionResult.emotion ? (
+                              <Text style={styles.metaText}>
+                                Emotion: {transcriptionResult.emotion}
+                              </Text>
+                            ) : null}
+                            {transcriptionResult.event ? (
+                              <Text style={styles.metaText}>
+                                Event: {transcriptionResult.event}
+                              </Text>
+                            ) : null}
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={styles.expandHeader}
+                          onPress={() => setTokensExpanded((e) => !e)}
+                        >
+                          <Ionicons
+                            name={
+                              tokensExpanded
+                                ? 'chevron-down'
+                                : 'chevron-forward'
+                            }
+                            size={18}
+                            color="#2e7d32"
+                          />
+                          <Text style={styles.expandHeaderText}>
+                            Tokens ({(transcriptionResult.tokens ?? []).length})
+                          </Text>
+                        </TouchableOpacity>
+                        {tokensExpanded && (
+                          <View style={styles.expandContent}>
+                            <View style={styles.expandActionRow}>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr = transcriptionResult.tokens ?? [];
+                                  Clipboard.setString(
+                                    Array.isArray(arr)
+                                      ? JSON.stringify(arr)
+                                      : String(arr)
+                                  );
+                                }}
+                              >
+                                <Ionicons
+                                  name="copy-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Copy
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr = transcriptionResult.tokens ?? [];
+                                  const str = Array.isArray(arr)
+                                    ? JSON.stringify(arr)
+                                    : String(arr);
+                                  Share.share({
+                                    message: str,
+                                    title: 'Tokens',
+                                  });
+                                }}
+                              >
+                                <Ionicons
+                                  name="share-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Share
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            <Text style={styles.expandListItem}>
+                              {(transcriptionResult.tokens ?? []).join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={styles.expandHeader}
+                          onPress={() => setTimestampsExpanded((e) => !e)}
+                        >
+                          <Ionicons
+                            name={
+                              timestampsExpanded
+                                ? 'chevron-down'
+                                : 'chevron-forward'
+                            }
+                            size={18}
+                            color="#2e7d32"
+                          />
+                          <Text style={styles.expandHeaderText}>
+                            Timestamps (
+                            {(transcriptionResult.timestamps ?? []).length})
+                          </Text>
+                        </TouchableOpacity>
+                        {timestampsExpanded && (
+                          <View style={styles.expandContent}>
+                            <View style={styles.expandActionRow}>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr =
+                                    transcriptionResult.timestamps ?? [];
+                                  Clipboard.setString(
+                                    Array.isArray(arr)
+                                      ? JSON.stringify(arr)
+                                      : String(arr)
+                                  );
+                                }}
+                              >
+                                <Ionicons
+                                  name="copy-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Copy
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr =
+                                    transcriptionResult.timestamps ?? [];
+                                  const str = Array.isArray(arr)
+                                    ? JSON.stringify(arr)
+                                    : String(arr);
+                                  Share.share({
+                                    message: str,
+                                    title: 'Timestamps',
+                                  });
+                                }}
+                              >
+                                <Ionicons
+                                  name="share-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Share
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            {(transcriptionResult.timestamps ?? []).length >
+                              0 && (
+                              <ScrollView
+                                style={styles.expandListWrap}
+                                nestedScrollEnabled
+                                showsVerticalScrollIndicator
+                              >
+                                {(transcriptionResult.timestamps ?? []).map(
+                                  (item, i) => (
+                                    <Text
+                                      key={`ts-${i}`}
+                                      style={styles.expandListItem}
+                                    >
+                                      [{String(item)}]
+                                    </Text>
+                                  )
+                                )}
+                              </ScrollView>
+                            )}
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={styles.expandHeader}
+                          onPress={() => setDurationsExpanded((e) => !e)}
+                        >
+                          <Ionicons
+                            name={
+                              durationsExpanded
+                                ? 'chevron-down'
+                                : 'chevron-forward'
+                            }
+                            size={18}
+                            color="#2e7d32"
+                          />
+                          <Text style={styles.expandHeaderText}>
+                            Durations (
+                            {(transcriptionResult.durations ?? []).length})
+                          </Text>
+                        </TouchableOpacity>
+                        {durationsExpanded && (
+                          <View style={styles.expandContent}>
+                            <View style={styles.expandActionRow}>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr =
+                                    transcriptionResult.durations ?? [];
+                                  Clipboard.setString(
+                                    Array.isArray(arr)
+                                      ? JSON.stringify(arr)
+                                      : String(arr)
+                                  );
+                                }}
+                              >
+                                <Ionicons
+                                  name="copy-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Copy
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.expandActionBtn}
+                                onPress={() => {
+                                  const arr =
+                                    transcriptionResult.durations ?? [];
+                                  const str = Array.isArray(arr)
+                                    ? JSON.stringify(arr)
+                                    : String(arr);
+                                  Share.share({
+                                    message: str,
+                                    title: 'Durations',
+                                  });
+                                }}
+                              >
+                                <Ionicons
+                                  name="share-outline"
+                                  size={18}
+                                  color="#2e7d32"
+                                  style={styles.expandActionIcon}
+                                />
+                                <Text style={styles.expandActionLabel}>
+                                  Share
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            {(transcriptionResult.durations ?? []).length >
+                              0 && (
+                              <ScrollView
+                                style={styles.expandListWrap}
+                                nestedScrollEnabled
+                                showsVerticalScrollIndicator
+                              >
+                                {(transcriptionResult.durations ?? []).map(
+                                  (item, i) => (
+                                    <Text
+                                      key={`d-${i}`}
+                                      style={styles.expandListItem}
+                                    >
+                                      [{String(item)}]
+                                    </Text>
+                                  )
+                                )}
+                              </ScrollView>
+                            )}
+                          </View>
+                        )}
+                        <View style={styles.resultButtonRow}>
                           <TouchableOpacity
-                            style={styles.copyIconButton}
+                            style={styles.resultActionButton}
                             onPress={() => {
-                              const t = transcriptionResult.text ?? '';
-                              if (t) Clipboard.setString(t);
+                              const json = JSON.stringify(
+                                transcriptionResult,
+                                null,
+                                2
+                              );
+                              Clipboard.setString(json);
                             }}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           >
                             <Ionicons
                               name="copy-outline"
-                              size={20}
+                              size={18}
                               color="#2e7d32"
+                              style={styles.resultActionIcon}
                             />
+                            <Text style={styles.resultActionText}>
+                              Copy all as JSON
+                            </Text>
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={styles.copyIconButton}
+                            style={styles.resultActionButton}
                             onPress={() => {
-                              const t = transcriptionResult.text ?? '';
-                              if (t) {
-                                Share.share({
-                                  message: t,
-                                  title: 'Transcription',
-                                });
-                              }
+                              const json = JSON.stringify(
+                                transcriptionResult,
+                                null,
+                                2
+                              );
+                              Share.share({
+                                message: json,
+                                title: 'Export all as JSON',
+                              });
                             }}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           >
                             <Ionicons
-                              name="share-outline"
-                              size={20}
+                              name="document-text-outline"
+                              size={18}
                               color="#2e7d32"
+                              style={styles.resultActionIcon}
                             />
+                            <Text style={styles.resultActionText}>
+                              Export all as JSON
+                            </Text>
                           </TouchableOpacity>
                         </View>
-                      </View>
-                      <Text style={styles.resultText} selectable>
-                        {transcriptionResult.text ?? ''}
+                      </>
+                    ) : (
+                      <Text style={styles.liveResultPlaceholder}>
+                        {audioSourceType === 'live'
+                          ? 'Transcription will appear here while you speak.'
+                          : 'No active transcription selected.'}
                       </Text>
-                      {(transcriptionResult.lang ||
-                        transcriptionResult.emotion ||
-                        transcriptionResult.event) && (
-                        <View style={styles.metaRow}>
-                          {transcriptionResult.lang ? (
-                            <Text style={styles.metaText}>
-                              Lang: {transcriptionResult.lang}
-                            </Text>
-                          ) : null}
-                          {transcriptionResult.emotion ? (
-                            <Text style={styles.metaText}>
-                              Emotion: {transcriptionResult.emotion}
-                            </Text>
-                          ) : null}
-                          {transcriptionResult.event ? (
-                            <Text style={styles.metaText}>
-                              Event: {transcriptionResult.event}
-                            </Text>
-                          ) : null}
-                        </View>
-                      )}
-                      <TouchableOpacity
-                        style={styles.expandHeader}
-                        onPress={() => setTokensExpanded((e) => !e)}
-                      >
-                        <Ionicons
-                          name={
-                            tokensExpanded ? 'chevron-down' : 'chevron-forward'
-                          }
-                          size={18}
-                          color="#2e7d32"
-                        />
-                        <Text style={styles.expandHeaderText}>
-                          Tokens ({(transcriptionResult.tokens ?? []).length})
-                        </Text>
-                      </TouchableOpacity>
-                      {tokensExpanded && (
-                        <View style={styles.expandContent}>
-                          <View style={styles.expandActionRow}>
+                    )}
+                  </View>
+
+                  {offlineTextBuffers.length > 0 && (
+                    <View style={styles.textBufferList}>
+                      <Text style={styles.textBufferListTitle}>
+                        Active OfflineTextBuffer
+                      </Text>
+                      {offlineTextBuffers.map((item) => (
+                        <View key={item.bufferId} style={styles.textBufferItem}>
+                          <View style={styles.textBufferItemHeader}>
                             <TouchableOpacity
-                              style={styles.expandActionBtn}
-                              onPress={() => {
-                                const arr = transcriptionResult.tokens ?? [];
-                                Clipboard.setString(
-                                  Array.isArray(arr)
-                                    ? JSON.stringify(arr)
-                                    : String(arr)
-                                );
-                              }}
+                              style={styles.flex1}
+                              onPress={() => setTranscriptionResult(item)}
                             >
-                              <Ionicons
-                                name="copy-outline"
-                                size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
-                              />
-                              <Text style={styles.expandActionLabel}>Copy</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.expandActionBtn}
-                              onPress={() => {
-                                const arr = transcriptionResult.tokens ?? [];
-                                const str = Array.isArray(arr)
-                                  ? JSON.stringify(arr)
-                                  : String(arr);
-                                Share.share({
-                                  message: str,
-                                  title: 'Tokens',
-                                });
-                              }}
-                            >
-                              <Ionicons
-                                name="share-outline"
-                                size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
-                              />
-                              <Text style={styles.expandActionLabel}>
-                                Share
+                              <Text style={styles.textBufferItemLabel}>
+                                {item.text?.trim()
+                                  ? item.text.trim().slice(0, 64)
+                                  : 'Empty transcription'}
                               </Text>
                             </TouchableOpacity>
-                          </View>
-                          <Text style={styles.expandListItem}>
-                            {(transcriptionResult.tokens ?? []).join(', ')}
-                          </Text>
-                        </View>
-                      )}
-                      <TouchableOpacity
-                        style={styles.expandHeader}
-                        onPress={() => setTimestampsExpanded((e) => !e)}
-                      >
-                        <Ionicons
-                          name={
-                            timestampsExpanded
-                              ? 'chevron-down'
-                              : 'chevron-forward'
-                          }
-                          size={18}
-                          color="#2e7d32"
-                        />
-                        <Text style={styles.expandHeaderText}>
-                          Timestamps (
-                          {(transcriptionResult.timestamps ?? []).length})
-                        </Text>
-                      </TouchableOpacity>
-                      {timestampsExpanded && (
-                        <View style={styles.expandContent}>
-                          <View style={styles.expandActionRow}>
                             <TouchableOpacity
-                              style={styles.expandActionBtn}
+                              style={styles.copyIconButton}
                               onPress={() => {
-                                const arr =
-                                  transcriptionResult.timestamps ?? [];
-                                Clipboard.setString(
-                                  Array.isArray(arr)
-                                    ? JSON.stringify(arr)
-                                    : String(arr)
+                                removeOfflineTextBuffer(item.bufferId).catch(
+                                  () => {}
                                 );
                               }}
-                            >
-                              <Ionicons
-                                name="copy-outline"
-                                size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
-                              />
-                              <Text style={styles.expandActionLabel}>Copy</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.expandActionBtn}
-                              onPress={() => {
-                                const arr =
-                                  transcriptionResult.timestamps ?? [];
-                                const str = Array.isArray(arr)
-                                  ? JSON.stringify(arr)
-                                  : String(arr);
-                                Share.share({
-                                  message: str,
-                                  title: 'Timestamps',
-                                });
+                              hitSlop={{
+                                top: 8,
+                                bottom: 8,
+                                left: 8,
+                                right: 8,
                               }}
                             >
                               <Ionicons
-                                name="share-outline"
+                                name="trash-outline"
                                 size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
+                                color="#b71c1c"
                               />
-                              <Text style={styles.expandActionLabel}>
-                                Share
-                              </Text>
                             </TouchableOpacity>
                           </View>
-                          {(transcriptionResult.timestamps ?? []).length >
-                            0 && (
-                            <ScrollView
-                              style={styles.expandListWrap}
-                              nestedScrollEnabled
-                              showsVerticalScrollIndicator
-                            >
-                              {(transcriptionResult.timestamps ?? []).map(
-                                (item, i) => (
-                                  <Text
-                                    key={`ts-${i}`}
-                                    style={styles.expandListItem}
-                                  >
-                                    [{String(item)}]
-                                  </Text>
-                                )
-                              )}
-                            </ScrollView>
-                          )}
-                        </View>
-                      )}
-                      <TouchableOpacity
-                        style={styles.expandHeader}
-                        onPress={() => setDurationsExpanded((e) => !e)}
-                      >
-                        <Ionicons
-                          name={
-                            durationsExpanded
-                              ? 'chevron-down'
-                              : 'chevron-forward'
-                          }
-                          size={18}
-                          color="#2e7d32"
-                        />
-                        <Text style={styles.expandHeaderText}>
-                          Durations (
-                          {(transcriptionResult.durations ?? []).length})
-                        </Text>
-                      </TouchableOpacity>
-                      {durationsExpanded && (
-                        <View style={styles.expandContent}>
-                          <View style={styles.expandActionRow}>
-                            <TouchableOpacity
-                              style={styles.expandActionBtn}
-                              onPress={() => {
-                                const arr = transcriptionResult.durations ?? [];
-                                Clipboard.setString(
-                                  Array.isArray(arr)
-                                    ? JSON.stringify(arr)
-                                    : String(arr)
-                                );
-                              }}
-                            >
-                              <Ionicons
-                                name="copy-outline"
-                                size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
-                              />
-                              <Text style={styles.expandActionLabel}>Copy</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.expandActionBtn}
-                              onPress={() => {
-                                const arr = transcriptionResult.durations ?? [];
-                                const str = Array.isArray(arr)
-                                  ? JSON.stringify(arr)
-                                  : String(arr);
-                                Share.share({
-                                  message: str,
-                                  title: 'Durations',
-                                });
-                              }}
-                            >
-                              <Ionicons
-                                name="share-outline"
-                                size={18}
-                                color="#2e7d32"
-                                style={styles.expandActionIcon}
-                              />
-                              <Text style={styles.expandActionLabel}>
-                                Share
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                          {(transcriptionResult.durations ?? []).length > 0 && (
-                            <ScrollView
-                              style={styles.expandListWrap}
-                              nestedScrollEnabled
-                              showsVerticalScrollIndicator
-                            >
-                              {(transcriptionResult.durations ?? []).map(
-                                (item, i) => (
-                                  <Text
-                                    key={`d-${i}`}
-                                    style={styles.expandListItem}
-                                  >
-                                    [{String(item)}]
-                                  </Text>
-                                )
-                              )}
-                            </ScrollView>
-                          )}
-                        </View>
-                      )}
-                      <View style={styles.resultButtonRow}>
-                        <TouchableOpacity
-                          style={styles.resultActionButton}
-                          onPress={() => {
-                            const json = JSON.stringify(
-                              transcriptionResult,
-                              null,
-                              2
-                            );
-                            Clipboard.setString(json);
-                          }}
-                        >
-                          <Ionicons
-                            name="copy-outline"
-                            size={18}
-                            color="#2e7d32"
-                            style={styles.resultActionIcon}
-                          />
-                          <Text style={styles.resultActionText}>
-                            Copy all as JSON
+                          <Text style={styles.bufferIdText} selectable>
+                            {item.bufferId}
                           </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.resultActionButton}
-                          onPress={() => {
-                            const json = JSON.stringify(
-                              transcriptionResult,
-                              null,
-                              2
-                            );
-                            Share.share({
-                              message: json,
-                              title: 'Export all as JSON',
-                            });
-                          }}
-                        >
-                          <Ionicons
-                            name="document-text-outline"
-                            size={18}
-                            color="#2e7d32"
-                            style={styles.resultActionIcon}
-                          />
-                          <Text style={styles.resultActionText}>
-                            Export all as JSON
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.liveResultPlaceholder}>
-                      Transcription will appear here while you speak.
-                    </Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               )}

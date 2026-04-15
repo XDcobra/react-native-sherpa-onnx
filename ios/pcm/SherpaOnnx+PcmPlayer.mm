@@ -6,6 +6,7 @@
 
 #import "../SherpaOnnx.h"
 #import <AVFoundation/AVFoundation.h>
+#import <React/RCTLog.h>
 
 #include "../audio/pipeline/PaLiveEntry.h"
 #include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
@@ -151,6 +152,26 @@ static void pcm_enqueue_offline_from(
 static std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pcm_live_entries;
 static std::mutex g_pcm_live_entries_mutex;
 
+static NSString *const kPcmOutputSpeakerId = @"ios_builtin_speaker";
+static NSString *const kPcmOutputReceiverId = @"ios_builtin_receiver";
+
+static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
+    if ([portType isEqualToString:AVAudioSessionPortBuiltInSpeaker]) return @"built_in_speaker";
+    if ([portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) return @"built_in_receiver";
+    if ([portType isEqualToString:AVAudioSessionPortHeadphones]) return @"wired_headphones";
+    if ([portType isEqualToString:AVAudioSessionPortHeadsetMic]) return @"wired_headset";
+    if ([portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothLE]) return @"bluetooth";
+    if ([portType isEqualToString:AVAudioSessionPortUSBAudio]) return @"usb";
+    if ([portType isEqualToString:AVAudioSessionPortHDMI]) return @"hdmi";
+    if ([portType isEqualToString:AVAudioSessionPortLineOut] ||
+        [portType isEqualToString:AVAudioSessionPortLineIn]) return @"line";
+    if ([portType isEqualToString:AVAudioSessionPortAirPlay]) return @"airplay";
+    if ([portType isEqualToString:AVAudioSessionPortCarAudio]) return @"car_audio";
+    return @"unknown";
+}
+
 }  // namespace
 
 @implementation SherpaOnnx (PcmPlayer)
@@ -158,6 +179,7 @@ static std::mutex g_pcm_live_entries_mutex;
 - (void)so_createPcmPlayer:(NSString *)playerId
                          audioBufferId:(NSString *)audioBufferId
                                      volume:(double)volume
+                   options:(NSDictionary *)options
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
@@ -195,9 +217,71 @@ static std::mutex g_pcm_live_entries_mutex;
     }
 
     @try {
+        NSString *requestedOutputDeviceId = [options[@"outputDeviceId"] isKindOfClass:[NSString class]]
+            ? options[@"outputDeviceId"]
+            : nil;
+
         AVAudioSession *audioSession = [AVAudioSession sharedInstance];
-        [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
-        [audioSession setActive:YES error:nil];
+        if (requestedOutputDeviceId != nil && requestedOutputDeviceId.length > 0) {
+            NSError *routeError = nil;
+            [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
+                                 mode:AVAudioSessionModeDefault
+                              options:AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionAllowBluetoothA2DP
+                                error:&routeError];
+            if (routeError) {
+                RCTLogWarn(@"createPcmPlayer: failed to switch session category for route selection (%@)", routeError.localizedDescription);
+            }
+
+            routeError = nil;
+            [audioSession setActive:YES error:&routeError];
+            if (routeError) {
+                RCTLogWarn(@"createPcmPlayer: failed to activate audio session before route selection (%@)", routeError.localizedDescription);
+            }
+
+            if ([requestedOutputDeviceId isEqualToString:kPcmOutputSpeakerId]) {
+                routeError = nil;
+                [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&routeError];
+                if (routeError) {
+                    RCTLogWarn(@"createPcmPlayer: failed to route to speaker (%@)", routeError.localizedDescription);
+                }
+            } else if ([requestedOutputDeviceId isEqualToString:kPcmOutputReceiverId]) {
+                routeError = nil;
+                [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&routeError];
+                if (routeError) {
+                    RCTLogWarn(@"createPcmPlayer: failed to route to receiver (%@)", routeError.localizedDescription);
+                }
+            } else {
+                NSArray<AVAudioSessionPortDescription *> *inputs = audioSession.availableInputs ?: @[];
+                AVAudioSessionPortDescription *preferredInput = nil;
+                for (AVAudioSessionPortDescription *input in inputs) {
+                    if ([input.UID isEqualToString:requestedOutputDeviceId]) {
+                        preferredInput = input;
+                        break;
+                    }
+                }
+
+                if (preferredInput != nil) {
+                    routeError = nil;
+                    BOOL setPreferred = [audioSession setPreferredInput:preferredInput error:&routeError];
+                    if (!setPreferred && routeError != nil) {
+                        RCTLogWarn(@"createPcmPlayer: failed to set preferred route input %@ (%@)",
+                                   requestedOutputDeviceId,
+                                   routeError.localizedDescription);
+                    }
+
+                    routeError = nil;
+                    [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&routeError];
+                    if (routeError) {
+                        RCTLogWarn(@"createPcmPlayer: failed to clear speaker override after preferred input (%@)", routeError.localizedDescription);
+                    }
+                } else {
+                    RCTLogWarn(@"createPcmPlayer: requested outputDeviceId %@ is not selectable on this route", requestedOutputDeviceId);
+                }
+            }
+        } else {
+            [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
+            [audioSession setActive:YES error:nil];
+        }
 
         auto session = std::make_shared<PcmPlayerSession>();
         session->playerId = [playerId UTF8String];
@@ -283,6 +367,120 @@ static std::mutex g_pcm_live_entries_mutex;
     } @catch (NSException *exception) {
         reject(@"PCM_PLAYER_INVALID_CONFIG",
                [NSString stringWithFormat:@"Failed to create PCM player: %@", exception.reason], nil);
+    }
+}
+
+- (void)so_listAvailableOutputDevicesResolve:(RCTPromiseResolveBlock)resolve
+                                      reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        AVAudioSessionRouteDescription *route = session.currentRoute;
+
+        NSMutableSet<NSString *> *selectedIds = [NSMutableSet set];
+        for (AVAudioSessionPortDescription *output in route.outputs) {
+            if ([output.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker]) {
+                [selectedIds addObject:kPcmOutputSpeakerId];
+            } else if ([output.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+                [selectedIds addObject:kPcmOutputReceiverId];
+            } else if (output.UID.length > 0) {
+                [selectedIds addObject:output.UID];
+            }
+        }
+
+        NSMutableDictionary<NSString *, NSMutableDictionary *> *byId = [NSMutableDictionary dictionary];
+
+        void (^addOrMerge)(NSString *, NSString *, NSString *, BOOL, BOOL, BOOL) = ^(
+            NSString *deviceId,
+            NSString *name,
+            NSString *kind,
+            BOOL selected,
+            BOOL isDefault,
+            BOOL canSelect
+        ) {
+            if (deviceId.length == 0) return;
+
+            NSMutableDictionary *existing = byId[deviceId];
+            if (existing == nil) {
+                byId[deviceId] = [@{
+                    @"id": deviceId,
+                    @"name": name ?: @"Output",
+                    @"kind": kind ?: @"unknown",
+                    @"selected": @(selected),
+                    @"default": @(isDefault),
+                    @"canSelect": @(canSelect),
+                } mutableCopy];
+                return;
+            }
+
+            if (name.length > 0) existing[@"name"] = name;
+            if (kind.length > 0) existing[@"kind"] = kind;
+            existing[@"selected"] = @([existing[@"selected"] boolValue] || selected);
+            existing[@"default"] = @([existing[@"default"] boolValue] || isDefault);
+            existing[@"canSelect"] = @([existing[@"canSelect"] boolValue] || canSelect);
+        };
+
+        addOrMerge(kPcmOutputSpeakerId, @"Built-in Speaker", @"built_in_speaker", [selectedIds containsObject:kPcmOutputSpeakerId], YES, YES);
+        addOrMerge(kPcmOutputReceiverId, @"Built-in Receiver", @"built_in_receiver", [selectedIds containsObject:kPcmOutputReceiverId], NO, YES);
+
+        NSArray<AVAudioSessionPortDescription *> *availableInputs = session.availableInputs ?: @[];
+        for (AVAudioSessionPortDescription *input in availableInputs) {
+            NSString *kind = pa_output_kind_for_port(input.portType);
+            addOrMerge(
+                input.UID ?: @"",
+                input.portName ?: @"Output",
+                kind,
+                [selectedIds containsObject:(input.UID ?: @"")],
+                NO,
+                YES
+            );
+        }
+
+        for (AVAudioSessionPortDescription *output in route.outputs) {
+            NSString *deviceId = @"";
+            if ([output.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker]) {
+                deviceId = kPcmOutputSpeakerId;
+            } else if ([output.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+                deviceId = kPcmOutputReceiverId;
+            } else {
+                deviceId = output.UID ?: @"";
+            }
+
+            addOrMerge(
+                deviceId,
+                output.portName ?: @"Output",
+                pa_output_kind_for_port(output.portType),
+                [selectedIds containsObject:deviceId],
+                [deviceId isEqualToString:kPcmOutputSpeakerId],
+                [deviceId isEqualToString:kPcmOutputSpeakerId] || [deviceId isEqualToString:kPcmOutputReceiverId]
+            );
+        }
+
+        NSMutableArray<NSMutableDictionary *> *result = [NSMutableArray arrayWithArray:byId.allValues];
+        if (result.count > 0) {
+            BOOL hasSelected = NO;
+            for (NSDictionary *entry in result) {
+                if ([entry[@"selected"] boolValue]) {
+                    hasSelected = YES;
+                    break;
+                }
+            }
+            if (!hasSelected) {
+                NSUInteger fallbackIndex = NSNotFound;
+                for (NSUInteger i = 0; i < result.count; i++) {
+                    if ([result[i][@"default"] boolValue]) {
+                        fallbackIndex = i;
+                        break;
+                    }
+                }
+                if (fallbackIndex == NSNotFound) fallbackIndex = 0;
+                result[fallbackIndex][@"selected"] = @YES;
+            }
+        }
+
+        resolve(result);
+    } @catch (NSException *exception) {
+        reject(@"PCM_PLAYER_ERROR", exception.reason, nil);
     }
 }
 

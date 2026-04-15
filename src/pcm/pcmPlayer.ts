@@ -2,6 +2,7 @@ import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   PcmPlayer,
+  PcmOutputDeviceInfo,
   PcmPlayerOptions,
   PcmPlayerAudioBuffer,
 } from './types';
@@ -12,7 +13,18 @@ let pcmPlayerCounter = 0;
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
   if (!eventEmitter) {
-    eventEmitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+    const nativeModule = NativeModules.SherpaOnnx as
+      | {
+          addListener?: (eventName: string) => void;
+          removeListeners?: (count: number) => void;
+        }
+      | undefined;
+    const supportsNativeEmitter =
+      typeof nativeModule?.addListener === 'function' &&
+      typeof nativeModule?.removeListeners === 'function';
+    eventEmitter = new NativeEventEmitter(
+      supportsNativeEmitter ? (nativeModule as any) : null
+    );
   }
   return eventEmitter;
 }
@@ -34,6 +46,7 @@ export async function createPcmPlayer(
   const playerId = `pcm_player_${++pcmPlayerCounter}`;
   const bufferId = resolvePipelineAudioBufferId(audioBuffer);
   const volume = options?.volume ?? 1.0;
+  const outputDeviceId = options?.outputDeviceId;
 
   // Subscribe to ended event before creating the player to avoid race conditions
   let endedSubscription: ReturnType<NativeEventEmitter['addListener']> | null =
@@ -51,7 +64,9 @@ export async function createPcmPlayer(
   }
 
   try {
-    await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume);
+    await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume, {
+      outputDeviceId,
+    });
   } catch (e) {
     endedSubscription?.remove();
     throw e;
@@ -100,4 +115,24 @@ export async function createPcmPlayer(
       await SherpaOnnx.destroyPcmPlayer(playerId);
     },
   };
+}
+
+/**
+ * List available output/playback devices.
+ *
+ * Use `outputDeviceId` in createPcmPlayer options to request a route.
+ * Route changes are best effort; check `selected` after start for the active device.
+ */
+export async function listAvailableOutputDevices(): Promise<
+  PcmOutputDeviceInfo[]
+> {
+  const raw = await SherpaOnnx.listAvailableOutputDevices();
+  return raw.map((device) => ({
+    id: String(device.id),
+    name: String(device.name),
+    kind: String(device.kind),
+    selected: Boolean(device.selected),
+    default: Boolean(device.default),
+    canSelect: Boolean(device.canSelect),
+  }));
 }

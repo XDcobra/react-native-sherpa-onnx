@@ -194,7 +194,7 @@ await releasePipelineAudioBuffer(live);
 ### Live buffer
 
 - `createEmptyLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
-- `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
+- `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`, `listAvailableInputDevices`
 - `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
@@ -319,6 +319,35 @@ function stopMicToLiveAudioBuffer(): Promise<void>;
 await startMicToLiveAudioBuffer(live, { emitToJs: false });
 await stopMicToLiveAudioBuffer();
 ```
+
+`options.inputDeviceId` accepts an id from `listAvailableInputDevices()` and requests that route as a best-effort preference.
+To confirm the actually active route, call `listAvailableInputDevices()` again and check `selected`.
+
+#### `listAvailableInputDevices()`
+
+```ts
+function listAvailableInputDevices(): Promise<
+  Array<{
+    id: string;
+    name: string;
+    kind: string;
+    selected: boolean;
+    default: boolean;
+    canSelect: boolean;
+  }>
+>;
+```
+
+```ts
+const inputs = await listAvailableInputDevices();
+const preferred = inputs.find((d) => d.canSelect && d.kind === 'built_in_mic');
+await startMicToLiveAudioBuffer(live, {
+  inputDeviceId: preferred?.id,
+});
+```
+
+Android exposes robust input enumeration and applies `inputDeviceId` when the recorder backend accepts it.
+iOS applies preferred input using AVAudioSession and remains best-effort because route activation is system-managed.
 
 #### `appendSamplesToLiveAudioBuffer(liveBuffer, samples, sampleRate)`
 

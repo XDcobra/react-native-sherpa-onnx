@@ -4,6 +4,7 @@ import type { RootStackParamList } from '../types/navigation';
 import HomeScreen from '../screens/home/HomeScreen';
 import STTScreen from '../screens/stt/STTScreen';
 import TTSScreen from '../screens/tts/TTSScreen';
+import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcaseScreen';
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
@@ -50,6 +51,13 @@ export default function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="PipelineShowcase"
+        component={PipelineShowcaseScreen}
+        options={{
+          title: 'Pipeline Showcase',
+        }}
+      />
+      <Stack.Screen
         name="GenerateTimestamp"
         component={GenerateTimestampScreen}
         options={{
@@ -60,7 +68,7 @@ export default function RootNavigator() {
         name="DownloadShowcase"
         component={DownloadShowcaseScreen}
         options={{
-          title: 'Download showcase',
+          title: 'Downloadmanager',
         }}
       />
       <Stack.Screen

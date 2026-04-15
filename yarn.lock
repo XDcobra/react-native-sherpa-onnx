@@ -10532,20 +10532,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-audio-api@npm:^0.11.6":
-  version: 0.11.7
-  resolution: "react-native-audio-api@npm:0.11.7"
-  dependencies:
-    semver: "npm:^7.7.3"
-  peerDependencies:
-    react: "*"
-    react-native: "*"
-  bin:
-    setup-rn-audio-api-web: scripts/setup-rn-audio-api-web.js
-  checksum: 10c0/caae145442fdac60ae2a0404d100f7557fc6ce9056ec11324ae5a35cdce352eb6a42a2cad567c59780cc18d8110179e5c4d26ea28fea156624bece0bfa88fb9c
-  languageName: node
-  linkType: hard
-
 "react-native-builder-bob@npm:^0.40.13":
   version: 0.40.18
   resolution: "react-native-builder-bob@npm:0.40.18"
@@ -10635,15 +10621,15 @@ __metadata:
     "@types/react": "npm:^19.2.0"
     react: "npm:19.2.0"
     react-native: "npm:0.83.0"
-    react-native-audio-api: "npm:^0.11.6"
     react-native-builder-bob: "npm:^0.40.13"
     react-native-monorepo-config: "npm:^0.3.1"
     react-native-safe-area-context: "npm:^5.6.2"
     react-native-screens: "npm:^4.20.0"
+    react-native-sherpa-onnx: "workspace:*"
   languageName: unknown
   linkType: soft
 
-"react-native-sherpa-onnx@workspace:.":
+"react-native-sherpa-onnx@workspace:*, react-native-sherpa-onnx@workspace:.":
   version: 0.0.0-use.local
   resolution: "react-native-sherpa-onnx@workspace:."
   dependencies:
@@ -10678,7 +10664,7 @@ __metadata:
     "@dr.pogodin/react-native-fs": "*"
     "@kesha-antonov/react-native-background-downloader": ^4.5.4
     react: "*"
-    react-native: "*"
+    react-native: ">=0.73.0"
   languageName: unknown
   linkType: soft
 

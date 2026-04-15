@@ -1,6 +1,4 @@
 ENV['RCT_NEW_ARCH_ENABLED'] = '1'
-# Disable FFmpeg vendored by react-native-audio-api; use FFmpeg from react-native-sherpa-onnx.
-ENV['DISABLE_AUDIOAPI_FFMPEG'] = '1'
 
 # Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',

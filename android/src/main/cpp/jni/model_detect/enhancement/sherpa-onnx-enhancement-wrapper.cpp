@@ -38,6 +38,7 @@ jobject EnhancementDetectResultToJava(
   if (!map) return nullptr;
 
   PutBoolean(env, map, mapPut, "success", result.ok);
+  PutBoolean(env, map, mapPut, "isStreaming", result.isStreaming);
   PutString(env, map, mapPut, "error", result.error);
   PutString(env, map, mapPut, "modelType",
             EnhancementModelKindToString(result.selectedKind));

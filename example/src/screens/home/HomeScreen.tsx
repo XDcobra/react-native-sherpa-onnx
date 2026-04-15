@@ -30,6 +30,15 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'pipeline_showcase',
+    title: 'Pipeline Showcase',
+    description:
+      'Mic/File -> Streaming STT -> Incremental TTS -> PCM playback with live metrics and finalize/save flow',
+    icon: 'git-compare',
+    screen: 'PipelineShowcase',
+    implemented: true,
+  },
+  {
     id: 'generate_timestamp',
     title: 'Generate timestamp',
     description: 'Generate subtitles/timestamps from a WAV file',
@@ -39,9 +48,9 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'download_showcase',
-    title: 'Download showcase',
+    title: 'Downloadmanager',
     description:
-      'Try the download manager: pause, resume, and clear partial installs',
+      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
     icon: 'cloud-download-outline',
     screen: 'DownloadShowcase',
     implemented: true,

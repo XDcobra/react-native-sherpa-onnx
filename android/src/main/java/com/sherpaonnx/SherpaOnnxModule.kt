@@ -1,6 +1,10 @@
 package com.sherpaonnx
 
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
@@ -70,7 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
-  private val pcmPlayerService = PcmPlayerService().also {
+  private val pcmPlayerService = PcmPlayerService(reactApplicationContext).also {
     it.onPlayerEnded = { playerId, bufferId ->
       try {
         val eventEmitter = reactApplicationContext
@@ -99,6 +103,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
+
+  private fun normalizeInputDeviceKind(type: Int): String {
+    return when (type) {
+      AudioDeviceInfo.TYPE_BUILTIN_MIC -> "built_in_mic"
+      AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth"
+      AudioDeviceInfo.TYPE_USB_DEVICE,
+      AudioDeviceInfo.TYPE_USB_ACCESSORY,
+      AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
+      AudioDeviceInfo.TYPE_TELEPHONY -> "telephony"
+      AudioDeviceInfo.TYPE_HDMI,
+      AudioDeviceInfo.TYPE_HDMI_ARC,
+      AudioDeviceInfo.TYPE_HDMI_EARC -> "hdmi"
+      AudioDeviceInfo.TYPE_FM_TUNER -> "fm"
+      AudioDeviceInfo.TYPE_LINE_ANALOG,
+      AudioDeviceInfo.TYPE_LINE_DIGITAL -> "line"
+      else -> "unknown"
+    }
+  }
 
   private external fun nativeInstallJSI(jsiRuntimePointer: Long, registry: Any): Boolean
 
@@ -752,30 +776,58 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private data class DecodableSource(
+    val path: String?,
+    val fd: Int,
+    val tempFile: File? = null,
+  )
+
+  private fun resolveDecodableSource(
+    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+  ): DecodableSource {
+    return when (handle) {
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
+        DecodableSource(path = handle.file.absolutePath, fd = -1)
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
+        DecodableSource(path = null, fd = handle.pfd.fd)
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
+        val tmpFile = File(
+          reactApplicationContext.cacheDir,
+          "decode_stream_${java.util.UUID.randomUUID()}"
+        )
+        try {
+          tmpFile.outputStream().use { out ->
+            handle.inputStream.copyTo(out, 65536)
+          }
+        } catch (e: Exception) {
+          try { tmpFile.delete() } catch (_: Exception) {}
+          throw FileIOException(
+            FileIOErrorCodes.READ_ERROR,
+            "Failed to materialize stream source for decode",
+            e
+          )
+        }
+        DecodableSource(path = tmpFile.absolutePath, fd = -1, tempFile = tmpFile)
+      }
+    }
+  }
+
   override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
 
     decodeExecutor.execute {
       var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
-      var tmpFile: File? = null
+      var tempSourceFile: File? = null
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-
-        val sourcePath = when (val handle = readHandle) {
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
-            val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
-            tmp.outputStream().use { out ->
-              handle.inputStream.copyTo(out, 65536)
-            }
-            tmpFile = tmp
-            tmp.absolutePath
-          }
-          null -> throw IllegalStateException("Resolved read handle is null")
-        }
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -799,6 +851,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToBuffer(
             sourcePath,
+            sourceFd,
             targetRate,
             forceMono,
             8192,
@@ -831,7 +884,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } finally {
         decodeCancelFlags.remove(operationId)
         try { readHandle?.close() } catch (_: Exception) {}
-        try { tmpFile?.delete() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
       }
     }
   }
@@ -881,28 +934,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     // Resolve file source synchronously, then run decode on background thread
     val readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
-    val tmpFile: File?
-    val sourcePath: String
+    var sourcePath: String? = null
+    var sourceFd: Int = -1
+    var tempSourceFile: File? = null
     try {
       readHandle = fileIOHelper.resolveSource(source)
-      when (val handle = readHandle) {
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-          sourcePath = handle.file.absolutePath
-          tmpFile = null
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-          sourcePath = handle.fdPath
-          tmpFile = null
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
-          val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
-          tmp.outputStream().use { out ->
-            handle.inputStream.copyTo(out, 65536)
-          }
-          sourcePath = tmp.absolutePath
-          tmpFile = tmp
-        }
-      }
+      val decodableSource = resolveDecodableSource(readHandle)
+      sourcePath = decodableSource.path
+      sourceFd = decodableSource.fd
+      tempSourceFile = decodableSource.tempFile
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       decodeCancelFlags.remove(operationId)
       fileIngestStatuses.remove(ingestId)
@@ -958,6 +998,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         @Suppress("UNCHECKED_CAST")
         val result = nativeDecodeFileStreaming(
           sourcePath,
+          sourceFd,
           targetRate,
           forceMono,
           8192,
@@ -1013,7 +1054,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelChecker.interrupt()
         decodeCancelFlags.remove(operationId)
         try { readHandle.close() } catch (_: Exception) {}
-        try { tmpFile?.delete() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
       }
     }
   }
@@ -1275,7 +1316,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   private fun encodeViaDecodeFile(
-    inputPath: String, outputPath: String, format: String,
+    inputPath: String?, inputFd: Int, outputPath: String, format: String,
     outputSampleRateHz: Int, bitrate: Int, quality: Int,
     operationId: String, cancelFlagAddr: Long
   ) {
@@ -1288,6 +1329,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       @Suppress("UNCHECKED_CAST")
       val decodeResult = nativeDecodeFileStreaming(
         inputPath,
+        inputFd,
         0, // keep source sample rate
         true, // force mono
         8192,
@@ -1318,7 +1360,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       // the encode session without knowing the source sample rate.
       // Instead, use batch decode + encode.
       val batchResult = nativeDecodeFileToBuffer(
-        inputPath, 0, true, 8192, cancelFlagAddr
+        inputPath,
+        inputFd,
+        0,
+        true,
+        8192,
+        cancelFlagAddr
       ) as? HashMap<String, Any> ?: throw RuntimeException("AUDIO_SAVE_SOURCE_NOT_FOUND: Decode failed")
 
       val samples = batchResult["samples"] as? FloatArray ?: FloatArray(0)
@@ -1452,7 +1499,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     when (entry) {
       is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked -> {
-        encodeViaDecodeFile(entry.filePath, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+        encodeViaDecodeFile(entry.filePath, -1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
       is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
         encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
@@ -1472,7 +1519,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     val spoolPath = entry.spoolFilePath
     if (spoolPath != null) {
-      encodeViaDecodeFile(spoolPath, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+      encodeViaDecodeFile(spoolPath, -1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
     } else {
       val snapshot = entry.snapshotRing()
       encodeViaPcm(snapshot, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
@@ -1498,19 +1545,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     decodeExecutor.execute {
       var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
-      var readTmpFile: File? = null
       var dest: ResolvedDestination? = null
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-        val sourcePath = when (val handle = readHandle) {
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> handle.file.absolutePath
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> handle.fdPath
+        val sourcePath: String?
+        val sourceFd: Int
+        when (val handle = readHandle) {
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
+            sourcePath = handle.file.absolutePath
+            sourceFd = -1
+          }
+          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
+            sourcePath = null
+            sourceFd = handle.pfd.fd
+          }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
-            val tmp = File(reactApplicationContext.cacheDir, "fileio_tmp_${java.util.UUID.randomUUID()}")
-            tmp.outputStream().use { out -> handle.inputStream.copyTo(out, 65536) }
-            readTmpFile = tmp
-            tmp.absolutePath
+            throw FileIOException(
+              FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+              "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
+            )
           }
           null -> throw RuntimeException("Resolved read handle is null")
         }
@@ -1532,7 +1586,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelChecker.start()
 
         try {
-          encodeViaDecodeFile(sourcePath, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
+          encodeViaDecodeFile(sourcePath, sourceFd, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
           cancelChecker.interrupt()
         } finally {
           nativeFreeCancelFlag(cancelFlagAddr)
@@ -1560,7 +1614,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } finally {
         saveCancelFlags.remove(operationId)
         try { readHandle?.close() } catch (_: Exception) {}
-        try { readTmpFile?.delete() } catch (_: Exception) {}
         cleanupSaveDestination(dest)
       }
     }
@@ -1612,8 +1665,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         )
       }
 
+      val preferredInputDeviceId = options
+        ?.takeIf { it.hasKey("inputDeviceId") && !it.isNull("inputDeviceId") }
+        ?.getString("inputDeviceId")
+        ?.trim()
+        ?.toIntOrNull()
+
       val sink = com.sherpaonnx.audio.pipeline.MicToLiveBufferSink(
+        context = reactApplicationContext,
         liveEntry = liveEntry,
+        preferredInputDeviceId = preferredInputDeviceId,
         onError = { msg ->
           val eventEmitter = reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -1641,6 +1702,38 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       micToLiveSink?.stop()
       micToLiveSink = null
       promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
+    }
+  }
+
+  override fun listAvailableInputDevices(promise: Promise) {
+    try {
+      val audioManager = reactApplicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
+      } else {
+        emptyList()
+      }
+
+      val routedInputId = micToLiveSink?.currentRoutedDeviceId()
+      val defaultInputId = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.id
+        ?: devices.firstOrNull()?.id
+      val selectedInputId = routedInputId ?: defaultInputId
+
+      val out = Arguments.createArray()
+      for (device in devices) {
+        val map = Arguments.createMap()
+        map.putString("id", device.id.toString())
+        map.putString("name", device.productName?.toString() ?: "Input ${device.id}")
+        map.putString("kind", normalizeInputDeviceKind(device.type))
+        map.putBoolean("selected", selectedInputId != null && device.id == selectedInputId)
+        map.putBoolean("default", device.type == AudioDeviceInfo.TYPE_BUILTIN_MIC)
+        map.putBoolean("canSelect", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+        out.pushMap(map)
+      }
+
+      promise.resolve(out)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
     }
@@ -2199,9 +2292,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     playerId: String,
     audioBufferId: String,
     volume: Double,
+    options: ReadableMap?,
     promise: Promise
   ) {
-    pcmPlayerService.create(playerId, audioBufferId, volume, promise)
+    pcmPlayerService.create(playerId, audioBufferId, volume, options, promise)
+  }
+
+  override fun listAvailableOutputDevices(promise: Promise) {
+    pcmPlayerService.listAvailableOutputDevices(promise)
   }
 
   override fun pausePcmPlayer(playerId: String, promise: Promise) {
@@ -2636,7 +2734,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic
     external fun nativeDecodeFileToBuffer(
-      path: String,
+      path: String?,
+      inputFd: Int,
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
@@ -2646,7 +2745,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */
     @JvmStatic
     external fun nativeDecodeFileStreaming(
-      path: String,
+      path: String?,
+      inputFd: Int,
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,

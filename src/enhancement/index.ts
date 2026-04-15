@@ -64,9 +64,10 @@ export async function detectEnhancementModel(
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
       : undefined;
+  const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
-    isStreaming: false,
+    isStreaming,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
     ...(raw.modelType != null && raw.modelType !== ''

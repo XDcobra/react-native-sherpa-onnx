@@ -1,0 +1,268 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  body: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+    gap: 14,
+  },
+  section: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    padding: 14,
+    gap: 10,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  hint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6E6E73',
+  },
+  warningText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#B24A00',
+  },
+  optionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  optionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F8F8FA',
+  },
+  optionButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#EAF3FF',
+  },
+  optionButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3A3A3C',
+  },
+  optionButtonTextActive: {
+    color: '#0065D1',
+  },
+  sourceButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F8F8FA',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  sourceButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#3A3A3C',
+  },
+  sourceMeta: {
+    fontSize: 12,
+    color: '#6E6E73',
+    lineHeight: 16,
+  },
+  modelGroupTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#3A3A3C',
+    marginTop: 2,
+  },
+  modelList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  modelChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F7F7F9',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    minWidth: 140,
+    flexGrow: 1,
+  },
+  modelChipActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#EAF3FF',
+  },
+  modelChipTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2C2C2E',
+    marginBottom: 2,
+  },
+  modelChipTitleActive: {
+    color: '#0058B6',
+  },
+  modelChipSub: {
+    fontSize: 11,
+    color: '#6E6E73',
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButton: {
+    flex: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  actionButtonPrimary: {
+    backgroundColor: '#007AFF',
+  },
+  actionButtonDanger: {
+    backgroundColor: '#FF3B30',
+  },
+  actionButtonMuted: {
+    backgroundColor: '#34C759',
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  statusText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#3A3A3C',
+  },
+  errorText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#C62828',
+  },
+  transcriptLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#636366',
+    marginBottom: 4,
+  },
+  transcriptBox: {
+    minHeight: 120,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D8D8DC',
+    backgroundColor: '#FCFCFD',
+    padding: 10,
+  },
+  transcriptText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#1C1C1E',
+  },
+  transcriptPlaceholder: {
+    fontSize: 14,
+    color: '#8E8E93',
+    lineHeight: 20,
+  },
+  partialText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6E6E73',
+    fontStyle: 'italic',
+  },
+  pipelineHintText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#5E5E64',
+  },
+  stepRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  stepChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F7F7F9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  stepChipActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#EAF3FF',
+  },
+  stepChipText: {
+    fontSize: 12,
+    color: '#4A4A4D',
+    fontWeight: '600',
+  },
+  stepChipTextActive: {
+    color: '#0058B6',
+  },
+  eventList: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D8D8DC',
+    backgroundColor: '#FCFCFD',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  eventItemText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#2C2C2E',
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  metricCard: {
+    flexGrow: 1,
+    minWidth: 150,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E3E3E8',
+    backgroundColor: '#FAFAFC',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  metricLabel: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: '#636366',
+    marginBottom: 4,
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  savedPath: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#1D5F2B',
+  },
+});

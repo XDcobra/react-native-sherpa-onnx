@@ -458,6 +458,61 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  bufferList: {
+    gap: 10,
+    marginTop: 4,
+  },
+  bufferListItem: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+  },
+  bufferListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  bufferListTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  bufferListMeta: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  bufferIdText: {
+    fontSize: 11,
+    color: '#8E8E93',
+    marginTop: 4,
+  },
+  bufferListActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  bufferActionButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bufferDeleteButton: {
+    backgroundColor: '#fff5f5',
+    borderWidth: 1,
+    borderColor: '#f5c6cb',
+  },
+  bufferDeleteText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#b71c1c',
+  },
   savedPathText: {
     fontSize: 12,
     color: '#8E8E93',

@@ -1,16 +1,25 @@
 package com.sherpaonnx.pcm
 
+import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
 import android.util.Log
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 
-internal class PcmPlayerService {
+internal class PcmPlayerService(
+  private val context: Context,
+) {
   private val registry = PcmPlayerRegistry()
+  private val audioManager: AudioManager by lazy {
+    context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+  }
 
   /** Callback to emit pcmPlayerEnded events to JS. Set by the module. */
   var onPlayerEnded: ((playerId: String, bufferId: String) -> Unit)? = null
@@ -19,6 +28,7 @@ internal class PcmPlayerService {
     playerId: String,
     audioBufferId: String,
     volume: Double,
+    options: ReadableMap?,
     promise: Promise
   ) {
     try {
@@ -75,6 +85,27 @@ internal class PcmPlayerService {
       registry.remove(playerId)?.destroy()
 
       track.setVolume(clampedVolume)
+
+      val requestedOutputDeviceId = options
+        ?.takeIf { it.hasKey("outputDeviceId") && !it.isNull("outputDeviceId") }
+        ?.getString("outputDeviceId")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && requestedOutputDeviceId != null) {
+        val requestedDeviceInt = requestedOutputDeviceId.toIntOrNull()
+        if (requestedDeviceInt != null) {
+          val preferredDevice = findOutputDeviceById(requestedDeviceInt)
+          if (preferredDevice != null) {
+            val applied = track.setPreferredDevice(preferredDevice)
+            Log.i(TAG, "Requested preferred output device id=$requestedDeviceInt applied=$applied")
+          } else {
+            Log.w(TAG, "Preferred output device id=$requestedDeviceInt not found; using default route")
+          }
+        } else {
+          Log.w(TAG, "Invalid outputDeviceId '$requestedOutputDeviceId'; expected numeric device id")
+        }
+      }
+
       val session = PcmPlayerSession(
         playerId = playerId,
         bufferId = audioBufferId,
@@ -103,6 +134,44 @@ internal class PcmPlayerService {
     } catch (e: Exception) {
       Log.e(TAG, "Failed to create PCM player: $playerId", e)
       promise.reject("PCM_PLAYER_INVALID_CONFIG", "Failed to create PCM player: ${e.message}", e)
+    }
+  }
+
+  fun listAvailableOutputDevices(promise: Promise) {
+    try {
+      val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+      } else {
+        emptyList()
+      }
+
+      val routedDeviceId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        registry.snapshotSessions().firstNotNullOfOrNull { session ->
+          session.track.routedDevice?.id
+        }
+      } else {
+        null
+      }
+
+      val defaultOutputId = devices.firstOrNull { isDefaultOutputDevice(it) }?.id
+        ?: devices.firstOrNull()?.id
+      val selectedOutputId = routedDeviceId ?: defaultOutputId
+
+      val out = Arguments.createArray()
+      for (device in devices) {
+        val map = Arguments.createMap()
+        map.putString("id", device.id.toString())
+        map.putString("name", device.productName?.toString() ?: "Output ${device.id}")
+        map.putString("kind", normalizeOutputKind(device.type))
+        map.putBoolean("selected", selectedOutputId != null && device.id == selectedOutputId)
+        map.putBoolean("default", isDefaultOutputDevice(device))
+        map.putBoolean("canSelect", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+        out.pushMap(map)
+      }
+
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("PCM_PLAYER_ERROR", "Failed to list output devices: ${e.message}", e)
     }
   }
 
@@ -219,6 +288,49 @@ internal class PcmPlayerService {
 
   fun shutdown() {
     registry.destroyAll()
+  }
+
+  private fun findOutputDeviceById(deviceId: Int): AudioDeviceInfo? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+    return audioManager
+      .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+      .firstOrNull { it.id == deviceId }
+  }
+
+  private fun isDefaultOutputDevice(device: AudioDeviceInfo): Boolean {
+    return when (device.type) {
+      AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+      AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> true
+      else -> false
+    }
+  }
+
+  private fun normalizeOutputKind(type: Int): String {
+    return when (type) {
+      AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "built_in_speaker"
+      AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "built_in_receiver"
+      AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE -> "built_in_speaker"
+      AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
+      AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired_headphones"
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET,
+      AudioDeviceInfo.TYPE_BLE_SPEAKER,
+      AudioDeviceInfo.TYPE_BLE_BROADCAST -> "bluetooth"
+      AudioDeviceInfo.TYPE_USB_DEVICE,
+      AudioDeviceInfo.TYPE_USB_ACCESSORY,
+      AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
+      AudioDeviceInfo.TYPE_HDMI,
+      AudioDeviceInfo.TYPE_HDMI_ARC,
+      AudioDeviceInfo.TYPE_HDMI_EARC -> "hdmi"
+      AudioDeviceInfo.TYPE_LINE_ANALOG,
+      AudioDeviceInfo.TYPE_LINE_DIGITAL -> "line"
+      AudioDeviceInfo.TYPE_DOCK -> "dock"
+      AudioDeviceInfo.TYPE_TELEPHONY -> "telephony"
+      AudioDeviceInfo.TYPE_HEARING_AID -> "hearing_aid"
+      AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "remote_submix"
+      else -> "unknown"
+    }
   }
 
   private fun rejectNotFound(playerId: String, promise: Promise) {

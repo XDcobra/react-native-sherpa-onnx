@@ -11,6 +11,8 @@ internal class PcmPlayerRegistry {
 
   fun remove(playerId: String): PcmPlayerSession? = sessions.remove(playerId)
 
+  fun snapshotSessions(): List<PcmPlayerSession> = sessions.values.toList()
+
   fun destroyAll() {
     sessions.values.forEach { it.destroy() }
     sessions.clear()

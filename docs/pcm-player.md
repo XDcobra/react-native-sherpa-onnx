@@ -66,7 +66,43 @@ Creates and starts a native playback session that consumes from a pipeline audio
 |-----------|------|---------|-------------|
 | `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| OfflineBufferHandle \| LiveBufferHandle \| string` | required | Buffer ref/handle or raw `bufferId` |
 | `options.volume` | `number` | `1.0` | Volume scale in range `[0, 1]` |
+| `options.outputDeviceId` | `string` | `undefined` | Preferred output route id from `listAvailableOutputDevices()` (best effort) |
 | `options.onEnded` | `(event: { playerId: string; bufferId: string }) => void` | `undefined` | Called once when playback run reaches EOF |
+
+Platform note: Android attempts direct AudioTrack routing to the requested device id where supported.
+iOS applies route preferences within AVAudioSession constraints, so `outputDeviceId` is capability-based best effort.
+
+### `listAvailableOutputDevices()`
+
+```ts
+function listAvailableOutputDevices(): Promise<
+  Array<{
+    id: string;
+    name: string;
+    kind: string;
+    selected: boolean;
+    default: boolean;
+    canSelect: boolean;
+  }>
+>;
+```
+
+```ts
+import {
+  createPcmPlayer,
+  listAvailableOutputDevices,
+} from 'react-native-sherpa-onnx/pcm';
+
+const outputs = await listAvailableOutputDevices();
+const preferred = outputs.find((d) => d.canSelect && d.kind === 'bluetooth');
+
+const player = await createPcmPlayer(audioBuffer, {
+  outputDeviceId: preferred?.id,
+});
+```
+
+On Android, enumeration is robust and includes routable hardware endpoints.
+On iOS, routable outputs are limited by current audio session/route policy; inspect `selected` after start to confirm the effective route.
 
 ### `PcmPlayer`
 

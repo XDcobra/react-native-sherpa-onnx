@@ -38,7 +38,9 @@ export interface ModelDetectResultBase {
    * Whether the detected model supports streaming inference.
    * For STT: derived from canonical online model types (transducer, paraformer, …).
    * For TTS: always `true`.
-   * For Enhancement and Alignment: always `false`.
+   * For Enhancement: supplied by native detection with online-compatibility preflight
+   * (`success=false` can still occur in name-only heuristic mode).
+   * For Alignment: always `false`.
    */
   isStreaming: boolean;
   /** Normalized primary hints (`iso6391Hint`); from native heuristics + SDK fallback. */

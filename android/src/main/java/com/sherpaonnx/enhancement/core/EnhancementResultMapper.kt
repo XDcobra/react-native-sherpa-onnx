@@ -7,6 +7,7 @@ import com.facebook.react.bridge.WritableMap
 internal object EnhancementResultMapper {
   fun detectResultToWritable(result: HashMap<String, Any>): WritableMap {
     val success = result["success"] as? Boolean ?: false
+    val isStreaming = result["isStreaming"] as? Boolean ?: false
     val detectedModels = result["detectedModels"] as? ArrayList<*>
     val modelType = result["modelType"] as? String
     val detectionSources = result["detectionSources"] as? ArrayList<*>
@@ -16,6 +17,7 @@ internal object EnhancementResultMapper {
 
     return Arguments.createMap().apply {
       putBoolean("success", success)
+      putBoolean("isStreaming", isStreaming)
       putArray("detectedModels", detectedModelsToWritableArray(detectedModels))
       if (!modelType.isNullOrBlank()) {
         putString("modelType", modelType)
