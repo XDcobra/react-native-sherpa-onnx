@@ -57,6 +57,7 @@ import {
   stopMicToLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   createEmptyOfflineTextBuffer,
   createLiveTextBuffer,
@@ -141,11 +142,13 @@ export default function STTScreen() {
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [preparingAudioBuffer, setPreparingAudioBuffer] = useState(false);
+  const [offlineBufferPlaying, setOfflineBufferPlaying] = useState(false);
   const [offlineInputBuffer, setOfflineInputBuffer] =
     useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
 
   const sttEngineRef = useRef<SttEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const offlineBufferPlayerRef = useRef<PcmPlayer | null>(null);
   const streamingEngineRef = useRef<LiveSttEngine | null>(null);
   const livePipelineRef = useRef<{
     liveAudioBufferId: string;
@@ -326,6 +329,10 @@ export default function STTScreen() {
         stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
         pcmPlaybackRef.current = null;
       }
+      if (offlineBufferPlayerRef.current) {
+        offlineBufferPlayerRef.current.destroy().catch(() => {});
+        offlineBufferPlayerRef.current = null;
+      }
     };
   }, []);
 
@@ -491,6 +498,12 @@ export default function STTScreen() {
   };
 
   const clearOfflineInputBuffer = async (resetSelection: boolean) => {
+    if (offlineBufferPlayerRef.current) {
+      await offlineBufferPlayerRef.current.destroy().catch(() => {});
+      offlineBufferPlayerRef.current = null;
+      setOfflineBufferPlaying(false);
+    }
+
     if (pcmPlaybackRef.current) {
       const activePlayback = pcmPlaybackRef.current;
       pcmPlaybackRef.current = null;
@@ -900,6 +913,38 @@ export default function STTScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
+    }
+  };
+
+  const handleToggleOfflineBufferPlayback = async () => {
+    const buffer = offlineInputBuffer;
+    if (!buffer) return;
+
+    if (offlineBufferPlayerRef.current) {
+      const current = offlineBufferPlayerRef.current;
+      offlineBufferPlayerRef.current = null;
+      setOfflineBufferPlaying(false);
+      await current.destroy().catch(() => {});
+      return;
+    }
+
+    try {
+      const player = await createPcmPlayer(buffer.bufferId as any, {
+        onEnded: () => {
+          const current = offlineBufferPlayerRef.current;
+          offlineBufferPlayerRef.current = null;
+          setOfflineBufferPlaying(false);
+          if (current) {
+            current.destroy().catch(() => {});
+          }
+        },
+      });
+      offlineBufferPlayerRef.current = player;
+      setOfflineBufferPlaying(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
+      setOfflineBufferPlaying(false);
     }
   };
 
@@ -1460,6 +1505,28 @@ export default function STTScreen() {
                   ) : (
                     <Text style={styles.buttonText}>Transcribe Audio</Text>
                   )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.playButton,
+                    styles.mt12,
+                    (loading || transcribing || preparingAudioBuffer) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleToggleOfflineBufferPlayback}
+                  disabled={loading || transcribing || preparingAudioBuffer}
+                >
+                  <View style={styles.rowAlignCenter}>
+                    <Ionicons
+                      name={offlineBufferPlaying ? 'stop' : 'play'}
+                      size={16}
+                      style={styles.iconInline}
+                    />
+                    <Text style={styles.playButtonText}>
+                      {offlineBufferPlaying ? 'Stop Buffer' : 'Play Buffer'}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
             )}

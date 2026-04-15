@@ -12,7 +12,18 @@ let pcmPlayerCounter = 0;
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
   if (!eventEmitter) {
-    eventEmitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+    const nativeModule = NativeModules.SherpaOnnx as
+      | {
+          addListener?: (eventName: string) => void;
+          removeListeners?: (count: number) => void;
+        }
+      | undefined;
+    const supportsNativeEmitter =
+      typeof nativeModule?.addListener === 'function' &&
+      typeof nativeModule?.removeListeners === 'function';
+    eventEmitter = new NativeEventEmitter(
+      supportsNativeEmitter ? (nativeModule as any) : null
+    );
   }
   return eventEmitter;
 }

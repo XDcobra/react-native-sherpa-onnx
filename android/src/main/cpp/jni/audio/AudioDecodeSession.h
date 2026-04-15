@@ -42,7 +42,7 @@ using DecodeStreamInfoCallback =
  */
 AudioDecodeResult decodeFile(
     const char* pathOrFd,
-  int inputFd,
+    int inputFd,
     const AudioDecodeConfig& config,
     DecodeChunkCallback onChunk,
     DecodeProgressCallback onProgress,       // may be nullptr
@@ -51,14 +51,14 @@ AudioDecodeResult decodeFile(
 );
 
 inline AudioDecodeResult decodeFile(
-  const char* pathOrFd,
-  const AudioDecodeConfig& config,
-  DecodeChunkCallback onChunk,
-  DecodeProgressCallback onProgress,
-  DecodeStreamInfoCallback onStreamInfo,
-  std::atomic<bool>& cancelFlag
+    const char* pathOrFd,
+    const AudioDecodeConfig& config,
+    DecodeChunkCallback onChunk,
+    DecodeProgressCallback onProgress,
+    DecodeStreamInfoCallback onStreamInfo,
+    std::atomic<bool>& cancelFlag
 ) {
-  return decodeFile(pathOrFd, -1, config, onChunk, onProgress, onStreamInfo, cancelFlag);
+    return decodeFile(pathOrFd, -1, config, onChunk, onProgress, onStreamInfo, cancelFlag);
 }
 
 } // namespace sherpa
