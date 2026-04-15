@@ -159,6 +159,22 @@ export interface LiveAudioBufferErrorEvent {
   message: string;
 }
 
+/** Unified audio device metadata for input/output route listing. */
+export interface PipelineAudioDeviceInfo {
+  /** Stable id for selection calls (platform-native device id/uid). */
+  id: string;
+  /** Human readable device name. */
+  name: string;
+  /** Normalized kind (built_in_mic, built_in_speaker, bluetooth, usb, ...). */
+  kind: string;
+  /** True when this device is currently active for the corresponding route. */
+  selected: boolean;
+  /** True when this is the platform/default fallback route. */
+  default: boolean;
+  /** Whether explicit selection is supported for this device on this platform. */
+  canSelect: boolean;
+}
+
 /** Callback set for live buffer append/error events. */
 export interface LiveAudioBufferCallbacks {
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
@@ -195,6 +211,11 @@ export interface CreateEmptyLiveAudioBufferOptions {
 export interface StartMicToLiveOptions {
   /** Compatibility switch: force-enable/disable centralized append events for this live buffer. */
   emitToJs?: boolean;
+  /**
+   * Optional preferred input device id from listAvailableInputDevices().
+   * Best effort: capture still starts if the requested route cannot be activated.
+   */
+  inputDeviceId?: string;
 }
 
 /** Mode for creating an offline buffer from a live buffer. */

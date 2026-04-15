@@ -320,8 +320,20 @@ export interface Spec extends TurboModule {
    */
   startMicToLiveAudioBuffer(
     liveBufferId: string,
-    options?: { emitToJs?: boolean }
+    options?: { emitToJs?: boolean; inputDeviceId?: string }
   ): Promise<void>;
+
+  /** List available input devices for microphone capture routing. */
+  listAvailableInputDevices(): Promise<
+    Array<{
+      id: string;
+      name: string;
+      kind: string;
+      selected: boolean;
+      default: boolean;
+      canSelect: boolean;
+    }>
+  >;
 
   /**
    * Stop microphone capture to a live audio buffer.
@@ -740,8 +752,21 @@ export interface Spec extends TurboModule {
   createPcmPlayer(
     playerId: string,
     audioBufferId: string,
-    volume: number
+    volume: number,
+    options?: { outputDeviceId?: string }
   ): Promise<void>;
+
+  /** List available output devices for PCM playback routing. */
+  listAvailableOutputDevices(): Promise<
+    Array<{
+      id: string;
+      name: string;
+      kind: string;
+      selected: boolean;
+      default: boolean;
+      canSelect: boolean;
+    }>
+  >;
 
   /**
    * Pause a PCM player session. Buffered samples are retained.
