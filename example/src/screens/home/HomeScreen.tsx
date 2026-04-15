@@ -30,6 +30,15 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'pipeline_showcase',
+    title: 'Pipeline Showcase',
+    description:
+      'Mic/File -> Streaming STT -> Incremental TTS -> PCM playback with live metrics and finalize/save flow',
+    icon: 'git-compare',
+    screen: 'PipelineShowcase',
+    implemented: true,
+  },
+  {
     id: 'generate_timestamp',
     title: 'Generate timestamp',
     description: 'Generate subtitles/timestamps from a WAV file',
