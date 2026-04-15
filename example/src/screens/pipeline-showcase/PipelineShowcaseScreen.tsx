@@ -92,6 +92,12 @@ type SavedOutputInfo = {
   numSamples: number;
 };
 
+type PipelineStep = {
+  key: 'stt' | 'segment' | 'tts' | 'playback';
+  label: string;
+  active: boolean;
+};
+
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
@@ -186,6 +192,10 @@ export default function PipelineShowcaseScreen() {
   const [queueDepth, setQueueDepth] = useState(0);
   const [ttsSessionState, setTtsSessionState] = useState('idle');
   const [ingestProgress, setIngestProgress] = useState<number | null>(null);
+  const [lastCommittedSegmentIndex, setLastCommittedSegmentIndex] = useState<
+    number | null
+  >(null);
+  const [segmentEvents, setSegmentEvents] = useState<string[]>([]);
 
   const [savedOutput, setSavedOutput] = useState<SavedOutputInfo | null>(null);
   const [savedPath, setSavedPath] = useState<string | null>(null);
@@ -209,6 +219,7 @@ export default function PipelineShowcaseScreen() {
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingInFlightRef = useRef(false);
   const outputSampleRateRef = useRef(16000);
+  const playbackStartedLoggedRef = useRef(false);
   const segmentTrackerRef = useRef<{
     lastSeenSegmentCount: number;
     lastForwardedSegmentIndex: number;
@@ -233,6 +244,45 @@ export default function PipelineShowcaseScreen() {
       committedSegments: [],
     };
   }, []);
+
+  const appendSegmentEvent = useCallback((message: string) => {
+    setSegmentEvents((prev) => [message, ...prev].slice(0, 5));
+  }, []);
+
+  const pipelineSteps = useMemo<PipelineStep[]>(
+    () => [
+      {
+        key: 'stt',
+        label: 'STT listening',
+        active: isRunning,
+      },
+      {
+        key: 'segment',
+        label: 'Segment committed',
+        active: lastCommittedSegmentIndex != null,
+      },
+      {
+        key: 'tts',
+        label: 'TTS generating',
+        active:
+          queueDepth > 0 ||
+          ttsSessionState !== 'idle' ||
+          lastCommittedSegmentIndex != null,
+      },
+      {
+        key: 'playback',
+        label: 'Playback',
+        active: generatedSpeechSeconds > 0,
+      },
+    ],
+    [
+      generatedSpeechSeconds,
+      isRunning,
+      lastCommittedSegmentIndex,
+      queueDepth,
+      ttsSessionState,
+    ]
+  );
 
   const refreshAudioDevices = useCallback(async () => {
     const [nextInputDevices, nextOutputDevices] = await Promise.all([
@@ -404,12 +454,19 @@ export default function PipelineShowcaseScreen() {
       }
 
       tracker.committedSegments.push(trimmed);
+      setLastCommittedSegmentIndex(segment.segmentIndex);
+      appendSegmentEvent(
+        `#${segment.segmentIndex} committed: "${trimmed.slice(0, 64)}${
+          trimmed.length > 64 ? '...' : ''
+        }"`
+      );
       forwardedCount += 1;
 
       if (controller) {
         try {
           controller.pushText(`${trimmed} `);
           controller.commit({ force: true });
+          appendSegmentEvent(`#${segment.segmentIndex} pushed to TTS`);
         } catch {
           // ignore controller state races during stop/teardown
         }
@@ -429,7 +486,7 @@ export default function PipelineShowcaseScreen() {
       setQueueDepth(metrics.queueDepth);
       setTtsSessionState(controller.state);
     }
-  }, []);
+  }, [appendSegmentEvent]);
 
   const startPolling = useCallback(() => {
     stopPolling();
@@ -606,7 +663,10 @@ export default function PipelineShowcaseScreen() {
     setGeneratedSpeechSeconds(0);
     setQueueDepth(0);
     setTtsSessionState('idle');
+    setLastCommittedSegmentIndex(null);
+    setSegmentEvents([]);
     setIngestProgress(null);
+    playbackStartedLoggedRef.current = false;
     clearSegmentTracker();
 
     try {
@@ -680,6 +740,13 @@ export default function PipelineShowcaseScreen() {
         emitAppendedEvents: true,
         onFramesAppended: (event) => {
           setGeneratedSpeechSeconds(event.totalSamplesWritten / ttsSampleRate);
+          if (
+            !playbackStartedLoggedRef.current &&
+            event.totalSamplesWritten > 0
+          ) {
+            playbackStartedLoggedRef.current = true;
+            appendSegmentEvent('Playback started');
+          }
         },
         onError: (event) => {
           setError(event.message);
@@ -783,6 +850,7 @@ export default function PipelineShowcaseScreen() {
       setIsStarting(false);
     }
   }, [
+    appendSegmentEvent,
     cleanupRuntimeResources,
     clearSegmentTracker,
     isRunning,
@@ -1281,10 +1349,53 @@ export default function PipelineShowcaseScreen() {
                 </Text>
               )}
             </View>
+            <Text style={styles.pipelineHintText}>
+              Speech starts after committed segments, not for every partial
+              word.
+            </Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>6. Live Metrics</Text>
+            <Text style={styles.sectionTitle}>6. Pipeline Flow</Text>
+            <View style={styles.stepRow}>
+              {pipelineSteps.map((step) => (
+                <View
+                  key={step.key}
+                  style={[
+                    styles.stepChip,
+                    step.active && styles.stepChipActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stepChipText,
+                      step.active && styles.stepChipTextActive,
+                    ]}
+                  >
+                    {step.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.transcriptLabel}>Recent Segment Events</Text>
+            {segmentEvents.length > 0 ? (
+              <View style={styles.eventList}>
+                {segmentEvents.map((event, idx) => (
+                  <Text key={`${event}_${idx}`} style={styles.eventItemText}>
+                    {event}
+                  </Text>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.hint}>
+                No committed segments yet. Events appear here as segments are
+                pushed to TTS.
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>7. Live Metrics</Text>
             <View style={styles.metricGrid}>
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>processedSegments</Text>

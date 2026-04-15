@@ -189,6 +189,50 @@ export const styles = StyleSheet.create({
     color: '#6E6E73',
     fontStyle: 'italic',
   },
+  pipelineHintText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#5E5E64',
+  },
+  stepRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  stepChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F7F7F9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  stepChipActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#EAF3FF',
+  },
+  stepChipText: {
+    fontSize: 12,
+    color: '#4A4A4D',
+    fontWeight: '600',
+  },
+  stepChipTextActive: {
+    color: '#0058B6',
+  },
+  eventList: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D8D8DC',
+    backgroundColor: '#FCFCFD',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  eventItemText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#2C2C2E',
+  },
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
