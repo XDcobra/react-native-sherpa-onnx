@@ -129,7 +129,7 @@ import {
 const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
 
 // Cheap check of required files / model type before loading weights.
-const det = await detectSttModel(modelPath);
+const det = await detectSttModel({ kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' });
 if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
 // Loads the offline recognizer; tune threads / int8 / provider per device.
@@ -206,19 +206,21 @@ Signatures below are exported from **`react-native-sherpa-onnx/stt`**. Reading t
 
 ### Detection and factory
 
-#### `detectSttModel(modelPath, options?)`
+#### `detectSttModel(source, options?)`
 
 ```ts
 function detectSttModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { preferInt8?: boolean; modelType?: STTModelType; assetName?: string; debug?: boolean }
 ): Promise<SttDetectModelResult>;
 ```
 
 ```ts
-const det = await detectSttModel({ type: 'asset', path: 'models/sherpa-onnx-whisper-tiny-en' });
+const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/sherpa-onnx-whisper-tiny-en' });
 console.log(det.success, det.modelType, det.detectedModels);
 ```
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 #### `createSTT(options)`
 

@@ -144,6 +144,8 @@ try {
 
 File-based detection **without** initializing the engine. Use before `createTTS` to get `modelType` and init the right `modelOptions`.
 
+For `FileSource` resolution problems, this promise can reject with `FILEIO_*` errors before native model detection runs.
+
 ```ts
 function detectTtsModel(
   source: FileSource,

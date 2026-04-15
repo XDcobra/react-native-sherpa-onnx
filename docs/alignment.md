@@ -105,7 +105,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
-const det = await detectSttModel(modelPath);
+const det = await detectSttModel({ kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' });
 if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
 const stt = await createSTT({
@@ -226,6 +226,8 @@ function detectAlignmentModel(
 ```
 
 The result includes `isStreaming: false` (alignment is always offline).
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 ```ts
 const det = await detectAlignmentModel({

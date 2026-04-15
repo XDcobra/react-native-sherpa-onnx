@@ -171,21 +171,23 @@ All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`de
 
 ### Detection and initialization
 
-#### `detectSttModel(modelPath, options?)`
+#### `detectSttModel(source, options?)`
 
 ```ts
 function detectSttModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: { preferInt8?: boolean; modelType?: STTModelType; assetName?: string; debug?: boolean }
 ): Promise<SttDetectModelResult>;
 ```
 
 ```ts
-const det = await detectSttModel({ type: 'asset', path: 'models/streaming-zipformer-en' });
+const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/streaming-zipformer-en' });
 console.log(det.success, det.modelType);
 ```
 
 Use this first when you need robust model-type selection before creating a streaming engine.
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 #### `createStreamingSTT(options)`
 

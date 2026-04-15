@@ -130,6 +130,8 @@ function detectEnhancementModel(
 
 The result includes `isStreaming: false` (enhancement is always offline).
 
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+
 ```ts
 const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },

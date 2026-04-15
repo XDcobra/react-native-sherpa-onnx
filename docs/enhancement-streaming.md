@@ -113,11 +113,11 @@ Signatures below are exported from **`react-native-sherpa-onnx/enhancement`** un
 
 ### Detection
 
-#### `detectEnhancementModel(modelPath, options?)`
+#### `detectEnhancementModel(source, options?)`
 
 ```ts
 function detectEnhancementModel(
-  modelPath: ModelPathConfig,
+  source: FileSource,
   options?: {
     modelType?: EnhancementModelType | 'auto';
     assetName?: string;
@@ -127,7 +127,7 @@ function detectEnhancementModel(
 
 ```ts
 const det = await detectEnhancementModel(
-  { type: 'asset', path: 'models/sherpa-onnx-speech-enhancement-gtcrn' },
+  { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
 console.log(det.success, det.modelType, det.detectedModels);
@@ -135,10 +135,12 @@ console.log(det.success, det.modelType, det.detectedModels);
 
 ```ts
 const det2 = await detectEnhancementModel(
-  { type: 'file', path: '/data/enhancement-pack' },
+  { kind: 'fs', path: '/data/enhancement-pack' },
   { modelType: 'auto', assetName: 'sherpa-onnx-speech-enhancement-gtcrn-int8' }
 );
 ```
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 ### Initialization
 

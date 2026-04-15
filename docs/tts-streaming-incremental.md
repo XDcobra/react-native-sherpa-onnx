@@ -144,6 +144,8 @@ function detectTtsModel(
 
 For TTS detections, `isStreaming` is always `true`.
 
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+
 ## Factories
 
 ### `createIncrementalStreamingTTS(options)`

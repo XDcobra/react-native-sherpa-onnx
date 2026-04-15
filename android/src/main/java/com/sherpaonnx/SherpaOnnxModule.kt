@@ -18,6 +18,8 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.fileio.FileIOErrorCodes
+import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
@@ -215,17 +217,36 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val dir = when (base) {
         "cache" -> reactApplicationContext.cacheDir
-        "documents" -> java.io.File(reactApplicationContext.filesDir, "Documents")
+        "documents" -> java.io.File(reactApplicationContext.filesDir, "docs")
         "files" -> reactApplicationContext.filesDir
         "tmp" -> java.io.File(reactApplicationContext.cacheDir, "tmp")
         "externalFiles" -> reactApplicationContext.getExternalFilesDir(null)
-          ?: reactApplicationContext.filesDir
-        else -> throw IllegalArgumentException("Unknown AppBaseDir: $base")
+          ?: throw FileIOException(
+            FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+            "No external files directory available"
+          )
+        else -> throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
+          "Unknown AppBaseDir: $base"
+        )
       }
-      if (!dir.exists()) dir.mkdirs()
+
+      if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+        throw FileIOException(
+          FileIOErrorCodes.WRITE_ERROR,
+          "Failed to create app base directory: ${dir.absolutePath}"
+        )
+      }
+
       promise.resolve(dir.absolutePath)
+    } catch (e: FileIOException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
-      promise.reject("RESOLVE_APP_BASE_DIR_ERROR", e.message, e)
+      promise.reject(
+        FileIOErrorCodes.RESOLVE_ERROR,
+        "Failed to resolve app base directory: ${e.message}",
+        e
+      )
     }
   }
 

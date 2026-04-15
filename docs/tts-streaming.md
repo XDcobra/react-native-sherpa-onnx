@@ -187,6 +187,8 @@ File-based detection and validation **without** initializing the TTS engine: no 
 
 For TTS detections, `isStreaming` is always `true`.
 
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+
 ```ts
 const result = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/my-tts-model' });
 if (!result.success) console.warn(result.error);

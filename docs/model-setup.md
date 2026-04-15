@@ -209,6 +209,8 @@ function detectSttModel(
 
 Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
 
+For `FileSource` resolution problems (unsupported location kind/platform, traversal, permissions, path resolution), the promise can reject with `FILEIO_*` errors before native model detection runs.
+
 #### `detectTtsModel(source, options?)`
 
 Detect the TTS model type without loading.
@@ -230,6 +232,8 @@ function detectTtsModel(
 ```
 
 Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors (for example `FILEIO_UNSUPPORTED_ON_PLATFORM`, `FILEIO_PATH_TRAVERSAL_BLOCKED`, `FILEIO_PERMISSION_DENIED`, `FILEIO_NOT_FOUND`, `FILEIO_RESOLVE_ERROR`).
 
 `lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
 

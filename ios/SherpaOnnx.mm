@@ -11,6 +11,7 @@
 
 #import "SherpaOnnx.h"
 #import "assets/bridge/SherpaOnnx+Assets.h"
+#import "fileio/FileIOResolver.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
@@ -255,26 +256,49 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
     NSString *dirPath = nil;
     if ([base isEqualToString:@"cache"]) {
         dirPath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
-    } else if ([base isEqualToString:@"documents"] || [base isEqualToString:@"externalFiles"]) {
+    } else if ([base isEqualToString:@"documents"]) {
         dirPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     } else if ([base isEqualToString:@"files"]) {
-        dirPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+        dirPath = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
     } else if ([base isEqualToString:@"tmp"]) {
         dirPath = NSTemporaryDirectory();
+    } else if ([base isEqualToString:@"externalFiles"]) {
+        reject(kFIOErrUnsupportedOnPlatform, @"externalFiles is not supported on iOS", nil);
+        return;
     } else {
-        reject(@"RESOLVE_APP_BASE_DIR_ERROR",
+        reject(kFIOErrUnsupportedLocationKind,
                [NSString stringWithFormat:@"Unknown AppBaseDir: %@", base], nil);
         return;
     }
     if (!dirPath) {
-        reject(@"RESOLVE_APP_BASE_DIR_ERROR", @"Could not resolve directory", nil);
+        reject(kFIOErrResolveError, @"Could not resolve directory", nil);
         return;
     }
-    // Ensure the directory exists
+
+    // Ensure the directory exists and reject if creation fails.
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:dirPath]) {
-        [fm createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:nil];
+    BOOL isDirectory = NO;
+    BOOL exists = [fm fileExistsAtPath:dirPath isDirectory:&isDirectory];
+    if (exists && !isDirectory) {
+        reject(kFIOErrResolveError,
+               [NSString stringWithFormat:@"Resolved app base path is not a directory: %@", dirPath],
+               nil);
+        return;
     }
+    if (!exists) {
+        NSError *createError = nil;
+        BOOL created = [fm createDirectoryAtPath:dirPath
+                     withIntermediateDirectories:YES
+                                      attributes:nil
+                                           error:&createError];
+        if (!created) {
+            reject(kFIOErrWriteError,
+                   [NSString stringWithFormat:@"Failed to create app base directory: %@", dirPath],
+                   createError);
+            return;
+        }
+    }
+
     resolve(dirPath);
 }
 

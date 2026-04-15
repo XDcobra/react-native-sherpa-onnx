@@ -1105,10 +1105,13 @@ export interface Spec extends TurboModule {
    * Return the absolute filesystem path for an {@link AppBaseDir} name.
    * Used by detect utilities to resolve `{ kind: 'app', base, path }` sources.
    *
-   * Android: cache → Context.cacheDir, documents → filesDir/Documents (/data/data/pkg/files/Documents),
-   *          files → filesDir, tmp → cacheDir/tmp, externalFiles → getExternalFilesDir(null).
-   * iOS:     cache → NSCachesDirectory, documents → NSDocumentDirectory,
-   *          files → NSLibraryDirectory, tmp → NSTemporaryDirectory, externalFiles → NSDocumentDirectory.
+   * Android: cache -> Context.cacheDir, documents -> filesDir/docs, files -> filesDir,
+   *          tmp -> cacheDir/tmp, externalFiles -> getExternalFilesDir(null).
+   * iOS:     cache -> NSCachesDirectory, documents -> NSDocumentDirectory,
+   *          files -> NSApplicationSupportDirectory, tmp -> NSTemporaryDirectory.
+   *
+   * Rejects with `FILEIO_*` errors (e.g. `FILEIO_UNSUPPORTED_ON_PLATFORM`,
+   * `FILEIO_UNSUPPORTED_LOCATION_KIND`, `FILEIO_WRITE_ERROR`, `FILEIO_RESOLVE_ERROR`).
    */
   resolveAppBaseDir(base: string): Promise<string>;
 
