@@ -1,6 +1,10 @@
 package com.sherpaonnx
 
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
@@ -70,7 +74,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
-  private val pcmPlayerService = PcmPlayerService().also {
+  private val pcmPlayerService = PcmPlayerService(reactApplicationContext).also {
     it.onPlayerEnded = { playerId, bufferId ->
       try {
         val eventEmitter = reactApplicationContext
@@ -99,6 +103,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
+
+  private fun normalizeInputDeviceKind(type: Int): String {
+    return when (type) {
+      AudioDeviceInfo.TYPE_BUILTIN_MIC -> "built_in_mic"
+      AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired_headset"
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth"
+      AudioDeviceInfo.TYPE_USB_DEVICE,
+      AudioDeviceInfo.TYPE_USB_ACCESSORY,
+      AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
+      AudioDeviceInfo.TYPE_TELEPHONY -> "telephony"
+      AudioDeviceInfo.TYPE_HDMI,
+      AudioDeviceInfo.TYPE_HDMI_ARC,
+      AudioDeviceInfo.TYPE_HDMI_EARC -> "hdmi"
+      AudioDeviceInfo.TYPE_FM_TUNER -> "fm"
+      AudioDeviceInfo.TYPE_LINE_ANALOG,
+      AudioDeviceInfo.TYPE_LINE_DIGITAL -> "line"
+      else -> "unknown"
+    }
+  }
 
   private external fun nativeInstallJSI(jsiRuntimePointer: Long, registry: Any): Boolean
 
@@ -1627,8 +1651,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         )
       }
 
+      val preferredInputDeviceId = options
+        ?.takeIf { it.hasKey("inputDeviceId") && !it.isNull("inputDeviceId") }
+        ?.getString("inputDeviceId")
+        ?.trim()
+        ?.toIntOrNull()
+
       val sink = com.sherpaonnx.audio.pipeline.MicToLiveBufferSink(
+        context = reactApplicationContext,
         liveEntry = liveEntry,
+        preferredInputDeviceId = preferredInputDeviceId,
         onError = { msg ->
           val eventEmitter = reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -1656,6 +1688,38 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       micToLiveSink?.stop()
       micToLiveSink = null
       promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
+    }
+  }
+
+  override fun listAvailableInputDevices(promise: Promise) {
+    try {
+      val audioManager = reactApplicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
+      } else {
+        emptyList()
+      }
+
+      val routedInputId = micToLiveSink?.currentRoutedDeviceId()
+      val defaultInputId = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.id
+        ?: devices.firstOrNull()?.id
+      val selectedInputId = routedInputId ?: defaultInputId
+
+      val out = Arguments.createArray()
+      for (device in devices) {
+        val map = Arguments.createMap()
+        map.putString("id", device.id.toString())
+        map.putString("name", device.productName?.toString() ?: "Input ${device.id}")
+        map.putString("kind", normalizeInputDeviceKind(device.type))
+        map.putBoolean("selected", selectedInputId != null && device.id == selectedInputId)
+        map.putBoolean("default", device.type == AudioDeviceInfo.TYPE_BUILTIN_MIC)
+        map.putBoolean("canSelect", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+        out.pushMap(map)
+      }
+
+      promise.resolve(out)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
     }
@@ -2214,9 +2278,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     playerId: String,
     audioBufferId: String,
     volume: Double,
+    options: ReadableMap?,
     promise: Promise
   ) {
-    pcmPlayerService.create(playerId, audioBufferId, volume, promise)
+    pcmPlayerService.create(playerId, audioBufferId, volume, options, promise)
+  }
+
+  override fun listAvailableOutputDevices(promise: Promise) {
+    pcmPlayerService.listAvailableOutputDevices(promise)
   }
 
   override fun pausePcmPlayer(playerId: String, promise: Promise) {

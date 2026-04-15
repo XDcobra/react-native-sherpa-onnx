@@ -22,6 +22,16 @@ static NSString *const kPAMicErrBufferNotFound = @"AUDIO_BUFFER_NOT_FOUND";
 static NSString *const kPAMicErrInvalidState = @"AUDIO_INVALID_STATE";
 static NSString *const kPAMicErrCaptureError = @"AUDIO_CAPTURE_ERROR";
 
+static NSString *pa_input_kind_for_port(AVAudioSessionPort portType) {
+  if ([portType isEqualToString:AVAudioSessionPortBuiltInMic]) return @"built_in_mic";
+  if ([portType isEqualToString:AVAudioSessionPortHeadsetMic]) return @"wired_headset";
+  if ([portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+      [portType isEqualToString:AVAudioSessionPortBluetoothLE]) return @"bluetooth";
+  if ([portType isEqualToString:AVAudioSessionPortUSBAudio]) return @"usb";
+  if ([portType isEqualToString:AVAudioSessionPortLineIn]) return @"line";
+  return @"unknown";
+}
+
 static std::vector<int16_t> pa_mic_resample_int16(
   const int16_t *input,
   size_t inputSize,
@@ -168,6 +178,32 @@ static void paMicAQInputCallback(
       return;
     }
 
+    NSString *requestedInputDeviceId = [options[@"inputDeviceId"] isKindOfClass:[NSString class]]
+      ? options[@"inputDeviceId"]
+      : nil;
+    if (requestedInputDeviceId != nil && requestedInputDeviceId.length > 0) {
+      NSArray<AVAudioSessionPortDescription *> *availableInputs = session.availableInputs ?: @[];
+      AVAudioSessionPortDescription *preferredInput = nil;
+      for (AVAudioSessionPortDescription *input in availableInputs) {
+        if ([input.UID isEqualToString:requestedInputDeviceId]) {
+          preferredInput = input;
+          break;
+        }
+      }
+
+      if (preferredInput != nil) {
+        NSError *preferredErr = nil;
+        BOOL applied = [session setPreferredInput:preferredInput error:&preferredErr];
+        if (!applied && preferredErr != nil) {
+          RCTLogWarn(@"startMicToLiveAudioBuffer: preferred input route request failed for %@ (%@)",
+                     requestedInputDeviceId,
+                     preferredErr.localizedDescription);
+        }
+      } else {
+        RCTLogWarn(@"startMicToLiveAudioBuffer: inputDeviceId %@ not found in availableInputs", requestedInputDeviceId);
+      }
+    }
+
     AudioStreamBasicDescription fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.mFormatID = kAudioFormatLinearPCM;
@@ -229,6 +265,58 @@ static void paMicAQInputCallback(
                                   withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                                         error:nil];
   resolve(nil);
+}
+
+- (void)listAvailableInputDevices:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    AVAudioSessionRouteDescription *route = session.currentRoute;
+    NSString *selectedInputId = route.inputs.firstObject.UID;
+
+    NSArray<AVAudioSessionPortDescription *> *availableInputs = session.availableInputs ?: @[];
+    NSMutableArray<NSMutableDictionary *> *out = [NSMutableArray arrayWithCapacity:availableInputs.count];
+
+    for (AVAudioSessionPortDescription *input in availableInputs) {
+      BOOL isDefault = [input.portType isEqualToString:AVAudioSessionPortBuiltInMic];
+      BOOL isSelected = selectedInputId != nil && [input.UID isEqualToString:selectedInputId];
+      NSMutableDictionary *entry = [@{
+        @"id": input.UID ?: @"",
+        @"name": input.portName ?: @"Input",
+        @"kind": pa_input_kind_for_port(input.portType),
+        @"selected": @(isSelected),
+        @"default": @(isDefault),
+        @"canSelect": @YES,
+      } mutableCopy];
+      [out addObject:entry];
+    }
+
+    if (out.count > 0) {
+      BOOL hasSelected = NO;
+      for (NSDictionary *entry in out) {
+        if ([entry[@"selected"] boolValue]) {
+          hasSelected = YES;
+          break;
+        }
+      }
+      if (!hasSelected) {
+        NSUInteger fallbackIndex = NSNotFound;
+        for (NSUInteger i = 0; i < out.count; i++) {
+          if ([out[i][@"default"] boolValue]) {
+            fallbackIndex = i;
+            break;
+          }
+        }
+        if (fallbackIndex == NSNotFound) fallbackIndex = 0;
+        out[fallbackIndex][@"selected"] = @YES;
+      }
+    }
+
+    resolve(out);
+  } @catch (NSException *e) {
+    reject(kPAMicErrCaptureError, e.reason, nil);
+  }
 }
 
 #endif

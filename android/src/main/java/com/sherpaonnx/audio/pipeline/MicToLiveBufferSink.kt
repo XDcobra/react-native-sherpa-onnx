@@ -1,8 +1,12 @@
 package com.sherpaonnx.audio.pipeline
 
+import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -16,7 +20,9 @@ import kotlin.concurrent.thread
  * JS event emission is handled centrally by LiveEntry append callbacks, independent of producer.
  */
 class MicToLiveBufferSink(
+  private val context: Context,
   private val liveEntry: LiveEntry,
+  private val preferredInputDeviceId: Int? = null,
   private val onError: ((String) -> Unit)? = null,
   private val logTag: String = "MicToLiveBufferSink"
 ) {
@@ -28,6 +34,16 @@ class MicToLiveBufferSink(
   private var running = false
   private var audioRecord: AudioRecord? = null
   private var captureThread: Thread? = null
+  @Volatile
+  private var lastRoutedInputDeviceId: Int = -1
+
+  private fun findInputDeviceById(deviceId: Int): AudioDeviceInfo? {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+      ?: return null
+    return audioManager
+      .getDevices(AudioManager.GET_DEVICES_INPUTS)
+      .firstOrNull { it.id == deviceId }
+  }
 
   fun start() {
     if (running) {
@@ -67,6 +83,19 @@ class MicToLiveBufferSink(
       return
     }
 
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && preferredInputDeviceId != null) {
+      val preferred = findInputDeviceById(preferredInputDeviceId)
+      if (preferred != null) {
+        val applied = record.setPreferredDevice(preferred)
+        Log.i(
+          logTag,
+          "Requested preferred input device id=$preferredInputDeviceId applied=$applied"
+        )
+      } else {
+        Log.w(logTag, "Preferred input device id=$preferredInputDeviceId not found; using default route")
+      }
+    }
+
     audioRecord = record
     running = true
 
@@ -74,6 +103,9 @@ class MicToLiveBufferSink(
       val shortBuf = ShortArray(bufSize / 2)
       try {
         record.startRecording()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          lastRoutedInputDeviceId = record.routedDevice?.id ?: -1
+        }
         while (running && liveEntry.state == LiveEntry.State.RECORDING &&
                record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
           val read = record.read(shortBuf, 0, shortBuf.size)
@@ -103,6 +135,7 @@ class MicToLiveBufferSink(
         try { record.stop() } catch (_: Exception) {}
         record.release()
         audioRecord = null
+        lastRoutedInputDeviceId = -1
       }
     }
   }
@@ -116,7 +149,15 @@ class MicToLiveBufferSink(
     captureThread?.join(2000)
     captureThread = null
     audioRecord = null
+    lastRoutedInputDeviceId = -1
     liveEntry.flushFramesAppendedEvents()
+  }
+
+  fun currentRoutedDeviceId(): Int? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+    val routed = audioRecord?.routedDevice?.id
+    if (routed != null) return routed
+    return if (lastRoutedInputDeviceId >= 0) lastRoutedInputDeviceId else null
   }
 
   val isRunning: Boolean get() = running
