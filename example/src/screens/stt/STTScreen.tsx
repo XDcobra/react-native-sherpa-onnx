@@ -74,6 +74,7 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   startWebAudioFilePlayback,
   stopWebAudioPlayback,
@@ -488,14 +489,23 @@ export default function STTScreen() {
     setTranscriptionResult(null);
 
     try {
-      let pathToTranscribe: string;
+      let sourceToTranscribe: FileSource;
 
       if (customAudioPath) {
-        pathToTranscribe = customAudioPath;
+        const trimmed = customAudioPath.trim();
+        if (trimmed.startsWith('content://')) {
+          sourceToTranscribe = { kind: 'contentUri', uri: trimmed };
+        } else if (trimmed.startsWith('file://')) {
+          const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
+          sourceToTranscribe = { kind: 'fs', path: filePath };
+        } else {
+          sourceToTranscribe = { kind: 'fs', path: trimmed };
+        }
       } else {
         // Resolve audio file path (using auto detection - tries asset first, then file system)
         const audioPathConfig = autoModelPath(selectedAudio!.id);
-        pathToTranscribe = await resolveModelPath(audioPathConfig);
+        const resolvedAudioPath = await resolveModelPath(audioPathConfig);
+        sourceToTranscribe = { kind: 'fs', path: resolvedAudioPath };
       }
 
       const engine = sttEngineRef.current;
@@ -504,61 +514,79 @@ export default function STTScreen() {
         setError('STT engine not initialized');
         return;
       }
-      const { bufferId } = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: pathToTranscribe,
-      });
+
+      let audioBufferId: string | null = null;
       const textRef = await createEmptyOfflineTextBuffer();
       const textBufferId = textRef.bufferId;
       try {
-        await engine.transcribe(bufferId, textBufferId);
+        const audioRef = await createOfflineAudioBufferFromFile(
+          sourceToTranscribe,
+          {
+            targetSampleRateHz: LIVE_SAMPLE_RATE,
+            forceMono: true,
+          }
+        );
+        audioBufferId = audioRef.bufferId;
+
+        await engine.transcribe(audioRef, textRef);
       } finally {
-        await releasePipelineAudioBuffer(bufferId);
+        if (audioBufferId != null) {
+          await releasePipelineAudioBuffer(audioBufferId).catch(() => {});
+        }
       }
-      const rawInfo = await getPipelineTextBufferInfo(textBufferId);
-      const info = rawInfo as OfflineTextBufferInfo;
-      const [text, tokens, timestamps, durations, lang, emotion, event] =
-        await Promise.all([
-          info.utf16Length > 0
-            ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
-            : Promise.resolve(''),
-          info.tokenCount > 0
-            ? getOfflineTextBufferTokensSlice(textBufferId, 0, info.tokenCount)
-            : Promise.resolve([]),
-          info.timestampCount > 0
-            ? getOfflineTextBufferTimestampsSlice(
-                textBufferId,
-                0,
-                info.timestampCount
-              )
-            : Promise.resolve([]),
-          info.durationCount > 0
-            ? getOfflineTextBufferDurationsSlice(
-                textBufferId,
-                0,
-                info.durationCount
-              )
-            : Promise.resolve([]),
-          info.hasLang
-            ? getOfflineTextBufferLang(textBufferId)
-            : Promise.resolve(''),
-          info.hasEmotion
-            ? getOfflineTextBufferEmotion(textBufferId)
-            : Promise.resolve(''),
-          info.hasEvent
-            ? getOfflineTextBufferEvent(textBufferId)
-            : Promise.resolve(''),
-        ]);
-      await releasePipelineTextBuffer(textBufferId);
-      setTranscriptionResult({
-        text,
-        tokens,
-        timestamps,
-        durations,
-        lang,
-        emotion,
-        event,
-      });
+
+      try {
+        const rawInfo = await getPipelineTextBufferInfo(textBufferId);
+        const info = rawInfo as OfflineTextBufferInfo;
+        const [text, tokens, timestamps, durations, lang, emotion, event] =
+          await Promise.all([
+            info.utf16Length > 0
+              ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
+              : Promise.resolve(''),
+            info.tokenCount > 0
+              ? getOfflineTextBufferTokensSlice(
+                  textBufferId,
+                  0,
+                  info.tokenCount
+                )
+              : Promise.resolve([]),
+            info.timestampCount > 0
+              ? getOfflineTextBufferTimestampsSlice(
+                  textBufferId,
+                  0,
+                  info.timestampCount
+                )
+              : Promise.resolve([]),
+            info.durationCount > 0
+              ? getOfflineTextBufferDurationsSlice(
+                  textBufferId,
+                  0,
+                  info.durationCount
+                )
+              : Promise.resolve([]),
+            info.hasLang
+              ? getOfflineTextBufferLang(textBufferId)
+              : Promise.resolve(''),
+            info.hasEmotion
+              ? getOfflineTextBufferEmotion(textBufferId)
+              : Promise.resolve(''),
+            info.hasEvent
+              ? getOfflineTextBufferEvent(textBufferId)
+              : Promise.resolve(''),
+          ]);
+
+        setTranscriptionResult({
+          text,
+          tokens,
+          timestamps,
+          durations,
+          lang,
+          emotion,
+          event,
+        });
+      } finally {
+        await releasePipelineTextBuffer(textBufferId).catch(() => {});
+      }
     } catch (err) {
       const msg =
         (err instanceof Error ? err.message : (err as any)?.message) ?? '';
