@@ -11,8 +11,10 @@ import {
   assetModelPath,
   fileModelPath,
   getDefaultModelPath,
+  resolveModelPath,
   type ModelPathConfig,
 } from 'react-native-sherpa-onnx';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
@@ -88,4 +90,18 @@ export function getFileModelPath(
     : getDefaultModelPath();
   const path = `${resolvedBase}/${modelName}`.replace(/\/+/g, '/');
   return fileModelPath(path);
+}
+
+/**
+ * Resolve a {@link ModelPathConfig} to a {@link FileSource} suitable for detect APIs.
+ * For `file` type, converts directly. For `asset`/`auto`, resolves the path first.
+ */
+export async function toDetectSource(
+  config: ModelPathConfig
+): Promise<FileSource> {
+  if (config.type === 'file') {
+    return { kind: 'fs', path: config.path };
+  }
+  const resolved = await resolveModelPath(config);
+  return { kind: 'fs', path: resolved };
 }

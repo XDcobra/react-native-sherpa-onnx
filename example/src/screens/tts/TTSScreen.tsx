@@ -58,6 +58,7 @@ import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../../modelConfig';
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
@@ -678,7 +679,9 @@ export default function TTSScreen() {
         });
       }
 
-      const detectResult = await detectTtsModel(modelPath);
+      const detectResult = await detectTtsModel(
+        await toDetectSource(modelPath)
+      );
       const normalizedDetected =
         detectResult.success && detectResult.detectedModels?.length
           ? detectResult.detectedModels.map((m) => ({

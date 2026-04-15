@@ -42,6 +42,7 @@ import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../../modelConfig';
 import { AUDIO_FILES, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -297,9 +298,10 @@ export default function EnhancementScreen() {
         modelType: 'auto',
       });
 
-      const detectResult = await detectEnhancementModel(modelPath, {
-        modelType: 'auto',
-      });
+      const detectResult = await detectEnhancementModel(
+        await toDetectSource(modelPath),
+        { modelType: 'auto' }
+      );
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         await engine.destroy();
         engineRef.current = null;
@@ -394,9 +396,10 @@ export default function EnhancementScreen() {
         numThreads: NUM_THREADS,
         modelType: kind,
       });
-      const detectResult = await detectEnhancementModel(modelPath, {
-        modelType: kind,
-      });
+      const detectResult = await detectEnhancementModel(
+        await toDetectSource(modelPath),
+        { modelType: kind }
+      );
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         await engine.destroy();
         setErrorSource('init');

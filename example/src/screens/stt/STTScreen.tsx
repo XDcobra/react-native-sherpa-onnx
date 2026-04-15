@@ -30,7 +30,6 @@ import {
   createSTT,
   createStreamingSTT,
   detectSttModel,
-  getOnlineTypeOrNull,
   type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
 import type {
@@ -43,6 +42,7 @@ import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../../modelConfig';
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -95,6 +95,7 @@ export default function STTScreen() {
   >([]);
   const [selectedModelType, setSelectedModelType] =
     useState<STTModelType | null>(null);
+  const [isStreamingModel, setIsStreamingModel] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<'init' | 'transcribe' | null>(
@@ -145,8 +146,7 @@ export default function STTScreen() {
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
 
-  const isLiveSupported =
-    getOnlineTypeOrNull(selectedModelType ?? undefined) !== null;
+  const isLiveSupported = isStreamingModel;
 
   const buildTranscriptionResult = (
     text: string,
@@ -332,6 +332,7 @@ export default function STTScreen() {
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
+    setIsStreamingModel(false);
 
     try {
       // Release previous engine if switching to another model
@@ -354,7 +355,9 @@ export default function STTScreen() {
         numThreads: STT_NUM_THREADS,
       });
 
-      const detectResult = await detectSttModel(modelPath);
+      const detectResult = await detectSttModel(
+        await toDetectSource(modelPath)
+      );
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         await engine.destroy();
         setErrorSource('init');
@@ -374,6 +377,7 @@ export default function STTScreen() {
       setDetectedModels(normalizedDetected);
       setCurrentModelFolder(modelFolder);
       setSelectedModelForInit(modelFolder);
+      setIsStreamingModel(detectResult.isStreaming);
       if (loadedType) {
         setSelectedModelType(loadedType);
       } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
@@ -688,8 +692,7 @@ export default function STTScreen() {
           : getFileModelPath(currentModelFolder, ModelCategory.Stt)
         : getAssetModelPath(currentModelFolder);
 
-      const onlineType = getOnlineTypeOrNull(selectedModelType);
-      if (!onlineType) return;
+      const onlineType: 'auto' = 'auto';
 
       engine = await createStreamingSTT({
         modelPath: modelPathConfig,
