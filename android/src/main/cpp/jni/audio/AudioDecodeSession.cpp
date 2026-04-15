@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <sys/stat.h>
 #include <vector>
 
 #ifdef __ANDROID__
@@ -186,7 +187,7 @@ AudioDecodeResult decodeWavFastPath(
       framesDecoded += (int)read;
 
       if (onProgress) {
-        int pct = totalSamples > 0 ? (int)std::min(100LL, (framesDecoded * 100) / totalSamples) : 0;
+        int pct = totalSamples > 0 ? (int)std::min<int64_t>(100, (framesDecoded * 100) / totalSamples) : 0;
         onProgress(framesDecoded, totalSamples, pct);
       }
     }
@@ -207,7 +208,7 @@ AudioDecodeResult decodeWavFastPath(
       framesDecoded += (int)read;
 
       if (onProgress) {
-        int pct = totalSamples > 0 ? (int)std::min(100LL, (framesDecoded * 100) / totalSamples) : 0;
+        int pct = totalSamples > 0 ? (int)std::min<int64_t>(100, (framesDecoded * 100) / totalSamples) : 0;
         onProgress(framesDecoded, totalSamples, pct);
       }
     }
@@ -397,7 +398,7 @@ AudioDecodeResult decodeFileFFmpeg(
 
         if (onProgress) {
           int pct = totalFramesEstimate > 0
-            ? (int)std::min(100LL, (totalFramesDecoded * 100) / totalFramesEstimate)
+            ? (int)std::min<int64_t>(100, (totalFramesDecoded * 100) / totalFramesEstimate)
             : 0;
           onProgress(totalFramesDecoded, totalFramesEstimate, pct);
         }
