@@ -1,2 +1,7 @@
 export { createPcmPlayer } from './pcmPlayer';
-export type { PcmPlayer, PcmPlayerOptions, PcmPlayerFeed } from './types';
+export type {
+  PcmPlayer,
+  PcmPlayerOptions,
+  PcmPlayerAudioBuffer,
+  PcmPlayerEndedEvent,
+} from './types';

@@ -1,13 +1,13 @@
 package com.sherpaonnx.tts.facade
 
 import com.facebook.react.bridge.Promise
-import com.sherpaonnx.tts.core.SherpaOnnxTtsHelper
+import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 
 /**
  * Common TTS facade: init, shutdown, detect/catalog, metadata, unload ([SherpaOnnxTtsCoordinator]).
  */
 internal class SherpaOnnxCommonTtsHelper(
-  private val core: SherpaOnnxTtsHelper
+  private val core: SherpaOnnxTtsCoordinator
 ) {
   fun initializeTts(
     instanceId: String,

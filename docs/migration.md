@@ -1,5 +1,11 @@
 # Migration Guides
 
+## AudioBuffer JSI / ArrayBuffer
+
+AudioBuffer sample transport is now synchronous and JSI-backed (`Float32Array` / `ArrayBuffer`) instead of bridge `number[]` payloads.
+
+See [migration/audiobuffer/audiobuffer-jsi-arraybuffer-migration.md](migration/audiobuffer/audiobuffer-jsi-arraybuffer-migration.md) for complete breaking changes and before/after code updates.
+
 ## STT/TTS model language lists (`ModelLanguage`)
 
 All model-language data and helpers live under **`react-native-sherpa-onnx/model-languages`**: **`ModelLanguage`**, per-model lists (e.g. `getWhisperLanguages`, `WHISPER_LANGUAGES`), and **`resolvePublicLanguageHints`**. Nothing in this area is re-exported from **`react-native-sherpa-onnx/stt`**. See **[model-languages.md](model-languages.md)** for usage and limitations (helpers are not authoritative for every checkpoint).
@@ -16,68 +22,84 @@ All model-language data and helpers live under **`react-native-sherpa-onnx/model
 
 ## Standalone PCM player (replacing TTS-bound player)
 
-The PCM player is no longer attached to `StreamingTtsEngine`. Use `createPcmPlayer` from `react-native-sherpa-onnx/pcm` for manual feed, or `playback: true` on streaming options for native playback.
+The PCM player is no longer attached to `StreamingTtsEngine`. It now plays from pipeline audio buffers (offline/live) and exposes full player controls (`pause`, `resume`, `seekToMs`, `restart`, `getPlaybackPositionMs`, `destroy`).
 
 ### Removed methods
 
 | Removed from `StreamingTtsEngine` | Replacement |
 |-----------------------------------|-------------|
-| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer({ sampleRate, feed: 'js' })` or `{ playback: true }` stream option |
-| `writePcmChunk(samples)` | `player.writePcmChunk(samples)` |
+| `startPcmPlayer(sampleRate, channels)` | `createPcmPlayer(audioBuffer, options?)` |
+| `writePcmChunk(samples)` | `appendSamplesToLiveAudioBuffer(liveBuffer, samples, sampleRate)` |
 | `stopPcmPlayer()` | `player.destroy()` |
 
 ### TurboModule renames
 
 | Before | After |
 |--------|-------|
-| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, sampleRate, channels, feed, ttsInstanceId)` |
-| `writeTtsPcmChunk(instanceId, samples)` | `writePcmChunk(playerId, samples)` |
+| `startTtsPcmPlayer(instanceId, sampleRate, channels)` | `createPcmPlayer(playerId, bufferId, volume)` |
+| `writeTtsPcmChunk(instanceId, samples)` | `appendSamplesToLiveAudioBuffer(...)` + live buffer cursor playback |
 | `stopTtsPcmPlayer(instanceId)` | `destroyPcmPlayer(playerId)` |
+
+Additional player controls:
+
+| New native method | Purpose |
+|-------------------|---------|
+| `seekPcmPlayerToMs(playerId, positionMs)` | Seek by milliseconds |
+| `restartPcmPlayer(playerId)` | Restart playback from beginning/start-of-available |
+| `getPcmPlayerPositionMs(playerId)` | Query current playback position |
 
 ### Before / After
 
-**Streaming + playback (preferred: native playback):**
+**Streaming + playback (native):**
 
 ```ts
 // Before
 await tts.startPcmPlayer(22050, 1);
 await tts.generateSpeechStream(text, opts, {
-  onChunk: (c) => tts.writePcmChunk(c.samples),
+  onChunk: (c) => {
+    // manual PCM push to deprecated TTS-bound player
+  },
   onEnd: () => tts.stopPcmPlayer(),
 });
 
-// After (native playback)
-const ctrl = await tts.generateSpeechStream(text, opts, {
-  onEnd: () => { /* done */ },
-}, { playback: true, emitChunks: false });
+// After (pipeline live buffer + standalone player)
+const liveAudio = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
+const player = await createPcmPlayer(liveAudio, {
+  onEnded: () => {
+    /* playback reached EOS */
+  },
+});
 
-// Pause / resume during playback:
-await ctrl.player?.pause();
-await ctrl.player?.resume();
-// ctrl.cancel() stops synthesis + destroys player
+await tts.generateSpeechStream(text, opts, {
+  onChunk: (c) => appendSamplesToLiveAudioBuffer(liveAudio, c.samples, c.sampleRate),
+  onEnd: async () => {
+    await finalizeLiveAudioBuffer(liveAudio);
+  },
+});
+
+await player.pause();
+await player.seekToMs(500);
+await player.resume();
 ```
 
-**Manual JS feed (non-TTS audio):**
+**Offline file playback with full controls:**
 
 ```ts
-// Before: not possible (PCM player was TTS-only)
-
-// After
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
-const player = await createPcmPlayer({ sampleRate: 16000, feed: 'js' });
-await player.writePcmChunk(someFloat32Samples);
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
+
+const audio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/input.wav',
+});
+
+const player = await createPcmPlayer(audio, {
+  onEnded: ({ playerId, bufferId }) => console.log(playerId, bufferId),
+});
+
+await player.seekToMs(1200);
+await player.restart();
 await player.destroy();
-```
-
-**Batch TTS playback (new):**
-
-```ts
-const audio = await tts.generateSpeech('Hello');
-const playback = await tts.playFromSink(audio.generation);
-// playback.player gives pause/resume/destroy control
-await playback.player.pause();
-await playback.player.resume();
-await playback.player.destroy();
 ```
 
 See [pcm-player.md](pcm-player.md) for standalone player details.
@@ -91,16 +113,16 @@ Streaming chunk payloads now deliver PCM as **`Float32Array`** instead of `numbe
 | Before | After |
 | --- | --- |
 | `chunk.samples` is `number[]` | `chunk.samples` is `Float32Array` |
-| `writePcmChunk(samples: number[])` | `writePcmChunk(samples: Float32Array \| number[])` |
+| Manual `number[]` processing | Typed-array-first (`Float32Array`) processing |
 
 ### Migration
 
-**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to `writePcmChunk` or another consumer that accepts `Float32Array`:
+**`onChunk` handler — no change needed** if you pass `chunk.samples` directly to a `Float32Array` consumer (for example `appendSamplesToLiveAudioBuffer`):
 
 ```ts
 onChunk: (chunk) => {
-  // chunk.samples is now Float32Array — works directly
-  void tts.writePcmChunk(chunk.samples);
+  // chunk.samples is now Float32Array
+  appendSamplesToLiveAudioBuffer(liveAudioBuffer, chunk.samples, chunk.sampleRate);
 },
 ```
 
@@ -181,6 +203,58 @@ The TurboModule methods **`batchTtsCatalogHints`** and **`nativeBatchTtsCatalogH
 
 Android and iOS share one native TTS detection implementation. The result map may include **`detectionSources`**: an array of short strings (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`) describing how the primary model kind was chosen. TypeScript exposes this as optional **`detectionSources?: readonly DetectionSource[]`** on **`detectTtsModel`**. Existing callers can ignore it; narrowing uses **`isDetectionSource`** when parsing unknown payloads.
 
+## STT and Speech Enhancement: model detection (TTS-aligned)
+
+Native detection for **STT** and **Speech Enhancement** now follows the same pattern as **TTS**: optional **`modelDir`** + optional **`assetName`** (at least one required), shared **catalog name heuristics** (**`languages`**, **`quantization`** on the wire), optional **`detectionSources`**, and a **name-only** branch when there is no directory scan ( **`success: false`** until a real folder is used for init — same idea as TTS).
+
+### TurboModule / `NativeSherpaOnnx`
+
+| Method | Before (typical) | After |
+| --- | --- | --- |
+| **`detectSttModel`** | `(modelDir, preferInt8?, modelType?)` | `(modelDir, assetName \| null, modelType?, preferInt8?, debug?)` |
+| **`detectEnhancementModel`** | `(modelDir, modelType?)` | `(modelDir, assetName \| null, modelType?)` |
+
+### Public JS facades (`…/stt`, `…/enhancement`)
+
+| API | Before | After |
+| --- | --- | --- |
+| **`detectSttModel`** | `options`: `preferInt8`, `modelType` only | Also optional **`assetName`** (overrides basename derived from `modelPath.path`), **`debug`**. Result adds optional **`detectionSources`**, **`quantization`**, and **`languages`** as **`PublicLanguageHint[]`** (native raw strings normalized via `resolvePublicLanguageHints`). |
+| **`detectEnhancementModel`** | `options`: `modelType` only | Also optional **`assetName`**. Result adds optional **`detectionSources`**, **`languages`**, **`quantization`** (same shared catalog pipeline as TTS/STT). |
+
+Direct TurboModule callers should pass **`null`** for **`assetName`** when unused. Facades derive a default **`assetName`** from the last segment of **`modelPath.path`** when you omit **`options.assetName`**.
+
+## STT native pipeline rework (upcoming **1.0.0 major**, breaking by design)
+
+This rework is a **public major 1.0.0** cut. Breaking changes are intentional; superseded STT APIs are removed instead of kept as long-lived deprecated shims.
+
+### What app developers must migrate
+
+| Topic | Before | After |
+| --- | --- | --- |
+| Offline STT result return | `transcribe*` returns full `SttRecognitionResult` payload (`text`, `tokens`, `timestamps`, `durations`, ...) | `transcribe*` returns small metadata + `resultId`; fetch heavy fields via lazy getters (`getSttResultText`, `getSttResultTokens`, `getSttResultTimestamps`, `getSttResultDurations`, `getSttResultLang`, `getSttResultEmotion`, `getSttResultEvent`) |
+| Access model | One-call “materialize everything” result usage | Discrete getter calls per concern (no masked bulk getter) |
+| Lifetime semantics | No `resultId` stale contract | Single active retained result per STT instance; old `resultId` becomes stale after a newer transcribe on the same instance |
+| `transcribeFile` execution path | Path decoded directly in recognizer path | File is normalized into internal native buffer + `bufferId` execution path (transparent for facade users; relevant to direct native callers/pipeline tools) |
+| Cross-feature ids | Potential per-feature id handling differences | One shared buffer-id type + sample-rate metadata contract across STT / Enhancement / Alignment entry points |
+| Opt-in bulk PCM to JS | Bridge stacks that still use `number[]` for large float audio | **`Float32Array`** with **JSI / `ArrayBuffer`** bulk copy (STT power-user paths + **TTS** batch `getSamples` / `getTtsSamples`) — **`number[]`** is not the target for megabyte-scale PCM |
+
+### Notes for direct TurboModule/native callers
+
+- Prefer id-based flows for pipeline composition (buffer/result handles) instead of pushing large PCM/results through JS.
+- Plan for stale-result errors when reusing an old `resultId` after a new transcribe on the same `instanceId`.
+- Remove reliance on compatibility wrappers that mirror pre-1.0 STT return shapes.
+- When you must materialize **float PCM** in JS, plan for **typed array / JSI** shapes, not element-wise **`number[]`**.
+
+## Bulk PCM to JS (`Float32Array` / JSI `ArrayBuffer`, TTS + STT)
+
+For the **same major** as the STT native pipeline rework, bulk **float** audio crossing into JavaScript uses **`Float32Array`** backed by a **single native bulk copy** (JSI **`ArrayBuffer`** view where the runtime/spec requires hand-written native code — same direction as batch TTS sink work).
+
+| Area | Direction |
+| --- | --- |
+| **STT** | Any opt-in “pull samples / buffer to JS” API returns **`Float32Array`** (or equivalent), not **`number[]`**, for large payloads. |
+| **TTS (batch)** | Replace legacy **`getTtsSamples` → `number[]`** with the **`Float32Array`** path already targeted by **`GeneratedAudio.getSamples()`** — see [migration/tts-generated-audio-native-sink-migration.md](./migration/tts-generated-audio-native-sink-migration.md) and [migration/stt-native-pipeline-research.md](./migration/stt-native-pipeline-research.md) (**Decision: PCM transport**). |
+| **Recognition arrays** | Token timestamps / durations may still use bridge-friendly numeric arrays where sizes are modest; that is separate from **megabyte-scale PCM**. |
+
 ## Unified TTS `saveAudio` (replacing `saveAudioToFile` / `saveAudioToContentUri`)
 
 The module-level helpers **`saveAudioToFile`** and **`saveAudioToContentUri`** are removed. Use **`saveAudio`** with an explicit target:
@@ -219,7 +293,7 @@ If you call the native module directly (bypassing the JS helpers), method names 
 | `copyFileToContentUri` | *(unchanged)* |
 | `saveTtsAudio` | *(unchanged; TTS PCM export)* |
 
-See [docs/files.md](./files.md).
+See [docs/fileio.md](./fileio.md).
 
 ## Breaking changes (upgrading to 0.3.0)
 

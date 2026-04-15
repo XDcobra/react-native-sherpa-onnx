@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ToastAndroid,
+  DeviceEventEmitter,
 } from 'react-native';
 import { styles } from './STTScreen.styles';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -31,12 +32,11 @@ import {
   detectSttModel,
   getOnlineTypeOrNull,
   type STTModelType,
-  type SttRecognitionResult,
 } from 'react-native-sherpa-onnx/stt';
 import type {
   SttEngine,
-  StreamingSttEngine,
-  SttStream,
+  LiveSttEngine,
+  SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
 import {
@@ -47,9 +47,29 @@ import {
 import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createPcmLiveStream,
-  type PcmLiveStreamHandle,
-} from 'react-native-sherpa-onnx/audio';
+  createEmptyLiveAudioBuffer,
+  createOfflineAudioBufferFromFile,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  createLiveTextBuffer,
+  getPipelineTextBufferInfo,
+  getOfflineTextBufferTextSlice,
+  getOfflineTextBufferTokensSlice,
+  getOfflineTextBufferTimestampsSlice,
+  getOfflineTextBufferDurationsSlice,
+  getOfflineTextBufferLang,
+  getOfflineTextBufferEmotion,
+  getOfflineTextBufferEvent,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
 import {
   startWebAudioFilePlayback,
   stopWebAudioPlayback,
@@ -89,8 +109,15 @@ export default function STTScreen() {
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [transcriptionResult, setTranscriptionResult] =
-    useState<SttRecognitionResult | null>(null);
+  const [transcriptionResult, setTranscriptionResult] = useState<{
+    text: string;
+    tokens: string[];
+    timestamps: number[];
+    lang: string;
+    emotion: string;
+    event: string;
+    durations: number[];
+  } | null>(null);
   const [tokensExpanded, setTokensExpanded] = useState(false);
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
@@ -98,19 +125,111 @@ export default function STTScreen() {
 
   const sttEngineRef = useRef<SttEngine | null>(null);
   const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
-  const streamingEngineRef = useRef<StreamingSttEngine | null>(null);
-  const liveStreamRef = useRef<SttStream | null>(null);
-  const liveProcessPromiseRef = useRef<Promise<void>>(Promise.resolve());
-  const pcmLiveStreamRef = useRef<{
-    handle: PcmLiveStreamHandle;
-    unsubData: () => void;
-    unsubError: () => void;
+  const streamingEngineRef = useRef<LiveSttEngine | null>(null);
+  const livePipelineRef = useRef<{
+    liveAudioBufferId: string;
+    liveTextBufferId: string;
+    pipelineHandle: SttPipelineHandle;
+    micErrorSubscription: { remove: () => void };
+    audioUnsubscribe: () => void;
+    textUnsubscribe: () => void;
   } | null>(null);
+  const livePreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  const livePreviewInFlightRef = useRef(false);
+  const liveAccumulatorRef = useRef<{
+    segmentCount: number;
+    segmentTexts: string[];
+  }>({ segmentCount: 0, segmentTexts: [] });
   const STT_NUM_THREADS = 2;
   const LIVE_SAMPLE_RATE = 16000;
 
   const isLiveSupported =
     getOnlineTypeOrNull(selectedModelType ?? undefined) !== null;
+
+  const buildTranscriptionResult = (
+    text: string,
+    tokens: string[] = [],
+    timestamps: number[] = []
+  ) => ({
+    text,
+    tokens,
+    timestamps,
+    lang: '',
+    emotion: '',
+    event: '',
+    durations: [],
+  });
+
+  const composeLiveText = (segmentTexts: string[], partialText: string) => {
+    const parts = segmentTexts
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    const trimmedPartial = partialText.trim();
+    if (trimmedPartial.length > 0) {
+      parts.push(trimmedPartial);
+    }
+    return parts.join(' ').trim();
+  };
+
+  const stopLivePreviewPolling = () => {
+    if (livePreviewTimerRef.current != null) {
+      clearInterval(livePreviewTimerRef.current);
+      livePreviewTimerRef.current = null;
+    }
+    livePreviewInFlightRef.current = false;
+  };
+
+  const syncLivePreview = async (liveTextBufferId: string) => {
+    if (livePreviewInFlightRef.current) return;
+    livePreviewInFlightRef.current = true;
+    try {
+      const accumulator = liveAccumulatorRef.current;
+      const segmentCount = await getLiveTextBufferSegmentCount(
+        liveTextBufferId
+      );
+
+      if (segmentCount < accumulator.segmentCount) {
+        const fullSegments =
+          segmentCount > 0
+            ? await getLiveTextBufferSegments(liveTextBufferId, 0, segmentCount)
+            : [];
+        accumulator.segmentCount = segmentCount;
+        accumulator.segmentTexts = fullSegments
+          .map((segment) => segment.text)
+          .filter((segment) => segment.trim().length > 0);
+      } else if (segmentCount > accumulator.segmentCount) {
+        const newSegments = await getLiveTextBufferSegments(
+          liveTextBufferId,
+          accumulator.segmentCount,
+          segmentCount - accumulator.segmentCount
+        );
+        for (const segment of newSegments) {
+          if (segment.text.trim().length > 0) {
+            accumulator.segmentTexts.push(segment.text);
+          }
+        }
+        accumulator.segmentCount = segmentCount;
+      }
+
+      const partialText = await getLiveTextBufferPartialSlice(
+        liveTextBufferId,
+        0,
+        4096
+      );
+      const previewText = composeLiveText(
+        accumulator.segmentTexts,
+        partialText
+      );
+
+      setTranscriptionResult(buildTranscriptionResult(previewText));
+    } catch {
+      // Ignore polling race conditions during teardown.
+    } finally {
+      livePreviewInFlightRef.current = false;
+    }
+  };
 
   // Load available models on mount
   useEffect(() => {
@@ -134,6 +253,12 @@ export default function STTScreen() {
           .join(', ')}`
       );
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopLivePreviewPolling();
+    };
   }, []);
 
   const loadAvailableModels = async () => {
@@ -347,8 +472,61 @@ export default function STTScreen() {
         setError('STT engine not initialized');
         return;
       }
-      const result = await engine.transcribeFile(pathToTranscribe);
-      setTranscriptionResult(result);
+      const { bufferId } = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path: pathToTranscribe,
+      });
+      const textRef = await createEmptyOfflineTextBuffer();
+      const textBufferId = textRef.bufferId;
+      try {
+        await engine.transcribe(bufferId, textBufferId);
+      } finally {
+        await releasePipelineAudioBuffer(bufferId);
+      }
+      const rawInfo = await getPipelineTextBufferInfo(textBufferId);
+      const info = rawInfo as OfflineTextBufferInfo;
+      const [text, tokens, timestamps, durations, lang, emotion, event] =
+        await Promise.all([
+          info.utf16Length > 0
+            ? getOfflineTextBufferTextSlice(textBufferId, 0, info.utf16Length)
+            : Promise.resolve(''),
+          info.tokenCount > 0
+            ? getOfflineTextBufferTokensSlice(textBufferId, 0, info.tokenCount)
+            : Promise.resolve([]),
+          info.timestampCount > 0
+            ? getOfflineTextBufferTimestampsSlice(
+                textBufferId,
+                0,
+                info.timestampCount
+              )
+            : Promise.resolve([]),
+          info.durationCount > 0
+            ? getOfflineTextBufferDurationsSlice(
+                textBufferId,
+                0,
+                info.durationCount
+              )
+            : Promise.resolve([]),
+          info.hasLang
+            ? getOfflineTextBufferLang(textBufferId)
+            : Promise.resolve(''),
+          info.hasEmotion
+            ? getOfflineTextBufferEmotion(textBufferId)
+            : Promise.resolve(''),
+          info.hasEvent
+            ? getOfflineTextBufferEvent(textBufferId)
+            : Promise.resolve(''),
+        ]);
+      await releasePipelineTextBuffer(textBufferId);
+      setTranscriptionResult({
+        text,
+        tokens,
+        timestamps,
+        durations,
+        lang,
+        emotion,
+        event,
+      });
     } catch (err) {
       const msg =
         (err instanceof Error ? err.message : (err as any)?.message) ?? '';
@@ -386,6 +564,10 @@ export default function STTScreen() {
   };
 
   const handleFree = async () => {
+    if (isLiveRecording || livePipelineRef.current) {
+      await handleLivePressOut();
+    }
+
     const engine = sttEngineRef.current;
     if (!engine) return;
     try {
@@ -478,9 +660,21 @@ export default function STTScreen() {
       handleLivePressOut();
       return;
     }
+    if (livePipelineRef.current) {
+      await handleLivePressOut();
+    }
+
     setError(null);
     setErrorSource(null);
     setTranscriptionResult(null);
+
+    let engine: LiveSttEngine | null = null;
+    let liveAudioBufferId: string | null = null;
+    let liveTextBufferId: string | null = null;
+    let pipelineHandle: SttPipelineHandle | null = null;
+    let micErrorSubscription: { remove: () => void } | null = null;
+    let audioUnsubscribe = () => {};
+    let textUnsubscribe = () => {};
 
     try {
       const useFilePath = padModelIds.includes(currentModelFolder);
@@ -497,58 +691,105 @@ export default function STTScreen() {
       const onlineType = getOnlineTypeOrNull(selectedModelType);
       if (!onlineType) return;
 
-      const engine = await createStreamingSTT({
+      engine = await createStreamingSTT({
         modelPath: modelPathConfig,
         modelType: onlineType,
         numThreads: STT_NUM_THREADS,
       });
       streamingEngineRef.current = engine;
-      const stream = await engine.createStream();
-      liveStreamRef.current = stream;
 
-      const pcmHandle = createPcmLiveStream({ sampleRate: LIVE_SAMPLE_RATE });
-      const unsubData = pcmHandle.onData((samples, sampleRate) => {
-        const streamCurrent = liveStreamRef.current;
-        if (!streamCurrent) return;
-        const prev = liveProcessPromiseRef.current;
-        liveProcessPromiseRef.current = (async () => {
-          await prev;
-          if (!liveStreamRef.current) return;
-          try {
-            const { result } = await streamCurrent.processAudioChunk(
-              samples,
-              sampleRate
-            );
-            setTranscriptionResult({
-              text: result.text,
-              tokens: result.tokens,
-              timestamps: result.timestamps,
-              lang: '',
-              emotion: '',
-              event: '',
-              durations: [],
-            });
-          } catch {
-            // ignore chunk errors (e.g. after release)
+      const liveAudioBuffer = await createEmptyLiveAudioBuffer({
+        sampleRate: LIVE_SAMPLE_RATE,
+        channelCount: 1,
+        windowSeconds: 120,
+        emitAppendedEvents: false,
+      });
+      liveAudioBufferId = liveAudioBuffer.bufferId;
+      audioUnsubscribe = liveAudioBuffer.unsubscribeEvents;
+
+      const liveTextBuffer = await createLiveTextBuffer({
+        windowMaxChars: 65536,
+        maxSegments: 2048,
+      });
+      liveTextBufferId = liveTextBuffer.bufferId;
+      textUnsubscribe = liveTextBuffer.unsubscribeEvents;
+
+      pipelineHandle = await engine.transcribe(
+        liveAudioBuffer.bufferId,
+        liveTextBuffer.bufferId
+      );
+
+      micErrorSubscription = DeviceEventEmitter.addListener(
+        'pipelineLiveAudioError',
+        (event: { message?: string; liveBufferId?: string }) => {
+          if (
+            event.liveBufferId != null &&
+            event.liveBufferId !== liveAudioBuffer.bufferId
+          ) {
+            return;
           }
-        })();
-      });
-      const unsubError = pcmHandle.onError((message) => {
-        setErrorSource('transcribe');
-        setError(message);
-      });
-      pcmLiveStreamRef.current = { handle: pcmHandle, unsubData, unsubError };
+          setErrorSource('transcribe');
+          setError(event.message ?? 'Microphone error');
+        }
+      );
+
+      liveAccumulatorRef.current = {
+        segmentCount: 0,
+        segmentTexts: [],
+      };
+      stopLivePreviewPolling();
+      livePreviewTimerRef.current = setInterval(() => {
+        void syncLivePreview(liveTextBuffer.bufferId);
+      }, 150);
+      void syncLivePreview(liveTextBuffer.bufferId);
+
+      livePipelineRef.current = {
+        liveAudioBufferId: liveAudioBuffer.bufferId,
+        liveTextBufferId: liveTextBuffer.bufferId,
+        pipelineHandle,
+        micErrorSubscription,
+        audioUnsubscribe,
+        textUnsubscribe,
+      };
+
       try {
-        await pcmHandle.start();
+        await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
+          emitToJs: false,
+        });
       } catch (startErr) {
-        pcmHandle.stop().catch(() => {});
-        unsubData();
-        unsubError();
-        pcmLiveStreamRef.current = null;
         throw startErr;
       }
+
       setIsLiveRecording(true);
     } catch (err) {
+      stopLivePreviewPolling();
+      await stopMicToLiveAudioBuffer().catch(() => {});
+
+      micErrorSubscription?.remove();
+      audioUnsubscribe();
+      textUnsubscribe();
+
+      if (pipelineHandle) {
+        await pipelineHandle.stop().catch(() => {});
+      }
+
+      if (engine) {
+        await engine.destroy().catch(() => {});
+        if (streamingEngineRef.current === engine) {
+          streamingEngineRef.current = null;
+        }
+      }
+
+      if (liveTextBufferId) {
+        await releasePipelineTextBuffer(liveTextBufferId).catch(() => {});
+      }
+      if (liveAudioBufferId) {
+        await releasePipelineAudioBuffer(liveAudioBufferId).catch(() => {});
+      }
+
+      livePipelineRef.current = null;
+      liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
+
       const msg = err instanceof Error ? err.message : String(err);
       setErrorSource('transcribe');
       setError(msg);
@@ -556,58 +797,78 @@ export default function STTScreen() {
   };
 
   const handleLivePressOut = async () => {
-    if (!isLiveRecording) return;
+    if (!isLiveRecording && !livePipelineRef.current) return;
     setIsLiveRecording(false);
 
-    const pcmCur = pcmLiveStreamRef.current;
-    if (pcmCur) {
-      await pcmCur.handle.stop();
-      pcmCur.unsubData();
-      pcmCur.unsubError();
-      pcmLiveStreamRef.current = null;
-    }
+    const pipelineState = livePipelineRef.current;
+    livePipelineRef.current = null;
 
-    const stream = liveStreamRef.current;
-    const engine = streamingEngineRef.current;
+    stopLivePreviewPolling();
+    await stopMicToLiveAudioBuffer().catch(() => {});
 
-    try {
-      await Promise.race([
-        liveProcessPromiseRef.current,
-        new Promise<void>((r) => setTimeout(r, 3000)),
-      ]);
-    } catch {
-      // ignore
-    }
-
-    if (stream && engine) {
+    if (pipelineState) {
       try {
-        await stream.inputFinished();
-        while (await stream.isReady()) {
-          await stream.decode();
-          const result = await stream.getResult();
-          setTranscriptionResult({
-            text: result.text,
-            tokens: result.tokens,
-            timestamps: result.timestamps,
-            lang: '',
-            emotion: '',
-            event: '',
-            durations: [],
-          });
-        }
+        await pipelineState.pipelineHandle.flush();
       } catch {
-        // ignore
-      } finally {
-        try {
-          await stream.release();
-        } catch {}
-        try {
-          await engine.destroy();
-        } catch {}
+        // ignore flush races during teardown
+      }
+
+      try {
+        const segmentCount = await getLiveTextBufferSegmentCount(
+          pipelineState.liveTextBufferId
+        );
+        const segments =
+          segmentCount > 0
+            ? await getLiveTextBufferSegments(
+                pipelineState.liveTextBufferId,
+                0,
+                segmentCount,
+                { includeTokens: true, includeTimestamps: true }
+              )
+            : [];
+        const partialText = await getLiveTextBufferPartialSlice(
+          pipelineState.liveTextBufferId,
+          0,
+          4096
+        );
+        const segmentTexts = segments
+          .map((segment) => segment.text)
+          .filter((segment) => segment.trim().length > 0);
+        const text = composeLiveText(segmentTexts, partialText);
+        const tokens = segments.flatMap((segment) => segment.tokens ?? []);
+        const timestamps = segments.flatMap(
+          (segment) => segment.timestamps ?? []
+        );
+
+        setTranscriptionResult(
+          buildTranscriptionResult(text, tokens, timestamps)
+        );
+      } catch {
+        // ignore result-read errors during teardown
+      }
+
+      await pipelineState.pipelineHandle.stop().catch(() => {});
+      pipelineState.micErrorSubscription.remove();
+      pipelineState.audioUnsubscribe();
+      pipelineState.textUnsubscribe();
+
+      await releasePipelineTextBuffer(pipelineState.liveTextBufferId).catch(
+        () => {}
+      );
+      await releasePipelineAudioBuffer(pipelineState.liveAudioBufferId).catch(
+        () => {}
+      );
+    }
+
+    const engine = streamingEngineRef.current;
+    if (engine) {
+      await engine.destroy().catch(() => {});
+      if (streamingEngineRef.current === engine) {
         streamingEngineRef.current = null;
-        liveStreamRef.current = null;
       }
     }
+
+    liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
   };
 
   const showLiveNotSupportedMessage = () => {

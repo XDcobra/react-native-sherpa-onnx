@@ -8,30 +8,45 @@ import {
   TextInput,
   Alert,
   Platform,
-  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   createTTS,
   createStreamingTTS,
   detectTtsModel,
-  saveAudioFromGeneration,
-  saveAudioFromPCM,
   type TTSModelType,
-  type TtsGenerationOptions,
+  type TtsSynthesisOptions,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
+  type TtsPipelineHandle,
+  type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
-import {
-  copyContentUriToCache,
-  shareAudioFile,
-} from 'react-native-sherpa-onnx/files';
+import { copyFile, shareFile } from 'react-native-sherpa-onnx/fileio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import type {
   TtsEngine,
   StreamingTtsEngine,
-  TtsStreamController,
-  GeneratedAudio,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  createEmptyOfflineAudioBuffer,
+  createOfflineAudioBufferFromFile,
+  createEmptyLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  finalizeLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import type {
+  OfflineAudioBufferRef,
+  LiveAudioBufferRef,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineTextBufferFromText,
+  createLiveTextBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import {
@@ -52,20 +67,30 @@ import {
   unlink,
   exists,
 } from '@dr.pogodin/react-native-fs';
-import { AudioContext } from 'react-native-audio-api';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { decodeAudioFileToFloatSamples } from 'react-native-sherpa-onnx/audio';
-import {
-  loadAudioAsArrayBuffer,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
-type TtsSavedAudioPlayback = ActiveWebAudioPlayback & { resolvedPath: string };
+/**
+ * Generated audio results from either batch or streaming TTS.
+ * Both now produce an OfflineAudioBuffer (buffer-to-buffer pipeline).
+ */
+type GeneratedResult = {
+  kind: 'buffer';
+  bufferId: string;
+  sampleRate: number;
+  numSamples: number;
+};
+
+type ReferenceAudioState = {
+  buffer: OfflineAudioBufferRef;
+  sampleRate: number;
+  numSamples: number;
+  ownedTempPath: string | null;
+};
 
 export default function TTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -87,7 +112,7 @@ export default function TTSScreen() {
   );
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
-  const [generatedAudio, setGeneratedAudio] = useState<GeneratedAudio | null>(
+  const [generatedAudio, setGeneratedAudio] = useState<GeneratedResult | null>(
     null
   );
   const [generating, setGenerating] = useState(false);
@@ -101,13 +126,6 @@ export default function TTSScreen() {
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [loadingSound, setLoadingSound] = useState(false);
-  const [cachedPlaybackPath, setCachedPlaybackPath] = useState<string | null>(
-    null
-  );
-  const [cachedPlaybackSource, setCachedPlaybackSource] = useState<
-    string | null
-  >(null);
 
   const [speakerId, setSpeakerId] = useState('0');
   const [speed, setSpeed] = useState('1.0');
@@ -118,10 +136,8 @@ export default function TTSScreen() {
   const [numSteps, setNumSteps] = useState('');
   const [extraOptions, setExtraOptions] = useState('');
   const [referenceText, setReferenceText] = useState('');
-  const [referenceAudio, setReferenceAudio] = useState<{
-    samples: number[];
-    sampleRate: number;
-  } | null>(null);
+  const [referenceAudio, setReferenceAudio] =
+    useState<ReferenceAudioState | null>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(
     null
   );
@@ -136,30 +152,17 @@ export default function TTSScreen() {
     }
   };
 
-  const getShareUrl = (path: string) => {
-    const decoded = getDisplayPath(path);
-    if (decoded.startsWith('content://') || decoded.startsWith('file://')) {
-      return decoded;
-    }
-    if (path.startsWith('content://') || path.startsWith('file://')) {
-      return path;
-    }
-    return Platform.OS === 'android' ? `file://${path}` : path;
-  };
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
-  const ttsSavedAudioPlaybackRef = useRef<TtsSavedAudioPlayback | null>(null);
-  const streamChunksRef = useRef<Float32Array[]>([]);
-  const streamSampleRateRef = useRef<number | null>(null);
-  const streamControllerRef = useRef<TtsStreamController | null>(null);
+  const pcmPlayerRef = useRef<PcmPlayer | null>(null);
+  const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
   const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
-  const streamQueueRef = useRef<string[]>([]);
-  const streamInFlightRef = useRef(false);
+  const streamPipelineRef = useRef<TtsPipelineHandle | null>(null);
+  const streamTextBufferIdRef = useRef<string | null>(null);
+  const streamAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const streamLastTextRef = useRef('');
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamInitialScheduleRef = useRef(false);
-  const streamProcessSchedulePendingRef = useRef(false);
-  const streamProcessCallSourceRef = useRef<string>('');
   const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showNoiseScale = useMemo(
@@ -325,92 +328,114 @@ export default function TTSScreen() {
   }, []);
 
   const stopTtsSavedAudioPlayback = useCallback(() => {
-    if (ttsSavedAudioPlaybackRef.current) {
-      stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
-      ttsSavedAudioPlaybackRef.current = null;
+    const player = pcmPlayerRef.current;
+    if (player) {
+      pcmPlayerRef.current = null;
+      player.destroy().catch(() => {});
     }
     setIsPlaying(false);
   }, []);
 
+  const releaseReferenceAudio = useCallback(
+    async (refAudio: ReferenceAudioState | null) => {
+      if (!refAudio) return;
+      await releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(
+        () => {}
+      );
+      if (refAudio.ownedTempPath) {
+        await unlink(refAudio.ownedTempPath).catch(() => {});
+      }
+    },
+    []
+  );
+
+  const clearReferenceAudio = useCallback(async () => {
+    const previous = referenceAudioRef.current;
+    referenceAudioRef.current = null;
+    setReferenceAudio(null);
+    setReferenceFileName(null);
+    await releaseReferenceAudio(previous);
+  }, [releaseReferenceAudio]);
+
   // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
-      if (ttsSavedAudioPlaybackRef.current) {
-        stopWebAudioPlayback(ttsSavedAudioPlaybackRef.current);
-        ttsSavedAudioPlaybackRef.current = null;
+      const pcmPlayer = pcmPlayerRef.current;
+      if (pcmPlayer) {
+        pcmPlayerRef.current = null;
+        pcmPlayer.destroy().catch(() => {});
       }
-      const controller = streamControllerRef.current;
-      if (controller) {
-        controller.cancel().catch(() => {});
-        streamControllerRef.current = null;
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        pipeline.stop().catch(() => {});
+        streamPipelineRef.current = null;
+      }
+      const textBufferId = streamTextBufferIdRef.current;
+      if (textBufferId) {
+        releasePipelineTextBuffer(textBufferId).catch(() => {});
+        streamTextBufferIdRef.current = null;
+      }
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        audioBuffer.unsubscribeEvents();
+        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
+        streamAudioBufferRef.current = null;
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
+      }
+      const refAudio = referenceAudioRef.current;
+      referenceAudioRef.current = null;
+      if (refAudio) {
+        releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(() => {});
+        if (refAudio.ownedTempPath) {
+          unlink(refAudio.ownedTempPath).catch(() => {});
+        }
       }
     };
   }, []);
 
   const resetStreamingState = useCallback(
-    (clearBuffer = true, options?: { resetScheduleRef?: boolean }) => {
-      const controller = streamControllerRef.current;
-      if (controller) {
-        controller.cancel().catch(() => {});
-        streamControllerRef.current = null;
+    (options?: { resetScheduleRef?: boolean }) => {
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        pipeline.stop().catch(() => {});
+        streamPipelineRef.current = null;
+      }
+      const textBufferId = streamTextBufferIdRef.current;
+      if (textBufferId) {
+        releasePipelineTextBuffer(textBufferId).catch(() => {});
+        streamTextBufferIdRef.current = null;
+      }
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        audioBuffer.unsubscribeEvents();
+        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
+        streamAudioBufferRef.current = null;
       }
       const streamingEngine = streamingTtsEngineRef.current;
       if (streamingEngine) {
         streamingEngine.destroy().catch(() => {});
         streamingTtsEngineRef.current = null;
       }
-      streamQueueRef.current = [];
-      streamInFlightRef.current = false;
       streamLastTextRef.current = '';
       if (options?.resetScheduleRef !== false) {
         streamInitialScheduleRef.current = false;
       }
-      streamProcessSchedulePendingRef.current = false;
       if (streamDebounceRef.current) {
         clearTimeout(streamDebounceRef.current);
         streamDebounceRef.current = null;
       }
-      if (clearBuffer) {
-        streamChunksRef.current = [];
-        streamSampleRateRef.current = null;
-        setStreamSampleCount(0);
-      }
+      setStreamSampleCount(0);
       setStreamProgress(null);
       setStreaming(false);
     },
     []
   );
 
-  const buildStreamedAudio = useCallback((): GeneratedAudio | null => {
-    const chunks = streamChunksRef.current;
-    if (chunks.length === 0) {
-      return null;
-    }
-    const total = chunks.reduce((sum, part) => sum + part.length, 0);
-    const combined = new Float32Array(total);
-    let offset = 0;
-    for (const part of chunks) {
-      combined.set(part, offset);
-      offset += part.length;
-    }
-    const sampleRate =
-      streamSampleRateRef.current ?? modelInfo?.sampleRate ?? 16000;
-    return {
-      sampleRate,
-      numSamples: combined.length,
-      generation: 0,
-      async getSamples(): Promise<Float32Array> {
-        return combined;
-      },
-    };
-  }, [modelInfo?.sampleRate]);
-
-  const getSynthesisOptions = useCallback((): TtsGenerationOptions => {
+  const getPipelineOptions = useCallback((): TtsPipelineOptions => {
     const sid = parseInt(speakerId, 10);
     const speedValue = parseFloat(speed);
     if (isNaN(sid) || sid < 0) {
@@ -427,88 +452,14 @@ export default function TTSScreen() {
     if (isNaN(speedValue) || speedValue <= 0) {
       throw new Error('Invalid speed value');
     }
-    const silenceScaleVal = silenceScale.trim();
-    const numStepsVal = numSteps.trim();
-    let extra: Record<string, string> | undefined;
-    if (extraOptions.trim().length > 0) {
-      const ex: Record<string, string> = {};
-      extraOptions
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .forEach((pair) => {
-          const idx = pair.indexOf(':');
-          if (idx > 0) {
-            const k = pair.slice(0, idx).trim();
-            const v = pair.slice(idx + 1).trim();
-            if (k && v) ex[k] = v;
-          }
-        });
-      if (Object.keys(ex).length > 0) extra = ex;
-    }
-    const hasValidRefAudio =
-      referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
-      referenceAudio.sampleRate > 0;
-    const refTrim = referenceText.trim();
-
-    const base: TtsGenerationOptions = {
-      sid,
-      speed: speedValue,
-      ...(silenceScaleVal.length > 0
-        ? (() => {
-            const v = parseFloat(silenceScaleVal);
-            return !isNaN(v) && v > 0 ? { silenceScale: v } : {};
-          })()
-        : {}),
-      ...(numStepsVal.length > 0
-        ? (() => {
-            const v = parseInt(numStepsVal, 10);
-            return !isNaN(v) && v > 0 ? { numSteps: v } : {};
-          })()
-        : {}),
-      ...(extra != null ? { extra } : {}),
-    };
-
-    if (hasValidRefAudio && selectedModelType === 'zipvoice') {
-      if (!refTrim) {
-        throw new Error('Zipvoice voice cloning requires reference text');
-      }
-      return {
-        ...base,
-        voiceClone: {
-          kind: 'zipvoice',
-          referenceAudio,
-          referenceText: refTrim,
-        },
-      };
-    }
-    if (hasValidRefAudio && selectedModelType === 'pocket') {
-      return {
-        ...base,
-        voiceClone: {
-          kind: 'pocket',
-          referenceAudio,
-          ...(refTrim.length > 0 ? { referenceText: refTrim } : {}),
-        },
-      };
-    }
-    return base;
-  }, [
-    speakerId,
-    speed,
-    silenceScale,
-    numSteps,
-    referenceText,
-    referenceAudio,
-    extraOptions,
-    modelInfo?.numSpeakers,
-    selectedModelType,
-  ]);
+    const opts: TtsPipelineOptions = { sid, speed: speedValue };
+    // silenceScale, numSteps, and extra are not supported on TtsPipelineOptions in the streaming pipeline API.
+    // Set them at engine init time via modelOptions if needed.
+    return opts;
+  }, [speakerId, speed, modelInfo?.numSpeakers]);
 
   const handlePickReferenceWav = useCallback(async () => {
     setError(null);
-    let tempCopiedPath: string | null = null;
     try {
       const picked = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
@@ -521,13 +472,43 @@ export default function TTSScreen() {
         return;
       }
       let path = uri.replace(/^file:\/\//, '');
+      let ownedTempPath: string | null = null;
       if (uri.startsWith('content://')) {
-        path = await copyContentUriToCache(uri, `tts_ref_${Date.now()}.wav`);
-        tempCopiedPath = path;
+        const result = await copyFile(
+          { kind: 'contentUri', uri },
+          { kind: 'app', base: 'cache', path: `tts_ref_${Date.now()}.wav` }
+        );
+        path =
+          result.output.kind === 'fs' ? result.output.path : result.output.uri;
+        ownedTempPath = path;
       }
-      const { samples, sampleRate } = await decodeAudioFileToFloatSamples(path);
-      setReferenceAudio({ samples, sampleRate });
+
+      const refBuffer = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path,
+      });
+      const info = await getPipelineAudioBufferInfo(refBuffer.bufferId);
+      const numSamples = info.numSamples ?? 0;
+      if (numSamples <= 0 || info.sampleRate <= 0) {
+        await releasePipelineAudioBuffer(refBuffer.bufferId).catch(() => {});
+        if (ownedTempPath) {
+          await unlink(ownedTempPath).catch(() => {});
+        }
+        setError('Reference audio is empty or invalid');
+        return;
+      }
+
+      const nextRef: ReferenceAudioState = {
+        buffer: refBuffer,
+        sampleRate: info.sampleRate,
+        numSamples,
+        ownedTempPath,
+      };
+      const previousRef = referenceAudioRef.current;
+      referenceAudioRef.current = nextRef;
+      setReferenceAudio(nextRef);
       setReferenceFileName(name);
+      await releaseReferenceAudio(previousRef);
     } catch (err: unknown) {
       if (
         (DocumentPicker as { isCancel?: (e: unknown) => boolean }).isCancel?.(
@@ -539,116 +520,26 @@ export default function TTSScreen() {
       setError(
         err instanceof Error ? err.message : 'Failed to load reference audio'
       );
-    } finally {
-      if (tempCopiedPath) {
-        try {
-          await unlink(tempCopiedPath);
-        } catch {
-          /* ignore */
-        }
-      }
     }
+  }, [releaseReferenceAudio]);
+
+  const enqueueStreamingText = useCallback((text: string) => {
+    const lastText = streamLastTextRef.current;
+    if (!text.startsWith(lastText)) {
+      streamLastTextRef.current = text;
+      return;
+    }
+    const delta = text.slice(lastText.length);
+    if (!delta.trim()) return;
+    streamLastTextRef.current = text;
+
+    const textBufferId = streamTextBufferIdRef.current;
+    if (!textBufferId) return;
+
+    appendLiveTextSegment(textBufferId, delta).catch((err) => {
+      console.warn('appendLiveTextSegment failed:', err);
+    });
   }, []);
-
-  const processStreamQueue = useCallback(async () => {
-    if (streamInFlightRef.current) {
-      return;
-    }
-    const engine = streamingTtsEngineRef.current;
-    if (!engine) {
-      return;
-    }
-    streamInFlightRef.current = true;
-    const nextText = streamQueueRef.current.shift();
-    if (!nextText?.trim()) {
-      streamInFlightRef.current = false;
-      return;
-    }
-
-    let options: TtsGenerationOptions;
-    try {
-      options = getSynthesisOptions();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      setError(msg);
-      return;
-    }
-
-    try {
-      const controller = await engine.generateSpeechStream(
-        nextText,
-        options,
-        {
-          onChunk: (chunk) => {
-            streamSampleRateRef.current = chunk.sampleRate;
-            streamChunksRef.current.push(chunk.samples);
-            setStreamSampleCount((prev) => prev + chunk.samples.length);
-            setStreamProgress(chunk.progress);
-          },
-          onEnd: (event) => {
-            streamInFlightRef.current = false;
-            streamControllerRef.current = null;
-            if (event.cancelled) {
-              const eng = streamingTtsEngineRef.current;
-              if (eng) {
-                eng.destroy().catch(() => {});
-              }
-              streamingTtsEngineRef.current = null;
-              setStreamProgress(null);
-              setStreaming(false);
-              const audio = buildStreamedAudio();
-              if (audio) setGeneratedAudio(audio);
-            } else {
-              setStreamProgress(null);
-              streamProcessCallSourceRef.current = 'onEnd';
-              processStreamQueue().catch((err) => {
-                console.warn('processStreamQueue:', err);
-              });
-            }
-          },
-          onError: (event) => {
-            streamInFlightRef.current = false;
-            streamControllerRef.current = null;
-            const eng = streamingTtsEngineRef.current;
-            if (eng) {
-              eng.destroy().catch(() => {});
-            }
-            streamingTtsEngineRef.current = null;
-            setError(event.message);
-            setStreamProgress(null);
-            setStreaming(false);
-          },
-        },
-        { playback: true }
-      );
-      streamControllerRef.current = controller;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      streamInFlightRef.current = false;
-      setError(msg);
-      setStreaming(false);
-    }
-  }, [getSynthesisOptions, buildStreamedAudio]);
-
-  const enqueueStreamingText = useCallback(
-    (text: string) => {
-      const trimmed = text;
-      const lastText = streamLastTextRef.current;
-      if (trimmed.startsWith(lastText)) {
-        const delta = trimmed.slice(lastText.length);
-        if (!delta.trim()) return;
-        streamLastTextRef.current = trimmed;
-        streamQueueRef.current.push(delta);
-        streamProcessCallSourceRef.current = 'enqueueStreamingText';
-        processStreamQueue().catch((err) => {
-          console.warn('processStreamQueue:', err);
-        });
-      } else {
-        streamLastTextRef.current = trimmed;
-      }
-    },
-    [processStreamQueue]
-  );
 
   useEffect(() => {
     if (!streaming) {
@@ -732,8 +623,6 @@ export default function TTSScreen() {
     setModelInfo(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
     setSpeakerId('0');
     setSpeed('1.0');
     setSilenceScale('');
@@ -743,10 +632,9 @@ export default function TTSScreen() {
     setNumSteps('');
     setExtraOptions('');
     setReferenceText('');
-    setReferenceAudio(null);
-    setReferenceFileName(null);
+    await clearReferenceAudio();
     if (streaming) {
-      resetStreamingState(true);
+      resetStreamingState();
     }
     stopTtsSavedAudioPlayback();
 
@@ -897,7 +785,7 @@ export default function TTSScreen() {
 
     const hasValidRefAudioForClone =
       referenceAudio != null &&
-      referenceAudio.samples.length > 0 &&
+      referenceAudio.numSamples > 0 &&
       referenceAudio.sampleRate > 0;
     if (
       selectedModelType === 'zipvoice' &&
@@ -914,10 +802,8 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
     if (streaming) {
-      resetStreamingState(true);
+      resetStreamingState();
     }
     stopTtsSavedAudioPlayback();
 
@@ -927,14 +813,91 @@ export default function TTSScreen() {
       return;
     }
     try {
-      const options = getSynthesisOptions();
-      const result = await engine.generateSpeech(inputText, options);
+      // Build synthesis options (buffer-based voice clone)
+      const options: TtsSynthesisOptions = {};
+      const sid = parseInt(speakerId, 10);
+      if (!isNaN(sid) && sid >= 0) options.sid = sid;
+      const speedValue = parseFloat(speed);
+      if (!isNaN(speedValue) && speedValue > 0) options.speed = speedValue;
+      const silVal = silenceScale.trim();
+      if (silVal) {
+        const v = parseFloat(silVal);
+        if (!isNaN(v) && v > 0) options.silenceScale = v;
+      }
+      const stepsVal = numSteps.trim();
+      if (stepsVal) {
+        const v = parseInt(stepsVal, 10);
+        if (!isNaN(v) && v > 0) options.numSteps = v;
+      }
+      if (extraOptions.trim()) {
+        const ex: Record<string, string> = {};
+        extraOptions
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((pair) => {
+            const idx = pair.indexOf(':');
+            if (idx > 0) {
+              const k = pair.slice(0, idx).trim();
+              const v = pair.slice(idx + 1).trim();
+              if (k && v) ex[k] = v;
+            }
+          });
+        if (Object.keys(ex).length > 0) options.extra = ex;
+      }
 
-      setGeneratedAudio(result);
-      Alert.alert(
-        'Success',
-        `Generated ${result.numSamples} samples at ${result.sampleRate} Hz`
-      );
+      // Voice clone: create buffer from raw reference samples
+      let refAudioBuf: OfflineAudioBufferRef | undefined;
+      const hasRefAudio =
+        referenceAudio != null &&
+        referenceAudio.numSamples > 0 &&
+        referenceAudio.sampleRate > 0;
+      if (
+        hasRefAudio &&
+        (selectedModelType === 'zipvoice' || selectedModelType === 'pocket')
+      ) {
+        refAudioBuf = referenceAudio.buffer;
+        if (selectedModelType === 'zipvoice') {
+          options.voiceClone = {
+            kind: 'zipvoice',
+            referenceAudio: refAudioBuf,
+            referenceText: referenceText.trim(),
+          };
+        } else {
+          const refTrim = referenceText.trim();
+          options.voiceClone = {
+            kind: 'pocket',
+            referenceAudio: refAudioBuf,
+            ...(refTrim ? { referenceText: refTrim } : {}),
+          };
+        }
+      }
+
+      // Buffer-to-buffer pipeline
+      const sr = modelInfo?.sampleRate ?? 16000;
+      const textBuf = await createOfflineTextBufferFromText(inputText);
+      const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+      try {
+        await engine.synthesize(
+          textBuf,
+          audioBuf,
+          Object.keys(options).length > 0 ? options : undefined
+        );
+        const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
+        setGeneratedAudio({
+          kind: 'buffer',
+          bufferId: audioBuf.bufferId,
+          sampleRate: info.sampleRate,
+          numSamples: info.numSamples ?? 0,
+        });
+        Alert.alert(
+          'Success',
+          `Generated ${info.numSamples ?? 0} samples at ${info.sampleRate} Hz`
+        );
+      } finally {
+        // Release text buffer (audio buffer kept for save/playback)
+        await releasePipelineTextBuffer(textBuf.bufferId).catch(() => {});
+      }
     } catch (err) {
       console.error('TTS Generation error:', err);
 
@@ -988,7 +951,7 @@ export default function TTSScreen() {
     if (Platform.OS === 'android') {
       const hasValidRef =
         referenceAudio != null &&
-        referenceAudio.samples.length > 0 &&
+        referenceAudio.numSamples > 0 &&
         referenceAudio.sampleRate > 0;
       if (selectedModelType === 'zipvoice' && hasValidRef) {
         setError(
@@ -1014,12 +977,9 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
-    setCachedPlaybackPath(null);
-    setCachedPlaybackSource(null);
-    resetStreamingState(true, { resetScheduleRef: false });
-    // Do NOT set streaming=true here: the useEffect would start a 400ms debounce and
-    // enqueueStreamingText(inputText) could run before we set streamLastTextRef below,
-    // causing a duplicate processStreamQueue. Set streaming only after queue + ref are set.
+    resetStreamingState({ resetScheduleRef: false });
+    // Do NOT set streaming=true here: the useEffect debounce could run before refs are set.
+    // Set streaming only after the pipeline is started.
     stopTtsSavedAudioPlayback();
 
     const useFilePath = padModelIds.includes(currentModelFolder);
@@ -1051,33 +1011,61 @@ export default function TTSScreen() {
 
       streamingTtsEngineRef.current = streamingEngine;
 
-      streamChunksRef.current = [];
-      streamSampleRateRef.current = null;
-      streamQueueRef.current = [inputText.trim()];
+      // Create a live audio buffer for streaming output
+      const sr = modelInfo?.sampleRate ?? 16000;
+      const liveAudioBuf = await createEmptyLiveAudioBuffer({
+        sampleRate: sr,
+        channelCount: 1,
+        emitAppendedEvents: true,
+        onFramesAppended: (event) => {
+          setStreamSampleCount((prev) => prev + event.frameCount);
+        },
+      });
+      streamAudioBufferRef.current = liveAudioBuf;
+
+      // Create a live text buffer and commit the initial text
+      const liveTextBuf = await createLiveTextBuffer({
+        emitPartialEvents: false,
+      });
+      streamTextBufferIdRef.current = liveTextBuf.bufferId;
+
+      // Append the initial text as a segment
+      await appendLiveTextSegment(liveTextBuf.bufferId, inputText.trim());
       streamLastTextRef.current = inputText.trim();
-      streamInFlightRef.current = false;
+
+      // Finalize immediately since we have the full text
+      await finalizeLiveTextBuffer(liveTextBuf.bufferId);
+
+      // Build pipeline options
+      let pipelineOpts: TtsPipelineOptions | undefined;
+      try {
+        pipelineOpts = getPipelineOptions();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        setError(msg);
+        resetStreamingState();
+        streamInitialScheduleRef.current = false;
+        return;
+      }
+
+      // Start the TTS pipeline
+      const pipelineHandle = await streamingEngine.synthesize(
+        liveTextBuf.bufferId,
+        liveAudioBuf.bufferId,
+        pipelineOpts
+      );
+      streamPipelineRef.current = pipelineHandle;
 
       setStreaming(true);
       setStreamProgress(0);
       setStreamSampleCount(0);
-      if (!streamProcessSchedulePendingRef.current) {
-        streamProcessSchedulePendingRef.current = true;
-        setTimeout(() => {
-          streamProcessSchedulePendingRef.current = false;
-          streamProcessCallSourceRef.current =
-            'handleStartStreaming-setTimeout';
-          processStreamQueue();
-        }, 0);
-      }
     } catch (err) {
       streamInitialScheduleRef.current = false;
-      streamProcessSchedulePendingRef.current = false;
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
       setStreamProgress(null);
       setStreaming(false);
-      streamingTtsEngineRef.current = null;
-      streamControllerRef.current = null;
+      resetStreamingState();
     }
   };
 
@@ -1086,18 +1074,36 @@ export default function TTSScreen() {
       return;
     }
     try {
-      const controller = streamControllerRef.current;
-      if (controller) {
-        await controller.cancel();
+      const pipeline = streamPipelineRef.current;
+      if (pipeline) {
+        await pipeline.stop();
       }
     } catch (err) {
       console.warn('Failed to cancel streaming:', err);
     } finally {
-      const streamedAudio = buildStreamedAudio();
-      if (streamedAudio) {
-        setGeneratedAudio(streamedAudio);
+      // Convert live audio buffer to an offline buffer for save/playback
+      const audioBuffer = streamAudioBufferRef.current;
+      if (audioBuffer) {
+        try {
+          audioBuffer.unsubscribeEvents();
+          await finalizeLiveAudioBuffer(audioBuffer.bufferId);
+          const offlineBuf = await createOfflineAudioBufferFromLive(
+            audioBuffer.bufferId
+          );
+          const info = await getPipelineAudioBufferInfo(offlineBuf.bufferId);
+          if (info.numSamples && info.numSamples > 0) {
+            setGeneratedAudio({
+              kind: 'buffer',
+              bufferId: offlineBuf.bufferId,
+              sampleRate: info.sampleRate,
+              numSamples: info.numSamples,
+            });
+          }
+        } catch {
+          // ignore — buffer may have been released
+        }
       }
-      resetStreamingState(false);
+      resetStreamingState();
     }
   };
 
@@ -1138,7 +1144,12 @@ export default function TTSScreen() {
     );
   };
 
-  const saveAudioWithData = async (audio: GeneratedAudio) => {
+  /** Save a GeneratedResult to a WAV file path. */
+  const saveResultToWav = async (audio: GeneratedResult, path: string) => {
+    await saveAudioAsFile(audio.bufferId, { kind: 'fs', path }, 'wav');
+  };
+
+  const saveAudioWithData = async (audio: GeneratedResult) => {
     if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
       return;
@@ -1149,42 +1160,16 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const format = 'wav';
-      const filename = `tts_${timestamp}.${format}`;
+      const filename = `tts_${timestamp}.wav`;
 
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
-      const saveWithTarget = async (
-        target:
-          | { kind: 'file'; path: string }
-          | { kind: 'androidContent'; directoryUri: string; filename: string }
-      ) => {
-        if (
-          audio.generation > 0 &&
-          '_instanceId' in audio &&
-          typeof (audio as any)._instanceId === 'string'
-        ) {
-          return saveAudioFromGeneration(audio, target, { format });
-        }
-        const pcm = await audio.getSamples();
-        return saveAudioFromPCM(
-          { samples: pcm, sampleRate: audio.sampleRate },
-          target,
-          { format }
-        );
-      };
-
       if (directoryUri) {
-        const savedUri = await saveWithTarget({
-          kind: 'androidContent',
-          directoryUri,
-          filename,
-        });
-        setSavedAudioPath(savedUri);
-        setCachedPlaybackPath(null);
-        setCachedPlaybackSource(null);
-
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedUri)}`);
+        // Android SAF: save to app cache, then inform user
+        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
+        await saveResultToWav(audio, tmpPath);
+        setSavedAudioPath(tmpPath);
+        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
 
@@ -1195,15 +1180,10 @@ export default function TTSScreen() {
 
       await mkdir(targetDirectory);
       const filePath = `${targetDirectory}/${filename}`;
-      const savedPath = await saveWithTarget({
-        kind: 'file',
-        path: filePath,
-      });
-      setSavedAudioPath(savedPath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
+      await saveResultToWav(audio, filePath);
+      setSavedAudioPath(filePath);
 
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1234,34 +1214,15 @@ export default function TTSScreen() {
 
     try {
       const timestamp = Date.now();
-      const format = 'wav';
       const directoryPath = DocumentDirectoryPath;
       await mkdir(directoryPath);
 
       const filename = `tts_${timestamp}.wav`;
       const filePath = `${directoryPath}/${filename}`;
-      const savedPath =
-        generatedAudio.generation > 0 &&
-        '_instanceId' in generatedAudio &&
-        typeof (generatedAudio as any)._instanceId === 'string'
-          ? await saveAudioFromGeneration(
-              generatedAudio,
-              { kind: 'file', path: filePath },
-              { format }
-            )
-          : await saveAudioFromPCM(
-              {
-                samples: await generatedAudio.getSamples(),
-                sampleRate: generatedAudio.sampleRate,
-              },
-              { kind: 'file', path: filePath },
-              { format }
-            );
-      setSavedAudioPath(savedPath);
-      setCachedPlaybackPath(null);
-      setCachedPlaybackSource(null);
+      await saveResultToWav(generatedAudio, filePath);
+      setSavedAudioPath(filePath);
 
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(savedPath)}`);
+      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1273,76 +1234,38 @@ export default function TTSScreen() {
   };
 
   const handlePlayAudio = async () => {
-    if (!savedAudioPath) {
-      Alert.alert('Error', 'No audio file saved. Save audio first.');
+    if (!generatedAudio) {
+      Alert.alert('Error', 'No audio to play. Generate speech first.');
       return;
     }
 
     try {
-      let playbackPath = savedAudioPath;
-      if (savedAudioPath.startsWith('content://')) {
-        const cacheName = `tts_playback_${Date.now()}.wav`;
-        if (
-          cachedPlaybackPath &&
-          cachedPlaybackSource === savedAudioPath &&
-          (await exists(cachedPlaybackPath))
-        ) {
-          playbackPath = cachedPlaybackPath;
+      // If already have an active player, toggle pause/resume
+      const cur = pcmPlayerRef.current;
+      if (cur) {
+        if (isPlaying) {
+          await cur.pause();
+          setIsPlaying(false);
         } else {
-          const cachedPath = await copyContentUriToCache(
-            savedAudioPath,
-            cacheName
-          );
-          setCachedPlaybackPath(cachedPath);
-          setCachedPlaybackSource(savedAudioPath);
-          playbackPath = cachedPath;
-        }
-      }
-
-      const cur = ttsSavedAudioPlaybackRef.current;
-      if (cur && cur.resolvedPath === playbackPath) {
-        if (cur.context.state === 'running') {
-          await cur.context.suspend();
-          setIsPlaying(false);
-          return;
-        }
-        if (cur.context.state === 'suspended') {
-          await cur.context.resume();
+          await cur.resume();
           setIsPlaying(true);
-          return;
         }
+        return;
       }
 
-      stopTtsSavedAudioPlayback();
-
-      setLoadingSound(true);
-      try {
-        const arrayBuffer = await loadAudioAsArrayBuffer(playbackPath);
-        const context = new AudioContext();
-        const audioBuffer = await context.decodeAudioData(arrayBuffer);
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(context.destination);
-        source.onEnded = () => {
-          ttsSavedAudioPlaybackRef.current = null;
+      // Create a new PCM player from the generated audio buffer
+      const player = await createPcmPlayer(generatedAudio.bufferId, {
+        onEnded: () => {
+          pcmPlayerRef.current = null;
           setIsPlaying(false);
-          context.close().catch(() => {});
-        };
-        source.start();
-        ttsSavedAudioPlaybackRef.current = {
-          context,
-          source,
-          resolvedPath: playbackPath,
-        };
-        setIsPlaying(true);
-      } finally {
-        setLoadingSound(false);
-      }
+        },
+      });
+      pcmPlayerRef.current = player;
+      setIsPlaying(true);
     } catch (err) {
       console.error('Play audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       Alert.alert('Error', `Failed to play audio: ${errorMessage}`);
-      setLoadingSound(false);
     }
   };
 
@@ -1367,21 +1290,14 @@ export default function TTSScreen() {
         return;
       }
 
-      const shareUrl = getShareUrl(savedAudioPath);
-
       // We use WAV for saved files.
       const mimeType = 'audio/wav';
 
-      if (Platform.OS === 'android') {
-        await shareAudioFile(shareUrl, mimeType);
-        return;
-      }
+      const source = savedAudioPath.startsWith('content://')
+        ? { kind: 'contentUri' as const, uri: savedAudioPath }
+        : { kind: 'fs' as const, path: savedAudioPath };
 
-      await Share.share({
-        title: 'Share TTS Audio',
-        message: 'TTS audio file',
-        url: shareUrl,
-      });
+      await shareFile(source, { mimeType });
     } catch (err) {
       console.error('Share audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1392,7 +1308,7 @@ export default function TTSScreen() {
   const handleFree = async () => {
     try {
       if (streaming) {
-        resetStreamingState(true);
+        resetStreamingState();
       }
       stopTtsSavedAudioPlayback();
       const engine = ttsEngineRef.current;
@@ -1417,8 +1333,7 @@ export default function TTSScreen() {
       setNumSteps('');
       setExtraOptions('');
       setReferenceText('');
-      setReferenceAudio(null);
-      setReferenceFileName(null);
+      await clearReferenceAudio();
       setError(null);
       Alert.alert('Success', 'TTS model released');
     } catch (err) {
@@ -1756,13 +1671,12 @@ export default function TTSScreen() {
                       <Text style={styles.resultText} numberOfLines={2}>
                         Loaded: {referenceFileName ?? 'reference.wav'} (
                         {referenceAudio.sampleRate} Hz,{' '}
-                        {referenceAudio.samples.length} samples)
+                        {referenceAudio.numSamples} samples)
                       </Text>
                       <TouchableOpacity
                         style={styles.cancelStreamButton}
                         onPress={() => {
-                          setReferenceAudio(null);
-                          setReferenceFileName(null);
+                          void clearReferenceAudio();
                         }}
                       >
                         <Text style={styles.generateButtonText}>
@@ -1915,28 +1829,23 @@ export default function TTSScreen() {
                   )}
                 </TouchableOpacity>
 
-                {savedAudioPath && (
+                {generatedAudio && (
                   <>
                     <TouchableOpacity
                       style={[styles.audioButton, styles.playButton]}
                       onPress={handlePlayAudio}
-                      disabled={loadingSound}
                     >
-                      {loadingSound ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <View style={styles.rowAlignCenter}>
-                          <Ionicons
-                            name={isPlaying ? 'pause' : 'play'}
-                            size={16}
-                            color="#fff"
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.audioButtonText}>
-                            {isPlaying ? 'Pause' : 'Play'}
-                          </Text>
-                        </View>
-                      )}
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name={isPlaying ? 'pause' : 'play'}
+                          size={16}
+                          color="#fff"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.audioButtonText}>
+                          {isPlaying ? 'Pause' : 'Play'}
+                        </Text>
+                      </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -1953,22 +1862,24 @@ export default function TTSScreen() {
                         <Text style={styles.audioButtonText}>Stop</Text>
                       </View>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.audioButton, styles.shareButton]}
-                      onPress={handleShareAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name="share-social"
-                          size={16}
-                          color="#fff"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.audioButtonText}>Share</Text>
-                      </View>
-                    </TouchableOpacity>
                   </>
+                )}
+
+                {savedAudioPath && (
+                  <TouchableOpacity
+                    style={[styles.audioButton, styles.shareButton]}
+                    onPress={handleShareAudio}
+                  >
+                    <View style={styles.rowAlignCenter}>
+                      <Ionicons
+                        name="share-social"
+                        size={16}
+                        color="#fff"
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.audioButtonText}>Share</Text>
+                    </View>
+                  </TouchableOpacity>
                 )}
               </View>
 

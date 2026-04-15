@@ -5,14 +5,6 @@ NS_ASSUME_NONNULL_BEGIN
 @interface SherpaOnnxAudioConvert : NSObject
 
 /**
- * Converts any supported audio file to 16 kHz mono 16-bit PCM WAV.
- * Returns YES on success, NO on failure. Populates `error` on failure.
- */
-+ (BOOL)convertAudioToWav16k:(NSString *)inputPath
-                  outputPath:(NSString *)outputPath
-                       error:(NSError **)error;
-
-/**
  * Converts arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
  * outputSampleRateHz is mostly used for MP3 encoding.
  * Returns YES on success, NO on failure. Populates `error` on failure.
@@ -24,14 +16,17 @@ NS_ASSUME_NONNULL_BEGIN
                        error:(NSError **)error;
 
 /**
- * Decode audio to mono float samples (approx. [-1, 1]) and sample rate.
- * targetSampleRateHz <= 0 keeps the decoded stream rate.
+ * Encode raw float32 PCM samples to an output file in the requested format.
+ * Bypasses FFmpeg input demuxer/decoder — samples go directly through resampler → encoder → muxer.
  */
-+ (BOOL)decodeAudioFileToFloatSamples:(NSString *)inputPath
-                   targetSampleRateHz:(int)targetSampleRateHz
-                           outSamples:(NSArray<NSNumber *> **)outSamples
-                        outSampleRate:(int *)outSampleRate
-                                error:(NSError **)error;
++ (BOOL)convertPcmToFormat:(const float *)samples
+                numSamples:(int)numSamples
+                sampleRate:(int)sampleRate
+              channelCount:(int)channelCount
+                outputPath:(NSString *)outputPath
+                    format:(NSString *)format
+        outputSampleRateHz:(int)outputSampleRateHz
+                     error:(NSError **)error;
 
 @end
 

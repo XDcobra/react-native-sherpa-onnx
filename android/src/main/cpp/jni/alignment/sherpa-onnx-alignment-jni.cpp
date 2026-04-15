@@ -179,7 +179,7 @@ void ThrowRuntimeException(JNIEnv* env, const char* message) {
 
 }  // namespace
 
-extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignProportional(
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignProportional(
     JNIEnv* env,
     jobject /* this */,
     jstring jText,
@@ -204,7 +204,7 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelp
   }
 }
 
-extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignEstimated(
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignEstimated(
     JNIEnv* env,
     jobject /* this */,
     jstring jText,
@@ -231,7 +231,7 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelp
   }
 }
 
-extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFloatPcm(
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFloatPcm(
     JNIEnv* env,
     jobject /* this */,
     jstring jModelPath,
@@ -273,7 +273,7 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelp
   }
 }
 
-extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFile(
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromFile(
     JNIEnv* env,
     jobject /* this */,
     jstring jModelPath,

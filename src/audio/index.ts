@@ -1,135 +1,180 @@
-import { Buffer } from 'buffer';
-import { DeviceEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import type {
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+} from './types';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 
-/**
- * Decode base64-encoded Int16 PCM to float array in [-1, 1].
- * Uses a preallocated Float32Array to avoid GC pressure on the live-mic hot path.
- */
-function base64PcmToFloatArray(base64: string): Float32Array {
-  const bytes = Buffer.from(base64, 'base64');
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const len = bytes.byteLength / 2;
-  const out = new Float32Array(len);
-  for (let i = 0; i < len; i++) {
-    out[i] = view.getInt16(i * 2, true) / 32768;
+let eventEmitter: NativeEventEmitter | null = null;
+function getEventEmitter(): NativeEventEmitter {
+  if (!eventEmitter) {
+    eventEmitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
   }
-  return out;
+  return eventEmitter;
 }
 
-export type PcmLiveStreamOptions = {
-  sampleRate?: number;
-  channelCount?: number;
-  bufferSizeFrames?: number;
-};
+let idCounter = 0;
+function generateOperationId(): string {
+  return `save_${Date.now()}_${++idCounter}`;
+}
 
-export type PcmLiveStreamHandle = {
-  start: () => Promise<void>;
-  stop: () => Promise<void>;
-  onData: (
-    callback: (samples: Float32Array, sampleRate: number) => void
-  ) => () => void;
-  onError: (callback: (message: string) => void) => () => void;
-};
-
-/**
- * Create a PCM live stream from the device microphone. Native capture and resampling ensure
- * PCM is always delivered at the requested sampleRate (e.g. 16000 for STT). The app must have
- * RECORD_AUDIO (Android) and NSMicrophoneUsageDescription (iOS) and grant permission before start().
- */
-export function createPcmLiveStream(
-  options?: PcmLiveStreamOptions
-): PcmLiveStreamHandle {
-  const sampleRate = options?.sampleRate ?? 16000;
-  const channelCount = options?.channelCount ?? 1;
-  const bufferSizeFrames = options?.bufferSizeFrames ?? 0;
-
-  return {
-    start: () =>
-      SherpaOnnx.startPcmLiveStream({
-        sampleRate,
-        channelCount,
-        bufferSizeFrames,
-      }),
-
-    stop: () => SherpaOnnx.stopPcmLiveStream(),
-
-    onData: (callback: (samples: Float32Array, sampleRate: number) => void) => {
-      const sub = DeviceEventEmitter.addListener(
-        'pcmLiveStreamData',
-        (event: { base64Pcm?: string; sampleRate?: number }) => {
-          const base64 = event?.base64Pcm ?? '';
-          const sr = event?.sampleRate ?? sampleRate;
-          if (base64) {
-            const samples = base64PcmToFloatArray(base64);
-            callback(samples, sr);
-          }
-        }
-      );
-      return () => sub.remove();
-    },
-
-    onError: (callback: (message: string) => void) => {
-      const sub = DeviceEventEmitter.addListener(
-        'pcmLiveStreamError',
-        (event: { message?: string }) => {
-          callback(event?.message ?? 'Unknown error');
-        }
-      );
-      return () => sub.remove();
-    },
-  };
+function parseResolvedFileRef(result: {
+  outputKind: string;
+  outputPath: string;
+}): ResolvedFileRef {
+  if (result.outputKind === 'contentUri') {
+    return { kind: 'contentUri', uri: result.outputPath };
+  }
+  return { kind: 'fs', path: result.outputPath };
 }
 
 /**
- * Convert any supported audio file to a requested format (e.g. "mp3", "flac", "wav", "m4a", "opus", "webm").
- * On Android this requires FFmpeg prebuilts. WAV output is always 16 kHz mono (sherpa-onnx).
- * For MP3, optional outputSampleRateHz: 32000, 44100, or 48000; 0/undefined = 44100.
- * For Opus, optional outputSampleRateHz: 8000, 12000, 16000, 24000, or 48000.
- * For M4A/AAC, standard bitrates apply.
- * Resolves on success, rejects with an error message on failure.
+ * Type guard: returns true if the input is a FileSource (has a `kind` property
+ * matching one of the FileSource discriminants).
  */
-export function convertAudioToFormat(
-  inputPath: string,
-  outputPath: string,
-  format: string,
-  outputSampleRateHz?: number
-): Promise<void> {
-  return SherpaOnnx.convertAudioToFormat(
-    inputPath,
-    outputPath,
-    format,
-    outputSampleRateHz ?? 0
+function isFileSource(input: AudioSaveInput): input is FileSource {
+  return (
+    typeof input === 'object' &&
+    input !== null &&
+    'kind' in input &&
+    typeof (input as any).kind === 'string' &&
+    ['fs', 'app', 'contentUri', 'securityScoped', 'pad'].includes(
+      (input as any).kind
+    )
   );
 }
 
 /**
- * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM.
- * On Android this requires FFmpeg prebuilts. Resolves on success, rejects with an error message on failure.
+ * Map quality string to internal numeric value (0=default, 1=low, 2=medium, 3=high).
  */
-export function convertAudioToWav16k(
-  inputPath: string,
-  outputPath: string
-): Promise<void> {
-  return SherpaOnnx.convertAudioToWav16k(inputPath, outputPath);
+function mapQuality(quality?: 'low' | 'medium' | 'high'): number {
+  switch (quality) {
+    case 'low':
+      return 1;
+    case 'medium':
+      return 2;
+    case 'high':
+      return 3;
+    default:
+      return 0;
+  }
 }
-
-export type DecodedAudioFloatSamples = {
-  samples: number[];
-  sampleRate: number;
-};
 
 /**
- * Decode a supported audio file to mono float PCM in [-1, 1] plus sample rate.
- * Same decode coverage as {@link convertAudioToFormat} (FFmpeg-backed on Android when not WAV).
- * @param targetSampleRateHz - Resample to this rate when > 0; use native decoded rate when 0 or omitted.
+ * Save audio to an encoded file at the given destination.
+ *
+ * Input can be:
+ * - A pipeline audio buffer (offline or finalized live): ref, handle, info, or raw ID string.
+ * - A FileSource for direct file-to-file encoding without intermediate buffers.
+ *
+ * Output: FileDestination descriptor.
+ * Returns a ResolvedFileRef pointing to the written file.
  */
-export function decodeAudioFileToFloatSamples(
-  inputPath: string,
-  targetSampleRateHz?: number
-): Promise<DecodedAudioFloatSamples> {
-  return SherpaOnnx.decodeAudioFileToFloatSamples(
-    inputPath,
-    targetSampleRateHz ?? 0
-  );
+export async function saveAudioAsFile(
+  input: AudioSaveInput,
+  output: FileDestination,
+  format: AudioOutputFormat,
+  options?: SaveAudioOptions
+): Promise<ResolvedFileRef> {
+  const operationId = generateOperationId();
+  const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
+  const bitrate = options?.bitrate ?? 0;
+  const quality = mapQuality(options?.quality);
+
+  let progressSubscription: { remove: () => void } | null = null;
+  let abortHandler: (() => void) | null = null;
+
+  try {
+    // Progress listener — listens to native "audioSaveProgress" events
+    if (options?.onProgress) {
+      const emitter = getEventEmitter();
+      const onProgress = options.onProgress;
+      progressSubscription = emitter.addListener('audioSaveProgress', ((
+        rawEvent: unknown
+      ) => {
+        const event = rawEvent as AudioSaveProgressEvent;
+        if (event.operationId === operationId) {
+          onProgress(event);
+        }
+      }) as any);
+    }
+
+    // AbortSignal → native cancel
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        throw Object.assign(new Error('Operation cancelled'), {
+          code: 'AUDIO_SAVE_CANCELLED',
+        });
+      }
+      abortHandler = () => {
+        SherpaOnnx.cancelAudioSave(operationId);
+      };
+      options.signal.addEventListener('abort', abortHandler);
+    }
+
+    let result: { outputKind: string; outputPath: string };
+
+    if (isFileSource(input)) {
+      // File-to-file path: AudioDecodeSession → AudioEncodeSession, no buffer registry
+      result = await SherpaOnnx.saveFileAsAudioFile(
+        input as any,
+        output as any,
+        format,
+        outputSampleRateHz,
+        bitrate,
+        quality,
+        operationId
+      );
+    } else {
+      // Buffer path: resolve to string bufferId, look up in native registry
+      result = await SherpaOnnx.saveAudioBufferToFile(
+        resolvePipelineAudioBufferId(input),
+        output as any,
+        format,
+        outputSampleRateHz,
+        bitrate,
+        quality,
+        operationId
+      );
+    }
+
+    return parseResolvedFileRef(result);
+  } finally {
+    progressSubscription?.remove();
+    if (abortHandler && options?.signal) {
+      options.signal.removeEventListener('abort', abortHandler);
+    }
+  }
 }
+
+/**
+ * Save audio as WAV 16 kHz mono 16-bit PCM.
+ * Shortcut for saveAudioAsFile(input, output, 'wav', { outputSampleRateHz: 16000 }).
+ *
+ * Accepts both buffer references and FileSource.
+ */
+export function saveAudioAsWav16k(
+  input: AudioSaveInput,
+  output: FileDestination
+): Promise<ResolvedFileRef> {
+  return saveAudioAsFile(input, output, 'wav', {
+    outputSampleRateHz: 16000,
+  });
+}
+
+export type {
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+} from './types';
+export { AudioSaveErrorCode } from './types';
+export type { AudioSaveErrorCodeValue } from './types';

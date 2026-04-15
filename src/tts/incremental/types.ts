@@ -1,16 +1,10 @@
+import type { TTSInitializeOptions, TTSModelInfo } from '../types';
 import type {
-  TtsGenerationOptions,
-  TtsStreamOptions,
-  TtsStreamChunk,
-  TtsStreamHandlers,
-  TtsStreamToFileOptions,
-  TtsStreamToFileHandlers,
-  TtsStreamFileEnd,
-  TTSInitializeOptions,
-  TTSModelInfo,
-} from '../types';
-import type { StreamingTtsEngine } from '../streamingTypes';
-import type { PcmPlayer } from '../../pcm/types';
+  StreamingTtsEngine,
+  TtsPipelineHandle,
+  TtsPipelineOptions,
+} from '../streamingTypes';
+import type { LiveAudioBufferIdSource } from '../../audiobuffer/types';
 import type { ModelPathConfig } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -139,19 +133,11 @@ export interface SegmentDroppedEvent {
   reason: 'overflow' | 'cancelled' | 'replaced';
 }
 
-export interface SegmentChunkEvent {
-  type: 'segment:chunk';
-  sessionId: SessionId;
-  segmentId: SegmentId;
-  chunk: TtsStreamChunk;
-}
-
 export type SegmentEvent =
   | SegmentQueuedEvent
   | SegmentStartedEvent
   | SegmentEndedEvent
-  | SegmentDroppedEvent
-  | SegmentChunkEvent;
+  | SegmentDroppedEvent;
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -196,62 +182,38 @@ export interface IncrementalRequestOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Per-request handlers (extend streaming handlers with incremental events)
+// Per-request handlers (pipeline-based: no chunk events)
 // ---------------------------------------------------------------------------
 
-export interface IncrementalStreamHandlers extends TtsStreamHandlers {
+export interface IncrementalStreamHandlers {
   onSessionEvent?: (event: SessionEvent) => void;
   onSegmentEvent?: (event: SegmentEvent) => void;
   onMetrics?: (metrics: IncrementalMetrics) => void;
 }
 
-export interface IncrementalStreamToFileHandlers
-  extends TtsStreamToFileHandlers {
-  onSessionEvent?: (event: SessionEvent) => void;
-  onSegmentEvent?: (event: SegmentEvent) => void;
-  onMetrics?: (metrics: IncrementalMetrics) => void;
-  /**
-   * Called for each segment after it has been written to its own file.
-   * Because each segment is written to a unique path, use this to collect
-   * the per-segment file paths (e.g. for later concatenation).
-   */
-  onSegmentFileEnd?: (
-    event: TtsStreamFileEnd & { segmentId: SegmentId }
-  ) => void;
-}
-
 // ---------------------------------------------------------------------------
-// Controllers (per-request, returned by generate* methods)
+// Controller (per-session, returned by startSession)
 // ---------------------------------------------------------------------------
 
 export interface IncrementalStreamController {
-  /** Push incremental text. May trigger auto-segmentation. */
-  pushText(text: string): void;
+  /**
+   * Push incremental text. May trigger auto-segmentation.
+   * Detected segments are committed to the internal LiveTextBuffer
+   * via appendLiveTextSegment() — the TTS pipeline worker picks them up natively.
+   */
+  pushText(text: string, meta?: { sid?: number; speed?: number }): void;
   /** Force-commit the current buffer as a segment. */
   commit(options?: CommitOptions): void;
-  /** Commit remainder and wait until all segments are processed. */
+  /** Commit remainder, finalize the text buffer, and wait until pipeline completes. */
   flush(options?: FlushOptions): Promise<void>;
-  /** Cancel generation. */
+  /** Cancel: stop pipeline, discard queued segments. */
   cancel(options?: CancelOptions): Promise<void>;
   /** Current metrics snapshot. */
   getMetrics(): IncrementalMetrics;
-  /** Player proxy over active segment player. Only when playback: true. */
-  readonly player: PcmPlayer | null;
-  /** Current session state. */
-  readonly state: SessionState;
-}
-
-export interface IncrementalStreamFileController {
-  /** Push incremental text. May trigger auto-segmentation. */
-  pushText(text: string): void;
-  /** Force-commit the current buffer as a segment. */
-  commit(options?: CommitOptions): void;
-  /** Commit remainder and wait until all segments are processed. */
-  flush(options?: FlushOptions): Promise<void>;
-  /** Cancel generation. */
-  cancel(options?: CancelOptions): Promise<void>;
-  /** Current metrics snapshot. */
-  getMetrics(): IncrementalMetrics;
+  /** The underlying TTS pipeline handle (for getStatus(), etc.). */
+  readonly pipeline: TtsPipelineHandle;
+  /** The internal LiveTextBuffer used for segmented text input. */
+  readonly textBuffer: { bufferId: string };
   /** Current session state. */
   readonly state: SessionState;
 }
@@ -281,29 +243,24 @@ export interface IncrementalStreamingTtsEngine {
   readonly instanceId: string;
 
   /**
-   * Start an incremental streaming speech request (same `TtsStreamOptions` defaults as
-   * `generateSpeechStream`: playback false, emitChunks true when `streamOptions` is omitted).
-   * Returns a controller for pushing text, committing, flushing, and cancelling.
-   * Only one active request at a time.
+   * Start an incremental speech synthesis session.
+   *
+   * Internally creates a LiveTextBuffer, starts a TTS pipeline to the
+   * given audioOut buffer, and returns a controller for pushing text incrementally.
+   *
+   * Text segmentation happens in JS (pushText → boundary detection → commitSegment).
+   * Audio synthesis happens entirely in native (TTS pipeline worker → LiveAudioBuffer).
+   * Zero bridge traffic for audio data.
+   *
+   * @param audioOut - Target live audio buffer for synthesized PCM
+   * @param ttsOptions - Pipeline-level TTS options (sid, speed, voiceClone)
+   * @param incrementalOptions - Segmentation and queue policies
    */
-  generateIncrementalSpeechStream(
-    options: TtsGenerationOptions | undefined,
-    handlers: IncrementalStreamHandlers,
-    streamOptions?: TtsStreamOptions,
+  startSession(
+    audioOut: LiveAudioBufferIdSource,
+    ttsOptions?: TtsPipelineOptions,
     incrementalOptions?: IncrementalRequestOptions
-  ): IncrementalStreamController;
-
-  /**
-   * Start an incremental streaming speech request writing to a file.
-   * Returns a controller for pushing text, committing, flushing, and cancelling.
-   * Only one active request at a time.
-   */
-  generateIncrementalSpeechStreamToFile(
-    options: TtsGenerationOptions | undefined,
-    fileOptions: TtsStreamToFileOptions,
-    handlers: IncrementalStreamToFileHandlers,
-    incrementalOptions?: IncrementalRequestOptions
-  ): IncrementalStreamFileController;
+  ): Promise<IncrementalStreamController>;
 
   /** Model sample rate and number of speakers. */
   getModelInfo(): Promise<TTSModelInfo>;

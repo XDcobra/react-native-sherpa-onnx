@@ -1,3 +1,6 @@
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type { OfflineTextBufferIdSource } from '../textbuffer/types';
+
 export interface AlignmentTimestamp {
   text: string;
   start: number;
@@ -34,14 +37,6 @@ export interface AlignTextToAudioResult {
   timingMode: AlignmentTimingMode;
 }
 
-/** Standalone audio input for alignment. */
-export type AlignAudioInput =
-  | string
-  | {
-      samples: Float32Array;
-      sampleRate: number;
-    };
-
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
 export type AlignTextToAudioOptionsProportional = {
   mode: 'proportional';
@@ -71,16 +66,7 @@ export type AlignTextToAudioOptions =
   | AlignTextToAudioOptionsAccurate;
 
 export type AlignTextToAudioFn = (
-  text: string,
-  audio: AlignAudioInput,
-  options: AlignTextToAudioOptions
-) => Promise<AlignTextToAudioResult>;
-
-/** Public TTS sink input type for alignment convenience. */
-export type AlignTextToTtsSinkInput = import('../tts/types').GeneratedAudio;
-
-export type AlignTextToTtsSinkFn = (
-  text: string,
-  generatedAudio: AlignTextToTtsSinkInput,
+  textIn: OfflineTextBufferIdSource,
+  audioIn: OfflineAudioBufferIdSource,
   options: AlignTextToAudioOptions
 ) => Promise<AlignTextToAudioResult>;

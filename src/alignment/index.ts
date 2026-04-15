@@ -13,20 +13,16 @@ import { ModelCategory } from '../download/types';
 
 export {
   alignTextToAudio,
-  alignTextToTtsSink,
   assertAlignmentGranularityForMode,
 } from './alignTextToAudio';
 
 export type {
-  AlignAudioInput,
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
   AlignTextToAudioOptionsAccurate,
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioResult,
-  AlignTextToTtsSinkFn,
-  AlignTextToTtsSinkInput,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
   AlignmentGranularity,

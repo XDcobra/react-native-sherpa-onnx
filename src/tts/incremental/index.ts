@@ -8,9 +8,9 @@ import { createEngine } from './engine';
 /**
  * Create an incremental-streaming TTS engine (factory).
  *
- * Returns an `IncrementalStreamingTtsEngine` whose
- * `generateIncrementalSpeechStream()` method creates per-request controllers
- * for progressive text pushing, segmentation, and optional native playback.
+ * Returns an `IncrementalStreamingTtsEngine` whose `startSession()` method
+ * creates a pipeline-backed session for progressive text pushing and
+ * segmentation.
  *
  * @example
  * ```ts
@@ -18,13 +18,7 @@ import { createEngine } from './engine';
  *   source: { engineOptions: { modelPath: { type: 'asset', path: 'model' } } },
  * });
  *
- * const ctrl = engine.generateIncrementalSpeechStream(undefined, {
- *   onChunk: (c) => {
- *     // default: playback false, emitChunks true
- *   },
- *   onEnd: () => console.log('done'),
- * });
- * // Native playback instead: add third arg `{ playback: true, emitChunks: false }`
+ * const ctrl = await engine.startSession(audioBuffer);
  * ctrl.pushText('Hello world. ');
  * ctrl.pushText('This is streaming TTS.');
  * await ctrl.flush();
@@ -74,10 +68,8 @@ export type {
   IncrementalMetrics,
   // Controllers
   IncrementalStreamController,
-  IncrementalStreamFileController,
   // Handlers
   IncrementalStreamHandlers,
-  IncrementalStreamToFileHandlers,
   // Per-request options
   IncrementalRequestOptions,
   // IDs & state
@@ -104,10 +96,7 @@ export type {
   // Segment events
   SegmentEvent,
   SegmentQueuedEvent,
-  SegmentStartedEvent,
-  SegmentEndedEvent,
   SegmentDroppedEvent,
-  SegmentChunkEvent,
 } from './types';
 
 export type { ResolvedSegmentationPolicy, SegmentBoundary } from './segmenter';

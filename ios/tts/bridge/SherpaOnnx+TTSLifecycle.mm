@@ -9,7 +9,6 @@
 #include "engine/TtsEngineStore.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
 
-#include <chrono>
 #include <mutex>
 #include <string>
 
@@ -62,65 +61,36 @@
         return;
     }
     std::string instanceIdStr = [instanceId UTF8String];
-    RCTPromiseResolveBlock resolveCopy = resolve;
-    RCTPromiseRejectBlock rejectCopy = reject;
-    NSString *instanceIdCopy = [instanceId copy];
     @try {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            TtsInstanceState *inst = nullptr;
-            {
-                std::lock_guard<std::mutex> lock(g_tts_mutex);
-                auto it = g_tts_instances.find(instanceIdStr);
-                if (it == g_tts_instances.end()) {
-                    resolveCopy(nil);
-                    return;
+        {
+            std::lock_guard<std::mutex> lock(g_tts_mutex);
+            auto it = g_tts_instances.find(instanceIdStr);
+            if (it != g_tts_instances.end()) {
+                TtsInstanceState *i = it->second.get();
+                if (i->wrapper != nullptr) {
+                    i->wrapper->release();
+                    i->wrapper.reset();
                 }
-                inst = it->second.get();
-                inst->streamCancelled.store(true);
+                i->sink.clear();
+                i->modelDir = nil;
+                i->modelType = nil;
+                i->provider = nil;
+                i->noiseScale = nil;
+                i->noiseScaleW = nil;
+                i->lengthScale = nil;
+                i->ruleFsts = nil;
+                i->ruleFars = nil;
+                i->maxNumSentences = nil;
+                i->silenceScale = nil;
+                g_tts_instances.erase(it);
             }
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                {
-                    std::unique_lock<std::mutex> lock(g_tts_mutex);
-                    auto it = g_tts_instances.find(instanceIdStr);
-                    if (it == g_tts_instances.end()) {
-                        dispatch_async(dispatch_get_main_queue(), ^{ resolveCopy(nil); });
-                        return;
-                    }
-                    TtsInstanceState *i = it->second.get();
-                    bool done = g_tts_stream_cv.wait_for(
-                        lock,
-                        std::chrono::seconds(5),
-                        [i] { return !i->streamRunning.load(); }
-                    );
-                    if (!done) {
-                        RCTLogWarn(@"TTS unload: stream did not stop within 5s, releasing anyway");
-                    }
-                    if (i->wrapper != nullptr) {
-                        i->wrapper->release();
-                        i->wrapper.reset();
-                    }
-                    // Sub-plan 01: clear PCM sink on unload
-                    i->sink.clear();
-                    i->modelDir = nil;
-                    i->modelType = nil;
-                    i->provider = nil;
-                    i->noiseScale = nil;
-                    i->noiseScaleW = nil;
-                    i->lengthScale = nil;
-                    i->ruleFsts = nil;
-                    i->ruleFars = nil;
-                    i->maxNumSentences = nil;
-                    i->silenceScale = nil;
-                    g_tts_instances.erase(it);
-                }
-                RCTLogInfo(@"TTS instance %@ released", instanceIdCopy);
-                dispatch_async(dispatch_get_main_queue(), ^{ resolveCopy(nil); });
-            });
-        });
+        }
+        RCTLogInfo(@"TTS instance %@ released", instanceId);
+        resolve(nil);
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS cleanup: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
-        rejectCopy(@"TTS_CLEANUP_ERROR", errorMsg, nil);
+        reject(@"TTS_CLEANUP_ERROR", errorMsg, nil);
     }
 }
 

@@ -8,368 +8,178 @@ import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
-import com.sherpaonnx.tts.core.TtsJniCallbackFactory
 import com.sherpaonnx.tts.core.dispatchGenerate
-import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.OfflineEntry
+import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
-  private val exportService: TtsAudioExportService,
-  private val pcmPlayerService: PcmPlayerService
 ) {
-  fun generateTts(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    try {
-      val inst = repository[instanceId] ?: run {
-        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS instance not found: $instanceId")
-        promise.reject("TTS_GENERATE_ERROR", "TTS instance not found: $instanceId")
-        return
-      }
-      if (!inst.hasEngine()) {
-        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-        promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-        return
-      }
-      val sid = TtsGenerationOptionsParser.getSid(options)
-      val speed = TtsGenerationOptionsParser.getSpeed(options)
-      val audio = when {
-        TtsGenerationOptionsParser.hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
-          if (inst.isZipvoice) {
-            val promptText = options!!.getString("referenceText")?.trim().orEmpty()
-            if (promptText.isEmpty()) {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
-              promise.reject(
-                "TTS_GENERATE_ERROR",
-                "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
-              )
-              return
-            }
-          }
-          val config = TtsGenerationOptionsParser.parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          inst.tts!!.generateWithConfig(text, config)
-        }
-        TtsGenerationOptionsParser.hasReferenceAudio(options) -> {
-          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
-          promise.reject(
-            "TTS_GENERATE_ERROR",
-            "Reference audio is only supported for Zipvoice and Pocket TTS."
-          )
-          return
-        }
-        inst.isPocket -> {
-          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
-          promise.reject(
-            "TTS_GENERATE_ERROR",
-            "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
-          )
-          return
-        }
-        else -> inst.dispatchGenerate(text, sid, speed)
-          ?: run {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-            return
-          }
-      }
-      // Sub-plan 01: store PCM in native sink; Sub-plan 02: return metadata only
-      synchronized(inst.sinkLock) {
-        inst.sink.update(audio.samples, audio.sampleRate)
-      }
-      val generation = inst.sink.generation.get()
-      val map = Arguments.createMap()
-      map.putInt("sampleRate", audio.sampleRate)
-      map.putInt("numSamples", audio.samples.size)
-      map.putDouble("generation", generation.toDouble())
-      promise.resolve(map)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "generateTts error: ${e.message}", e)
-      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
-    }
-  }
-
-  fun generateTtsWithTimestamps(instanceId: String, text: String, options: ReadableMap?, promise: Promise) {
-    try {
-      val inst = repository[instanceId] ?: run {
-        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS instance not found: $instanceId")
-        promise.reject("TTS_GENERATE_ERROR", "TTS instance not found: $instanceId")
-        return
-      }
-      if (!inst.hasEngine()) {
-        Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-        promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-        return
-      }
-
-      val subtitleMode = TtsGenerationOptionsParser.getSubtitleMode(options)
-      if (subtitleMode == "accurate") {
-        Log.e(
-          "SherpaOnnxTts",
-          "TTS_SUBTITLE_ERROR: subtitleMode 'accurate' is handled by alignment.alignTextToTtsSink",
-        )
-        promise.reject(
-          "TTS_SUBTITLE_ERROR",
-          "subtitleMode 'accurate' is handled via alignment.alignTextToTtsSink; generate audio and align from sink.",
-        )
-        return
-      }
-      if (TtsGenerationOptionsParser.isCharacterGranularityRequested(options) && subtitleMode != "accurate") {
-        Log.e(
-          "SherpaOnnxTts",
-          "TTS_SUBTITLE_ERROR: Character granularity is only supported when subtitleMode is 'accurate'"
-        )
-        promise.reject(
-          "TTS_SUBTITLE_ERROR",
-          "Character granularity is only supported when subtitleMode is 'accurate'."
-        )
-        return
-      }
-
-      val sid = TtsGenerationOptionsParser.getSid(options)
-      val speed = TtsGenerationOptionsParser.getSpeed(options)
-      val sentenceChunkSizes = mutableListOf<Int>()
-      val audio: GeneratedAudio = when {
-        subtitleMode == "off" || subtitleMode == "proportional" -> {
-          when {
-            TtsGenerationOptionsParser.hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
-              if (inst.isZipvoice) {
-                val promptText = options!!.getString("referenceText")?.trim().orEmpty()
-                if (promptText.isEmpty()) {
-                  Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
-                  promise.reject(
-                    "TTS_GENERATE_ERROR",
-                    "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
-                  )
-                  return
-                }
-              }
-              val config = TtsGenerationOptionsParser.parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-              inst.tts!!.generateWithConfig(text, config)
-            }
-            TtsGenerationOptionsParser.hasReferenceAudio(options) -> {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
-              promise.reject(
-                "TTS_GENERATE_ERROR",
-                "Reference audio is only supported for Zipvoice and Pocket TTS."
-              )
-              return
-            }
-            inst.isPocket -> {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
-              promise.reject(
-                "TTS_GENERATE_ERROR",
-                "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
-              )
-              return
-            }
-            else -> inst.dispatchGenerate(text, sid, speed)
-              ?: run {
-                Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-                promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-                return
-              }
-          }
-        }
-        TtsGenerationOptionsParser.hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
-          if (inst.isZipvoice) {
-            val promptText = options!!.getString("referenceText")?.trim().orEmpty()
-            if (promptText.isEmpty()) {
-              Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Zipvoice voice cloning requires non-empty referenceText")
-              promise.reject(
-                "TTS_GENERATE_ERROR",
-                "Zipvoice voice cloning requires non-empty referenceText (transcript of reference audio)."
-              )
-              return
-            }
-          }
-          val config = TtsGenerationOptionsParser.parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
-          inst.tts!!.generateWithConfigAndCallback(
-            text,
-            config,
-            TtsJniCallbackFactory.ttsChunkCallbackForJni(sentenceChunkSizes)
-          )
-        }
-        TtsGenerationOptionsParser.hasReferenceAudio(options) -> {
-          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Reference audio is not supported for this TTS model type")
-          promise.reject(
-            "TTS_GENERATE_ERROR",
-            "Reference audio is only supported for Zipvoice and Pocket TTS."
-          )
-          return
-        }
-        inst.isPocket -> {
-          Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: Pocket TTS requires reference audio for voice cloning")
-          promise.reject(
-            "TTS_GENERATE_ERROR",
-            "Pocket TTS requires reference audio for voice cloning. Pass referenceAudio and referenceSampleRate (> 0) in options."
-          )
-          return
-        }
-        else -> {
-          val tts = inst.tts
-          if (tts == null) {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
-            return
-          }
-          tts.generateWithCallback(text, sid, speed, TtsJniCallbackFactory.ttsChunkCallbackForJni(sentenceChunkSizes))
-        }
-      }
-
-      if (subtitleMode != "off" && sentenceChunkSizes.isEmpty() && audio.samples.isNotEmpty()) {
-        sentenceChunkSizes.add(audio.samples.size)
-      }
-
-      // Sub-plan 01: store PCM in native sink
-      synchronized(inst.sinkLock) {
-        inst.sink.update(audio.samples, audio.sampleRate)
-      }
-      val generation = inst.sink.generation.get()
-
-      // Sub-plan 02: metadata-only — no samples array over the bridge
-      val map = Arguments.createMap()
-      map.putInt("sampleRate", audio.sampleRate)
-      map.putInt("numSamples", audio.samples.size)
-      map.putDouble("generation", generation.toDouble())
-
-      if (subtitleMode == "estimated") {
-        val counts = Arguments.createArray()
-        for (c in sentenceChunkSizes) {
-          counts.pushInt(c)
-        }
-        map.putArray("segmentSampleCounts", counts)
-      }
-
-      // Subtitles are now produced by alignment.alignTextToTtsSink(...), not here.
-      // Keep return shape for backwards compatibility.
-      map.putArray("subtitles", Arguments.createArray())
-      val timingMode = when (subtitleMode) {
-        "off" -> "off"
-        "proportional" -> "proportional"
-        else -> "estimated"
-      }
-      map.putString("timingMode", timingMode)
-      promise.resolve(map)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: ${e.message ?: "Failed to generate speech"}", e)
-      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to generate speech", e)
-    }
-  }
 
   /**
-   * Return PCM samples from the native sink as a number[] for the given generation.
-   * This is the fallback path (non-JSI); a future JSI path can return Float32Array directly.
+   * Buffer-to-buffer TTS synthesis: reads text from an OfflineTextBuffer,
+   * writes PCM into an empty OfflineAudioBuffer.
    */
-  fun getTtsSamples(instanceId: String, generation: Double, promise: Promise) {
-    try {
-      val inst = repository[instanceId] ?: run {
-        promise.reject("TTS_INSTANCE_NOT_FOUND", "TTS instance not found: $instanceId")
-        return
-      }
-      val requestedGen = generation.toLong()
-      synchronized(inst.sinkLock) {
-        val currentGen = inst.sink.generation.get()
-        if (currentGen == 0L || inst.sink.samples == null) {
-          promise.reject("TTS_NO_SAMPLES", "No batch synthesis result available for instance $instanceId")
-          return
-        }
-        if (requestedGen != currentGen) {
-          promise.reject("TTS_STALE_GENERATION", "Generation $requestedGen is stale; current is $currentGen")
-          return
-        }
-        val pcm = inst.sink.samples!!
-        val arr = Arguments.createArray()
-        for (s in pcm) {
-          arr.pushDouble(s.toDouble())
-        }
-        val map = Arguments.createMap()
-        map.putArray("samples", arr)
-        map.putInt("sampleRate", inst.sink.sampleRate)
-        promise.resolve(map)
-      }
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "getTtsSamples error: ${e.message}", e)
-      promise.reject("TTS_SAMPLES_ERROR", e.message ?: "Failed to get TTS samples", e)
-    }
-  }
-
-  /**
-   * Save audio directly from native sink to file (no JS PCM round-trip).
-   */
-  fun saveTtsAudioFromSink(
+  fun synthesizeTts(
     instanceId: String,
-    generation: Double,
-    destinationType: String,
-    pathOrDirectoryUri: String,
-    filename: String,
-    format: String,
-    outputSampleRateHz: Double,
+    textInBufferId: String,
+    audioOutBufferId: String,
+    options: ReadableMap?,
     promise: Promise
   ) {
     try {
+      // 1. Resolve TTS engine
       val inst = repository[instanceId] ?: run {
-        promise.reject("TTS_INSTANCE_NOT_FOUND", "TTS instance not found: $instanceId")
+        promise.reject("TTS_GENERATE_ERROR", "TTS instance not found: $instanceId")
         return
       }
-      val requestedGen = generation.toLong()
-      val pcmCopy: FloatArray
-      val rate: Int
-      synchronized(inst.sinkLock) {
-        val currentGen = inst.sink.generation.get()
-        if (currentGen == 0L || inst.sink.samples == null) {
-          promise.reject("TTS_NO_SAMPLES", "No batch synthesis result available for instance $instanceId")
-          return
-        }
-        if (requestedGen != currentGen) {
-          promise.reject("TTS_STALE_GENERATION", "Generation $requestedGen is stale; current is $currentGen")
-          return
-        }
-        pcmCopy = inst.sink.samples!!.copyOf()
-        rate = inst.sink.sampleRate
+      if (!inst.hasEngine()) {
+        promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+        return
       }
-      // Delegate directly with FloatArray — no ReadableArray conversion needed
-      exportService.saveTtsAudioDirect(pcmCopy, rate, destinationType, pathOrDirectoryUri, filename, format, outputSampleRateHz.toInt(), promise)
+
+      // 2. Resolve input text buffer
+      val textEntry = TextPipelineRegistry.getOffline(textInBufferId)
+      if (textEntry == null) {
+        promise.reject("TTS_TEXT_BUFFER_NOT_FOUND", "Offline text buffer not found: $textInBufferId")
+        return
+      }
+      if (!textInBufferId.startsWith("txt_off_")) {
+        promise.reject("TTS_TEXT_BUFFER_KIND_MISMATCH", "Expected offline text buffer (txt_off_*), got: $textInBufferId")
+        return
+      }
+      if (!textEntry.populated || textEntry.text.isEmpty()) {
+        promise.reject("TTS_TEXT_BUFFER_EMPTY", "Text buffer is empty or not populated: $textInBufferId")
+        return
+      }
+
+      // 3. Resolve output audio buffer
+      val audioEntry = PipelineAudioRegistry.getOffline(audioOutBufferId)
+      if (audioEntry == null) {
+        promise.reject("TTS_AUDIO_OUT_NOT_FOUND", "Offline audio buffer not found: $audioOutBufferId")
+        return
+      }
+      if (!audioOutBufferId.startsWith("off_")) {
+        promise.reject("TTS_AUDIO_OUT_KIND_MISMATCH", "Expected offline audio buffer (off_*), got: $audioOutBufferId")
+        return
+      }
+      if (audioEntry !is OfflineEntry.InMemory) {
+        promise.reject("TTS_AUDIO_OUT_KIND_MISMATCH", "Audio output buffer must be an in-memory buffer (created via createEmptyOfflineAudioBuffer)")
+        return
+      }
+      if (audioEntry.numSamples > 0) {
+        promise.reject("TTS_AUDIO_OUT_ALREADY_POPULATED", "Audio output buffer is already populated: $audioOutBufferId")
+        return
+      }
+
+      // 4. Sample rate strict check
+      val modelSampleRate = inst.tts?.sampleRate() ?: 0
+      if (modelSampleRate > 0 && audioEntry.sampleRate != modelSampleRate) {
+        promise.reject(
+          "TTS_OUTPUT_SAMPLE_RATE_MISMATCH",
+          "audioOut.sampleRate (${audioEntry.sampleRate}) != model sampleRate ($modelSampleRate). " +
+            "Allocate with getTtsSampleRate() or tts.getSampleRate()."
+        )
+        return
+      }
+
+      // 5. Parse generation options
+      val text = textEntry.text
+      val sid = TtsGenerationOptionsParser.getSid(options)
+      val speed = TtsGenerationOptionsParser.getSpeed(options)
+
+      // 6. Handle voice cloning with OfflineAudioBuffer reference
+      val audio: GeneratedAudio = if (TtsSynthesisOptionsParser.hasVoiceCloneBuffer(options)) {
+        if (!inst.isZipvoice && !inst.isPocket) {
+          promise.reject("TTS_GENERATE_ERROR", "Reference audio is only supported for Zipvoice and Pocket TTS.")
+          return
+        }
+        val refBufferId = options?.getString("referenceAudioBufferId")
+        if (refBufferId.isNullOrEmpty()) {
+          promise.reject("TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND", "referenceAudioBufferId is required for voice cloning")
+          return
+        }
+        val refEntry = PipelineAudioRegistry.getOffline(refBufferId)
+        if (refEntry == null) {
+          promise.reject("TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND", "Reference audio buffer not found: $refBufferId")
+          return
+        }
+        if (!refBufferId.startsWith("off_")) {
+          promise.reject("TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH", "Expected offline audio buffer for reference, got: $refBufferId")
+          return
+        }
+        if (inst.isZipvoice) {
+          val refText = options?.getString("referenceText")?.trim().orEmpty()
+          if (refText.isEmpty()) {
+            promise.reject("TTS_GENERATE_ERROR", "Zipvoice voice cloning requires non-empty referenceText.")
+            return
+          }
+        }
+        // Build GenerationConfig from buffer reference audio
+        val refSamples = refEntry.readAllSamples()
+        val refSampleRate = refEntry.sampleRate
+        val silenceScale = if (options?.hasKey("silenceScale") == true) options.getDouble("silenceScale").toFloat() else 0.2f
+        val numSteps = if (options?.hasKey("numSteps") == true) options.getDouble("numSteps").toInt() else 5
+        val refText = options?.getString("referenceText") ?: ""
+        val extraMap = options?.getMap("extra")?.let { map ->
+          val it = map.keySetIterator()
+          buildMap<String, String> {
+            while (it.hasNextKey()) {
+              val k = it.nextKey()
+              put(k, map.getString(k).orEmpty())
+            }
+          }
+        }
+        val config = GenerationConfig(
+          silenceScale = silenceScale,
+          speed = speed,
+          sid = sid,
+          referenceAudio = refSamples,
+          referenceSampleRate = refSampleRate,
+          referenceText = refText,
+          numSteps = numSteps,
+          extra = extraMap
+        )
+        inst.tts!!.generateWithConfig(text, config)
+      } else if (inst.isPocket) {
+        promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass voiceClone in options.")
+        return
+      } else {
+        inst.dispatchGenerate(text, sid, speed) ?: run {
+          promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+          return
+        }
+      }
+
+      if (audio.samples.isEmpty() || audio.sampleRate == 0) {
+        promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+        return
+      }
+
+      // 7. Adopt samples into the output buffer (zero-copy move, synchronized to prevent TOCTOU)
+      val adopted = audioEntry.tryAdoptSamples(audio.samples)
+      if (!adopted) {
+        promise.reject("TTS_AUDIO_OUT_ALREADY_POPULATED", "Audio output buffer was populated concurrently: $audioOutBufferId")
+        return
+      }
+
+      promise.resolve(null)
     } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "saveTtsAudioFromSink error: ${e.message}", e)
-      promise.reject("TTS_SAVE_ERROR", e.message ?: "Failed to save TTS audio from sink", e)
+      Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
+      promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)
     }
   }
+}
 
-  fun playTtsFromSink(instanceId: String, generation: Double, sampleRate: Double, promise: Promise) {
-    try {
-      val inst = repository[instanceId] ?: run {
-        promise.reject("TTS_INSTANCE_NOT_FOUND", "TTS instance not found: $instanceId")
-        return
-      }
-      val requestedGen = generation.toLong()
-      val pcmCopy: FloatArray
-      val rate: Int
-      synchronized(inst.sinkLock) {
-        val currentGen = inst.sink.generation.get()
-        if (currentGen == 0L || inst.sink.samples == null) {
-          promise.reject("TTS_SINK_EMPTY", "No batch synthesis result available for instance $instanceId")
-          return
-        }
-        if (requestedGen != currentGen) {
-          promise.reject("TTS_SINK_STALE", "Generation $requestedGen is stale; current is $currentGen")
-          return
-        }
-        pcmCopy = inst.sink.samples!!.copyOf()
-        rate = if (sampleRate.toInt() > 0) sampleRate.toInt() else inst.sink.sampleRate
-      }
-      val playerId = "batch_play_${instanceId}_${requestedGen}"
-      // Auto-destroy any previous batch playback player for this instance
-      val prevPlayerId = inst.batchPlaybackPlayerId
-      if (prevPlayerId != null) {
-        pcmPlayerService.destroyInternal(prevPlayerId)
-      }
-      inst.batchPlaybackPlayerId = playerId
-      pcmPlayerService.createInternal(playerId, rate, 1, instanceId)
-      pcmPlayerService.enqueueFromNative(playerId, pcmCopy)
-      val result = Arguments.createMap()
-      result.putString("playerId", playerId)
-      promise.resolve(result)
-    } catch (e: Exception) {
-      Log.e("SherpaOnnxTts", "playTtsFromSink error: ${e.message}", e)
-      promise.reject("TTS_PLAY_ERROR", e.message ?: "Failed to play TTS audio from sink", e)
-    }
+/**
+ * Helper to check for buffer-based voice clone options in the new pipeline API.
+ */
+internal object TtsSynthesisOptionsParser {
+  fun hasVoiceCloneBuffer(options: ReadableMap?): Boolean {
+    if (options == null) return false
+    return options.hasKey("referenceAudioBufferId") &&
+      !options.isNull("referenceAudioBufferId") &&
+      (options.getString("referenceAudioBufferId")?.isNotEmpty() == true)
   }
 }

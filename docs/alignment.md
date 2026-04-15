@@ -1,41 +1,69 @@
-# Alignment and subtitles (text + audio)
+# Alignment and subtitles (OfflineTextBuffer + OfflineAudioBuffer)
 
-Use this module whenever you have **transcript text** and **audio** and need **timed subtitle lines**.
+Use this module when you already have:
+- transcript in an `OfflineTextBuffer`
+- audio in an `OfflineAudioBuffer`
+
+It returns subtitle timing items (`text`, `start`, `end`).
 
 **Import path:** `react-native-sherpa-onnx/alignment`
 
 ## Modes
 
 | Mode | Needs | `timingMode` in result |
-|------|--------|-------------------------|
-| **proportional** | Audio duration + text only | `proportional` |
-| **estimated** | Audio + `segmentSampleCounts` timeline | `estimated` |
-| **accurate** | Audio + wav2vec2 ONNX (`alignmentModelPath`) | `aligned` |
+| --- | --- | --- |
+| `proportional` | text + audio duration | `proportional` |
+| `estimated` | text + `segmentSampleCounts` timeline | `estimated` |
+| `accurate` | text + audio + wav2vec2 ONNX | `aligned` |
 
-Granularity:
+Granularity rules:
 - `proportional` / `estimated`: `sentence` or `word`
 - `accurate`: `sentence`, `word`, or `character`
 
 ## Quick Start
 
-### 1) Proportional timing
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `TEXT_INVALID_ARGUMENT` or `AUDIO_INVALID_ARGUMENT`.
+
+### 1) Proportional alignment (buffer-to-buffer)
 
 ```ts
 import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 
-const r = await alignTextToAudio('Hello world.', '/path/to/audio.wav', {
-  mode: 'proportional',
-  granularity: 'sentence',
+const textBuf = await createOfflineTextBufferFromText('Hello world.');
+const audioBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
 });
 
-console.log(r.timingMode); // 'proportional'
-console.log(r.subtitles);  // [{ text, start, end }, ...]
+try {
+  const r = await alignTextToAudio(textBuf, audioBuf, {
+    mode: 'proportional',
+    granularity: 'sentence',
+  });
+
+  console.log(r.timingMode); // 'proportional'
+  console.log(r.subtitles);  // [{ text, start, end }, ...]
+} finally {
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
+}
 ```
 
 ### 2) Accurate CTC (wav2vec2 ONNX)
 
 ```ts
-import { alignTextToAudio, detectAlignmentModel } from 'react-native-sherpa-onnx/alignment';
+import {
+  alignTextToAudio,
+  detectAlignmentModel,
+} from 'react-native-sherpa-onnx/alignment';
 
 const det = await detectAlignmentModel({
   type: 'file',
@@ -46,71 +74,149 @@ if (!det.success || !det.paths?.model) {
   throw new Error(det.error ?? 'Alignment model not found');
 }
 
-// Path input
-const r1 = await alignTextToAudio('Hello world.', '/path/to/audio.wav', {
+// Uses native forced alignment over the offline audio buffer
+const r = await alignTextToAudio(textBuf, audioBuf, {
   mode: 'accurate',
   alignmentModelPath: det.paths.model,
   granularity: 'word',
 });
-
-// In-memory PCM input (Float32Array)
-const r2 = await alignTextToAudio(
-  'Hello world.',
-  { samples: yourMonoSamplesFloat32, sampleRate: yourSampleRate },
-  {
-    mode: 'accurate',
-    alignmentModelPath: det.paths.model,
-    granularity: 'character',
-  }
-);
 ```
 
-### 3) TTS sink integration (no PCM JS round-trip)
+### 3) Estimated mode (external timeline)
+
+Estimated mode does **not** derive `segmentSampleCounts` from the waveform alone: you pass **one integer sample count per subtitle segment** after the transcript is split with `granularity` (`sentence` or `word`). Typical sources are **offline STT** timelines (text buffer slices) or **TTS** synthesis metadata (per chunk / per segment sample spans at the engine sample rate). The same `alignTextToAudio` call works once you have that array; only the producer of the counts changes.
+
+Below, **`segmentSampleCounts` comes from offline STT** after `transcribe` fills the text buffer. **TTS** is analogous: build the same array from your batch or streaming pipeline’s per-segment sample lengths (native timeline, summed chunk sizes, etc.) at the same `sampleRate` as `audioBuf`.
+
+```ts
+import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
+import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
+import {
+  createOfflineAudioBufferFromFile,
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferDurationsSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+  type OfflineTextBufferInfo,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
+const det = await detectSttModel(modelPath);
+if (!det.success) throw new Error(det.error ?? 'STT detection failed');
+
+const stt = await createSTT({
+  modelPath,
+  modelType: (det.modelType as any) ?? 'auto',
+});
+
+const audioBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
+const textBuf = await createEmptyOfflineTextBuffer();
+
+try {
+  await stt.transcribe(audioBuf, textBuf);
+
+  const audioInfo = await getPipelineAudioBufferInfo(audioBuf);
+  const ti = (await getPipelineTextBufferInfo(textBuf)) as OfflineTextBufferInfo;
+
+  // STT: per-token durations (seconds in typical sherpa-onnx setups — confirm for your model).
+  const dursSec = await getOfflineTextBufferDurationsSlice(textBuf, 0, ti.durationCount);
+  // Map to sample counts at the *same* rate as the offline audio buffer.
+  // For `granularity: 'word'`, counts must align with how the alignment engine splits words; if you have
+  // sub-word tokens, merge durations per word boundary before building `segmentSampleCounts`.
+  const segmentSampleCounts = dursSec.map((sec) =>
+    Math.round(sec * audioInfo.sampleRate)
+  );
+
+  // Manual: when you already know segment lengths (e.g. from an editor), skip STT/TTS and pass literals:
+  // const segmentSampleCounts = [12000, 9000, 8000];
+
+  // TTS: same idea — fill `segmentSampleCounts` from your synthesis timeline (per meta segment / summed
+  // chunk PCM lengths) at `audioInfo.sampleRate`; then call `alignTextToAudio` exactly as below.
+
+  const r = await alignTextToAudio(textBuf, audioBuf, {
+    mode: 'estimated',
+    granularity: 'word',
+    chunks: {
+      sampleRate: audioInfo.sampleRate,
+      segmentSampleCounts,
+    },
+  });
+
+  console.log(r.timingMode, r.subtitles);
+} finally {
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
+  await stt.destroy();
+}
+```
+
+### 4) TTS -> Alignment pipeline
+
+**Offline STT** fits the same pattern: you already have an `OfflineAudioBuffer` (input) and an `OfflineTextBuffer` filled by `stt.transcribe(audio, textOut)` — call `alignTextToAudio(textOut, audio, options)` with the same modes as below. See [stt-offline.md](./stt-offline.md).
 
 ```ts
 import { createTTS } from 'react-native-sherpa-onnx/tts';
-import { alignTextToTtsSink } from 'react-native-sherpa-onnx/alignment';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
 
 const tts = await createTTS({ modelPath: { type: 'asset', path: 'models/vits' } });
-const audio = await tts.generateSpeech('Hello world');
+const sr = await tts.getSampleRate();
 
-const aligned = await alignTextToTtsSink('Hello world', audio, {
-  mode: 'proportional',
-  granularity: 'sentence',
-});
+const textBuf = await createOfflineTextBufferFromText('Hello world');
+const audioBuf = await createEmptyOfflineAudioBuffer(sr);
 
-await tts.destroy();
+try {
+  await tts.synthesize(textBuf, audioBuf);
+  const aligned = await alignTextToAudio(textBuf, audioBuf, {
+    mode: 'proportional',
+    granularity: 'sentence',
+  });
+  console.log(aligned.subtitles);
+} finally {
+  await releasePipelineTextBuffer(textBuf).catch(() => {});
+  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
+  await tts.destroy();
+}
 ```
 
-Use this especially for `accurate` mode after TTS generation to avoid pulling full PCM into JS and pushing it back to native.
+## API reference
 
-## API Reference
+### Alignment
 
-### `alignTextToAudio(text, audio, options)`
+#### `alignTextToAudio(textIn, audioIn, options)`
 
 ```ts
 function alignTextToAudio(
-  text: string,
-  audio: string | { samples: Float32Array; sampleRate: number },
+  textIn: OfflineTextBufferIdSource,
+  audioIn: OfflineAudioBufferIdSource,
   options: AlignTextToAudioOptions
 ): Promise<AlignTextToAudioResult>;
 ```
-
-Native-first implementation for all modes.
-
-### `alignTextToTtsSink(text, generatedAudio, options)`
 
 ```ts
-function alignTextToTtsSink(
-  text: string,
-  generatedAudio: GeneratedAudio,
-  options: AlignTextToAudioOptions
-): Promise<AlignTextToAudioResult>;
+const result = await alignTextToAudio(textBuf, audioBuf, {
+  mode: 'proportional',
+  granularity: 'sentence',
+});
 ```
 
-Align directly from the native TTS sink (best path for TTS-generated audio).
+### Detection
 
-### `detectAlignmentModel(modelPath, options?)`
+#### `detectAlignmentModel(modelPath, options?)`
 
 ```ts
 function detectAlignmentModel(
@@ -119,25 +225,64 @@ function detectAlignmentModel(
 ): Promise<AlignmentDetectModelResult>;
 ```
 
-Inspects model folders and returns detection metadata following the unified detect shape:
+```ts
+const det = await detectAlignmentModel({
+  type: 'asset',
+  path: 'models/alignment-wav2vec2',
+});
+if (det.success) {
+  console.log(det.modelType, det.paths?.model);
+}
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `success` | `boolean` | Whether at least one model was detected |
-| `error` | `string?` | Error message on failure |
-| `detectedModels` | `DetectedModelEntry[]?` | All candidate models found |
-| `modelType` | `string?` | Resolved model type (e.g. `wav2vec2ctc`) |
-| `paths` | `object?` | Resolved `model` path for `alignmentModelPath` |
-| `languages` | `string[]?` | ISO 639-1 language codes derived from model ID |
-| `quantization` | `string?` | Quantization level (e.g. `int8`) |
-| `detectionSources` | `DetectionSource[]?` | How detection was performed (`fileListing`, `nameOnly`, …) |
+### Validation
+
+#### `assertAlignmentGranularityForMode(mode, granularity)`
+
+```ts
+function assertAlignmentGranularityForMode(
+  mode: 'proportional' | 'estimated' | 'aligned' | 'off',
+  granularity: AlignmentGranularity
+): void;
+```
+
+```ts
+// throws if granularity='character' but mode is not aligned/accurate
+assertAlignmentGranularityForMode('aligned', 'character');
+```
+
+## Pipeline buffers (audio + text)
+See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [textbuffer.md](textbuffer.md).
+
+## Types (core)
+
+| Type | Description |
+| --- | --- |
+| `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \| 'word'; language?: string }` |
+| `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \| 'word'; language?: string }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; alignmentModelPath: string; granularity?: 'sentence' \| 'word' \| 'character'; language?: string }` |
+| `AlignmentChunkTimeline` | `{ sampleRate: number; segmentSampleCounts: readonly number[] }` |
+| `AlignTextToAudioResult` | `{ subtitles: SubtitleTimingItem[]; timingMode: 'proportional' \| 'estimated' \| 'aligned' }` |
+| `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
+| `OfflineAudioBufferIdSource` | From `react-native-sherpa-onnx/audiobuffer` |
+
+## Error code quick table
+
+| Code | Meaning |
+| --- | --- |
+| `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` | text buffer id not found |
+| `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` | expected `txt_off_*`, got wrong buffer kind |
+| `ALIGNMENT_TEXT_BUFFER_EMPTY` | text buffer empty or not populated |
+| `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` | audio buffer id not found |
+| `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` | expected `off_*`, got wrong buffer kind |
+| `ALIGNMENT_AUDIO_BUFFER_EMPTY` | audio buffer has no samples |
+| `ALIGNMENT_MODEL_MISSING` | accurate mode without `alignmentModelPath` |
+| `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
+| `ALIGNMENT_ERROR` | generic native alignment failure |
 
 ## Notes
 
-- `alignTextToAudio` now expects **`Float32Array`** for in-memory PCM.
-- `getAudioDuration` is the only native duration/metrics method.
-- Legacy low-level native methods (`alignAccurateFromPath`, `alignAccurateFromFloat32`) and the compatibility alias `getAlignmentAudioMetrics` were removed. Use `alignTextToAudio` / `alignTextToTtsSink` and the native-first TurboModule methods instead.
-
-## STT status
-
-A dedicated STT-to-alignment helper is still not shipped. The estimated mode already supports generic `segmentSampleCounts` timelines, so STT integration can map token timestamps to that shape in a future helper.
+- Input API is now **buffer-only** (`OfflineTextBuffer` + `OfflineAudioBuffer`).
+- `alignTextToTtsSink` is removed.
+- Path/PCM overloads are removed.

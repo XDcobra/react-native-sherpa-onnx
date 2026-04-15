@@ -1,28 +1,61 @@
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import type { PcmPlayer, PcmPlayerOptions, PcmPlayerFeed } from './types';
+import type {
+  PcmPlayer,
+  PcmPlayerOptions,
+  PcmPlayerAudioBuffer,
+} from './types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer/index';
 
 let pcmPlayerCounter = 0;
 
+let eventEmitter: NativeEventEmitter | null = null;
+function getEventEmitter(): NativeEventEmitter {
+  if (!eventEmitter) {
+    eventEmitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+  }
+  return eventEmitter;
+}
+
 /**
- * Create a standalone PCM player session for mono float audio playback.
+ * Create a pipeline audio buffer player session for mono float audio playback.
  *
- * @param options - Player configuration (sampleRate, feed mode, optional TTS binding)
+ * The player consumes audio frames from a pipeline buffer (offline or live)
+ * and plays them via native audio backend (AudioTrack on Android, AVAudioEngine on iOS).
+ *
+ * @param audioBuffer - Live or offline audio buffer to play from
+ * @param options - Player configuration (volume, onEnded, etc.)
  * @returns Promise resolving to a PcmPlayer handle
  */
 export async function createPcmPlayer(
-  options: PcmPlayerOptions
+  audioBuffer: PcmPlayerAudioBuffer,
+  options?: PcmPlayerOptions
 ): Promise<PcmPlayer> {
   const playerId = `pcm_player_${++pcmPlayerCounter}`;
-  const feed: PcmPlayerFeed = options.feed ?? 'js';
-  const channels = options.channels ?? 1;
+  const bufferId = resolvePipelineAudioBufferId(audioBuffer);
+  const volume = options?.volume ?? 1.0;
 
-  await SherpaOnnx.createPcmPlayer(
-    playerId,
-    options.sampleRate,
-    channels,
-    feed,
-    options.ttsInstanceId ?? null
-  );
+  // Subscribe to ended event before creating the player to avoid race conditions
+  let endedSubscription: ReturnType<NativeEventEmitter['addListener']> | null =
+    null;
+  if (options?.onEnded) {
+    const onEnded = options.onEnded;
+    endedSubscription = getEventEmitter().addListener('pcmPlayerEnded', ((
+      rawEvent: unknown
+    ) => {
+      const event = rawEvent as { playerId: string; bufferId: string };
+      if (event.playerId === playerId) {
+        onEnded({ playerId: event.playerId, bufferId: event.bufferId });
+      }
+    }) as any);
+  }
+
+  try {
+    await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume);
+  } catch (e) {
+    endedSubscription?.remove();
+    throw e;
+  }
 
   let destroyed = false;
   const guard = () => {
@@ -32,22 +65,6 @@ export async function createPcmPlayer(
   return {
     get playerId() {
       return playerId;
-    },
-    get feed() {
-      return feed;
-    },
-
-    async writePcmChunk(samples: Float32Array | number[]): Promise<void> {
-      guard();
-      if (feed === 'native') {
-        throw new Error(
-          `PcmPlayer ${playerId} has feed 'native'; writePcmChunk() is not allowed from JS. ` +
-            `Use feed 'js' for manual PCM writes.`
-        );
-      }
-      const arr =
-        samples instanceof Float32Array ? Array.from(samples) : samples;
-      return SherpaOnnx.writePcmChunk(playerId, arr);
     },
 
     async pause(): Promise<void> {
@@ -60,9 +77,26 @@ export async function createPcmPlayer(
       return SherpaOnnx.resumePcmPlayer(playerId);
     },
 
+    async seekToMs(positionMs: number): Promise<void> {
+      guard();
+      return SherpaOnnx.seekPcmPlayerToMs(playerId, positionMs);
+    },
+
+    async restart(): Promise<void> {
+      guard();
+      return SherpaOnnx.restartPcmPlayer(playerId);
+    },
+
+    async getPlaybackPositionMs(): Promise<number> {
+      guard();
+      return SherpaOnnx.getPcmPlayerPositionMs(playerId);
+    },
+
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
+      endedSubscription?.remove();
+      endedSubscription = null;
       await SherpaOnnx.destroyPcmPlayer(playerId);
     },
   };

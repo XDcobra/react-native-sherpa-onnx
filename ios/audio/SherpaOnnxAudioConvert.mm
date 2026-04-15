@@ -17,15 +17,7 @@ extern "C" {
 
 // Forward declaration — convertToFormat handles all formats including WAV (16 kHz mono).
 static std::string convertToFormat(const char* inputPath, const char* outputPath, const char* formatHint, int outputSampleRateHz);
-static std::string decodeAudioFileToFloatMono(const char* inputPath,
-                                              int targetSampleRateHz,
-                                              std::vector<float>* outSamples,
-                                              int* outSampleRate);
-
-// Convenience: convert any audio to 16 kHz mono WAV via the main convertToFormat pipeline.
-static std::string convertToWav16kMono(const char* inputPath, const char* outputPath) {
-    return convertToFormat(inputPath, outputPath, "wav", 16000);
-}
+static std::string convertPcmToFormatImpl(const float *samples, int numSamples, int sampleRate, int channelCount, const char *outputPath, const char *formatHint, int outputSampleRateHz);
 
 // Generic conversion: supports writing WAV/MP3/FLAC depending on output file extension and linked encoders.
 // WAV output is 16 kHz mono PCM (sherpa-onnx). outputSampleRateHz is only used for MP3 (libshine: 32000/44100/48000); 0 = default 44100.
@@ -663,239 +655,357 @@ static std::string convertToFormat(const char* inputPath, const char* outputPath
 #endif
 }
 
-static std::string decodeAudioFileToFloatMono(const char* inputPath,
-                                              int targetSampleRateHz,
-                                              std::vector<float>* outSamples,
-                                              int* outSampleRate) {
-    outSamples->clear();
-    *outSampleRate = 0;
-#ifndef HAVE_FFMPEG
-    (void)inputPath;
-    (void)targetSampleRateHz;
-    return std::string("FFmpeg not available. Build prebuilts with third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh.");
-#else
-    if (!inputPath) {
-        return std::string("inputPath is null");
-    }
+// ==================== PCM-to-Format (no demuxer/decoder) ====================
 
-    AVFormatContext* inFmt = nullptr;
-    if (avformat_open_input(&inFmt, inputPath, nullptr, nullptr) < 0) {
-        return std::string("Failed to open input file");
-    }
-    if (avformat_find_stream_info(inFmt, nullptr) < 0) {
-        avformat_close_input(&inFmt);
-        return std::string("Failed to find stream info");
-    }
+static std::string convertPcmToFormatImpl(
+    const float *samples, int numSamples, int sampleRate, int channelCount,
+    const char *outputPath, const char *formatHint, int outputSampleRateHz)
+{
+#ifdef HAVE_FFMPEG
+    if (!samples || numSamples <= 0) return std::string("No samples provided");
+    if (sampleRate <= 0) return std::string("Invalid sample rate");
+    if (channelCount <= 0) return std::string("Invalid channel count");
+    if (!outputPath || !outputPath[0]) return std::string("No output path");
 
-    int audioStreamIndex = -1;
-    for (unsigned i = 0; i < inFmt->nb_streams; ++i) {
-        if (inFmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            audioStreamIndex = (int)i;
-            break;
-        }
-    }
-    if (audioStreamIndex < 0) {
-        avformat_close_input(&inFmt);
-        return std::string("No audio stream found in input");
-    }
+    std::string fmt(formatHint ? formatHint : "");
+    bool isWav = (fmt == "wav" || fmt.empty());
 
-    AVStream* inStream = inFmt->streams[audioStreamIndex];
-    const AVCodec* decoder = avcodec_find_decoder(inStream->codecpar->codec_id);
-    if (!decoder) {
-        avformat_close_input(&inFmt);
-        return std::string("Unsupported input codec");
-    }
+    AVCodecID codec_id = AV_CODEC_ID_NONE;
+    if (isWav) codec_id = AV_CODEC_ID_PCM_S16LE;
+    else if (fmt == "mp3") codec_id = AV_CODEC_ID_MP3;
+    else if (fmt == "flac") codec_id = AV_CODEC_ID_FLAC;
+    else if (fmt == "m4a" || fmt == "aac") codec_id = AV_CODEC_ID_AAC;
+    else if (fmt == "opus" || fmt == "ogg" || fmt == "webm" || fmt == "mkv") codec_id = AV_CODEC_ID_OPUS;
+    else codec_id = AV_CODEC_ID_PCM_S16LE;
 
-    AVCodecContext* decCtx = avcodec_alloc_context3(decoder);
-    if (!decCtx) {
-        avformat_close_input(&inFmt);
-        return std::string("Failed to allocate decoder context");
-    }
-    if (avcodec_parameters_to_context(decCtx, inStream->codecpar) < 0) {
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
-        return std::string("Failed to copy codec parameters");
-    }
-    if (avcodec_open2(decCtx, decoder, nullptr) < 0) {
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
-        return std::string("Failed to open decoder");
-    }
+    int totalFrames = numSamples / channelCount;
 
-    int in_sr = decCtx->sample_rate;
-    if (inStream->codecpar->sample_rate > 0) {
-        in_sr = inStream->codecpar->sample_rate;
-    }
-    if (in_sr <= 0) {
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
-        return std::string("Invalid input sample rate");
-    }
+    AVFormatContext* outFmt = nullptr;
+    if (avformat_alloc_output_context2(&outFmt, nullptr, nullptr, outputPath) < 0 || !outFmt)
+        return std::string("Failed to allocate output context");
 
-    int out_sr = (targetSampleRateHz > 0) ? targetSampleRateHz : in_sr;
-    if (out_sr <= 0) {
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
-        return std::string("Invalid output sample rate");
-    }
-
-    AVChannelLayout in_layout{};
-    if (inStream->codecpar->ch_layout.nb_channels > 0) {
-        if (av_channel_layout_copy(&in_layout, &inStream->codecpar->ch_layout) < 0) {
-            avcodec_free_context(&decCtx);
-            avformat_close_input(&inFmt);
-            return std::string("Failed to copy input channel layout");
-        }
+    const AVCodec* encoder = nullptr;
+    if (codec_id == AV_CODEC_ID_MP3) {
+        encoder = avcodec_find_encoder_by_name("libshine");
+        if (!encoder) { avformat_free_context(outFmt); return std::string("libshine encoder not available"); }
+    } else if (codec_id == AV_CODEC_ID_OPUS) {
+        encoder = avcodec_find_encoder_by_name("libopus");
+        if (!encoder) { avformat_free_context(outFmt); return std::string("libopus encoder not available"); }
     } else {
-        if (av_channel_layout_copy(&in_layout, &decCtx->ch_layout) < 0) {
-            avcodec_free_context(&decCtx);
-            avformat_close_input(&inFmt);
-            return std::string("Failed to get decoder channel layout");
-        }
+        encoder = avcodec_find_encoder(codec_id);
+        if (!encoder) { avformat_free_context(outFmt); return std::string("Encoder not available"); }
     }
 
-    AVChannelLayout out_layout = AV_CHANNEL_LAYOUT_MONO;
+    AVStream* outStream = avformat_new_stream(outFmt, nullptr);
+    if (!outStream) { avformat_free_context(outFmt); return std::string("Failed to create output stream"); }
+
+    AVCodecContext* encCtx = avcodec_alloc_context3(encoder);
+    if (!encCtx) { avformat_free_context(outFmt); return std::string("Failed to allocate encoder context"); }
+
+    av_channel_layout_default(&encCtx->ch_layout, channelCount);
+    if (codec_id == AV_CODEC_ID_MP3) {
+        int want_ch = (channelCount == 2) ? 2 : 1;
+        av_channel_layout_uninit(&encCtx->ch_layout);
+        if (want_ch == 2) { AVChannelLayout st = AV_CHANNEL_LAYOUT_STEREO; av_channel_layout_copy(&encCtx->ch_layout, &st); }
+        else { AVChannelLayout mo = AV_CHANNEL_LAYOUT_MONO; av_channel_layout_copy(&encCtx->ch_layout, &mo); }
+    }
+
+    encCtx->sample_rate = sampleRate;
+    if (isWav) {
+        encCtx->sample_fmt = AV_SAMPLE_FMT_S16;
+        if (outputSampleRateHz > 0) encCtx->sample_rate = outputSampleRateHz;
+    }
+
+    AVSampleFormat chosen_fmt = AV_SAMPLE_FMT_NONE;
+    const void *fmt_configs = nullptr; int fmt_num = 0;
+    const void *sr_configs = nullptr; int sr_num = 0;
+    const void *chl_configs = nullptr; int chl_num = 0;
+#if defined(AV_CODEC_CONFIG_SAMPLE_FORMAT)
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &fmt_configs, &fmt_num);
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_SAMPLE_RATE, 0, &sr_configs, &sr_num);
+    avcodec_get_supported_config(encCtx, encoder, AV_CODEC_CONFIG_CHANNEL_LAYOUT, 0, &chl_configs, &chl_num);
+#endif
+
+    if (!isWav) {
+        if (fmt_configs && fmt_num > 0) {
+            const AVSampleFormat *fmts = (const AVSampleFormat *)fmt_configs;
+            for (int i = 0; i < fmt_num; ++i) if (fmts[i] == AV_SAMPLE_FMT_S16) { chosen_fmt = AV_SAMPLE_FMT_S16; break; }
+            if (chosen_fmt == AV_SAMPLE_FMT_NONE && codec_id == AV_CODEC_ID_MP3)
+                for (int i = 0; i < fmt_num; ++i) if (fmts[i] == AV_SAMPLE_FMT_S16P) { chosen_fmt = AV_SAMPLE_FMT_S16P; break; }
+            if (chosen_fmt == AV_SAMPLE_FMT_NONE) chosen_fmt = fmts[0];
+        } else {
+            chosen_fmt = (codec_id == AV_CODEC_ID_MP3) ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
+        }
+        encCtx->sample_fmt = chosen_fmt;
+    }
+
+    if (sr_configs && sr_num > 0) {
+        const int *srs = (const int*)sr_configs;
+        int pick = 0;
+        for (int i = 0; i < sr_num; ++i) if (srs[i] == encCtx->sample_rate) { pick = srs[i]; break; }
+        if (pick == 0) pick = srs[0];
+        encCtx->sample_rate = pick;
+    }
+    if (codec_id == AV_CODEC_ID_MP3) {
+        int want = (outputSampleRateHz == 32000 || outputSampleRateHz == 44100 || outputSampleRateHz == 48000) ? outputSampleRateHz : 44100;
+        encCtx->sample_rate = want;
+    }
+    if (codec_id == AV_CODEC_ID_OPUS) {
+        int want = (outputSampleRateHz == 8000 || outputSampleRateHz == 12000 || outputSampleRateHz == 16000 || outputSampleRateHz == 24000 || outputSampleRateHz == 48000) ? outputSampleRateHz : 48000;
+        encCtx->sample_rate = want;
+    }
+    if (!isWav && codec_id != AV_CODEC_ID_MP3 && codec_id != AV_CODEC_ID_OPUS) {
+        if (outputSampleRateHz > 0) encCtx->sample_rate = outputSampleRateHz;
+    }
+
+    if (chl_configs && chl_num > 0) {
+        const AVChannelLayout *layouts = (const AVChannelLayout *)chl_configs;
+        int pick_nb = 0;
+        for (int i = 0; i < chl_num; ++i) if (layouts[i].nb_channels == encCtx->ch_layout.nb_channels) { pick_nb = layouts[i].nb_channels; break; }
+        if (pick_nb == 0) pick_nb = layouts[0].nb_channels > 0 ? layouts[0].nb_channels : 1;
+        if (encCtx->ch_layout.nb_channels != pick_nb) av_channel_layout_default(&encCtx->ch_layout, pick_nb);
+    }
+
+    if (codec_id == AV_CODEC_ID_MP3 || codec_id == AV_CODEC_ID_AAC || codec_id == AV_CODEC_ID_OPUS) encCtx->bit_rate = 128000;
+    else encCtx->bit_rate = 0;
+    if (outFmt->oformat->flags & AVFMT_GLOBALHEADER) encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    if (encCtx->sample_rate > 0) encCtx->time_base = AVRational{1, encCtx->sample_rate};
+
+    AVDictionary *enc_opts = nullptr;
+    char tmpbuf[64];
+    if (codec_id != AV_CODEC_ID_MP3) {
+        snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->ch_layout.nb_channels > 0 ? encCtx->ch_layout.nb_channels : 1);
+        av_dict_set(&enc_opts, "channels", tmpbuf, 0);
+        snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->sample_rate);
+        av_dict_set(&enc_opts, "sample_rate", tmpbuf, 0);
+        if (encCtx->bit_rate > 0) { snprintf(tmpbuf, sizeof(tmpbuf), "%d", (int)encCtx->bit_rate); av_dict_set(&enc_opts, "bit_rate", tmpbuf, 0); }
+    }
+
+    int ret = avcodec_open2(encCtx, encoder, &enc_opts);
+    if (ret < 0) {
+        if (enc_opts) { av_dict_free(&enc_opts); enc_opts = nullptr; }
+        if (codec_id == AV_CODEC_ID_MP3) {
+            char eb[256]; av_strerror(ret, eb, sizeof(eb));
+            avcodec_free_context(&encCtx); avformat_free_context(outFmt);
+            return std::string("Failed to open encoder: ") + eb;
+        }
+        const AVSampleFormat *fmts = fmt_configs ? (const AVSampleFormat*)fmt_configs : nullptr;
+        if (fmts && fmt_num > 0) {
+            for (int i = 0; i < fmt_num && ret < 0; ++i) {
+                encCtx->sample_fmt = fmts[i];
+                AVDictionary *t = nullptr;
+                snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->ch_layout.nb_channels > 0 ? encCtx->ch_layout.nb_channels : 1);
+                av_dict_set(&t, "channels", tmpbuf, 0);
+                snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->sample_rate);
+                av_dict_set(&t, "sample_rate", tmpbuf, 0);
+                if (encCtx->bit_rate > 0) { snprintf(tmpbuf, sizeof(tmpbuf), "%d", (int)encCtx->bit_rate); av_dict_set(&t, "bit_rate", tmpbuf, 0); }
+                int r = avcodec_open2(encCtx, encoder, &t);
+                if (r >= 0) { if (t) av_dict_free(&t); ret = r; break; }
+                if (t) av_dict_free(&t);
+            }
+        }
+        if (ret < 0) {
+            AVSampleFormat fb[] = { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_FLTP };
+            for (int fi = 0; fi < 3 && ret < 0; ++fi) {
+                encCtx->sample_fmt = fb[fi];
+                AVDictionary *t = nullptr;
+                snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->ch_layout.nb_channels > 0 ? encCtx->ch_layout.nb_channels : 1);
+                av_dict_set(&t, "channels", tmpbuf, 0);
+                snprintf(tmpbuf, sizeof(tmpbuf), "%d", encCtx->sample_rate);
+                av_dict_set(&t, "sample_rate", tmpbuf, 0);
+                if (encCtx->bit_rate > 0) { snprintf(tmpbuf, sizeof(tmpbuf), "%d", (int)encCtx->bit_rate); av_dict_set(&t, "bit_rate", tmpbuf, 0); }
+                int r = avcodec_open2(encCtx, encoder, &t);
+                if (r >= 0) { if (t) av_dict_free(&t); ret = r; break; }
+                if (t) av_dict_free(&t);
+            }
+        }
+        if (ret < 0) {
+            char eb[256]; av_strerror(ret, eb, sizeof(eb));
+            avcodec_free_context(&encCtx); avformat_free_context(outFmt);
+            return std::string("Failed to open encoder: ") + eb;
+        }
+    }
+    if (enc_opts) av_dict_free(&enc_opts);
+
+    if (avcodec_parameters_from_context(outStream->codecpar, encCtx) < 0) {
+        avcodec_free_context(&encCtx); avformat_free_context(outFmt);
+        return std::string("Failed to set output stream parameters");
+    }
+    if (!(outFmt->oformat->flags & AVFMT_NOFILE)) {
+        if (avio_open(&outFmt->pb, outputPath, AVIO_FLAG_WRITE) < 0) {
+            avcodec_free_context(&encCtx); avformat_free_context(outFmt);
+            return std::string("Failed to open output file for writing");
+        }
+    }
+    if (avformat_write_header(outFmt, nullptr) < 0) {
+        if (!(outFmt->oformat->flags & AVFMT_NOFILE)) avio_closep(&outFmt->pb);
+        avcodec_free_context(&encCtx); avformat_free_context(outFmt);
+        return std::string("Failed to write output header");
+    }
+
     SwrContext* swr = nullptr;
+    AVChannelLayout in_ch_layout{};
+    av_channel_layout_default(&in_ch_layout, channelCount);
     if (swr_alloc_set_opts2(&swr,
-                           &out_layout,
-                           AV_SAMPLE_FMT_FLT,
-                           out_sr,
-                           &in_layout,
-                           decCtx->sample_fmt,
-                           in_sr,
-                           0,
-                           nullptr) < 0 ||
-        !swr) {
-        av_channel_layout_uninit(&in_layout);
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
+            &encCtx->ch_layout, encCtx->sample_fmt, encCtx->sample_rate,
+            &in_ch_layout, AV_SAMPLE_FMT_FLT, sampleRate,
+            0, nullptr) < 0 || !swr) {
+        av_channel_layout_uninit(&in_ch_layout);
+        avcodec_free_context(&encCtx);
+        if (!(outFmt->oformat->flags & AVFMT_NOFILE)) avio_closep(&outFmt->pb);
+        avformat_free_context(outFmt);
         return std::string("Failed to initialize resampler");
     }
     if (swr_init(swr) < 0) {
-        av_channel_layout_uninit(&in_layout);
-        swr_free(&swr);
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
+        av_channel_layout_uninit(&in_ch_layout); swr_free(&swr);
+        avcodec_free_context(&encCtx);
+        if (!(outFmt->oformat->flags & AVFMT_NOFILE)) avio_closep(&outFmt->pb);
+        avformat_free_context(outFmt);
         return std::string("Failed to initialize resampler (swr_init)");
     }
-    av_channel_layout_uninit(&in_layout);
+    av_channel_layout_uninit(&in_ch_layout);
 
-    AVPacket* pkt = av_packet_alloc();
-    AVFrame* frame = av_frame_alloc();
-    if (!pkt || !frame) {
-        if (pkt) av_packet_free(&pkt);
-        if (frame) av_frame_free(&frame);
-        swr_free(&swr);
-        avcodec_free_context(&decCtx);
-        avformat_close_input(&inFmt);
-        return std::string("Out of memory");
-    }
+    int64_t encoder_pts = 0;
+    const int enc_frame_size =
+        (codec_id == AV_CODEC_ID_MP3) ? 1152 :
+        (encCtx->frame_size > 0 ? encCtx->frame_size : 1024);
+    int out_ch = encCtx->ch_layout.nb_channels;
+    if (out_ch <= 0) out_ch = 1;
+    int bytes_per_sample = av_get_bytes_per_sample(encCtx->sample_fmt);
+    const int bytesPerFrame = bytes_per_sample * out_ch;
 
-    auto appendConverted = [&](uint8_t* buf, int nbFloats) {
-        if (!buf || nbFloats <= 0) return;
-        const float* f = reinterpret_cast<const float*>(buf);
-        outSamples->insert(outSamples->end(), f, f + nbFloats);
+    std::vector<uint8_t> accumBuf;
+    size_t accumReadOffset = 0;
+    int accumSamples = 0;
+    const size_t kCompactThreshold = 256 * 1024;
+
+    auto maybeCompact = [&]() {
+        if (accumReadOffset == 0) return;
+        if (accumReadOffset < kCompactThreshold && accumReadOffset * 2 < accumBuf.size()) return;
+        size_t valid = accumBuf.size() - accumReadOffset;
+        if (valid > 0) memmove(accumBuf.data(), accumBuf.data() + accumReadOffset, valid);
+        accumBuf.resize(valid);
+        accumReadOffset = 0;
     };
 
-    auto convertOneFrame = [&](AVFrame* fr) {
-        // Copy plane pointers so we can pass const uint8_t** to swr_convert without
-        // reinterpret_cast(uint8_t** -> const uint8_t**), which triggers -Wcast-qual.
-        uint8_t** src = fr->extended_data ? fr->extended_data : fr->data;
-        int nplanes = fr->ch_layout.nb_channels;
-        if (nplanes <= 0) nplanes = AV_NUM_DATA_POINTERS;
+    auto flushAccumFrames = [&](bool sendPartial) {
+        int needed = enc_frame_size;
+        if (needed <= 0) return;
+        while (accumSamples >= needed || (sendPartial && accumSamples > 0)) {
+            int toSend = (accumSamples >= needed) ? needed : accumSamples;
+            AVFrame* ef = av_frame_alloc();
+            if (!ef) break;
+            ef->format = encCtx->sample_fmt;
+            ef->sample_rate = encCtx->sample_rate;
+            if (av_channel_layout_copy(&ef->ch_layout, &encCtx->ch_layout) < 0) { av_frame_free(&ef); break; }
+            ef->nb_samples = toSend;
+            if (av_frame_get_buffer(ef, 0) < 0) { av_channel_layout_uninit(&ef->ch_layout); av_frame_free(&ef); break; }
+            memcpy(ef->data[0], accumBuf.data() + accumReadOffset, toSend * bytesPerFrame);
+            ef->pts = encoder_pts;
+            encoder_pts += toSend;
+            accumReadOffset += (size_t)(toSend * bytesPerFrame);
+            accumSamples -= toSend;
 
-        const uint8_t* in_stack[AV_NUM_DATA_POINTERS] = {};
-        std::vector<const uint8_t*> in_heap;
-        const uint8_t** in_arg;
-        if (nplanes > AV_NUM_DATA_POINTERS) {
-            in_heap.resize(static_cast<size_t>(nplanes));
-            for (int i = 0; i < nplanes; ++i) {
-                in_heap[static_cast<size_t>(i)] = src[i];
-            }
-            in_arg = in_heap.data();
-        } else {
-            for (int i = 0; i < nplanes; ++i) {
-                in_stack[i] = src[i];
-            }
-            in_arg = in_stack;
-        }
-
-        int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
-        int64_t max_out =
-            av_rescale_rnd(swr_get_delay(swr, in_sr2) + (int64_t)fr->nb_samples, out_sr, in_sr2, AV_ROUND_UP);
-        if (max_out < 1) max_out = 1;
-        uint8_t* out_buf = nullptr;
-        if (av_samples_alloc(&out_buf, nullptr, 1, (int)max_out, AV_SAMPLE_FMT_FLT, 0) < 0) {
-            return;
-        }
-        int converted = swr_convert(swr, &out_buf, (int)max_out, in_arg, fr->nb_samples);
-        if (converted > 0) {
-            appendConverted(out_buf, converted);
-        }
-        av_freep(&out_buf);
-    };
-
-    while (av_read_frame(inFmt, pkt) >= 0) {
-        if (pkt->stream_index == audioStreamIndex) {
-            if (avcodec_send_packet(decCtx, pkt) == 0) {
-                while (avcodec_receive_frame(decCtx, frame) == 0) {
-                    convertOneFrame(frame);
-                    av_frame_unref(frame);
+            for (;;) {
+                int r = avcodec_send_frame(encCtx, ef);
+                if (r == 0) break;
+                if (r == AVERROR(EAGAIN)) {
+                    AVPacket* op = av_packet_alloc();
+                    while (avcodec_receive_packet(encCtx, op) == 0) {
+                        op->stream_index = outStream->index;
+                        av_packet_rescale_ts(op, encCtx->time_base, outStream->time_base);
+                        av_interleaved_write_frame(outFmt, op);
+                        av_packet_unref(op);
+                    }
+                    av_packet_free(&op);
+                    continue;
                 }
+                break;
+            }
+            AVPacket* op = av_packet_alloc();
+            while (avcodec_receive_packet(encCtx, op) == 0) {
+                op->stream_index = outStream->index;
+                av_packet_rescale_ts(op, encCtx->time_base, outStream->time_base);
+                av_interleaved_write_frame(outFmt, op);
+                av_packet_unref(op);
+            }
+            av_packet_free(&op);
+            av_channel_layout_uninit(&ef->ch_layout);
+            av_frame_free(&ef);
+            if (!sendPartial && accumSamples < needed) break;
+        }
+    };
+
+    const int CHUNK_FRAMES = 4096;
+    int frameOffset = 0;
+    while (frameOffset < totalFrames) {
+        int chunkFrames = std::min(CHUNK_FRAMES, totalFrames - frameOffset);
+        const float* chunkPtr = samples + frameOffset * channelCount;
+        int64_t out_nb = av_rescale_rnd(swr_get_delay(swr, sampleRate) + chunkFrames,
+                                        encCtx->sample_rate, sampleRate, AV_ROUND_UP);
+        uint8_t** outData = nullptr;
+        if (av_samples_alloc_array_and_samples(&outData, nullptr, out_ch, (int)out_nb, encCtx->sample_fmt, 0) < 0) {
+            frameOffset += chunkFrames; continue;
+        }
+        const uint8_t* inPlane = reinterpret_cast<const uint8_t*>(chunkPtr);
+        int converted = swr_convert(swr, outData, (int)out_nb, &inPlane, chunkFrames);
+        if (converted > 0) {
+            int newBytes = converted * bytesPerFrame;
+            maybeCompact();
+            size_t oldSize = accumBuf.size();
+            accumBuf.resize(oldSize + (size_t)newBytes);
+            memcpy(accumBuf.data() + oldSize, outData[0], (size_t)newBytes);
+            accumSamples += converted;
+            flushAccumFrames(false);
+        }
+        av_freep(&outData[0]); av_freep(&outData);
+        frameOffset += chunkFrames;
+    }
+
+    { // drain resampler tail
+        int tailCap = swr_get_delay(swr, encCtx->sample_rate) + 256;
+        if (tailCap > 0) {
+            uint8_t** tailData = nullptr;
+            if (av_samples_alloc_array_and_samples(&tailData, nullptr, out_ch, tailCap, encCtx->sample_fmt, 0) >= 0) {
+                int tc = swr_convert(swr, tailData, tailCap, nullptr, 0);
+                if (tc > 0) {
+                    maybeCompact();
+                    size_t oldSize = accumBuf.size();
+                    accumBuf.resize(oldSize + (size_t)(tc * bytesPerFrame));
+                    memcpy(accumBuf.data() + oldSize, tailData[0], (size_t)(tc * bytesPerFrame));
+                    accumSamples += tc;
+                }
+                av_freep(&tailData[0]); av_freep(&tailData);
             }
         }
-        av_packet_unref(pkt);
+    }
+    flushAccumFrames(true);
+
+    avcodec_send_frame(encCtx, nullptr);
+    { AVPacket* fp = av_packet_alloc();
+      while (avcodec_receive_packet(encCtx, fp) == 0) {
+          fp->stream_index = outStream->index;
+          av_packet_rescale_ts(fp, encCtx->time_base, outStream->time_base);
+          av_interleaved_write_frame(outFmt, fp);
+          av_packet_unref(fp);
+      }
+      av_packet_free(&fp);
     }
 
-    if (avcodec_send_packet(decCtx, nullptr) == 0) {
-        while (avcodec_receive_frame(decCtx, frame) == 0) {
-            convertOneFrame(frame);
-            av_frame_unref(frame);
-        }
-    }
-
-    {
-        int in_sr2 = inStream->codecpar->sample_rate ? inStream->codecpar->sample_rate : decCtx->sample_rate;
-        int tailCap = (int)swr_get_delay(swr, in_sr2) + 4096;
-        if (tailCap < 16) tailCap = 16;
-        uint8_t* tailData = nullptr;
-        if (av_samples_alloc(&tailData, nullptr, 1, tailCap, AV_SAMPLE_FMT_FLT, 0) >= 0) {
-            int tailConverted = swr_convert(swr, &tailData, tailCap, nullptr, 0);
-            if (tailConverted > 0) {
-                appendConverted(tailData, tailConverted);
-            }
-            av_freep(&tailData);
-        }
-    }
-
-    av_packet_free(&pkt);
-    av_frame_free(&frame);
+    av_write_trailer(outFmt);
+    if (!(outFmt->oformat->flags & AVFMT_NOFILE)) avio_closep(&outFmt->pb);
     swr_free(&swr);
-    avcodec_free_context(&decCtx);
-    avformat_close_input(&inFmt);
-
-    *outSampleRate = out_sr;
+    avcodec_free_context(&encCtx);
+    avformat_free_context(outFmt);
     return std::string("");
+#else
+    (void)samples; (void)numSamples; (void)sampleRate; (void)channelCount;
+    (void)outputPath; (void)formatHint; (void)outputSampleRateHz;
+    return std::string("FFmpeg not available.");
 #endif
 }
 
 @implementation SherpaOnnxAudioConvert
-
-+ (BOOL)convertAudioToWav16k:(NSString *)inputPath
-                  outputPath:(NSString *)outputPath
-                       error:(NSError **)error
-{
-    std::string err = convertToWav16kMono(inputPath.UTF8String, outputPath.UTF8String);
-    if (!err.empty()) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
-                                         code:-1
-                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:err.c_str()]}];
-        }
-        return NO;
-    }
-    return YES;
-}
 
 + (BOOL)convertAudioToFormat:(NSString *)inputPath
                   outputPath:(NSString *)outputPath
@@ -915,25 +1025,17 @@ static std::string decodeAudioFileToFloatMono(const char* inputPath,
     return YES;
 }
 
-+ (BOOL)decodeAudioFileToFloatSamples:(NSString *)inputPath
-                   targetSampleRateHz:(int)targetSampleRateHz
-                           outSamples:(NSArray<NSNumber *> **)outSamples
-                        outSampleRate:(int *)outSampleRate
-                                error:(NSError **)error
++ (BOOL)convertPcmToFormat:(const float *)samples
+                numSamples:(int)numSamples
+                sampleRate:(int)sampleRate
+              channelCount:(int)channelCount
+                outputPath:(NSString *)outputPath
+                    format:(NSString *)format
+        outputSampleRateHz:(int)outputSampleRateHz
+                     error:(NSError **)error
 {
-    if (!outSamples || !outSampleRate) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
-                                         code:-2
-                                     userInfo:@{NSLocalizedDescriptionKey: @"outSamples/outSampleRate required"}];
-        }
-        return NO;
-    }
-    *outSamples = nil;
-    *outSampleRate = 0;
-    std::vector<float> v;
-    int sr = 0;
-    std::string err = decodeAudioFileToFloatMono(inputPath.UTF8String, targetSampleRateHz, &v, &sr);
+    std::string err = convertPcmToFormatImpl(samples, numSamples, sampleRate, channelCount,
+                                             outputPath.UTF8String, format.UTF8String, outputSampleRateHz);
     if (!err.empty()) {
         if (error) {
             *error = [NSError errorWithDomain:@"SherpaOnnxAudioConvert"
@@ -942,12 +1044,6 @@ static std::string decodeAudioFileToFloatMono(const char* inputPath,
         }
         return NO;
     }
-    NSMutableArray<NSNumber *> *arr = [NSMutableArray arrayWithCapacity:v.size()];
-    for (size_t i = 0; i < v.size(); ++i) {
-        [arr addObject:@(v[i])];
-    }
-    *outSamples = arr;
-    *outSampleRate = sr;
     return YES;
 }
 

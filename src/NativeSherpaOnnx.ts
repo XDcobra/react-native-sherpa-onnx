@@ -26,6 +26,12 @@ export interface Spec extends TurboModule {
    */
   testSherpaInit(): Promise<string>;
 
+  /**
+   * Install JSI bindings for high-performance sample transport.
+   * Normally auto-installed during module init. Exposed as fallback.
+   */
+  installJSI(): boolean;
+
   // ==================== STT Methods ====================
 
   /**
@@ -75,17 +81,20 @@ export interface Spec extends TurboModule {
 
   /**
    * Detect STT model type and structure without initializing the recognizer.
-   * Uses the same native file-based detection as initializeStt. Useful to show model-specific
-   * options before init or to query the type for a given path.
-   * @param modelDir - Absolute path to model directory (use resolveModelPath first for asset/file paths)
-   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * Uses the same native detection logic as initializeStt.
+   * @param modelDir - Absolute path to extracted model directory, or empty string for asset-name-only detection.
+   * @param assetName - Release asset stem / folder basename (e.g. sherpa-onnx-whisper-tiny); null/empty when scanning modelDir only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels (array of { type, modelDir }), modelType (primary detected type), and optionally isHardwareSpecificUnsupported (true when the model is for unsupported hardware e.g. RK35xx, Ascend)
+   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param debug - Optional: enable verbose native logging
+   * @returns Object with unified detect fields plus STT-specific `isHardwareSpecificUnsupported`.
    */
   detectSttModel(
     modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
     preferInt8?: boolean,
-    modelType?: string
+    debug?: boolean
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -94,43 +103,31 @@ export interface Spec extends TurboModule {
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
+    /** Raw heuristic language tags from asset/folder name (catalog). */
+    languages?: string[];
+    /** fp16, int8, int8-quantized, unknown — from name heuristics. */
+    quantization?: string;
+    /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
+    detectionSources?: string[];
   }>;
 
+  // ==================== Offline STT (by-reference) ====================
+
   /**
-   * Transcribe an audio file. Returns full recognition result (text, tokens, timestamps, lang, emotion, event, durations).
+   * Transcribe from a pipeline offline audio buffer into an offline text buffer.
+   * The text buffer is populated with the recognition result.
+   * @param instanceId - STT engine instance ID
+   * @param bufferId - Offline audio buffer handle (off_…)
+   * @param textOutBufferId - Offline text buffer handle (txt_off_…) to write result into
    */
-  transcribeFile(
+  transcribe(
     instanceId: string,
-    filePath: string
-  ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    lang: string;
-    emotion: string;
-    event: string;
-    durations: number[];
-  }>;
+    bufferId: string,
+    textOutBufferId: string
+  ): Promise<void>;
 
   /**
-   * Transcribe from float PCM samples (e.g. from microphone). Same return type as transcribeFile.
-   */
-  transcribeSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    lang: string;
-    emotion: string;
-    event: string;
-    durations: number[];
-  }>;
-
-  /**
-   * Update recognizer config at runtime (decodingMethod, maxActivePaths, hotwordsFile, hotwordsScore, blankPenalty, ruleFsts, ruleFars).
+   * Update recognizer config at runtime.
    */
   setSttConfig(instanceId: string, options: Object): Promise<void>;
 
@@ -178,75 +175,394 @@ export interface Spec extends TurboModule {
     }
   ): Promise<{ success: boolean; error?: string }>;
 
-  /** Create a new stream for the given OnlineRecognizer instance. */
-  createSttStream(
+  /** Start native streaming STT pipeline: live audio buffer -> live text buffer. */
+  startSttPipeline(
     instanceId: string,
-    streamId: string,
-    hotwords?: string
-  ): Promise<void>;
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    chunkSize?: number
+  ): Promise<{ pipelineId: string }>;
 
-  /** Feed PCM samples to a streaming STT stream. */
-  acceptSttWaveform(
-    streamId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<void>;
-
-  /** Signal end of input for a streaming STT stream. */
-  sttStreamInputFinished(streamId: string): Promise<void>;
-
-  /** Run decoding on the stream (call when isSttStreamReady is true). */
-  decodeSttStream(streamId: string): Promise<void>;
-
-  /** True if the stream has enough audio to decode. */
-  isSttStreamReady(streamId: string): Promise<boolean>;
-
-  /** Get current partial or final result (call after decodeSttStream). */
-  getSttStreamResult(streamId: string): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-  }>;
-
-  /** True if endpoint (end of utterance) was detected. */
-  isSttStreamEndpoint(streamId: string): Promise<boolean>;
-
-  /** Reset stream state for reuse. */
-  resetSttStream(streamId: string): Promise<void>;
-
-  /** Release stream and remove from native state. */
-  releaseSttStream(streamId: string): Promise<void>;
-
-  /** Release OnlineRecognizer and all its streams. */
+  /** Release OnlineRecognizer and stop any active STT pipeline for this instance. */
   unloadOnlineStt(instanceId: string): Promise<void>;
 
+  // ==================== Pipeline Audio Buffers ====================
+
   /**
-   * Convenience: feed audio, decode while ready, return result and endpoint status in one call.
+   * Decode an audio file into an offline audio buffer.
+   * Uses AudioDecodeSession (FFmpeg + WAV fast path).
+   * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
+   * @param targetSampleRateHz - 0 = keep source rate
+   * @param forceMono - true = downmix to mono
+   * @param operationId - For progress events + cancellation
    */
-  processSttAudioChunk(
-    streamId: string,
-    samples: number[],
-    sampleRate: number
+  decodeFileToOfflineBuffer(
+    source: Object,
+    targetSampleRateHz: number,
+    forceMono: boolean,
+    operationId: string
   ): Promise<{
-    text: string;
-    tokens: string[];
-    timestamps: number[];
-    isEndpoint: boolean;
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
   }>;
 
   /**
-   * Start native PCM live capture. Microphone audio is captured and resampled to the requested
-   * sampleRate; chunks are emitted via the "pcmLiveStreamData" event (base64 Int16 PCM).
-   * App must have RECORD_AUDIO (Android) and NSMicrophoneUsageDescription (iOS) and grant permission before calling.
+   * Create an offline audio buffer from a live buffer.
+   * @param liveBufferId - The live buffer to snapshot/convert.
+   * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).
    */
-  startPcmLiveStream(options: {
+  createOfflineAudioBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
+   * The buffer starts unpopulated; native synthesis fills it exactly once.
+   * @param sampleRate - Expected sample rate (must match model output rate for TTS).
+   * @param channelCount - Channel count (only 1/mono supported).
+   */
+  createEmptyOfflineAudioBuffer(
+    sampleRate: number,
+    channelCount?: number
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create an empty live audio buffer with a rolling-window ring buffer.
+   * @param options.sampleRate - Sample rate in Hz.
+   * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
+   * @param options.persistencePath - Optional file path for WAV spool.
+   * @param options.persistenceFormat - "wav_pcm_s16le" (default) or "wav_pcm_float".
+   * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
+   * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
+   */
+  createEmptyLiveAudioBuffer(options: {
     sampleRate: number;
     channelCount?: number;
-    bufferSizeFrames?: number;
-  }): Promise<void>;
+    windowSeconds?: number;
+    persistencePath?: string;
+    persistenceFormat?: string;
+    emitAppendedEvents?: boolean;
+    appendEventMinIntervalMs?: number;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+    totalSamplesWritten: number;
+    totalSamplesDropped: number;
+    hasActiveSpool: boolean;
+  }>;
 
-  /** Stop native PCM live capture. */
-  stopPcmLiveStream(): Promise<void>;
+  /**
+   * Append all samples from an offline buffer to a live buffer.
+   */
+  appendOfflineToLiveAudioBuffer(
+    liveBufferId: string,
+    offlineBufferId: string
+  ): Promise<void>;
+
+  /**
+   * Finalize a live audio buffer (recording → finished).
+   * No more appends allowed after this. Patches spool WAV header if persistence is active.
+   */
+  finalizeLiveAudioBuffer(liveBufferId: string): Promise<void>;
+
+  /**
+   * Get info for any pipeline audio buffer (offline or live).
+   */
+  getPipelineAudioBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+    totalSamplesWritten?: number;
+    totalSamplesDropped?: number;
+    hasActiveSpool?: boolean;
+  }>;
+
+  /**
+   * Release any pipeline audio buffer (offline or live).
+   */
+  releasePipelineAudioBuffer(bufferId: string): Promise<void>;
+
+  /**
+   * Start microphone capture directly into a live audio buffer (no JS roundtrip).
+   * The mic writes resampled Float32 samples directly into the live buffer's ring.
+   * `emitToJs` is a compatibility shortcut to force-enable/disable append events for this live buffer.
+   */
+  startMicToLiveAudioBuffer(
+    liveBufferId: string,
+    options?: { emitToJs?: boolean }
+  ): Promise<void>;
+
+  /**
+   * Stop microphone capture to a live audio buffer.
+   */
+  stopMicToLiveAudioBuffer(): Promise<void>;
+
+  // ==================== File Ingest to Live Buffer ====================
+
+  /** Start streaming file decode into an existing live buffer. */
+  startFileIngestToLiveBuffer(
+    liveBufferId: string,
+    source: Object,
+    targetSampleRateHz: number,
+    forceMono: boolean,
+    autoFinalize: boolean,
+    operationId: string
+  ): Promise<{ ingestId: string }>;
+
+  /** Query file ingest status. */
+  getFileIngestStatus(ingestId: string): Promise<{
+    isRunning: boolean;
+    framesIngested: number;
+    totalFramesEstimate: number;
+    percent: number;
+    error?: string;
+  }>;
+
+  /** Cancel a running decode operation (offline or ingest). */
+  cancelDecode(operationId: string): Promise<void>;
+
+  // ==================== Pipeline Text Buffers ====================
+
+  /**
+   * Create an empty offline text buffer as output target for offline STT.
+   */
+  createEmptyOfflineTextBuffer(): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create an offline text buffer from a live text buffer (snapshot or finalized).
+   * @param liveBufferId - Live text buffer handle
+   * @param mode - "fullIfSpooled" or "windowSnapshot"
+   */
+  createOfflineTextBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create an offline text buffer pre-populated with the given text.
+   * Used as TTS input source for direct text-to-speech synthesis.
+   * @param text - The text content to populate the buffer with.
+   * @param options - Optional metadata (lang, emotion, event).
+   */
+  createOfflineTextBufferFromText(
+    text: string,
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length: number;
+    tokenCount: number;
+    timestampCount: number;
+    durationCount: number;
+    hasLang: boolean;
+    hasEmotion: boolean;
+    hasEvent: boolean;
+  }>;
+
+  /**
+   * Create a live text buffer for streaming/incremental text.
+   */
+  createLiveTextBuffer(options: {
+    windowMaxChars?: number;
+    maxSegments?: number;
+    emitPartialEvents?: boolean;
+    partialEventMinIntervalMs?: number;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    totalCharsWritten: number;
+    revision: number;
+    segmentCount: number;
+  }>;
+
+  /**
+   * Create a live text buffer seeded from an offline text buffer.
+   */
+  createLiveTextBufferFromOffline(offlineBufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    totalCharsWritten: number;
+    revision: number;
+    segmentCount: number;
+  }>;
+
+  /**
+   * Finalize a live text buffer (recording → finished).
+   */
+  finalizeLiveTextBuffer(liveBufferId: string): Promise<void>;
+
+  /**
+   * Get info for any pipeline text buffer (offline or live).
+   */
+  getPipelineTextBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    utf16Length?: number;
+    tokenCount?: number;
+    timestampCount?: number;
+    durationCount?: number;
+    hasLang?: boolean;
+    hasEmotion?: boolean;
+    hasEvent?: boolean;
+    totalCharsWritten?: number;
+    revision?: number;
+    segmentCount?: number;
+  }>;
+
+  /**
+   * Release any pipeline text buffer (offline or live).
+   */
+  releasePipelineTextBuffer(bufferId: string): Promise<void>;
+
+  /**
+   * Get a slice of hypothesis text from an offline text buffer.
+   */
+  getOfflineTextBufferTextSlice(
+    bufferId: string,
+    startUtf16: number,
+    maxUtf16: number
+  ): Promise<string>;
+
+  /**
+   * Get a slice of tokens from an offline text buffer.
+   */
+  getOfflineTextBufferTokensSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<string[]>;
+
+  /**
+   * Get a slice of timestamps from an offline text buffer.
+   */
+  getOfflineTextBufferTimestampsSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  /**
+   * Get a slice of durations from an offline text buffer.
+   */
+  getOfflineTextBufferDurationsSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  /**
+   * Get the language string from an offline text buffer.
+   */
+  getOfflineTextBufferLang(bufferId: string): Promise<string>;
+
+  /**
+   * Get the emotion string from an offline text buffer.
+   */
+  getOfflineTextBufferEmotion(bufferId: string): Promise<string>;
+
+  /**
+   * Get the event string from an offline text buffer.
+   */
+  getOfflineTextBufferEvent(bufferId: string): Promise<string>;
+
+  /**
+   * Get a slice of partial text from a live text buffer (debug/UI).
+   */
+  getLiveTextBufferPartialSlice(
+    liveBufferId: string,
+    startUtf16: number,
+    maxUtf16: number
+  ): Promise<string>;
+
+  /** Commit a text segment to a live text buffer. */
+  appendLiveTextSegment(
+    liveBufferId: string,
+    text: string,
+    tokens?: string[],
+    timestamps?: number[],
+    meta?: Object
+  ): Promise<{ segmentIndex: number }>;
+
+  /** Read committed text segments from a live text buffer by index window. */
+  getLiveTextBufferSegments(
+    liveBufferId: string,
+    startIndex: number,
+    maxCount: number,
+    options?: {
+      includeTokens?: boolean;
+      includeTimestamps?: boolean;
+      includeMeta?: boolean;
+    }
+  ): Promise<{
+    segments: Array<{
+      text: string;
+      source: string;
+      segmentIndex: number;
+      tokens?: string[];
+      timestamps?: number[];
+      meta?: Object;
+    }>;
+  }>;
+
+  /** Return number of committed segments currently retained in the live segment log. */
+  getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
 
   // ==================== TTS Methods ====================
 
@@ -345,137 +661,34 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Generate speech from text. Returns metadata only (no PCM samples).
-   * Use getTtsSamples() to retrieve PCM from the native sink.
-   * @param instanceId - Unique ID for this engine instance
-   * @param text - Text to convert to speech
-   * @param options - Generation options: `sid`, `speed`, `silenceScale`, `numSteps`, `extra`.
-   *   Voice cloning (iOS & Android): `referenceAudio` + `referenceSampleRate` for Zipvoice/Pocket only; Zipvoice also needs non-empty `referenceText`.
-   * @returns Object with { sampleRate, numSamples, generation }
-   */
-  generateTts(
-    instanceId: string,
-    text: string,
-    options: Object
-  ): Promise<{
-    sampleRate: number;
-    numSamples: number;
-    generation: number;
-  }>;
-
-  /**
-   * Generate speech with subtitle/timestamp metadata. Returns metadata only (no PCM samples).
-   * Use getTtsSamples() to retrieve PCM from the native sink.
-   * @param instanceId - Unique ID for this engine instance
-   * @param text - Text to convert to speech
-   * @param options - Same as {@link generateTts} options plus subtitle options (`subtitleMode`, `subtitleGranularity`).
-   * @returns Object with sampleRate, numSamples, generation, subtitles, and timingMode
-   */
-  generateTtsWithTimestamps(
-    instanceId: string,
-    text: string,
-    options: Object
-  ): Promise<{
-    sampleRate: number;
-    numSamples: number;
-    generation: number;
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-    /** Present for estimated subtitle mode (one sample-count per sentence chunk). */
-    segmentSampleCounts?: number[];
-  }>;
-
-  /**
-   * Retrieve PCM samples from the native sink for a given TTS generation.
+   * Synthesize speech from a text buffer into an audio buffer (buffer-to-buffer pipeline).
+   * The audioOut buffer must be empty (created via createEmptyOfflineAudioBuffer).
+   * Its sampleRate must match the model output rate (strict, no resampling).
    * @param instanceId - TTS engine instance ID
-   * @param generation - Generation number from generateTts/generateTtsWithTimestamps
-   * @returns Object with { samples: number[], sampleRate: number }
+   * @param textInBufferId - Offline text buffer ID (input text source)
+   * @param audioOutBufferId - Empty offline audio buffer ID (output target)
+   * @param options - Synthesis options (sid, speed, voiceClone, etc.)
    */
-  getTtsSamples(
+  synthesizeTts(
     instanceId: string,
-    generation: number
-  ): Promise<{
-    samples: number[];
-    sampleRate: number;
-  }>;
-
-  /**
-   * Save TTS audio directly from the native sink (no JS PCM round-trip).
-   * @param instanceId - TTS engine instance ID
-   * @param generation - Generation number from generateTts
-   * @param destinationType - 'file' or 'androidContent'
-   * @param pathOrDirectoryUri - Output path or SAF directory URI
-   * @param filename - Filename for androidContent destination
-   * @param format - Output format (wav, mp3, flac, etc.)
-   * @param outputSampleRateHz - Encoder sample rate hint; 0 for defaults
-   */
-  saveTtsAudioFromSink(
-    instanceId: string,
-    generation: number,
-    destinationType: string,
-    pathOrDirectoryUri: string,
-    filename: string,
-    format: string,
-    outputSampleRateHz: number
-  ): Promise<string>;
-
-  /**
-   * Play PCM from the native batch sink through the device speaker.
-   * @param instanceId - TTS engine instance ID
-   * @param generation - Expected sink generation (stale check)
-   * @param sampleRate - Override sample rate (0 = use sink rate)
-   */
-  playTtsFromSink(
-    instanceId: string,
-    generation: number,
-    sampleRate: number
-  ): Promise<{ playerId: string }>;
+    textInBufferId: string,
+    audioOutBufferId: string,
+    options?: Object
+  ): Promise<void>;
 
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
-   * Read audio duration/sample metrics for common formats (WAV fast path + decoder/metadata fallback).
+   * Standalone offline alignment from pipeline buffers (all modes).
+   *
+   * - `textInBufferId`: offline text buffer (`txt_off_*`)
+   * - `audioInBufferId`: offline audio buffer (`off_*`)
+   *
+   * Both buffers are read-only for alignment.
    */
-  getAudioDuration(audioPath: string): Promise<{
-    sampleRate: number;
-    totalSamples: number;
-  }>;
-
-  /**
-   * Standalone alignment from audio path (all modes).
-   */
-  alignTextToAudioFromPath(
-    text: string,
-    audioPath: string,
-    mode: 'proportional' | 'estimated' | 'accurate',
-    granularity: 'sentence' | 'word' | 'character',
-    options?: Object
-  ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-  }>;
-
-  /**
-   * Standalone alignment from in-memory PCM (all modes).
-   */
-  alignTextToAudioFromPcm(
-    text: string,
-    samples: number[],
-    sampleRate: number,
-    mode: 'proportional' | 'estimated' | 'accurate',
-    granularity: 'sentence' | 'word' | 'character',
-    options?: Object
-  ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
-  }>;
-
-  /**
-   * Sink-based alignment from generated TTS audio (zero PCM round-trip for accurate mode).
-   */
-  alignTextToTtsSink(
-    generatedAudio: Object,
-    text: string,
+  alignOfflineTextToAudio(
+    textInBufferId: string,
+    audioInBufferId: string,
     mode: 'proportional' | 'estimated' | 'accurate',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object
@@ -506,60 +719,29 @@ export interface Spec extends TurboModule {
   // ==================== Online (streaming) TTS Methods ====================
 
   /**
-   * Generate speech in streaming mode (emits chunk events).
-   * @param instanceId - Unique ID for this engine instance
-   * @param requestId - Unique ID for this generation (included in chunk/end/error events for routing)
-   * @param text - Text to convert to speech
-   * @param options - Same shape as batch TTS; reference streaming is **Pocket-only** (Zipvoice cloning uses non-streaming generate).
+   * Start a streaming TTS pipeline worker.
+   * Reads committed segments from a LiveTextBuffer, synthesizes each one
+   * (using per-segment meta overrides where available), and writes PCM
+   * samples to a LiveAudioBuffer.
    */
-  generateTtsStream(
+  startTtsPipeline(
     instanceId: string,
-    requestId: string,
-    text: string,
-    options: Object
-  ): Promise<void>;
-
-  /**
-   * Generate speech in streaming mode and write directly to file in native.
-   * Emits `ttsStreamFileEnd` / `ttsStreamFileError` and optionally `ttsStreamChunk`.
-   */
-  generateTtsStreamToFile(
-    instanceId: string,
-    requestId: string,
-    text: string,
-    options: Object,
-    fileOptions: Object
-  ): Promise<void>;
-
-  /**
-   * Cancel an ongoing streaming TTS generation.
-   * @param instanceId - Unique ID for this engine instance
-   */
-  cancelTtsStream(instanceId: string): Promise<void>;
+    textInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
 
   /**
    * Create a standalone PCM player session.
    * @param playerId - Unique session ID (generated by JS)
-   * @param sampleRate - Sample rate in Hz
-   * @param channels - Number of channels (1 = mono)
-   * @param feed - 'js' or 'native'
-   * @param ttsInstanceId - Optional TTS engine binding (null = standalone)
+   * @param audioBufferId - Pipeline audio buffer ID to play from
+   * @param volume - Volume scale [0, 1]
    */
   createPcmPlayer(
     playerId: string,
-    sampleRate: number,
-    channels: number,
-    feed: string,
-    ttsInstanceId: string | null
+    audioBufferId: string,
+    volume: number
   ): Promise<void>;
-
-  /**
-   * Write float PCM samples to a player session.
-   * Rejects if feed is 'native' or player not found.
-   * @param playerId - Player session ID
-   * @param samples - Float PCM [-1, 1]
-   */
-  writePcmChunk(playerId: string, samples: number[]): Promise<void>;
 
   /**
    * Pause a PCM player session. Buffered samples are retained.
@@ -572,6 +754,25 @@ export interface Spec extends TurboModule {
    * @param playerId - Player session ID
    */
   resumePcmPlayer(playerId: string): Promise<void>;
+
+  /**
+   * Seek a PCM player to a position in milliseconds.
+   * @param playerId - Player session ID
+   * @param positionMs - Target position in milliseconds
+   */
+  seekPcmPlayerToMs(playerId: string, positionMs: number): Promise<void>;
+
+  /**
+   * Restart a PCM player from the beginning.
+   * @param playerId - Player session ID
+   */
+  restartPcmPlayer(playerId: string): Promise<void>;
+
+  /**
+   * Get the current playback position in milliseconds.
+   * @param playerId - Player session ID
+   */
+  getPcmPlayerPositionMs(playerId: string): Promise<number>;
 
   /**
    * Destroy a PCM player session and release native resources.
@@ -603,12 +804,16 @@ export interface Spec extends TurboModule {
 
   detectEnhancementModel(
     modelDir: string,
-    modelType?: string
+    assetName: string | null,
+    modelType?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
   }>;
 
   initializeEnhancement(
@@ -626,17 +831,11 @@ export interface Spec extends TurboModule {
     sampleRate?: number;
   }>;
 
-  enhanceFile(
+  enhanceOfflineAudioBuffers(
     instanceId: string,
-    inputPath: string,
-    outputPath?: string
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  enhanceSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
+    audioInBufferId: string,
+    audioOutBufferId: string
+  ): Promise<void>;
 
   getEnhancementSampleRate(instanceId: string): Promise<number>;
 
@@ -656,84 +855,79 @@ export interface Spec extends TurboModule {
     frameShiftInSamples?: number;
   }>;
 
-  feedEnhancementSamples(
-    instanceId: string,
-    samples: number[],
-    sampleRate: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  flushOnlineEnhancement(
-    instanceId: string
-  ): Promise<{ samples: number[]; sampleRate: number }>;
-
-  resetOnlineEnhancement(instanceId: string): Promise<void>;
-
   unloadOnlineEnhancement(instanceId: string): Promise<void>;
 
-  /**
-   * Save TTS audio (mono float PCM) to a file path or Android SAF directory.
-   * @param destinationType - `'file'` = `pathOrDirectoryUri` is the full output file path; `'androidContent'` = directory tree URI + `filename`
-   * @param pathOrDirectoryUri - Absolute file path (when `file`) or SAF directory URI (when `androidContent`)
-   * @param filename - Used when `androidContent`; ignored / empty when `file`
-   * @param format - Output container/codec hint: `wav` (default behavior), `mp3`, `flac`, `m4a`, `opus`, … (same as convertAudioToFormat; requires FFmpeg when not WAV)
-   * @param outputSampleRateHz - Encoder hint (e.g. MP3 32000/44100/48000); use 0 for defaults
-   */
-  saveTtsAudioFromPCM(
-    samples: number[],
-    sampleRate: number,
-    destinationType: string,
-    pathOrDirectoryUri: string,
-    filename: string,
-    format: string,
-    outputSampleRateHz: number
-  ): Promise<string>;
+  // ==================== Enhancement Pipeline ====================
 
-  // ==================== File / persistence (shared) ====================
+  startEnhancementPipeline(
+    instanceId: string,
+    inputBufferId: string,
+    outputBufferId: string
+  ): Promise<{ pipelineId: string }>;
+
+  // ==================== Streaming Pipeline Control (generic) ====================
+
+  stopStreamingPipeline(pipelineId: string): Promise<void>;
+
+  flushStreamingPipeline(pipelineId: string): Promise<void>;
+
+  resetStreamingPipeline(pipelineId: string): Promise<void>;
+
+  getStreamingPipelineStatus(pipelineId: string): Promise<{
+    pipelineId: string;
+    isRunning: boolean;
+    chunksProcessed: number;
+    unitsRead: number;
+    unitsWritten: number;
+    error: string | null;
+  }>;
+
+  // ==================== File I/O ====================
 
   /**
-   * Save a text file via Android SAF directory URI, or a regular directory path on iOS.
-   * @param text - Text content to write
-   * @param directoryUri - Directory content URI (tree or document) on Android; file URL or path on iOS
-   * @param filename - Desired file name (e.g. note.txt)
-   * @param mimeType - MIME type (e.g. text/plain)
-   * @returns The content URI of the saved file (Android) or file path (iOS)
+   * Copy file from source to destination.
+   * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
+   * @param destination - Serialized FileDestination (ReadableMap with `kind` discriminator)
+   * @param overwrite - Overwrite existing file at destination
+   * @param createParentDirectories - Create parent dirs for fs/app destinations
+   * @param operationId - Unique ID for progress events and cancellation
+   * @returns { bytesCopied: number, outputKind: string, outputPath: string }
    */
-  saveTextToContentUri(
+  copyFile(
+    source: Object,
+    destination: Object,
+    overwrite: boolean,
+    createParentDirectories: boolean,
+    operationId: string
+  ): Promise<{
+    bytesCopied: number;
+    outputKind: string;
+    outputPath: string;
+  }>;
+
+  /**
+   * Write text to a destination.
+   * @returns { outputKind: string, outputPath: string }
+   */
+  saveText(
     text: string,
-    directoryUri: string,
-    filename: string,
-    mimeType: string
-  ): Promise<string>;
+    destination: Object,
+    encoding: string,
+    overwrite: boolean
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
 
   /**
-   * Copy a local file into a document under a SAF directory URI (format-agnostic; Android only).
-   * @param filePath - Absolute path to an existing file on disk
-   * @param directoryUri - SAF directory tree or document URI
-   * @param filename - Display name for the new document
-   * @param mimeType - MIME type for the created document
-   * @returns The content URI of the created document
+   * Open system share sheet for source file.
    */
-  copyFileToContentUri(
-    filePath: string,
-    directoryUri: string,
-    filename: string,
-    mimeType: string
-  ): Promise<string>;
+  shareFile(source: Object, mimeType: string, title: string): Promise<void>;
 
   /**
-   * Copy a content URI (or file path) to an app cache file for native consumers.
-   * @param fileUri - content:// URI or file path
-   * @param filename - Desired cache file name
-   * @returns Absolute file path to the cached copy
+   * Cancel an in-progress file I/O operation by operationId.
    */
-  copyContentUriToCache(fileUri: string, filename: string): Promise<string>;
-
-  /**
-   * Open the system share sheet for an audio file (file path or content URI).
-   * @param fileUri - File path or content URI
-   * @param mimeType - MIME type (e.g. audio/wav)
-   */
-  shareAudioFile(fileUri: string, mimeType: string): Promise<void>;
+  cancelFileIO(operationId: string): Promise<void>;
 
   // ==================== Helper - Assets ====================
 
@@ -847,37 +1041,63 @@ export interface Spec extends TurboModule {
    */
   computeFileSha256(filePath: string): Promise<string>;
 
-  // ==================== Helper - Audio conversion ====================
+  // ==================== Helper - Audio save ====================
 
   /**
-   * Convert arbitrary audio file to requested format (e.g. "mp3", "flac", "wav").
-   * Requires FFmpeg prebuilts when called on Android.
-   * For MP3 (libshine), outputSampleRateHz can be 32000, 44100, or 48000; 0 or omitted = 44100.
-   * WAV output is always 16 kHz mono (sherpa-onnx). Resolves when conversion succeeds, rejects with an error message on failure.
+   * Save a pipeline audio buffer to an encoded file via AudioEncodeSession.
+   * File-backed inputs are decoded via AudioDecodeSession first.
+   * Direct PCM inputs are fed to the encoder in chunks without decode.
+   *
+   * @param bufferId - "off_*" or "live_*" (must be finalized if live)
+   * @param destination - Serialized FileDestination
+   * @param format - Target format string (wav, mp3, flac, etc.)
+   * @param outputSampleRateHz - 0 = format-dependent default
+   * @param bitrate - Target bitrate in kbps (0 = codec default or quality-derived)
+   * @param quality - 0=default, 1=low, 2=medium, 3=high
+   * @param operationId - For progress/cancel correlation
    */
-  convertAudioToFormat(
-    inputPath: string,
-    outputPath: string,
+  saveAudioBufferToFile(
+    bufferId: string,
+    destination: Object,
     format: string,
-    outputSampleRateHz?: number
-  ): Promise<void>;
+    outputSampleRateHz: number,
+    bitrate: number,
+    quality: number,
+    operationId: string
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
 
   /**
-   * Convert any supported audio file to WAV 16 kHz mono 16-bit PCM.
-   * Requires FFmpeg prebuilts when called on Android.
+   * Encode a source audio file to an output file via AudioDecodeSession → AudioEncodeSession.
+   * No buffer registry involvement — direct file-to-file pipeline.
+   *
+   * @param source - Serialized FileSource
+   * @param destination - Serialized FileDestination
+   * @param format - Target format string (wav, mp3, flac, etc.)
+   * @param outputSampleRateHz - 0 = format-dependent default
+   * @param bitrate - Target bitrate in kbps (0 = codec default or quality-derived)
+   * @param quality - 0=default, 1=low, 2=medium, 3=high
+   * @param operationId - For progress/cancel correlation
    */
-  convertAudioToWav16k(inputPath: string, outputPath: string): Promise<void>;
+  saveFileAsAudioFile(
+    source: Object,
+    destination: Object,
+    format: string,
+    outputSampleRateHz: number,
+    bitrate: number,
+    quality: number,
+    operationId: string
+  ): Promise<{
+    outputKind: string;
+    outputPath: string;
+  }>;
 
   /**
-   * Decode an audio file to mono float samples in [-1, 1] and the effective sample rate.
-   * Supports the same inputs as convertAudioToFormat (file paths and Android content:// URIs).
-   * On Android, non-WAV formats require FFmpeg prebuilts; WAV may use a fast path via WaveReader.
-   * @param targetSampleRateHz - If > 0, resample to this rate; if 0 or omitted, keep the decoded stream rate.
+   * Cancel a running audio save operation.
    */
-  decodeAudioFileToFloatSamples(
-    inputPath: string,
-    targetSampleRateHz?: number
-  ): Promise<{ samples: number[]; sampleRate: number }>;
+  cancelAudioSave(operationId: string): Promise<void>;
 
   // ==================== Execution Provider Methods ====================
 

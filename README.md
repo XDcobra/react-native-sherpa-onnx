@@ -18,8 +18,8 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 </div>
 
-> **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
-> Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
+> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**  
+> This project started as a side hobby project. After seeing the value it provides and that many people already use it, I decided to rebuild it with a more professional foundation. Because of that, I had to redesign the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK with significantly better performance and speed, plus a cleaner, more consistent, and easier public API. For an overview of all breaking changes and the migration path, read [docs/migration.md](docs/migration.md).
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
@@ -44,25 +44,17 @@ YARN_NODE_LINKER=node-modules yarn install
 
 ### Android
 
-No additional setup required. The library automatically handles native dependencies via Gradle. For execution provider support (CPU, NNAPI, XNNPACK, QNN) and optional QNN setup, see [Execution provider support](./docs/execution-providers.md). For building Android native libs yourself, see [sherpa-onnx-prebuilt](third_party/sherpa-onnx-prebuilt/README.md).
+No additional setup required.
+
+Optional: if you want Qualcomm acceleration, see QNN setup in [Execution provider support](./docs/execution-providers.md).
 
 ### iOS
-
-The sherpa-onnx **XCFramework is not shipped in the repo or npm** (size ~80MB). It is **downloaded automatically** when you run `pod install`; no manual steps are required. The version used is pinned in `third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG` (format: `sherpa-onnx-ios-vX.Y.Z` or `sherpa-onnx-ios-vX.Y.Z-N` with optional build number) and the archive is fetched from [GitHub Releases](https://github.com/XDcobra/react-native-sherpa-onnx/releases?q=sherpa-onnx-ios).
-
-#### Setup
 
 ```sh
 cd your-app/ios
 bundle install
 bundle exec pod install
 ```
-
-The podspec runs `scripts/setup-ios-framework.sh`, which downloads the XCFramework (and, if needed, libarchive sources) so the Pod builds correctly. Libarchive is compiled from source as part of the Pod; its version is pinned in `third_party/libarchive_prebuilt/IOS_RELEASE_TAG`.
-
-#### Building the iOS framework
-
-To build the sherpa-onnx iOS XCFramework yourself (e.g. custom version or patches), see [third_party/sherpa-onnx-prebuilt/README.md](third_party/sherpa-onnx-prebuilt/README.md) and the [Framework - Sherpa-Onnx (iOS) Release](.github/workflows/framework-sherpa-onnx-ios-framework.yml) workflow.
 
 #### Model download (optional)
 
@@ -86,16 +78,17 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Installation](#installation)
   - [Android](#android)
   - [iOS](#ios)
+- [SDK pipeline logic](#sdk-pipeline-logic)
+  - [Offline pipeline (batch)](#offline-pipeline-batch)
+  - [Streaming pipeline (live)](#streaming-pipeline-live)
+  - [Decision guide: offline vs streaming](#decision-guide-offline-vs-streaming)
 - [Feature Support](#feature-support)
 - [Platform Support Status](#platform-support-status)
 - [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
-  - [Speech-to-Text (STT) Models](#speech-to-text-stt-models)
-  - [Text-to-Speech (TTS) Models](#text-to-speech-tts-models)
-  - [Speech Enhancement Models](#speech-enhancement-models)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
-- [Breaking changes (upgrading to 0.3.0)](#breaking-changes-upgrading-to-030)
+- [Breaking changes (upgrading to 1.0.0)](docs/migration.md)
   - [Instance-based API (TTS + STT)](#instance-based-api-tts--stt)
   - [Speech-to-Text (STT)](#speech-to-text-stt)
   - [Text-to-Speech (TTS)](#text-to-speech-tts)
@@ -105,34 +98,6 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Contributing](#contributing)
 - [License](#license)
 
-## Bundled sherpa-onnx version
-
-| Platform | Version |
-|----------|---------|
-| Android | 1.12.35 |
-| iOS | 1.12.35 |
-
-## Feature Support
-
-| Feature | Status | Docs | Notes |
-|---------|--------|------|-------|
-| Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
-| Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
-| Live capture API | ✅ **Supported** | [PCM live stream](./docs/pcm-live-stream.md) | Native microphone capture with resampling for live transcription (use with streaming STT). |
-| Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
-| Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
-| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Standalone API: **`alignTextToAudio`** (`react-native-sherpa-onnx/alignment`). |
-| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
-| Play Asset Delivery (PAD) | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Android only. Archives: [Extraction API](./docs/extraction.md). |
-| Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
-| Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
-| Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
-| TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Speech Enhancement | ✅ **Supported** | [Speech Enhancement](./docs/speech-enhancement.md) | API and initialization covered in docs. |
-| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 0.5.0 |
-| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 0.6.0 |
-| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 0.7.0 |
-
 ## Platform Support Status
 
 | Platform | Status | Notes |
@@ -140,13 +105,95 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 | **iOS** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
 
-## Known issues
+## Feature Support
 
-- **[Pocket TTS (voice cloning)](docs/KNOWN_ISSUES.md)** — voice cloning: **Android** supported; **iOS** experimental. Heuristic EOS and **iOS vs Android drift** (length/quality); not a React Native–only issue. Full notes: [investigation doc](docs/github-issue-pocket-tts-eos-frame-zero.md).
+| Feature | Status | Docs | Notes |
+|---------|--------|------|-------|
+| Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt-offline.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
+| Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
+| Live capture API | ✅ **Supported** | [Pipeline buffers (`audiobuffer`)](./docs/audiobuffer.md) ([live](./docs/audiobuffer-streaming.md)) | Native microphone → live audio buffer; optional JS chunks for streaming STT. |
+| Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
+| Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
+| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Standalone API: **`alignTextToAudio`** (`react-native-sherpa-onnx/alignment`). |
+| Speech Enhancement | ✅ **Supported** | [Overview](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md), [Streaming](./docs/enhancement-streaming.md) | Batch offline buffers; streaming via native live-buffer pipeline only (`createStreamingEnhancement` → `enhance`). |
+| Build-in Audio Player | ✅ **Supported** | [PCM Player](./docs/pcm-player.md) | Play any generated speech (offline/streaming) directly by using the built in pcm player. Easy use and higher performance. |
+| Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
+| Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
+| Play Asset Delivery (PAD) | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Android only. Archives: [Extraction API](./docs/extraction.md). |
+| Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
+| Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
+| TypeScript | ✅ **Supported** | — | Full type definitions included. |
+| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.1.0 |
+| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.2.0 |
+| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.3.0 |
+
+## SDK pipeline logic
+
+The SDK uses one consistent pipeline idea with two execution styles:
+
+- **Offline (batch):** fully populated input buffers are processed to completion before downstream steps read results.
+- **Streaming (live):** workers run continuously and exchange data through live buffers while upstream and downstream stages execute in parallel.
+
+### Offline pipeline (batch)
+
+Best when you already have complete input (file or full in-memory data) and want deterministic, one-shot output.
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer input] --> B[Offline STT/TTS/Enhancement engine]
+  B --> C[OfflineTextBuffer or OfflineAudioBuffer output]
+  C --> D[Read slices / save file / post-process]
+```
+
+**Characteristics**
+- Simple lifecycle (`create` -> `run` -> `read` -> `release`)
+- Predictable completion semantics (`Promise<void>` when job is done)
+- Great for file transcription, subtitle generation, export jobs
+
+### Streaming pipeline (live)
+
+Best when data arrives over time (mic/live feed) or when low-latency chaining is needed.
+
+```mermaid
+flowchart LR
+  A[Live source<br/>mic or append] --> B[Streaming STT]
+  B --> C[LiveTextBuffer]
+  C --> D[Streaming TTS]
+  D --> E[LiveAudioBuffer]
+  E --> F[Downstream consumer<br/>player/enhancement/STT]
+```
+
+In streaming mode, multiple pipeline parts can run **at the same time**:
+- upstream appends to live buffer
+- current worker drains and processes
+- downstream worker/consumer reads new units immediately
+
+**Advantages**
+- Lower end-to-end latency (first results before full input is finished)
+- Native-native chaining with less JS bridge traffic for steady-state data flow
+- Better fit for real-time UX (partial STT, incremental TTS, live enhancement)
+
+**Trade-offs**
+- More lifecycle orchestration (`start/flush/reset/stop`, finalization order)
+- Buffer/sample-rate compatibility must be managed carefully across stages
+- Debugging timing/state issues can be more complex than batch mode
+
+### Decision guide: offline vs streaming
+
+Prefer **offline** when:
+- input is already complete (audio file, full text)
+- you need simple control flow and deterministic completion
+- latency is less important than straightforward processing
+
+Prefer **streaming** when:
+- input arrives continuously (microphone/live feed)
+- you need low time-to-first-result / low perceived latency
+- you want concurrent stage execution (e.g. STT -> text buffer -> TTS -> audio buffer)
 
 ## Supported Model Types
 
-### Speech-to-Text (STT) Models
+<details>
+<summary>Speech-to-Text (STT) models</summary>
 
 | Model Type               | `modelType` Value | Description                                                                              | Download Links                                                                                   |
 | ------------------------ | ----------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -173,7 +220,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 For **real-time (streaming) recognition** from a microphone or audio stream, use streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, or `tone_ctc`. See [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md).
 
-### Text-to-Speech (TTS) Models
+</details>
+
+<details>
+<summary>Text-to-Speech (TTS) models</summary>
 
 | Model Type       | `modelType` Value | Description                                                                                          | Download Links                                                                      |
 | ---------------- | ----------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -188,7 +238,10 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 
 For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
 
-### Speech Enhancement Models
+</details>
+
+<details>
+<summary>Speech Enhancement models</summary>
 
 Speech enhancement improves noisy or degraded speech using ONNX models from the sherpa-onnx **speech-enhancement-models** release. Detection looks for **`.onnx`** filenames containing **`gtcrn`** or **`dpdfnet`** (case-insensitive). With **`'auto'`**, **GTCRN** is preferred when both are present in the same folder.
 
@@ -198,21 +251,39 @@ Speech enhancement improves noisy or degraded speech using ONNX models from the 
 | **GTCRN**    | `'gtcrn'`         | Lightweight speech enhancement (e.g. `gtcrn_simple.onnx`).                  | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 | **DPDFNet**  | `'dpdfnet'`       | Deep speech enhancement variants (e.g. `dpdfnet2.onnx`, `dpdfnet4.onnx`, `dpdfnet8.onnx`, `dpdfnet_baseline.onnx`, `dpdfnet2_48khz_hr.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 
-APIs, batch vs online processing, and initialization are covered in [Speech Enhancement](./docs/speech-enhancement.md).
+APIs and initialization: [Speech enhancement overview](./docs/speech-enhancement.md), [offline batch](./docs/enhancement-offline.md), [streaming (live buffers)](./docs/enhancement-streaming.md).
+
+</details>
+
+<details>
+<summary>Alignment models</summary>
+
+Alignment uses timing modes with different model requirements:
+
+| Mode | Needs model download? | Model | Download |
+| --- | --- | --- | --- |
+| `proportional` | No | n/a | n/a |
+| `estimated` | No | n/a | n/a |
+| `accurate` | Yes | wav2vec2 forced-alignment ONNX | [Download](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models) |
+
+For accurate alignment model setup and detection, see [Alignment / subtitles](./docs/alignment.md) and [Model setup](./docs/model-setup.md).
+
+</details>
 
 ## Documentation
 
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
-- [Speech-to-Text (STT)](./docs/stt.md) – Offline transcription (file or samples)
+- [Speech-to-Text (STT)](./docs/stt-offline.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
-- [PCM Live Stream](./docs/pcm-live-stream.md) – Native microphone capture with resampling for live transcription (use with streaming STT)
+- [Pipeline audio buffers (`audiobuffer`)](./docs/audiobuffer.md) – Overview; [offline](./docs/audiobuffer-offline.md), [live / streaming](./docs/audiobuffer-streaming.md)
+- [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
 - [Alignment / subtitles](./docs/alignment.md) – `alignTextToAudio`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
 - [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
 - [Voice Activity Detection (VAD)](./docs/vad.md)
 - [Speaker Diarization](./docs/diarization.md)
-- [Speech Enhancement](./docs/speech-enhancement.md)
+- [Speech enhancement](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)
@@ -227,6 +298,17 @@ Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to com
 - React Native >= 0.70
 - Android API 24+ (Android 7.0+)
 - iOS 13.0+
+
+## Bundled sherpa-onnx version
+
+| Platform | Version |
+|----------|---------|
+| Android | 1.12.35 |
+| iOS | 1.12.35 |
+
+## Known issues
+
+- **[Pocket TTS (voice cloning)](docs/KNOWN_ISSUES.md)** — voice cloning: **Android** supported; **iOS** experimental. Heuristic EOS and **iOS vs Android drift** (length/quality); not a React Native–only issue. Full notes: [investigation doc](docs/github-issue-pocket-tts-eos-frame-zero.md).
 
 ## Example Apps
 

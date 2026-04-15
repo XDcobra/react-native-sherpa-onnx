@@ -11,10 +11,6 @@ internal class PcmPlayerRegistry {
 
   fun remove(playerId: String): PcmPlayerSession? = sessions.remove(playerId)
 
-  /** Find player bound to a TTS instance (for playback:true lookup). */
-  fun findByTtsInstanceId(ttsInstanceId: String): PcmPlayerSession? =
-    sessions.values.firstOrNull { it.ttsInstanceId == ttsInstanceId && !it.destroyed }
-
   fun destroyAll() {
     sessions.values.forEach { it.destroy() }
     sessions.clear()

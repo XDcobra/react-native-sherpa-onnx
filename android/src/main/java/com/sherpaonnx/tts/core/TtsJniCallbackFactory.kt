@@ -14,20 +14,6 @@ internal object TtsJniCallbackFactory {
   fun boxForTtsJni(n: Int): java.lang.Integer = java.lang.Integer(n)
 
   @Suppress("UNCHECKED_CAST")
-  fun ttsChunkCallbackForJni(
-    sentenceChunkSizes: MutableList<Int>
-  ): kotlin.Function1<FloatArray, Int> {
-    val boxed =
-      object : kotlin.jvm.functions.Function1<FloatArray, java.lang.Integer> {
-        override fun invoke(chunk: FloatArray): java.lang.Integer {
-          sentenceChunkSizes.add(chunk.size)
-          return boxForTtsJni(chunk.size)
-        }
-      }
-    return boxed as kotlin.Function1<FloatArray, Int>
-  }
-
-  @Suppress("UNCHECKED_CAST")
   fun ttsStreamChunkCallbackForJni(
     cancelled: AtomicBoolean,
     onChunk: (FloatArray) -> Unit

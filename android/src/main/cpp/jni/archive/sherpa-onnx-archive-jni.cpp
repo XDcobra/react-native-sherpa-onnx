@@ -141,7 +141,7 @@ static std::ptrdiff_t JniStreamRead(void* buf, size_t len, void* user_data) {
 // ── JNI: nativeExtract ──────────────────────────────────────────
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtract(
+Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeExtract(
     JNIEnv* env,
     jobject,
     jstring j_source_path,
@@ -184,7 +184,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtract(
 // ── JNI: nativeExtractFromStream ────────────────────────────────
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractFromStream(
+Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeExtractFromStream(
     JNIEnv* env,
     jobject,
     jobject j_input_stream,
@@ -257,7 +257,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeExtractFromStream(
 // ── JNI: nativeCancelOperation ──────────────────────────────────
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeCancelOperation(
+Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeCancelOperation(
     JNIEnv* env, jobject, jstring j_operation_id) {
   const char* opId = env->GetStringUTFChars(j_operation_id, nullptr);
   ArchiveHelper::CancelOperation(std::string(opId));
@@ -267,7 +267,7 @@ Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeCancelOperation(
 // ── JNI: nativeComputeFileSha256 ────────────────────────────────
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_sherpaonnx_SherpaOnnxArchiveHelper_nativeComputeFileSha256(
+Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeComputeFileSha256(
     JNIEnv* env, jobject, jstring j_file_path, jobject j_promise) {
   const char* path = env->GetStringUTFChars(j_file_path, nullptr);
   std::string file_str(path);

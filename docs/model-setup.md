@@ -391,7 +391,7 @@ if (!detection.success) {
 | `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
 | `resolveModelPath()` fails | Check that the model directory exists at the expected location on the platform |
 | PAD returns `null` | PAD requires `play-core` dependency and correct `build.gradle` asset pack config; iOS always returns `null` |
-| `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt.md#validation-required-files) for the file-per-type table |
+| `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
 | Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |
 | TTS init fails with `Error processing file '/usr/share/espeak-ng-data/phontab'` | Path to `espeak-ng-data` is too long; espeak-ng truncates it and falls back to `/usr/share`. See [issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) for workarounds. |
@@ -407,7 +407,7 @@ if (!detection.success) {
 ## See Also
 
 - [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
-- [STT](stt.md) — Speech-to-Text API
+- [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts.md) — Text-to-Speech API
 - [Download Manager](download-manager.md) — Download models in-app
 - [Execution Providers](execution-providers.md) — QNN, NNAPI, XNNPACK, Core ML

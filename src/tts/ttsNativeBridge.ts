@@ -2,7 +2,7 @@ import type { ModelPathConfig } from '../types';
 import type {
   TTSInitializeOptions,
   TTSModelType,
-  TtsGenerationOptions,
+  TtsSynthesisOptions,
   TtsKittenModelOptions,
   TtsKokoroModelOptions,
   TtsMatchaModelOptions,
@@ -10,6 +10,8 @@ import type {
   TtsUpdateOptions,
   TtsVitsModelOptions,
 } from './types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 
 export type FlattenedTtsModelNativeOptions = {
   noiseScale: number | undefined;
@@ -178,48 +180,40 @@ export function expandTtsUpdateOptions(opts: TtsUpdateOptions): {
 }
 
 /**
- * Convert TtsGenerationOptions to a flat object for the native bridge.
+ * Convert TtsSynthesisOptions to a flat object for the native bridge.
+ * VoiceClone reference audio is passed as a buffer ID (not raw samples).
  */
-export function toNativeTtsGenerationOptions(
-  options?: TtsGenerationOptions,
-  extras?: Record<string, unknown>
-): Record<string, unknown> {
-  if (options == null) return { ...(extras ?? {}) };
+export function toNativeSynthesisOptions(
+  options?: TtsSynthesisOptions
+): Record<string, unknown> | undefined {
+  if (options == null) return undefined;
   const out: Record<string, unknown> = {};
   if (options.sid !== undefined) out.sid = options.sid;
   if (options.speed !== undefined) out.speed = options.speed;
   if (options.silenceScale !== undefined) {
     out.silenceScale = options.silenceScale;
   }
-  if (options.voiceClone != null) {
-    const vc = options.voiceClone;
-    const sr = vc.referenceAudio.sampleRate;
-    if (
-      typeof __DEV__ !== 'undefined' &&
-      __DEV__ &&
-      (!Number.isFinite(sr) || sr <= 0)
-    ) {
-      console.warn(
-        '[react-native-sherpa-onnx] TTS voiceClone.referenceAudio.sampleRate must be > 0 for voice cloning (Zipvoice/Pocket).'
-      );
-    }
-    out.referenceAudio = vc.referenceAudio.samples;
-    out.referenceSampleRate = vc.referenceAudio.sampleRate;
-    if (vc.kind === 'zipvoice') {
-      out.referenceText = vc.referenceText;
-    } else if (vc.referenceText !== undefined) {
-      out.referenceText = vc.referenceText;
-    }
-  }
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
   if (options.extra != null && Object.keys(options.extra).length > 0) {
     out.extra = options.extra;
   }
-  if (options.subtitles?.mode !== undefined) {
-    out.subtitleMode = options.subtitles.mode;
+  if (options.voiceClone != null) {
+    const vc = options.voiceClone;
+    const refBufferId = resolvePipelineAudioBufferId(
+      vc.referenceAudio as OfflineAudioBufferIdSource
+    );
+    out.referenceAudioBufferId = refBufferId;
+    if (vc.kind === 'zipvoice') {
+      const referenceText = vc.referenceText?.trim() ?? '';
+      if (referenceText.length === 0) {
+        throw new Error(
+          '[TTS] Zipvoice voice cloning requires a non-empty referenceText in voiceClone options.'
+        );
+      }
+      out.referenceText = referenceText;
+    } else if (vc.referenceText !== undefined) {
+      out.referenceText = vc.referenceText.trim();
+    }
   }
-  if (options.subtitles?.granularity !== undefined) {
-    out.subtitleGranularity = options.subtitles.granularity;
-  }
-  return extras != null ? { ...out, ...extras } : out;
+  return Object.keys(out).length > 0 ? out : undefined;
 }

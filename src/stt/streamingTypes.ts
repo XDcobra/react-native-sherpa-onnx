@@ -1,4 +1,7 @@
 import type { ModelPathConfig } from '../types';
+import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 
 /**
  * Online (streaming) STT model types.
@@ -84,73 +87,36 @@ export interface StreamingSttInitOptions {
   blankPenalty?: number;
   /** Enable debug logging. Default: false. */
   debug?: boolean;
-  /**
-   * Enable adaptive input normalization for audio chunks in processAudioChunk().
-   * When true (default), input is scaled so the peak is ~0.8 to handle varying device levels (e.g. quiet mics on iOS).
-   * Set to false if your audio is already in the expected range [-1, 1] and you want to pass it through unchanged.
-   */
-  enableInputNormalization?: boolean;
 }
 
-/**
- * Partial or final recognition result from streaming STT (maps to Kotlin OnlineRecognizerResult).
- */
-export interface StreamingSttResult {
-  text: string;
-  tokens: string[];
-  timestamps: number[];
+/** Options for starting a native STT pipeline worker. */
+export interface SttPipelineOptions {
+  /** Number of audio samples drained per worker loop. Default: 3200. */
+  chunkSize?: number;
 }
 
-/**
- * Streaming STT stream. Created by StreamingSttEngine.createStream().
- * Feeds audio via acceptWaveform, then decode / getResult / isEndpoint.
- */
-export interface SttStream {
-  readonly streamId: string;
-
-  /** Feed PCM samples (float in [-1, 1]) to the stream. */
-  acceptWaveform(samples: number[], sampleRate: number): Promise<void>;
-
-  /** Signal that no more audio will be fed. */
-  inputFinished(): Promise<void>;
-
-  /** Run decoding on accumulated audio (call when isReady() is true). */
-  decode(): Promise<void>;
-
-  /** True if there is enough audio to decode. */
-  isReady(): Promise<boolean>;
-
-  /** Get current partial or final result. Call after decode(). */
-  getResult(): Promise<StreamingSttResult>;
-
-  /** True if endpoint (end of utterance) was detected. */
-  isEndpoint(): Promise<boolean>;
-
-  /** Reset stream state for reuse. */
-  reset(): Promise<void>;
-
-  /** Release native stream; do not use after this. */
-  release(): Promise<void>;
-
-  /**
-   * Convenience: feed audio, auto-decode while ready, return result and endpoint status.
-   * Reduces bridge round-trips from 5 to 1 per chunk.
-   */
-  processAudioChunk(
-    samples: number[] | Float32Array,
-    sampleRate: number
-  ): Promise<{ result: StreamingSttResult; isEndpoint: boolean }>;
+/** Pipeline handle returned by LiveSttEngine.transcribe(). */
+export interface SttPipelineHandle extends StreamingPipelineHandle {
+  /** STT engine instance id driving this pipeline. */
+  readonly instanceId: string;
 }
 
-/**
- * Streaming STT engine (OnlineRecognizer). Create via createStreamingSTT().
- */
-export interface StreamingSttEngine {
+/** Streaming STT engine in pipeline mode (live audio -> live text). */
+export interface LiveSttEngine {
   readonly instanceId: string;
 
-  /** Create a new stream for this recognizer. Optional hotwords string. */
-  createStream(hotwords?: string): Promise<SttStream>;
+  /**
+   * Start native pipeline transcription:
+   * - drains audio from a live audio buffer
+   * - runs online recognizer decode loop
+   * - writes partials + committed segments to a live text buffer
+   */
+  transcribe(
+    audioIn: LiveAudioBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options?: SttPipelineOptions
+  ): Promise<SttPipelineHandle>;
 
-  /** Release native recognizer and all streams. */
+  /** Release native recognizer and stop any active pipeline. */
   destroy(): Promise<void>;
 }

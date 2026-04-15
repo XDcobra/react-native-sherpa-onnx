@@ -1,23 +1,30 @@
 # Streaming Text-to-Speech (TTS)
 
-Incremental speech generation with chunk callbacks: lower time-to-first-byte, playback while generating, or piping float PCM into another pipeline. The API is **instance-based** — create an engine with `createStreamingTTS()`, then call `destroy()` when done.
+Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
-**For full-buffer synthesis, timestamps on the batch path, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
+**For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
-## Choosing a streaming path
+## Architecture
 
-| Goal | Use | Options |
-|------|-----|---------|
-| **Interactive playback (native, zero bridge PCM)** | `generateSpeechStream` | `playback: true, emitChunks: false` |
-| **Interactive playback + waveform visualization** | `generateSpeechStream` | `playback: true, emitChunks: true` |
-| **Chunks to JS only (manual player feed)** | `generateSpeechStream` | `playback: false, emitChunks: true` (default) |
-| **Incremental text feeding** (progressive input) | `generateIncrementalSpeechStream` | `playback: false, emitChunks: true` (default; same as `generateSpeechStream`) |
-| **Long-text file export** (preferred) | `generateSpeechStreamToFile` | `emitChunks: false` (default) |
-| **File export + live playback** | `generateSpeechStreamToFile` | `playback: true, emitChunks: false` |
+```text
+Text input ──→ LiveTextBuffer ──→ [TTS Pipeline Worker] ──→ LiveAudioBuffer ──→ downstream
+                                   (native thread)
+```
 
-**`generateSpeechStreamToFile`** is the preferred path for long text because all PCM stays in native memory. Set `emitChunks: true` only when you also need live playback or visualization during export.
+The TTS pipeline worker:
+1. Creates a text cursor on the input `LiveTextBuffer`.
+2. Blocks (condition variable) until new committed segments arrive.
+3. For each segment, resolves `sid`/`speed` from per-segment `meta` (falls back to pipeline defaults), then calls `tts.Generate(text, sid, speed, chunkCallback)`.
+4. The chunk callback writes PCM directly to the output `LiveAudioBuffer` — zero JS bridge traffic.
+5. When the input text buffer is finalized and all segments are drained, the worker auto-stops.
+
+Downstream consumers (enhancement pipeline, PCM player, STT pipeline, WAV export) read audio from the output buffer **in parallel** while TTS is still producing. True streaming parallelism across stages.
+
+```text
+LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ [Enhancement] ──→ LiveAudioBuffer₂ ──→ [Streaming STT]
+```
 
 ## Models & paths
 
@@ -27,12 +34,22 @@ Incremental speech generation with chunk callbacks: lower time-to-first-byte, pl
 
 ## Quick Start
 
-### 1) Interactive playback / visualization (`generateSpeechStream`)
+All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
 
-Use this path when you want real-time chunk handling in JS. This example shows the recommended pre-check with `detectTtsModel` before engine init.
+### 1) Direct pipeline control (`synthesize`)
+
+Use when you manage text segments and audio buffers yourself.
 
 ```ts
-import { createStreamingTTS, detectTtsModel } from 'react-native-sherpa-onnx/tts';
+import {
+  createStreamingTTS,
+  detectTtsModel,
+  createLiveTextBuffer,
+  createEmptyLiveAudioBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+  finalizeLiveAudioBuffer,
+} from 'react-native-sherpa-onnx/tts';
 
 const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
 const det = await detectTtsModel(modelPath);
@@ -49,116 +66,81 @@ const tts = await createStreamingTTS({
   },
 });
 
-// Native playback — no manual PCM player needed
-const controller = await tts.generateSpeechStream(
-  'Streaming hello.',
-  { sid: 0, speed: 1.0 },
-  {
-    onChunk: (c) => {
-      // chunks are only published if emitChunks: true
-      // set emitChunks: false to reduce overhead if you only want to use the pcm player
-      // c.samples, c.sampleRate, c.progress, c.isFinal
-    },
-    onEnd: () => {
-      console.log('Playback finished');
-    },
-    onError: (e) => {
-      console.error('Stream error:', e.message);
-    },
-  },
-  { playback: true, emitChunks: true }
-);
-
-// Pause / resume during playback:
-await controller.player?.pause();
-await controller.player?.resume();
-
-// Cancel stops synthesis + destroys player
-await controller.cancel().catch(() => {});
-await tts.destroy();
-```
-
-### 2) Long-text file export (preferred) (`generateSpeechStreamToFile`)
-
-Preferred for long text because PCM stays native and is written incrementally to file.  
-If needed, you can use `detectTtsModel` exactly like in example 1 before `createStreamingTTS`.
-
-```ts
-import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
-
-const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/absolute/path/to/tts-model' },
+// Create buffers
+const sampleRate = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer();
+const audioOut = await createEmptyLiveAudioBuffer({
+  sampleRate,
+  channelCount: 1,
 });
 
-const ctrl = await tts.generateSpeechStreamToFile(
-  'Long text that should be exported directly.',
-  { sid: 0, speed: 1.0 },
-  {
-    output: { kind: 'file', path: '/absolute/path/out.wav' },
-    format: 'wav',
-    keepPartialOnCancel: false,
-    emitChunks: false,
-  },
-  {
-    onEnd: (e) => {
-      // e.path, e.bytesWritten, e.sampleRate, e.cancelled
-    },
-    onError: (e) => {
-      // e.message
-    },
-  }
-);
-
-await ctrl.cancel().catch(() => {});
-await tts.destroy();
-```
-
-### 3) File export + live playback (`generateSpeechStreamToFile` + `playback: true`)
-
-Use when you need native file export and native audio playback at the same time.  
-If needed, you can use `detectTtsModel` exactly like in example 1 before `createStreamingTTS`.
-
-```ts
-import { createStreamingTTS } from 'react-native-sherpa-onnx/tts';
-
-const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/absolute/path/to/tts-model' },
+// Start native pipeline
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  sid: 0,
+  speed: 1.0,
 });
 
-const ctrl = await tts.generateSpeechStreamToFile(
-  'Export and play while generating.',
-  { sid: 0, speed: 1.0 },
-  {
-    output: { kind: 'file', path: '/absolute/path/out-with-monitor.wav' },
-    format: 'wav',
-    emitChunks: false,
-  },
-  {
-    onEnd: (e) => {
-      console.log(`Saved ${e.bytesWritten} bytes to ${e.path}`);
-    },
-    onError: (e) => {
-      console.error('Stream error:', e.message);
-    },
-  },
-  { playback: true }
-);
+// Push text segments (pipeline synthesizes each as it arrives)
+await appendLiveTextSegment(textIn, 'Hello world. ');
+await appendLiveTextSegment(textIn, 'How are you today?');
 
-// Pause / resume during playback:
-await ctrl.player?.pause();
-await ctrl.player?.resume();
+// Signal no more text
+await finalizeLiveTextBuffer(textIn);
 
-await ctrl.cancel().catch(() => {});
+// Wait for pipeline to finish processing all segments
+await pipeline.flush();
+
+// Finalize audio buffer (if downstream consumers need an end signal)
+await finalizeLiveAudioBuffer(audioOut);
+
+// Cleanup
+await pipeline.stop();
 await tts.destroy();
 ```
+
+### 2) Per-segment metadata overrides
+
+Override `sid` and `speed` per segment via the `meta` parameter:
+
+```ts
+// Different speaker for each segment
+await appendLiveTextSegment(textIn, 'Hello!', undefined, undefined, { sid: 0, speed: 1.0 });
+await appendLiveTextSegment(textIn, 'Hi there!', undefined, undefined, { sid: 1, speed: 0.9 });
+```
+
+The worker resolves per call:
+```
+effectiveSid   = segment.meta.sid   ?? pipelineOptions.sid   ?? 0
+effectiveSpeed = segment.meta.speed ?? pipelineOptions.speed ?? 1.0
+```
+
+### 3) Pipeline with voice cloning
+
+Voice cloning reference audio is loaded **once** at pipeline start and reused for all segments.
+
+```ts
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  sid: 0,
+  speed: 1.0,
+  voiceClone: {
+    kind: 'pocket',
+    referenceAudio: offlineAudioBufferRef, // OfflineAudioBufferRef or string bufferId
+  },
+});
+```
+
+**Note:** Zipvoice cloning requires `referenceText` and is **not** supported in streaming on Android. For Zipvoice voice cloning, use batch `generateSpeech` on the offline path — [tts-offline.md](tts-offline.md).
 
 ### 4) Incremental text feeding (`createIncrementalStreamingTTS`)
 
-Use this path when text arrives progressively (chat/LLM typing).  
-The engine batches text into segments and reuses the existing streaming path internally.
+Use this path when text arrives progressively (chat/LLM typing). The engine handles segmentation, queue management, and pipeline lifecycle internally.
 
 ```ts
-import { createIncrementalStreamingTTS } from 'react-native-sherpa-onnx/tts';
+import {
+  createIncrementalStreamingTTS,
+  createEmptyLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+} from 'react-native-sherpa-onnx/tts';
 
 const inc = await createIncrementalStreamingTTS({
   source: {
@@ -173,63 +155,36 @@ const inc = await createIncrementalStreamingTTS({
   },
 });
 
-// Start one incremental request (request-centric API).
-// Omitting streamOptions uses playback: false, emitChunks: true (chunks to JS).
-const ctrl = inc.generateIncrementalSpeechStream(
-  { sid: 0, speed: 1.0 },
-  {
-    onSessionEvent: (e) => {
-      // session:started | session:draining | session:idle | session:cancelled | session:error
-      console.log(e.type);
-    },
-    onSegmentEvent: (e) => {
-      // segment:queued | segment:started | segment:chunk | segment:ended | segment:dropped
-      if (e.type === 'segment:dropped') console.warn(e.reason);
-    },
-    onChunk: (c) => {
-      // c.samples, c.sampleRate — default emitChunks: true
-    },
-    onError: (e) => {
-      console.error('Incremental stream error:', e.message);
-    },
-  }
-);
+const sampleRate = await inc.getSampleRate();
+const audioOut = await createEmptyLiveAudioBuffer({
+  sampleRate,
+  channelCount: 1,
+  onFramesAppended: (info) => {
+    // Track progress: info.totalFrames, info.source
+  },
+});
 
-// Push progressive text chunks
+// Start a session — creates an internal LiveTextBuffer + pipeline automatically
+const ctrl = await inc.startSession(audioOut, { sid: 0, speed: 1.0 });
+
+// Push progressive text chunks (auto-segmentation detects boundaries)
 ctrl.pushText('Hallo Michael. ');
 ctrl.pushText('Today, the weather was amazing. But tomorrow, I think it will rain instead. ');
 
-// commit() is done automatically internally if auto-segmentation finds a boundary
-// commit() is a force trigger: it enqueues the current buffer now, even without punctuation/timeout boundary.
-// so use it only if you need to force enqueueing
+// commit() forces immediate enqueue even without boundary detection
 ctrl.commit();
 
-// Wait until queue is drained
+// Flush: commit remainder, finalize text buffer, wait until pipeline completes
 await ctrl.flush();
 
-// With default options, ctrl.player is null. For native playback, pass e.g.
-// { playback: true, emitChunks: false } as the third argument, then:
-// await ctrl.player?.pause();
-// await ctrl.player?.resume();
+// Finalize audio output
+await finalizeLiveAudioBuffer(audioOut);
 
-// Optional: cancel active + queued work
-await ctrl.cancel({ scope: 'all' });
+// Cancel (alternative to flush — discards remaining)
+// await ctrl.cancel({ scope: 'all' });
+
 await inc.destroy();
 ```
-
-**Note:** Zipvoice cloning is **not** supported in streaming on Android; Pocket cloning uses `voiceClone: { kind: 'pocket', referenceAudio: { samples, sampleRate } }`. For Zipvoice voice cloning use batch **`generateSpeech`** on the offline path — [tts-offline.md](tts-offline.md).
-
-## Stream options (`TtsStreamOptions`)
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `playback` | `boolean` | `false` | Enqueue PCM to native player automatically |
-| `emitChunks` | `boolean` | `true` | Deliver `onChunk` callbacks with binary PCM |
-| `autoDestroy` | `boolean` | `true` | Auto-destroy the internal player after `onEnd` fires |
-
-**Invalid combination:** `playback: false` + `emitChunks: false` is a no-op. The current JS wrapper does **not** reject; it logs a warning and returns a no-op controller. Enable at least one of `playback` or `emitChunks`.
-
-When `playback: true`, the streaming controller exposes `ctrl.player` — a `PcmPlayer` with `pause()`, `resume()`, and `destroy()`. See [pcm-player.md](pcm-player.md) for standalone player usage.
 
 ## Setup (iOS & Android)
 
@@ -238,10 +193,10 @@ When `playback: true`, the streaming controller exposes `ctrl.player` — a `Pcm
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
 | Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment.md](alignment.md) |
 | Multi-instance | Each `createTTS` / `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
+| One pipeline per engine | `synthesize()` rejects with `TTS_PIPELINE_ALREADY_RUNNING` if a pipeline is already active on the same engine |
+| Sample rate match | `audioOut.sampleRate` must equal the TTS model's output sample rate (strict — no hidden resampling) |
 
 ## API Reference
-
-Each entry below uses a one-line TypeScript signature (exported names match `react-native-sherpa-onnx/tts`). `ModelPathConfig` is imported from `react-native-sherpa-onnx` when you use the path-only `createStreamingTTS` shorthand.
 
 ## Detection
 
@@ -256,19 +211,15 @@ function detectTtsModel(
   error?: string;
   detectedModels: { type: string; modelDir: string }[];
   modelType?: TTSModelType;
-  // only available for Kokoro/Kitten; otherwise empty
   lexiconLanguageCandidates?: string[];
   languages?: { iso6391Hint: string; id: string }[];
   quantization?: string;
   sizeTier?: string;
-  /** When present, how native code chose the model kind (e.g. `fileListing` after a scan, `dirName` from the folder name, `fallbackOrder`, `explicitModelType`, or `nameOnly` for the empty-file-list test path). */
   detectionSources?: readonly DetectionSource[];
 }>;
 ```
 
 File-based detection and validation **without** initializing the TTS engine: no native synthesizer is created, so this call is comparatively cheap and suitable as a **pre-check** before **`createStreamingTTS`** or **`createTTS`** — for example to obtain a concrete `modelType` (and Kokoro/Kitten `lexiconLanguageCandidates`) so you can pass the right `modelOptions` on init.
-
-**`detectionSources`** is an optional, ordered trace of mechanisms used (stable string literals; see `DetectionSource` in `react-native-sherpa-onnx/tts`). The host-only **name-only** path (empty file list in C++ tests) never validates paths and is not used by production `detectTtsModel` after a real directory scan.
 
 ```ts
 const result = await detectTtsModel({ type: 'asset', path: 'models/my-tts-model' });
@@ -297,8 +248,8 @@ function createIncrementalStreamingTTS(
 ): Promise<IncrementalStreamingTtsEngine>;
 ```
 
-High-level incremental layer over `StreamingTtsEngine`.  
-It handles buffering, boundary detection, queue policy, and serial dispatch.
+High-level incremental layer over `StreamingTtsEngine`.
+It handles buffering, boundary detection, queue policy, and pipeline lifecycle internally.
 
 ```ts
 const inc = await createIncrementalStreamingTTS({
@@ -308,140 +259,118 @@ const inc = await createIncrementalStreamingTTS({
 
 ## Streaming engine (`StreamingTtsEngine`)
 
-### `tts.generateSpeechStream(text, options, handlers)`
+### `tts.synthesize(textIn, audioOut, options?)`
 
 ```ts
-generateSpeechStream(
-  text: string,
-  options: TtsGenerationOptions | undefined,
-  handlers: TtsStreamHandlers
-): Promise<TtsStreamController>;
+synthesize(
+  textIn: LiveTextBufferIdSource,
+  audioOut: LiveAudioBufferIdSource,
+  options?: TtsPipelineOptions,
+): Promise<TtsPipelineHandle>;
 ```
 
-Starts streaming synthesis; events are delivered to `handlers`. Only one stream per engine at a time.
+Starts a native streaming TTS pipeline. A dedicated background worker thread drains committed text segments from `textIn`, synthesizes each segment, and writes PCM samples to `audioOut`.
+
+- `textIn` must be a live text buffer in `recording` state.
+- `audioOut` must be a live audio buffer in `recording` state.
+- `audioOut.sampleRate` must equal the TTS model's sample rate.
+- Only **one pipeline per engine** at a time.
+
+Returns a `TtsPipelineHandle` to control the running pipeline.
 
 ```ts
-const ctrl = await tts.generateSpeechStream('Hi', undefined, {
-  onChunk: (c) => {
-    // c.samples, c.sampleRate, c.progress, c.isFinal
-  },
-  onEnd: (e) => {
-    // e.cancelled
-  },
-  onError: (e) => {
-    // e.message
-  },
-});
+const pipeline = await tts.synthesize(textIn, audioOut, { sid: 0, speed: 1.0 });
 ```
 
-### `tts.generateSpeechStreamToFile(text, options, fileOptions, handlers)`
-
-```ts
-generateSpeechStreamToFile(
-  text: string,
-  options: TtsGenerationOptions | undefined,
-  fileOptions: TtsStreamToFileOptions,
-  handlers: TtsStreamToFileHandlers
-): Promise<TtsStreamFileController>;
-```
-
-Streams synthesis directly to a native file sink (v1: WAV). Use this mode for long texts to avoid collecting all samples in JS memory.
-
-```ts
-const ctrl = await tts.generateSpeechStreamToFile(
-  'Save this stream.',
-  undefined,
-  {
-    output: { kind: 'file', path: '/absolute/path/out.wav' },
-    format: 'wav',
-    keepPartialOnCancel: false,
-    emitChunks: true,
-  },
-  {
-    onChunk: (c) => {
-      // optional when emitChunks=true — use for waveform visualization etc.
-    },
-    onEnd: (e) => {
-      // e.path, e.bytesWritten, e.sampleRate, e.cancelled
-    },
-    onError: (e) => {
-      // e.message, e.path?
-    },
-  }
-);
-```
-
-### `tts.cancelSpeechStream()`
-
-```ts
-cancelSpeechStream(): Promise<void>;
-```
-
-Cancels the current stream from the engine side.
-
-```ts
-await tts.cancelSpeechStream();
-```
-
-### Standalone PCM player
-
-For manual PCM playback (non-TTS audio, custom feed logic), use the standalone player from `react-native-sherpa-onnx/pcm`. See [pcm-player.md](pcm-player.md).
-
-### `tts.getModelInfo()` (streaming)
+### `tts.getModelInfo()` / `tts.getSampleRate()` / `tts.getNumSpeakers()`
 
 ```ts
 getModelInfo(): Promise<TTSModelInfo>;
-```
-
-Same as batch engine.
-
-### `tts.getSampleRate()` (streaming)
-
-```ts
 getSampleRate(): Promise<number>;
-```
-
-### `tts.getNumSpeakers()` (streaming)
-
-```ts
 getNumSpeakers(): Promise<number>;
 ```
 
-### `tts.destroy()` (streaming)
+### `tts.destroy()`
 
 ```ts
 destroy(): Promise<void>;
 ```
 
+Stops any running pipeline, then releases native TTS resources. Do not use the engine after this.
+
+## Pipeline handle (`TtsPipelineHandle`)
+
+Returned by `tts.synthesize()`. Extends `StreamingPipelineHandle`.
+
+### `pipeline.stop()`
+
+```ts
+stop(): Promise<void>;
+```
+
+Stops the pipeline. If a segment is currently being synthesized, the chunk callback signals cancellation — sherpa-onnx aborts the current generation. Partial audio already written to the output buffer remains (valid prefix). Worker thread exits cleanly.
+
+### `pipeline.flush()`
+
+```ts
+flush(): Promise<void>;
+```
+
+Waits for the currently synthesizing segment to complete, then drains and synthesizes all remaining queued segments. Promise resolves when all current segments are processed. The pipeline **continues running** after flush.
+
+### `pipeline.reset()`
+
+```ts
+reset(): Promise<void>;
+```
+
+Discards queued (unprocessed) segments by advancing the cursor past all available segments. If a segment is currently being synthesized, it completes (no mid-generation cancel). The pipeline **continues running** — subsequent commits are processed normally.
+
+### `pipeline.getStatus()`
+
+```ts
+getStatus(): Promise<StreamingPipelineStatus>;
+```
+
+Returns pipeline metrics:
+
+```ts
+interface StreamingPipelineStatus {
+  pipelineId: string;
+  isRunning: boolean;
+  chunksProcessed: number;  // segments completed
+  unitsRead: number;        // characters consumed
+  unitsWritten: number;     // audio samples produced
+  error: string | null;
+}
+```
+
+### `pipeline.pipelineId`
+
+Readonly string identifier for this pipeline instance.
+
+### `pipeline.instanceId`
+
+Readonly string — the TTS engine instance driving this pipeline.
+
 ## Incremental engine (`IncrementalStreamingTtsEngine`)
 
-### `inc.generateIncrementalSpeechStream(options, handlers, streamOptions?, incrementalOptions?)`
+### `inc.startSession(audioOut, ttsOptions?, incrementalOptions?)`
 
 ```ts
-generateIncrementalSpeechStream(
-  options: TtsGenerationOptions | undefined,
-  handlers: IncrementalStreamHandlers,
-  streamOptions?: TtsStreamOptions,
-  incrementalOptions?: IncrementalRequestOptions
-): IncrementalStreamController;
+startSession(
+  audioOut: LiveAudioBufferIdSource,
+  ttsOptions?: TtsPipelineOptions,
+  incrementalOptions?: IncrementalRequestOptions,
+): Promise<IncrementalStreamController>;
 ```
 
-Starts one incremental request with chunk/playback behavior analogous to `generateSpeechStream`.  
-Omitted `streamOptions` uses the same per-field defaults: `playback: false`, `emitChunks: true`.  
-Only one active request per engine instance at a time.
+Starts an incremental speech synthesis session:
+1. Creates an internal `LiveTextBuffer` automatically.
+2. Starts a TTS pipeline (`synthesize()`) from the internal text buffer to `audioOut`.
+3. Returns a controller for pushing text incrementally.
 
-### `inc.generateIncrementalSpeechStreamToFile(options, fileOptions, handlers, incrementalOptions?)`
-
-```ts
-generateIncrementalSpeechStreamToFile(
-  options: TtsGenerationOptions | undefined,
-  fileOptions: TtsStreamToFileOptions,
-  handlers: IncrementalStreamToFileHandlers,
-  incrementalOptions?: IncrementalRequestOptions
-): IncrementalStreamFileController;
-```
-
-Starts one incremental request writing to file (internally segmented and serialized).
+Only one active session per engine instance at a time.
 
 ### `inc.getModelInfo()`, `inc.getSampleRate()`, `inc.getNumSpeakers()`, `inc.destroy()`
 
@@ -449,13 +378,13 @@ Same semantics as `StreamingTtsEngine`.
 
 ## Incremental stream controller (`IncrementalStreamController`)
 
-### `ctrl.pushText(text)`
+### `ctrl.pushText(text, meta?)`
 
 ```ts
-pushText(text: string): void;
+pushText(text: string, meta?: { sid?: number; speed?: number }): void;
 ```
 
-Adds incremental input text to the active request buffer. Auto-segmentation may enqueue new segments.
+Adds incremental input text. Auto-segmentation detects boundaries based on the segmentation policy and commits segments to the internal `LiveTextBuffer`. The native pipeline worker picks them up automatically.
 
 ### `ctrl.commit(options?)`
 
@@ -463,14 +392,14 @@ Adds incremental input text to the active request buffer. Auto-segmentation may 
 commit(options?: CommitOptions): void;
 ```
 
-`commit()` is a force trigger, not a required step for normal generation.
+Force-commit the current buffer as a segment. Not required for normal operation — `pushText()` triggers auto-segmentation.
 
 Behavior matrix:
 
-- Only `pushText()` with detectable boundaries -> speech is generated automatically.
-- `pushText()` without boundaries, but timeout enabled -> speech starts when timeout triggers forced segmentation.
-- `pushText()` without boundaries and no timeout -> no generation until `commit()` or `flush()`.
-- `commit()` -> immediate enqueue/start path for current buffered text.
+- `pushText()` with detectable boundaries → speech generated automatically.
+- `pushText()` without boundaries + timeout enabled → speech starts after timeout.
+- `pushText()` without boundaries and no timeout → no generation until `commit()` or `flush()`.
+- `commit()` → immediate enqueue of current buffer, bypassing boundary detection.
 
 ### `ctrl.flush(options?)`
 
@@ -478,7 +407,7 @@ Behavior matrix:
 flush(options?: FlushOptions): Promise<void>;
 ```
 
-Commits remaining buffer and resolves when queue + active segment are finished.
+Commits remaining buffer, finalizes the internal text buffer, and resolves when all segments have been synthesized.
 
 ### `ctrl.cancel(options?)`
 
@@ -488,9 +417,9 @@ cancel(options?: CancelOptions): Promise<void>;
 
 Cancels by scope:
 
-- `all` (default): active + queued
-- `active`: active only
-- `queued`: queued only
+- `all` (default): stops pipeline, discards active + queued, releases text buffer
+- `active`: stops active synthesis only
+- `queued`: discards queued segments, resets pipeline cursor; session continues
 
 ### `ctrl.getMetrics()`
 
@@ -500,58 +429,29 @@ getMetrics(): IncrementalMetrics;
 
 Returns a snapshot: queue depth, totals, and current active segment id.
 
-### `ctrl.player`
+### `ctrl.pipeline`
 
-`PcmPlayer | null` (non-null only when `streamOptions.playback === true`).
+The underlying `TtsPipelineHandle` (for `getStatus()`, etc.).
+
+### `ctrl.textBuffer`
+
+`{ bufferId: string }` — the internal `LiveTextBuffer` used for segmented text input.
 
 ### `ctrl.state`
 
-Current session state for this request.
+Current session state: `'idle' | 'active' | 'draining' | 'cancelled' | 'errored' | 'destroyed'`.
 
-## Stream controller (`TtsStreamController`)
+## Pipeline options (`TtsPipelineOptions`)
 
-### `controller.cancel()`
-
-```ts
-cancel(): Promise<void>;
-```
-
-Cancels the ongoing generation and unsubscribes listeners.
-
-```ts
-await controller.cancel();
-```
-
-### `controller.unsubscribe()`
-
-```ts
-unsubscribe(): void;
-```
-
-Removes event listeners (also called automatically on end/error).
-
-```ts
-controller.unsubscribe();
-```
-
-## Subtitles
-
-**Subtitle generation is not integrated into the streaming TTS API.** `generateSpeechStream`, `generateSpeechStreamToFile`, and the incremental APIs do not accept `SubtitleOptions` and do not emit word- or line-level timings during synthesis.
-
-**Supported workflow today (post-hoc alignment)**
-
-1. **`generateSpeechStreamToFile`** (preferred for performance)— When writing finishes (`onEnd` on the stream-to-file handlers), pass the **output audio file** and your **transcript** to **`alignTextToAudio`** from `react-native-sherpa-onnx/alignment` (modes and wav2vec2 setup: [alignment.md](alignment.md)).
-
-2. **`generateSpeechStream`** — Collect **PCM** from **`onChunk`** across the utterance (same `sampleRate`), or assemble the full buffer before handling **`onEnd`**, then call **`alignTextToAudio`** with that audio and the transcript, following the input shapes described in [alignment.md](alignment.md) (e.g. WAV path or supported PCM payload).
-
-Batch **`generateSpeechWithTimestamps`** on [Offline TTS](tts-offline.md) remains the path for proportional / estimated / accurate timings in **one** non-streaming call.
-
-**Roadmap:** Built-in subtitle or live timing support for streaming TTS is **planned for a future release**; until then, use the alignment flow above after audio is available.
-
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `sid` | `number` | `0` | Speaker ID (overridable per-segment via `meta.sid`) |
+| `speed` | `number` | `1.0` | Speed multiplier (overridable per-segment via `meta.speed`) |
+| `voiceClone` | `TtsVoiceClone` | — | Voice cloning config; set once for the entire pipeline |
 
 ## Types
 
-Listed types are those used by **streaming TTS** in this document (`createStreamingTTS`, `generateSpeechStream` / `ToFile`, `createIncrementalStreamingTTS`, and shared `detectTtsModel` / engine init). **Subtitles:** not part of these streaming types — see [Subtitles](#subtitles). Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
+Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
 
 ### Detection & model path
 
@@ -565,7 +465,7 @@ Listed types are those used by **streaming TTS** in this document (`createStream
 | `DetectedModelEntry` | `{ type: string; modelDir: string }` |
 | `DetectionSource` | Trace literals from native detection |
 
-### Init & generation
+### Init
 
 **`TtsUpdateOptions`** / `updateParams` are **batch-only** ([tts-offline.md](tts-offline.md)); `StreamingTtsEngine` does not expose parameter updates.
 
@@ -573,46 +473,32 @@ Listed types are those used by **streaming TTS** in this document (`createStream
 | --- | --- |
 | `TTSInitializeOptions` | `createStreamingTTS()` / `IncrementalStreamingTtsSource.engineOptions` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
 | `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
-| `TtsGenerationOptions` | Synth options (`voiceClone`, `sid`, `speed`, …) for `generateSpeechStream` / incremental segments |
-| `TtsReferenceAudio` | `{ samples: number[]; sampleRate: number }` |
 | `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
 | `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
 | `TtsModelOptions` | Internal aggregate for native flattening; prefer init unions in app code |
 | `TtsVitsModelOptions`, `TtsMatchaModelOptions`, … | Per-architecture scale options |
 
-
-### Streaming engine & stream results
+### Pipeline engine & handle
 
 | Type | Notes |
 | --- | --- |
-| `StreamingTtsEngine` | `createStreamingTTS()` instance |
+| `StreamingTtsEngine` | `createStreamingTTS()` instance: `synthesize()`, `getModelInfo()`, `getSampleRate()`, `getNumSpeakers()`, `destroy()` |
+| `TtsPipelineHandle` | Extends `StreamingPipelineHandle`: `stop()`, `flush()`, `reset()`, `getStatus()`, `pipelineId`, `instanceId` |
+| `TtsPipelineOptions` | `{ sid?, speed?, voiceClone? }` |
+| `StreamingPipelineHandle` | Generic pipeline handle: `stop()`, `flush()`, `reset()`, `getStatus()` |
+| `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
-| `TtsStreamChunk` | `{ samples, sampleRate, progress, isFinal }` + optional `instanceId`, `requestId` |
-| `TtsStreamEnd` | `{ cancelled: boolean }` + optional ids |
-| `TtsStreamError` | `{ message: string }` + optional ids |
-| `TtsStreamHandlers` | `{ onChunk?, onEnd?, onError? }` |
-| `TtsStreamOptions` | `{ playback?, emitChunks?, autoDestroy? }` |
-| `TtsStreamController` | `cancel()`, `unsubscribe()`, `player: PcmPlayer \| null` |
-| `PcmPlayer` | On stream controller when `playback: true` — see [pcm-player.md](pcm-player.md) |
-| `TtsStreamFileOutput` | `{ kind: 'file'; path: string }` |
-| `TtsStreamToFileOptions` | `{ output, format?: 'wav', keepPartialOnCancel?, emitChunks? }` |
-| `TtsStreamFileEnd` | `{ path, bytesWritten, sampleRate, cancelled }` + optional ids |
-| `TtsStreamFileError` | `{ message, path? }` + optional ids |
-| `TtsStreamToFileHandlers` | `{ onChunk?, onEnd?, onError? }` |
-| `TtsStreamFileController` | `cancel()`, `unsubscribe()` |
 
 ### Incremental streaming
 
 | Type | Notes |
 | --- | --- |
-| `IncrementalStreamingTtsEngine` | `generateIncrementalSpeechStream`, `generateIncrementalSpeechStreamToFile`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
+| `IncrementalStreamingTtsEngine` | `startSession`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
 | `IncrementalStreamingTtsFactoryOptions` | `{ source, segmentation?, queue? }` |
 | `IncrementalStreamingTtsSource` | `{ engine: StreamingTtsEngine }` or `{ engineOptions: TTSInitializeOptions \| ModelPathConfig }` |
 | `IncrementalRequestOptions` | `{ segmentation?, queue? }` |
-| `IncrementalStreamHandlers` | `TtsStreamHandlers` + `onSessionEvent?`, `onSegmentEvent?`, `onMetrics?` |
-| `IncrementalStreamToFileHandlers` | `TtsStreamToFileHandlers` + `onSessionEvent?`, `onSegmentEvent?`, `onMetrics?` |
-| `IncrementalStreamController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `player`, `state` |
-| `IncrementalStreamFileController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `state` |
+| `IncrementalStreamHandlers` | `{ onSessionEvent?, onSegmentEvent?, onMetrics? }` |
+| `IncrementalStreamController` | `pushText`, `commit`, `flush`, `cancel`, `getMetrics`, `pipeline`, `textBuffer`, `state` |
 | `SegmentationPolicy` | `boundaryChars?`, `maxCharsPerSegment?`, `maxWaitMs?`, `minCharsPerSegment?`, `debounceMs?` |
 | `QueuePolicy` | `mode?`, `maxSegments?`, `maxBufferedChars?`, `overflowStrategy?` |
 | `QueueMode` | `'fifo' \| 'replace-tail' \| 'latest-wins'` |
@@ -625,32 +511,44 @@ Listed types are those used by **streaming TTS** in this document (`createStream
 | `SessionState` | `'idle' \| 'active' \| 'draining' \| 'cancelled' \| 'errored' \| 'destroyed'` |
 | `IncrementalMetrics` | `{ queueDepth, totalSegmentsQueued, totalSegmentsCompleted, totalSegmentsDropped, totalSegmentsReplaced, activeSegmentId }` |
 | `SessionEvent` | `session:started`, `session:idle`, `session:draining`, `session:cancelled`, `session:error` |
-| `SegmentEvent` | `segment:queued`, `segment:started`, `segment:chunk`, `segment:ended`, `segment:dropped` |
+| `SegmentEvent` | `segment:queued`, `segment:started`, `segment:ended`, `segment:dropped` |
 
-**Breaking type history:** [migration.md](migration.md) → **Text-to-Speech: strict types (0.4.0)** under the 0.4.0 section.
+## Error codes
+
+| Code | Meaning |
+| --- | --- |
+| `TTS_PIPELINE_ALREADY_RUNNING` | `synthesize()` called while a pipeline on this engine is already active |
+| `TTS_PIPELINE_TEXT_BUFFER_NOT_FOUND` | Input live text buffer ID not found |
+| `TTS_PIPELINE_AUDIO_BUFFER_NOT_FOUND` | Output live audio buffer ID not found |
+| `TTS_PIPELINE_BUFFER_KIND_MISMATCH` | Non-live buffer passed (must be `live_*` / `txt_live_*`) |
+| `TTS_PIPELINE_BUFFER_NOT_RECORDING` | Buffer already finalized; cannot start pipeline on it |
+| `TTS_PIPELINE_SAMPLE_RATE_MISMATCH` | Output buffer's `sampleRate` ≠ TTS model's output sample rate |
+| `TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND` | `referenceAudioBufferId` not found in offline audio registry |
+| `TTS_PIPELINE_VOICE_CLONE_UNSUPPORTED` | Voice cloning requested but model type does not support it |
+| `STREAMING_PIPELINE_NOT_FOUND` | `pipelineId` not found (stop/flush/reset/status) |
+| `STREAMING_PIPELINE_ERROR` | Worker thread crashed |
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| `ALIGNMENT_MODEL_MISSING` | `accurate` without `alignmentModelPath` | Pass absolute path to wav2vec2 ONNX; see [alignment.md](alignment.md) |
+| `TTS_PIPELINE_ALREADY_RUNNING` | Called `synthesize()` before previous pipeline stopped | `stop()` the previous pipeline first, or create a second engine |
+| `TTS_PIPELINE_SAMPLE_RATE_MISMATCH` | `LiveAudioBuffer` sample rate ≠ model sample rate | Use `tts.getSampleRate()` to get the correct rate before creating the audio buffer |
 | `TTS_GENERATE_ERROR` / cloning | `voiceClone` on non–Zipvoice/Pocket model | Remove `voiceClone` or switch model |
-| Zipvoice clone fails | Missing / empty `referenceText` | Use `voiceClone: { kind: 'zipvoice', referenceAudio, referenceText }` with non-empty text |
+| Zipvoice clone fails | Missing / empty `referenceText` | Use `voiceClone: { kind: 'zipvoice', referenceAudio, referenceText }` — with non-empty text; Android streaming does not support Zipvoice |
 | Init throws with `modelOptions` | `modelType` is `'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
 | Methods throw after `destroy` | Engine already released | Create a new engine |
-| Streaming error on Android + Zipvoice + ref audio | Unsupported combination | Use batch `generateSpeech` for Zipvoice cloning |
-| `generateSpeechStreamToFile` fails with format error | Non-WAV format requested | Use `format: 'wav'` for v1 stream-to-file |
 | Wrong or slow inference | Provider not built / unavailable | Check [execution-providers.md](execution-providers.md) and native logs |
 
 ## Mapping to Native API
 
-If you call the **`NativeSherpaOnnx`** TurboModule directly instead of `createTTS()` / `createStreamingTTS()`, instance-bound TTS methods take **`instanceId`** as the first argument. Prefer the factory APIs in this document unless you manage native instances yourself.
+If you call the **`NativeSherpaOnnx`** TurboModule directly: `startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options?)` starts the native worker. Pipeline control methods (`stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`) take a `pipelineId`. Prefer the factory APIs in this document unless you manage native instances yourself.
 
 ## See also
 
-- [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share  
-- [pcm-player.md](pcm-player.md) — standalone PCM player  
-- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)  
-- [execution-providers.md](execution-providers.md) — ORT execution providers  
-- [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)  
-- [migration.md](migration.md) — strict TTS TypeScript unions (0.4.0)
+- [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
+- [pcm-player.md](pcm-player.md) — standalone PCM player
+- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
+- [execution-providers.md](execution-providers.md) — ORT execution providers
+- [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
+- [migration.md](migration.md) — breaking changes history

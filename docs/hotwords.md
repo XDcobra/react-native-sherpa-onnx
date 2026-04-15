@@ -205,16 +205,49 @@ if (detection.success && detection.modelType) {
 
 ```typescript
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
-const engine = await createStreamingSTT({
+const recognizer = await createStreamingSTT({
   modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   hotwordsScore: 2.0,
 });
 
-const stream = await engine.createStream();
-// Feed audio chunks...
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+await startMicToLiveAudioBuffer(audioIn);
+// ... recording session ...
+await stopMicToLiveAudioBuffer();
+
+await pipeline.flush();
+
+const count = await getLiveTextBufferSegmentCount(textOut);
+const segments =
+  count > 0
+    ? await getLiveTextBufferSegments(textOut, 0, count, { includeTokens: true })
+    : [];
+
+console.log(segments.map((s) => s.text).join(' '));
+
+await pipeline.stop();
+await recognizer.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
 ```
 
 ### Dynamic hotwords (per-session)
@@ -259,6 +292,6 @@ await stt.setConfig({ hotwordsFile: hotwordsPath });
 
 ## See Also
 
-- [STT](stt.md) — Offline speech recognition API
+- [STT](stt-offline.md) — Offline speech recognition API
 - [Streaming STT](stt-streaming.md) — Real-time recognition with hotwords
 - [Model Setup](model-setup.md) — Model discovery and paths

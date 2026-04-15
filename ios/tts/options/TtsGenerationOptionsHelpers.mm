@@ -16,23 +16,24 @@ NSString *TtsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
     }
 }
 
-std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps) {
-    if (options == nil) return std::nullopt;
-    NSArray *refArr = options[@"referenceAudio"];
-    if (![refArr isKindOfClass:[NSArray class]] || [refArr count] == 0) return std::nullopt;
-    NSNumber *srNum = options[@"referenceSampleRate"];
-    if (srNum == nil || [srNum doubleValue] <= 0) return std::nullopt;
+BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options) {
+    if (options == nil) return NO;
+    NSString *refId = options[@"referenceAudioBufferId"];
+    return refId != nil && [refId isKindOfClass:[NSString class]] && [refId length] > 0;
+}
+
+std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
+    NSDictionary *options,
+    const std::vector<float> &refSamples,
+    int32_t refSampleRate,
+    int32_t defaultNumSteps
+) {
+    if (refSamples.empty() || refSampleRate <= 0) return std::nullopt;
 
     sherpaonnx::VoiceCloneOptions vo;
-    vo.reference_sample_rate = static_cast<int32_t>([srNum doubleValue]);
-    vo.reference_audio.reserve([refArr count]);
-    for (id elem in refArr) {
-        float v = 0.f;
-        if ([elem isKindOfClass:[NSNumber class]]) {
-            v = static_cast<float>([(NSNumber *)elem doubleValue]);
-        }
-        vo.reference_audio.push_back(v);
-    }
+    vo.reference_audio = refSamples;
+    vo.reference_sample_rate = refSampleRate;
+
     NSString *rt = options[@"referenceText"];
     if (rt != nil && [rt length] > 0) {
         vo.reference_text = std::string([rt UTF8String]);
@@ -58,44 +59,3 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromNSDictionary(N
     return vo;
 }
 
-BOOL NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
-    auto o = VoiceCloneOptionsFromNSDictionary(options, 1);
-    return o.has_value() && !o->reference_audio.empty() && o->reference_sample_rate > 0;
-}
-
-NSString *SubtitleModeFromOptions(NSDictionary *options) {
-    NSString *raw = [options[@"subtitleMode"] isKindOfClass:[NSString class]] ? options[@"subtitleMode"] : nil;
-    NSString *normalized = raw != nil
-        ? [[raw lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-        : @"proportional";
-
-    if ([normalized isEqualToString:@"off"] ||
-        [normalized isEqualToString:@"proportional"] ||
-        [normalized isEqualToString:@"estimated"] ||
-        [normalized isEqualToString:@"accurate"]) {
-        return normalized;
-    }
-
-    return @"proportional";
-}
-
-NSString *SubtitleGranularityFromOptions(NSDictionary *options) {
-    NSString *raw = [options[@"subtitleGranularity"] isKindOfClass:[NSString class]] ? options[@"subtitleGranularity"] : nil;
-    NSString *normalized = raw != nil
-        ? [[raw lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-        : @"sentence";
-
-    if ([normalized isEqualToString:@"word"] || [normalized isEqualToString:@"sentence"]) {
-        return normalized;
-    }
-
-    return @"sentence";
-}
-
-BOOL IsCharacterGranularityRequested(NSDictionary *options) {
-    NSString *raw = [options[@"subtitleGranularity"] isKindOfClass:[NSString class]] ? options[@"subtitleGranularity"] : nil;
-    NSString *normalized = raw != nil
-        ? [[raw lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
-        : @"";
-    return [normalized isEqualToString:@"character"];
-}

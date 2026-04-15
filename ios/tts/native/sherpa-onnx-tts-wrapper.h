@@ -100,12 +100,6 @@ public:
         const std::optional<VoiceCloneOptions>& cloning
     );
 
-    static bool saveToWavFile(
-        const std::vector<float>& samples,
-        int32_t sampleRate,
-        const std::string& filePath
-    );
-
     int32_t getSampleRate() const;
 
     int32_t getNumSpeakers() const;

@@ -65,15 +65,25 @@
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
     },
-    "./files": {
-      "source": "./src/files/index.ts",
-      "types": "./lib/typescript/src/files/index.d.ts",
-      "default": "./lib/module/files/index.js"
+    "./fileio": {
+      "source": "./src/fileio/index.ts",
+      "types": "./lib/typescript/src/fileio/index.d.ts",
+      "default": "./lib/module/fileio/index.js"
     },
     "./pcm": {
       "source": "./src/pcm/index.ts",
       "types": "./lib/typescript/src/pcm/index.d.ts",
       "default": "./lib/module/pcm/index.js"
+    },
+    "./audiobuffer": {
+      "source": "./src/audiobuffer/index.ts",
+      "types": "./lib/typescript/src/audiobuffer/index.d.ts",
+      "default": "./lib/module/audiobuffer/index.js"
+    },
+    "./textbuffer": {
+      "source": "./src/textbuffer/index.ts",
+      "types": "./lib/typescript/src/textbuffer/index.d.ts",
+      "default": "./lib/module/textbuffer/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -193,7 +203,7 @@
     "@dr.pogodin/react-native-fs": "*",
     "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "react": "*",
-    "react-native": "*"
+    "react-native": ">=0.73.0"
   },
   "workspaces": [
     "example"

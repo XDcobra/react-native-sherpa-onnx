@@ -25,6 +25,8 @@ endif()
 # Calculate path relative to project root: android/src/main/cpp -> android -> project root
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
+find_package(ReactAndroid CONFIG QUIET)
+
 # Optional: disable FFmpeg (gradle.properties: sherpaOnnxDisableFfmpeg=true). See docs/disable-ffmpeg.md.
 set(USE_FFMPEG ON)
 if(SHERPA_ONNX_DISABLE_FFMPEG)
@@ -86,6 +88,7 @@ set(SOURCES
     jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
     jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp
@@ -93,15 +96,20 @@ set(SOURCES
     jni/model_detect/tts/sherpa-onnx-model-detect-tts.cpp
     jni/model_detect/tts/sherpa-onnx-validate-tts.cpp
     jni/model_detect/tts/sherpa-onnx-tts-wrapper.cpp
+    jni/model_detect/enhancement/sherpa-onnx-enhancement-catalog-metadata.cpp
     jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
     jni/model_detect/alignment/sherpa-onnx-model-detect-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-validate-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
-    jni/audio/sherpa-onnx-audio-convert-jni.cpp
-    jni/audio/audio_convert_file.cpp
+    jni/audiobuffer/SherpaOnnxJSI.cpp
+    jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp
+    jni/audio/AudioDecodeSession.cpp
+    jni/audio/audio_decode_jni.cpp
+    jni/audio/AudioEncodeSession.cpp
+    jni/audio/audio_encode_jni.cpp
     crypto/sha256.cpp
 )
 
@@ -241,6 +249,13 @@ if(SHERPA_C_API_LIB_DIR)
 endif()
 target_link_directories(sherpaonnx PRIVATE ${ORT_JNILIB_DIR})
 target_link_libraries(sherpaonnx PRIVATE onnxruntime)
+if(TARGET ReactAndroid::jsi)
+    target_link_libraries(sherpaonnx PRIVATE ReactAndroid::jsi)
+elseif(TARGET jsi)
+    target_link_libraries(sherpaonnx PRIVATE jsi)
+else()
+    message(WARNING "JSI target not found (ReactAndroid::jsi/jsi). Building without explicit JSI linkage.")
+endif()
 # Link archive only when USE_LIBARCHIVE (otherwise libsherpaonnx.so would depend on libarchive.so at load time).
 if(USE_FFMPEG)
     target_link_libraries(sherpaonnx

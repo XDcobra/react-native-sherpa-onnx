@@ -306,5 +306,5 @@ if (sttModel) {
 
 - [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `autoModelPath`
 - [Download manager](download-manager.md) — downloading models from the network
-- [STT](stt.md) — Speech-to-Text API
+- [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts.md) — Text-to-Speech API

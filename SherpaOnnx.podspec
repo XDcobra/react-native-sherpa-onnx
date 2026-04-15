@@ -33,7 +33,13 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/model_detect/**/*.cpp",
     # Shared alignment core (segmenter + proportional/estimated/accurate CTC).
     "android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp",
-    "android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp"
+    "android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp",
+    # Shared audio decode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
+    "android/src/main/cpp/jni/audio/AudioDecodeSession.cpp",
+    "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    # Shared audio encode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.cpp",
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -43,7 +49,9 @@ Pod::Spec.new do |s|
     "ios/model_detect/**/*",
     # Android JNI only (jni.h / JNIEnv). iOS compiles ObjC++ wrappers under ios/ instead.
     "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
-    "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp"
+    "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp",
+    "android/src/main/cpp/jni/audio/audio_decode_jni.cpp",
+    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -110,13 +118,13 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
     "\"#{pod_root}/ios/enhancement\"",
-    "\"#{pod_root}/ios/online_stt\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

@@ -5,7 +5,6 @@ import type {
   SegmentEvent,
   IncrementalMetrics,
 } from './types';
-import type { TtsStreamChunk } from '../types';
 
 // ---------------------------------------------------------------------------
 // Session event factories
@@ -75,14 +74,6 @@ export function segmentDropped(
   reason: 'overflow' | 'cancelled' | 'replaced'
 ): SegmentEvent {
   return { type: 'segment:dropped', sessionId, segmentId, reason };
-}
-
-export function segmentChunk(
-  sessionId: SessionId,
-  segmentId: SegmentId,
-  chunk: TtsStreamChunk
-): SegmentEvent {
-  return { type: 'segment:chunk', sessionId, segmentId, chunk };
 }
 
 // ---------------------------------------------------------------------------

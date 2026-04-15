@@ -2,20 +2,25 @@
  * SherpaOnnx.mm
  *
  * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
- * SherpaOnnx+Assets.mm), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
+ * ios/assets/bridge), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
  * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
- * SherpaOnnx+Assets.mm; STT in SherpaOnnx+STT.mm; TTS in ios/tts/bridge (SherpaOnnx+TTS*.mm) plus ios/tts/{engine,native,options,subtitle,wav}; file/share helpers in SherpaOnnx+Files.mm.
+ * ios/assets/{bridge,core}; pipeline audio in ios/audio/{bridge,pipeline}; STT in ios/stt/bridge
+ * (SherpaOnnx+STT.mm, SherpaOnnx+OnlineSTT.mm); TTS in ios/tts/bridge (SherpaOnnx+TTS*.mm) plus
+ * ios/tts/{engine,native,options,subtitle,wav}; file I/O in fileio/ (SherpaOnnx+FileIO.mm).
  */
 
 #import "SherpaOnnx.h"
-#import "SherpaOnnx+Assets.h"
+#import "assets/bridge/SherpaOnnx+Assets.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
-#import "SherpaOnnxAudioConvert.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
+
+@interface SherpaOnnx (JSI)
+- (BOOL)autoInstallJSI;
+@end
 
 @implementation SherpaOnnx
 
@@ -27,7 +32,16 @@
 - (instancetype)init
 {
     self = [super initWithDisabledObservation];
+    if (self) {
+        [self autoInstallJSI];
+    }
     return self;
+}
+
+- (void)setBridge:(RCTBridge *)bridge
+{
+    [super setBridge:bridge];
+    [self autoInstallJSI];
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
@@ -38,7 +52,7 @@
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"ttsStreamChunk", @"ttsStreamEnd", @"ttsStreamError", @"ttsStreamFileEnd", @"ttsStreamFileError", @"extractArchiveProgress", @"pcmLiveStreamData", @"pcmLiveStreamError" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"pcmPlayerEnded" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
@@ -230,60 +244,6 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
 {
     // PAD APK_ASSETS listing is Android-only.
     resolve(@[]);
-}
-
-- (void)convertAudioToFormat:(NSString *)inputPath
-                 outputPath:(NSString *)outputPath
-                     format:(NSString *)format
-         outputSampleRateHz:(NSNumber *)outputSampleRateHz
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
-{
-    NSError *error = nil;
-    if (![SherpaOnnxAudioConvert convertAudioToFormat:inputPath
-                                           outputPath:outputPath
-                                               format:format
-                                   outputSampleRateHz:outputSampleRateHz.intValue
-                                                error:&error]) {
-        reject(@"CONVERT_ERROR", error ? error.localizedDescription : @"Conversion failed", error);
-        return;
-    }
-    resolve(nil);
-}
-
-- (void)convertAudioToWav16k:(NSString *)inputPath
-                 outputPath:(NSString *)outputPath
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
-{
-    NSError *error = nil;
-    if (![SherpaOnnxAudioConvert convertAudioToWav16k:inputPath
-                                           outputPath:outputPath
-                                                error:&error]) {
-        reject(@"CONVERT_ERROR", error ? error.localizedDescription : @"Conversion to WAV 16kHz mono failed", error);
-        return;
-    }
-    resolve(nil);
-}
-
-- (void)decodeAudioFileToFloatSamples:(NSString *)inputPath
-                   targetSampleRateHz:(NSNumber *)targetSampleRateHz
-                              resolve:(RCTPromiseResolveBlock)resolve
-                               reject:(RCTPromiseRejectBlock)reject
-{
-    NSArray<NSNumber *> *samples = nil;
-    int sr = 0;
-    NSError *error = nil;
-    int rate = targetSampleRateHz != nil ? targetSampleRateHz.intValue : 0;
-    if (![SherpaOnnxAudioConvert decodeAudioFileToFloatSamples:inputPath
-                                            targetSampleRateHz:rate
-                                                    outSamples:&samples
-                                                 outSampleRate:&sr
-                                                         error:&error]) {
-        reject(@"DECODE_ERROR", error ? error.localizedDescription : @"Failed to decode audio", error);
-        return;
-    }
-    resolve(@{ @"samples": samples ?: @[], @"sampleRate": @(sr) });
 }
 
 - (void)getAvailableProviders:(RCTPromiseResolveBlock)resolve

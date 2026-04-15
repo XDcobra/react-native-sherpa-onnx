@@ -237,10 +237,6 @@
         return;
     }
     TtsInstanceState *inst = it->second.get();
-    if (inst->streamRunning.load()) {
-        reject(@"TTS_UPDATE_ERROR", @"Cannot update params while streaming", nil);
-        return;
-    }
 
     NSNumber *nextNoiseScale = nil;
     if (noiseScale == nil) {

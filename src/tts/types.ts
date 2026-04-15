@@ -1,7 +1,13 @@
 import type { ModelPathConfig } from '../types';
-import type { SubtitleTimingItem } from '../alignment/types';
-import type { PcmPlayer } from '../pcm/types';
 import type { DetectedModelEntry } from '../types/modelDetect';
+import type {
+  OfflineAudioBufferRef,
+  OfflineBufferHandle,
+} from '../audiobuffer/types';
+import type {
+  OfflineTextBufferRef,
+  OfflineTextBufferHandle,
+} from '../textbuffer/types';
 
 /**
  * Supported TTS model types.
@@ -292,307 +298,62 @@ export type TtsUpdateOptions =
   | TtsUpdateOptionsSupertonic;
 
 export type SubtitleMode = 'off' | 'proportional' | 'estimated' | 'accurate';
-
 export type SubtitleGranularity = 'sentence' | 'word' | 'character';
 
-/** Subtitles off, proportional timing, or estimated (synthesis chunks); no alignment model; character not allowed. */
-export type SubtitleOptionsProportionalOrEstimated = {
-  mode?: 'off' | 'proportional' | 'estimated';
-  granularity?: 'sentence' | 'word';
-  alignmentModelPath?: never;
-};
-
-/** Forced alignment: alignment ONNX path required; character granularity allowed. */
-export type SubtitleOptionsAccurate = {
-  mode: 'accurate';
-  /** Absolute path to alignment ONNX (required). */
-  alignmentModelPath: string;
-  granularity?: 'sentence' | 'word' | 'character';
-};
-
-export type SubtitleOptions =
-  | SubtitleOptionsProportionalOrEstimated
-  | SubtitleOptionsAccurate;
-
-/** Mono float samples in [-1, 1] for Zipvoice / Pocket voice cloning. */
-export type TtsReferenceAudio = {
-  samples: number[];
-  sampleRate: number;
-};
-
-/** Zipvoice cloning: prompt text is required for native. */
+/** Zipvoice cloning: reference audio from OfflineAudioBuffer; prompt text required. */
 export type TtsVoiceCloneZipvoice = {
   kind: 'zipvoice';
-  referenceAudio: TtsReferenceAudio;
+  referenceAudio: OfflineAudioBufferRef | OfflineBufferHandle;
   referenceText: string;
 };
 
-/** Pocket cloning: reference audio required; transcript optional (not read natively). */
+/** Pocket cloning: reference audio from OfflineAudioBuffer; transcript optional. */
 export type TtsVoiceClonePocket = {
   kind: 'pocket';
-  referenceAudio: TtsReferenceAudio;
+  referenceAudio: OfflineAudioBufferRef | OfflineBufferHandle;
   referenceText?: string;
 };
 
 export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
 
-type TtsGenerationBase = {
-  /**
-   * Speaker ID for multi-speaker models.
-   * For single-speaker models, this is ignored.
-   *
-   * Use `getNumSpeakers()` to check how many speakers are available.
-   *
-   * @default 0
-   */
+/**
+ * Options for buffer-to-buffer TTS synthesis via `tts.synthesize()`.
+ * No subtitle/alignment options — those are separate modules.
+ *
+ * Note: `silenceScale` and `numSteps` are only applied when `voiceClone` is
+ * provided. They are ignored for non-cloning synthesis (native code only reads
+ * them inside the voice-clone config).
+ */
+export type TtsSynthesisOptions = {
   sid?: number;
-
-  /**
-   * Speech speed multiplier.
-   *
-   * @default 1.0
-   */
   speed?: number;
-
-  /**
-   * Silence scale (Kotlin GenerationConfig.silenceScale). Used at generate time.
-   */
   silenceScale?: number;
-
-  /**
-   * Number of steps, e.g. flow-matching steps (Kotlin GenerationConfig.numSteps).
-   * Used by models such as Pocket.
-   */
   numSteps?: number;
-
-  /**
-   * Extra options as key-value pairs (Kotlin GenerationConfig.extra).
-   * Model-specific (e.g. temperature, chunk_size for Pocket).
-   */
   extra?: Record<string, string>;
-
-  /**
-   * Subtitle/timestamp generation options.
-   */
-  subtitles?: SubtitleOptions;
+  voiceClone?: TtsVoiceClone;
 };
-
-/**
- * Options for TTS generation. Use `voiceClone` for Zipvoice/Pocket reference audio (not top-level reference fields).
- */
-export type TtsGenerationOptions = TtsGenerationBase &
-  ({ voiceClone?: undefined } | { voiceClone: TtsVoiceClone });
-
-/**
- * Generated audio data from TTS synthesis.
- *
- * PCM samples are held in a native sink and not transferred to JS by default.
- * Use `getSamples()` to retrieve the PCM data when needed.
- */
-export interface GeneratedAudio {
-  /**
-   * Sample rate of the generated audio in Hz.
-   * Common values: 16000, 22050, 44100, 48000
-   */
-  sampleRate: number;
-
-  /**
-   * Number of mono float PCM samples in the generated audio.
-   */
-  numSamples: number;
-
-  /**
-   * Monotonic generation ID (matches native sink).
-   * Used internally for stale-detection; may also be useful for debugging.
-   */
-  generation: number;
-
-  /**
-   * Retrieve raw PCM samples from the native sink as Float32Array.
-   * Allocates memory in JS — call only when you need raw PCM (e.g. custom playback).
-   * Prefer `saveAudioFromGeneration()` for saving to file (avoids JS round-trip).
-   *
-   * @throws if the generation is stale (a new generateSpeech was called on the same engine)
-   * @throws if the engine instance has been destroyed
-   */
-  getSamples(): Promise<Float32Array>;
-}
-
-/**
- * Generated audio with subtitle/timestamp metadata.
- */
-export interface GeneratedAudioWithTimestamps extends GeneratedAudio {
-  /**
-   * Subtitle/timestamp entries.
-   */
-  subtitles: SubtitleTimingItem[];
-
-  /**
-   * Subtitle timing mode (aligned with `react-native-sherpa-onnx/alignment`).
-   */
-  timingMode: 'off' | 'proportional' | 'estimated' | 'aligned';
-}
-
-/**
- * Streaming chunk event payload for TTS generation.
- *
- * PCM data is delivered as `Float32Array` (base64-decoded from native into a
- * typed array in JS; not a zero-copy binary transfer).
- * Internal routing IDs (`instanceId`, `requestId`) are stripped before
- * the chunk reaches public handlers.
- */
-export interface TtsStreamChunk {
-  /** Mono float PCM samples in [-1, 1]. */
-  samples: Float32Array;
-  /** Sample rate of the generated audio in Hz. */
-  sampleRate: number;
-  /** Synthesis progress in [0, 1]. 1.0 on the final chunk. */
-  progress: number;
-  /** True for the last chunk of a generation. */
-  isFinal: boolean;
-}
-
-/**
- * Streaming end event payload.
- */
-export interface TtsStreamEnd {
-  cancelled: boolean;
-}
-
-/**
- * Streaming error event payload.
- */
-export interface TtsStreamError {
-  message: string;
-}
-
-/**
- * Controller returned by generateSpeechStream().
- * Use cancel() to stop generation, unsubscribe() to remove event listeners.
- */
-export interface TtsStreamController {
-  /** Cancel the ongoing TTS generation (and destroy the player if playback was active). */
-  cancel(): Promise<void>;
-  /** Remove event listeners (called automatically on end/error, or manually). */
-  unsubscribe(): void;
-  /**
-   * The player managing native playback for this stream run.
-   * Non-null only when streamOptions.playback was true.
-   */
-  readonly player: PcmPlayer | null;
-}
-
-/**
- * Handlers for TTS streaming generation (chunk, end, error).
- */
-export interface TtsStreamHandlers {
-  onChunk?: (chunk: TtsStreamChunk) => void;
-  onEnd?: (event: TtsStreamEnd) => void;
-  onError?: (event: TtsStreamError) => void;
-}
-
-/** Options controlling stream behavior (playback, chunk emission). */
-export interface TtsStreamOptions {
-  /**
-   * When true, synthesis enqueues PCM into a native player automatically.
-   * No writePcmChunk() needed. Default: false.
-   */
-  playback?: boolean;
-  /**
-   * When true, onChunk callbacks deliver binary PCM to JS.
-   * When false, no chunk events are emitted (only onEnd / onError).
-   * Default: true.
-   */
-  emitChunks?: boolean;
-  /**
-   * When true, the internally created player (used when playback: true) is automatically
-   * destroyed after onEnd fires. Default: true.
-   * Set to false to retain the player for deferred destroy() or final draining.
-   */
-  autoDestroy?: boolean;
-}
-
-/** File output target for streaming-to-file generation. */
-export type TtsStreamFileOutput = {
-  kind: 'file';
-  /** Absolute output path. */
-  path: string;
-};
-
-/** Event payload emitted when stream-to-file finishes. */
-export interface TtsStreamFileEnd {
-  cancelled: boolean;
-  path: string;
-  bytesWritten: number;
-  sampleRate: number;
-}
-
-/** Event payload emitted when stream-to-file fails. */
-export interface TtsStreamFileError {
-  message: string;
-  path?: string;
-}
-
-/** Stream-to-file behavior options. */
-export type TtsStreamToFileOptions = {
-  output: TtsStreamFileOutput;
-  /**
-   * Output format. v1 supports 'wav'.
-   * Reserved for future expansion.
-   */
-  format?: 'wav';
-  /** Keep finalized partial file when cancelled. Default: false. */
-  keepPartialOnCancel?: boolean;
-  /** Emit normal chunk events while writing to file. Default: false. */
-  emitChunks?: boolean;
-  /**
-   * When true, also play audio through a native player while writing to file.
-   * Default: false.
-   */
-  playback?: boolean;
-};
-
-/** Handlers for stream-to-file generation. */
-export interface TtsStreamToFileHandlers {
-  onChunk?: (chunk: TtsStreamChunk) => void;
-  onEnd?: (event: TtsStreamFileEnd) => void;
-  onError?: (event: TtsStreamFileError) => void;
-}
-
-/** Controller returned by generateSpeechStreamToFile(). */
-export interface TtsStreamFileController {
-  cancel(): Promise<void>;
-  unsubscribe(): void;
-}
 
 /**
  * Instance-based batch TTS engine returned by createTTS().
- * Use for one-shot synthesis (generateSpeech, generateSpeechWithTimestamps).
+ * Use synthesize() for buffer-to-buffer offline synthesis.
  * For streaming, use createStreamingTTS() and StreamingTtsEngine instead.
  * Call destroy() when done to free native resources.
  */
 export interface TtsEngine {
   readonly instanceId: string;
-  generateSpeech(
-    text: string,
-    options?: TtsGenerationOptions
-  ): Promise<GeneratedAudio>;
-  generateSpeechWithTimestamps(
-    text: string,
-    options?: TtsGenerationOptions
-  ): Promise<GeneratedAudioWithTimestamps>;
   /**
-   * Play the most recent batch synthesis result through the device speaker.
-   * Reads PCM directly from the native sink — no JS memory allocation.
+   * Buffer-to-buffer offline TTS synthesis.
+   * Reads text from an OfflineTextBuffer and writes audio into an empty OfflineAudioBuffer.
    *
-   * @param generation - The generation number from GeneratedAudio.generation.
-   *                     Must match the current sink to prevent playing stale audio.
-   * @param options - Optional player configuration.
+   * @param textIn - Offline text buffer (input text source)
+   * @param audioOut - Empty offline audio buffer (output target); sampleRate must match model output rate
+   * @param options - Synthesis options (sid, speed, voiceClone, etc.)
    */
-  playFromSink(
-    generation: number,
-    options?: PlayFromSinkOptions
-  ): Promise<TtsBatchPlaybackController>;
+  synthesize(
+    textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
+    audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
+    options?: TtsSynthesisOptions
+  ): Promise<void>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: DetectedModelEntry[];
@@ -601,21 +362,6 @@ export interface TtsEngine {
   getSampleRate(): Promise<number>;
   getNumSpeakers(): Promise<number>;
   destroy(): Promise<void>;
-}
-
-/**
- * Controller returned by TtsEngine.playFromSink().
- * Provides pause/resume/destroy controls over the batch playback player.
- */
-export interface TtsBatchPlaybackController {
-  /** The underlying PCM player (feed: 'native'). Use for pause/resume/destroy. */
-  readonly player: PcmPlayer;
-}
-
-/** Options for TtsEngine.playFromSink(). */
-export interface PlayFromSinkOptions {
-  /** Sample rate override. If omitted, uses the sink's sample rate. */
-  sampleRate?: number;
 }
 
 /**
@@ -651,21 +397,3 @@ export type SaveAudioTargetAndroidContent = {
 export type SaveAudioTarget =
   | SaveAudioTargetFile
   | SaveAudioTargetAndroidContent;
-
-/** Explicit PCM payload for `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`. */
-export type SaveAudioFromPcmInput = {
-  samples: number[] | Float32Array;
-  sampleRate: number;
-};
-
-/**
- * Options for `saveAudioFromGeneration()` / `saveAudioFromPCM()` in `react-native-sherpa-onnx/tts`.
- * `format` defaults to `'wav'`.
- * Non-WAV formats require native FFmpeg; see docs/disable-ffmpeg.md.
- */
-export type SaveAudioOptions = {
-  /** Same format strings as `convertAudioToFormat` in `react-native-sherpa-onnx/audio` (e.g. `wav`, `mp3`, `flac`, `m4a`, `opus`). */
-  format?: string;
-  /** Encoder output sample rate hint; `0` uses native defaults. MP3/Opus have allowed values — see audio-conversion.md. */
-  outputSampleRateHz?: number;
-};

@@ -18,7 +18,7 @@ import {
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
-import { copyContentUriToCache } from 'react-native-sherpa-onnx/files';
+import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
   alignTextToAudio,
   detectAlignmentModel,
@@ -26,6 +26,14 @@ import {
   type AlignmentGranularity,
   type AlignmentModelType,
 } from 'react-native-sherpa-onnx/alignment';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -467,26 +475,41 @@ export default function GenerateTimestampScreen() {
     setResult(null);
 
     let cleanupPath: string | null = null;
+    let textBufferId: string | null = null;
+    let audioBufferId: string | null = null;
     try {
       let audioPath = normalizeUriToPath(selectedAudioUri);
       if (selectedAudioUri.startsWith('content://')) {
-        audioPath = await copyContentUriToCache(
-          selectedAudioUri,
-          `timestamp_input_${Date.now()}.wav`
+        const cacheName = `timestamp_input_${Date.now()}.wav`;
+        const result = await copyFile(
+          { kind: 'contentUri', uri: selectedAudioUri },
+          { kind: 'app', base: 'cache', path: cacheName }
         );
+        audioPath =
+          result.output.kind === 'fs' ? result.output.path : audioPath;
         cleanupPath = audioPath;
       }
 
       const proportionalGranularity: 'sentence' | 'word' =
         granularity === 'character' ? 'sentence' : granularity;
+
+      const textBuffer = await createOfflineTextBufferFromText(text);
+      textBufferId = textBuffer.bufferId;
+
+      const audioBuffer = await createOfflineAudioBufferFromFile({
+        kind: 'fs',
+        path: audioPath,
+      });
+      audioBufferId = audioBuffer.bufferId;
+
       const subtitleResult =
         mode === 'accurate'
-          ? await alignTextToAudio(text, audioPath, {
+          ? await alignTextToAudio(textBuffer, audioBuffer, {
               mode: 'accurate',
               granularity,
               alignmentModelPath: initializedModelPath,
             })
-          : await alignTextToAudio(text, audioPath, {
+          : await alignTextToAudio(textBuffer, audioBuffer, {
               mode: 'proportional',
               granularity: proportionalGranularity,
             });
@@ -497,6 +520,16 @@ export default function GenerateTimestampScreen() {
       setError(message);
       setErrorSource('generate');
     } finally {
+      if (textBufferId) {
+        await releasePipelineTextBuffer(textBufferId).catch(() => {
+          // ignore cleanup errors
+        });
+      }
+      if (audioBufferId) {
+        await releasePipelineAudioBuffer(audioBufferId).catch(() => {
+          // ignore cleanup errors
+        });
+      }
       if (cleanupPath) {
         unlink(cleanupPath).catch(() => {
           // ignore cleanup errors
