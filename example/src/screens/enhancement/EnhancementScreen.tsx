@@ -19,6 +19,7 @@ import {
   resolveModelPath,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   DocumentDirectoryPath,
   DownloadDirectoryPath,
@@ -481,12 +482,35 @@ export default function EnhancementScreen() {
     setLastEnhancedAudio(null);
 
     try {
-      let inputPath: string;
+      let inputSource: FileSource;
+      let inputPathForDisplay: string;
       if (customAudioPath) {
-        inputPath = customAudioPath;
+        const trimmed = customAudioPath.trim();
+        if (trimmed.startsWith('content://')) {
+          inputSource = { kind: 'contentUri', uri: trimmed };
+          inputPathForDisplay = trimmed;
+        } else if (trimmed.startsWith('file://')) {
+          const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
+          if (filePath.startsWith('/proc/self/fd/')) {
+            throw new Error(
+              'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+            );
+          }
+          inputSource = { kind: 'fs', path: filePath };
+          inputPathForDisplay = filePath;
+        } else if (trimmed.startsWith('/proc/self/fd/')) {
+          throw new Error(
+            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+          );
+        } else {
+          inputSource = { kind: 'fs', path: trimmed };
+          inputPathForDisplay = trimmed;
+        }
       } else {
         const audioPathConfig = autoModelPath(selectedAudio!.id);
-        inputPath = await resolveModelPath(audioPathConfig);
+        const resolvedPath = await resolveModelPath(audioPathConfig);
+        inputSource = { kind: 'fs', path: resolvedPath };
+        inputPathForDisplay = resolvedPath;
       }
 
       const engine = engineRef.current;
@@ -497,10 +521,7 @@ export default function EnhancementScreen() {
       }
 
       // Create input buffer from file
-      const inputBuf = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: inputPath,
-      });
+      const inputBuf = await createOfflineAudioBufferFromFile(inputSource);
       const sr = await engine.getSampleRate();
       // Create empty output buffer at model sample rate
       const outputBuf = await createEmptyOfflineAudioBuffer(sr);
@@ -520,7 +541,7 @@ export default function EnhancementScreen() {
         // Release input buffer (output kept for save feature)
         await releasePipelineAudioBuffer(inputBuf.bufferId).catch(() => {});
         setOutputWavPath(outPath);
-        setLastInputPath(inputPath);
+        setLastInputPath(inputPathForDisplay);
         setLastEnhancedAudio({
           outputBufferId: outputBuf.bufferId as string,
           sampleRate: outSr,
@@ -602,11 +623,28 @@ export default function EnhancementScreen() {
         type: [DocumentPicker.types.audio],
       });
       const file = Array.isArray(res) ? res[0] : res;
-      const uri = file.uri || file.name;
+      const uri =
+        file.uri ??
+        (file as any).fileCopyUri ??
+        (file as any).localUri ??
+        (file as any).nativeUri;
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
       if (!uri) {
         setErrorSource('enhance');
         setError('Could not get file URI from picker result');
+        return;
+      }
+      const fsPathProbe = uri.startsWith('file://')
+        ? decodeURI(uri.replace(/^file:\/\//, ''))
+        : uri;
+      if (
+        uri.startsWith('/proc/self/fd/') ||
+        fsPathProbe.startsWith('/proc/self/fd/')
+      ) {
+        setErrorSource('enhance');
+        setError(
+          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
+        );
         return;
       }
       setCustomAudioPath(uri);

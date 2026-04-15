@@ -60,7 +60,7 @@ export default function RootNavigator() {
         name="DownloadShowcase"
         component={DownloadShowcaseScreen}
         options={{
-          title: 'Download showcase',
+          title: 'Downloadmanager',
         }}
       />
       <Stack.Screen

@@ -177,6 +177,37 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2e7d32',
   },
+  textBufferList: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(46, 125, 50, 0.22)',
+    gap: 8,
+  },
+  textBufferListTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2e7d32',
+  },
+  textBufferItem: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c8e6c9',
+    backgroundColor: '#f1f8f1',
+    padding: 10,
+  },
+  textBufferItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  textBufferItemLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1b5e20',
+    fontWeight: '500',
+  },
   errorContainer: {
     marginTop: 30,
     padding: 20,

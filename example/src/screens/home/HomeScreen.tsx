@@ -39,9 +39,9 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'download_showcase',
-    title: 'Download showcase',
+    title: 'Downloadmanager',
     description:
-      'Try the download manager: pause, resume, and clear partial installs',
+      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
     icon: 'cloud-download-outline',
     screen: 'DownloadShowcase',
     implemented: true,

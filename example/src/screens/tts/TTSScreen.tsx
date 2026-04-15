@@ -90,6 +90,8 @@ type GeneratedResult = {
   numSamples: number;
 };
 
+let gTtsOfflineAudioBuffers: GeneratedResult[] = [];
+
 type ReferenceAudioState = {
   buffer: OfflineAudioBufferRef;
   sampleRate: number;
@@ -121,6 +123,9 @@ export default function TTSScreen() {
   const [generatedAudio, setGeneratedAudio] = useState<GeneratedResult | null>(
     null
   );
+  const [offlineAudioBuffers, setOfflineAudioBuffers] = useState<
+    GeneratedResult[]
+  >(gTtsOfflineAudioBuffers);
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -131,7 +136,7 @@ export default function TTSScreen() {
   } | null>(null);
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [playingBufferId, setPlayingBufferId] = useState<string | null>(null);
 
   const [speakerId, setSpeakerId] = useState('0');
   const [speed, setSpeed] = useState('1.0');
@@ -349,7 +354,19 @@ export default function TTSScreen() {
       pcmPlayerRef.current = null;
       player.destroy().catch(() => {});
     }
-    setIsPlaying(false);
+    setPlayingBufferId(null);
+  }, []);
+
+  const appendOfflineAudioBuffer = useCallback((audio: GeneratedResult) => {
+    setGeneratedAudio(audio);
+    setOfflineAudioBuffers((prev) => {
+      const next = [
+        ...prev.filter((item) => item.bufferId !== audio.bufferId),
+        audio,
+      ];
+      gTtsOfflineAudioBuffers = next;
+      return next;
+    });
   }, []);
 
   const releaseReferenceAudio = useCallback(
@@ -915,7 +932,7 @@ export default function TTSScreen() {
           Object.keys(options).length > 0 ? options : undefined
         );
         const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
-        setGeneratedAudio({
+        appendOfflineAudioBuffer({
           kind: 'buffer',
           bufferId: audioBuf.bufferId,
           sampleRate: info.sampleRate,
@@ -1118,7 +1135,7 @@ export default function TTSScreen() {
           );
           const info = await getPipelineAudioBufferInfo(offlineBuf.bufferId);
           if (info.numSamples && info.numSamples > 0) {
-            setGeneratedAudio({
+            appendOfflineAudioBuffer({
               kind: 'buffer',
               bufferId: offlineBuf.bufferId,
               sampleRate: info.sampleRate,
@@ -1259,49 +1276,54 @@ export default function TTSScreen() {
     }
   };
 
-  const handlePlayAudio = async () => {
-    if (!generatedAudio) {
-      Alert.alert('Error', 'No audio to play. Generate speech first.');
-      return;
-    }
-
-    try {
-      // If already have an active player, toggle pause/resume
-      const cur = pcmPlayerRef.current;
-      if (cur) {
-        if (isPlaying) {
-          await cur.pause();
-          setIsPlaying(false);
-        } else {
-          await cur.resume();
-          setIsPlaying(true);
+  const handleToggleOfflineBufferPlayback = useCallback(
+    async (bufferId: string) => {
+      try {
+        const currentPlayer = pcmPlayerRef.current;
+        if (currentPlayer) {
+          await currentPlayer.destroy().catch(() => {});
+          pcmPlayerRef.current = null;
+          const wasSameBuffer = playingBufferId === bufferId;
+          setPlayingBufferId(null);
+          if (wasSameBuffer) {
+            return;
+          }
         }
-        return;
+
+        const player = await createPcmPlayer(bufferId, {
+          onEnded: () => {
+            pcmPlayerRef.current = null;
+            setPlayingBufferId(null);
+          },
+        });
+        pcmPlayerRef.current = player;
+        setPlayingBufferId(bufferId);
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : 'Unknown error';
+        Alert.alert('Error', `Failed to play buffer: ${errorMessage}`);
+      }
+    },
+    [playingBufferId]
+  );
+
+  const handleDeleteOfflineBuffer = useCallback(
+    async (bufferId: string) => {
+      if (playingBufferId === bufferId) {
+        stopTtsSavedAudioPlayback();
       }
 
-      // Create a new PCM player from the generated audio buffer
-      const player = await createPcmPlayer(generatedAudio.bufferId, {
-        onEnded: () => {
-          pcmPlayerRef.current = null;
-          setIsPlaying(false);
-        },
+      await releasePipelineAudioBuffer(bufferId).catch(() => {});
+      setOfflineAudioBuffers((prev) => {
+        const next = prev.filter((item) => item.bufferId !== bufferId);
+        gTtsOfflineAudioBuffers = next;
+        return next;
       });
-      pcmPlayerRef.current = player;
-      setIsPlaying(true);
-    } catch (err) {
-      console.error('Play audio error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      Alert.alert('Error', `Failed to play audio: ${errorMessage}`);
-    }
-  };
-
-  const handleStopAudio = () => {
-    try {
-      stopTtsSavedAudioPlayback();
-    } catch (err) {
-      console.error('Stop audio error:', err);
-    }
-  };
+      setGeneratedAudio((prev) => (prev?.bufferId === bufferId ? null : prev));
+      setSavedAudioPath((prev) => (prev ? null : prev));
+    },
+    [playingBufferId, stopTtsSavedAudioPlayback]
+  );
 
   const handleShareAudio = async () => {
     if (!savedAudioPath) {
@@ -1349,6 +1371,12 @@ export default function TTSScreen() {
       setSelectedModelType(null);
       setModelInfo(null);
       setGeneratedAudio(null);
+      const buffersToRelease = gTtsOfflineAudioBuffers;
+      gTtsOfflineAudioBuffers = [];
+      setOfflineAudioBuffers([]);
+      for (const item of buffersToRelease) {
+        await releasePipelineAudioBuffer(item.bufferId).catch(() => {});
+      }
       setSavedAudioPath(null);
       setSpeakerId('0');
       setSpeed('1.0');
@@ -1855,42 +1883,6 @@ export default function TTSScreen() {
                   )}
                 </TouchableOpacity>
 
-                {generatedAudio && (
-                  <>
-                    <TouchableOpacity
-                      style={[styles.audioButton, styles.playButton]}
-                      onPress={handlePlayAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name={isPlaying ? 'pause' : 'play'}
-                          size={16}
-                          color="#fff"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.audioButtonText}>
-                          {isPlaying ? 'Pause' : 'Play'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.audioButton, styles.stopButton]}
-                      onPress={handleStopAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name="stop"
-                          size={16}
-                          color="#fff"
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.audioButtonText}>Stop</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </>
-                )}
-
                 {savedAudioPath && (
                   <TouchableOpacity
                     style={[styles.audioButton, styles.shareButton]}
@@ -1916,6 +1908,87 @@ export default function TTSScreen() {
                   {getDisplayPath(savedAudioPath)}
                 </Text>
               )}
+            </View>
+          )}
+
+          {offlineAudioBuffers.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>OfflineAudioBuffer List</Text>
+              <Text style={styles.sectionDescription}>
+                Active generated buffers stay available when you leave and
+                re-open this screen. SDK note: you are responsible for buffer
+                lifecycle management and should not forget to call
+                releasePipelineAudioBuffer at the appropriate time.
+              </Text>
+              <View style={styles.bufferList}>
+                {offlineAudioBuffers.map((buffer, index) => {
+                  const isPlayingThis = playingBufferId === buffer.bufferId;
+                  return (
+                    <View key={buffer.bufferId} style={styles.bufferListItem}>
+                      <View style={styles.bufferListHeader}>
+                        <Text style={styles.bufferListTitle}>
+                          Buffer {index + 1}
+                        </Text>
+                        <Text style={styles.bufferListMeta}>
+                          {(buffer.numSamples / buffer.sampleRate).toFixed(2)}s
+                        </Text>
+                      </View>
+                      <Text style={styles.bufferListMeta}>
+                        {buffer.sampleRate} Hz |{' '}
+                        {buffer.numSamples.toLocaleString()} samples
+                      </Text>
+                      <Text style={styles.bufferIdText} selectable>
+                        {buffer.bufferId}
+                      </Text>
+
+                      <View style={styles.bufferListActions}>
+                        <TouchableOpacity
+                          style={[styles.bufferActionButton, styles.playButton]}
+                          onPress={() => {
+                            handleToggleOfflineBufferPlayback(
+                              buffer.bufferId
+                            ).catch(() => {});
+                          }}
+                        >
+                          <View style={styles.rowAlignCenter}>
+                            <Ionicons
+                              name={isPlayingThis ? 'stop' : 'play'}
+                              size={16}
+                              color="#fff"
+                              style={styles.iconInline}
+                            />
+                            <Text style={styles.audioButtonText}>
+                              {isPlayingThis ? 'Stop' : 'Play'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.bufferActionButton,
+                            styles.bufferDeleteButton,
+                          ]}
+                          onPress={() => {
+                            handleDeleteOfflineBuffer(buffer.bufferId).catch(
+                              () => {}
+                            );
+                          }}
+                        >
+                          <View style={styles.rowAlignCenter}>
+                            <Ionicons
+                              name="trash-outline"
+                              size={16}
+                              color="#b71c1c"
+                              style={styles.iconInline}
+                            />
+                            <Text style={styles.bufferDeleteText}>Delete</Text>
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
           )}
 
