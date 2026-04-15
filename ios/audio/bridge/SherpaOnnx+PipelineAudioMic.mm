@@ -5,6 +5,7 @@
  */
 
 #import "../../SherpaOnnx.h"
+#import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 

@@ -1069,8 +1069,8 @@ export default function PipelineShowcaseScreen() {
               PCM Player
             </Text>
             <Text style={styles.warningText}>
-              Headset empfohlen: Ohne Headset kann das Mikrofon den Lautsprecher
-              wieder aufnehmen.
+              Headset recommended: Without a headset, the microphone may pick up
+              speaker playback.
             </Text>
           </View>
 

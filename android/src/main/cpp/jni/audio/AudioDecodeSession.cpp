@@ -329,10 +329,6 @@ AudioDecodeResult decodeFileFFmpeg(
       throw std::runtime_error("DECODE_NOT_FOUND: Cannot duplicate input fd");
     }
 
-    if (lseek(ownedFd, 0, SEEK_SET) < 0) {
-      throw std::runtime_error("DECODE_INVALID_SOURCE: Input fd is not seekable");
-    }
-
     constexpr int kAvioBufferSize = 64 * 1024;
     auto* avioBuffer = static_cast<unsigned char*>(av_malloc(kAvioBufferSize));
     if (!avioBuffer) {

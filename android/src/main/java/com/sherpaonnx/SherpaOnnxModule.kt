@@ -776,35 +776,58 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private data class DecodableSource(
+    val path: String?,
+    val fd: Int,
+    val tempFile: File? = null,
+  )
+
+  private fun resolveDecodableSource(
+    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+  ): DecodableSource {
+    return when (handle) {
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
+        DecodableSource(path = handle.file.absolutePath, fd = -1)
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
+        DecodableSource(path = null, fd = handle.pfd.fd)
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
+        val tmpFile = File(
+          reactApplicationContext.cacheDir,
+          "decode_stream_${java.util.UUID.randomUUID()}"
+        )
+        try {
+          tmpFile.outputStream().use { out ->
+            handle.inputStream.copyTo(out, 65536)
+          }
+        } catch (e: Exception) {
+          try { tmpFile.delete() } catch (_: Exception) {}
+          throw FileIOException(
+            FileIOErrorCodes.READ_ERROR,
+            "Failed to materialize stream source for decode",
+            e
+          )
+        }
+        DecodableSource(path = tmpFile.absolutePath, fd = -1, tempFile = tmpFile)
+      }
+    }
+  }
+
   override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
 
     decodeExecutor.execute {
       var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-
-        val sourcePath: String?
-        val sourceFd: Int
-        when (val handle = readHandle) {
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            sourcePath = handle.file.absolutePath
-            sourceFd = -1
-          }
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            sourcePath = null
-            sourceFd = handle.pfd.fd
-          }
-          is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
-            throw FileIOException(
-              FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
-              "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
-            )
-          }
-          null -> throw IllegalStateException("Resolved read handle is null")
-        }
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -861,6 +884,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } finally {
         decodeCancelFlags.remove(operationId)
         try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
       }
     }
   }
@@ -910,26 +934,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     // Resolve file source synchronously, then run decode on background thread
     val readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
-    val sourcePath: String?
-    val sourceFd: Int
+    var sourcePath: String? = null
+    var sourceFd: Int = -1
+    var tempSourceFile: File? = null
     try {
       readHandle = fileIOHelper.resolveSource(source)
-      when (val handle = readHandle) {
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-          sourcePath = handle.file.absolutePath
-          sourceFd = -1
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-          sourcePath = null
-          sourceFd = handle.pfd.fd
-        }
-        is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
-          throw FileIOException(
-            FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
-            "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
-          )
-        }
-      }
+      val decodableSource = resolveDecodableSource(readHandle)
+      sourcePath = decodableSource.path
+      sourceFd = decodableSource.fd
+      tempSourceFile = decodableSource.tempFile
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       decodeCancelFlags.remove(operationId)
       fileIngestStatuses.remove(ingestId)
@@ -1041,6 +1054,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelChecker.interrupt()
         decodeCancelFlags.remove(operationId)
         try { readHandle.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
       }
     }
   }

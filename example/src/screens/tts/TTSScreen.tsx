@@ -96,8 +96,6 @@ type GeneratedResult = {
   numSamples: number;
 };
 
-let gTtsOfflineAudioBuffers: GeneratedResult[] = [];
-
 type ReferenceAudioState = {
   buffer: OfflineAudioBufferRef;
   sampleRate: number;
@@ -131,7 +129,7 @@ export default function TTSScreen() {
   );
   const [offlineAudioBuffers, setOfflineAudioBuffers] = useState<
     GeneratedResult[]
-  >(gTtsOfflineAudioBuffers);
+  >([]);
   const [generating, setGenerating] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
@@ -141,6 +139,9 @@ export default function TTSScreen() {
     numSpeakers: number;
   } | null>(null);
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
+  const [savedAudioBufferId, setSavedAudioBufferId] = useState<string | null>(
+    null
+  );
   const [saving, setSaving] = useState(false);
   const [playingBufferId, setPlayingBufferId] = useState<string | null>(null);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
@@ -185,6 +186,7 @@ export default function TTSScreen() {
   const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamInitialScheduleRef = useRef(false);
   const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const offlineAudioBuffersRef = useRef<GeneratedResult[]>([]);
 
   const showNoiseScale = useMemo(
     () => selectedModelType === 'vits' || selectedModelType === 'matcha',
@@ -388,7 +390,6 @@ export default function TTSScreen() {
         ...prev.filter((item) => item.bufferId !== audio.bufferId),
         audio,
       ];
-      gTtsOfflineAudioBuffers = next;
       return next;
     });
   }, []);
@@ -413,6 +414,11 @@ export default function TTSScreen() {
     setReferenceFileName(null);
     await releaseReferenceAudio(previous);
   }, [releaseReferenceAudio]);
+
+  // Keep latest offline buffers accessible to the unmount cleanup callback.
+  useEffect(() => {
+    offlineAudioBuffersRef.current = offlineAudioBuffers;
+  }, [offlineAudioBuffers]);
 
   // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
@@ -450,6 +456,11 @@ export default function TTSScreen() {
         if (refAudio.ownedTempPath) {
           unlink(refAudio.ownedTempPath).catch(() => {});
         }
+      }
+      const buffersToRelease = offlineAudioBuffersRef.current;
+      offlineAudioBuffersRef.current = [];
+      for (const item of buffersToRelease) {
+        releasePipelineAudioBuffer(item.bufferId).catch(() => {});
       }
     };
   }, []);
@@ -698,6 +709,7 @@ export default function TTSScreen() {
     setModelInfo(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
+    setSavedAudioBufferId(null);
     setSpeakerId('0');
     setSpeed('1.0');
     setSilenceScale('');
@@ -874,6 +886,7 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
+    setSavedAudioBufferId(null);
     if (streaming) {
       resetStreamingState();
     }
@@ -1049,6 +1062,7 @@ export default function TTSScreen() {
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
+    setSavedAudioBufferId(null);
     resetStreamingState({ resetScheduleRef: false });
     // Do NOT set streaming=true here: the useEffect debounce could run before refs are set.
     // Set streaming only after the pipeline is started.
@@ -1236,6 +1250,7 @@ export default function TTSScreen() {
         const tmpPath = `${DocumentDirectoryPath}/${filename}`;
         await saveResultToWav(audio, tmpPath);
         setSavedAudioPath(tmpPath);
+        setSavedAudioBufferId(audio.bufferId);
         Alert.alert('Success', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
         return;
       }
@@ -1249,6 +1264,7 @@ export default function TTSScreen() {
       const filePath = `${targetDirectory}/${filename}`;
       await saveResultToWav(audio, filePath);
       setSavedAudioPath(filePath);
+      setSavedAudioBufferId(audio.bufferId);
 
       Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
@@ -1288,6 +1304,7 @@ export default function TTSScreen() {
       const filePath = `${directoryPath}/${filename}`;
       await saveResultToWav(generatedAudio, filePath);
       setSavedAudioPath(filePath);
+      setSavedAudioBufferId(generatedAudio.bufferId);
 
       Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
     } catch (err) {
@@ -1340,14 +1357,15 @@ export default function TTSScreen() {
 
       await releasePipelineAudioBuffer(bufferId).catch(() => {});
       setOfflineAudioBuffers((prev) => {
-        const next = prev.filter((item) => item.bufferId !== bufferId);
-        gTtsOfflineAudioBuffers = next;
-        return next;
+        return prev.filter((item) => item.bufferId !== bufferId);
       });
       setGeneratedAudio((prev) => (prev?.bufferId === bufferId ? null : prev));
-      setSavedAudioPath((prev) => (prev ? null : prev));
+      if (savedAudioBufferId === bufferId) {
+        setSavedAudioPath(null);
+        setSavedAudioBufferId(null);
+      }
     },
-    [playingBufferId, stopTtsSavedAudioPlayback]
+    [playingBufferId, savedAudioBufferId, stopTtsSavedAudioPlayback]
   );
 
   const handleShareAudio = async () => {
@@ -1396,13 +1414,14 @@ export default function TTSScreen() {
       setSelectedModelType(null);
       setModelInfo(null);
       setGeneratedAudio(null);
-      const buffersToRelease = gTtsOfflineAudioBuffers;
-      gTtsOfflineAudioBuffers = [];
+      const buffersToRelease = offlineAudioBuffersRef.current;
+      offlineAudioBuffersRef.current = [];
       setOfflineAudioBuffers([]);
       for (const item of buffersToRelease) {
         await releasePipelineAudioBuffer(item.bufferId).catch(() => {});
       }
       setSavedAudioPath(null);
+      setSavedAudioBufferId(null);
       setSpeakerId('0');
       setSpeed('1.0');
       setSilenceScale('');
