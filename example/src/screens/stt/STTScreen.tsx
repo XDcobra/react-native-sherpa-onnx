@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Text,
   View,
@@ -76,12 +76,23 @@ import {
 import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
-  startWebAudioFilePlayback,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
+  startPcmFilePlayback,
+  stopPcmFilePlayback,
+  type ActivePcmFilePlayback,
+} from '../../utils/audioFilePcmPlayback';
 
 const PAD_PACK_NAME = 'sherpa_models';
+
+type SttOfflineInputBufferState = {
+  bufferId: string;
+  sourceType: 'example' | 'own';
+  sourceLabel: string;
+  selectedAudioId: string | null;
+  customAudioPath: string | null;
+  customAudioName: string | null;
+};
+
+let gSttOfflineInputBuffer: SttOfflineInputBufferState | null = null;
 
 export default function STTScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -129,9 +140,12 @@ export default function STTScreen() {
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [preparingAudioBuffer, setPreparingAudioBuffer] = useState(false);
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
 
   const sttEngineRef = useRef<SttEngine | null>(null);
-  const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
+  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
   const streamingEngineRef = useRef<LiveSttEngine | null>(null);
   const livePipelineRef = useRef<{
     liveAudioBufferId: string;
@@ -153,6 +167,10 @@ export default function STTScreen() {
   const LIVE_SAMPLE_RATE = 16000;
 
   const isLiveSupported = isStreamingModel;
+  const availableAudioFiles = useMemo(
+    () => (currentModelFolder ? getAudioFilesForModel(currentModelFolder) : []),
+    [currentModelFolder]
+  );
 
   const buildTranscriptionResult = (
     text: string,
@@ -277,6 +295,40 @@ export default function STTScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (gSttOfflineInputBuffer == null) {
+      return;
+    }
+    setOfflineInputBuffer(gSttOfflineInputBuffer);
+    setAudioSourceType(gSttOfflineInputBuffer.sourceType);
+    setCustomAudioPath(gSttOfflineInputBuffer.customAudioPath);
+    setCustomAudioName(gSttOfflineInputBuffer.customAudioName);
+  }, []);
+
+  useEffect(() => {
+    if (
+      offlineInputBuffer == null ||
+      offlineInputBuffer.selectedAudioId == null
+    ) {
+      return;
+    }
+    const matched = availableAudioFiles.find(
+      (audio) => audio.id === offlineInputBuffer.selectedAudioId
+    );
+    if (matched) {
+      setSelectedAudio(matched);
+    }
+  }, [availableAudioFiles, offlineInputBuffer]);
+
+  useEffect(() => {
+    return () => {
+      if (pcmPlaybackRef.current) {
+        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
+        pcmPlaybackRef.current = null;
+      }
+    };
+  }, []);
+
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
@@ -357,6 +409,155 @@ export default function STTScreen() {
       return getFileModelPath(modelFolder, ModelCategory.Stt);
     }
     return getAssetModelPath(modelFolder);
+  };
+
+  const resolveInputSource = async (
+    override?: {
+      selectedAudio?: AudioFileInfo | null;
+      customAudioPath?: string | null;
+      customAudioName?: string | null;
+    } | null
+  ): Promise<{
+    source: FileSource;
+    sourceType: 'example' | 'own';
+    sourceLabel: string;
+    selectedAudioId: string | null;
+    customAudioPath: string | null;
+    customAudioName: string | null;
+  }> => {
+    const effectiveCustomAudioPath =
+      override?.customAudioPath ?? customAudioPath;
+    const effectiveCustomAudioName =
+      override?.customAudioName ?? customAudioName;
+
+    if (effectiveCustomAudioPath) {
+      const trimmed = effectiveCustomAudioPath.trim();
+      if (trimmed.startsWith('content://')) {
+        return {
+          source: { kind: 'contentUri', uri: trimmed },
+          sourceType: 'own',
+          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+          selectedAudioId: null,
+          customAudioPath: effectiveCustomAudioPath,
+          customAudioName: effectiveCustomAudioName,
+        };
+      }
+      if (trimmed.startsWith('file://')) {
+        const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
+        if (filePath.startsWith('/proc/self/fd/')) {
+          throw new Error(
+            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+          );
+        }
+        return {
+          source: { kind: 'fs', path: filePath },
+          sourceType: 'own',
+          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+          selectedAudioId: null,
+          customAudioPath: effectiveCustomAudioPath,
+          customAudioName: effectiveCustomAudioName,
+        };
+      }
+      if (trimmed.startsWith('/proc/self/fd/')) {
+        throw new Error(
+          'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
+        );
+      }
+      return {
+        source: { kind: 'fs', path: trimmed },
+        sourceType: 'own',
+        sourceLabel: effectiveCustomAudioName ?? 'Local audio',
+        selectedAudioId: null,
+        customAudioPath: effectiveCustomAudioPath,
+        customAudioName: effectiveCustomAudioName,
+      };
+    }
+
+    const effectiveSelectedAudio = override?.selectedAudio ?? selectedAudio;
+    if (!effectiveSelectedAudio) {
+      throw new Error('Please select an audio file (example or local WAV)');
+    }
+
+    const audioPathConfig = autoModelPath(effectiveSelectedAudio.id);
+    const resolvedAudioPath = await resolveModelPath(audioPathConfig);
+    return {
+      source: { kind: 'fs', path: resolvedAudioPath },
+      sourceType: 'example',
+      sourceLabel: effectiveSelectedAudio.name,
+      selectedAudioId: effectiveSelectedAudio.id,
+      customAudioPath: null,
+      customAudioName: null,
+    };
+  };
+
+  const clearOfflineInputBuffer = async (resetSelection: boolean) => {
+    if (pcmPlaybackRef.current) {
+      const activePlayback = pcmPlaybackRef.current;
+      pcmPlaybackRef.current = null;
+      await stopPcmFilePlayback(activePlayback);
+    }
+
+    const existing = gSttOfflineInputBuffer;
+    gSttOfflineInputBuffer = null;
+    setOfflineInputBuffer(null);
+
+    if (existing?.bufferId) {
+      await releasePipelineAudioBuffer(existing.bufferId).catch(() => {});
+    }
+
+    if (resetSelection) {
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
+      setTranscriptionResult(null);
+    }
+  };
+
+  const prepareOfflineInputBuffer = async (
+    override?: {
+      selectedAudio?: AudioFileInfo | null;
+      customAudioPath?: string | null;
+      customAudioName?: string | null;
+    } | null
+  ) => {
+    setPreparingAudioBuffer(true);
+    setError(null);
+    setErrorSource(null);
+    setTranscriptionResult(null);
+
+    try {
+      const resolved = await resolveInputSource(override);
+
+      if (gSttOfflineInputBuffer?.bufferId) {
+        await releasePipelineAudioBuffer(gSttOfflineInputBuffer.bufferId).catch(
+          () => {}
+        );
+      }
+
+      const audioRef = await createOfflineAudioBufferFromFile(resolved.source, {
+        targetSampleRateHz: LIVE_SAMPLE_RATE,
+        forceMono: true,
+      });
+
+      const nextBufferState: SttOfflineInputBufferState = {
+        bufferId: audioRef.bufferId,
+        sourceType: resolved.sourceType,
+        sourceLabel: resolved.sourceLabel,
+        selectedAudioId: resolved.selectedAudioId,
+        customAudioPath: resolved.customAudioPath,
+        customAudioName: resolved.customAudioName,
+      };
+      gSttOfflineInputBuffer = nextBufferState;
+      setOfflineInputBuffer(nextBufferState);
+      setAudioSourceType(resolved.sourceType);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorSource('transcribe');
+      setError(msg);
+    } finally {
+      setPreparingAudioBuffer(false);
+    }
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -476,10 +677,11 @@ export default function STTScreen() {
       return;
     }
 
-    // If a custom audio file was chosen, prefer it
-    if (!selectedAudio && !customAudioPath) {
+    if (!offlineInputBuffer) {
       setErrorSource('transcribe');
-      setError('Please select an audio file (example or local WAV)');
+      setError(
+        'Please select an audio source and create an OfflineAudioBuffer first'
+      );
       return;
     }
 
@@ -489,25 +691,6 @@ export default function STTScreen() {
     setTranscriptionResult(null);
 
     try {
-      let sourceToTranscribe: FileSource;
-
-      if (customAudioPath) {
-        const trimmed = customAudioPath.trim();
-        if (trimmed.startsWith('content://')) {
-          sourceToTranscribe = { kind: 'contentUri', uri: trimmed };
-        } else if (trimmed.startsWith('file://')) {
-          const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
-          sourceToTranscribe = { kind: 'fs', path: filePath };
-        } else {
-          sourceToTranscribe = { kind: 'fs', path: trimmed };
-        }
-      } else {
-        // Resolve audio file path (using auto detection - tries asset first, then file system)
-        const audioPathConfig = autoModelPath(selectedAudio!.id);
-        const resolvedAudioPath = await resolveModelPath(audioPathConfig);
-        sourceToTranscribe = { kind: 'fs', path: resolvedAudioPath };
-      }
-
       const engine = sttEngineRef.current;
       if (!engine) {
         setErrorSource('transcribe');
@@ -515,27 +698,11 @@ export default function STTScreen() {
         return;
       }
 
-      let audioBufferId: string | null = null;
       const textRef = await createEmptyOfflineTextBuffer();
       const textBufferId = textRef.bufferId;
       try {
-        const audioRef = await createOfflineAudioBufferFromFile(
-          sourceToTranscribe,
-          {
-            targetSampleRateHz: LIVE_SAMPLE_RATE,
-            forceMono: true,
-          }
-        );
-        audioBufferId = audioRef.bufferId;
+        await engine.transcribe(offlineInputBuffer.bufferId as any, textRef);
 
-        await engine.transcribe(audioRef, textRef);
-      } finally {
-        if (audioBufferId != null) {
-          await releasePipelineAudioBuffer(audioBufferId).catch(() => {});
-        }
-      }
-
-      try {
         const rawInfo = await getPipelineTextBufferInfo(textBufferId);
         const info = rawInfo as OfflineTextBufferInfo;
         const [text, tokens, timestamps, durations, lang, emotion, event] =
@@ -642,10 +809,7 @@ export default function STTScreen() {
     setDetectedModels([]);
     setSelectedModelType(null);
     setInitResult(null);
-    setAudioSourceType(null);
-    setSelectedAudio(null);
-    setCustomAudioPath(null);
-    setCustomAudioName(null);
+    await clearOfflineInputBuffer(true);
     setTranscriptionResult(null);
     setError(null);
     setErrorSource(null);
@@ -663,7 +827,11 @@ export default function STTScreen() {
 
       // res may be an array or single object depending on version/config
       const file = Array.isArray(res) ? res[0] : res;
-      const uri = file.uri || file.name;
+      const uri =
+        file.uri ??
+        (file as any).fileCopyUri ??
+        (file as any).localUri ??
+        (file as any).nativeUri;
       const name = file.name || uri?.split('/')?.pop() || 'local.wav';
 
       if (!uri) {
@@ -671,11 +839,29 @@ export default function STTScreen() {
         setError('Could not get file URI from picker result');
         return;
       }
+      const fsPathProbe = uri.startsWith('file://')
+        ? decodeURI(uri.replace(/^file:\/\//, ''))
+        : uri;
+      if (
+        uri.startsWith('/proc/self/fd/') ||
+        fsPathProbe.startsWith('/proc/self/fd/')
+      ) {
+        setErrorSource('transcribe');
+        setError(
+          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
+        );
+        return;
+      }
 
       setCustomAudioPath(uri);
       setCustomAudioName(name);
       // clear example selection when choosing a local file
       setSelectedAudio(null);
+      setAudioSourceType('own');
+      await prepareOfflineInputBuffer({
+        customAudioPath: uri,
+        customAudioName: name,
+      });
     } catch (err: any) {
       const isCancel =
         (DocumentPicker &&
@@ -698,16 +884,19 @@ export default function STTScreen() {
   const handlePlayAudio = async () => {
     if (!customAudioPath) return;
     try {
-      if (webAudioPlaybackRef.current) {
-        stopWebAudioPlayback(webAudioPlaybackRef.current);
-        webAudioPlaybackRef.current = null;
+      if (pcmPlaybackRef.current) {
+        const activePlayback = pcmPlaybackRef.current;
+        pcmPlaybackRef.current = null;
+        await stopPcmFilePlayback(activePlayback);
       }
-      webAudioPlaybackRef.current = await startWebAudioFilePlayback(
-        customAudioPath,
-        () => {
-          webAudioPlaybackRef.current = null;
+
+      let nextPlayback: ActivePcmFilePlayback | null = null;
+      nextPlayback = await startPcmFilePlayback(customAudioPath, () => {
+        if (pcmPlaybackRef.current === nextPlayback) {
+          pcmPlaybackRef.current = null;
         }
-      );
+      });
+      pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -789,9 +978,9 @@ export default function STTScreen() {
       };
       stopLivePreviewPolling();
       livePreviewTimerRef.current = setInterval(() => {
-        void syncLivePreview(liveTextBuffer.bufferId);
+        syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
       }, 150);
-      void syncLivePreview(liveTextBuffer.bufferId);
+      syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
 
       livePipelineRef.current = {
         liveAudioBufferId: liveAudioBuffer.bufferId,
@@ -931,11 +1120,6 @@ export default function STTScreen() {
     }
   };
 
-  // Get available audio files for current model
-  const availableAudioFiles = currentModelFolder
-    ? getAudioFilesForModel(currentModelFolder)
-    : [];
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.body}>
@@ -984,8 +1168,9 @@ export default function STTScreen() {
             ) : availableModels.length === 0 ? (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  No models found in assets/models/ folder. Please add STT
-                  models first. See STT_MODEL_SETUP.md for details.
+                  No models found. Please add STT models as bundled assets,
+                  downloaded models, or PAD models. See STT_MODEL_SETUP.md for
+                  details.
                 </Text>
               </View>
             ) : (
@@ -1150,7 +1335,12 @@ export default function STTScreen() {
                 : '2. Transcribe Audio'}
             </Text>
             <Text style={styles.hint}>
-              Select an audio source and transcribe it using the selected model.
+              Select an audio source, create an OfflineAudioBuffer once, and
+              transcribe it using the selected model.
+            </Text>
+            <Text style={styles.hint}>
+              SDK note: remember to release pipeline buffers when they are no
+              longer needed to avoid memory leaks.
             </Text>
 
             {!selectedModelType && (
@@ -1163,13 +1353,17 @@ export default function STTScreen() {
               </View>
             )}
 
-            {selectedModelType && !audioSourceType && (
+            {selectedModelType && !offlineInputBuffer && !audioSourceType && (
               <>
                 <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
                 <View style={styles.sourceChoiceRow}>
                   <TouchableOpacity
                     style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => setAudioSourceType('example')}
+                    onPress={() => {
+                      setAudioSourceType('example');
+                      setCustomAudioPath(null);
+                      setCustomAudioName(null);
+                    }}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
@@ -1226,8 +1420,53 @@ export default function STTScreen() {
               </>
             )}
 
+            {selectedModelType && offlineInputBuffer && (
+              <View style={styles.selectedFileContainer}>
+                <View style={styles.bufferHeaderRow}>
+                  <View style={styles.bufferHeaderTextWrap}>
+                    <Text style={styles.selectedFileLabel}>
+                      OfflineAudioBuffer ready:
+                    </Text>
+                    <Text style={styles.selectedFileName}>
+                      {offlineInputBuffer.sourceLabel}
+                    </Text>
+                    <Text style={styles.bufferIdText} selectable>
+                      {offlineInputBuffer.bufferId}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.bufferDeleteButton}
+                    onPress={() => {
+                      clearOfflineInputBuffer(true).catch(() => {});
+                    }}
+                    disabled={loading || transcribing || preparingAudioBuffer}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#b71c1c" />
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.mt12,
+                    (transcribing || loading || preparingAudioBuffer) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleTranscribe}
+                  disabled={transcribing || loading || preparingAudioBuffer}
+                >
+                  {transcribing ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Transcribe Audio</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
             {selectedModelType &&
               audioSourceType === 'example' &&
+              !offlineInputBuffer &&
               availableAudioFiles.length > 0 && (
                 <>
                   <Text style={styles.subsectionTitle}>Select Audio File:</Text>
@@ -1240,7 +1479,14 @@ export default function STTScreen() {
                           selectedAudio?.id === audioFile.id &&
                             styles.audioFileButtonActive,
                         ]}
-                        onPress={() => setSelectedAudio(audioFile)}
+                        onPress={async () => {
+                          setSelectedAudio(audioFile);
+                          setCustomAudioPath(null);
+                          setCustomAudioName(null);
+                          await prepareOfflineInputBuffer({
+                            selectedAudio: audioFile,
+                          });
+                        }}
                       >
                         <Text
                           style={[
@@ -1258,29 +1504,10 @@ export default function STTScreen() {
                     ))}
                   </View>
 
-                  {selectedAudio && (
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        (transcribing || loading) && styles.buttonDisabled,
-                      ]}
-                      onPress={handleTranscribe}
-                      disabled={transcribing || loading}
-                    >
-                      {transcribing ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.buttonText}>Transcribe Audio</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
                     onPress={() => {
-                      setAudioSourceType(null);
-                      setSelectedAudio(null);
-                      setTranscriptionResult(null);
+                      clearOfflineInputBuffer(true).catch(() => {});
                     }}
                   >
                     <Text style={styles.secondaryButtonText}>
@@ -1290,86 +1517,65 @@ export default function STTScreen() {
                 </>
               )}
 
-            {selectedModelType && audioSourceType === 'own' && (
-              <>
-                <Text style={styles.subsectionTitle}>
-                  Select Local WAV File:
-                </Text>
-                <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
-                  onPress={handlePickLocalFile}
-                  disabled={loading}
-                >
-                  <View style={styles.rowCenter}>
-                    <Ionicons
-                      name="folder-open-outline"
-                      size={16}
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.buttonText}>Choose Local WAV</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {customAudioName && (
-                  <View style={styles.selectedFileContainer}>
-                    <Text style={styles.selectedFileLabel}>Selected file:</Text>
-                    <Text style={styles.selectedFileName}>
-                      {customAudioName}
-                    </Text>
-
-                    <TouchableOpacity
-                      style={[styles.playButton]}
-                      onPress={handlePlayAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name="play"
-                          size={16}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.playButtonText}>Play Audio</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {customAudioPath && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (transcribing || loading) && styles.buttonDisabled,
-                      styles.mt12,
-                    ]}
-                    onPress={handleTranscribe}
-                    disabled={transcribing || loading}
-                  >
-                    {transcribing ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>Transcribe Audio</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.secondaryButton, styles.mt15]}
-                  onPress={() => {
-                    setAudioSourceType(null);
-                    setCustomAudioPath(null);
-                    setCustomAudioName(null);
-                    setTranscriptionResult(null);
-                    if (webAudioPlaybackRef.current) {
-                      stopWebAudioPlayback(webAudioPlaybackRef.current);
-                      webAudioPlaybackRef.current = null;
-                    }
-                  }}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    ← Change Audio Source
+            {selectedModelType &&
+              audioSourceType === 'own' &&
+              !offlineInputBuffer && (
+                <>
+                  <Text style={styles.subsectionTitle}>
+                    Select Local WAV File:
                   </Text>
-                </TouchableOpacity>
-              </>
-            )}
+                  <TouchableOpacity
+                    style={[styles.button, loading && styles.buttonDisabled]}
+                    onPress={handlePickLocalFile}
+                    disabled={loading}
+                  >
+                    <View style={styles.rowCenter}>
+                      <Ionicons
+                        name="folder-open-outline"
+                        size={16}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.buttonText}>Choose Local WAV</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {customAudioName && (
+                    <View style={styles.selectedFileContainer}>
+                      <Text style={styles.selectedFileLabel}>
+                        Selected file:
+                      </Text>
+                      <Text style={styles.selectedFileName}>
+                        {customAudioName}
+                      </Text>
+
+                      <TouchableOpacity
+                        style={[styles.playButton]}
+                        onPress={handlePlayAudio}
+                      >
+                        <View style={styles.rowAlignCenter}>
+                          <Ionicons
+                            name="play"
+                            size={16}
+                            style={styles.iconInline}
+                          />
+                          <Text style={styles.playButtonText}>Play Audio</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.mt15]}
+                    onPress={() => {
+                      clearOfflineInputBuffer(true).catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      ← Change Audio Source
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
 
             {selectedModelType && audioSourceType === 'live' && (
               <>

@@ -97,7 +97,7 @@ android {
     }
   }
 
-  // When FFmpeg is disabled, exclude FFmpeg .so from our output to avoid merge conflicts with other libs (e.g. react-native-audio-api).
+  // When FFmpeg is disabled, exclude FFmpeg .so from our output to avoid merge conflicts with other libs.
   if (sherpaOnnxDisableFfmpeg) {
     packaging {
       jniLibs {

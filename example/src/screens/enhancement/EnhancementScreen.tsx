@@ -51,10 +51,10 @@ import {
 import { AUDIO_FILES, type AudioFileInfo } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  startWebAudioFilePlayback,
-  stopWebAudioPlayback,
-  type ActiveWebAudioPlayback,
-} from '../../utils/audioFileWebPlayback';
+  startPcmFilePlayback,
+  stopPcmFilePlayback,
+  type ActivePcmFilePlayback,
+} from '../../utils/audioFilePcmPlayback';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -128,7 +128,7 @@ export default function EnhancementScreen() {
   const [saving, setSaving] = useState(false);
 
   const engineRef = useRef<EnhancementEngine | null>(null);
-  const webAudioPlaybackRef = useRef<ActiveWebAudioPlayback | null>(null);
+  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
 
   const getDisplayPath = (path: string) => {
     try {
@@ -136,6 +136,13 @@ export default function EnhancementScreen() {
     } catch {
       return path;
     }
+  };
+
+  const stopActivePlayback = async () => {
+    if (!pcmPlaybackRef.current) return;
+    const activePlayback = pcmPlaybackRef.current;
+    pcmPlaybackRef.current = null;
+    await stopPcmFilePlayback(activePlayback);
   };
 
   const pickSaveDirectory = async (): Promise<{
@@ -227,6 +234,15 @@ export default function EnhancementScreen() {
       });
     });
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pcmPlaybackRef.current) {
+        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
+        pcmPlaybackRef.current = null;
+      }
+    };
   }, []);
 
   const loadAvailableModels = async () => {
@@ -571,10 +587,7 @@ export default function EnhancementScreen() {
     setLastEnhancedAudio(null);
     setError(null);
     setErrorSource(null);
-    if (webAudioPlaybackRef.current) {
-      stopWebAudioPlayback(webAudioPlaybackRef.current);
-      webAudioPlaybackRef.current = null;
-    }
+    await stopActivePlayback();
   };
 
   const handlePickLocalFile = async () => {
@@ -617,16 +630,14 @@ export default function EnhancementScreen() {
   const playPath = async (path: string | null) => {
     if (!path) return;
     try {
-      if (webAudioPlaybackRef.current) {
-        stopWebAudioPlayback(webAudioPlaybackRef.current);
-        webAudioPlaybackRef.current = null;
-      }
-      webAudioPlaybackRef.current = await startWebAudioFilePlayback(
-        path,
-        () => {
-          webAudioPlaybackRef.current = null;
+      await stopActivePlayback();
+      let nextPlayback: ActivePcmFilePlayback | null = null;
+      nextPlayback = await startPcmFilePlayback(path, () => {
+        if (pcmPlaybackRef.current === nextPlayback) {
+          pcmPlaybackRef.current = null;
         }
-      );
+      });
+      pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);

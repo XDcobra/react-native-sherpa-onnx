@@ -502,6 +502,30 @@ export const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
+  bufferHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  bufferHeaderTextWrap: {
+    flex: 1,
+  },
+  bufferDeleteButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#f5c6cb',
+    backgroundColor: '#fff5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bufferIdText: {
+    fontSize: 11,
+    color: '#8E8E93',
+    marginTop: 4,
+  },
   playButton: {
     backgroundColor: '#4CAF50',
     paddingVertical: 12,
