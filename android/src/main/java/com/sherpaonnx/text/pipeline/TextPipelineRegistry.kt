@@ -62,7 +62,11 @@ object TextPipelineRegistry {
       ?: throw IllegalArgumentException("Live text buffer not found: $liveBufferId")
 
     val bufferId = "txt_off_${UUID.randomUUID()}"
-    val text = live.snapshotText()
+    val text = when (mode) {
+      "windowSnapshot" -> live.snapshotText()
+      "fullIfSpooled" -> live.snapshotCommittedTextIfComplete() ?: live.snapshotText()
+      else -> throw IllegalArgumentException("Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'.")
+    }
 
     val entry = OfflineTextEntry(
       bufferId = bufferId,

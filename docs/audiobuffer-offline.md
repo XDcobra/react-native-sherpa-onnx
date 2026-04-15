@@ -175,7 +175,7 @@ await saveAudioAsWav16k(offline, { kind: 'fs', path: '/tmp/offline_16k.wav' });
 await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac');
 ```
 
-### Conversion: Offline buffer <--> Online buffer
+### Conversion: Offline buffer <--> Live buffer
 
 #### `createOfflineAudioBufferFromLive(liveBuffer, mode?)`
 

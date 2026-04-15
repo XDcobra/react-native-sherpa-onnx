@@ -140,8 +140,16 @@ internal class TtsPipelineWorker(
     val tts = ttsInstance.tts ?: return
 
     if (voiceClone != null) {
-      @Suppress("UNCHECKED_CAST")
-      val extra = (meta?.get("extra") as? Map<String, String>) ?: emptyMap()
+      val extra = mutableMapOf<String, String>()
+      val rawExtra = meta?.get("extra") as? Map<*, *>
+      if (rawExtra != null) {
+        for ((key, value) in rawExtra) {
+          val stringKey = key as? String ?: continue
+          if (value != null) {
+            extra[stringKey] = value.toString()
+          }
+        }
+      }
       val config = GenerationConfig(
         sid = effectiveSid,
         speed = effectiveSpeed,

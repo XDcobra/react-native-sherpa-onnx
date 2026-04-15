@@ -59,11 +59,12 @@ internal fun parseWavHeader(filePath: String): FileBackedMetadata? {
       val chunkId = String(idBuf)
       val chunkSize = ByteBuffer.wrap(sizeBuf).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
       val chunkDataStart = raf.filePointer
+      val paddedChunkSize = chunkSize + (chunkSize and 1L)
 
       when (chunkId) {
         "fmt " -> {
           if (chunkSize < 16) {
-            raf.seek(chunkDataStart + chunkSize)
+            raf.seek(chunkDataStart + paddedChunkSize)
             continue
           }
           val fmt = ByteArray(16)
@@ -75,7 +76,7 @@ internal fun parseWavHeader(filePath: String): FileBackedMetadata? {
           bb.int // byteRate
           bb.short // blockAlign
           bitsPerSample = bb.short.toInt() and 0xFFFF
-          raf.seek(chunkDataStart + chunkSize)
+          raf.seek(chunkDataStart + paddedChunkSize)
         }
         "data" -> {
           dataOffset = raf.filePointer
@@ -83,7 +84,7 @@ internal fun parseWavHeader(filePath: String): FileBackedMetadata? {
           break
         }
         else -> {
-          raf.seek(chunkDataStart + chunkSize)
+          raf.seek(chunkDataStart + paddedChunkSize)
         }
       }
     }

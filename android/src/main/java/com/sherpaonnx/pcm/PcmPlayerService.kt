@@ -152,7 +152,10 @@ internal class PcmPlayerService {
       val offline = session.offlineEntry
       if (offline != null && sampleIndex > offline.numSamples) {
         // Clamp to end rather than reject for offline
-        session.seekToSample(offline.numSamples.toLong())
+        if (!session.seekToSample(offline.numSamples.toLong())) {
+          promise.reject("PCM_PLAYER_ERROR", "Seek failed for player: $playerId")
+          return
+        }
         promise.resolve(null)
         return
       }

@@ -234,4 +234,22 @@ class LiveTextEntry(
    * Snapshot current text for creating offline from live.
    */
   fun snapshotText(): String = currentText
+
+  /**
+   * Snapshot concatenated committed segment text when the buffer is finalized and
+   * no segment eviction occurred (best-effort full transcript).
+   * Returns null when a complete transcript is not available.
+   */
+  fun snapshotCommittedTextIfComplete(): String? {
+    synchronized(segmentLock) {
+      if (state != State.FINISHED) return null
+      if (evictedCount > 0) return null
+      if (segments.isEmpty()) return currentText
+      return buildString {
+        for (segment in segments) {
+          append(segment.text)
+        }
+      }
+    }
+  }
 }

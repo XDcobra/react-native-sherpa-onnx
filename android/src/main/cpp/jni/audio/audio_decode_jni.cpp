@@ -73,33 +73,63 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
             "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
 
         jobject map = env->NewObject(hashMapClass, hashMapInit);
+        auto putMapEntry = [env, map, hashMapPut](const char* key, jobject value) {
+            jstring jKey = env->NewStringUTF(key);
+            jobject previousValue = env->CallObjectMethod(map, hashMapPut, jKey, value);
+            if (previousValue) {
+                env->DeleteLocalRef(previousValue);
+            }
+            if (jKey) {
+                env->DeleteLocalRef(jKey);
+            }
+        };
 
         // Samples array
         jfloatArray jSamples = env->NewFloatArray((jint)allSamples.size());
         if (jSamples && !allSamples.empty()) {
             env->SetFloatArrayRegion(jSamples, 0, (jint)allSamples.size(), allSamples.data());
         }
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("samples"), jSamples);
+        putMapEntry("samples", jSamples);
+        if (jSamples) {
+            env->DeleteLocalRef(jSamples);
+        }
 
         // Source sample rate
         jclass intClass = env->FindClass("java/lang/Integer");
         jmethodID intValueOf = env->GetStaticMethodID(intClass, "valueOf", "(I)Ljava/lang/Integer;");
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("sourceSampleRate"),
-            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceSampleRate));
+        jobject sourceSampleRateValue =
+            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceSampleRate);
+        putMapEntry("sourceSampleRate", sourceSampleRateValue);
+        if (sourceSampleRateValue) {
+            env->DeleteLocalRef(sourceSampleRateValue);
+        }
 
         // Source channels
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("sourceChannels"),
-            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceChannels));
+        jobject sourceChannelsValue =
+            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceChannels);
+        putMapEntry("sourceChannels", sourceChannelsValue);
+        if (sourceChannelsValue) {
+            env->DeleteLocalRef(sourceChannelsValue);
+        }
 
         // Total frames decoded
         jclass longClass = env->FindClass("java/lang/Long");
         jmethodID longValueOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("totalFramesDecoded"),
-            env->CallStaticObjectMethod(longClass, longValueOf, (jlong)result.totalFramesDecoded));
+        jobject totalFramesDecodedValue =
+            env->CallStaticObjectMethod(longClass, longValueOf, (jlong)result.totalFramesDecoded);
+        putMapEntry("totalFramesDecoded", totalFramesDecodedValue);
+        if (totalFramesDecodedValue) {
+            env->DeleteLocalRef(totalFramesDecodedValue);
+        }
+        if (intClass) {
+            env->DeleteLocalRef(intClass);
+        }
+        if (longClass) {
+            env->DeleteLocalRef(longClass);
+        }
+        if (hashMapClass) {
+            env->DeleteLocalRef(hashMapClass);
+        }
 
         return map;
     } catch (const std::runtime_error& e) {
@@ -220,21 +250,51 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
         jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put",
             "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
         jobject map = env->NewObject(hashMapClass, hashMapInit);
+        auto putMapEntry = [env, map, hashMapPut](const char* key, jobject value) {
+            jstring jKey = env->NewStringUTF(key);
+            jobject previousValue = env->CallObjectMethod(map, hashMapPut, jKey, value);
+            if (previousValue) {
+                env->DeleteLocalRef(previousValue);
+            }
+            if (jKey) {
+                env->DeleteLocalRef(jKey);
+            }
+        };
 
         jclass intClass = env->FindClass("java/lang/Integer");
         jmethodID intValueOf = env->GetStaticMethodID(intClass, "valueOf", "(I)Ljava/lang/Integer;");
         jclass longClass = env->FindClass("java/lang/Long");
         jmethodID longValueOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
 
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("sourceSampleRate"),
-            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceSampleRate));
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("sourceChannels"),
-            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceChannels));
-        env->CallObjectMethod(map, hashMapPut,
-            env->NewStringUTF("totalFramesDecoded"),
-            env->CallStaticObjectMethod(longClass, longValueOf, (jlong)result.totalFramesDecoded));
+        jobject sourceSampleRateValue =
+            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceSampleRate);
+        putMapEntry("sourceSampleRate", sourceSampleRateValue);
+        if (sourceSampleRateValue) {
+            env->DeleteLocalRef(sourceSampleRateValue);
+        }
+
+        jobject sourceChannelsValue =
+            env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceChannels);
+        putMapEntry("sourceChannels", sourceChannelsValue);
+        if (sourceChannelsValue) {
+            env->DeleteLocalRef(sourceChannelsValue);
+        }
+
+        jobject totalFramesDecodedValue =
+            env->CallStaticObjectMethod(longClass, longValueOf, (jlong)result.totalFramesDecoded);
+        putMapEntry("totalFramesDecoded", totalFramesDecodedValue);
+        if (totalFramesDecodedValue) {
+            env->DeleteLocalRef(totalFramesDecodedValue);
+        }
+        if (intClass) {
+            env->DeleteLocalRef(intClass);
+        }
+        if (longClass) {
+            env->DeleteLocalRef(longClass);
+        }
+        if (hashMapClass) {
+            env->DeleteLocalRef(hashMapClass);
+        }
 
         return map;
     } catch (const std::runtime_error& e) {
