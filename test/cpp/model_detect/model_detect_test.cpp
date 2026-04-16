@@ -426,6 +426,87 @@ TEST(ModelDetectValidation, SttFullScanDetectionSourcesExplicit) {
               result.detectionSources.end());
 }
 
+// ═══ STT isStreaming (online-guard) ═════════════════════════════════════
+
+TEST(SttIsStreaming, NameOnlyStreamingTransducer) {
+    const std::string syntheticDir = "m/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20";
+    auto result = sherpaonnx::DetectSttModelFromFileList({}, syntheticDir, "auto", std::nullopt);
+
+    EXPECT_FALSE(result.ok) << "Name-only detection should not be fully successful";
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kTransducer);
+    EXPECT_TRUE(result.isStreaming)
+        << "Name-only transducer should be heuristically marked streaming";
+}
+
+TEST(SttIsStreaming, NameOnlyStreamingParaformer) {
+    const std::string syntheticDir = "m/sherpa-onnx-streaming-paraformer-bilingual-zh-en";
+    auto result = sherpaonnx::DetectSttModelFromFileList({}, syntheticDir, "auto", std::nullopt);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kParaformer);
+    EXPECT_TRUE(result.isStreaming)
+        << "Name-only paraformer should be heuristically marked streaming";
+}
+
+TEST(SttIsStreaming, NameOnlyNonStreamingWhisper) {
+    const std::string syntheticDir = "m/sherpa-onnx-whisper-tiny";
+    auto result = sherpaonnx::DetectSttModelFromFileList({}, syntheticDir, "auto", std::nullopt);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kWhisper);
+    EXPECT_FALSE(result.isStreaming)
+        << "Whisper is offline-only; should not be streaming";
+}
+
+TEST(SttIsStreaming, NameOnlyNonStreamingSenseVoice) {
+    const std::string syntheticDir = "m/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17";
+    auto result = sherpaonnx::DetectSttModelFromFileList({}, syntheticDir, "auto", std::nullopt);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kSenseVoice);
+    EXPECT_FALSE(result.isStreaming)
+        << "SenseVoice is offline-only; should not be streaming";
+}
+
+TEST(SttIsStreaming, NameOnlyExplicitWenetCtcIsStreaming) {
+    const std::string syntheticDir = "m/sherpa-onnx-streaming-wenet-ctc-aishell";
+    auto result = sherpaonnx::DetectSttModelFromFileList({}, syntheticDir, "wenet_ctc", std::nullopt);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kWenetCtc);
+    EXPECT_TRUE(result.isStreaming)
+        << "WeNet CTC (explicit type) should be heuristically marked streaming";
+}
+
+TEST(SttIsStreaming, FileListTransducerIsStreamingWithoutOrt) {
+    // In test builds ORT is not available, so the guard optimistically returns passed=true.
+    const std::string dir = "test-models/streaming-transducer";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "decoder-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "joiner-epoch-99-avg-1.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "transducer", std::nullopt);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kTransducer);
+    // Without ORT the guard optimistically returns true
+    EXPECT_TRUE(result.isStreaming);
+}
+
+TEST(SttIsStreaming, FileListWhisperIsNotStreaming) {
+    const std::string dir = "test-models/whisper-tiny";
+    std::vector<FE> files = {
+        MakeEntry(dir, "tiny-encoder.onnx"),
+        MakeEntry(dir, "tiny-decoder.onnx"),
+        MakeEntry(dir, "tiny-tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectSttModelFromFileList(files, dir, "whisper", std::nullopt);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::SttModelKind::kWhisper);
+    EXPECT_FALSE(result.isStreaming)
+        << "Whisper file-list detection should not be streaming";
+}
 
 
 TEST(ModelDetectValidation, TtsKokoroMissingEspeakData) {
