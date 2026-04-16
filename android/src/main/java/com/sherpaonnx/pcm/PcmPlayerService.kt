@@ -11,6 +11,7 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.audio.session.PaAudioSessionCoordinator
 
 internal class PcmPlayerService(
@@ -112,6 +113,22 @@ internal class PcmPlayerService(
       session.onEnded = {
         onPlayerEnded?.invoke(session.playerId, session.bufferId)
       }
+      session.onTerminalError = fun(code, message) {
+        Log.e(TAG, "PCM player terminal error playerId=$playerId code=$code message=$message")
+        val removed = registry.remove(playerId)
+        if (removed == null) {
+          return
+        }
+        try {
+          removed.destroy()
+        } catch (_: Exception) {
+        }
+        try {
+          PaAudioSessionCoordinator.unregisterTrack(removed.track)
+        } catch (_: Exception) {
+        }
+        PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
+      }
 
       registry.put(session)
       track.play()
@@ -122,7 +139,35 @@ internal class PcmPlayerService(
         session.startOfflineDrain()
       }
 
+      val createError = session.terminalErrorSnapshot()
+      if (createError != null) {
+        val removed = registry.remove(playerId)
+        removed?.destroy()
+        removed?.let { PaAudioSessionCoordinator.unregisterTrack(it.track) }
+        if (intentAcquired) {
+          intentId?.let { PaAudioSessionCoordinator.releaseIntent(it) }
+        }
+        promise.reject(createError.first, createError.second, session.terminalErrorCause())
+        return
+      }
+
       promise.resolve(null)
+    } catch (e: OutOfMemoryError) {
+      try {
+        createdSession?.destroy()
+        createdTrack?.let { PaAudioSessionCoordinator.unregisterTrack(it) }
+      } catch (_: Exception) {
+      } finally {
+        if (intentAcquired) {
+          intentId?.let { PaAudioSessionCoordinator.releaseIntent(it) }
+        }
+      }
+      Log.e(TAG, "Failed to create PCM player due to OOM: $playerId", e)
+      promise.reject(
+        OfflineOomError.CODE,
+        OfflineOomError.message("playback"),
+        e
+      )
     } catch (e: Exception) {
       try {
         createdSession?.destroy()
@@ -178,6 +223,7 @@ internal class PcmPlayerService(
 
   fun pause(playerId: String, promise: Promise) {
     val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (rejectIfTerminalError(session, promise)) return
     if (session.destroyed) return rejectDestroyed(playerId, promise)
     try {
       session.pause()
@@ -190,6 +236,7 @@ internal class PcmPlayerService(
 
   fun resume(playerId: String, promise: Promise) {
     val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (rejectIfTerminalError(session, promise)) return
     if (session.destroyed) return rejectDestroyed(playerId, promise)
     try {
       session.resume()
@@ -202,6 +249,7 @@ internal class PcmPlayerService(
 
   fun seekToMs(playerId: String, positionMs: Double, promise: Promise) {
     val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (rejectIfTerminalError(session, promise)) return
     if (session.destroyed) return rejectDestroyed(playerId, promise)
     try {
       val sampleIndex = ((positionMs / 1000.0) * session.sampleRate).toLong().coerceAtLeast(0)
@@ -243,6 +291,7 @@ internal class PcmPlayerService(
 
   fun restart(playerId: String, promise: Promise) {
     val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (rejectIfTerminalError(session, promise)) return
     if (session.destroyed) return rejectDestroyed(playerId, promise)
     try {
       val startPos = if (session.liveEntry != null) {
@@ -263,6 +312,7 @@ internal class PcmPlayerService(
 
   fun getPositionMs(playerId: String, promise: Promise) {
     val session = registry[playerId] ?: return rejectNotFound(playerId, promise)
+    if (rejectIfTerminalError(session, promise)) return
     if (session.destroyed) return rejectDestroyed(playerId, promise)
     try {
       promise.resolve(session.getPositionMs())
@@ -354,6 +404,12 @@ internal class PcmPlayerService(
 
   private fun rejectDestroyed(playerId: String, promise: Promise) {
     promise.reject("PCM_PLAYER_DESTROYED", "PCM player already destroyed: $playerId")
+  }
+
+  private fun rejectIfTerminalError(session: PcmPlayerSession, promise: Promise): Boolean {
+    val error = session.terminalErrorSnapshot() ?: return false
+    promise.reject(error.first, error.second, session.terminalErrorCause())
+    return true
   }
 
   private companion object {

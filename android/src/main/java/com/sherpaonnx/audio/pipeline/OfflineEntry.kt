@@ -135,6 +135,22 @@ sealed class OfflineEntry {
       return out
     }
 
+    /**
+     * Read samples directly into caller-provided output to avoid per-chunk allocations.
+     * @return Number of samples copied into [out]
+     */
+    fun readInto(startSample: Int, out: FloatArray, offset: Int, maxSamples: Int): Int {
+      if (maxSamples <= 0 || offset < 0 || offset >= out.size) return 0
+      val safeStart = startSample.coerceAtLeast(0)
+      if (safeStart >= numSamples) return 0
+      val actualCount = minOf(maxSamples, numSamples - safeStart, out.size - offset)
+      if (actualCount <= 0) return 0
+      val fb = requireMapping().asFloatBuffer()
+      fb.position(safeStart)
+      fb.get(out, offset, actualCount)
+      return actualCount
+    }
+
     override fun releaseResources() {
       mappedBuffer = null // Release reference → GC will unmap
       try { File(filePath).delete() } catch (_: Exception) {}
@@ -302,11 +318,9 @@ internal class MmapReader(private val entry: OfflineEntry.MmapBacked) : OfflineR
   private var pos = 0
   override fun readSamples(out: FloatArray, offset: Int, maxSamples: Int): Int {
     if (pos >= entry.numSamples) return 0
-    val count = minOf(maxSamples, entry.numSamples - pos)
-    val slice = entry.readSlice(pos, count)
-    System.arraycopy(slice, 0, out, offset, slice.size)
-    pos += slice.size
-    return slice.size
+    val read = entry.readInto(pos, out, offset, maxSamples)
+    pos += read
+    return read
   }
   override fun seekToSample(sampleIndex: Int) {
     pos = sampleIndex.coerceIn(0, entry.numSamples)

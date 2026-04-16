@@ -10,6 +10,7 @@ import com.sherpaonnx.alignment.core.AlignmentResultMapper
 import com.sherpaonnx.alignment.core.SttAlignmentSegment
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.HashMap
 import java.util.concurrent.Executors
@@ -180,6 +181,13 @@ internal class SherpaOnnxAlignmentHelper {
         }
 
         promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
+      } catch (e: OutOfMemoryError) {
+        Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
+        promise.reject(
+          AlignmentErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("alignment"),
+          e
+        )
       } catch (e: Exception) {
         Log.e(AlignmentErrorCodes.TAG, "ALIGNMENT_ERROR: ${e.message}", e)
         AlignmentPromiseUtils.rejectWithEmbeddedCode(

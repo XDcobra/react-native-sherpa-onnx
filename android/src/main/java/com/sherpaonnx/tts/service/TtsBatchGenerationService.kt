@@ -11,6 +11,7 @@ import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.dispatchGenerate
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 
 internal class TtsBatchGenerationService(
@@ -168,6 +169,13 @@ internal class TtsBatchGenerationService(
       PipelineAudioRegistry.upgradeToMmapIfNeeded(audioOutBufferId)
 
       promise.resolve(null)
+    } catch (e: OutOfMemoryError) {
+      Log.e("SherpaOnnxTts", "synthesizeTts OOM", e)
+      promise.reject(
+        OfflineOomError.CODE,
+        OfflineOomError.message("text-to-speech"),
+        e
+      )
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)

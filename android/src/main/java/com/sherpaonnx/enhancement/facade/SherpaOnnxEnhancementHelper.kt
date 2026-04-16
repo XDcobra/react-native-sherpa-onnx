@@ -12,6 +12,7 @@ import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.enhancement.core.EnhancementErrorCodes
 import com.sherpaonnx.enhancement.core.EnhancementInstance
 import com.sherpaonnx.enhancement.core.EnhancementModelConfigFactory
@@ -128,6 +129,7 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
+    
     if (!audioInBufferId.startsWith("off_")) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_BUFFER_KIND_MISMATCH,
@@ -144,7 +146,7 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
     if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
-      promise.reject(
+            promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_BUFFER_EMPTY,
         "Input offline audio buffer is empty: $audioInBufferId",
       )
@@ -166,6 +168,7 @@ internal class SherpaOnnxEnhancementHelper(
       )
       return
     }
+
     if (audioOutEntry !is OfflineEntry.InMemory) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_OUTPUT_NOT_EMPTY,
@@ -194,6 +197,13 @@ internal class SherpaOnnxEnhancementHelper(
       // Upgrade output to mmap if it exceeds the threshold
       PipelineAudioRegistry.upgradeToMmapIfNeeded(audioOutBufferId)
       promise.resolve(null)
+    } catch (e: OutOfMemoryError) {
+      Log.e(EnhancementErrorCodes.TAG, "OOM Enhancement offline failed", e)
+      promise.reject(
+        EnhancementErrorCodes.OFFLINE_OOM,
+        OfflineOomError.message("enhancement"),
+        e
+      )
     } catch (e: Exception) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_ERROR,
