@@ -11,10 +11,18 @@ Import from `react-native-sherpa-onnx/pcm`.
 ```ts
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 
 const audioBuffer = await createOfflineAudioBufferFromFile({
   kind: 'fs',
   path: '/path/to/audio.wav',
+});
+
+// Optional: set global input/output preference before creating the player.
+// See: [Pipeline Audio Session Coordination](audio-session.md)
+await setPipelineAudioRoutePreference({
+  inputDeviceId: 'android_builtin_mic',
+  outputDeviceId: 'android_builtin_speaker',
 });
 
 const player = await createPcmPlayer(audioBuffer, {
@@ -66,58 +74,92 @@ Creates and starts a native playback session that consumes from a pipeline audio
 |-----------|------|---------|-------------|
 | `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| OfflineBufferHandle \| LiveBufferHandle \| string` | required | Buffer ref/handle or raw `bufferId` |
 | `options.volume` | `number` | `1.0` | Volume scale in range `[0, 1]` |
-| `options.outputDeviceId` | `string` | `undefined` | Preferred output route id from `listAvailableOutputDevices()` (best effort) |
 | `options.onEnded` | `(event: { playerId: string; bufferId: string }) => void` | `undefined` | Called once when playback run reaches EOF |
 
-Platform note: Android attempts direct AudioTrack routing to the requested device id where supported.
-iOS applies route preferences within AVAudioSession constraints, so `outputDeviceId` is capability-based best effort.
-
-### `listAvailableOutputDevices()`
+To choose playback hardware for this pipeline, enumerate devices via `react-native-sherpa-onnx/audio` and then set `outputDeviceId` through `setPipelineAudioRoutePreference(...)`.
 
 ```ts
-function listAvailableOutputDevices(): Promise<
-  Array<{
-    id: string;
-    name: string;
-    kind: string;
-    selected: boolean;
-    default: boolean;
-    canSelect: boolean;
-  }>
->;
+function createPcmPlayer(
+  audioBuffer:
+    | OfflineAudioBufferRef
+    | LiveAudioBufferRef
+    | OfflineBufferHandle
+    | LiveBufferHandle
+    | string,
+  options?: {
+    volume?: number;
+    onEnded?: (event: { playerId: string; bufferId: string }) => void;
+  }
+): Promise<PcmPlayer>;
 ```
 
 ```ts
-import {
-  createPcmPlayer,
-  listAvailableOutputDevices,
-} from 'react-native-sherpa-onnx/pcm';
-
-const outputs = await listAvailableOutputDevices();
-const preferred = outputs.find((d) => d.canSelect && d.kind === 'bluetooth');
-
 const player = await createPcmPlayer(audioBuffer, {
-  outputDeviceId: preferred?.id,
+  volume: 1.0,
+  onEnded: (event) => console.log(event.playerId, event.bufferId),
 });
 ```
 
-On Android, enumeration is robust and includes routable hardware endpoints.
-On iOS, routable outputs are limited by current audio session/route policy; inspect `selected` after start to confirm the effective route.
+### `player.pause()`
 
-### `PcmPlayer`
+```ts
+function pause(): Promise<void>;
+```
 
-| Method | Description |
-|--------|-------------|
-| `pause()` | Pause playback. Buffered data remains intact. |
-| `resume()` | Resume paused playback. |
-| `seekToMs(positionMs)` | Seek to position in milliseconds. |
-| `restart()` | Restart playback from the beginning/start-of-available. |
-| `getPlaybackPositionMs()` | Return current playback position in milliseconds. |
-| `destroy()` | Stop playback and release native resources. |
+```ts
+await player.pause();
+```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `playerId` | `string` | Unique player identifier |
+### `player.resume()`
+
+```ts
+function resume(): Promise<void>;
+```
+
+```ts
+await player.resume();
+```
+
+### `player.seekToMs(positionMs)`
+
+```ts
+function seekToMs(positionMs: number): Promise<void>;
+```
+
+```ts
+await player.seekToMs(1200);
+```
+
+### `player.restart()`
+
+```ts
+function restart(): Promise<void>;
+```
+
+```ts
+await player.restart();
+```
+
+### `player.getPlaybackPositionMs()`
+
+```ts
+function getPlaybackPositionMs(): Promise<number>;
+```
+
+```ts
+const posMs = await player.getPlaybackPositionMs();
+console.log(posMs);
+```
+
+### `player.destroy()`
+
+```ts
+function destroy(): Promise<void>;
+```
+
+```ts
+await player.destroy();
+```
 
 ## Playback Semantics
 
@@ -138,13 +180,13 @@ On iOS, routable outputs are limited by current audio session/route policy; insp
 
 ## Error Codes
 
-Common player errors:
-
-- `PCM_PLAYER_NOT_FOUND`
-- `PCM_PLAYER_INVALID_STATE`
-- `PCM_PLAYER_SEEK_OUT_OF_RANGE`
-- `PCM_PLAYER_BUFFER_NOT_FOUND`
-- `PCM_PLAYER_BUFFER_INCOMPATIBLE_STATE`
+| Code | Meaning |
+| --- | --- |
+| `PCM_PLAYER_NOT_FOUND` | Player id not found in native registry |
+| `PCM_PLAYER_INVALID_STATE` | Operation not valid in current player state |
+| `PCM_PLAYER_SEEK_OUT_OF_RANGE` | Seek target is outside current playable range |
+| `PCM_PLAYER_BUFFER_NOT_FOUND` | Referenced audio buffer id does not exist |
+| `PCM_PLAYER_BUFFER_INCOMPATIBLE_STATE` | Buffer state cannot be used for requested player operation |
 
 ## Architecture Notes
 

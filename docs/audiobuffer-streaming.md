@@ -76,6 +76,7 @@ import {
   getLiveTextBufferSegments,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 
 const SAMPLE_RATE = 16000;
 
@@ -126,6 +127,13 @@ const previewTimer = setInterval(async () => {
   // Example output: hello wor
   // Example output (after endpoint): hello world
 }, 150);
+
+// Optional: set global input/output preference before starting mic.
+// See: [Pipeline Audio Session Coordination](audio-session.md)
+await setPipelineAudioRoutePreference({
+  inputDeviceId: 'android_builtin_mic',
+  outputDeviceId: 'android_builtin_speaker',
+});
 
 await startMicToLiveAudioBuffer(live);
 // … recording …
@@ -194,11 +202,13 @@ await releasePipelineAudioBuffer(live);
 ### Live buffer
 
 - `createEmptyLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
-- `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`, `listAvailableInputDevices`
+- `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
 - `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 - Callbacks: `onFramesAppended` / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
+
+Device routing belongs to `react-native-sherpa-onnx/audio`: use `listAvailableInputDevices()`, `listAvailableOutputDevices()`, and `setPipelineAudioRoutePreference(...)`.
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createEmptyLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
 
@@ -206,7 +216,7 @@ Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createE
 
 ## API reference
 
-All signatures below are exported from `react-native-sherpa-onnx/audiobuffer`. Unless noted, buffer arguments accept the matching `*IdSource` union (ref, info snapshot, handle, or string).
+All signatures below are exported from `react-native-sherpa-onnx/audiobuffer`. Unless noted, buffer arguments accept the matching `*IdSource` union (ref, info snapshot, handle, or string). Device/route APIs are exported from `react-native-sherpa-onnx/audio`.
 
 Ref-first usage is recommended: pass the buffer ref directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.
 
@@ -320,34 +330,7 @@ await startMicToLiveAudioBuffer(live, { emitToJs: false });
 await stopMicToLiveAudioBuffer();
 ```
 
-`options.inputDeviceId` accepts an id from `listAvailableInputDevices()` and requests that route as a best-effort preference.
-To confirm the actually active route, call `listAvailableInputDevices()` again and check `selected`.
-
-#### `listAvailableInputDevices()`
-
-```ts
-function listAvailableInputDevices(): Promise<
-  Array<{
-    id: string;
-    name: string;
-    kind: string;
-    selected: boolean;
-    default: boolean;
-    canSelect: boolean;
-  }>
->;
-```
-
-```ts
-const inputs = await listAvailableInputDevices();
-const preferred = inputs.find((d) => d.canSelect && d.kind === 'built_in_mic');
-await startMicToLiveAudioBuffer(live, {
-  inputDeviceId: preferred?.id,
-});
-```
-
-Android exposes robust input enumeration and applies `inputDeviceId` when the recorder backend accepts it.
-iOS applies preferred input using AVAudioSession and remains best-effort because route activation is system-managed.
+Use `setPipelineAudioRoutePreference(...)` from `react-native-sherpa-onnx/audio` for global input/output preference.
 
 #### `appendSamplesToLiveAudioBuffer(liveBuffer, samples, sampleRate)`
 
@@ -417,6 +400,29 @@ function appendOfflineToLiveAudioBuffer(
 ```ts
 await appendOfflineToLiveAudioBuffer(live, offline);
 ```
+
+---
+
+## Error code quick table
+
+| Code | Meaning |
+| --- | --- |
+| `AUDIO_BUFFER_NOT_FOUND` | Referenced pipeline audio buffer id does not exist |
+| `AUDIO_BUFFER_KIND_MISMATCH` | Buffer kind does not match the called API (offline vs live) |
+| `AUDIO_BUFFER_EMPTY` | Buffer has no samples for the requested operation |
+| `AUDIO_INVALID_ARGUMENT` | Invalid buffer id/argument passed to API |
+| `AUDIO_CAPTURE_ERROR` | Microphone capture failed to start or continue |
+| `AUDIO_INVALID_STATE` | Live buffer is not in required state (`recording`/`finished`) |
+| `AUDIO_ALREADY_FINALIZED` | Operation expects recording buffer but buffer is already finalized |
+| `DECODE_NOT_FOUND` | Ingest source file not found or not accessible |
+| `DECODE_OPEN_FAILED` | Ingest source could not be opened/probed |
+| `DECODE_NO_AUDIO_STREAM` | Ingest source has no audio stream |
+| `DECODE_CODEC_UNSUPPORTED` | Ingest source codec could not be initialized/decoded |
+| `DECODE_DECODE_ERROR` | Ingest decode loop failed while reading frames |
+| `DECODE_RESAMPLE_ERROR` | Ingest resample/downmix stage failed |
+| `DECODE_CANCELLED` | Ingest/decode cancelled via signal or cancel call |
+| `DECODE_PERMISSION_DENIED` | Platform denied permission to read source |
+| `DECODE_INTERNAL_ERROR` | Generic native decode/ingest failure |
 
 ---
 

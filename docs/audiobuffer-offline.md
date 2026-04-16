@@ -19,6 +19,8 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 **Why this is fast:** apps orchestrate with **ids and small control calls**; bulk audio is not shuttled through the JS bridge sample-by-sample. Native code owns decode, resampling, and backing storage; live buffers add a native ring and optional spool I/O.
 
+When this buffer is used in a playback or mic+playback pipeline, choose input/output devices through `react-native-sherpa-onnx/audio` with `setPipelineAudioRoutePreference(...)` (and `listAvailableInputDevices()` / `listAvailableOutputDevices()`).
+
 ---
 
 ## Main API (summary)
@@ -189,6 +191,26 @@ function createOfflineAudioBufferFromLive(
 ```ts
 const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
 ```
+
+---
+
+## Error code quick table
+
+| Code | Meaning |
+| --- | --- |
+| `AUDIO_BUFFER_NOT_FOUND` | Referenced pipeline audio buffer id does not exist |
+| `AUDIO_BUFFER_KIND_MISMATCH` | Buffer kind does not match the called API (offline vs live) |
+| `AUDIO_BUFFER_EMPTY` | Buffer has no samples for the requested operation |
+| `AUDIO_INVALID_ARGUMENT` | Invalid buffer id/argument passed to API |
+| `DECODE_NOT_FOUND` | Source file not found or not accessible |
+| `DECODE_OPEN_FAILED` | Input could not be opened/probed by native decode |
+| `DECODE_NO_AUDIO_STREAM` | Input file/container has no audio stream |
+| `DECODE_CODEC_UNSUPPORTED` | Codec could not be initialized/decoded |
+| `DECODE_DECODE_ERROR` | Decode loop failed while reading audio frames |
+| `DECODE_RESAMPLE_ERROR` | Resample/downmix stage failed |
+| `DECODE_CANCELLED` | Decode cancelled via `AbortSignal` or cancel call |
+| `DECODE_PERMISSION_DENIED` | Platform denied permission to read source |
+| `DECODE_INTERNAL_ERROR` | Generic native decode failure |
 
 ---
 

@@ -111,7 +111,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 |---------|--------|------|-------|
 | Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt-offline.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
 | Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
-| Live capture API | ✅ **Supported** | [Pipeline buffers (`audiobuffer`)](./docs/audiobuffer.md) ([live](./docs/audiobuffer-streaming.md)) | Native microphone → live audio buffer; optional JS chunks for streaming STT. |
+| Live capture API | ✅ **Supported** | [Pipeline buffers (`audiobuffer`)](./docs/audiobuffer.md) ([live](./docs/audiobuffer-streaming.md)) · [Pipeline Audio Session](./docs/audio-session.md) | Native microphone → live audio buffer; optional JS chunks for streaming STT. Global route/session policy for mic + PCM to set input/output device manually. |
 | Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
 | Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
 | TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Standalone API: **`alignTextToAudio`** (`react-native-sherpa-onnx/alignment`). |
@@ -276,6 +276,7 @@ For accurate alignment model setup and detection, see [Alignment / subtitles](./
 - [Speech-to-Text (STT)](./docs/stt-offline.md) – Offline transcription (file or samples)
 - [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
 - [Pipeline audio buffers (`audiobuffer`)](./docs/audiobuffer.md) – Overview; [offline](./docs/audiobuffer-offline.md), [live / streaming](./docs/audiobuffer-streaming.md)
+- [Pipeline Audio Session](./docs/audio-session.md) – Global audio session policy and route preference for mic + PCM
 - [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
 - [Alignment / subtitles](./docs/alignment.md) – `alignTextToAudio`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
