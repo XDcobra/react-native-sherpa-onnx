@@ -1,15 +1,12 @@
 package com.sherpaonnx.audio.pipeline
 
 import android.content.Context
-import android.media.AudioDeviceInfo
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Log
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import com.sherpaonnx.audio.session.PaAudioSessionCoordinator
 import kotlin.concurrent.thread
 
 /**
@@ -22,7 +19,6 @@ import kotlin.concurrent.thread
 class MicToLiveBufferSink(
   private val context: Context,
   private val liveEntry: LiveEntry,
-  private val preferredInputDeviceId: Int? = null,
   private val onError: ((String) -> Unit)? = null,
   private val logTag: String = "MicToLiveBufferSink"
 ) {
@@ -36,14 +32,6 @@ class MicToLiveBufferSink(
   private var captureThread: Thread? = null
   @Volatile
   private var lastRoutedInputDeviceId: Int = -1
-
-  private fun findInputDeviceById(deviceId: Int): AudioDeviceInfo? {
-    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-      ?: return null
-    return audioManager
-      .getDevices(AudioManager.GET_DEVICES_INPUTS)
-      .firstOrNull { it.id == deviceId }
-  }
 
   fun start() {
     if (running) {
@@ -83,18 +71,11 @@ class MicToLiveBufferSink(
       return
     }
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && preferredInputDeviceId != null) {
-      val preferred = findInputDeviceById(preferredInputDeviceId)
-      if (preferred != null) {
-        val applied = record.setPreferredDevice(preferred)
-        Log.i(
-          logTag,
-          "Requested preferred input device id=$preferredInputDeviceId applied=$applied"
-        )
-      } else {
-        Log.w(logTag, "Preferred input device id=$preferredInputDeviceId not found; using default route")
-      }
-    }
+    // Register mic intent with coordinator and apply preferred device
+    PaAudioSessionCoordinator.acquireIntent(
+      PaAudioSessionCoordinator.Intent(ownerId = "mic", needsInput = true, needsOutput = false)
+    )
+    PaAudioSessionCoordinator.applyPreferredDevice(record)
 
     audioRecord = record
     running = true
@@ -145,12 +126,14 @@ class MicToLiveBufferSink(
     val record = audioRecord
     if (record != null) {
       try { record.stop() } catch (_: Exception) {}
+      PaAudioSessionCoordinator.unregisterRecord(record)
     }
     captureThread?.join(2000)
     captureThread = null
     audioRecord = null
     lastRoutedInputDeviceId = -1
     liveEntry.flushFramesAppendedEvents()
+    PaAudioSessionCoordinator.releaseIntent("mic")
   }
 
   fun currentRoutedDeviceId(): Int? {

@@ -5,6 +5,7 @@ import type {
   AudioSaveInput,
   SaveAudioOptions,
   AudioSaveProgressEvent,
+  PipelineAudioDeviceInfo,
 } from './types';
 import type {
   FileDestination,
@@ -175,6 +176,92 @@ export type {
   AudioSaveInput,
   SaveAudioOptions,
   AudioSaveProgressEvent,
+  PipelineAudioProfile,
+  PipelineAudioSessionConfig,
+  PipelineAudioRoutePreference,
+  PipelineAudioSessionState,
+  PipelineAudioDeviceInfo,
 } from './types';
 export { AudioSaveErrorCode } from './types';
 export type { AudioSaveErrorCodeValue } from './types';
+
+// ── Pipeline Audio Session API ────────────────────────────────────────────
+
+import type {
+  PipelineAudioSessionConfig,
+  PipelineAudioRoutePreference,
+  PipelineAudioSessionState,
+} from './types';
+
+/**
+ * Configure the pipeline audio session coordinator.
+ * Call before starting mic/PCM operations to set session-level options.
+ */
+export async function configurePipelineAudioSession(
+  config: PipelineAudioSessionConfig
+): Promise<void> {
+  await SherpaOnnx.configurePipelineAudioSession(config);
+}
+
+/**
+ * Set the global audio route preference.
+ * Applied to all active and future mic/PCM sessions.
+ * On iOS this sets AVAudioSession preferred input/output; on Android it calls setPreferredDevice on all AudioRecord/AudioTrack instances.
+ */
+export async function setPipelineAudioRoutePreference(
+  preference: PipelineAudioRoutePreference
+): Promise<void> {
+  await SherpaOnnx.setPipelineAudioRoutePreference(
+    preference.inputDeviceId ?? null,
+    preference.outputDeviceId ?? null
+  );
+}
+
+/**
+ * Clear the global audio route preference, reverting to system defaults.
+ */
+export async function clearPipelineAudioRoutePreference(): Promise<void> {
+  await SherpaOnnx.clearPipelineAudioRoutePreference();
+}
+
+/**
+ * Get a snapshot of the current pipeline audio session state.
+ */
+export async function getPipelineAudioSessionState(): Promise<PipelineAudioSessionState> {
+  const snapshot = await SherpaOnnx.getPipelineAudioSessionState();
+  return snapshot as PipelineAudioSessionState;
+}
+
+/**
+ * List available microphone/input devices for global route selection.
+ */
+export async function listAvailableInputDevices(): Promise<
+  PipelineAudioDeviceInfo[]
+> {
+  const raw = await SherpaOnnx.listAvailableInputDevices();
+  return raw.map((device) => ({
+    id: String(device.id),
+    name: String(device.name),
+    kind: String(device.kind),
+    selected: Boolean(device.selected),
+    default: Boolean(device.default),
+    canSelect: Boolean(device.canSelect),
+  }));
+}
+
+/**
+ * List available output/playback devices for global route selection.
+ */
+export async function listAvailableOutputDevices(): Promise<
+  PipelineAudioDeviceInfo[]
+> {
+  const raw = await SherpaOnnx.listAvailableOutputDevices();
+  return raw.map((device) => ({
+    id: String(device.id),
+    name: String(device.name),
+    kind: String(device.kind),
+    selected: Boolean(device.selected),
+    default: Boolean(device.default),
+    canSelect: Boolean(device.canSelect),
+  }));
+}

@@ -322,7 +322,7 @@ export interface Spec extends TurboModule {
    */
   startMicToLiveAudioBuffer(
     liveBufferId: string,
-    options?: { emitToJs?: boolean; inputDeviceId?: string }
+    options?: { emitToJs?: boolean }
   ): Promise<void>;
 
   /** List available input devices for microphone capture routing. */
@@ -754,8 +754,7 @@ export interface Spec extends TurboModule {
   createPcmPlayer(
     playerId: string,
     audioBufferId: string,
-    volume: number,
-    options?: { outputDeviceId?: string }
+    volume: number
   ): Promise<void>;
 
   /** List available output devices for PCM playback routing. */
@@ -1163,6 +1162,25 @@ export interface Spec extends TurboModule {
   getNnapiSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getXnnpackSupport(modelBase64?: string): Promise<AccelerationSupport>;
   getCoreMlSupport(modelBase64?: string): Promise<AccelerationSupport>;
+
+  // ── Pipeline Audio Session Coordinator ───────────────────────────────
+
+  /** Configure the pipeline audio session coordinator policy. */
+  configurePipelineAudioSession(config: {
+    keepActiveWhenIdle?: boolean;
+  }): Promise<void>;
+
+  /** Set global audio route preference (applied to all active and future sessions). */
+  setPipelineAudioRoutePreference(
+    inputDeviceId: string | null,
+    outputDeviceId: string | null
+  ): Promise<void>;
+
+  /** Clear global audio route preference, reverting to system defaults. */
+  clearPipelineAudioRoutePreference(): Promise<void>;
+
+  /** Get a snapshot of the current pipeline audio session state. */
+  getPipelineAudioSessionState(): Promise<Object>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

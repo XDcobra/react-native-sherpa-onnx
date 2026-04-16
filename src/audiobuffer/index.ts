@@ -603,30 +603,9 @@ export async function startMicToLiveAudioBuffer(
     options
       ? {
           emitToJs: options.emitToJs,
-          inputDeviceId: options.inputDeviceId,
         }
       : undefined
   );
-}
-
-/**
- * List available microphone/input devices for route selection.
- *
- * Use `inputDeviceId` from this result in `startMicToLiveAudioBuffer(..., { inputDeviceId })`.
- * Selection is best effort; check `selected` after start to confirm active routing.
- */
-export async function listAvailableInputDevices(): Promise<
-  import('./types').PipelineAudioDeviceInfo[]
-> {
-  const raw = await getNative().listAvailableInputDevices();
-  return raw.map((device) => ({
-    id: String(device.id),
-    name: String(device.name),
-    kind: String(device.kind),
-    selected: Boolean(device.selected),
-    default: Boolean(device.default),
-    canSelect: Boolean(device.canSelect),
-  }));
 }
 
 /**
@@ -791,7 +770,6 @@ export type {
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferErrorEvent,
-  PipelineAudioDeviceInfo,
   PipelineAudioErrorCodeValue,
   AudioDecodeOptions,
   DecodeProgressEvent,

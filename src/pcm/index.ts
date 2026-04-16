@@ -1,8 +1,7 @@
-export { createPcmPlayer, listAvailableOutputDevices } from './pcmPlayer';
+export { createPcmPlayer } from './pcmPlayer';
 export type {
   PcmPlayer,
   PcmPlayerOptions,
   PcmPlayerAudioBuffer,
   PcmPlayerEndedEvent,
-  PcmOutputDeviceInfo,
 } from './types';

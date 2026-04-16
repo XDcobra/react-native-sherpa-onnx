@@ -110,3 +110,76 @@ export const AudioSaveErrorCode = {
 
 export type AudioSaveErrorCodeValue =
   (typeof AudioSaveErrorCode)[keyof typeof AudioSaveErrorCode];
+
+// ── Pipeline Audio Session Types ──────────────────────────────────────────
+
+/**
+ * Audio profile describing the current session profile.
+ * - 'inactive': No audio owners registered.
+ * - 'playback': At least one PCM player active, no mic.
+ * - 'duplex': Mic capture active (implies PlayAndRecord on iOS).
+ */
+export type PipelineAudioProfile = 'inactive' | 'playback' | 'duplex';
+
+/**
+ * Configuration for the pipeline audio session coordinator.
+ */
+export interface PipelineAudioSessionConfig {
+  /**
+   * If true, the audio session remains active even when no owners are registered.
+   * On iOS this prevents AVAudioSession deactivation; on Android it holds AudioFocus.
+   * Default: false.
+   */
+  keepActiveWhenIdle?: boolean;
+}
+
+/**
+ * Route preference for the pipeline audio session.
+ * Device IDs are platform-specific:
+ * - iOS: AVAudioSessionPortDescription.UID or special ids like 'ios_builtin_speaker', 'ios_builtin_receiver'.
+ * - Android: AudioDeviceInfo.id (numeric string).
+ */
+export interface PipelineAudioRoutePreference {
+  /** Preferred input device ID (mic). Null/undefined = system default. */
+  inputDeviceId?: string | null;
+  /** Preferred output device ID (speaker). Null/undefined = system default. */
+  outputDeviceId?: string | null;
+}
+
+/** Unified audio device metadata for input/output route listing. */
+export interface PipelineAudioDeviceInfo {
+  /** Stable id for selection calls (platform-native device id/uid). */
+  id: string;
+  /** Human readable device name. */
+  name: string;
+  /** Normalized kind (built_in_mic, built_in_speaker, bluetooth, usb, ...). */
+  kind: string;
+  /** True when this device is currently active for the corresponding route. */
+  selected: boolean;
+  /** True when this is the platform/default fallback route. */
+  default: boolean;
+  /** Whether explicit selection is supported for this device on this platform. */
+  canSelect: boolean;
+}
+
+/**
+ * Snapshot of the current pipeline audio session state.
+ */
+export interface PipelineAudioSessionState {
+  /** Whether the audio session is currently active. */
+  active: boolean;
+  /** Current computed profile. */
+  profile: PipelineAudioProfile;
+  /** Number of active mic owners. */
+  activeMicOwners: number;
+  /** Number of active PCM player owners. */
+  activePcmOwners: number;
+  /** Currently configured preferred input device ID, or null. */
+  preferredInputDeviceId: string | null;
+  /** Currently configured preferred output device ID, or null. */
+  preferredOutputDeviceId: string | null;
+  /** Currently routed input device ID, or null. */
+  currentInputDeviceId: string | null;
+  /** Currently routed output device ID, or null. */
+  currentOutputDeviceId: string | null;
+}

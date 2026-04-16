@@ -20,6 +20,52 @@ All model-language data and helpers live under **`react-native-sherpa-onnx/model
 
 `detectTtsModel()` and `detectSttModel().languages` expose **`{ iso6391Hint, id }[]`** (see **`PublicLanguageHint`** in `react-native-sherpa-onnx/model-languages`). Download **`ModelMeta.languages`** remains **`string[]`** (hint tags only). For custom flows, call `resolvePublicLanguageHints({ domain: 'tts' \| 'stt' \| 'vad' \| 'alignment', modelType?, rawFromNative? })`.
 
+## Pipeline Audio Session Coordination
+
+Mic and PCM routing/session behavior is now coordinated globally instead of per call.
+
+### Breaking changes
+
+| Before | After |
+|--------|-------|
+| `startMicToLiveAudioBuffer(live, { emitToJs?, inputDeviceId? })` | `startMicToLiveAudioBuffer(live, { emitToJs? })` |
+| `createPcmPlayer(audioBuffer, { volume?, outputDeviceId?, onEnded? })` | `createPcmPlayer(audioBuffer, { volume?, onEnded? })` |
+| Per-call route via mic/player options | Global route via `setPipelineAudioRoutePreference(...)` |
+
+### New APIs
+
+- `configurePipelineAudioSession({ keepActiveWhenIdle? })`
+- `setPipelineAudioRoutePreference({ inputDeviceId?, outputDeviceId? })`
+- `clearPipelineAudioRoutePreference()`
+- `getPipelineAudioSessionState()`
+
+### Before / After
+
+```ts
+// Before
+await startMicToLiveAudioBuffer(live, { inputDeviceId: input.id });
+const player = await createPcmPlayer(audioBuffer, { outputDeviceId: output.id });
+
+// After
+import {
+  setPipelineAudioRoutePreference,
+  getPipelineAudioSessionState,
+} from 'react-native-sherpa-onnx/audio';
+
+await setPipelineAudioRoutePreference({
+  inputDeviceId: input.id,
+  outputDeviceId: output.id,
+});
+
+await startMicToLiveAudioBuffer(live, { emitToJs: true });
+const player = await createPcmPlayer(audioBuffer, { volume: 1.0 });
+
+const state = await getPipelineAudioSessionState();
+console.log(state.profile, state.currentOutputDeviceId);
+```
+
+See [audio-session.md](audio-session.md) for full details.
+
 ## Standalone PCM player (replacing TTS-bound player)
 
 The PCM player is no longer attached to `StreamingTtsEngine`. It now plays from pipeline audio buffers (offline/live) and exposes full player controls (`pause`, `resume`, `seekToMs`, `restart`, `getPlaybackPositionMs`, `destroy`).

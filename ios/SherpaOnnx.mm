@@ -15,9 +15,14 @@
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
+#import "audio/session/PaAudioSessionCoordinator.h"
+#include "pcm/PcmPlayerRegistry.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
+
+// Defined in SherpaOnnx+PipelineAudioMic.mm
+extern void paMicStopQueue(void);
 
 @interface SherpaOnnx (JSI)
 - (BOOL)autoInstallJSI;
@@ -37,6 +42,14 @@
         [self autoInstallJSI];
     }
     return self;
+}
+
+- (void)invalidate
+{
+    paMicStopQueue();
+    pcmPlayerDestroyAll();
+    [[PaAudioSessionCoordinator shared] resetAll];
+    [super invalidate];
 }
 
 - (void)setBridge:(RCTBridge *)bridge

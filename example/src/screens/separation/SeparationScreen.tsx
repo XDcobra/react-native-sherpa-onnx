@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 export default function SeparationScreen() {
   return (
@@ -20,6 +21,7 @@ export default function SeparationScreen() {
           <Text style={styles.featureItem}>• Export separated tracks</Text>
         </View>
       </View>
+      <ScreenIntroModal screenId="Separation" />
     </SafeAreaView>
   );
 }

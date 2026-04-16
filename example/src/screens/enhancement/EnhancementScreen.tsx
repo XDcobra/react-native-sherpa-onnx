@@ -62,6 +62,7 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -1160,6 +1161,8 @@ export default function EnhancementScreen() {
           </View>
         </ScrollView>
       </View>
+
+      <ScreenIntroModal screenId="Enhancement" />
     </SafeAreaView>
   );
 }

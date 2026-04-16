@@ -143,6 +143,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun initialize() {
     super.initialize()
     tryInstallJsiBindings()
+    com.sherpaonnx.audio.session.PaAudioSessionCoordinator.initialize(reactApplicationContext)
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -174,6 +175,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
     pcmPlayerService.shutdown()
+    com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
   }
 
   /**
@@ -192,6 +194,61 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   /** Asset path for embedded QNN test model (ORT testdata: qnn_multi_ctx_embed). */
   private val qnnTestModelAsset = "testModels/qnn_multi_ctx_embed.onnx"
+
+  // ── Pipeline Audio Session Coordinator ──────────────────────────────────────
+
+  override fun configurePipelineAudioSession(config: ReadableMap?, promise: Promise) {
+    try {
+      val keepActiveWhenIdle = config?.takeIf { it.hasKey("keepActiveWhenIdle") && !it.isNull("keepActiveWhenIdle") }
+        ?.getBoolean("keepActiveWhenIdle") ?: false
+      com.sherpaonnx.audio.session.PaAudioSessionCoordinator.configurePolicy(keepActiveWhenIdle)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("AUDIO_SESSION_CONFIG_ERROR", e.message, e)
+    }
+  }
+
+  override fun setPipelineAudioRoutePreference(inputDeviceId: String?, outputDeviceId: String?, promise: Promise) {
+    try {
+      val inputId = inputDeviceId?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
+      val outputId = outputDeviceId?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
+      com.sherpaonnx.audio.session.PaAudioSessionCoordinator.setRoutePreference(inputId, outputId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("AUDIO_SESSION_ROUTE_ERROR", e.message, e)
+    }
+  }
+
+  override fun clearPipelineAudioRoutePreference(promise: Promise) {
+    try {
+      com.sherpaonnx.audio.session.PaAudioSessionCoordinator.clearRoutePreference()
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("AUDIO_SESSION_ROUTE_ERROR", e.message, e)
+    }
+  }
+
+  override fun getPipelineAudioSessionState(promise: Promise) {
+    try {
+      val snapshot = com.sherpaonnx.audio.session.PaAudioSessionCoordinator.stateSnapshot()
+      val map = Arguments.createMap()
+      map.putBoolean("active", snapshot["active"] as? Boolean ?: false)
+      map.putString("profile", snapshot["profile"] as? String ?: "inactive")
+      map.putInt("activeMicOwners", snapshot["activeMicOwners"] as? Int ?: 0)
+      map.putInt("activePcmOwners", snapshot["activePcmOwners"] as? Int ?: 0)
+      val prefInput = snapshot["preferredInputDeviceId"] as? String
+      if (prefInput != null) map.putString("preferredInputDeviceId", prefInput) else map.putNull("preferredInputDeviceId")
+      val prefOutput = snapshot["preferredOutputDeviceId"] as? String
+      if (prefOutput != null) map.putString("preferredOutputDeviceId", prefOutput) else map.putNull("preferredOutputDeviceId")
+      val curInput = snapshot["currentInputDeviceId"] as? String
+      if (curInput != null) map.putString("currentInputDeviceId", curInput) else map.putNull("currentInputDeviceId")
+      val curOutput = snapshot["currentOutputDeviceId"] as? String
+      if (curOutput != null) map.putString("currentOutputDeviceId", curOutput) else map.putNull("currentOutputDeviceId")
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("AUDIO_SESSION_STATE_ERROR", e.message, e)
+    }
+  }
 
   /**
    * QNN support (AccelerationSupport): providerCompiled, hasAccelerator (native HTP init), canInit (session test).
@@ -1667,16 +1724,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         )
       }
 
-      val preferredInputDeviceId = options
-        ?.takeIf { it.hasKey("inputDeviceId") && !it.isNull("inputDeviceId") }
-        ?.getString("inputDeviceId")
-        ?.trim()
-        ?.toIntOrNull()
-
       val sink = com.sherpaonnx.audio.pipeline.MicToLiveBufferSink(
         context = reactApplicationContext,
         liveEntry = liveEntry,
-        preferredInputDeviceId = preferredInputDeviceId,
         onError = { msg ->
           val eventEmitter = reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -2294,10 +2344,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     playerId: String,
     audioBufferId: String,
     volume: Double,
-    options: ReadableMap?,
     promise: Promise
   ) {
-    pcmPlayerService.create(playerId, audioBufferId, volume, options, promise)
+    pcmPlayerService.create(playerId, audioBufferId, volume, promise)
   }
 
   override fun listAvailableOutputDevices(promise: Promise) {

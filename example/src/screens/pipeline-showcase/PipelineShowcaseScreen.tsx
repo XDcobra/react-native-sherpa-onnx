@@ -38,7 +38,6 @@ import {
   finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
   ingestFileToLiveAudioBuffer,
-  listAvailableInputDevices,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
@@ -54,12 +53,13 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
-  createPcmPlayer,
+  listAvailableInputDevices,
   listAvailableOutputDevices,
-  type PcmPlayer,
-} from 'react-native-sherpa-onnx/pcm';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+  saveAudioAsFile,
+  setPipelineAudioRoutePreference,
+} from 'react-native-sherpa-onnx/audio';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -78,6 +78,7 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -148,12 +149,34 @@ export default function PipelineShowcaseScreen() {
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
   const [inputDevices, setInputDevices] = useState<AudioRouteDevice[]>([]);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
-  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<
+  const [selectedInputDeviceId, setSelectedInputDeviceIdState] = useState<
     string | null
   >(null);
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
+  const [selectedOutputDeviceId, setSelectedOutputDeviceIdState] = useState<
     string | null
   >(null);
+
+  // Push route preference to native coordinator whenever device selection changes
+  const setSelectedInputDeviceId = useCallback(
+    (id: string | null) => {
+      setSelectedInputDeviceIdState(id);
+      setPipelineAudioRoutePreference({
+        inputDeviceId: id,
+        outputDeviceId: selectedOutputDeviceId,
+      }).catch(() => {});
+    },
+    [selectedOutputDeviceId]
+  );
+  const setSelectedOutputDeviceId = useCallback(
+    (id: string | null) => {
+      setSelectedOutputDeviceIdState(id);
+      setPipelineAudioRoutePreference({
+        inputDeviceId: selectedInputDeviceId,
+        outputDeviceId: id,
+      }).catch(() => {});
+    },
+    [selectedInputDeviceId]
+  );
 
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -292,12 +315,23 @@ export default function PipelineShowcaseScreen() {
 
     setInputDevices(nextInputDevices);
     setOutputDevices(nextOutputDevices);
-    setSelectedInputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextInputDevices)
-    );
-    setSelectedOutputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextOutputDevices)
-    );
+
+    let newInputId: string | null = null;
+    let newOutputId: string | null = null;
+    setSelectedInputDeviceIdState((prev) => {
+      newInputId = keepValidDeviceSelection(prev, nextInputDevices);
+      return newInputId;
+    });
+    setSelectedOutputDeviceIdState((prev) => {
+      newOutputId = keepValidDeviceSelection(prev, nextOutputDevices);
+      return newOutputId;
+    });
+
+    // Push validated selections to the native coordinator
+    setPipelineAudioRoutePreference({
+      inputDeviceId: newInputId,
+      outputDeviceId: newOutputId,
+    }).catch(() => {});
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -755,7 +789,6 @@ export default function PipelineShowcaseScreen() {
       outputAudioBufferRef.current = outputLiveAudio;
 
       const player = await createPcmPlayer(outputLiveAudio, {
-        outputDeviceId: selectedOutputDeviceId ?? undefined,
         onEnded: () => {
           setStatusText((prev) => {
             if (prev.includes('Finalize complete')) {
@@ -801,7 +834,6 @@ export default function PipelineShowcaseScreen() {
       if (sourceMode === 'mic') {
         await startMicToLiveAudioBuffer(inputLiveAudio, {
           emitToJs: false,
-          inputDeviceId: selectedInputDeviceId ?? undefined,
         });
         setStatusText(
           'Realtime loop is running. Headset is strongly recommended to avoid acoustic feedback.'
@@ -862,8 +894,6 @@ export default function PipelineShowcaseScreen() {
     resolveTtsModelPath,
     selectedSttModel,
     selectedTtsModel,
-    selectedInputDeviceId,
-    selectedOutputDeviceId,
     sourceMode,
     startPolling,
   ]);
@@ -1419,6 +1449,8 @@ export default function PipelineShowcaseScreen() {
           </View>
         </ScrollView>
       </View>
+
+      <ScreenIntroModal screenId="PipelineShowcase" />
     </SafeAreaView>
   );
 }

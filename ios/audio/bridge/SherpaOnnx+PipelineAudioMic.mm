@@ -11,6 +11,7 @@
 
 #include "../pipeline/PaLiveEntry.h"
 #include "../pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#import "../session/PaAudioSessionCoordinator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -66,7 +67,8 @@ static AudioQueueBufferRef g_pa_mic_aq_buffers[kPaMicAQNumberBuffers];
 static volatile BOOL g_pa_mic_aq_running = NO;
 static NSInteger g_pa_mic_capture_rate = 16000;
 
-static void paMicStopQueue(void) {
+// Exposed for module teardown (see SherpaOnnx.mm invalidate).
+void paMicStopQueue(void) {
   if (g_pa_mic_audio_queue == NULL) return;
   g_pa_mic_aq_running = NO;
   AudioQueueStop(g_pa_mic_audio_queue, true);
@@ -165,45 +167,11 @@ static void paMicAQInputCallback(
       live->configureAppendEvents(emitToJs, live->appendEventMinIntervalMs);
     }
 
-    NSError *error = nil;
-    AVAudioSession *session = [AVAudioSession sharedInstance];
-    if (![session setCategory:AVAudioSessionCategoryPlayAndRecord
-                         mode:AVAudioSessionModeDefault
-                      options:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth
-                        error:&error]) {
-      reject(kPAMicErrCaptureError, error.localizedDescription, error);
-      return;
-    }
-    if (![session setActive:YES withOptions:0 error:&error]) {
-      reject(kPAMicErrCaptureError, error.localizedDescription, error);
-      return;
-    }
-
-    NSString *requestedInputDeviceId = [options[@"inputDeviceId"] isKindOfClass:[NSString class]]
-      ? options[@"inputDeviceId"]
-      : nil;
-    if (requestedInputDeviceId != nil && requestedInputDeviceId.length > 0) {
-      NSArray<AVAudioSessionPortDescription *> *availableInputs = session.availableInputs ?: @[];
-      AVAudioSessionPortDescription *preferredInput = nil;
-      for (AVAudioSessionPortDescription *input in availableInputs) {
-        if ([input.UID isEqualToString:requestedInputDeviceId]) {
-          preferredInput = input;
-          break;
-        }
-      }
-
-      if (preferredInput != nil) {
-        NSError *preferredErr = nil;
-        BOOL applied = [session setPreferredInput:preferredInput error:&preferredErr];
-        if (!applied && preferredErr != nil) {
-          RCTLogWarn(@"startMicToLiveAudioBuffer: preferred input route request failed for %@ (%@)",
-                     requestedInputDeviceId,
-                     preferredErr.localizedDescription);
-        }
-      } else {
-        RCTLogWarn(@"startMicToLiveAudioBuffer: inputDeviceId %@ not found in availableInputs", requestedInputDeviceId);
-      }
-    }
+    // Register mic intent with coordinator (handles AVAudioSession category/activation)
+    PaAudioSessionIntent *micIntent = [PaAudioSessionIntent intentWithOwnerId:@"mic"
+                                                                   needsInput:YES
+                                                                  needsOutput:NO];
+    [[PaAudioSessionCoordinator shared] acquireIntent:micIntent];
 
     AudioStreamBasicDescription fmt;
     memset(&fmt, 0, sizeof(fmt));
@@ -225,7 +193,7 @@ static void paMicAQInputCallback(
       g_pa_mic_audio_queue = NULL;
     }
     if (status != noErr || g_pa_mic_audio_queue == NULL) {
-      [session setActive:NO withOptions:0 error:nil];
+      [[PaAudioSessionCoordinator shared] releaseIntent:@"mic"];
       reject(kPAMicErrCaptureError, @"AudioQueueNewInput failed", nil);
       return;
     }
@@ -236,7 +204,7 @@ static void paMicAQInputCallback(
       status = AudioQueueAllocateBuffer(g_pa_mic_audio_queue, bufferByteSize, &g_pa_mic_aq_buffers[i]);
       if (status != noErr) {
         paMicStopQueue();
-        [session setActive:NO withOptions:0 error:nil];
+        [[PaAudioSessionCoordinator shared] releaseIntent:@"mic"];
         reject(kPAMicErrCaptureError, @"AudioQueueAllocateBuffer failed", nil);
         return;
       }
@@ -247,7 +215,7 @@ static void paMicAQInputCallback(
     status = AudioQueueStart(g_pa_mic_audio_queue, NULL);
     if (status != noErr) {
       paMicStopQueue();
-      [session setActive:NO withOptions:0 error:nil];
+      [[PaAudioSessionCoordinator shared] releaseIntent:@"mic"];
       reject(kPAMicErrCaptureError, @"AudioQueueStart failed", nil);
       return;
     }
@@ -262,9 +230,7 @@ static void paMicAQInputCallback(
                           reject:(RCTPromiseRejectBlock)reject
 {
   paMicStopQueue();
-  [[AVAudioSession sharedInstance] setActive:NO
-                                  withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                                        error:nil];
+  [[PaAudioSessionCoordinator shared] releaseIntent:@"mic"];
   resolve(nil);
 }
 

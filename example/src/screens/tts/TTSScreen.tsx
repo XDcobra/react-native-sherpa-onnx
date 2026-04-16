@@ -75,16 +75,19 @@ import {
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import {
+  saveAudioAsFile,
+  setPipelineAudioRoutePreference,
+} from 'react-native-sherpa-onnx/audio';
 import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
 import {
   fetchOutputDevices,
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
-
 /**
  * Generated audio results from either batch or streaming TTS.
  * Both now produce an OfflineAudioBuffer (buffer-to-buffer pipeline).
@@ -1331,8 +1334,10 @@ export default function TTSScreen() {
           }
         }
 
+        await setPipelineAudioRoutePreference({
+          outputDeviceId: selectedOutputDeviceId ?? null,
+        }).catch(() => {});
         const player = await createPcmPlayer(bufferId, {
-          outputDeviceId: selectedOutputDeviceId ?? undefined,
           onEnded: () => {
             pcmPlayerRef.current = null;
             setPlayingBufferId(null);
@@ -2062,6 +2067,7 @@ export default function TTSScreen() {
           </View>
         </ScrollView>
       </View>
+      <ScreenIntroModal screenId="TTS" />
     </SafeAreaView>
   );
 }

@@ -47,6 +47,7 @@ import {
   toDetectSource,
 } from '../../modelConfig';
 import { styles } from './GenerateTimestampScreen.styles';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -821,6 +822,8 @@ export default function GenerateTimestampScreen() {
           </View>
         </ScrollView>
       </View>
+
+      <ScreenIntroModal screenId="GenerateTimestamp" />
 
       <Modal
         transparent

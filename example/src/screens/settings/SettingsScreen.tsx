@@ -16,6 +16,7 @@ import {
   getCoreMlSupport,
   getAvailableProviders,
 } from 'react-native-sherpa-onnx';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const appPkg = (() => {
   try {
@@ -368,6 +369,7 @@ export default function SettingsScreen() {
             </Text>
           )}
         </View>
+        <ScreenIntroModal screenId="Settings" />
       </ScrollView>
     </SafeAreaView>
   );

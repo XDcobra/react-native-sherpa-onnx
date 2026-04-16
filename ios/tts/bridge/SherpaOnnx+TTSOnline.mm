@@ -15,9 +15,8 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)so_createPcmPlayer:(NSString *)playerId
           audioBufferId:(NSString *)audioBufferId
               volume:(double)volume
-                  options:(NSDictionary *)options
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject;
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject;
 - (void)so_pausePcmPlayer:(NSString *)playerId
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject;
@@ -235,16 +234,14 @@ static std::mutex g_tts_pipeline_mutex;
 
 - (void)createPcmPlayer:(NSString *)playerId
          audioBufferId:(NSString *)audioBufferId
-             volume:(double)volume
-            options:(NSDictionary *)options
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject {
+              volume:(double)volume
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject {
   [self so_createPcmPlayer:playerId
-         audioBufferId:audioBufferId
-             volume:volume
-                  options:options
-                   resolve:resolve
-                    reject:reject];
+          audioBufferId:audioBufferId
+              volume:volume
+                    resolve:resolve
+                     reject:reject];
 }
 
 - (void)listAvailableOutputDevices:(RCTPromiseResolveBlock)resolve

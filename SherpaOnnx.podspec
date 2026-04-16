@@ -56,6 +56,11 @@ Pod::Spec.new do |s|
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
   end
+  # Also mark shared C++ headers from android/ as private to prevent Clang module issues.
+  private_headers += [
+    "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
+  ]
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"

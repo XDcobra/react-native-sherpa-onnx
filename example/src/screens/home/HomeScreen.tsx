@@ -11,6 +11,7 @@ import type { ComponentProps } from 'react';
 import { StatusBar } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, Feature } from '../../types/navigation';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const FEATURES: Feature[] = [
   {
@@ -162,6 +163,7 @@ export default function HomeScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         />
       </View>
+      <ScreenIntroModal screenId="Home" />
     </SafeAreaView>
   );
 }
