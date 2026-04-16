@@ -48,37 +48,34 @@
     return;
   }
 
-  std::shared_ptr<PaOfflineEntry> audioInEntry;
-  std::shared_ptr<PaOfflineEntry> audioOutEntry;
-  {
-    std::lock_guard<std::mutex> paLock(g_pa_mutex);
-    auto inIt = g_pa_offline.find(audioInId);
-    if (inIt == g_pa_offline.end()) {
-      reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
-             [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInBufferId],
-             nil);
-      return;
-    }
-    audioInEntry = inIt->second;
-
-    auto outIt = g_pa_offline.find(audioOutId);
-    if (outIt == g_pa_offline.end()) {
-      reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
-             [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioOutBufferId],
-             nil);
-      return;
-    }
-    audioOutEntry = outIt->second;
+  int inSampleRate = 0;
+  int inNumSamples = 0;
+  std::string errCode;
+  std::string errMsg;
+  if (!pa_get_offline_metadata(audioInId, &inSampleRate, &inNumSamples, &errCode, &errMsg)) {
+    reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInBufferId],
+           nil);
+    return;
   }
 
-  if (audioInEntry->sampleRate <= 0 || audioInEntry->numSamples() <= 0) {
+  int outSampleRate = 0;
+  int outNumSamples = 0;
+  if (!pa_get_offline_metadata(audioOutId, &outSampleRate, &outNumSamples, &errCode, &errMsg)) {
+    reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioOutBufferId],
+           nil);
+    return;
+  }
+
+  if (inSampleRate <= 0 || inNumSamples <= 0) {
     reject(@"ENHANCEMENT_BUFFER_EMPTY",
            [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
            nil);
     return;
   }
 
-  if (audioOutEntry->isMmapBacked() || !audioOutEntry->samples.empty()) {
+  if (outNumSamples != 0) {
     reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
            [NSString stringWithFormat:@"Output offline audio buffer must be empty: %@", audioOutBufferId],
            nil);
@@ -86,7 +83,14 @@
   }
 
   @try {
-    std::vector<float> inputSamples = audioInEntry->readAllSamples();
+    std::vector<float> inputSamples;
+    int inputSr = 0;
+    if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+      reject(@"ENHANCEMENT_BUFFER_EMPTY",
+             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
+             nil);
+      return;
+    }
 
     sherpaonnx::EnhancedAudioResult enhancedResult;
     {
@@ -96,18 +100,18 @@
         reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
         return;
       }
-      enhancedResult = it->second->wrapper->runSamples(inputSamples, audioInEntry->sampleRate);
+      enhancedResult = it->second->wrapper->runSamples(inputSamples, inputSr);
     }
 
     {
-      std::lock_guard<std::mutex> paLock(g_pa_mutex);
-      if (!audioOutEntry->samples.empty()) {
+      std::string adoptErrCode;
+      std::string adoptErrMsg;
+      if (!pa_adopt_offline_samples_if_empty(audioOutId, std::move(enhancedResult.samples), &adoptErrCode, &adoptErrMsg)) {
         reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
                [NSString stringWithFormat:@"Output buffer was populated concurrently: %@", audioOutBufferId],
                nil);
         return;
       }
-      audioOutEntry->samples = std::move(enhancedResult.samples);
     }
 
     // Upgrade output to mmap if it exceeds the threshold

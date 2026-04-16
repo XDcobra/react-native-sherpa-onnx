@@ -247,4 +247,23 @@ bool txt_live_commit_segment(
 	NSDictionary *meta = nil,
 	std::string *error = nullptr
 );
+
+// Read an offline text buffer content by id.
+bool txt_read_offline_text(
+	const std::string &bufferId,
+	std::string *text,
+	std::string *error = nullptr
+);
+
+bool txt_populate_offline_if_empty(
+	const std::string &bufferId,
+	const std::string &text,
+	const std::vector<std::string> &tokens,
+	const std::vector<float> &timestamps,
+	const std::vector<float> &durations,
+	const std::string &lang,
+	const std::string &emotion,
+	const std::string &event,
+	std::string *error = nullptr
+);
 #endif

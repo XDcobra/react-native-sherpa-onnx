@@ -43,7 +43,7 @@ createParentDirectories:(BOOL)createParentDirectories
       return;
     }
 
-    __weak typeof(self) weakSelf = self;
+    SherpaOnnx * __weak weakSelf = self;
     void (^progressBlock)(int64_t, int64_t, int) = ^(int64_t bytesTransferred, int64_t totalBytes, int percent) {
       [weakSelf emitFileIOProgress:operationId bytesTransferred:bytesTransferred totalBytes:totalBytes percent:percent];
     };

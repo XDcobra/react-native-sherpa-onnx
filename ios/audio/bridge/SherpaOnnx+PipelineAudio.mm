@@ -571,6 +571,50 @@ bool pa_append_samples_to_live(
   return true;
 }
 
+bool pa_get_offline_metadata(
+  const std::string &bufferId,
+  int *sampleRate,
+  int *numSamples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_offline.find(bufferId);
+  if (it == g_pa_offline.end() || !it->second) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  if (sampleRate) *sampleRate = it->second->sampleRate;
+  if (numSamples) *numSamples = it->second->numSamples();
+  return true;
+}
+
+bool pa_adopt_offline_samples_if_empty(
+  const std::string &bufferId,
+  std::vector<float> &&samples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_offline.find(bufferId);
+  if (it == g_pa_offline.end() || !it->second) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+
+  auto entry = it->second;
+  if (entry->numSamples() != 0) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_EMPTY]";
+    if (errorMessage) *errorMessage = "Offline buffer already populated";
+    return false;
+  }
+
+  entry->samples = std::move(samples);
+  return true;
+}
+
 static std::string pa_generateId(const char *prefix) {
   return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
@@ -673,7 +717,7 @@ static std::string pa_generateId(const char *prefix) {
 
       sherpa::AudioDecodeResult result;
       try {
-        result = sherpa::decodeFile(path, config, onChunk, onProgress, nullptr, *cancelFlag);
+        result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, nullptr, *cancelFlag);
       } catch (const std::runtime_error &e) {
         [readHandle cleanup];
         if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
@@ -1425,7 +1469,7 @@ static std::string pa_encodeViaDecodeFile(
         });
       };
 
-      auto result = sherpa::decodeFile(path, config, onChunk, onProgress, onStreamInfo, *cancelFlag);
+      auto result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, onStreamInfo, *cancelFlag);
       srcSampleRate = result.sourceSampleRate;
       srcChannels = result.sourceChannels;
 

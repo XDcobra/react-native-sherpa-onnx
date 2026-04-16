@@ -156,6 +156,52 @@ bool txt_live_commit_segment(
     }
 }
 
+bool txt_read_offline_text(
+    const std::string &bufferId,
+    std::string *text,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (!it->second->populated || it->second->text.empty()) {
+        if (error) *error = "Text buffer is empty or not populated";
+        return false;
+    }
+    if (text) {
+        *text = it->second->text;
+    }
+    return true;
+}
+
+bool txt_populate_offline_if_empty(
+    const std::string &bufferId,
+    const std::string &text,
+    const std::vector<std::string> &tokens,
+    const std::vector<float> &timestamps,
+    const std::vector<float> &durations,
+    const std::string &lang,
+    const std::string &emotion,
+    const std::string &event,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (it->second->populated) {
+        if (error) *error = "Text buffer already populated";
+        return false;
+    }
+    it->second->populate(text, tokens, timestamps, durations, lang, emotion, event);
+    return true;
+}
+
 static std::string txt_generateId(const char *prefix) {
     return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
