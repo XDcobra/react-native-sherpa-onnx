@@ -1,4 +1,5 @@
 #import "../../SherpaOnnx.h"
+#import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../sherpa-onnx-enhancement-wrapper.h"
@@ -11,12 +12,22 @@
 
 @implementation SherpaOnnx (Enhancement)
 
+static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
+static NSString *const kOfflineEnhancementOomMessage =
+    @"Not enough memory for offline enhancement. Please use a streaming mode for large inputs.";
+
 - (void)enhanceOfflineAudioBuffers:(NSString *)instanceId
                    audioInBufferId:(NSString *)audioInBufferId
                   audioOutBufferId:(NSString *)audioOutBufferId
                            resolve:(RCTPromiseResolveBlock)resolve
                             reject:(RCTPromiseRejectBlock)reject
 {
+  RCTLogInfo(
+    @"[Enhancement] enhanceOfflineAudioBuffers called instanceId=%@ audioInBufferId=%@ audioOutBufferId=%@",
+    instanceId,
+    audioInBufferId,
+    audioOutBufferId
+  );
   if (instanceId == nil || [instanceId length] == 0) {
     reject(@"ENHANCEMENT_ERROR", @"instanceId is required", nil);
     return;
@@ -69,6 +80,12 @@
   }
 
   if (inSampleRate <= 0 || inNumSamples <= 0) {
+    RCTLogInfo(
+      @"[Enhancement] input buffer invalid: bufferId=%@ sampleRate=%d numSamples=%d",
+      audioInBufferId,
+      inSampleRate,
+      inNumSamples
+    );
     reject(@"ENHANCEMENT_BUFFER_EMPTY",
            [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
            nil);
@@ -76,6 +93,12 @@
   }
 
   if (outNumSamples != 0) {
+    RCTLogInfo(
+      @"[Enhancement] output buffer not empty: bufferId=%@ outNumSamples=%d outSampleRate=%d",
+      audioOutBufferId,
+      outNumSamples,
+      outSampleRate
+    );
     reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
            [NSString stringWithFormat:@"Output offline audio buffer must be empty: %@", audioOutBufferId],
            nil);
@@ -86,11 +109,27 @@
     std::vector<float> inputSamples;
     int inputSr = 0;
     if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+      RCTLogInfo(
+        @"[Enhancement] read offline samples failed or empty: bufferId=%@ inputSr=%d inputSamplesSize=%zu",
+        audioInBufferId,
+        inputSr,
+        inputSamples.size()
+      );
       reject(@"ENHANCEMENT_BUFFER_EMPTY",
              [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
              nil);
       return;
     }
+
+    RCTLogInfo(
+      @"[Enhancement] input samples materialized: bufferId=%@ inputSr=%d inputSamplesSize=%zu (metaSr=%d metaNumSamples=%d) outBufferId=%@",
+      audioInBufferId,
+      inputSr,
+      inputSamples.size(),
+      inSampleRate,
+      inNumSamples,
+      audioOutBufferId
+    );
 
     sherpaonnx::EnhancedAudioResult enhancedResult;
     {
@@ -119,8 +158,14 @@
 
     resolve(nil);
   } @catch (NSException *exception) {
+    NSString *reason = exception.reason ?: @"";
+    NSString *reasonLower = [reason lowercaseString];
+    if ([reasonLower containsString:@"memory"] || [reasonLower containsString:@"alloc"]) {
+      reject(kOfflineOomCode, kOfflineEnhancementOomMessage, nil);
+      return;
+    }
     reject(@"ENHANCEMENT_ERROR",
-           [NSString stringWithFormat:@"Enhancement failed: %@", exception.reason],
+           [NSString stringWithFormat:@"Enhancement failed: %@", reason],
            nil);
   }
 }

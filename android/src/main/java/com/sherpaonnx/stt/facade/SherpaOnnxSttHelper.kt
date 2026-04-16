@@ -10,6 +10,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.stt.core.OfflineSttRecognizerConfigFactory
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
@@ -272,6 +273,13 @@ internal class SherpaOnnxSttHelper(
       } finally {
         stream.release()
       }
+    } catch (e: OutOfMemoryError) {
+      Log.e(logTag, "transcribe OOM", e)
+      promise.reject(
+        SttErrorCodes.OFFLINE_OOM,
+        OfflineOomError.message("speech-to-text"),
+        e
+      )
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to transcribe from audio buffer"
       Log.e(logTag, "transcribe error: $message", e)

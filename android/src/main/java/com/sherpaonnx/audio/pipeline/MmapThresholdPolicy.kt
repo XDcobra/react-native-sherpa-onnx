@@ -130,11 +130,7 @@ internal object MmapThresholdPolicy {
     val s = ensureSnapshot()
     synchronized(lock) {
       if (logged) return
-      Log.i(
-        TAG,
-        "mmap threshold policy: platform=android ramClass=${s.ramClass} fileOrigin=${s.fileOriginThresholdBytes} heapOrigin=${s.heapOriginThresholdBytes}"
-      )
-      logged = true
+            logged = true
     }
   }
 }

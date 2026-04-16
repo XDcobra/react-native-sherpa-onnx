@@ -342,6 +342,7 @@ Typical `SttErrorCode` values from the STT layer (exact strings match native):
 | `STT_BUFFER_NOT_FOUND` | Invalid or released **audio** buffer id |
 | `STT_BUFFER_KIND_MISMATCH` | Wrong buffer kind passed to transcribe |
 | `STT_BUFFER_EMPTY` | Empty or unusable audio buffer |
+| `OFFLINE_OOM` | Not enough memory for offline processing. Use streaming STT for large audio inputs. |
 | `TEXT_BUFFER_NOT_FOUND` | Invalid or released **text** buffer id |
 | `TEXT_ALREADY_POPULATED` | `textOut` already filled; use a new empty buffer |
 

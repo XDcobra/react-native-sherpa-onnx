@@ -352,6 +352,7 @@ Typical **promise rejection `code`** strings from the native layer (offline + st
 | `ENHANCEMENT_BUFFER_KIND_MISMATCH` | Buffer kind does not match expected offline/streaming input contract. |
 | `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Offline output buffer must be empty before `enhance(...)`. |
+| `OFFLINE_OOM` | Not enough memory for offline enhancement paths. Use streaming enhancement for large audio inputs. |
 | `ONLINE_ENHANCEMENT_INIT_ERROR` | Streaming engine initialization failed (missing ids, detection/init failure, invalid setup). |
 | `ONLINE_ENHANCEMENT_ERROR` | Streaming runtime failure (e.g. missing online instance, unload conflict with active pipeline). |
 | `PIPELINE_NOT_FOUND` | Pipeline id is not registered (already stopped or never started). |

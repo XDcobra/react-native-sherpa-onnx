@@ -18,6 +18,10 @@
 
 @implementation SherpaOnnx (TTSBatch)
 
+static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
+static NSString *const kOfflineTtsOomMessage =
+    @"Not enough memory for offline text-to-speech. Please use a streaming mode for large inputs.";
+
 - (void)so_synthesizeTts:(NSString *)instanceId
          textInBufferId:(NSString *)textInBufferId
         audioOutBufferId:(NSString *)audioOutBufferId
@@ -178,6 +182,12 @@
 
         resolve([NSNull null]);
     } @catch (NSException *exception) {
+        NSString *reason = exception.reason ?: @"";
+        NSString *reasonLower = [reason lowercaseString];
+        if ([reasonLower containsString:@"memory"] || [reasonLower containsString:@"alloc"]) {
+            reject(kOfflineOomCode, kOfflineTtsOomMessage, nil);
+            return;
+        }
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS synthesis: %@", exception.reason];
         RCTLogError(@"%@", errorMsg);
         reject(@"TTS_GENERATE_ERROR", errorMsg, nil);

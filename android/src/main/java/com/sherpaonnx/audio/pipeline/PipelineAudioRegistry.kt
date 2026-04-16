@@ -60,14 +60,29 @@ object PipelineAudioRegistry {
     val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
     val dir = cacheDir
 
-    val entry = if (rawSize >= threshold && dir != null) {
-      OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
-        ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    val selectedForMmap = rawSize >= threshold && dir != null
+    val entry = if (selectedForMmap) {
+      val mmapEntry = OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
+      mmapEntry ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     } else {
       OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     }
     offlineEntries[bufferId] = entry
     return entry
+  }
+
+  /**
+   * Replace an existing offline entry (typically an empty output target) with a new entry.
+   * Used when we want to upgrade an output buffer to file-backed mmap without needing
+   * a full heap materialization of the final samples.
+   */
+  fun replaceOfflineEntry(bufferId: String, entry: OfflineEntry) {
+    offlineEntries[bufferId]?.let { old ->
+      try {
+        old.releaseResources()
+      } catch (_: Exception) {}
+    }
+    offlineEntries[bufferId] = entry
   }
 
   /**
@@ -200,19 +215,23 @@ object PipelineAudioRegistry {
       val rawSize = f32File.length()
       val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.FILE_ORIGIN)
 
-      val entry = if (rawSize >= threshold) {
-        OfflineEntry.createMmapFromFile(
+      val shouldMmap = rawSize >= threshold
+      val entry = if (shouldMmap) {
+        val mmapEntry = OfflineEntry.createMmapFromFile(
           bufferId,
           sampleRate,
           channelCount,
           numSamples,
           f32File.absolutePath
-        ) ?: run {
-          f32File.delete()
+        )
+        if (mmapEntry == null) {
+                    f32File.delete()
           null
+        } else {
+                    mmapEntry
         }
       } else {
-        val samples = FloatArray(numSamples)
+                val samples = FloatArray(numSamples)
         java.io.RandomAccessFile(f32File, "r").use { raf ->
           val bytes = ByteArray(numSamples * 4)
           raf.readFully(bytes)
@@ -250,9 +269,10 @@ object PipelineAudioRegistry {
     val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
     val dir = cacheDir
 
-    val entry = if (rawSize >= threshold && dir != null) {
-      OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
-        ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    val selectedForMmap = rawSize >= threshold && dir != null
+    val entry = if (selectedForMmap) {
+      val mmapEntry = OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
+      mmapEntry ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     } else {
       OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     }
@@ -281,13 +301,15 @@ object PipelineAudioRegistry {
     if (entry !is OfflineEntry.InMemory) return
     val rawSize = entry.numSamples.toLong() * 4
     val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
-    if (rawSize < threshold) return
+    if (rawSize < threshold) {
+            return
+    }
     val dir = cacheDir ?: return
-
+    
     val mmapEntry = OfflineEntry.createMmapFromSamples(
       entry.bufferId, entry.sampleRate, entry.channelCount, entry.samples, dir
     ) ?: return
-
+    
     // Atomically replace in registry
     offlineEntries[bufferId] = mmapEntry
     entry.samples = FloatArray(0) // Release heap memory from old InMemory

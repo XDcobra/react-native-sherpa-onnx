@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -77,6 +78,9 @@ static NSString *const kAlignmentErrTextBufferEmpty = @"ALIGNMENT_TEXT_BUFFER_EM
 static NSString *const kAlignmentErrAudioBufferNotFound = @"ALIGNMENT_AUDIO_BUFFER_NOT_FOUND";
 static NSString *const kAlignmentErrAudioBufferKindMismatch = @"ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH";
 static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_EMPTY";
+static NSString *const kAlignmentErrOfflineOom = @"OFFLINE_OOM";
+static NSString *const kAlignmentOfflineOomMessage =
+    @"Not enough memory for offline alignment. Please use smaller chunks or a streaming-friendly pipeline.";
 
 }  // namespace
 
@@ -239,6 +243,8 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
       }
 
       resolve(sherpaonnx::alignment::bridge::AlignmentResultToNSDictionary(result));
+    } catch (const std::bad_alloc &) {
+      reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
     } catch (const std::exception &e) {
       NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
       reject(kAlignmentErrCode, errorMsg, nil);
