@@ -1,5 +1,6 @@
 package com.sherpaonnx.audio.pipeline
 
+import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
@@ -30,8 +31,9 @@ object PipelineAudioRegistry {
   /**
    * Run startup orphan sweep. Call once from module initialize().
    */
-  fun initializeWithCacheDir(dir: File) {
+  fun initializeWithCacheDir(context: Context, dir: File) {
     cacheDir = dir
+    MmapThresholdPolicy.initialize(context.applicationContext)
     OfflineEntry.sweepOrphanedTempFiles(dir)
   }
 
@@ -39,8 +41,8 @@ object PipelineAudioRegistry {
 
   /**
    * Create an offline buffer from Float32 PCM samples (in-memory FloatArray).
-   * Uses mmap for large buffers (≥ 10 MB raw PCM), in-memory for small ones.
-   * 
+   * Uses mmap for large buffers, in-memory for small ones.
+   *
    * WARNING: For large FloatArrays, this may cause OOM. Prefer file-based APIs
    * (decodeFileToOfflineBuffer, createOfflineFromLive with spool files) for big data.
    */
@@ -55,9 +57,10 @@ object PipelineAudioRegistry {
 
     val bufferId = "off_${UUID.randomUUID()}"
     val rawSize = samples.size.toLong() * 4
+    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
     val dir = cacheDir
 
-    val entry = if (rawSize >= PA_FILE_BACKED_THRESHOLD_BYTES && dir != null) {
+    val entry = if (rawSize >= threshold && dir != null) {
       OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
         ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     } else {
@@ -123,7 +126,7 @@ object PipelineAudioRegistry {
    *
    * @param liveBufferId ID of the live buffer.
    * @param mode How to create the offline buffer:
-   *   - "fullIfSpooled": If live has a spool file, read and convert to mmap if large.
+    *   - "fullIfSpooled": If live has a spool file, use file-origin threshold policy.
    *     Otherwise, snapshot the ring.
    *   - "windowSnapshot": Always snapshot the current ring window (in-memory copy).
    */
@@ -194,13 +197,38 @@ object PipelineAudioRegistry {
         return null
       }
 
-      OfflineEntry.createMmapFromFile(
-        bufferId, sampleRate, channelCount, numSamples,
-        f32File.absolutePath
-      ) ?: run {
+      val rawSize = f32File.length()
+      val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.FILE_ORIGIN)
+
+      val entry = if (rawSize >= threshold) {
+        OfflineEntry.createMmapFromFile(
+          bufferId,
+          sampleRate,
+          channelCount,
+          numSamples,
+          f32File.absolutePath
+        ) ?: run {
+          f32File.delete()
+          null
+        }
+      } else {
+        val samples = FloatArray(numSamples)
+        java.io.RandomAccessFile(f32File, "r").use { raf ->
+          val bytes = ByteArray(numSamples * 4)
+          raf.readFully(bytes)
+          val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+          for (i in 0 until numSamples) {
+            samples[i] = bb.float
+          }
+        }
         f32File.delete()
-        null
+        OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
       }
+
+      if (entry != null) {
+        offlineEntries[bufferId] = entry
+      }
+      entry
     } catch (e: Exception) {
       Log.w(TAG, "createOfflineFromF32WavSpoolFile failed: ${e.message}")
       f32File.delete()
@@ -219,9 +247,10 @@ object PipelineAudioRegistry {
     samples: FloatArray,
   ): OfflineEntry {
     val rawSize = samples.size.toLong() * 4
+    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
     val dir = cacheDir
 
-    val entry = if (rawSize >= PA_FILE_BACKED_THRESHOLD_BYTES && dir != null) {
+    val entry = if (rawSize >= threshold && dir != null) {
       OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
         ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     } else {
@@ -251,7 +280,8 @@ object PipelineAudioRegistry {
     val entry = offlineEntries[bufferId] ?: return
     if (entry !is OfflineEntry.InMemory) return
     val rawSize = entry.numSamples.toLong() * 4
-    if (rawSize < PA_FILE_BACKED_THRESHOLD_BYTES) return
+    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
+    if (rawSize < threshold) return
     val dir = cacheDir ?: return
 
     val mmapEntry = OfflineEntry.createMmapFromSamples(

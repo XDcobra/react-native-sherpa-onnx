@@ -144,7 +144,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.initialize()
     tryInstallJsiBindings()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.initialize(reactApplicationContext)
-    PipelineAudioRegistry.initializeWithCacheDir(reactApplicationContext.cacheDir)
+    PipelineAudioRegistry.initializeWithCacheDir(
+      reactApplicationContext,
+      reactApplicationContext.cacheDir
+    )
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -937,7 +940,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
 
           val rawSize = numSamples.toLong() * 4
-          val entry = if (rawSize >= com.sherpaonnx.audio.pipeline.PA_FILE_BACKED_THRESHOLD_BYTES) {
+          val threshold = com.sherpaonnx.audio.pipeline.MmapThresholdPolicy.thresholdBytes(
+            com.sherpaonnx.audio.pipeline.ThresholdPathType.FILE_ORIGIN
+          )
+          val entry = if (rawSize >= threshold) {
             // Large file: mmap the temp .f32 directly (zero heap copy)
             com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromMmapFile(
               tmpF32.absolutePath, numSamples, outputRate, 1
