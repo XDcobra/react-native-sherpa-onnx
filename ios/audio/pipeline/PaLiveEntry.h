@@ -94,7 +94,6 @@ struct PaLiveEntry {
   // Spool
   bool hasActiveSpool = false;
   std::string spoolPath;
-  bool spoolIsFloat = false;
   std::ofstream spoolFile;
   int64_t spoolSamplesWritten = 0;
   bool isTemporarySpool = false;
@@ -158,7 +157,7 @@ struct PaLiveEntry {
   }
 
   PaLiveEntry(const std::string &bid, int sr, int ch, double windowSec,
-              const std::string &spoolPathArg, bool spoolFloat,
+              const std::string &spoolPathArg,
               bool emitAppendedEvents,
               int appendEventMinIntervalMsArg,
               std::function<void(const std::string &, int, int64_t)> onFramesAppendedArg)
@@ -172,12 +171,9 @@ struct PaLiveEntry {
 
     if (!spoolPathArg.empty()) {
       spoolPath = spoolPathArg;
-      spoolIsFloat = spoolFloat;
       spoolFile.open(spoolPath, std::ios::binary | std::ios::trunc);
       if (spoolFile) {
-        int bytesPerSample = spoolFloat ? 4 : 2;
-        int audioFormat = spoolFloat ? 3 : 1;
-        pa_writeWavHeaderToStream(spoolFile, sr, bytesPerSample * 8, audioFormat, 0);
+        pa_writeWavHeaderToStream(spoolFile, sr, 32, 3, 0); // always F32
         hasActiveSpool = true;
       } else {
         spoolPath.clear();
@@ -193,12 +189,11 @@ struct PaLiveEntry {
    * @param isFloat  true = WAV FLOAT, false = WAV PCM S16LE.
    * @param temporary  If true, the spool file is deleted on release().
    */
-  void enableSpool(const std::string &path, bool isFloat, bool temporary = false) {
+  void enableSpool(const std::string &path, bool temporary = false) {
     if (state != RECORDING) return;
     if (hasActiveSpool) return;
 
     spoolPath = path;
-    spoolIsFloat = isFloat;
     isTemporarySpool = temporary;
     spoolFile.open(spoolPath, std::ios::binary | std::ios::trunc);
     if (!spoolFile) {
@@ -206,9 +201,7 @@ struct PaLiveEntry {
       isTemporarySpool = false;
       return;
     }
-    int bytesPerSample = isFloat ? 4 : 2;
-    int audioFormat = isFloat ? 3 : 1;
-    pa_writeWavHeaderToStream(spoolFile, sampleRate, bytesPerSample * 8, audioFormat, 0);
+    pa_writeWavHeaderToStream(spoolFile, sampleRate, 32, 3, 0); // always F32
     hasActiveSpool = true;
   }
 
@@ -266,15 +259,7 @@ struct PaLiveEntry {
 
     // Write to spool (outside ring lock)
     if (hasActiveSpool && spoolFile.is_open()) {
-      if (spoolIsFloat) {
-        spoolFile.write(reinterpret_cast<const char*>(toAppend), appendCount * 4);
-      } else {
-        for (size_t i = 0; i < appendCount; i++) {
-          float c = std::max(-1.0f, std::min(1.0f, toAppend[i]));
-          int16_t s = (int16_t)std::max(-32768, std::min(32767, (int)(c * 32767.0f)));
-          spoolFile.write(reinterpret_cast<char*>(&s), 2);
-        }
-      }
+      spoolFile.write(reinterpret_cast<const char*>(toAppend), appendCount * 4);
       spoolSamplesWritten += appendCount;
     }
 
@@ -367,8 +352,7 @@ struct PaLiveEntry {
 
     if (hasActiveSpool && spoolFile.is_open()) {
       spoolFile.flush();
-      int bytesPerSample = spoolIsFloat ? 4 : 2;
-      int64_t dataSize = spoolSamplesWritten * bytesPerSample;
+      int64_t dataSize = spoolSamplesWritten * 4;
 
       spoolFile.seekp(4, std::ios::beg);
       uint32_t riffSize = (uint32_t)(44 + dataSize - 8);

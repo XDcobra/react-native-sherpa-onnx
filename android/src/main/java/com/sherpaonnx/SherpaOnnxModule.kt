@@ -1012,7 +1012,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           "ingest_spool_${java.util.UUID.randomUUID()}.wav"
         ).absolutePath
         liveEntry.enableSpool(
-          com.sherpaonnx.audio.pipeline.PersistenceConfig(tmpSpoolPath, com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE),
+          com.sherpaonnx.audio.pipeline.PersistenceConfig(tmpSpoolPath),
           temporary = true
         )
       } catch (e: Exception) {
@@ -1224,12 +1224,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val persistence = if (options.hasKey("persistencePath")) {
         val path = options.getString("persistencePath") ?: throw IllegalArgumentException("persistencePath must be a string")
-        val formatStr = if (options.hasKey("persistenceFormat")) options.getString("persistenceFormat") else "wav_pcm_s16le"
-        val format = when (formatStr) {
-          "wav_pcm_float" -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_FLOAT
-          else -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE
-        }
-        com.sherpaonnx.audio.pipeline.PersistenceConfig(path, format)
+        com.sherpaonnx.audio.pipeline.PersistenceConfig(path)
       } else null
 
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createLive(

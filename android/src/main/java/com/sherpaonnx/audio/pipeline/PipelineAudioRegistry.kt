@@ -140,14 +140,8 @@ object PipelineAudioRegistry {
       "fullIfSpooled" -> {
         val spoolPath = live.spoolFilePath
         if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
-          val metadata = parseWavHeader(spoolPath)
-          if (metadata != null) {
-            // Stream WAV to F32 temp file, then mmap (avoids OOM on large spool files)
-            createOfflineFromWavSpoolFile(bufferId, spoolPath, metadata)
-              ?: createFromRingSnapshot(bufferId, live)
-          } else {
-            createFromRingSnapshot(bufferId, live)
-          }
+          createOfflineFromF32WavSpoolFile(bufferId, spoolPath, live.sampleRate, live.channelCount)
+            ?: createFromRingSnapshot(bufferId, live)
         } else {
           createFromRingSnapshot(bufferId, live)
         }
@@ -164,42 +158,43 @@ object PipelineAudioRegistry {
   }
 
   /**
-   * Stream a WAV spool file directly to a raw .f32 file, then mmap it.
-   * Avoids loading the entire file into a FloatArray (OOM fix for large spool files).
-   * Returns the OfflineEntry, or null if conversion fails.
+   * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
+   * Returns the OfflineEntry, or null if conversion fails (caller falls back to ring snapshot).
    */
-  private fun createOfflineFromWavSpoolFile(
+  private fun createOfflineFromF32WavSpoolFile(
     bufferId: String,
     spoolPath: String,
-    metadata: FileBackedMetadata
+    sampleRate: Int,
+    channelCount: Int,
   ): OfflineEntry? {
     val dir = cacheDir ?: return null
     val f32File = File(dir, "pa_off_${bufferId}.f32")
 
     return try {
-      // Stream WAV PCM samples directly to .f32 raw file
-      f32File.outputStream().use { fos ->
-        FileBackedReader(spoolPath, metadata).use { reader ->
-          val chunkSize = 8192
-          val chunk = FloatArray(chunkSize)
-          while (true) {
-            val read = reader.readSamples(chunk, 0, chunkSize)
-            if (read <= 0) break
-            // Write raw float32 bytes
-            val buf = java.nio.ByteBuffer.allocate(read * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            buf.asFloatBuffer().put(chunk, 0, read)
-            fos.write(buf.array())
-          }
+      // Skip 44-byte WAV header, copy raw F32 bytes directly
+      File(spoolPath).inputStream().use { input ->
+        val skipped = input.skip(44)
+        if (skipped != 44L) throw RuntimeException("Failed to skip WAV header")
+        f32File.outputStream().use { output ->
+          input.copyTo(output, bufferSize = 32768)
         }
       }
 
-      // Mmap the written .f32 file directly
+      val numSamples = (f32File.length() / 4).toInt()
+      if (numSamples <= 0) {
+        f32File.delete()
+        return null
+      }
+
       OfflineEntry.createMmapFromFile(
-        bufferId, metadata.sampleRate, metadata.channelCount, metadata.numSamples,
+        bufferId, sampleRate, channelCount, numSamples,
         f32File.absolutePath
-      ) ?: throw RuntimeException("Failed to mmap WAV spool file")
+      ) ?: run {
+        f32File.delete()
+        null
+      }
     } catch (e: Exception) {
-      Log.w(TAG, "createOfflineFromWavSpoolFile failed: ${e.message}")
+      Log.w(TAG, "createOfflineFromF32WavSpoolFile failed: ${e.message}")
       f32File.delete()
       null
     }

@@ -334,79 +334,49 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
 }
 
 /**
- * Stream a WAV spool file directly to a raw .f32 file, then mmap it.
- * Avoids loading the entire file into memory (OOM fix for large spool files).
- * Returns a valid entry on success, or null if conversion fails.
+ * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
+ * Returns the entry on success, or nullptr on failure (caller falls back to ring snapshot).
  */
-static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromWavSpoolFileStreaming(
+static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
   const std::string &bufferId,
   const std::string &spoolPath,
-  const PaWavHeader &hdr
+  int sampleRate,
+  int channelCount
 ) {
   std::string tempDir = pa_tempDir();
   std::string f32Path = tempDir + "/pa_off_" + bufferId + ".f32";
 
   try {
-    // Open WAV for reading and F32 for writing
     std::ifstream wavFile(spoolPath, std::ios::binary);
     if (!wavFile) return nullptr;
-    wavFile.seekg(hdr.dataOffset);
+
+    // Skip 44-byte WAV header
+    wavFile.seekg(44);
+    if (!wavFile) return nullptr;
 
     std::ofstream f32File(f32Path, std::ios::binary);
     if (!f32File) return nullptr;
 
-    // Stream convert samples in chunks (avoid allocating 100+ MB at once)
-    const int chunkSize = 8192;
-    std::vector<float> chunk(chunkSize);
-
-    if (hdr.audioFormat == 1 && hdr.bitsPerSample == 16) {
-      // S16 PCM → F32
-      std::vector<int16_t> s16Buf(chunkSize);
-      int samplesRemaining = hdr.numSamples;
-      while (samplesRemaining > 0) {
-        int toRead = std::min(chunkSize, samplesRemaining);
-        wavFile.read(reinterpret_cast<char*>(s16Buf.data()), toRead * 2);
-        int actualRead = wavFile.gcount() / 2;
-        if (actualRead <= 0) break;
-
-        for (int i = 0; i < actualRead; i++) {
-          chunk[i] = (float)s16Buf[i] / 32768.0f;
-        }
-        // Write raw float32 bytes
-        f32File.write(reinterpret_cast<const char*>(chunk.data()), actualRead * 4);
-        samplesRemaining -= actualRead;
-      }
-    } else if (hdr.audioFormat == 3 && hdr.bitsPerSample == 32) {
-      // F32 PCM → F32 (pass-through)
-      int samplesRemaining = hdr.numSamples;
-      while (samplesRemaining > 0) {
-        int toRead = std::min(chunkSize, samplesRemaining);
-        wavFile.read(reinterpret_cast<char*>(chunk.data()), toRead * 4);
-        int actualRead = wavFile.gcount() / 4;
-        if (actualRead <= 0) break;
-        f32File.write(reinterpret_cast<const char*>(chunk.data()), actualRead * 4);
-        samplesRemaining -= actualRead;
-      }
-    } else {
-      // Unsupported format
-      return nullptr;
+    // Raw byte copy (F32→F32, no conversion)
+    char buf[32768];
+    while (wavFile.read(buf, sizeof(buf)) || wavFile.gcount() > 0) {
+      f32File.write(buf, wavFile.gcount());
     }
 
     f32File.close();
     wavFile.close();
 
-    // Mmap the written .f32 file
+    // Mmap the .f32 file
     auto region = PaMmapRegion::mapFile(f32Path);
     if (!region) {
       unlink(f32Path.c_str());
       return nullptr;
     }
 
-    // Create entry with mmapped region
     auto entry = std::make_shared<PaOfflineEntry>();
     entry->bufferId = bufferId;
-    entry->sampleRate = hdr.sampleRate;
-    entry->channelCount = hdr.channelCount;
+    entry->sampleRate = sampleRate;
+    entry->channelCount = channelCount;
     entry->mmapRegion = std::move(region);
     return entry;
 
@@ -965,16 +935,9 @@ static std::string pa_generateId(const char *prefix) {
     std::shared_ptr<PaOfflineEntry> entry;
 
     if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
-      PaWavHeader hdr;
-      if (pa_parseWavHeader(live->spoolPath, hdr)) {
-        // Stream WAV to .f32 temp file to avoid OOM on large spool files
-        entry = pa_createOfflineFromWavSpoolFileStreaming(bufferId, live->spoolPath, hdr);
-        if (!entry) {
-          // Fallback: snapshot ring if streaming fails
-          auto snapshot = live->snapshotRing();
-          entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
-        }
-      } else {
+      entry = pa_createOfflineFromF32WavSpool(bufferId, live->spoolPath, live->sampleRate, live->channelCount);
+      if (!entry) {
+        // Fallback: snapshot ring if streaming fails
         auto snapshot = live->snapshotRing();
         entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
       }
@@ -1006,13 +969,8 @@ static std::string pa_generateId(const char *prefix) {
     if (windowSec <= 0) { reject(kPAErrInvalidArgument, @"windowSeconds must be > 0", nil); return; }
 
     std::string spoolPath;
-    bool spoolFloat = false;
     if (options.persistencePath()) {
       spoolPath = [options.persistencePath() UTF8String];
-      if (options.persistenceFormat()) {
-        NSString *fmt = options.persistenceFormat();
-        spoolFloat = [fmt isEqualToString:@"wav_pcm_float"];
-      }
     }
 
     bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
@@ -1050,7 +1008,6 @@ static std::string pa_generateId(const char *prefix) {
       ch,
       windowSec,
       spoolPath,
-      spoolFloat,
       emitAppendedEvents,
       appendEventMinIntervalMs,
       onFramesAppended
@@ -1507,7 +1464,7 @@ static std::string pa_encodeViaDecodeFile(
   if (!liveEntry->hasActiveSpool) {
     NSString *tmpSpoolPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
       [NSString stringWithFormat:@"ingest_spool_%@.wav", [[NSUUID UUID] UUIDString]]];
-    liveEntry->enableSpool([tmpSpoolPath UTF8String], false, true);
+    liveEntry->enableSpool([tmpSpoolPath UTF8String], true);
     if (!liveEntry->hasActiveSpool) {
       reject(@"AUDIO_SPOOL_ERROR", @"Failed to create temporary spool for file ingest", nil);
       return;
