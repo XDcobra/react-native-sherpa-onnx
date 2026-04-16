@@ -1,9 +1,11 @@
 # File-backed mmap for large offline audio buffers — implementation spec
 
-**Status:** Ready for implementation.  
+**Status:** Implemented.  
 **Supersedes:** [`perf-offline-audio-buffer-backing-spec.md`](./perf-offline-audio-buffer-backing-spec.md) (high-level motivation and goals).  
 **Audience:** Native contributors (Kotlin, Objective-C++), SDK maintainers.  
 **Breaking changes:** Allowed — SDK is pre-release. Changes that simplify internals or improve robustness are welcome.
+
+> **Threshold policy update:** The original fixed 10 MB cutoff in this document has been replaced by the dynamic policy from [`dynamic-mmap-threshold-implementation-plan.md`](./dynamic-mmap-threshold-implementation-plan.md), based on platform, device RAM class, and path type (`file-origin` vs `heap-origin`).
 
 ---
 
@@ -11,7 +13,7 @@
 
 | Question | Decision |
 |---|---|
-| **Exact threshold / per-platform** | Hard-code **10 MB of raw PCM** (`numSamples × bytesPerSample × channels`). A future plan will make it dynamic per platform and device. |
+| **Exact threshold / per-platform** | Use a **dynamic native policy** based on platform, RAM class, and path type. |
 | **Random access requirement** | Yes — JSI slice reads and potential alignment internals need random access. Use **mmap** as the backing strategy. |
 | **Temp file robustness** | Implement a **three-layer** cleanup strategy: deterministic release, startup orphan sweep, and OS-level temp directory semantics. See §4. |
 
@@ -22,7 +24,7 @@
 ### In scope
 
 - Replace `readAllSamples()`-based full-load for file-backed `OfflineEntry` / `PaOfflineEntry` with **mmap**-backed access.
-- Apply the **10 MB threshold** to decide `InMemory` vs `FileBacked` for **all** offline buffer creation paths (not just live-to-offline).
+- Apply the **dynamic threshold policy** to decide `InMemory` vs `FileBacked` for **all** offline buffer creation paths (not just live-to-offline).
 - Enable the **enhancement output** path to produce `FileBacked` buffers when the result exceeds the threshold.
 - Provide a **robust temp file lifecycle** (deterministic cleanup, crash-resilient orphan sweep).
 - Enable **JSI slice access** for file-backed buffers (currently returns `BUFFER_NOT_IN_MEMORY`).
@@ -30,7 +32,7 @@
 
 ### Out of scope
 
-- Dynamic / per-device threshold tuning (future plan).
+- Public TypeScript API for threshold tuning.
 - Live buffer ring or spool changes (unrelated lifecycle).
 - Changes to offline text buffer semantics.
 - Multi-channel (stereo) support — current pipeline is mono-only.
@@ -454,11 +456,16 @@ AlignAccurateFromFloatPcm(model, text, entry->floatPtr(), entry->sampleRate, gra
 
 ```
 rawPcmSize = numSamples × sizeof(float)   // = numSamples × 4 bytes
-threshold  = 10 * 1024 * 1024             // = 10 MB = 10,485,760 bytes
-                                           // = 2,621,440 samples
-                                           // ≈ 164 seconds @ 16 kHz mono
-                                           // ≈ 60 seconds @ 44.1 kHz mono
+thresholdBytes = clamp(platformBase(pathType) × ramMultiplier(ramClass), 4 MB, 32 MB)
 ```
+
+Where:
+
+- `pathType=file-origin`: decode/spool/file-centric creation paths (earlier mmap adoption)
+- `pathType=heap-origin`: FloatArray/in-memory creation and upgrade paths
+- Android bases: `file=6 MB`, `heap=10 MB`
+- iOS bases: `file=8 MB`, `heap=12 MB`
+- RAM multipliers: `LOW=0.75x`, `MID=1.0x`, `HIGH=1.5x`, `VERY_HIGH=2.0x`
 
 ### Application points
 
@@ -466,21 +473,16 @@ The threshold check must be applied at **every** offline buffer creation path:
 
 | Creation path | Current behavior | New behavior |
 |---|---|---|
-| `createOfflineAudioBufferFromFile` (FFmpeg decode) | Always InMemory | Apply threshold after decode |
-| `createOfflineAudioBufferFromSamples` (JSI) | Always InMemory | Apply threshold (copy samples to temp .f32 if large) |
+| `createOfflineAudioBufferFromFile` (FFmpeg decode) | Always InMemory | Apply **file-origin** threshold after decode |
+| `createOfflineAudioBufferFromSamples` (JSI) | Always InMemory | Apply **heap-origin** threshold (copy samples to temp .f32 if large) |
 | `createEmptyOfflineAudioBuffer` (for TTS/enhancement output) | Always InMemory | Create InMemory; **upgrade** to FileBacked after `adoptSamples()` if large (see §7) |
-| `createOfflineFromLive` (fullIfSpooled) | FileBacked only if spool exists | Convert spool → .f32 + mmap if large; InMemory if small |
-| `createOfflineFromLive` (windowSnapshot) | Always InMemory (ring snapshot) | Apply threshold (ring snapshot is typically < 10 MB, but check) |
+| `createOfflineFromLive` (fullIfSpooled) | FileBacked only if spool exists | Convert spool → .f32, apply **file-origin** threshold (mmap if large, InMemory if small) |
+| `createOfflineFromLive` (windowSnapshot) | Always InMemory (ring snapshot) | Apply **heap-origin** threshold |
 
-### Constant location
+### Policy location
 
-```kotlin
-// Android
-internal const val PA_FILE_BACKED_THRESHOLD_BYTES: Long = 10L * 1024 * 1024
-
-// iOS
-static const long kPaFileBackedThreshold = 10L * 1024 * 1024;
-```
+- Android: `MmapThresholdPolicy.thresholdBytes(pathType)` in `MmapThresholdPolicy.kt`
+- iOS: `pa_computeThresholdBytes(pathType)` in `SherpaOnnx+PipelineAudio.mm`
 
 ---
 
