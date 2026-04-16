@@ -388,8 +388,7 @@ static void pa_logThresholdPolicyOnce() {
     return;
   }
 
-  const auto &snapshot = pa_thresholdSnapshot();
-  }
+}
 
 static long pa_computeThresholdBytes(PaThresholdPathType pathType) {
   const auto &snapshot = pa_thresholdSnapshot();

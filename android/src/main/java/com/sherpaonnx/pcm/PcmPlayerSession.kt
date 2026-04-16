@@ -82,6 +82,7 @@ internal class PcmPlayerSession(
   private var queuedFrames = 0
   private var highWaterActive = false
   private val writeThreadStop = AtomicBoolean(false)
+  private val cleanupStarted = AtomicBoolean(false)
   private val sourceExhaustedGeneration = AtomicInteger(-1)
 
   @Volatile private var terminalError: TerminalErrorState? = null
@@ -505,7 +506,7 @@ internal class PcmPlayerSession(
   }
 
   fun destroy() {
-    if (destroyed && writeThreadStop.get()) return
+    if (!cleanupStarted.compareAndSet(false, true)) return
     destroyed = true
 
     // Increment generation to stop drain threads

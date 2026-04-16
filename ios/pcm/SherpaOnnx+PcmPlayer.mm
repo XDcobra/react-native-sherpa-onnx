@@ -379,10 +379,6 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
         return;
     }
 
-     else {
-        long long estBytes = (long long)offlineNumSamples * 4LL;
-            }
-
     NSString *intentId = [NSString stringWithFormat:@"pcm:%@", playerId];
     BOOL intentAcquired = NO;
     BOOL createSucceeded = NO;

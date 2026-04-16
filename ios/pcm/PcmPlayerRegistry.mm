@@ -21,24 +21,15 @@ std::mutex g_pcm_player_mutex;
 bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration) {
     if (destroyed || playerNode == nil || audioFormat == nil || numSamples <= 0 || terminalOom.load()) return false;
 
-    bool blocked = false;
-    std::chrono::steady_clock::time_point blockedStart{};
     {
         std::unique_lock<std::mutex> lock(enqueueMutex);
-         while (!destroyed &&
-             !terminalOom.load() &&
-               (expectedGeneration < 0 || drainGeneration.load() == expectedGeneration) &&
-               maxBufferedFrames > 0 &&
-               (bufferedFrames + numSamples) > maxBufferedFrames) {
+          while (!destroyed &&
+              !terminalOom.load() &&
+                (expectedGeneration < 0 || drainGeneration.load() == expectedGeneration) &&
+                maxBufferedFrames > 0 &&
+                (bufferedFrames + numSamples) > maxBufferedFrames) {
             if (!highWaterActive) {
                 highWaterActive = true;
-                const int bufferedMs = sampleRate > 0
-                    ? (int)((bufferedFrames * 1000LL) / (int64_t)sampleRate)
-                    : 0;
-                            }
-            if (!blocked) {
-                blocked = true;
-                blockedStart = std::chrono::steady_clock::now();
             }
             enqueueCv.wait_for(lock, std::chrono::milliseconds(10));
         }
@@ -68,39 +59,20 @@ bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSampl
 
     [playerNode scheduleBuffer:buffer completionCallbackType:AVAudioPlayerNodeCompletionDataConsumed completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType callbackType) {
         int32_t remaining = buffersInFlight.fetch_sub(1) - 1;
-        bool emitWatermarkExit = false;
-        int64_t bufferedNow = 0;
         {
             std::lock_guard<std::mutex> lock(enqueueMutex);
             bufferedFrames = std::max<int64_t>(0, bufferedFrames - chunkFrames);
-            bufferedNow = bufferedFrames;
             if (highWaterActive && bufferedFrames <= resumeBufferedFrames) {
                 highWaterActive = false;
-                emitWatermarkExit = true;
             }
         }
         enqueueCv.notify_all();
-        if (emitWatermarkExit) {
-            const int bufferedMs = sampleRate > 0
-                ? (int)((bufferedNow * 1000LL) / (int64_t)sampleRate)
-                : 0;
-                    }
         if (remaining == 0 && sourceExhausted.load() && gen == drainGeneration.load()) {
             if (!endedEmitted.exchange(true)) {
                 if (onEndedCallback) onEndedCallback();
             }
         }
     }];
-
-    if (blocked) {
-        auto blockedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - blockedStart
-        ).count();
-        std::lock_guard<std::mutex> lock(enqueueMutex);
-        const int bufferedMs = sampleRate > 0
-            ? (int)((bufferedFrames * 1000LL) / (int64_t)sampleRate)
-            : 0;
-            }
 
     return true;
 }
