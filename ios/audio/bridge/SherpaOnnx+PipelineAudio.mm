@@ -26,6 +26,7 @@
 #include <set>
 #include <fstream>
 #include <functional>
+#include <algorithm>
 #include <cmath>
 #include <atomic>
 #include <cstdio>
@@ -291,7 +292,122 @@ struct PaOfflineEntry {
 std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
-static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB raw PCM
+
+enum class PaDeviceRamClass {
+  LOW,
+  MID,
+  HIGH,
+  VERY_HIGH,
+};
+
+enum class PaThresholdPathType {
+  FILE_ORIGIN,
+  HEAP_ORIGIN,
+};
+
+struct PaThresholdSnapshot {
+  PaDeviceRamClass ramClass = PaDeviceRamClass::MID;
+  long fileOriginThresholdBytes = 8L * 1024L * 1024L;
+  long heapOriginThresholdBytes = 12L * 1024L * 1024L;
+};
+
+static constexpr long kPaMb = 1024L * 1024L;
+static constexpr long kPaMinThresholdBytes = 4L * kPaMb;
+static constexpr long kPaMaxThresholdBytes = 32L * kPaMb;
+
+static constexpr uint64_t kPaLowRamMaxBytes = 3ULL * 1024ULL * 1024ULL * 1024ULL;
+static constexpr uint64_t kPaMidRamMaxBytes = 6ULL * 1024ULL * 1024ULL * 1024ULL;
+static constexpr uint64_t kPaHighRamMaxBytes = 12ULL * 1024ULL * 1024ULL * 1024ULL;
+
+static constexpr double kPaFileOriginBaseMb = 8.0;
+static constexpr double kPaHeapOriginBaseMb = 12.0;
+
+static constexpr double kPaMultiplierLow = 0.75;
+static constexpr double kPaMultiplierMid = 1.0;
+static constexpr double kPaMultiplierHigh = 1.5;
+static constexpr double kPaMultiplierVeryHigh = 2.0;
+
+static std::once_flag gPaThresholdInitOnce;
+static std::atomic<bool> gPaThresholdLogged(false);
+static PaThresholdSnapshot gPaThresholdSnapshot;
+
+static const char *pa_ramClassName(PaDeviceRamClass ramClass) {
+  switch (ramClass) {
+    case PaDeviceRamClass::LOW: return "LOW";
+    case PaDeviceRamClass::MID: return "MID";
+    case PaDeviceRamClass::HIGH: return "HIGH";
+    case PaDeviceRamClass::VERY_HIGH: return "VERY_HIGH";
+  }
+  return "MID";
+}
+
+static PaDeviceRamClass pa_classifyRam(uint64_t totalRamBytes) {
+  if (totalRamBytes <= kPaLowRamMaxBytes) return PaDeviceRamClass::LOW;
+  if (totalRamBytes <= kPaMidRamMaxBytes) return PaDeviceRamClass::MID;
+  if (totalRamBytes <= kPaHighRamMaxBytes) return PaDeviceRamClass::HIGH;
+  return PaDeviceRamClass::VERY_HIGH;
+}
+
+static double pa_multiplierForRamClass(PaDeviceRamClass ramClass) {
+  switch (ramClass) {
+    case PaDeviceRamClass::LOW: return kPaMultiplierLow;
+    case PaDeviceRamClass::MID: return kPaMultiplierMid;
+    case PaDeviceRamClass::HIGH: return kPaMultiplierHigh;
+    case PaDeviceRamClass::VERY_HIGH: return kPaMultiplierVeryHigh;
+  }
+  return kPaMultiplierMid;
+}
+
+static long pa_clampThresholdBytes(long bytes) {
+  return std::max(kPaMinThresholdBytes, std::min(kPaMaxThresholdBytes, bytes));
+}
+
+static void pa_initializeThresholdSnapshot() {
+  uint64_t totalRamBytes = [[NSProcessInfo processInfo] physicalMemory];
+  PaDeviceRamClass ramClass = pa_classifyRam(totalRamBytes);
+  double multiplier = pa_multiplierForRamClass(ramClass);
+
+  long fileThreshold = pa_clampThresholdBytes((long)(kPaFileOriginBaseMb * multiplier * (double)kPaMb));
+  long heapThreshold = pa_clampThresholdBytes((long)(kPaHeapOriginBaseMb * multiplier * (double)kPaMb));
+
+  gPaThresholdSnapshot.ramClass = ramClass;
+  gPaThresholdSnapshot.fileOriginThresholdBytes = fileThreshold;
+  gPaThresholdSnapshot.heapOriginThresholdBytes = heapThreshold;
+}
+
+static const PaThresholdSnapshot &pa_thresholdSnapshot() {
+  std::call_once(gPaThresholdInitOnce, []() {
+    pa_initializeThresholdSnapshot();
+  });
+  return gPaThresholdSnapshot;
+}
+
+static void pa_logThresholdPolicyOnce() {
+  bool expected = false;
+  if (!gPaThresholdLogged.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  const auto &snapshot = pa_thresholdSnapshot();
+  RCTLogInfo(
+    @"[PipelineAudio] mmap threshold policy: platform=ios ramClass=%s fileOrigin=%ld heapOrigin=%ld",
+    pa_ramClassName(snapshot.ramClass),
+    snapshot.fileOriginThresholdBytes,
+    snapshot.heapOriginThresholdBytes
+  );
+}
+
+static long pa_computeThresholdBytes(PaThresholdPathType pathType) {
+  const auto &snapshot = pa_thresholdSnapshot();
+  pa_logThresholdPolicyOnce();
+  switch (pathType) {
+    case PaThresholdPathType::FILE_ORIGIN:
+      return snapshot.fileOriginThresholdBytes;
+    case PaThresholdPathType::HEAP_ORIGIN:
+      return snapshot.heapOriginThresholdBytes;
+  }
+  return snapshot.heapOriginThresholdBytes;
+}
 
 static std::string pa_tempDir() {
   return [NSTemporaryDirectory() UTF8String];
@@ -313,7 +429,8 @@ static std::shared_ptr<PaOfflineEntry> pa_createEntryWithThreshold(
   entry->channelCount = channelCount;
 
   long rawSize = (long)samples.size() * sizeof(float);
-  if (rawSize >= kPaFileBackedThreshold) {
+  long threshold = pa_computeThresholdBytes(PaThresholdPathType::HEAP_ORIGIN);
+  if (rawSize >= threshold) {
     auto region = PaMmapRegion::createFromSamples(samples.data(), samples.size(), pa_tempDir(), bufferId);
     if (region) {
       entry->mmapRegion = std::move(region);
@@ -338,7 +455,8 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
   }
   if (entry->isMmapBacked()) return;
   long rawSize = (long)entry->samples.size() * sizeof(float);
-  if (rawSize < kPaFileBackedThreshold) return;
+  long threshold = pa_computeThresholdBytes(PaThresholdPathType::HEAP_ORIGIN);
+  if (rawSize < threshold) return;
 
   auto region = PaMmapRegion::createFromSamples(
     entry->samples.data(), entry->samples.size(), pa_tempDir(), bufferId
@@ -362,7 +480,8 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
 }
 
 /**
- * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
+ * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file.
+ * Use file-origin threshold policy to decide between mmap and in-memory storage.
  * Returns the entry on success, or nullptr on failure (caller falls back to ring snapshot).
  */
 static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
@@ -386,13 +505,63 @@ static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
     if (!f32File) return nullptr;
 
     // Raw byte copy (F32→F32, no conversion)
+    int64_t copiedBytes = 0;
     char buf[32768];
     while (wavFile.read(buf, sizeof(buf)) || wavFile.gcount() > 0) {
-      f32File.write(buf, wavFile.gcount());
+      std::streamsize count = wavFile.gcount();
+      if (count <= 0) break;
+      f32File.write(buf, count);
+      copiedBytes += (int64_t)count;
     }
 
     f32File.close();
     wavFile.close();
+
+    if (copiedBytes <= 0) {
+      unlink(f32Path.c_str());
+      return nullptr;
+    }
+
+    long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
+    if (copiedBytes < threshold) {
+      int sampleCount = (int)(copiedBytes / (int64_t)sizeof(float));
+      if (sampleCount <= 0) {
+        unlink(f32Path.c_str());
+        return nullptr;
+      }
+
+      int fd = open(f32Path.c_str(), O_RDONLY);
+      if (fd < 0) {
+        unlink(f32Path.c_str());
+        return nullptr;
+      }
+
+      std::vector<float> samples((size_t)sampleCount);
+      size_t bytesToRead = (size_t)sampleCount * sizeof(float);
+      uint8_t *dst = reinterpret_cast<uint8_t *>(samples.data());
+      size_t offset = 0;
+      while (offset < bytesToRead) {
+        ssize_t n = read(fd, dst + offset, bytesToRead - offset);
+        if (n < 0) {
+          if (errno == EINTR) continue;
+          close(fd);
+          unlink(f32Path.c_str());
+          return nullptr;
+        }
+        if (n == 0) break;
+        offset += (size_t)n;
+      }
+      close(fd);
+      unlink(f32Path.c_str());
+      if (offset != bytesToRead) return nullptr;
+
+      auto entry = std::make_shared<PaOfflineEntry>();
+      entry->bufferId = bufferId;
+      entry->sampleRate = sampleRate;
+      entry->channelCount = channelCount;
+      entry->samples = std::move(samples);
+      return entry;
+    }
 
     // Mmap the .f32 file
     auto region = PaMmapRegion::mapFile(f32Path);
@@ -864,8 +1033,9 @@ static std::string pa_generateId(const char *prefix) {
       int outputRate = config.targetSampleRate > 0 ? config.targetSampleRate : result.sourceSampleRate;
 
       long rawSize = (long)totalSamplesWritten * sizeof(float);
+      long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
       std::shared_ptr<PaOfflineEntry> entry;
-      if (rawSize >= kPaFileBackedThreshold) {
+      if (rawSize >= threshold) {
         // Large: mmap the already-written .f32 directly (zero heap copy)
         auto region = PaMmapRegion::mapFile(f32Path);
         if (region) {
