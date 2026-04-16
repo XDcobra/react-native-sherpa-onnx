@@ -89,221 +89,6 @@ struct TxtOfflineEntry {
     }
 };
 
-// ==================== Text Segment ====================
-struct TextSegment {
-    std::string text;
-    std::vector<std::string> tokens;
-    std::vector<float> timestamps;
-    std::string source;
-    int segmentIndex;
-    NSDictionary *meta = nil;
-};
-
-// ==================== Live Text Entry ====================
-struct TxtLiveEntry {
-    enum State { RECORDING, FINISHED };
-
-    std::string bufferId;
-    State state = RECORDING;
-    std::string currentText;
-    int64_t totalCharsWritten = 0;
-    std::atomic<int> revision{0};
-    int windowMaxChars = 65536;
-    int maxSegments = 1000;
-    bool emitPartialEvents = false;
-    int64_t partialEventMinIntervalMs = 0;
-
-    // ── Segment log (ring with maxSegments capacity) ──
-    std::deque<TextSegment> segments;
-    std::mutex segmentMutex;
-    int64_t evictedCount = 0;
-
-    int segmentCount() {
-        std::lock_guard<std::mutex> lock(segmentMutex);
-        return (int)segments.size();
-    }
-
-    // ── Cursor system ──
-    struct SegmentCursor {
-        int cursorId;
-        std::atomic<int> readPos{0};
-    };
-    std::unordered_map<int, std::unique_ptr<SegmentCursor>> segmentCursors;
-    std::mutex cursorMutex;
-    std::atomic<int> nextCursorId{0};
-
-    int createSegmentCursor() {
-        int id = nextCursorId.fetch_add(1);
-        auto cursor = std::make_unique<SegmentCursor>();
-        cursor->cursorId = id;
-        cursor->readPos.store(0);
-        std::lock_guard<std::mutex> lock(cursorMutex);
-        segmentCursors[id] = std::move(cursor);
-        return id;
-    }
-
-    std::vector<TextSegment> drainSegments(int cursorId, int maxCount) {
-        std::lock_guard<std::mutex> cLock(cursorMutex);
-        auto it = segmentCursors.find(cursorId);
-        if (it == segmentCursors.end()) return {};
-        std::lock_guard<std::mutex> sLock(segmentMutex);
-        int pos = it->second->readPos.load();
-        if (pos >= (int)segments.size()) return {};
-        int end = std::min(pos + maxCount, (int)segments.size());
-        std::vector<TextSegment> result(segments.begin() + pos, segments.begin() + end);
-        it->second->readPos.store(end);
-        return result;
-    }
-
-    std::vector<TextSegment> getSegments(int startIndex, int maxCount) {
-        if (startIndex < 0 || maxCount <= 0) return {};
-        std::lock_guard<std::mutex> sLock(segmentMutex);
-        if (startIndex >= (int)segments.size()) return {};
-        int end = std::min(startIndex + maxCount, (int)segments.size());
-        return std::vector<TextSegment>(segments.begin() + startIndex, segments.begin() + end);
-    }
-
-    void releaseSegmentCursor(int cursorId) {
-        std::lock_guard<std::mutex> lock(cursorMutex);
-        segmentCursors.erase(cursorId);
-    }
-
-    // ── Append listeners (token-based) ──
-    struct NativeAppendListener {
-        int token;
-        std::function<void()> callback;
-    };
-    std::vector<NativeAppendListener> appendListeners;
-    std::mutex appendListenerMutex;
-    std::atomic<int> nextListenerToken{0};
-
-    int addAppendListener(std::function<void()> listener) {
-        int token = nextListenerToken.fetch_add(1);
-        std::lock_guard<std::mutex> lock(appendListenerMutex);
-        appendListeners.push_back({token, std::move(listener)});
-        return token;
-    }
-
-    void removeAppendListener(int token) {
-        std::lock_guard<std::mutex> lock(appendListenerMutex);
-        appendListeners.erase(
-            std::remove_if(appendListeners.begin(), appendListeners.end(),
-                           [token](const NativeAppendListener &l) { return l.token == token; }),
-            appendListeners.end());
-    }
-
-    void notifyAppendListeners() {
-        std::vector<std::function<void()>> callbacks;
-        {
-            std::lock_guard<std::mutex> lock(appendListenerMutex);
-            callbacks.reserve(appendListeners.size());
-            for (auto &l : appendListeners) callbacks.push_back(l.callback);
-        }
-        for (auto &cb : callbacks) cb();
-    }
-
-    // ── Partial text ──
-    void writePartial(const std::string &text) {
-        if (state == FINISHED) {
-            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
-        }
-        // Convert to NSString for UTF-16 length handling
-        NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-        int len = ns ? (int)[ns length] : 0;
-        if (len > windowMaxChars) {
-            NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-            currentText = [trimmed UTF8String] ?: "";
-        } else {
-            currentText = text;
-        }
-        totalCharsWritten += len;
-        revision.fetch_add(1);
-    }
-
-    void appendText(const std::string &text) {
-        if (state == FINISHED) {
-            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
-        }
-        std::string combined = currentText + text;
-        NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
-        int len = ns ? (int)[ns length] : 0;
-        NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-        int appendLen = textNs ? (int)[textNs length] : 0;
-        if (len > windowMaxChars) {
-            NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-            currentText = [trimmed UTF8String] ?: "";
-        } else {
-            currentText = combined;
-        }
-        totalCharsWritten += appendLen;
-        revision.fetch_add(1);
-    }
-
-    int commitSegment(const std::string &text,
-                      const std::vector<std::string> &tokens = {},
-                      const std::vector<float> &timestamps = {},
-                      const std::string &source = "unknown",
-                      NSDictionary *meta = nil) {
-        if (state == FINISHED) {
-            throw std::runtime_error("Live text buffer is finalized: " + bufferId);
-        }
-        int committedSegmentIndex = -1;
-        {
-            std::lock_guard<std::mutex> lock(segmentMutex);
-            TextSegment seg;
-            seg.text = text;
-            seg.tokens = tokens;
-            seg.timestamps = timestamps;
-            seg.source = source;
-            seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
-            seg.meta = meta;
-            committedSegmentIndex = seg.segmentIndex;
-            segments.push_back(std::move(seg));
-            // Evict oldest if over capacity
-            if ((int)segments.size() > maxSegments) {
-                segments.pop_front();
-                evictedCount++;
-                // Snap cursors forward
-                std::lock_guard<std::mutex> cLock(cursorMutex);
-                for (auto &pair : segmentCursors) {
-                    int p = pair.second->readPos.load();
-                    if (p > 0) pair.second->readPos.fetch_sub(1);
-                    else pair.second->readPos.store(0);
-                }
-            }
-            NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-            int charLen = textNs ? (int)[textNs length] : 0;
-            totalCharsWritten += charLen;
-            revision.fetch_add(1);
-        }
-        notifyAppendListeners();
-        return committedSegmentIndex;
-    }
-
-    void finalize_() {
-        if (state == FINISHED) {
-            throw std::runtime_error("Already finalized: " + bufferId);
-        }
-        state = FINISHED;
-        notifyAppendListeners();
-    }
-
-    std::string snapshotText() const {
-        return currentText;
-    }
-
-    NSDictionary *toDict() {
-        return @{
-            @"bufferId": [NSString stringWithUTF8String:bufferId.c_str()],
-            @"kind": @"liveTextBuffer",
-            @"state": state == RECORDING ? @"recording" : @"finished",
-            @"totalCharsWritten": @(totalCharsWritten),
-            @"revision": @(revision.load()),
-            @"segmentCount": @(segmentCount()),
-        };
-    }
-};
-
 // ==================== Registry ====================
 
 // Non-static: shared with SherpaOnnx+STT.mm via SherpaOnnx+TextBufferGlobals.h
@@ -369,6 +154,52 @@ bool txt_live_commit_segment(
         if (error) *error = "Unknown live text commitSegment error";
         return false;
     }
+}
+
+bool txt_read_offline_text(
+    const std::string &bufferId,
+    std::string *text,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (!it->second->populated || it->second->text.empty()) {
+        if (error) *error = "Text buffer is empty or not populated";
+        return false;
+    }
+    if (text) {
+        *text = it->second->text;
+    }
+    return true;
+}
+
+bool txt_populate_offline_if_empty(
+    const std::string &bufferId,
+    const std::string &text,
+    const std::vector<std::string> &tokens,
+    const std::vector<float> &timestamps,
+    const std::vector<float> &durations,
+    const std::string &lang,
+    const std::string &emotion,
+    const std::string &event,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (it->second->populated) {
+        if (error) *error = "Text buffer already populated";
+        return false;
+    }
+    it->second->populate(text, tokens, timestamps, durations, lang, emotion, event);
+    return true;
 }
 
 static std::string txt_generateId(const char *prefix) {
@@ -885,6 +716,7 @@ static std::string txt_generateId(const char *prefix) {
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
+    try {
     @try {
         std::string lid = [liveBufferId UTF8String] ?: "";
         std::string textStr = [text UTF8String] ?: "";
@@ -925,6 +757,8 @@ static std::string txt_generateId(const char *prefix) {
         resolve(@{ @"segmentIndex": @(segmentIndex) });
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
     } catch (const std::runtime_error &e) {
         reject(kTxtErrAlreadyFinalized, [NSString stringWithUTF8String:e.what()], nil);
     } catch (const std::exception &e) {
@@ -941,6 +775,7 @@ static std::string txt_generateId(const char *prefix) {
                            resolve:(RCTPromiseResolveBlock)resolve
                             reject:(RCTPromiseRejectBlock)reject
 {
+    try {
     @try {
         std::string lid = [liveBufferId UTF8String] ?: "";
         int s = (int)startIndex;
@@ -1013,6 +848,8 @@ static std::string txt_generateId(const char *prefix) {
         resolve(@{ @"segments": segmentArray });
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
     } catch (const std::exception &e) {
         reject(kTxtErrInternalError, [NSString stringWithUTF8String:e.what()], nil);
     } catch (...) {

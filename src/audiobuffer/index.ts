@@ -461,7 +461,6 @@ export async function createEmptyLiveAudioBuffer(
     channelCount: options.channelCount,
     windowSeconds: options.windowSeconds,
     persistencePath: options.persistencePath,
-    persistenceFormat: options.persistenceFormat,
     emitAppendedEvents: nativeEmitAppendedEvents,
     appendEventMinIntervalMs,
   });

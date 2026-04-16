@@ -446,58 +446,60 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         return;
     }
 
-    // Look up text output buffer
-    std::shared_ptr<TxtOfflineEntry> textEntry;
+    // Verify text output buffer exists and is currently empty
     {
-        std::lock_guard<std::mutex> txtLock(g_txt_mutex);
-        auto tit = g_txt_offline.find(textOutIdStr);
-        if (tit == g_txt_offline.end()) {
+        std::string existingText;
+        std::string textReadError;
+        if (txt_read_offline_text(textOutIdStr, &existingText, &textReadError)) {
+            reject(kSttErrAlreadyPopulated, @"Text buffer already populated", nil);
+            return;
+        }
+        if (textReadError.find("not found") != std::string::npos) {
             reject(kSttErrTextBufferNotFound,
                    [NSString stringWithFormat:@"Offline text buffer not found: %@", textOutBufferId], nil);
             return;
         }
-        if (tit->second->populated) {
-            reject(kSttErrAlreadyPopulated,
-                   @"Text buffer already populated", nil);
-            return;
-        }
-        textEntry = tit->second;
     }
 
-    // Look up audio buffer
-    std::shared_ptr<PaOfflineEntry> entry;
-    {
-        std::lock_guard<std::mutex> paLock(g_pa_mutex);
-        auto oit = g_pa_offline.find(bufferIdStr);
-        if (oit == g_pa_offline.end()) {
-            auto lit = g_pa_live.find(bufferIdStr);
-            if (lit != g_pa_live.end()) {
-                reject(
-                    kSttErrBufferKindMismatch,
-                    [NSString stringWithFormat:@"Buffer kind mismatch: expected offline buffer, got live buffer: %@", bufferId],
-                    nil);
-                return;
-            }
-            reject(kSttErrBufferNotFound,
-                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
+    // Read offline audio via shared helper API
+    std::vector<float> samples;
+    int sampleRate = 0;
+    if (!pa_read_offline_samples(bufferIdStr, &samples, &sampleRate)) {
+        auto liveEntry = pa_get_live_entry(bufferIdStr);
+        if (liveEntry != nullptr) {
+            reject(
+                kSttErrBufferKindMismatch,
+                [NSString stringWithFormat:@"Buffer kind mismatch: expected offline buffer, got live buffer: %@", bufferId],
+                nil);
             return;
         }
-        entry = oit->second;
+        reject(kSttErrBufferNotFound,
+               [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
+        return;
     }
 
-    if (entry->numSamples() == 0) {
+    if (samples.empty()) {
         reject(kSttErrBufferNotFound, @"Audio buffer is empty", nil);
         return;
     }
 
-    std::vector<float> samples = entry->readAllSamples();
-    int32_t sampleRate = entry->sampleRate;
-
     SttInstanceState *inst = it->second.get();
     try {
-        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, sampleRate);
-        textEntry->populate(result.text, result.tokens, result.timestamps,
-                            result.durations, result.lang, result.emotion, result.event);
+        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, static_cast<int32_t>(sampleRate));
+        std::string populateError;
+        if (!txt_populate_offline_if_empty(
+              textOutIdStr,
+              result.text,
+              result.tokens,
+              result.timestamps,
+              result.durations,
+              result.lang,
+              result.emotion,
+              result.event,
+              &populateError)) {
+            reject(kSttErrAlreadyPopulated, @"Text buffer already populated", nil);
+            return;
+        }
         resolve(nil);
     } catch (const std::exception& e) {
         NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";

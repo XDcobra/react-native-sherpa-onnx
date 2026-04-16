@@ -208,7 +208,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
         return;
     }
 
-    if (inputEntry->kind != "livePcmBuffer") {
+    if (inputBufferKey.rfind("live_", 0) != 0) {
         reject(@"STT_PIPELINE_BUFFER_KIND_MISMATCH", @"Input buffer must be a live audio buffer", nil);
         return;
     }

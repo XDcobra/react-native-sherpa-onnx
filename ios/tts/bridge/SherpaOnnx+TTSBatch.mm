@@ -52,58 +52,47 @@
     sherpaonnx::TtsWrapper *wrapper = ttsIt->second->wrapper.get();
 
     // 2. Resolve input text buffer
+    if (textInIdStr.find("txt_off_") != 0) {
+        reject(@"TTS_TEXT_BUFFER_KIND_MISMATCH",
+               [NSString stringWithFormat:@"Expected offline text buffer (txt_off_*), got: %@", textInBufferId], nil);
+        return;
+    }
     std::string text;
-    {
-        std::lock_guard<std::mutex> txtLock(g_txt_mutex);
-        auto txtIt = g_txt_offline.find(textInIdStr);
-        if (txtIt == g_txt_offline.end()) {
-            reject(@"TTS_TEXT_BUFFER_NOT_FOUND",
-                   [NSString stringWithFormat:@"Offline text buffer not found: %@", textInBufferId], nil);
-            return;
-        }
-        if (textInIdStr.find("txt_off_") != 0) {
-            reject(@"TTS_TEXT_BUFFER_KIND_MISMATCH",
-                   [NSString stringWithFormat:@"Expected offline text buffer (txt_off_*), got: %@", textInBufferId], nil);
-            return;
-        }
-        auto &entry = txtIt->second;
-        if (!entry->populated || entry->text.empty()) {
-            reject(@"TTS_TEXT_BUFFER_EMPTY",
-                   [NSString stringWithFormat:@"Text buffer is empty or not populated: %@", textInBufferId], nil);
-            return;
-        }
-        text = entry->text;
+    std::string textError;
+    if (!txt_read_offline_text(textInIdStr, &text, &textError)) {
+        NSString *msg = [NSString stringWithUTF8String:textError.c_str()] ?: @"Text buffer read failed";
+        NSString *code = [msg containsString:@"not found"] ? @"TTS_TEXT_BUFFER_NOT_FOUND" : @"TTS_TEXT_BUFFER_EMPTY";
+        reject(code, msg, nil);
+        return;
     }
 
     // 3. Resolve output audio buffer
-    std::shared_ptr<PaOfflineEntry> audioEntry;
-    {
-        std::lock_guard<std::mutex> paLock(g_pa_mutex);
-        auto paIt = g_pa_offline.find(audioOutIdStr);
-        if (paIt == g_pa_offline.end()) {
-            reject(@"TTS_AUDIO_OUT_NOT_FOUND",
-                   [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioOutBufferId], nil);
-            return;
-        }
-        if (audioOutIdStr.find("off_") != 0) {
-            reject(@"TTS_AUDIO_OUT_KIND_MISMATCH",
-                   [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioOutBufferId], nil);
-            return;
-        }
-        audioEntry = paIt->second;
-        if (audioEntry->isFileBacked || !audioEntry->samples.empty()) {
-            reject(@"TTS_AUDIO_OUT_ALREADY_POPULATED",
-                   [NSString stringWithFormat:@"Audio output buffer is already populated: %@", audioOutBufferId], nil);
-            return;
-        }
+    if (audioOutIdStr.find("off_") != 0) {
+        reject(@"TTS_AUDIO_OUT_KIND_MISMATCH",
+               [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioOutBufferId], nil);
+        return;
+    }
+    int audioOutSampleRate = 0;
+    int audioOutNumSamples = 0;
+    std::string paErrCode;
+    std::string paErrMsg;
+    if (!pa_get_offline_metadata(audioOutIdStr, &audioOutSampleRate, &audioOutNumSamples, &paErrCode, &paErrMsg)) {
+        reject(@"TTS_AUDIO_OUT_NOT_FOUND",
+               [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioOutBufferId], nil);
+        return;
+    }
+    if (audioOutNumSamples != 0) {
+        reject(@"TTS_AUDIO_OUT_ALREADY_POPULATED",
+               [NSString stringWithFormat:@"Audio output buffer is already populated: %@", audioOutBufferId], nil);
+        return;
     }
 
     // 4. Sample rate strict check
     int32_t modelSampleRate = wrapper->getSampleRate();
-    if (modelSampleRate > 0 && audioEntry->sampleRate != modelSampleRate) {
+    if (modelSampleRate > 0 && audioOutSampleRate != modelSampleRate) {
         reject(@"TTS_OUTPUT_SAMPLE_RATE_MISMATCH",
                [NSString stringWithFormat:@"audioOut.sampleRate (%d) != model sampleRate (%d). Allocate with getTtsSampleRate() or tts.getSampleRate().",
-                audioEntry->sampleRate, modelSampleRate], nil);
+                audioOutSampleRate, modelSampleRate], nil);
         return;
     }
 
@@ -135,22 +124,18 @@
             std::string refBufferId = [refBufferIdNS UTF8String];
             std::vector<float> refSamples;
             int32_t refSampleRate = 0;
-            {
-                std::lock_guard<std::mutex> paLock(g_pa_mutex);
-                auto refIt = g_pa_offline.find(refBufferId);
-                if (refIt == g_pa_offline.end()) {
-                    reject(@"TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND",
-                           [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferIdNS], nil);
-                    return;
-                }
-                if (refBufferId.find("off_") != 0) {
-                    reject(@"TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH",
-                           [NSString stringWithFormat:@"Expected offline audio buffer for reference, got: %@", refBufferIdNS], nil);
-                    return;
-                }
-                refSamples = refIt->second->readAllSamples();
-                refSampleRate = refIt->second->sampleRate;
+            if (refBufferId.find("off_") != 0) {
+                reject(@"TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH",
+                       [NSString stringWithFormat:@"Expected offline audio buffer for reference, got: %@", refBufferIdNS], nil);
+                return;
             }
+            int tmpSr = 0;
+            if (!pa_read_offline_samples(refBufferId, &refSamples, &tmpSr)) {
+                reject(@"TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND",
+                       [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferIdNS], nil);
+                return;
+            }
+            refSampleRate = tmpSr;
             if (kind == Kind::kZipvoice) {
                 NSString *rt = options[@"referenceText"];
                 NSString *trimmed = rt != nil ? [rt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
@@ -179,14 +164,17 @@
 
         // 7. Adopt samples into the output buffer (move)
         {
-            std::lock_guard<std::mutex> paLock(g_pa_mutex);
-            if (!audioEntry->samples.empty()) {
+            std::string adoptErrCode;
+            std::string adoptErrMsg;
+            if (!pa_adopt_offline_samples_if_empty(audioOutIdStr, std::move(result.samples), &adoptErrCode, &adoptErrMsg)) {
                 reject(@"TTS_AUDIO_OUT_ALREADY_POPULATED",
                        [NSString stringWithFormat:@"Audio output buffer was populated concurrently: %@", audioOutBufferId], nil);
                 return;
             }
-            audioEntry->samples = std::move(result.samples);
         }
+
+        // Upgrade to mmap if it exceeds the threshold
+        pa_upgradeToMmapIfNeeded(audioOutIdStr);
 
         resolve([NSNull null]);
     } @catch (NSException *exception) {

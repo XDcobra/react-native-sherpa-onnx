@@ -255,7 +255,6 @@ export interface Spec extends TurboModule {
    * @param options.sampleRate - Sample rate in Hz.
    * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.persistencePath - Optional file path for WAV spool.
-   * @param options.persistenceFormat - "wav_pcm_s16le" (default) or "wav_pcm_float".
    * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
    * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
    */
@@ -264,7 +263,6 @@ export interface Spec extends TurboModule {
     channelCount?: number;
     windowSeconds?: number;
     persistencePath?: string;
-    persistenceFormat?: string;
     emitAppendedEvents?: boolean;
     appendEventMinIntervalMs?: number;
   }): Promise<{

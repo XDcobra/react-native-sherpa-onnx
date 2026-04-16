@@ -8,6 +8,8 @@
 #include <jni.h>
 #include <android/log.h>
 #include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -153,6 +155,160 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToBuffer(
         }
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                        "DECODE_INTERNAL_ERROR: Unknown error during decode");
+        return nullptr;
+    }
+}
+
+/**
+ * Streaming decode directly to a raw float32 file on disk.
+ * Avoids all large heap allocations — chunks are fwrite'd as they arrive.
+ *
+ * Returns a HashMap with:
+ *   "outputPath"       (String)  — absolute path to the written .f32 file
+ *   "numSamples"       (Long)    — total float32 sample count
+ *   "sourceSampleRate" (Integer) — source file sample rate
+ *   "sourceChannels"   (Integer) — source file channel count
+ *
+ * On error throws a Java RuntimeException with DECODE_* error code prefix.
+ */
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd,
+    jint targetSampleRate,
+    jboolean forceMono,
+    jint chunkSize,
+    jlong cancelFlagPtr,
+    jstring jOutputPath
+) {
+    const char* path = nullptr;
+    if (jPath) {
+        path = env->GetStringUTFChars(jPath, nullptr);
+        if (!path) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "DECODE_INTERNAL_ERROR: Failed to get path string");
+            return nullptr;
+        }
+    }
+    const char* outputPath = nullptr;
+    if (jOutputPath) {
+        outputPath = env->GetStringUTFChars(jOutputPath, nullptr);
+    }
+    if (!outputPath || outputPath[0] == '\0') {
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        if (outputPath && jOutputPath) env->ReleaseStringUTFChars(jOutputPath, outputPath);
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "DECODE_INTERNAL_ERROR: Missing output path for mmap decode");
+        return nullptr;
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        env->ReleaseStringUTFChars(jOutputPath, outputPath);
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "DECODE_NOT_FOUND: Empty file path and invalid fd");
+        return nullptr;
+    }
+
+    sherpa::AudioDecodeConfig config;
+    config.targetSampleRate = (int)targetSampleRate;
+    config.forceMono = (bool)forceMono;
+    config.chunkSize = chunkSize > 0 ? (int)chunkSize : 8192;
+
+    auto& cancelFlag = *reinterpret_cast<std::atomic<bool>*>(cancelFlagPtr);
+
+    // Open output file for streaming writes
+    std::string outPathStr(outputPath);
+    FILE* outFile = fopen(outPathStr.c_str(), "wb");
+    if (!outFile) {
+        int err = errno;
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        env->ReleaseStringUTFChars(jOutputPath, outputPath);
+        std::string msg = "DECODE_INTERNAL_ERROR: Cannot open output file: " + std::string(strerror(err));
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), msg.c_str());
+        return nullptr;
+    }
+
+    int64_t totalSamplesWritten = 0;
+    bool writeError = false;
+
+    auto onChunk = [&](const float* samples, int count) {
+        if (writeError) return;
+        size_t written = fwrite(samples, sizeof(float), (size_t)count, outFile);
+        if ((int)written != count) {
+            writeError = true;
+        } else {
+            totalSamplesWritten += count;
+        }
+    };
+
+    try {
+        auto result = sherpa::decodeFile(path, (int)inputFd, config, onChunk, nullptr, nullptr, cancelFlag);
+        fclose(outFile);
+        outFile = nullptr;
+
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        env->ReleaseStringUTFChars(jOutputPath, outputPath);
+
+        if (writeError) {
+            remove(outPathStr.c_str());
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "DECODE_INTERNAL_ERROR: Write error during streaming decode");
+            return nullptr;
+        }
+
+        // Build result HashMap
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        jobject map = env->NewObject(hashMapClass, hashMapInit);
+        auto putEntry = [env, map, hashMapPut](const char* key, jobject value) {
+            jstring jKey = env->NewStringUTF(key);
+            jobject prev = env->CallObjectMethod(map, hashMapPut, jKey, value);
+            if (prev) env->DeleteLocalRef(prev);
+            env->DeleteLocalRef(jKey);
+        };
+
+        jstring jOutPath = env->NewStringUTF(outPathStr.c_str());
+        putEntry("outputPath", jOutPath);
+        env->DeleteLocalRef(jOutPath);
+
+        jclass longClass = env->FindClass("java/lang/Long");
+        jmethodID longValueOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
+        jobject numSamplesVal = env->CallStaticObjectMethod(longClass, longValueOf, (jlong)totalSamplesWritten);
+        putEntry("numSamples", numSamplesVal);
+        env->DeleteLocalRef(numSamplesVal);
+        env->DeleteLocalRef(longClass);
+
+        jclass intClass = env->FindClass("java/lang/Integer");
+        jmethodID intValueOf = env->GetStaticMethodID(intClass, "valueOf", "(I)Ljava/lang/Integer;");
+        jobject srcSr = env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceSampleRate);
+        putEntry("sourceSampleRate", srcSr);
+        env->DeleteLocalRef(srcSr);
+        jobject srcCh = env->CallStaticObjectMethod(intClass, intValueOf, (jint)result.sourceChannels);
+        putEntry("sourceChannels", srcCh);
+        env->DeleteLocalRef(srcCh);
+        env->DeleteLocalRef(intClass);
+        env->DeleteLocalRef(hashMapClass);
+
+        return map;
+    } catch (const std::runtime_error& e) {
+        if (outFile) fclose(outFile);
+        remove(outPathStr.c_str());
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        env->ReleaseStringUTFChars(jOutputPath, outputPath);
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+        return nullptr;
+    } catch (...) {
+        if (outFile) fclose(outFile);
+        remove(outPathStr.c_str());
+        if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+        env->ReleaseStringUTFChars(jOutputPath, outputPath);
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                       "DECODE_INTERNAL_ERROR: Unknown error during streaming mmap decode");
         return nullptr;
     }
 }

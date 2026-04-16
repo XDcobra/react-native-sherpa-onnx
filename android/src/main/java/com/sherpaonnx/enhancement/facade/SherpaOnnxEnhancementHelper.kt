@@ -191,6 +191,8 @@ internal class SherpaOnnxEnhancementHelper(
         )
         return
       }
+      // Upgrade output to mmap if it exceeds the threshold
+      PipelineAudioRegistry.upgradeToMmapIfNeeded(audioOutBufferId)
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject(

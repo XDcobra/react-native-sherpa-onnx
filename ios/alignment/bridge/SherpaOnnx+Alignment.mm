@@ -131,7 +131,6 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
         return;
       }
 
-      std::shared_ptr<TxtOfflineEntry> textEntry;
       {
         std::lock_guard<std::mutex> txtLock(g_txt_mutex);
         auto it = g_txt_offline.find(textId);
@@ -147,10 +146,11 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
           }
           return;
         }
-        textEntry = it->second;
       }
 
-      if (!textEntry->populated || textEntry->text.empty()) {
+      std::string inputText;
+      std::string textReadErr;
+      if (!txt_read_offline_text(textId, &inputText, &textReadErr) || inputText.empty()) {
         reject(kAlignmentErrTextBufferEmpty,
                [NSString stringWithFormat:@"Offline text buffer is empty or not populated: %@", textInBufferId],
                nil);
@@ -164,7 +164,6 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
         return;
       }
 
-      std::shared_ptr<PaOfflineEntry> audioEntry;
       {
         std::lock_guard<std::mutex> paLock(g_pa_mutex);
         auto it = g_pa_offline.find(audioId);
@@ -180,10 +179,20 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
           }
           return;
         }
-        audioEntry = it->second;
       }
 
-      if (audioEntry->sampleRate <= 0 || audioEntry->numSamples() <= 0) {
+      int inputSampleRate = 0;
+      int inputNumSamples = 0;
+      std::string paMetaErrCode;
+      std::string paMetaErrMsg;
+      if (!pa_get_offline_metadata(audioId, &inputSampleRate, &inputNumSamples, &paMetaErrCode, &paMetaErrMsg)) {
+        reject(kAlignmentErrAudioBufferNotFound,
+               [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInBufferId],
+               nil);
+        return;
+      }
+
+      if (inputSampleRate <= 0 || inputNumSamples <= 0) {
         reject(kAlignmentErrAudioBufferEmpty,
                [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
                nil);
@@ -196,41 +205,35 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
       sherpa_onnx::alignment::AlignmentResult result;
       if (modeStr == "proportional") {
         result = sherpa_onnx::alignment::AlignProportional(
-            textEntry->text,
-            audioEntry->numSamples(),
-            audioEntry->sampleRate,
+            inputText,
+            inputNumSamples,
+            inputSampleRate,
             granularityStr);
       } else if (modeStr == "estimated") {
-        int32_t sr = sherpaonnx::alignment::bridge::ParseEstimatedSampleRate(options, audioEntry->sampleRate);
+        int32_t sr = sherpaonnx::alignment::bridge::ParseEstimatedSampleRate(options, inputSampleRate);
         auto counts = sherpaonnx::alignment::bridge::ParseSegmentSampleCounts(options);
         result = sherpa_onnx::alignment::AlignEstimated(
-            textEntry->text,
+            inputText,
             counts,
             sr,
             granularityStr);
       } else if (modeStr == "accurate") {
         std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
-        if (audioEntry->isFileBacked) {
-          result = sherpa_onnx::alignment::AlignAccurateFromFile(
-              modelPathStr,
-              textEntry->text,
-              audioEntry->filePath,
-              granularityStr);
-        } else {
-          if (audioEntry->samples.empty()) {
-            reject(kAlignmentErrAudioBufferEmpty,
-                   [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
-                   nil);
-            return;
-          }
-          result = sherpa_onnx::alignment::AlignAccurateFromPcm(
-              modelPathStr,
-              textEntry->text,
-              audioEntry->samples.data(),
-              audioEntry->samples.size(),
-              audioEntry->sampleRate,
-              granularityStr);
+        std::vector<float> pcm;
+        int pcmSampleRate = 0;
+        if (!pa_read_offline_samples(audioId, &pcm, &pcmSampleRate) || pcm.empty()) {
+          reject(kAlignmentErrAudioBufferEmpty,
+                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
+                 nil);
+          return;
         }
+        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+            modelPathStr,
+            inputText,
+            pcm.data(),
+            pcm.size(),
+            pcmSampleRate,
+            granularityStr);
       } else {
         throw std::runtime_error("Unsupported alignment mode");
       }

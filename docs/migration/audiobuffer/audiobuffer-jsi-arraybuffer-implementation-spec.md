@@ -1102,7 +1102,7 @@ export interface CreateLiveAudioBufferOptions {
   channelCount?: number;
   windowSeconds?: number;
   persistencePath?: string;
-  persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';
+  persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';  // ← REMOVED (always F32 WAV internally)
   emitAppendedEvents?: boolean;
   emitAppendedSamples?: boolean;  // ← REMOVE
   appendEventMinIntervalMs?: number;
@@ -1116,7 +1116,7 @@ export interface CreateLiveAudioBufferOptions {
   channelCount?: number;
   windowSeconds?: number;
   persistencePath?: string;
-  persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';
+  persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';  // ← REMOVED (always F32 WAV internally)
   emitAppendedEvents?: boolean;
   appendEventMinIntervalMs?: number;
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
@@ -1154,7 +1154,7 @@ createLiveAudioBuffer(options: {
   channelCount?: number;
   windowSeconds?: number;
   persistencePath?: string;
-  persistenceFormat?: string;
+  persistenceFormat?: string;  // ← REMOVED (always F32 WAV internally)
   emitAppendedSamples?: boolean;  // ← REMOVE
   // ... rest
 }): Promise<{...}>;
@@ -1165,7 +1165,7 @@ createLiveAudioBuffer(options: {
   channelCount?: number;
   windowSeconds?: number;
   persistencePath?: string;
-  persistenceFormat?: string;
+  persistenceFormat?: string;  // ← REMOVED (always F32 WAV internally)
   // ... rest
 }): Promise<{...}>;
 ```

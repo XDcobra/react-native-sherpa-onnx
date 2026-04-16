@@ -504,13 +504,7 @@ class LiveEntry(
 
 data class PersistenceConfig(
   val filePath: String,
-  val format: SpoolFormat = SpoolFormat.WAV_PCM_S16LE
 )
-
-enum class SpoolFormat {
-  WAV_PCM_S16LE,
-  WAV_PCM_FLOAT
-}
 
 // ========== Spool Writer ==========
 
@@ -526,8 +520,6 @@ internal class SpoolWriter(
   val filePath: String = config.filePath
   private var raf: RandomAccessFile? = null
   private var totalSamplesWritten = 0L
-  private val isFloat = config.format == SpoolFormat.WAV_PCM_FLOAT
-  private val bytesPerSample = if (isFloat) 4 else 2
   private val lock = Object()
 
   init {
@@ -545,12 +537,12 @@ internal class SpoolWriter(
     header.put("WAVE".toByteArray(Charsets.US_ASCII))
     header.put("fmt ".toByteArray(Charsets.US_ASCII))
     header.putInt(16)
-    header.putShort(if (isFloat) 3 else 1) // audioFormat
+    header.putShort(3) // audioFormat = IEEE Float
     header.putShort(channelCount.toShort())
     header.putInt(sampleRate)
-    header.putInt(sampleRate * channelCount * bytesPerSample) // byteRate
-    header.putShort((channelCount * bytesPerSample).toShort()) // blockAlign
-    header.putShort((bytesPerSample * 8).toShort()) // bitsPerSample
+    header.putInt(sampleRate * channelCount * 4) // byteRate
+    header.putShort((channelCount * 4).toShort()) // blockAlign
+    header.putShort(32) // bitsPerSample
     header.put("data".toByteArray(Charsets.US_ASCII))
     header.putInt(0) // placeholder for data size
     raf!!.write(header.array())
@@ -559,15 +551,8 @@ internal class SpoolWriter(
   fun append(samples: FloatArray) {
     synchronized(lock) {
       val r = raf ?: return
-      val buf = ByteBuffer.allocate(samples.size * bytesPerSample).order(ByteOrder.LITTLE_ENDIAN)
-      if (isFloat) {
-        for (s in samples) buf.putFloat(s)
-      } else {
-        for (s in samples) {
-          val clamped = s.coerceIn(-1.0f, 1.0f)
-          buf.putShort((clamped * 32767.0f).toInt().coerceIn(-32768, 32767).toShort())
-        }
-      }
+      val buf = ByteBuffer.allocate(samples.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+      for (s in samples) buf.putFloat(s)
       r.write(buf.array())
       totalSamplesWritten += samples.size
     }
@@ -577,7 +562,7 @@ internal class SpoolWriter(
   fun finalize_() {
     synchronized(lock) {
       val r = raf ?: return
-      val dataSize = totalSamplesWritten * bytesPerSample
+      val dataSize = totalSamplesWritten * 4
       val fileSize = 44 + dataSize
 
       // Patch RIFF size (offset 4)

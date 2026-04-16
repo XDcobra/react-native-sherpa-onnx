@@ -59,3 +59,26 @@ bool pa_append_samples_to_live(
 	std::string *errorCode,
 	std::string *errorMessage
 );
+
+// Query offline buffer metadata by id.
+bool pa_get_offline_metadata(
+	const std::string &bufferId,
+	int *sampleRate,
+	int *numSamples,
+	std::string *errorCode,
+	std::string *errorMessage
+);
+
+// Populate an empty offline buffer atomically.
+bool pa_adopt_offline_samples_if_empty(
+	const std::string &bufferId,
+	std::vector<float> &&samples,
+	std::string *errorCode,
+	std::string *errorMessage
+);
+
+// Orphan sweep for mmap temp files.
+void pa_sweepOrphanedTempFiles(int maxAgeSec = 3600);
+
+// Upgrade an in-memory entry to mmap if it exceeds the threshold.
+void pa_upgradeToMmapIfNeeded(const std::string &bufferId);

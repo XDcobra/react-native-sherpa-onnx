@@ -1,10 +1,14 @@
 package com.sherpaonnx.audio.pipeline
 
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
 import java.io.Closeable
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+
+private const val TAG = "PipelineAudioRegistry"
 
 /**
  * Unified pipeline audio buffer registry.
@@ -19,13 +23,28 @@ object PipelineAudioRegistry {
   private val offlineEntries = ConcurrentHashMap<String, OfflineEntry>()
   private val liveEntries = ConcurrentHashMap<String, LiveEntry>()
 
+  /** Set once during module init — used for mmap temp files. */
+  @Volatile
+  var cacheDir: File? = null
+
+  /**
+   * Run startup orphan sweep. Call once from module initialize().
+   */
+  fun initializeWithCacheDir(dir: File) {
+    cacheDir = dir
+    OfflineEntry.sweepOrphanedTempFiles(dir)
+  }
+
   // ==================== Offline Buffer Creation ====================
 
   /**
-   * Create an offline buffer from Float32 PCM samples provided from JS.
-   * Always in-memory.
+   * Create an offline buffer from Float32 PCM samples (in-memory FloatArray).
+   * Uses mmap for large buffers (≥ 10 MB raw PCM), in-memory for small ones.
+   * 
+   * WARNING: For large FloatArrays, this may cause OOM. Prefer file-based APIs
+   * (decodeFileToOfflineBuffer, createOfflineFromLive with spool files) for big data.
    */
-  fun createOfflineFromSamples(
+  fun createOfflineFromFloatArray(
     samples: FloatArray,
     sampleRate: Int,
     channelCount: Int = 1
@@ -35,12 +54,41 @@ object PipelineAudioRegistry {
     if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
 
     val bufferId = "off_${UUID.randomUUID()}"
-    val entry = OfflineEntry.InMemory(
-      bufferId = bufferId,
-      sampleRate = sampleRate,
-      channelCount = channelCount,
-      samples = samples
-    )
+    val rawSize = samples.size.toLong() * 4
+    val dir = cacheDir
+
+    val entry = if (rawSize >= PA_FILE_BACKED_THRESHOLD_BYTES && dir != null) {
+      OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
+        ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    } else {
+      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    }
+    offlineEntries[bufferId] = entry
+    return entry
+  }
+
+  /**
+   * Create an offline buffer from a pre-written raw float32 file.
+   * The file is memory-mapped directly — no heap allocation of all samples.
+   * Falls back to the old in-memory path only if mmap fails.
+   *
+   * @param f32FilePath Absolute path to an existing raw float32 file.
+   * @param numSamples Total float32 sample count in the file.
+   * @param sampleRate Output sample rate.
+   */
+  fun createOfflineFromMmapFile(
+    f32FilePath: String,
+    numSamples: Int,
+    sampleRate: Int,
+    channelCount: Int = 1
+  ): OfflineEntry {
+    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
+    if (numSamples <= 0) throw IllegalArgumentException("numSamples must be > 0")
+    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
+
+    val bufferId = "off_${UUID.randomUUID()}"
+    val entry = OfflineEntry.createMmapFromFile(bufferId, sampleRate, channelCount, numSamples, f32FilePath)
+      ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Failed to mmap decoded file")
     offlineEntries[bufferId] = entry
     return entry
   }
@@ -75,8 +123,8 @@ object PipelineAudioRegistry {
    *
    * @param liveBufferId ID of the live buffer.
    * @param mode How to create the offline buffer:
-   *   - "fullIfSpooled": If live has a spool file, create file-backed offline from it
-   *     (no RAM duplication). Otherwise, snapshot the ring.
+   *   - "fullIfSpooled": If live has a spool file, read and convert to mmap if large.
+   *     Otherwise, snapshot the ring.
    *   - "windowSnapshot": Always snapshot the current ring window (in-memory copy).
    */
   fun createOfflineFromLive(
@@ -92,24 +140,9 @@ object PipelineAudioRegistry {
       "fullIfSpooled" -> {
         val spoolPath = live.spoolFilePath
         if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
-          // File-backed from finalized spool (no RAM duplication)
-          val metadata = parseWavHeader(spoolPath)
-          if (metadata != null) {
-            val entry = OfflineEntry.FileBacked(
-              bufferId = bufferId,
-              sampleRate = metadata.sampleRate,
-              channelCount = metadata.channelCount,
-              filePath = spoolPath,
-              metadata = metadata
-            )
-            offlineEntries[bufferId] = entry
-            entry
-          } else {
-            // Spool header unreadable, fall back to ring snapshot
-            createFromRingSnapshot(bufferId, live)
-          }
+          createOfflineFromF32WavSpoolFile(bufferId, spoolPath, live.sampleRate, live.channelCount)
+            ?: createFromRingSnapshot(bufferId, live)
         } else {
-          // No spool or still recording: snapshot ring
           createFromRingSnapshot(bufferId, live)
         }
       }
@@ -120,14 +153,134 @@ object PipelineAudioRegistry {
 
   private fun createFromRingSnapshot(bufferId: String, live: LiveEntry): OfflineEntry {
     val snapshot = live.snapshotRing()
-    val entry = OfflineEntry.InMemory(
-      bufferId = bufferId,
-      sampleRate = live.sampleRate,
-      channelCount = live.channelCount,
-      samples = snapshot
-    )
+    val entry = createEntryWithThreshold(bufferId, live.sampleRate, live.channelCount, snapshot)
+    return entry
+  }
+
+  /**
+   * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
+   * Returns the OfflineEntry, or null if conversion fails (caller falls back to ring snapshot).
+   */
+  private fun createOfflineFromF32WavSpoolFile(
+    bufferId: String,
+    spoolPath: String,
+    sampleRate: Int,
+    channelCount: Int,
+  ): OfflineEntry? {
+    val dir = cacheDir ?: return null
+    val f32File = File(dir, "pa_off_${bufferId}.f32")
+
+    return try {
+      // Skip 44-byte WAV header, copy raw F32 bytes directly
+      File(spoolPath).inputStream().use { input ->
+        var remaining = 44L
+        while (remaining > 0L) {
+          val skipped = input.skip(remaining)
+          if (skipped > 0L) {
+            remaining -= skipped
+            continue
+          }
+          if (input.read() == -1) throw RuntimeException("Failed to skip WAV header")
+          remaining -= 1L
+        }
+        f32File.outputStream().use { output ->
+          input.copyTo(output, bufferSize = 32768)
+        }
+      }
+
+      val numSamples = (f32File.length() / 4).toInt()
+      if (numSamples <= 0) {
+        f32File.delete()
+        return null
+      }
+
+      OfflineEntry.createMmapFromFile(
+        bufferId, sampleRate, channelCount, numSamples,
+        f32File.absolutePath
+      ) ?: run {
+        f32File.delete()
+        null
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "createOfflineFromF32WavSpoolFile failed: ${e.message}")
+      f32File.delete()
+      null
+    }
+  }
+
+  /**
+   * Create an entry applying the mmap threshold: large → MmapBacked, small → InMemory.
+   * Registers in offlineEntries.
+   */
+  internal fun createEntryWithThreshold(
+    bufferId: String,
+    sampleRate: Int,
+    channelCount: Int,
+    samples: FloatArray,
+  ): OfflineEntry {
+    val rawSize = samples.size.toLong() * 4
+    val dir = cacheDir
+
+    val entry = if (rawSize >= PA_FILE_BACKED_THRESHOLD_BYTES && dir != null) {
+      OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
+        ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    } else {
+      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
+    }
     offlineEntries[bufferId] = entry
     return entry
+  }
+
+  // Note: This still uses the old in-heap path because these scenarios have FloatArrays
+  // that are already materialized:
+  //   - JSI external calls: intentional, documented as power-user API
+  //   - Ring snapshots: typically small (ring buffer is bounded)
+  //   - Enhancement output: filled into pre-allocated empty buffer
+  // For large file data, use file-based paths (decodeFileToOfflineBuffer, createOfflineFromLive).
+
+  /**
+   * Upgrade an InMemory entry to MmapBacked if it exceeds the threshold.
+   * Used after adoptSamples() in enhancement output.
+   * Atomically swaps the entry in the registry.
+   */
+  fun upgradeToMmapIfNeeded(bufferId: String) {
+    // Upgrade an in-memory buffer to mmap if it exceeds the threshold.
+    // Used when TTS/Enhancement output fills an initially-empty buffer.
+    // This is safe because enhancement output is typically bounded (< 1-10 min audio),
+    // and the buffer was already in heap before upgrade.
+    val entry = offlineEntries[bufferId] ?: return
+    if (entry !is OfflineEntry.InMemory) return
+    val rawSize = entry.numSamples.toLong() * 4
+    if (rawSize < PA_FILE_BACKED_THRESHOLD_BYTES) return
+    val dir = cacheDir ?: return
+
+    val mmapEntry = OfflineEntry.createMmapFromSamples(
+      entry.bufferId, entry.sampleRate, entry.channelCount, entry.samples, dir
+    ) ?: return
+
+    // Atomically replace in registry
+    offlineEntries[bufferId] = mmapEntry
+    entry.samples = FloatArray(0) // Release heap memory from old InMemory
+  }
+
+  /** Read a WAV spool into float32 samples. */
+  private fun readWavToFloat32(filePath: String, metadata: FileBackedMetadata): FloatArray? {
+    return try {
+      val result = FloatArray(metadata.numSamples)
+      FileBackedReader(filePath, metadata).use { reader ->
+        var offset = 0
+        val chunk = 8192
+        while (offset < result.size) {
+          val read = reader.readSamples(result, offset, minOf(chunk, result.size - offset))
+          if (read <= 0) break
+          offset += read
+        }
+      }
+      result
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to read WAV spool: ${e.message}")
+      null
+    }
   }
 
   // ==================== Live Buffer Creation ====================
@@ -264,24 +417,6 @@ object PipelineAudioRegistry {
     return false
   }
 
-  /**
-   * Attach a retained resource to an offline file-backed entry.
-   * The resource is released automatically when the buffer is released.
-   */
-  fun attachOfflineRetainedResource(bufferId: String, resource: Closeable) {
-    val entry = offlineEntries[bufferId]
-      ?: run {
-        resource.close()
-        throw IllegalArgumentException("Offline buffer not found: $bufferId")
-      }
-
-    if (entry is OfflineEntry.FileBacked) {
-      entry.retainResource(resource)
-    } else {
-      resource.close()
-    }
-  }
-
   // ==================== Accessors for pipeline stages ====================
 
   fun getOffline(bufferId: String): OfflineEntry? = offlineEntries[bufferId]
@@ -305,7 +440,8 @@ object PipelineAudioRegistry {
   }
 
   /**
-   * Get a sample slice from an in-memory offline buffer for JSI/JNI callers.
+   * Get a sample slice from an offline buffer for JSI/JNI callers.
+   * Works for both InMemory and MmapBacked entries.
    */
   fun getOfflineSamplesSliceJni(
     bufferId: String,
@@ -316,18 +452,7 @@ object PipelineAudioRegistry {
       ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
 
     if (frameCount <= 0) return FloatArray(0)
-
-    return when (entry) {
-      is OfflineEntry.InMemory -> {
-        val safeStart = startFrame.coerceAtLeast(0)
-        if (safeStart >= entry.samples.size) return FloatArray(0)
-        val endExclusive = (safeStart + frameCount).coerceAtMost(entry.samples.size)
-        entry.samples.copyOfRange(safeStart, endExclusive)
-      }
-      is OfflineEntry.FileBacked -> {
-        throw UnsupportedOperationException("[BUFFER_NOT_IN_MEMORY] $bufferId")
-      }
-    }
+    return entry.readSlice(startFrame, frameCount)
   }
 
   /**
@@ -351,7 +476,7 @@ object PipelineAudioRegistry {
     sampleRate: Int,
     channelCount: Int,
   ): String {
-    val entry = createOfflineFromSamples(samples, sampleRate, channelCount)
+    val entry = createOfflineFromFloatArray(samples, sampleRate, channelCount)
     return "{" +
       "\"bufferId\":\"${entry.bufferId}\"," +
       "\"kind\":\"offlinePcmBuffer\"," +

@@ -144,6 +144,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.initialize()
     tryInstallJsiBindings()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.initialize(reactApplicationContext)
+    PipelineAudioRegistry.initializeWithCacheDir(reactApplicationContext.cacheDir)
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -907,25 +908,54 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelChecker.start()
 
         try {
+          // Streaming decode: write float32 chunks directly to a temp .f32 file,
+          // avoiding any large heap allocation (OOM fix for big files).
+          val dir = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.cacheDir
+            ?: reactApplicationContext.cacheDir
+          val tmpF32 = java.io.File(dir, "pa_off_decode_${java.util.UUID.randomUUID()}.f32")
+
           @Suppress("UNCHECKED_CAST")
-          val result = nativeDecodeFileToBuffer(
+          val result = nativeDecodeFileToMmapFile(
             sourcePath,
             sourceFd,
             targetRate,
             forceMono,
             8192,
-            cancelFlagAddr
+            cancelFlagAddr,
+            tmpF32.absolutePath
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
           cancelChecker.interrupt()
 
-          val samples = result["samples"] as? FloatArray ?: FloatArray(0)
+          val numSamples = (result["numSamples"] as? Long)?.toInt() ?: 0
           val srcSampleRate = (result["sourceSampleRate"] as? Int) ?: 0
           val outputRate = if (targetRate > 0) targetRate else srcSampleRate
 
-          val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromSamples(
-            samples, outputRate, 1
-          )
+          if (numSamples <= 0) {
+            tmpF32.delete()
+            throw RuntimeException("DECODE_EMPTY: No samples decoded")
+          }
+
+          val rawSize = numSamples.toLong() * 4
+          val entry = if (rawSize >= com.sherpaonnx.audio.pipeline.PA_FILE_BACKED_THRESHOLD_BYTES) {
+            // Large file: mmap the temp .f32 directly (zero heap copy)
+            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromMmapFile(
+              tmpF32.absolutePath, numSamples, outputRate, 1
+            )
+          } else {
+            // Small file: read into heap and delete temp file
+            val samples = FloatArray(numSamples)
+            java.io.RandomAccessFile(tmpF32, "r").use { raf ->
+              val buf = java.nio.ByteBuffer.allocate(numSamples * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+              raf.channel.read(buf)
+              buf.flip()
+              buf.asFloatBuffer().get(samples)
+            }
+            tmpF32.delete()
+            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFloatArray(
+              samples, outputRate, 1
+            )
+          }
 
           promise.resolve(entry.toWritableMap())
         } finally {
@@ -982,7 +1012,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           "ingest_spool_${java.util.UUID.randomUUID()}.wav"
         ).absolutePath
         liveEntry.enableSpool(
-          com.sherpaonnx.audio.pipeline.PersistenceConfig(tmpSpoolPath, com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE),
+          com.sherpaonnx.audio.pipeline.PersistenceConfig(tmpSpoolPath),
           temporary = true
         )
       } catch (e: Exception) {
@@ -1194,12 +1224,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val persistence = if (options.hasKey("persistencePath")) {
         val path = options.getString("persistencePath") ?: throw IllegalArgumentException("persistencePath must be a string")
-        val formatStr = if (options.hasKey("persistenceFormat")) options.getString("persistenceFormat") else "wav_pcm_s16le"
-        val format = when (formatStr) {
-          "wav_pcm_float" -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_FLOAT
-          else -> com.sherpaonnx.audio.pipeline.SpoolFormat.WAV_PCM_S16LE
-        }
-        com.sherpaonnx.audio.pipeline.PersistenceConfig(path, format)
+        com.sherpaonnx.audio.pipeline.PersistenceConfig(path)
       } else null
 
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createLive(
@@ -1366,6 +1391,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
         }
         offset = end
+      }
+      val finishErr = nativeEncodeSessionFinish(sessionPtr)
+      if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
+    } finally {
+      nativeEncodeSessionRelease(sessionPtr)
+    }
+  }
+
+  private fun encodeViaOfflineReader(
+    entry: com.sherpaonnx.audio.pipeline.OfflineEntry,
+    outputPath: String, format: String, outputSampleRateHz: Int,
+    bitrate: Int, quality: Int, operationId: String,
+    cancelFlagAddr: Long
+  ) {
+    val channelCount = entry.channelCount
+    if (channelCount <= 0 || (entry.numSamples % channelCount) != 0) {
+      throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid channel/sample alignment")
+    }
+    val totalFrames = entry.numSamples / channelCount
+    val sessionPtr = nativeEncodeSessionCreate(
+      outputPath, format, entry.sampleRate, channelCount,
+      outputSampleRateHz, bitrate, quality,
+      totalFrames.toLong(),
+      cancelFlagAddr
+    )
+    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+
+    try {
+      val chunkFrames = 4096
+      val chunkSamples = chunkFrames * channelCount
+      val scratch = FloatArray(chunkSamples)
+      entry.createReader().use { reader ->
+        while (true) {
+          val samplesRead = reader.readSamples(scratch, 0, chunkSamples)
+          if (samplesRead <= 0) break
+          if ((samplesRead % channelCount) != 0) {
+            throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid read alignment")
+          }
+          val framesRead = samplesRead / channelCount
+          val chunk = if (samplesRead == scratch.size) scratch else scratch.copyOf(samplesRead)
+          val err = nativeEncodeSessionFeedChunk(sessionPtr, chunk, framesRead)
+          if (err.isNotEmpty()) {
+            if (err.contains("CANCELLED")) throw RuntimeException("AUDIO_SAVE_CANCELLED: $err")
+            throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
+          }
+        }
       }
       val finishErr = nativeEncodeSessionFinish(sessionPtr)
       if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
@@ -1557,8 +1628,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
 
     when (entry) {
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked -> {
-        encodeViaDecodeFile(entry.filePath, -1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+      is com.sherpaonnx.audio.pipeline.OfflineEntry.MmapBacked -> {
+        encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
       is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
         encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
@@ -2791,6 +2862,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       forceMono: Boolean,
       chunkSize: Int,
       cancelFlagPtr: Long
+    ): HashMap<String, Any>?
+
+    /** Streaming decode to raw .f32 file: returns HashMap{outputPath: String, numSamples: Long, sourceSampleRate: Int, sourceChannels: Int}. */
+    @JvmStatic
+    external fun nativeDecodeFileToMmapFile(
+      path: String?,
+      inputFd: Int,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      cancelFlagPtr: Long,
+      outputPath: String
     ): HashMap<String, Any>?
 
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */

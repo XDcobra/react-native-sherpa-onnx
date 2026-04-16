@@ -164,6 +164,9 @@ internal class TtsBatchGenerationService(
         return
       }
 
+      // Upgrade to mmap if it exceeds the threshold
+      PipelineAudioRegistry.upgradeToMmapIfNeeded(audioOutBufferId)
+
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)

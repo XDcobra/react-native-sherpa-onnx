@@ -770,7 +770,6 @@ export default function PipelineShowcaseScreen() {
         channelCount: 1,
         windowSeconds: 240,
         persistencePath: outputAudioPath,
-        persistenceFormat: 'wav_pcm_float',
         emitAppendedEvents: true,
         onFramesAppended: (event) => {
           setGeneratedSpeechSeconds(event.totalSamplesWritten / ttsSampleRate);

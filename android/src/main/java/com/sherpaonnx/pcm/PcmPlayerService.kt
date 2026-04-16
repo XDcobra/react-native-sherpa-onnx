@@ -290,15 +290,16 @@ internal class PcmPlayerService(
   }
 
   fun shutdown() {
-    val playerIds = registry.keys.toList()
-    for (playerId in playerIds) {
-      val session = registry.remove(playerId) ?: continue
+    val sessions = registry.snapshotSessions()
+    for (session in sessions) {
+      val playerId = session.playerId
+      val removed = registry.remove(playerId) ?: continue
       try {
-        session.destroy()
+        removed.destroy()
       } catch (e: Exception) {
         Log.e(TAG, "Failed to destroy PCM player during shutdown: $playerId", e)
       } finally {
-        PaAudioSessionCoordinator.unregisterTrack(session.track)
+        PaAudioSessionCoordinator.unregisterTrack(removed.track)
         PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
       }
     }

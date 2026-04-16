@@ -60,6 +60,10 @@ const info = await getPipelineAudioBufferInfo(offline);
 console.log(info.kind, info.state);
 ```
 
+`OfflineAudioBufferInfo` includes an optional `storageKind?: 'ram' | 'mmap'`.
+- Default: `'ram'` (when `storageKind` is omitted / `undefined`)
+- `storageKind: 'mmap'` indicates a file-backed / memory-mapped backing strategy.
+
 #### `releasePipelineAudioBuffer(buffer)`
 
 ```ts
@@ -163,7 +167,7 @@ function getOfflineAudioBufferSamplesSlice(
 const head = getOfflineAudioBufferSamplesSlice(offline, 0, 320);
 ```
 
-Only in-memory offline buffers are supported. File-backed buffers throw `BUFFER_NOT_IN_MEMORY`.
+Supports both in-memory offline buffers (`info.storageKind === 'ram'`) and file-backed offline buffers (`info.storageKind === 'mmap'`).
 
 #### Convert offline buffer to file
 

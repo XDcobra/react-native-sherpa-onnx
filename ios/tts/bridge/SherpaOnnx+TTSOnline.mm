@@ -165,30 +165,23 @@ static std::mutex g_tts_pipeline_mutex;
             std::string refKey = [refBufferId UTF8String];
 
             auto modelKind = inst->wrapper->getModelKind();
-            if (modelKind != sherpaonnx::TtsModelKind::Pocket) {
+            if (modelKind != sherpaonnx::TtsModelKind::kPocket) {
                 reject(@"TTS_PIPELINE_VOICE_CLONE_UNSUPPORTED",
                        @"Voice cloning in pipeline mode is only supported for Pocket TTS", nil);
                 return;
             }
 
-            std::shared_ptr<PaOfflineEntry> refEntry;
-            {
-                std::lock_guard<std::mutex> lock(g_pa_mutex);
-                auto it = g_pa_offline.find(refKey);
-                if (it == g_pa_offline.end() || !it->second) {
-                    reject(@"TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND",
-                           [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferId], nil);
-                    return;
-                }
-                refEntry = it->second;
+            std::vector<float> refSamples;
+            int refSampleRate = 0;
+            if (!pa_read_offline_samples(refKey, &refSamples, &refSampleRate)) {
+                reject(@"TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND",
+                       [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferId], nil);
+                return;
             }
-
-            auto refSamples = refEntry->readAllSamples();
-            int32_t refSampleRate = refEntry->sampleRate;
 
             sherpaonnx::VoiceCloneOptions clone;
             clone.reference_audio = std::move(refSamples);
-            clone.reference_sample_rate = refSampleRate;
+            clone.reference_sample_rate = static_cast<int32_t>(refSampleRate);
             clone.reference_text = options[@"referenceText"]
                 ? std::string([options[@"referenceText"] UTF8String] ?: "")
                 : "";

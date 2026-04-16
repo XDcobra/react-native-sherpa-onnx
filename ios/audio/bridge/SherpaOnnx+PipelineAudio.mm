@@ -28,8 +28,14 @@
 #include <functional>
 #include <cmath>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <thread>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // ==================== Error Codes ====================
 static NSString *const kPAErrBufferNotFound   = @"AUDIO_BUFFER_NOT_FOUND";
@@ -109,6 +115,107 @@ static bool pa_parseWavHeader(const std::string &filePath, PaWavHeader &hdr) {
 
 // pa_writeWavHeaderToStream is provided by PaLiveEntry.h
 
+// ==================== Mmap Region ====================
+
+/**
+ * RAII wrapper for a POSIX mmap region over a raw float32 file.
+ */
+struct PaMmapRegion {
+  void *addr = MAP_FAILED;
+  size_t length = 0;
+  std::string filePath;
+
+  PaMmapRegion() = default;
+  PaMmapRegion(const PaMmapRegion &) = delete;
+  PaMmapRegion &operator=(const PaMmapRegion &) = delete;
+  PaMmapRegion(PaMmapRegion &&o) noexcept : addr(o.addr), length(o.length), filePath(std::move(o.filePath)) {
+    o.addr = MAP_FAILED;
+    o.length = 0;
+  }
+  PaMmapRegion &operator=(PaMmapRegion &&o) noexcept {
+    if (this != &o) {
+      release();
+      addr = o.addr;
+      length = o.length;
+      filePath = std::move(o.filePath);
+      o.addr = MAP_FAILED;
+      o.length = 0;
+    }
+    return *this;
+  }
+  ~PaMmapRegion() { release(); }
+
+  bool isValid() const { return addr != MAP_FAILED && addr != nullptr; }
+  const float *floatPtr() const { return isValid() ? reinterpret_cast<const float *>(addr) : nullptr; }
+  int numSamples() const { return isValid() ? (int)(length / sizeof(float)) : 0; }
+
+  void release() {
+    if (isValid()) {
+      munmap(addr, length);
+      addr = MAP_FAILED;
+      length = 0;
+    }
+    if (!filePath.empty()) {
+      unlink(filePath.c_str());
+      filePath.clear();
+    }
+  }
+
+  /** Map an existing raw .f32 file. */
+  static std::unique_ptr<PaMmapRegion> mapFile(const std::string &path) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return nullptr;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size == 0) { close(fd); return nullptr; }
+
+    void *mapped = mmap(nullptr, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (mapped == MAP_FAILED) return nullptr;
+
+    auto region = std::make_unique<PaMmapRegion>();
+    region->addr = mapped;
+    region->length = (size_t)st.st_size;
+    region->filePath = path;
+    return region;
+  }
+
+  /** Write raw float32 data to a temp file and mmap it. */
+  static std::unique_ptr<PaMmapRegion> createFromSamples(
+    const float *samples,
+    size_t count,
+    const std::string &tempDir,
+    const std::string &bufferId
+  ) {
+    std::string path = tempDir + "/pa_off_" + bufferId + ".f32";
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return nullptr;
+
+    size_t bytes = count * sizeof(float);
+    const uint8_t *src = reinterpret_cast<const uint8_t *>(samples);
+    size_t remaining = bytes;
+    while (remaining > 0) {
+      ssize_t n = write(fd, src, remaining);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        close(fd);
+        unlink(path.c_str());
+        return nullptr;
+      }
+      if (n == 0) {
+        close(fd);
+        unlink(path.c_str());
+        return nullptr;
+      }
+      src += n;
+      remaining -= (size_t)n;
+    }
+    close(fd);
+
+    return mapFile(path);
+  }
+};
+
 // ==================== Offline Entry ====================
 
 struct PaOfflineEntry {
@@ -117,16 +224,23 @@ struct PaOfflineEntry {
   int channelCount;
   // In-memory variant
   std::vector<float> samples;
-  // File-backed variant
-  bool isFileBacked = false;
-  std::string filePath;
-  PaWavHeader wavHeader;
+  // Mmap-backed variant
+  std::unique_ptr<PaMmapRegion> mmapRegion;
+
+  bool isMmapBacked() const { return mmapRegion && mmapRegion->isValid(); }
+  std::string storageKind() const { return isMmapBacked() ? "mmap" : "ram"; }
 
   int numSamples() const {
-    return isFileBacked ? wavHeader.numSamples : (int)samples.size();
+    return isMmapBacked() ? mmapRegion->numSamples() : (int)samples.size();
   }
   double durationMs() const {
     return sampleRate > 0 ? (double)numSamples() / sampleRate * 1000.0 : 0.0;
+  }
+
+  /** Get direct float pointer for zero-copy reads. Works for both variants. */
+  const float *floatPtr() const {
+    if (isMmapBacked()) return mmapRegion->floatPtr();
+    return samples.empty() ? nullptr : samples.data();
   }
 
   NSDictionary *toDict() const {
@@ -137,25 +251,35 @@ struct PaOfflineEntry {
       @"sampleRate": @(sampleRate),
       @"channelCount": @(channelCount),
       @"numSamples": @(numSamples()),
-      @"durationMs": @(durationMs())
+      @"durationMs": @(durationMs()),
+      @"storageKind": [NSString stringWithUTF8String:storageKind().c_str()]
     };
   }
 
   std::vector<float> readAllSamples() const {
-    if (!isFileBacked) return samples;
-    std::vector<float> result(wavHeader.numSamples);
-    std::ifstream f(filePath, std::ios::binary);
-    f.seekg(wavHeader.dataOffset);
-    if (wavHeader.audioFormat == 1 && wavHeader.bitsPerSample == 16) {
-      std::vector<int16_t> buf(wavHeader.numSamples);
-      f.read(reinterpret_cast<char*>(buf.data()), wavHeader.numSamples * 2);
-      for (int i = 0; i < wavHeader.numSamples; i++) {
-        result[i] = (float)buf[i] / 32768.0f;
-      }
-    } else if (wavHeader.audioFormat == 3 && wavHeader.bitsPerSample == 32) {
-      f.read(reinterpret_cast<char*>(result.data()), wavHeader.numSamples * 4);
+    if (!isMmapBacked()) return samples;
+    const float *ptr = mmapRegion->floatPtr();
+    int n = mmapRegion->numSamples();
+    return std::vector<float>(ptr, ptr + n);
+  }
+
+  std::vector<float> readSlice(int startSample, int count) const {
+    int total = numSamples();
+    int safeStart = std::max(0, startSample);
+    if (safeStart >= total) return {};
+    int actualCount = std::min(count, total - safeStart);
+    const float *base = floatPtr();
+    if (!base) return {};
+    return std::vector<float>(base + safeStart, base + safeStart + actualCount);
+  }
+
+  void release() {
+    if (mmapRegion) {
+      mmapRegion->release();
+      mmapRegion.reset();
     }
-    return result;
+    samples.clear();
+    samples.shrink_to_fit();
   }
 };
 
@@ -167,7 +291,151 @@ struct PaOfflineEntry {
 std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
-static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB
+static const long kPaFileBackedThreshold = 10L * 1024 * 1024; // 10 MB raw PCM
+
+static std::string pa_tempDir() {
+  return [NSTemporaryDirectory() UTF8String];
+}
+
+/**
+ * Create an entry, using mmap if the raw PCM size exceeds the threshold.
+ * The samples vector is consumed (moved) on success for the in-memory path.
+ */
+static std::shared_ptr<PaOfflineEntry> pa_createEntryWithThreshold(
+  const std::string &bufferId,
+  int sampleRate,
+  int channelCount,
+  std::vector<float> &samples
+) {
+  auto entry = std::make_shared<PaOfflineEntry>();
+  entry->bufferId = bufferId;
+  entry->sampleRate = sampleRate;
+  entry->channelCount = channelCount;
+
+  long rawSize = (long)samples.size() * sizeof(float);
+  if (rawSize >= kPaFileBackedThreshold) {
+    auto region = PaMmapRegion::createFromSamples(samples.data(), samples.size(), pa_tempDir(), bufferId);
+    if (region) {
+      entry->mmapRegion = std::move(region);
+      return entry; // samples vector not moved — caller can let it destruct
+    }
+  }
+  entry->samples = std::move(samples);
+  return entry;
+}
+
+/**
+ * Upgrade an entry to mmap if it exceeds the threshold.
+ * Used after adoptSamples in enhancement output.
+ */
+void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) return;
+    entry = it->second;
+  }
+  if (entry->isMmapBacked()) return;
+  long rawSize = (long)entry->samples.size() * sizeof(float);
+  if (rawSize < kPaFileBackedThreshold) return;
+
+  auto region = PaMmapRegion::createFromSamples(
+    entry->samples.data(), entry->samples.size(), pa_tempDir(), bufferId
+  );
+  if (!region) return;
+
+  auto upgradedEntry = std::make_shared<PaOfflineEntry>();
+  upgradedEntry->bufferId = entry->bufferId;
+  upgradedEntry->sampleRate = entry->sampleRate;
+  upgradedEntry->channelCount = entry->channelCount;
+  upgradedEntry->mmapRegion = std::move(region);
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) return;
+    if (it->second != entry) return;
+    if (it->second->isMmapBacked()) return;
+    it->second = upgradedEntry;
+  }
+}
+
+/**
+ * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
+ * Returns the entry on success, or nullptr on failure (caller falls back to ring snapshot).
+ */
+static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
+  const std::string &bufferId,
+  const std::string &spoolPath,
+  int sampleRate,
+  int channelCount
+) {
+  std::string tempDir = pa_tempDir();
+  std::string f32Path = tempDir + "/pa_off_" + bufferId + ".f32";
+
+  try {
+    std::ifstream wavFile(spoolPath, std::ios::binary);
+    if (!wavFile) return nullptr;
+
+    // Skip 44-byte WAV header
+    wavFile.seekg(44);
+    if (!wavFile) return nullptr;
+
+    std::ofstream f32File(f32Path, std::ios::binary);
+    if (!f32File) return nullptr;
+
+    // Raw byte copy (F32→F32, no conversion)
+    char buf[32768];
+    while (wavFile.read(buf, sizeof(buf)) || wavFile.gcount() > 0) {
+      f32File.write(buf, wavFile.gcount());
+    }
+
+    f32File.close();
+    wavFile.close();
+
+    // Mmap the .f32 file
+    auto region = PaMmapRegion::mapFile(f32Path);
+    if (!region) {
+      unlink(f32Path.c_str());
+      return nullptr;
+    }
+
+    auto entry = std::make_shared<PaOfflineEntry>();
+    entry->bufferId = bufferId;
+    entry->sampleRate = sampleRate;
+    entry->channelCount = channelCount;
+    entry->mmapRegion = std::move(region);
+    return entry;
+
+  } catch (...) {
+    unlink(f32Path.c_str());
+    return nullptr;
+  }
+}
+
+
+/**
+ * Sweep orphaned pa_off_*.f32 temp files older than maxAgeSec.
+ */
+void pa_sweepOrphanedTempFiles(int maxAgeSec) {
+  NSString *tmpDir = NSTemporaryDirectory();
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSArray<NSString *> *files = [fm contentsOfDirectoryAtPath:tmpDir error:nil];
+  if (!files) return;
+
+  NSDate *now = [NSDate date];
+  for (NSString *name in files) {
+    if (![name hasPrefix:@"pa_off_"] || ![name hasSuffix:@".f32"]) continue;
+    NSString *fullPath = [tmpDir stringByAppendingPathComponent:name];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+    NSDate *mod = attrs[NSFileModificationDate];
+    if (mod && [now timeIntervalSinceDate:mod] > maxAgeSec) {
+      [fm removeItemAtPath:fullPath error:nil];
+      RCTLogInfo(@"Orphan sweep: deleted %@", name);
+    }
+  }
+}
 static std::string pa_generateId(const char *prefix);
 
 // Decode cancel registry: operationId → atomic cancel flag
@@ -260,11 +528,8 @@ bool pa_create_offline_from_samples(
   }
 
   std::string bufferId = pa_generateId("off");
-  auto entry = std::make_shared<PaOfflineEntry>();
-  entry->bufferId = bufferId;
-  entry->sampleRate = sampleRate;
-  entry->channelCount = channelCount;
-  entry->samples.assign(samples, samples + count);
+  std::vector<float> sampleVec(samples, samples + count);
+  auto entry = pa_createEntryWithThreshold(bufferId, sampleRate, channelCount, sampleVec);
 
   {
     std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -299,10 +564,13 @@ bool pa_get_offline_samples_slice(
     entry = it->second;
   }
 
-  if (entry->isFileBacked) {
-    if (errorCode) *errorCode = "[BUFFER_NOT_IN_MEMORY]";
-    if (errorMessage) *errorMessage = "Offline buffer is file-backed";
-    return false;
+  if (entry->isMmapBacked()) {
+    // mmap-backed: use readSlice for zero-copy
+    if (frameCount <= 0 || out == nullptr) {
+      return true;
+    }
+    *out = entry->readSlice(startFrame, frameCount);
+    return true;
   }
 
   if (frameCount <= 0 || out == nullptr) {
@@ -386,6 +654,50 @@ bool pa_append_samples_to_live(
   return true;
 }
 
+bool pa_get_offline_metadata(
+  const std::string &bufferId,
+  int *sampleRate,
+  int *numSamples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_offline.find(bufferId);
+  if (it == g_pa_offline.end() || !it->second) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  if (sampleRate) *sampleRate = it->second->sampleRate;
+  if (numSamples) *numSamples = it->second->numSamples();
+  return true;
+}
+
+bool pa_adopt_offline_samples_if_empty(
+  const std::string &bufferId,
+  std::vector<float> &&samples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_offline.find(bufferId);
+  if (it == g_pa_offline.end() || !it->second) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+
+  auto entry = it->second;
+  if (entry->numSamples() != 0) {
+    if (errorCode) *errorCode = "[BUFFER_NOT_EMPTY]";
+    if (errorMessage) *errorMessage = "Offline buffer already populated";
+    return false;
+  }
+
+  entry->samples = std::move(samples);
+  return true;
+}
+
 static std::string pa_generateId(const char *prefix) {
   return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
@@ -465,12 +777,34 @@ static std::string pa_generateId(const char *prefix) {
       config.forceMono = forceMono;
       config.chunkSize = 8192;
 
-      // Collect all decoded samples
-      std::vector<float> allSamples;
-      allSamples.reserve(8192 * 64);
+      // Stream decoded chunks directly to a raw .f32 temp file on disk.
+      // This avoids building a huge std::vector<float> in heap (OOM fix for large files).
+      std::string bufferId = pa_generateId("off");
+      std::string tmpDir = pa_tempDir();
+      std::string f32Path = tmpDir + "/pa_off_" + bufferId + ".f32";
+      FILE *outFile = fopen(f32Path.c_str(), "wb");
+      if (!outFile) {
+        [readHandle cleanup];
+        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+        {
+          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        reject(kPAErrInternalError, @"Cannot open temp file for streaming decode", nil);
+        return;
+      }
 
-      auto onChunk = [&allSamples](const float *samples, int count) {
-        allSamples.insert(allSamples.end(), samples, samples + count);
+      int64_t totalSamplesWritten = 0;
+      bool writeError = false;
+
+      auto onChunk = [&](const float *samples, int count) {
+        if (writeError) return;
+        size_t written = fwrite(samples, sizeof(float), (size_t)count, outFile);
+        if ((int)written != count) {
+          writeError = true;
+        } else {
+          totalSamplesWritten += count;
+        }
       };
 
       auto onProgress = [weakSelf, operationId](int64_t framesDecoded, int64_t totalEstimate, int percent) {
@@ -488,8 +822,10 @@ static std::string pa_generateId(const char *prefix) {
 
       sherpa::AudioDecodeResult result;
       try {
-        result = sherpa::decodeFile(path, config, onChunk, onProgress, nullptr, *cancelFlag);
+        result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, nullptr, *cancelFlag);
       } catch (const std::runtime_error &e) {
+        fclose(outFile);
+        unlink(f32Path.c_str());
         [readHandle cleanup];
         if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
         {
@@ -509,6 +845,9 @@ static std::string pa_generateId(const char *prefix) {
         return;
       }
 
+      fclose(outFile);
+      outFile = nullptr;
+
       [readHandle cleanup];
       if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
       {
@@ -516,19 +855,46 @@ static std::string pa_generateId(const char *prefix) {
         g_pa_decodeCancelFlags.erase(opId);
       }
 
-      if (allSamples.empty()) {
+      if (writeError || totalSamplesWritten <= 0) {
+        unlink(f32Path.c_str());
         reject(kPAErrFileReadError, @"Could not decode audio samples", nil);
         return;
       }
 
       int outputRate = config.targetSampleRate > 0 ? config.targetSampleRate : result.sourceSampleRate;
 
-      std::string bufferId = pa_generateId("off");
-      auto entry = std::make_shared<PaOfflineEntry>();
-      entry->bufferId = bufferId;
-      entry->sampleRate = outputRate;
-      entry->channelCount = 1;
-      entry->samples = std::move(allSamples);
+      long rawSize = (long)totalSamplesWritten * sizeof(float);
+      std::shared_ptr<PaOfflineEntry> entry;
+      if (rawSize >= kPaFileBackedThreshold) {
+        // Large: mmap the already-written .f32 directly (zero heap copy)
+        auto region = PaMmapRegion::mapFile(f32Path);
+        if (region) {
+          entry = std::make_shared<PaOfflineEntry>();
+          entry->bufferId = bufferId;
+          entry->sampleRate = outputRate;
+          entry->channelCount = 1;
+          entry->mmapRegion = std::move(region);
+        }
+      }
+      if (!entry) {
+        // Small or mmap failed: load into heap vector, delete temp file
+        int fd = open(f32Path.c_str(), O_RDONLY);
+        if (fd >= 0) {
+          std::vector<float> samples((size_t)totalSamplesWritten);
+          read(fd, samples.data(), (size_t)totalSamplesWritten * sizeof(float));
+          close(fd);
+          unlink(f32Path.c_str());
+          entry = std::make_shared<PaOfflineEntry>();
+          entry->bufferId = bufferId;
+          entry->sampleRate = outputRate;
+          entry->channelCount = 1;
+          entry->samples = std::move(samples);
+        } else {
+          unlink(f32Path.c_str());
+          reject(kPAErrInternalError, @"Failed to read decoded audio temp file", nil);
+          return;
+        }
+      }
 
       {
         std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -593,22 +959,19 @@ static std::string pa_generateId(const char *prefix) {
 
     std::string modeStr = mode ? [mode UTF8String] : "fullIfSpooled";
     std::string bufferId = pa_generateId("off");
-    auto entry = std::make_shared<PaOfflineEntry>();
-    entry->bufferId = bufferId;
-    entry->sampleRate = live->sampleRate;
-    entry->channelCount = live->channelCount;
+
+    std::shared_ptr<PaOfflineEntry> entry;
 
     if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
-      PaWavHeader hdr;
-      if (pa_parseWavHeader(live->spoolPath, hdr)) {
-        entry->isFileBacked = true;
-        entry->filePath = live->spoolPath;
-        entry->wavHeader = hdr;
-      } else {
-        entry->samples = live->snapshotRing();
+      entry = pa_createOfflineFromF32WavSpool(bufferId, live->spoolPath, live->sampleRate, live->channelCount);
+      if (!entry) {
+        // Fallback: snapshot ring if streaming fails
+        auto snapshot = live->snapshotRing();
+        entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
       }
     } else {
-      entry->samples = live->snapshotRing();
+      auto snapshot = live->snapshotRing();
+      entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
     }
 
     {
@@ -634,13 +997,8 @@ static std::string pa_generateId(const char *prefix) {
     if (windowSec <= 0) { reject(kPAErrInvalidArgument, @"windowSeconds must be > 0", nil); return; }
 
     std::string spoolPath;
-    bool spoolFloat = false;
     if (options.persistencePath()) {
       spoolPath = [options.persistencePath() UTF8String];
-      if (options.persistenceFormat()) {
-        NSString *fmt = options.persistenceFormat();
-        spoolFloat = [fmt isEqualToString:@"wav_pcm_float"];
-      }
     }
 
     bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
@@ -678,7 +1036,6 @@ static std::string pa_generateId(const char *prefix) {
       ch,
       windowSec,
       spoolPath,
-      spoolFloat,
       emitAppendedEvents,
       appendEventMinIntervalMs,
       onFramesAppended
@@ -902,11 +1259,10 @@ static std::string pa_encodeViaDecodeFile(
       reject(@"AUDIO_SAVE_BUFFER_EMPTY", @"Buffer is empty", nil); return;
     }
 
-    if (entry->isFileBacked) {
-      err = pa_encodeViaDecodeFile(entry->filePath.c_str(), outputPathStr.c_str(), fmt.c_str(),
-                                    rate, (int)bitrate, (int)quality, *cancelFlag);
-    } else {
-      err = pa_encodeViaPcm(entry->samples.data(), (int)entry->samples.size(),
+    {
+      const float *ptr = entry->floatPtr();
+      int n = entry->numSamples();
+      err = pa_encodeViaPcm(ptr, n,
                              entry->sampleRate, entry->channelCount,
                              outputPathStr.c_str(), fmt.c_str(), rate,
                              (int)bitrate, (int)quality, *cancelFlag);
@@ -1093,6 +1449,7 @@ static std::string pa_encodeViaDecodeFile(
   std::lock_guard<std::mutex> lock(g_pa_mutex);
   auto offIt = g_pa_offline.find(bid);
   if (offIt != g_pa_offline.end()) {
+    offIt->second->release();
     g_pa_offline.erase(offIt);
     resolve(nil);
     return;
@@ -1135,7 +1492,7 @@ static std::string pa_encodeViaDecodeFile(
   if (!liveEntry->hasActiveSpool) {
     NSString *tmpSpoolPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
       [NSString stringWithFormat:@"ingest_spool_%@.wav", [[NSUUID UUID] UUIDString]]];
-    liveEntry->enableSpool([tmpSpoolPath UTF8String], false, true);
+    liveEntry->enableSpool([tmpSpoolPath UTF8String], true);
     if (!liveEntry->hasActiveSpool) {
       reject(@"AUDIO_SPOOL_ERROR", @"Failed to create temporary spool for file ingest", nil);
       return;
@@ -1234,7 +1591,7 @@ static std::string pa_encodeViaDecodeFile(
         });
       };
 
-      auto result = sherpa::decodeFile(path, config, onChunk, onProgress, onStreamInfo, *cancelFlag);
+      auto result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, onStreamInfo, *cancelFlag);
       srcSampleRate = result.sourceSampleRate;
       srcChannels = result.sourceChannels;
 
