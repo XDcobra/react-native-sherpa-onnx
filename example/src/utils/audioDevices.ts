@@ -1,11 +1,8 @@
 import {
+  listAvailableOutputDevices,
   listAvailableInputDevices,
   type PipelineAudioDeviceInfo,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  listAvailableOutputDevices,
-  type PcmOutputDeviceInfo,
-} from 'react-native-sherpa-onnx/pcm';
+} from 'react-native-sherpa-onnx/audio';
 
 export type AudioRouteDevice = {
   id: string;
@@ -27,9 +24,7 @@ function dedupeDevices(devices: AudioRouteDevice[]): AudioRouteDevice[] {
   });
 }
 
-function normalizeDevice(
-  device: PipelineAudioDeviceInfo | PcmOutputDeviceInfo
-): AudioRouteDevice {
+function normalizeDevice(device: PipelineAudioDeviceInfo): AudioRouteDevice {
   return {
     id: device.id,
     name: device.name,

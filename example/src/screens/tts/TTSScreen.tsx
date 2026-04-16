@@ -75,7 +75,10 @@ import {
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './TTSScreen.styles';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import {
+  saveAudioAsFile,
+  setPipelineAudioRoutePreference,
+} from 'react-native-sherpa-onnx/audio';
 import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
 import {
   fetchOutputDevices,
@@ -1331,8 +1334,10 @@ export default function TTSScreen() {
           }
         }
 
+        await setPipelineAudioRoutePreference({
+          outputDeviceId: selectedOutputDeviceId ?? null,
+        }).catch(() => {});
         const player = await createPcmPlayer(bufferId, {
-          outputDeviceId: selectedOutputDeviceId ?? undefined,
           onEnded: () => {
             pcmPlayerRef.current = null;
             setPlayingBufferId(null);

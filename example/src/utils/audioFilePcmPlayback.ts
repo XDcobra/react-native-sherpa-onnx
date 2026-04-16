@@ -3,6 +3,7 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
 function toFileSource(pathOrUri: string): FileSource {
@@ -54,8 +55,12 @@ export async function startPcmFilePlayback(
   };
 
   try {
+    if (options?.outputDeviceId != null) {
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: options.outputDeviceId,
+      }).catch(() => {});
+    }
     player = await createPcmPlayer(bufferId, {
-      outputDeviceId: options?.outputDeviceId,
       onEnded: () => {
         stop()
           .finally(() => {

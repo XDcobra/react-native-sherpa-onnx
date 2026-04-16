@@ -58,6 +58,7 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import {
   createEmptyOfflineTextBuffer,
   createLiveTextBuffer,
@@ -998,17 +999,14 @@ export default function STTScreen() {
       }
 
       let nextPlayback: ActivePcmFilePlayback | null = null;
-      nextPlayback = await startPcmFilePlayback(
-        customAudioPath,
-        () => {
-          if (pcmPlaybackRef.current === nextPlayback) {
-            pcmPlaybackRef.current = null;
-          }
-        },
-        {
-          outputDeviceId: selectedOutputDeviceId ?? undefined,
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: selectedOutputDeviceId ?? null,
+      }).catch(() => {});
+      nextPlayback = await startPcmFilePlayback(customAudioPath, () => {
+        if (pcmPlaybackRef.current === nextPlayback) {
+          pcmPlaybackRef.current = null;
         }
-      );
+      });
       pcmPlaybackRef.current = nextPlayback;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1029,8 +1027,10 @@ export default function STTScreen() {
     }
 
     try {
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: selectedOutputDeviceId ?? null,
+      }).catch(() => {});
       const player = await createPcmPlayer(buffer.bufferId as any, {
-        outputDeviceId: selectedOutputDeviceId ?? undefined,
         onEnded: () => {
           const current = offlineBufferPlayerRef.current;
           offlineBufferPlayerRef.current = null;
@@ -1138,9 +1138,11 @@ export default function STTScreen() {
       };
 
       try {
+        await setPipelineAudioRoutePreference({
+          inputDeviceId: selectedInputDeviceId ?? null,
+        }).catch(() => {});
         await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
           emitToJs: false,
-          inputDeviceId: selectedInputDeviceId ?? undefined,
         });
       } catch (startErr) {
         throw startErr;
