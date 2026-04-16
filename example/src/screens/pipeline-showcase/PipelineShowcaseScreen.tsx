@@ -215,6 +215,7 @@ export default function PipelineShowcaseScreen() {
   const [queueDepth, setQueueDepth] = useState(0);
   const [ttsSessionState, setTtsSessionState] = useState('idle');
   const [ingestProgress, setIngestProgress] = useState<number | null>(null);
+  const [ingestStatusText, setIngestStatusText] = useState<string | null>(null);
   const [lastCommittedSegmentIndex, setLastCommittedSegmentIndex] = useState<
     number | null
   >(null);
@@ -417,6 +418,9 @@ export default function PipelineShowcaseScreen() {
     if (incrementalTtsEngine) {
       await incrementalTtsEngine.destroy().catch(() => {});
     }
+
+    setIngestProgress(null);
+    setIngestStatusText(null);
   }, [stopPolling]);
 
   const resolveSttModelPath = useCallback(
@@ -644,6 +648,8 @@ export default function PipelineShowcaseScreen() {
 
   const handlePickAudioFile = useCallback(async () => {
     setError(null);
+    setIngestProgress(null);
+    setIngestStatusText(null);
     try {
       const picked = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
@@ -700,6 +706,9 @@ export default function PipelineShowcaseScreen() {
     setLastCommittedSegmentIndex(null);
     setSegmentEvents([]);
     setIngestProgress(null);
+    setIngestStatusText(
+      sourceMode === 'file' ? 'Ready to decode selected audio.' : null
+    );
     playbackStartedLoggedRef.current = false;
     clearSegmentTracker();
 
@@ -839,6 +848,9 @@ export default function PipelineShowcaseScreen() {
         );
       } else {
         const source = toFileSource(pickedFileUri ?? '');
+        setIngestStatusText(
+          'Decoding selected audio and ingesting to live pipeline...'
+        );
         const ingest = await ingestFileToLiveAudioBuffer(
           inputLiveAudio,
           source,
@@ -847,7 +859,22 @@ export default function PipelineShowcaseScreen() {
             forceMono: true,
             autoFinalize: true,
             onProgress: (event) => {
-              setIngestProgress(event.percent);
+              const percent = Math.max(0, Math.min(100, event.percent ?? 0));
+              setIngestProgress(percent);
+
+              const totalFrames = event.totalFramesEstimate ?? 0;
+              if (totalFrames > 0) {
+                setIngestStatusText(
+                  `Decoding and ingesting... ${Math.round(percent)}% (${
+                    event.framesDecoded
+                  }/${totalFrames} frames)`
+                );
+                return;
+              }
+
+              setIngestStatusText(
+                `Decoding and ingesting... ${Math.round(percent)}%`
+              );
             },
           }
         );
@@ -856,6 +883,7 @@ export default function PipelineShowcaseScreen() {
         ingest.done
           .then(() => {
             setIngestProgress(100);
+            setIngestStatusText('File ingest complete.');
             setStatusText(
               'File ingest finished. Press Stop to flush/finalize and optionally export WAV.'
             );
@@ -863,8 +891,10 @@ export default function PipelineShowcaseScreen() {
           .catch((ingestErr) => {
             const code = (ingestErr as { code?: string })?.code;
             if (code === 'DECODE_CANCELLED') {
+              setIngestStatusText('File ingest cancelled.');
               return;
             }
+            setIngestStatusText('File ingest failed.');
             setError(normalizeErrorMessage(ingestErr));
           });
 
@@ -1151,7 +1181,11 @@ export default function PipelineShowcaseScreen() {
                   styles.optionButton,
                   sourceMode === 'mic' && styles.optionButtonActive,
                 ]}
-                onPress={() => setSourceMode('mic')}
+                onPress={() => {
+                  setSourceMode('mic');
+                  setIngestProgress(null);
+                  setIngestStatusText(null);
+                }}
                 disabled={isRunning || isStarting || isStopping}
               >
                 <Text
@@ -1168,7 +1202,11 @@ export default function PipelineShowcaseScreen() {
                   styles.optionButton,
                   sourceMode === 'file' && styles.optionButtonActive,
                 ]}
-                onPress={() => setSourceMode('file')}
+                onPress={() => {
+                  setSourceMode('file');
+                  setIngestProgress(null);
+                  setIngestStatusText(null);
+                }}
                 disabled={isRunning || isStarting || isStopping}
               >
                 <Text
@@ -1201,24 +1239,67 @@ export default function PipelineShowcaseScreen() {
             />
 
             {sourceMode === 'file' && (
-              <TouchableOpacity
-                style={styles.sourceButton}
-                onPress={handlePickAudioFile}
-                disabled={isRunning || isStarting || isStopping}
-              >
-                <Text style={styles.sourceButtonText}>
-                  {pickedFileName ? 'Change audio file' : 'Pick audio file'}
-                </Text>
-                <Text style={styles.sourceMeta}>
-                  {pickedFileName
-                    ? `${pickedFileName}${
-                        ingestProgress != null
-                          ? ` (ingest ${Math.round(ingestProgress)}%)`
-                          : ''
-                      }`
-                    : 'Choose any local audio file or content URI'}
-                </Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={styles.sourceButton}
+                  onPress={handlePickAudioFile}
+                  disabled={isRunning || isStarting || isStopping}
+                >
+                  <Text style={styles.sourceButtonText}>
+                    {pickedFileName ? 'Change audio file' : 'Pick audio file'}
+                  </Text>
+                  <Text style={styles.sourceMeta}>
+                    {pickedFileName
+                      ? `${pickedFileName}${
+                          ingestProgress != null
+                            ? ` (ingest ${Math.round(ingestProgress)}%)`
+                            : ''
+                        }`
+                      : 'Choose any local audio file or content URI'}
+                  </Text>
+                </TouchableOpacity>
+
+                {(isStarting ||
+                  isRunning ||
+                  ingestProgress != null ||
+                  ingestStatusText != null) && (
+                  <View style={styles.ingestProgressContainer}>
+                    <View style={styles.ingestProgressHeaderRow}>
+                      <Text style={styles.ingestProgressLabel}>
+                        {ingestStatusText ?? 'Preparing file ingest...'}
+                      </Text>
+                      {ingestProgress != null && (
+                        <Text style={styles.ingestProgressPercent}>
+                          {Math.round(ingestProgress)}%
+                        </Text>
+                      )}
+                    </View>
+
+                    {ingestProgress != null ? (
+                      <View style={styles.ingestProgressTrack}>
+                        <View
+                          style={[
+                            styles.ingestProgressFill,
+                            {
+                              width: `${Math.max(
+                                0,
+                                Math.min(100, ingestProgress)
+                              )}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    ) : (
+                      <View style={styles.ingestProgressWaitingRow}>
+                        <ActivityIndicator size="small" color="#007AFF" />
+                        <Text style={styles.ingestProgressWaitingText}>
+                          Waiting for the first decoded chunk...
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
             )}
           </View>
 

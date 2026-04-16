@@ -164,6 +164,12 @@ export default function STTScreen() {
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [preparingAudioBuffer, setPreparingAudioBuffer] = useState(false);
+  const [offlineBufferBuildProgress, setOfflineBufferBuildProgress] = useState<
+    number | null
+  >(null);
+  const [offlineBufferBuildStatus, setOfflineBufferBuildStatus] = useState<
+    string | null
+  >(null);
   const [offlineBufferPlaying, setOfflineBufferPlaying] = useState(false);
   const [offlineInputBuffer, setOfflineInputBuffer] =
     useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
@@ -192,6 +198,7 @@ export default function STTScreen() {
     null
   );
   const livePreviewInFlightRef = useRef(false);
+  const offlineBufferBuildRequestRef = useRef(0);
   const liveAccumulatorRef = useRef<{
     segmentCount: number;
     segmentTexts: string[];
@@ -550,6 +557,10 @@ export default function STTScreen() {
   };
 
   const clearOfflineInputBuffer = async (resetSelection: boolean) => {
+    offlineBufferBuildRequestRef.current += 1;
+    setOfflineBufferBuildProgress(null);
+    setOfflineBufferBuildStatus(null);
+
     if (offlineBufferPlayerRef.current) {
       await offlineBufferPlayerRef.current.destroy().catch(() => {});
       offlineBufferPlayerRef.current = null;
@@ -616,13 +627,23 @@ export default function STTScreen() {
       customAudioName?: string | null;
     } | null
   ) => {
+    const requestId = ++offlineBufferBuildRequestRef.current;
     setPreparingAudioBuffer(true);
+    setOfflineBufferBuildProgress(0);
+    setOfflineBufferBuildStatus('Preparing OfflineAudioBuffer...');
     setError(null);
     setErrorSource(null);
     setTranscriptionResult(null);
 
     try {
       const resolved = await resolveInputSource(override);
+      if (requestId !== offlineBufferBuildRequestRef.current) {
+        return;
+      }
+
+      setOfflineBufferBuildStatus(
+        `Decoding \"${resolved.sourceLabel}\" into OfflineAudioBuffer...`
+      );
 
       if (gSttOfflineInputBuffer?.bufferId) {
         await releasePipelineAudioBuffer(gSttOfflineInputBuffer.bufferId).catch(
@@ -633,7 +654,34 @@ export default function STTScreen() {
       const audioRef = await createOfflineAudioBufferFromFile(resolved.source, {
         targetSampleRateHz: LIVE_SAMPLE_RATE,
         forceMono: true,
+        onProgress: (event) => {
+          if (requestId !== offlineBufferBuildRequestRef.current) {
+            return;
+          }
+
+          const percent = Math.max(0, Math.min(100, event.percent ?? 0));
+          setOfflineBufferBuildProgress(percent);
+
+          const totalFrames = event.totalFramesEstimate ?? 0;
+          if (totalFrames > 0) {
+            setOfflineBufferBuildStatus(
+              `Decoding \"${resolved.sourceLabel}\"... ${Math.round(
+                percent
+              )}% (${event.framesDecoded}/${totalFrames} frames)`
+            );
+            return;
+          }
+
+          setOfflineBufferBuildStatus(
+            `Decoding \"${resolved.sourceLabel}\"... ${Math.round(percent)}%`
+          );
+        },
       });
+
+      if (requestId !== offlineBufferBuildRequestRef.current) {
+        await releasePipelineAudioBuffer(audioRef.bufferId).catch(() => {});
+        return;
+      }
 
       const nextBufferState: SttOfflineInputBufferState = {
         bufferId: audioRef.bufferId,
@@ -646,12 +694,21 @@ export default function STTScreen() {
       gSttOfflineInputBuffer = nextBufferState;
       setOfflineInputBuffer(nextBufferState);
       setAudioSourceType(resolved.sourceType);
+      setOfflineBufferBuildProgress(null);
+      setOfflineBufferBuildStatus(null);
     } catch (err) {
+      if (requestId !== offlineBufferBuildRequestRef.current) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       setErrorSource('transcribe');
       setError(msg);
+      setOfflineBufferBuildProgress(null);
+      setOfflineBufferBuildStatus(null);
     } finally {
-      setPreparingAudioBuffer(false);
+      if (requestId === offlineBufferBuildRequestRef.current) {
+        setPreparingAudioBuffer(false);
+      }
     }
   };
 
@@ -1503,6 +1560,42 @@ export default function STTScreen() {
               </View>
             )}
 
+            {selectedModelType &&
+              (audioSourceType === 'example' || audioSourceType === 'own') &&
+              (preparingAudioBuffer || offlineBufferBuildStatus != null) && (
+                <View style={styles.decodeProgressContainer}>
+                  <View style={styles.decodeProgressHeaderRow}>
+                    <Text style={styles.decodeProgressLabel}>
+                      {offlineBufferBuildStatus ??
+                        'Preparing OfflineAudioBuffer...'}
+                    </Text>
+                    {offlineBufferBuildProgress != null && (
+                      <Text style={styles.decodeProgressPercent}>
+                        {Math.round(offlineBufferBuildProgress)}%
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.decodeProgressTrack}>
+                    <View
+                      style={[
+                        styles.decodeProgressFill,
+                        {
+                          width: `${Math.max(
+                            0,
+                            Math.min(100, offlineBufferBuildProgress ?? 0)
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                  {preparingAudioBuffer && (
+                    <Text style={styles.decodeProgressMeta}>
+                      Large files can take a while to decode.
+                    </Text>
+                  )}
+                </View>
+              )}
+
             {selectedModelType && !offlineInputBuffer && !audioSourceType && (
               <>
                 <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
@@ -1513,7 +1606,10 @@ export default function STTScreen() {
                       setAudioSourceType('example');
                       setCustomAudioPath(null);
                       setCustomAudioName(null);
+                      setOfflineBufferBuildProgress(null);
+                      setOfflineBufferBuildStatus(null);
                     }}
+                    disabled={preparingAudioBuffer || transcribing || loading}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
@@ -1528,7 +1624,12 @@ export default function STTScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => setAudioSourceType('own')}
+                    onPress={() => {
+                      setAudioSourceType('own');
+                      setOfflineBufferBuildProgress(null);
+                      setOfflineBufferBuildStatus(null);
+                    }}
+                    disabled={preparingAudioBuffer || transcribing || loading}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
@@ -1550,10 +1651,13 @@ export default function STTScreen() {
                     onPress={() => {
                       if (isLiveSupported) {
                         setAudioSourceType('live');
+                        setOfflineBufferBuildProgress(null);
+                        setOfflineBufferBuildStatus(null);
                       } else {
                         showLiveNotSupportedMessage();
                       }
                     }}
+                    disabled={preparingAudioBuffer || transcribing || loading}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
@@ -1659,6 +1763,9 @@ export default function STTScreen() {
                           selectedAudio?.id === audioFile.id &&
                             styles.audioFileButtonActive,
                         ]}
+                        disabled={
+                          preparingAudioBuffer || loading || transcribing
+                        }
                         onPress={async () => {
                           setSelectedAudio(audioFile);
                           setCustomAudioPath(null);
@@ -1705,9 +1812,13 @@ export default function STTScreen() {
                     Select Local WAV File:
                   </Text>
                   <TouchableOpacity
-                    style={[styles.button, loading && styles.buttonDisabled]}
+                    style={[
+                      styles.button,
+                      (loading || preparingAudioBuffer || transcribing) &&
+                        styles.buttonDisabled,
+                    ]}
                     onPress={handlePickLocalFile}
-                    disabled={loading}
+                    disabled={loading || preparingAudioBuffer || transcribing}
                   >
                     <View style={styles.rowCenter}>
                       <Ionicons
