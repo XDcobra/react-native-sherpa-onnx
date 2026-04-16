@@ -172,9 +172,19 @@ sealed class OfflineEntry {
       return try {
         val tempFile = File(cacheDir, "pa_off_${bufferId}.f32")
         FileOutputStream(tempFile).use { fos ->
-          val buf = ByteBuffer.allocate(samples.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-          buf.asFloatBuffer().put(samples)
-          fos.write(buf.array())
+          val chunkFloats = 8192
+          val chunkBytes = ByteArray(chunkFloats * 4)
+          val chunkBuffer = ByteBuffer.wrap(chunkBytes).order(ByteOrder.LITTLE_ENDIAN)
+          var offset = 0
+          while (offset < samples.size) {
+            val toWrite = minOf(chunkFloats, samples.size - offset)
+            chunkBuffer.clear()
+            for (i in 0 until toWrite) {
+              chunkBuffer.putFloat(samples[offset + i])
+            }
+            fos.write(chunkBytes, 0, toWrite * 4)
+            offset += toWrite
+          }
         }
         val mapped = mapFile(tempFile) ?: run {
           tempFile.delete()

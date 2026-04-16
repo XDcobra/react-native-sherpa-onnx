@@ -30,6 +30,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <thread>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -191,9 +192,25 @@ struct PaMmapRegion {
     if (fd < 0) return nullptr;
 
     size_t bytes = count * sizeof(float);
-    ssize_t written = write(fd, samples, bytes);
+    const uint8_t *src = reinterpret_cast<const uint8_t *>(samples);
+    size_t remaining = bytes;
+    while (remaining > 0) {
+      ssize_t n = write(fd, src, remaining);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        close(fd);
+        unlink(path.c_str());
+        return nullptr;
+      }
+      if (n == 0) {
+        close(fd);
+        unlink(path.c_str());
+        return nullptr;
+      }
+      src += n;
+      remaining -= (size_t)n;
+    }
     close(fd);
-    if (written != (ssize_t)bytes) { unlink(path.c_str()); return nullptr; }
 
     return mapFile(path);
   }
@@ -328,9 +345,20 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
   );
   if (!region) return;
 
-  entry->mmapRegion = std::move(region);
-  entry->samples.clear();
-  entry->samples.shrink_to_fit();
+  auto upgradedEntry = std::make_shared<PaOfflineEntry>();
+  upgradedEntry->bufferId = entry->bufferId;
+  upgradedEntry->sampleRate = entry->sampleRate;
+  upgradedEntry->channelCount = entry->channelCount;
+  upgradedEntry->mmapRegion = std::move(region);
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) return;
+    if (it->second != entry) return;
+    if (it->second->isMmapBacked()) return;
+    it->second = upgradedEntry;
+  }
 }
 
 /**

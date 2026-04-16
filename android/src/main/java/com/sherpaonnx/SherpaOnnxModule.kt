@@ -1399,6 +1399,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun encodeViaOfflineReader(
+    entry: com.sherpaonnx.audio.pipeline.OfflineEntry,
+    outputPath: String, format: String, outputSampleRateHz: Int,
+    bitrate: Int, quality: Int, operationId: String,
+    cancelFlagAddr: Long
+  ) {
+    val channelCount = entry.channelCount
+    if (channelCount <= 0 || (entry.numSamples % channelCount) != 0) {
+      throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid channel/sample alignment")
+    }
+    val totalFrames = entry.numSamples / channelCount
+    val sessionPtr = nativeEncodeSessionCreate(
+      outputPath, format, entry.sampleRate, channelCount,
+      outputSampleRateHz, bitrate, quality,
+      totalFrames.toLong(),
+      cancelFlagAddr
+    )
+    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+
+    try {
+      val chunkFrames = 4096
+      val chunkSamples = chunkFrames * channelCount
+      val scratch = FloatArray(chunkSamples)
+      entry.createReader().use { reader ->
+        while (true) {
+          val samplesRead = reader.readSamples(scratch, 0, chunkSamples)
+          if (samplesRead <= 0) break
+          if ((samplesRead % channelCount) != 0) {
+            throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid read alignment")
+          }
+          val framesRead = samplesRead / channelCount
+          val chunk = if (samplesRead == scratch.size) scratch else scratch.copyOf(samplesRead)
+          val err = nativeEncodeSessionFeedChunk(sessionPtr, chunk, framesRead)
+          if (err.isNotEmpty()) {
+            if (err.contains("CANCELLED")) throw RuntimeException("AUDIO_SAVE_CANCELLED: $err")
+            throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
+          }
+        }
+      }
+      val finishErr = nativeEncodeSessionFinish(sessionPtr)
+      if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
+    } finally {
+      nativeEncodeSessionRelease(sessionPtr)
+    }
+  }
+
   private fun encodeViaDecodeFile(
     inputPath: String?, inputFd: Int, outputPath: String, format: String,
     outputSampleRateHz: Int, bitrate: Int, quality: Int,
@@ -1583,8 +1629,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     when (entry) {
       is com.sherpaonnx.audio.pipeline.OfflineEntry.MmapBacked -> {
-        val samples = entry.readAllSamples()
-        encodeViaPcm(samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+        encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
       is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
         encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)

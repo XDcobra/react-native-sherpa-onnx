@@ -173,8 +173,16 @@ object PipelineAudioRegistry {
     return try {
       // Skip 44-byte WAV header, copy raw F32 bytes directly
       File(spoolPath).inputStream().use { input ->
-        val skipped = input.skip(44)
-        if (skipped != 44L) throw RuntimeException("Failed to skip WAV header")
+        var remaining = 44L
+        while (remaining > 0L) {
+          val skipped = input.skip(remaining)
+          if (skipped > 0L) {
+            remaining -= skipped
+            continue
+          }
+          if (input.read() == -1) throw RuntimeException("Failed to skip WAV header")
+          remaining -= 1L
+        }
         f32File.outputStream().use { output ->
           input.copyTo(output, bufferSize = 32768)
         }

@@ -167,8 +167,7 @@ function getOfflineAudioBufferSamplesSlice(
 const head = getOfflineAudioBufferSamplesSlice(offline, 0, 320);
 ```
 
-Only in-memory offline buffers are supported: `info.storageKind` must be `'ram'`.
-File-backed buffers (`storageKind: 'mmap'`) throw `BUFFER_NOT_IN_MEMORY`.
+Supports both in-memory offline buffers (`info.storageKind === 'ram'`) and file-backed offline buffers (`info.storageKind === 'mmap'`).
 
 #### Convert offline buffer to file
 
