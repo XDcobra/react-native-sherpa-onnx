@@ -28,6 +28,7 @@
 #include <functional>
 #include <cmath>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 #include <sys/mman.h>
@@ -331,6 +332,90 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
   entry->samples.clear();
   entry->samples.shrink_to_fit();
 }
+
+/**
+ * Stream a WAV spool file directly to a raw .f32 file, then mmap it.
+ * Avoids loading the entire file into memory (OOM fix for large spool files).
+ * Returns a valid entry on success, or null if conversion fails.
+ */
+static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromWavSpoolFileStreaming(
+  const std::string &bufferId,
+  const std::string &spoolPath,
+  const PaWavHeader &hdr
+) {
+  std::string tempDir = pa_tempDir();
+  std::string f32Path = tempDir + "/pa_off_" + bufferId + ".f32";
+
+  try {
+    // Open WAV for reading and F32 for writing
+    std::ifstream wavFile(spoolPath, std::ios::binary);
+    if (!wavFile) return nullptr;
+    wavFile.seekg(hdr.dataOffset);
+
+    std::ofstream f32File(f32Path, std::ios::binary);
+    if (!f32File) return nullptr;
+
+    // Stream convert samples in chunks (avoid allocating 100+ MB at once)
+    const int chunkSize = 8192;
+    std::vector<float> chunk(chunkSize);
+
+    if (hdr.audioFormat == 1 && hdr.bitsPerSample == 16) {
+      // S16 PCM → F32
+      std::vector<int16_t> s16Buf(chunkSize);
+      int samplesRemaining = hdr.numSamples;
+      while (samplesRemaining > 0) {
+        int toRead = std::min(chunkSize, samplesRemaining);
+        wavFile.read(reinterpret_cast<char*>(s16Buf.data()), toRead * 2);
+        int actualRead = wavFile.gcount() / 2;
+        if (actualRead <= 0) break;
+
+        for (int i = 0; i < actualRead; i++) {
+          chunk[i] = (float)s16Buf[i] / 32768.0f;
+        }
+        // Write raw float32 bytes
+        f32File.write(reinterpret_cast<const char*>(chunk.data()), actualRead * 4);
+        samplesRemaining -= actualRead;
+      }
+    } else if (hdr.audioFormat == 3 && hdr.bitsPerSample == 32) {
+      // F32 PCM → F32 (pass-through)
+      int samplesRemaining = hdr.numSamples;
+      while (samplesRemaining > 0) {
+        int toRead = std::min(chunkSize, samplesRemaining);
+        wavFile.read(reinterpret_cast<char*>(chunk.data()), toRead * 4);
+        int actualRead = wavFile.gcount() / 4;
+        if (actualRead <= 0) break;
+        f32File.write(reinterpret_cast<const char*>(chunk.data()), actualRead * 4);
+        samplesRemaining -= actualRead;
+      }
+    } else {
+      // Unsupported format
+      return nullptr;
+    }
+
+    f32File.close();
+    wavFile.close();
+
+    // Mmap the written .f32 file
+    auto region = PaMmapRegion::mapFile(f32Path);
+    if (!region) {
+      unlink(f32Path.c_str());
+      return nullptr;
+    }
+
+    // Create entry with mmapped region
+    auto entry = std::make_shared<PaOfflineEntry>();
+    entry->bufferId = bufferId;
+    entry->sampleRate = hdr.sampleRate;
+    entry->channelCount = hdr.channelCount;
+    entry->mmapRegion = std::move(region);
+    return entry;
+
+  } catch (...) {
+    unlink(f32Path.c_str());
+    return nullptr;
+  }
+}
+
 
 /**
  * Sweep orphaned pa_off_*.f32 temp files older than maxAgeSec.
@@ -694,12 +779,34 @@ static std::string pa_generateId(const char *prefix) {
       config.forceMono = forceMono;
       config.chunkSize = 8192;
 
-      // Collect all decoded samples
-      std::vector<float> allSamples;
-      allSamples.reserve(8192 * 64);
+      // Stream decoded chunks directly to a raw .f32 temp file on disk.
+      // This avoids building a huge std::vector<float> in heap (OOM fix for large files).
+      std::string bufferId = pa_generateId("off");
+      std::string tmpDir = pa_tempDir();
+      std::string f32Path = tmpDir + "/pa_off_" + bufferId + ".f32";
+      FILE *outFile = fopen(f32Path.c_str(), "wb");
+      if (!outFile) {
+        [readHandle cleanup];
+        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+        {
+          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        reject(kPAErrInternalError, @"Cannot open temp file for streaming decode", nil);
+        return;
+      }
 
-      auto onChunk = [&allSamples](const float *samples, int count) {
-        allSamples.insert(allSamples.end(), samples, samples + count);
+      int64_t totalSamplesWritten = 0;
+      bool writeError = false;
+
+      auto onChunk = [&](const float *samples, int count) {
+        if (writeError) return;
+        size_t written = fwrite(samples, sizeof(float), (size_t)count, outFile);
+        if ((int)written != count) {
+          writeError = true;
+        } else {
+          totalSamplesWritten += count;
+        }
       };
 
       auto onProgress = [weakSelf, operationId](int64_t framesDecoded, int64_t totalEstimate, int percent) {
@@ -719,6 +826,8 @@ static std::string pa_generateId(const char *prefix) {
       try {
         result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, nullptr, *cancelFlag);
       } catch (const std::runtime_error &e) {
+        fclose(outFile);
+        unlink(f32Path.c_str());
         [readHandle cleanup];
         if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
         {
@@ -738,6 +847,9 @@ static std::string pa_generateId(const char *prefix) {
         return;
       }
 
+      fclose(outFile);
+      outFile = nullptr;
+
       [readHandle cleanup];
       if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
       {
@@ -745,15 +857,46 @@ static std::string pa_generateId(const char *prefix) {
         g_pa_decodeCancelFlags.erase(opId);
       }
 
-      if (allSamples.empty()) {
+      if (writeError || totalSamplesWritten <= 0) {
+        unlink(f32Path.c_str());
         reject(kPAErrFileReadError, @"Could not decode audio samples", nil);
         return;
       }
 
       int outputRate = config.targetSampleRate > 0 ? config.targetSampleRate : result.sourceSampleRate;
 
-      std::string bufferId = pa_generateId("off");
-      auto entry = pa_createEntryWithThreshold(bufferId, outputRate, 1, allSamples);
+      long rawSize = (long)totalSamplesWritten * sizeof(float);
+      std::shared_ptr<PaOfflineEntry> entry;
+      if (rawSize >= kPaFileBackedThreshold) {
+        // Large: mmap the already-written .f32 directly (zero heap copy)
+        auto region = PaMmapRegion::mapFile(f32Path);
+        if (region) {
+          entry = std::make_shared<PaOfflineEntry>();
+          entry->bufferId = bufferId;
+          entry->sampleRate = outputRate;
+          entry->channelCount = 1;
+          entry->mmapRegion = std::move(region);
+        }
+      }
+      if (!entry) {
+        // Small or mmap failed: load into heap vector, delete temp file
+        int fd = open(f32Path.c_str(), O_RDONLY);
+        if (fd >= 0) {
+          std::vector<float> samples((size_t)totalSamplesWritten);
+          read(fd, samples.data(), (size_t)totalSamplesWritten * sizeof(float));
+          close(fd);
+          unlink(f32Path.c_str());
+          entry = std::make_shared<PaOfflineEntry>();
+          entry->bufferId = bufferId;
+          entry->sampleRate = outputRate;
+          entry->channelCount = 1;
+          entry->samples = std::move(samples);
+        } else {
+          unlink(f32Path.c_str());
+          reject(kPAErrInternalError, @"Failed to read decoded audio temp file", nil);
+          return;
+        }
+      }
 
       {
         std::lock_guard<std::mutex> lock(g_pa_mutex);
@@ -819,32 +962,26 @@ static std::string pa_generateId(const char *prefix) {
     std::string modeStr = mode ? [mode UTF8String] : "fullIfSpooled";
     std::string bufferId = pa_generateId("off");
 
-    std::vector<float> samplesVec;
+    std::shared_ptr<PaOfflineEntry> entry;
 
     if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
       PaWavHeader hdr;
       if (pa_parseWavHeader(live->spoolPath, hdr)) {
-        // Read WAV spool into float samples, then apply threshold
-        samplesVec.resize(hdr.numSamples);
-        std::ifstream f(live->spoolPath, std::ios::binary);
-        f.seekg(hdr.dataOffset);
-        if (hdr.audioFormat == 1 && hdr.bitsPerSample == 16) {
-          std::vector<int16_t> buf(hdr.numSamples);
-          f.read(reinterpret_cast<char*>(buf.data()), hdr.numSamples * 2);
-          for (int i = 0; i < hdr.numSamples; i++) {
-            samplesVec[i] = (float)buf[i] / 32768.0f;
-          }
-        } else if (hdr.audioFormat == 3 && hdr.bitsPerSample == 32) {
-          f.read(reinterpret_cast<char*>(samplesVec.data()), hdr.numSamples * 4);
+        // Stream WAV to .f32 temp file to avoid OOM on large spool files
+        entry = pa_createOfflineFromWavSpoolFileStreaming(bufferId, live->spoolPath, hdr);
+        if (!entry) {
+          // Fallback: snapshot ring if streaming fails
+          auto snapshot = live->snapshotRing();
+          entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
         }
       } else {
-        samplesVec = live->snapshotRing();
+        auto snapshot = live->snapshotRing();
+        entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
       }
     } else {
-      samplesVec = live->snapshotRing();
+      auto snapshot = live->snapshotRing();
+      entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
     }
-
-    auto entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, samplesVec);
 
     {
       std::lock_guard<std::mutex> lock(g_pa_mutex);

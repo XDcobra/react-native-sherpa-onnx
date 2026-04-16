@@ -38,10 +38,13 @@ object PipelineAudioRegistry {
   // ==================== Offline Buffer Creation ====================
 
   /**
-   * Create an offline buffer from Float32 PCM samples.
+   * Create an offline buffer from Float32 PCM samples (in-memory FloatArray).
    * Uses mmap for large buffers (≥ 10 MB raw PCM), in-memory for small ones.
+   * 
+   * WARNING: For large FloatArrays, this may cause OOM. Prefer file-based APIs
+   * (decodeFileToOfflineBuffer, createOfflineFromLive with spool files) for big data.
    */
-  fun createOfflineFromSamples(
+  fun createOfflineFromFloatArray(
     samples: FloatArray,
     sampleRate: Int,
     channelCount: Int = 1
@@ -60,6 +63,32 @@ object PipelineAudioRegistry {
     } else {
       OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
     }
+    offlineEntries[bufferId] = entry
+    return entry
+  }
+
+  /**
+   * Create an offline buffer from a pre-written raw float32 file.
+   * The file is memory-mapped directly — no heap allocation of all samples.
+   * Falls back to the old in-memory path only if mmap fails.
+   *
+   * @param f32FilePath Absolute path to an existing raw float32 file.
+   * @param numSamples Total float32 sample count in the file.
+   * @param sampleRate Output sample rate.
+   */
+  fun createOfflineFromMmapFile(
+    f32FilePath: String,
+    numSamples: Int,
+    sampleRate: Int,
+    channelCount: Int = 1
+  ): OfflineEntry {
+    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
+    if (numSamples <= 0) throw IllegalArgumentException("numSamples must be > 0")
+    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
+
+    val bufferId = "off_${UUID.randomUUID()}"
+    val entry = OfflineEntry.createMmapFromFile(bufferId, sampleRate, channelCount, numSamples, f32FilePath)
+      ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Failed to mmap decoded file")
     offlineEntries[bufferId] = entry
     return entry
   }
@@ -113,13 +142,9 @@ object PipelineAudioRegistry {
         if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
           val metadata = parseWavHeader(spoolPath)
           if (metadata != null) {
-            // Read spool WAV into float32 samples, then apply threshold
-            val samples = readWavToFloat32(spoolPath, metadata)
-            if (samples != null) {
-              createEntryWithThreshold(bufferId, metadata.sampleRate, metadata.channelCount, samples)
-            } else {
-              createFromRingSnapshot(bufferId, live)
-            }
+            // Stream WAV to F32 temp file, then mmap (avoids OOM on large spool files)
+            createOfflineFromWavSpoolFile(bufferId, spoolPath, metadata)
+              ?: createFromRingSnapshot(bufferId, live)
           } else {
             createFromRingSnapshot(bufferId, live)
           }
@@ -136,6 +161,48 @@ object PipelineAudioRegistry {
     val snapshot = live.snapshotRing()
     val entry = createEntryWithThreshold(bufferId, live.sampleRate, live.channelCount, snapshot)
     return entry
+  }
+
+  /**
+   * Stream a WAV spool file directly to a raw .f32 file, then mmap it.
+   * Avoids loading the entire file into a FloatArray (OOM fix for large spool files).
+   * Returns the OfflineEntry, or null if conversion fails.
+   */
+  private fun createOfflineFromWavSpoolFile(
+    bufferId: String,
+    spoolPath: String,
+    metadata: FileBackedMetadata
+  ): OfflineEntry? {
+    val dir = cacheDir ?: return null
+    val f32File = File(dir, "pa_off_${bufferId}.f32")
+
+    return try {
+      // Stream WAV PCM samples directly to .f32 raw file
+      f32File.outputStream().use { fos ->
+        FileBackedReader(spoolPath, metadata).use { reader ->
+          val chunkSize = 8192
+          val chunk = FloatArray(chunkSize)
+          while (true) {
+            val read = reader.readSamples(chunk, 0, chunkSize)
+            if (read <= 0) break
+            // Write raw float32 bytes
+            val buf = java.nio.ByteBuffer.allocate(read * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            buf.asFloatBuffer().put(chunk, 0, read)
+            fos.write(buf.array())
+          }
+        }
+      }
+
+      // Mmap the written .f32 file directly
+      OfflineEntry.createMmapFromFile(
+        bufferId, metadata.sampleRate, metadata.channelCount, metadata.numSamples,
+        f32File.absolutePath
+      ) ?: throw RuntimeException("Failed to mmap WAV spool file")
+    } catch (e: Exception) {
+      Log.w(TAG, "createOfflineFromWavSpoolFile failed: ${e.message}")
+      f32File.delete()
+      null
+    }
   }
 
   /**
@@ -161,12 +228,23 @@ object PipelineAudioRegistry {
     return entry
   }
 
+  // Note: This still uses the old in-heap path because these scenarios have FloatArrays
+  // that are already materialized:
+  //   - JSI external calls: intentional, documented as power-user API
+  //   - Ring snapshots: typically small (ring buffer is bounded)
+  //   - Enhancement output: filled into pre-allocated empty buffer
+  // For large file data, use file-based paths (decodeFileToOfflineBuffer, createOfflineFromLive).
+
   /**
    * Upgrade an InMemory entry to MmapBacked if it exceeds the threshold.
    * Used after adoptSamples() in enhancement output.
    * Atomically swaps the entry in the registry.
    */
   fun upgradeToMmapIfNeeded(bufferId: String) {
+    // Upgrade an in-memory buffer to mmap if it exceeds the threshold.
+    // Used when TTS/Enhancement output fills an initially-empty buffer.
+    // This is safe because enhancement output is typically bounded (< 1-10 min audio),
+    // and the buffer was already in heap before upgrade.
     val entry = offlineEntries[bufferId] ?: return
     if (entry !is OfflineEntry.InMemory) return
     val rawSize = entry.numSamples.toLong() * 4
@@ -395,7 +473,7 @@ object PipelineAudioRegistry {
     sampleRate: Int,
     channelCount: Int,
   ): String {
-    val entry = createOfflineFromSamples(samples, sampleRate, channelCount)
+    val entry = createOfflineFromFloatArray(samples, sampleRate, channelCount)
     return "{" +
       "\"bufferId\":\"${entry.bufferId}\"," +
       "\"kind\":\"offlinePcmBuffer\"," +

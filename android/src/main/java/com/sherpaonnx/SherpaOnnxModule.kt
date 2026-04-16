@@ -908,25 +908,54 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelChecker.start()
 
         try {
+          // Streaming decode: write float32 chunks directly to a temp .f32 file,
+          // avoiding any large heap allocation (OOM fix for big files).
+          val dir = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.cacheDir
+            ?: reactApplicationContext.cacheDir
+          val tmpF32 = java.io.File(dir, "pa_off_decode_${java.util.UUID.randomUUID()}.f32")
+
           @Suppress("UNCHECKED_CAST")
-          val result = nativeDecodeFileToBuffer(
+          val result = nativeDecodeFileToMmapFile(
             sourcePath,
             sourceFd,
             targetRate,
             forceMono,
             8192,
-            cancelFlagAddr
+            cancelFlagAddr,
+            tmpF32.absolutePath
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
           cancelChecker.interrupt()
 
-          val samples = result["samples"] as? FloatArray ?: FloatArray(0)
+          val numSamples = (result["numSamples"] as? Long)?.toInt() ?: 0
           val srcSampleRate = (result["sourceSampleRate"] as? Int) ?: 0
           val outputRate = if (targetRate > 0) targetRate else srcSampleRate
 
-          val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromSamples(
-            samples, outputRate, 1
-          )
+          if (numSamples <= 0) {
+            tmpF32.delete()
+            throw RuntimeException("DECODE_EMPTY: No samples decoded")
+          }
+
+          val rawSize = numSamples.toLong() * 4
+          val entry = if (rawSize >= com.sherpaonnx.audio.pipeline.PA_FILE_BACKED_THRESHOLD_BYTES) {
+            // Large file: mmap the temp .f32 directly (zero heap copy)
+            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromMmapFile(
+              tmpF32.absolutePath, numSamples, outputRate, 1
+            )
+          } else {
+            // Small file: read into heap and delete temp file
+            val samples = FloatArray(numSamples)
+            java.io.RandomAccessFile(tmpF32, "r").use { raf ->
+              val buf = java.nio.ByteBuffer.allocate(numSamples * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+              raf.channel.read(buf)
+              buf.flip()
+              buf.asFloatBuffer().get(samples)
+            }
+            tmpF32.delete()
+            com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFloatArray(
+              samples, outputRate, 1
+            )
+          }
 
           promise.resolve(entry.toWritableMap())
         } finally {
@@ -2793,6 +2822,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       forceMono: Boolean,
       chunkSize: Int,
       cancelFlagPtr: Long
+    ): HashMap<String, Any>?
+
+    /** Streaming decode to raw .f32 file: returns HashMap{outputPath: String, numSamples: Long, sourceSampleRate: Int, sourceChannels: Int}. */
+    @JvmStatic
+    external fun nativeDecodeFileToMmapFile(
+      path: String?,
+      inputFd: Int,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      cancelFlagPtr: Long,
+      outputPath: String
     ): HashMap<String, Any>?
 
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */

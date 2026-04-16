@@ -208,6 +208,43 @@ sealed class OfflineEntry {
     }
 
     /**
+     * Adopt an already-written raw float32 file as an mmap-backed entry.
+     * The file is memory-mapped directly — no heap allocation of all samples.
+     * Used by streaming decode to avoid OOM on large files.
+     *
+     * @param f32FilePath Absolute path to an existing raw float32 file.
+     * @param numSamples Total number of float32 samples in the file.
+     * @return [MmapBacked] entry, or null if mapping fails.
+     */
+    fun createMmapFromFile(
+      bufferId: String,
+      sampleRate: Int,
+      channelCount: Int,
+      numSamples: Int,
+      f32FilePath: String,
+    ): MmapBacked? {
+      return try {
+        val file = File(f32FilePath)
+        if (!file.exists() || file.length() != numSamples.toLong() * 4) {
+          Log.w(TAG, "createMmapFromFile: file missing or size mismatch")
+          return null
+        }
+        val mapped = mapFile(file) ?: return null
+        MmapBacked(
+          bufferId = bufferId,
+          sampleRate = sampleRate,
+          channelCount = channelCount,
+          numSamples = numSamples,
+          filePath = f32FilePath,
+          mappedBuffer = mapped,
+        )
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to create mmap-backed buffer from file: ${e.message}")
+        null
+      }
+    }
+
+    /**
      * Sweep orphaned .f32 temp files older than [maxAgeMs] from [cacheDir].
      */
     fun sweepOrphanedTempFiles(cacheDir: File, maxAgeMs: Long = 3_600_000L) {
