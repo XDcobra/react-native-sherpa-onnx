@@ -214,15 +214,17 @@ internal class SherpaOnnxEnhancementHelper(
   }
 
   fun getSampleRate(instanceId: String, promise: Promise) {
-    val denoiser = instances[instanceId]?.denoiser
-    if (denoiser == null) {
+    val offlineDenoiser = instances[instanceId]?.denoiser
+    val onlineDenoiser = onlineInstances[instanceId]?.denoiser
+    val sampleRate = offlineDenoiser?.sampleRate ?: onlineDenoiser?.sampleRate
+    if (sampleRate == null) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_ERROR,
         "Enhancement instance not found: $instanceId",
       )
       return
     }
-    promise.resolve(denoiser.sampleRate)
+    promise.resolve(sampleRate)
   }
 
   fun unloadEnhancement(instanceId: String, promise: Promise) {

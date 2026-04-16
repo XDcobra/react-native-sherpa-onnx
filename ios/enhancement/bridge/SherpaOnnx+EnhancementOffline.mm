@@ -181,12 +181,22 @@ static NSString *const kOfflineEnhancementOomMessage =
   std::string instanceIdStr = [instanceId UTF8String];
 
   std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
-  auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
-  if (it == sherpaonnx::enhancement::bridge::g_enhancement_instances.end() || it->second->wrapper == nullptr) {
-    reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
+  auto offlineIt = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
+  if (offlineIt != sherpaonnx::enhancement::bridge::g_enhancement_instances.end() &&
+      offlineIt->second->wrapper != nullptr) {
+    resolve(@(offlineIt->second->wrapper->getSampleRate()));
     return;
   }
-  resolve(@(it->second->wrapper->getSampleRate()));
+
+  auto onlineIt = sherpaonnx::enhancement::bridge::g_online_enhancement_instances.find(instanceIdStr);
+  if (onlineIt != sherpaonnx::enhancement::bridge::g_online_enhancement_instances.end() &&
+      onlineIt->second->wrapper != nullptr) {
+    resolve(@(onlineIt->second->wrapper->getSampleRate()));
+    return;
+  }
+
+  reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
+  return;
 }
 
 - (void)unloadEnhancement:(NSString *)instanceId

@@ -61,6 +61,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Speech enhancement demo',
     body: 'This screen demonstrates offline enhancement on noisy audio. It helps you see how the SDK improves the signal before downstream recognition or playback steps.',
   },
+  EnhancementStreaming: {
+    title: 'Streaming enhancement demo',
+    body: 'This screen mirrors the offline enhancement flow but runs through live input/output buffers and a streaming pipeline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+  },
   Separation: {
     title: 'Source separation preview',
     body: 'This placeholder screen shows where source separation will appear in the example app. It is useful for understanding how the SDK may split mixed audio into cleaner components.',

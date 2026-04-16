@@ -31,16 +31,21 @@ import {
   onModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
 import {
-  createEnhancement,
+  createStreamingEnhancement,
   detectEnhancementModel,
-  type EnhancementEngine,
+  type StreamingEnhancementEngine,
+  type EnhancementPipelineHandle,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
-  createOfflineAudioBufferFromFile,
-  createEmptyOfflineAudioBuffer,
-  releasePipelineAudioBuffer,
+  createEmptyLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
+  ingestFileToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+  type FileIngestHandle,
+  type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 import {
@@ -67,8 +72,8 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
 
-type PreparedEnhancementInputBuffer = {
-  bufferId: string;
+type SelectedEnhancementInput = {
+  source: FileSource;
   sourceType: 'example' | 'own';
   sourceLabel: string;
   sourcePathForPlayback: string;
@@ -77,7 +82,18 @@ type PreparedEnhancementInputBuffer = {
   customAudioName: string | null;
 };
 
-let gEnhancementPreparedInputBuffer: PreparedEnhancementInputBuffer | null =
+type PreparedStreamingEnhancementInputBuffer = {
+  bufferId: string;
+  sampleRate: number;
+  sourceType: 'example' | 'own';
+  sourceLabel: string;
+  sourcePathForPlayback: string;
+  selectedAudioId: string | null;
+  customAudioPath: string | null;
+  customAudioName: string | null;
+};
+
+let gEnhancementStreamingPreparedInputBuffer: PreparedStreamingEnhancementInputBuffer | null =
   null;
 
 function isEnhancementHint(folder: string, hint: string): boolean {
@@ -104,7 +120,7 @@ const localStyles = StyleSheet.create({
   },
 });
 
-export default function EnhancementScreen() {
+export default function EnhancementStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
@@ -129,23 +145,24 @@ export default function EnhancementScreen() {
   );
   const [audioSourceType, setAudioSourceType] = useState<
     'example' | 'own' | null
-  >(gEnhancementPreparedInputBuffer?.sourceType ?? null);
+  >(gEnhancementStreamingPreparedInputBuffer?.sourceType ?? null);
   const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
     () => {
-      const selectedId = gEnhancementPreparedInputBuffer?.selectedAudioId;
+      const selectedId =
+        gEnhancementStreamingPreparedInputBuffer?.selectedAudioId;
       if (!selectedId) return null;
       return AUDIO_FILES.find((file) => file.id === selectedId) ?? null;
     }
   );
   const [customAudioPath, setCustomAudioPath] = useState<string | null>(
-    gEnhancementPreparedInputBuffer?.customAudioPath ?? null
+    gEnhancementStreamingPreparedInputBuffer?.customAudioPath ?? null
   );
   const [customAudioName, setCustomAudioName] = useState<string | null>(
-    gEnhancementPreparedInputBuffer?.customAudioName ?? null
+    gEnhancementStreamingPreparedInputBuffer?.customAudioName ?? null
   );
   const [preparedInputBuffer, setPreparedInputBuffer] =
-    useState<PreparedEnhancementInputBuffer | null>(
-      gEnhancementPreparedInputBuffer
+    useState<PreparedStreamingEnhancementInputBuffer | null>(
+      gEnhancementStreamingPreparedInputBuffer
     );
   const [preparingInputBuffer, setPreparingInputBuffer] = useState(false);
   const [inputBufferBuildProgress, setInputBufferBuildProgress] = useState<
@@ -157,7 +174,6 @@ export default function EnhancementScreen() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
-  /** Path of the input file used for the last successful run (for playback). */
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
     outputBufferId: string;
@@ -171,17 +187,22 @@ export default function EnhancementScreen() {
     string | null
   >(null);
 
-  const engineRef = useRef<EnhancementEngine | null>(null);
+  const engineRef = useRef<StreamingEnhancementEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
-  const preparedInputBufferRef = useRef<PreparedEnhancementInputBuffer | null>(
-    gEnhancementPreparedInputBuffer
-  );
-  const inputBufferRequestRef = useRef(0);
+  const fileIngestRef = useRef<FileIngestHandle | null>(null);
+  const preparedInputBufferRef =
+    useRef<PreparedStreamingEnhancementInputBuffer | null>(
+      gEnhancementStreamingPreparedInputBuffer
+    );
+  const outputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
+  const pipelineRef = useRef<EnhancementPipelineHandle | null>(null);
+  const finalizedOutputBufferIdRef = useRef<string | null>(null);
+  const inputBufferBuildRequestRef = useRef(0);
 
   const setPreparedInputBufferState = (
-    next: PreparedEnhancementInputBuffer | null
+    next: PreparedStreamingEnhancementInputBuffer | null
   ) => {
-    gEnhancementPreparedInputBuffer = next;
+    gEnhancementStreamingPreparedInputBuffer = next;
     preparedInputBufferRef.current = next;
     setPreparedInputBuffer(next);
   };
@@ -209,8 +230,62 @@ export default function EnhancementScreen() {
     );
   };
 
+  const clearFinalizedOutput = async () => {
+    const existingOutputBufferId = finalizedOutputBufferIdRef.current;
+    finalizedOutputBufferIdRef.current = null;
+    if (existingOutputBufferId) {
+      await releasePipelineAudioBuffer(existingOutputBufferId).catch(() => {});
+    }
+    setLastEnhancedAudio(null);
+    setOutputWavPath(null);
+    setEnhanceResult(null);
+  };
+
+  const cleanupRuntimeResources = async () => {
+    const ingest = fileIngestRef.current;
+    fileIngestRef.current = null;
+    if (ingest) {
+      try {
+        const status = await ingest.getStatus();
+        if (status.isRunning) {
+          ingest.cancel();
+        }
+      } catch {
+        // Ignore status races.
+      }
+    }
+
+    const pipeline = pipelineRef.current;
+    pipelineRef.current = null;
+    if (pipeline) {
+      await pipeline.stop().catch(() => {});
+    }
+
+    const outputLiveBuffer = outputLiveBufferRef.current;
+    outputLiveBufferRef.current = null;
+    if (outputLiveBuffer?.bufferId) {
+      await releasePipelineAudioBuffer(outputLiveBuffer.bufferId).catch(
+        () => {}
+      );
+    }
+  };
+
   const clearPreparedInputBuffer = async () => {
-    inputBufferRequestRef.current += 1;
+    inputBufferBuildRequestRef.current += 1;
+
+    const ingest = fileIngestRef.current;
+    fileIngestRef.current = null;
+    if (ingest) {
+      try {
+        const status = await ingest.getStatus();
+        if (status.isRunning) {
+          ingest.cancel();
+        }
+      } catch {
+        // Ignore status races.
+      }
+    }
+
     const existing = preparedInputBufferRef.current;
     setPreparedInputBufferState(null);
     setPreparingInputBuffer(false);
@@ -239,15 +314,7 @@ export default function EnhancementScreen() {
       customAudioPath?: string | null;
       customAudioName?: string | null;
     } | null
-  ): Promise<{
-    source: FileSource;
-    sourceType: 'example' | 'own';
-    sourceLabel: string;
-    sourcePathForPlayback: string;
-    selectedAudioId: string | null;
-    customAudioPath: string | null;
-    customAudioName: string | null;
-  }> => {
+  ): Promise<SelectedEnhancementInput> => {
     const effectiveCustomAudioPath =
       override?.customAudioPath ?? customAudioPath;
     const effectiveCustomAudioName =
@@ -324,11 +391,11 @@ export default function EnhancementScreen() {
       customAudioName?: string | null;
     } | null
   ) => {
-    const requestId = ++inputBufferRequestRef.current;
+    const requestId = ++inputBufferBuildRequestRef.current;
 
     setPreparingInputBuffer(true);
     setInputBufferBuildProgress(0);
-    setInputBufferBuildStatus('Preparing OfflineAudioBuffer...');
+    setInputBufferBuildStatus('Preparing LiveAudioBuffer...');
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
@@ -336,9 +403,21 @@ export default function EnhancementScreen() {
     setLastInputPath(null);
     setLastEnhancedAudio(null);
 
+    let createdInputBufferId: string | null = null;
+
     try {
       const resolved = await resolveSelectedInputSource(override);
-      if (requestId !== inputBufferRequestRef.current) {
+      if (requestId !== inputBufferBuildRequestRef.current) {
+        return;
+      }
+
+      const engine = engineRef.current;
+      if (!engine) {
+        throw new Error('Streaming enhancement engine is not initialized');
+      }
+
+      const sampleRate = await engine.getSampleRate();
+      if (requestId !== inputBufferBuildRequestRef.current) {
         return;
       }
 
@@ -359,41 +438,67 @@ export default function EnhancementScreen() {
       }
 
       setInputBufferBuildStatus(
-        `Decoding \"${resolved.sourceLabel}\" into OfflineAudioBuffer...`
+        `Decoding \"${resolved.sourceLabel}\" into LiveAudioBuffer...`
       );
 
-      const inputRef = await createOfflineAudioBufferFromFile(resolved.source, {
-        onProgress: (event) => {
-          if (requestId !== inputBufferRequestRef.current) {
-            return;
-          }
-
-          const percent = Math.max(0, Math.min(100, event.percent ?? 0));
-          setInputBufferBuildProgress(percent);
-
-          const totalFrames = event.totalFramesEstimate ?? 0;
-          if (totalFrames > 0) {
-            setInputBufferBuildStatus(
-              `Decoding \"${resolved.sourceLabel}\"... ${Math.round(
-                percent
-              )}% (${event.framesDecoded}/${totalFrames} frames)`
-            );
-            return;
-          }
-
-          setInputBufferBuildStatus(
-            `Decoding \"${resolved.sourceLabel}\"... ${Math.round(percent)}%`
-          );
-        },
+      const inputLive = await createEmptyLiveAudioBuffer({
+        sampleRate,
+        channelCount: 1,
+        windowSeconds: 240,
+        emitAppendedEvents: false,
       });
+      createdInputBufferId = inputLive.bufferId;
 
-      if (requestId !== inputBufferRequestRef.current) {
-        await releasePipelineAudioBuffer(inputRef.bufferId).catch(() => {});
+      if (requestId !== inputBufferBuildRequestRef.current) {
+        await releasePipelineAudioBuffer(inputLive.bufferId).catch(() => {});
+        return;
+      }
+
+      const ingest = await ingestFileToLiveAudioBuffer(
+        inputLive.bufferId,
+        resolved.source,
+        {
+          targetSampleRateHz: sampleRate,
+          forceMono: true,
+          autoFinalize: false,
+          onProgress: (event) => {
+            if (requestId !== inputBufferBuildRequestRef.current) {
+              return;
+            }
+
+            const percent = Math.max(0, Math.min(100, event.percent ?? 0));
+            setInputBufferBuildProgress(percent);
+
+            const totalFrames = event.totalFramesEstimate ?? 0;
+            if (totalFrames > 0) {
+              setInputBufferBuildStatus(
+                `Decoding \"${resolved.sourceLabel}\"... ${Math.round(
+                  percent
+                )}% (${event.framesDecoded}/${totalFrames} frames)`
+              );
+              return;
+            }
+
+            setInputBufferBuildStatus(
+              `Decoding \"${resolved.sourceLabel}\"... ${Math.round(percent)}%`
+            );
+          },
+        }
+      );
+      fileIngestRef.current = ingest;
+      await ingest.done;
+      if (fileIngestRef.current === ingest) {
+        fileIngestRef.current = null;
+      }
+
+      if (requestId !== inputBufferBuildRequestRef.current) {
+        await releasePipelineAudioBuffer(inputLive.bufferId).catch(() => {});
         return;
       }
 
       setPreparedInputBufferState({
-        bufferId: inputRef.bufferId,
+        bufferId: inputLive.bufferId,
+        sampleRate,
         sourceType: resolved.sourceType,
         sourceLabel: resolved.sourceLabel,
         sourcePathForPlayback: resolved.sourcePathForPlayback,
@@ -401,11 +506,16 @@ export default function EnhancementScreen() {
         customAudioPath: resolved.customAudioPath,
         customAudioName: resolved.customAudioName,
       });
+      createdInputBufferId = null;
       setInputBufferBuildProgress(null);
       setInputBufferBuildStatus(null);
     } catch (err) {
-      if (requestId !== inputBufferRequestRef.current) {
+      if (requestId !== inputBufferBuildRequestRef.current) {
         return;
+      }
+
+      if (createdInputBufferId) {
+        await releasePipelineAudioBuffer(createdInputBufferId).catch(() => {});
       }
 
       const msg = err instanceof Error ? err.message : String(err);
@@ -414,7 +524,7 @@ export default function EnhancementScreen() {
       setInputBufferBuildProgress(null);
       setInputBufferBuildStatus(null);
     } finally {
-      if (requestId === inputBufferRequestRef.current) {
+      if (requestId === inputBufferBuildRequestRef.current) {
         setPreparingInputBuffer(false);
       }
     }
@@ -438,7 +548,10 @@ export default function EnhancementScreen() {
     } catch (pickerErr) {
       const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
       if (!isCancel) {
-        console.warn('EnhancementScreen: directory picker error', pickerErr);
+        console.warn(
+          'EnhancementStreamingScreen: directory picker error',
+          pickerErr
+        );
       }
     }
     return { directoryPath, directoryUri };
@@ -456,10 +569,11 @@ export default function EnhancementScreen() {
       Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
       return;
     }
+
     setSaving(true);
     try {
       const timestamp = Date.now();
-      const filename = `sherpa_enhanced_${timestamp}.wav`;
+      const filename = `sherpa_streaming_enhanced_${timestamp}.wav`;
       const { directoryPath, directoryUri } = await pickSaveDirectory();
 
       const saveBufferToPath = async (path: string) => {
@@ -471,7 +585,6 @@ export default function EnhancementScreen() {
       };
 
       if (directoryUri) {
-        // Android SAF: save to cache then copy
         const tmpPath = `${DocumentDirectoryPath}/${filename}`;
         await saveBufferToPath(tmpPath);
         Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
@@ -500,7 +613,7 @@ export default function EnhancementScreen() {
   useEffect(() => {
     loadAvailableModels();
     refreshOutputDevices().catch(() => {
-      // ignore unsupported-platform lookup failures
+      // Ignore unsupported-platform lookup failures.
     });
   }, []);
 
@@ -508,7 +621,7 @@ export default function EnhancementScreen() {
     const unsubscribe = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Enhancement) return;
       loadAvailableModels().catch(() => {
-        // ignore refresh errors
+        // Ignore refresh errors.
       });
     });
     return unsubscribe;
@@ -516,18 +629,46 @@ export default function EnhancementScreen() {
 
   useEffect(() => {
     return () => {
-      inputBufferRequestRef.current += 1;
+      inputBufferBuildRequestRef.current += 1;
       if (pcmPlaybackRef.current) {
         stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
         pcmPlaybackRef.current = null;
       }
+      cleanupRuntimeResources().catch(() => {});
+      const outputBufferId = finalizedOutputBufferIdRef.current;
+      finalizedOutputBufferIdRef.current = null;
+      if (outputBufferId) {
+        releasePipelineAudioBuffer(outputBufferId).catch(() => {});
+      }
+      const engine = engineRef.current;
+      engineRef.current = null;
+      if (engine) {
+        engine.destroy().catch(() => {});
+      }
     };
   }, []);
+
+  const resolveEnhancementModelPath = (modelFolder: string) => {
+    if (padModelIds.includes(modelFolder)) {
+      return padModelsPath
+        ? getFileModelPath(
+            modelFolder,
+            ModelCategory.Enhancement,
+            padModelsPath
+          )
+        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    if (downloadedModelIds.includes(modelFolder)) {
+      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+    }
+    return getAssetModelPath(modelFolder);
+  };
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
     setErrorSource(null);
+
     try {
       const assetModels = await listAssetModels();
       const enhancementFolders = assetModels
@@ -552,10 +693,28 @@ export default function EnhancementScreen() {
           resolvedPadPath = padPath;
         }
       } catch (e) {
-        console.warn('EnhancementScreen: PAD/listModelsAtPath failed', e);
+        console.warn(
+          'EnhancementStreamingScreen: PAD/listModelsAtPath failed',
+          e
+        );
         padFolders = [];
       }
-      setPadModelsPath(resolvedPadPath);
+
+      const resolvePathForCandidate = (modelFolder: string) => {
+        if (padFolders.includes(modelFolder)) {
+          return resolvedPadPath
+            ? getFileModelPath(
+                modelFolder,
+                ModelCategory.Enhancement,
+                resolvedPadPath
+              )
+            : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+        }
+        if (downloadedFolders.includes(modelFolder)) {
+          return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+        }
+        return getAssetModelPath(modelFolder);
+      };
 
       const combined = [
         ...padFolders,
@@ -564,40 +723,41 @@ export default function EnhancementScreen() {
           (f) => !padFolders.includes(f) && !enhancementFolders.includes(f)
         ),
       ];
+
+      const streamingModels: string[] = [];
+      for (const modelFolder of combined) {
+        try {
+          const detection = await detectEnhancementModel(
+            await toDetectSource(resolvePathForCandidate(modelFolder)),
+            { modelType: 'auto' }
+          );
+          if (detection.success && detection.isStreaming) {
+            streamingModels.push(modelFolder);
+          }
+        } catch {
+          // Ignore models that cannot be detected.
+        }
+      }
+
       setPadModelIds(padFolders);
       setDownloadedModelIds(downloadedFolders);
-      setAvailableModels(combined);
+      setPadModelsPath(resolvedPadPath);
+      setAvailableModels(streamingModels);
 
-      if (combined.length === 0) {
+      if (streamingModels.length === 0) {
         setErrorSource('init');
         setError(
-          'No speech enhancement models found. Add a GTCRN or DPDFNet model as a bundled asset, downloaded model, or PAD model. See docs/speech-enhancement.md.'
+          'No streaming enhancement models found. Use a model that reports isStreaming=true via detectEnhancementModel.'
         );
       }
     } catch (err) {
-      console.error('EnhancementScreen: Failed to load models:', err);
+      console.error('EnhancementStreamingScreen: Failed to load models:', err);
       setErrorSource('init');
       setError('Failed to load available models');
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
     }
-  };
-
-  const resolveEnhancementModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(
-            modelFolder,
-            ModelCategory.Enhancement,
-            padModelsPath
-          )
-        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
-    }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
-    }
-    return getAssetModelPath(modelFolder);
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -617,24 +777,30 @@ export default function EnhancementScreen() {
 
       const modelPath = resolveEnhancementModelPath(modelFolder);
 
-      const engine = await createEnhancement({
-        modelPath,
-        numThreads: NUM_THREADS,
-        modelType: 'auto',
-      });
-
       const detectResult = await detectEnhancementModel(
         await toDetectSource(modelPath),
         { modelType: 'auto' }
       );
       if (!detectResult.success || !detectResult.detectedModels?.length) {
-        await engine.destroy();
-        engineRef.current = null;
         setErrorSource('init');
         setError('No enhancement models detected in the directory');
         setInitResult('Initialization failed: No compatible models found');
         return;
       }
+      if (!detectResult.isStreaming) {
+        setErrorSource('init');
+        setError(
+          'Selected model is offline-only. Choose a model that supports streaming enhancement.'
+        );
+        setInitResult('Initialization failed: model is not streaming-capable');
+        return;
+      }
+
+      const engine = await createStreamingEnhancement({
+        modelPath,
+        numThreads: NUM_THREADS,
+        modelType: 'auto',
+      });
 
       const normalized = detectResult.detectedModels.map((m) => ({
         type: m.type,
@@ -650,6 +816,7 @@ export default function EnhancementScreen() {
       setDetectedModels(normalized);
       setCurrentModelFolder(modelFolder);
       setSelectedModelForInit(modelFolder);
+
       if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
         setSelectedModelKind(loadedKind);
       } else if (
@@ -661,7 +828,9 @@ export default function EnhancementScreen() {
 
       const types = normalized.map((m) => m.type).join(', ');
       setInitResult(
-        `Initialized: ${getModelDisplayName(modelFolder)}\nDetected: ${types}`
+        `Initialized streaming engine: ${getModelDisplayName(
+          modelFolder
+        )}\nDetected: ${types}`
       );
 
       const persistedPrepared = preparedInputBufferRef.current;
@@ -682,12 +851,13 @@ export default function EnhancementScreen() {
         setCustomAudioPath(null);
         setCustomAudioName(null);
       }
+
       setEnhanceResult(null);
       setOutputWavPath(null);
       setLastInputPath(null);
-      setLastEnhancedAudio(null);
+      await clearFinalizedOutput();
     } catch (err) {
-      console.error('Enhancement init error:', err);
+      console.error('EnhancementStreaming init error:', err);
       let errorMessage = 'Unknown error';
       if (err instanceof Error) {
         errorMessage = err.message;
@@ -711,11 +881,12 @@ export default function EnhancementScreen() {
 
   const handleReinitWithKind = async (kind: EnhancementModelType) => {
     if (!currentModelFolder) return;
+
     setSelectedModelKind(kind);
-    const folder = currentModelFolder;
     setLoading(true);
     setError(null);
     setErrorSource(null);
+
     try {
       const previous = engineRef.current;
       if (previous) {
@@ -723,26 +894,34 @@ export default function EnhancementScreen() {
         engineRef.current = null;
       }
 
-      const modelPath = resolveEnhancementModelPath(folder);
-
-      const engine = await createEnhancement({
-        modelPath,
-        numThreads: NUM_THREADS,
-        modelType: kind,
-      });
+      const modelPath = resolveEnhancementModelPath(currentModelFolder);
       const detectResult = await detectEnhancementModel(
         await toDetectSource(modelPath),
         { modelType: kind }
       );
       if (!detectResult.success || !detectResult.detectedModels?.length) {
-        await engine.destroy();
         setErrorSource('init');
         setError('No enhancement models detected for the selected type');
         return;
       }
+      if (!detectResult.isStreaming) {
+        setErrorSource('init');
+        setError(
+          'Selected architecture is not streaming-capable in this model directory.'
+        );
+        return;
+      }
+
+      const engine = await createStreamingEnhancement({
+        modelPath,
+        numThreads: NUM_THREADS,
+        modelType: kind,
+      });
       engineRef.current = engine;
       setInitResult(
-        `Initialized: ${getModelDisplayName(folder)} (${kind.toUpperCase()})`
+        `Initialized streaming engine: ${getModelDisplayName(
+          currentModelFolder
+        )} (${kind.toUpperCase()})`
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -753,141 +932,9 @@ export default function EnhancementScreen() {
     }
   };
 
-  const handleEnhance = async () => {
-    if (!currentModelFolder) {
-      setErrorSource('enhance');
-      setError('Please initialize a model first');
-      return;
-    }
-    if (preparingInputBuffer) {
-      setErrorSource('enhance');
-      setError('Please wait for OfflineAudioBuffer preparation to finish');
-      return;
-    }
-
-    const prepared = preparedInputBufferRef.current;
-    if (!prepared) {
-      setErrorSource('enhance');
-      setError('Select audio and wait until OfflineAudioBuffer is ready');
-      return;
-    }
-
-    setEnhancing(true);
-    setError(null);
-    setErrorSource(null);
-    setEnhanceResult(null);
-    setOutputWavPath(null);
-    setLastInputPath(null);
-    setLastEnhancedAudio(null);
-
-    try {
-      const engine = engineRef.current;
-      if (!engine) {
-        setErrorSource('enhance');
-        setError('Enhancement engine not initialized');
-        return;
-      }
-
-      if (lastEnhancedAudio?.outputBufferId) {
-        await releasePipelineAudioBuffer(
-          lastEnhancedAudio.outputBufferId
-        ).catch(() => {});
-      }
-
-      const sr = await engine.getSampleRate();
-      // Create empty output buffer at model sample rate
-      const outputBuf = await createEmptyOfflineAudioBuffer(sr);
-      try {
-        await engine.enhance(prepared.bufferId, outputBuf.bufferId);
-        // Get output info for display
-        const outInfo = await getPipelineAudioBufferInfo(outputBuf.bufferId);
-        const n = outInfo.numSamples ?? 0;
-        const outSr = outInfo.sampleRate ?? sr;
-        const sec = outSr > 0 ? (n / outSr).toFixed(2) : '?';
-        const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-        await saveAudioAsFile(
-          outputBuf.bufferId,
-          { kind: 'fs', path: outPath },
-          'wav'
-        );
-        setOutputWavPath(outPath);
-        setLastInputPath(prepared.sourcePathForPlayback);
-        setLastEnhancedAudio({
-          outputBufferId: outputBuf.bufferId as string,
-          sampleRate: outSr,
-          numSamples: n,
-        });
-        setEnhanceResult(
-          `Samples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
-        );
-      } catch (enhanceErr) {
-        // Release output buffer on error (input buffer remains cached for retries)
-        await releasePipelineAudioBuffer(outputBuf.bufferId).catch(() => {});
-        throw enhanceErr;
-      }
-    } catch (err) {
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        if ('code' in err) {
-          errorMessage = `[${(err as any).code}] ${errorMessage}`;
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        const errorObj = err as any;
-        errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
-          JSON.stringify(err);
-      }
-      setErrorSource('enhance');
-      setError(errorMessage);
-    } finally {
-      setEnhancing(false);
-    }
-  };
-
-  const handleFree = async () => {
-    // Release any held output buffer
-    if (lastEnhancedAudio?.outputBufferId) {
-      await releasePipelineAudioBuffer(lastEnhancedAudio.outputBufferId).catch(
-        () => {}
-      );
-    }
-    const engine = engineRef.current;
-    if (engine) {
-      try {
-        await engine.destroy();
-      } catch (e) {
-        console.warn('EnhancementScreen: destroy failed', e);
-      }
-    }
-    engineRef.current = null;
-    setCurrentModelFolder(null);
-    setSelectedModelForInit(null);
-    setDetectedModels([]);
-    setSelectedModelKind(null);
-    setInitResult(null);
-    setAudioSourceType(null);
-    setSelectedAudio(null);
-    setCustomAudioPath(null);
-    setCustomAudioName(null);
-    await clearPreparedInputBuffer();
-    setEnhanceResult(null);
-    setOutputWavPath(null);
-    setLastInputPath(null);
-    setLastEnhancedAudio(null);
-    setError(null);
-    setErrorSource(null);
-    await stopActivePlayback();
-  };
-
   const handlePickLocalFile = async () => {
     setError(null);
     setErrorSource(null);
-    setEnhanceResult(null);
-    setOutputWavPath(null);
-    setLastInputPath(null);
-    setLastEnhancedAudio(null);
     try {
       const res = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
@@ -917,6 +964,7 @@ export default function EnhancementScreen() {
         );
         return;
       }
+
       await prepareInputBufferFromSelection({
         customAudioPath: uri,
         customAudioName: name,
@@ -959,6 +1007,176 @@ export default function EnhancementScreen() {
     }
   };
 
+  const handleEnhance = async () => {
+    if (!currentModelFolder) {
+      setErrorSource('enhance');
+      setError('Please initialize a model first');
+      return;
+    }
+
+    const engine = engineRef.current;
+    if (!engine) {
+      setErrorSource('enhance');
+      setError('Streaming enhancement engine is not initialized');
+      return;
+    }
+
+    if (preparingInputBuffer) {
+      setErrorSource('enhance');
+      setError('Please wait for LiveAudioBuffer preparation to finish');
+      return;
+    }
+
+    const prepared = preparedInputBufferRef.current;
+    if (!prepared) {
+      setErrorSource('enhance');
+      setError('Select audio and wait until LiveAudioBuffer is ready');
+      return;
+    }
+
+    setEnhancing(true);
+    setError(null);
+    setErrorSource(null);
+    setEnhanceResult(null);
+    setOutputWavPath(null);
+    setLastInputPath(null);
+
+    let producedOfflineBufferId: string | null = null;
+
+    try {
+      await stopActivePlayback();
+      await cleanupRuntimeResources();
+      await clearFinalizedOutput();
+
+      const sampleRate = await engine.getSampleRate();
+      if (sampleRate !== prepared.sampleRate) {
+        setErrorSource('enhance');
+        setError(
+          'The prepared LiveAudioBuffer was built for a different sample rate. Remove it and build again for the current model.'
+        );
+        return;
+      }
+      const frameShift = await engine.getFrameShiftInSamples();
+
+      const outputLivePath = `${DocumentDirectoryPath}/streaming_enhancement_live_${Date.now()}.wav`;
+      const outputLive = await createEmptyLiveAudioBuffer({
+        sampleRate,
+        channelCount: 1,
+        windowSeconds: 240,
+        persistencePath: outputLivePath,
+        emitAppendedEvents: false,
+      });
+      outputLiveBufferRef.current = outputLive;
+
+      const pipeline = await engine.enhance(
+        prepared.bufferId,
+        outputLive.bufferId
+      );
+      pipelineRef.current = pipeline;
+
+      // Input buffer must be in RECORDING state when pipeline starts.
+      // Finalize right after start so the worker can drain to EOS.
+      await finalizeLiveAudioBuffer(prepared.bufferId).catch(() => {});
+
+      await pipeline.flush().catch(() => {});
+      await pipeline.stop().catch(() => {});
+      pipelineRef.current = null;
+
+      await finalizeLiveAudioBuffer(outputLive.bufferId).catch(() => {});
+
+      const offlineOutput = await createOfflineAudioBufferFromLive(
+        outputLive.bufferId,
+        'fullIfSpooled'
+      );
+      producedOfflineBufferId = offlineOutput.bufferId;
+
+      const outInfo = await getPipelineAudioBufferInfo(offlineOutput.bufferId);
+      const numSamples =
+        outInfo.kind === 'offlinePcmBuffer' ? outInfo.numSamples : 0;
+      const outputSampleRate = outInfo.sampleRate ?? sampleRate;
+      const durationSeconds =
+        outputSampleRate > 0 ? (numSamples / outputSampleRate).toFixed(2) : '?';
+
+      const outputPath = `${DocumentDirectoryPath}/sherpa_streaming_enhanced_${Date.now()}.wav`;
+      await saveAudioAsFile(
+        offlineOutput.bufferId,
+        { kind: 'fs', path: outputPath },
+        'wav'
+      );
+
+      finalizedOutputBufferIdRef.current = offlineOutput.bufferId;
+      setLastEnhancedAudio({
+        outputBufferId: offlineOutput.bufferId,
+        sampleRate: outputSampleRate,
+        numSamples,
+      });
+      setOutputWavPath(outputPath);
+      setLastInputPath(prepared.sourcePathForPlayback);
+      setEnhanceResult(
+        `Pipeline: streaming enhancement\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
+      );
+      producedOfflineBufferId = null;
+    } catch (err) {
+      if (producedOfflineBufferId) {
+        await releasePipelineAudioBuffer(producedOfflineBufferId).catch(
+          () => {}
+        );
+      }
+
+      let errorMessage = 'Unknown error';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        if ('code' in err) {
+          errorMessage = `[${(err as any).code}] ${errorMessage}`;
+        }
+      } else if (typeof err === 'object' && err !== null) {
+        const errorObj = err as any;
+        errorMessage =
+          errorObj.message ||
+          errorObj.userInfo?.NSLocalizedDescription ||
+          JSON.stringify(err);
+      }
+      setErrorSource('enhance');
+      setError(errorMessage);
+    } finally {
+      await cleanupRuntimeResources();
+      setEnhancing(false);
+    }
+  };
+
+  const handleFree = async () => {
+    setError(null);
+    setErrorSource(null);
+
+    await stopActivePlayback();
+    await cleanupRuntimeResources();
+    await clearFinalizedOutput();
+
+    const engine = engineRef.current;
+    if (engine) {
+      try {
+        await engine.destroy();
+      } catch (e) {
+        console.warn('EnhancementStreamingScreen: destroy failed', e);
+      }
+    }
+    engineRef.current = null;
+
+    setCurrentModelFolder(null);
+    setSelectedModelForInit(null);
+    setDetectedModels([]);
+    setSelectedModelKind(null);
+    setInitResult(null);
+    await clearPreparedInputBuffer();
+    setAudioSourceType(null);
+    setSelectedAudio(null);
+    setCustomAudioPath(null);
+    setCustomAudioName(null);
+    setEnhanceResult(null);
+    setOutputWavPath(null);
+    setLastInputPath(null);
+  };
+
   const engineReady = currentModelFolder != null && engineRef.current != null;
   const showKindPicker =
     detectedModels.length > 1 &&
@@ -978,7 +1196,7 @@ export default function EnhancementScreen() {
             <TouchableOpacity
               style={styles.freeButton}
               onPress={handleFree}
-              disabled={loading}
+              disabled={loading || enhancing}
             >
               <Text style={styles.freeButtonText}>Release model</Text>
             </TouchableOpacity>
@@ -987,8 +1205,8 @@ export default function EnhancementScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize model</Text>
             <Text style={styles.hint}>
-              Offline denoising (GTCRN / DPDFNet). Select a folder, then tap
-              &quot;Use model&quot;.
+              Streaming enhancement for long-form audio. Only models with
+              isStreaming=true are shown here.
             </Text>
 
             {(currentModelFolder || selectedModelForInit) && (
@@ -1009,14 +1227,15 @@ export default function EnhancementScreen() {
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#007AFF" />
                 <Text style={styles.loadingText}>
-                  Discovering enhancement models…
+                  Discovering streaming enhancement models...
                 </Text>
               </View>
             ) : availableModels.length === 0 ? (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  No enhancement models in assets or PAD. Add models from the
-                  sherpa-onnx speech-enhancement-models release.
+                  No streaming enhancement models in assets or PAD. Add a model
+                  directory that reports isStreaming=true in
+                  detectEnhancementModel.
                 </Text>
               </View>
             ) : (
@@ -1034,7 +1253,7 @@ export default function EnhancementScreen() {
                         loading && styles.buttonDisabled,
                       ]}
                       onPress={() => setSelectedModelForInit(modelFolder)}
-                      disabled={loading}
+                      disabled={loading || enhancing}
                     >
                       <Text
                         style={[
@@ -1055,7 +1274,7 @@ export default function EnhancementScreen() {
               style={[
                 styles.button,
                 styles.applyButton,
-                loading && styles.buttonDisabled,
+                (loading || enhancing) && styles.buttonDisabled,
               ]}
               onPress={() =>
                 handleInitialize(
@@ -1063,7 +1282,9 @@ export default function EnhancementScreen() {
                 )
               }
               disabled={
-                loading || (!selectedModelForInit && !currentModelFolder)
+                loading ||
+                enhancing ||
+                (!selectedModelForInit && !currentModelFolder)
               }
             >
               {loading ? (
@@ -1073,7 +1294,7 @@ export default function EnhancementScreen() {
                     color="#FFFFFF"
                     style={styles.applyButtonSpinner}
                   />
-                  <Text style={styles.buttonText}>Initializing…</Text>
+                  <Text style={styles.buttonText}>Initializing...</Text>
                 </View>
               ) : (
                 <Text style={styles.buttonText}>Use model</Text>
@@ -1100,7 +1321,7 @@ export default function EnhancementScreen() {
               <Text style={styles.sectionTitle}>2. Architecture</Text>
               <Text style={styles.hint}>
                 This folder contains both GTCRN and DPDFNet. Pick which
-                checkpoint to use, then enhance audio below.
+                checkpoint to use, then stream a file below.
               </Text>
               <View style={styles.detectedModelsContainer}>
                 {(['gtcrn', 'dpdfnet'] as const).map((kind) => (
@@ -1112,7 +1333,7 @@ export default function EnhancementScreen() {
                         styles.detectedModelButtonActive,
                     ]}
                     onPress={() => handleReinitWithKind(kind)}
-                    disabled={loading}
+                    disabled={loading || enhancing}
                   >
                     <Text
                       style={[
@@ -1131,11 +1352,13 @@ export default function EnhancementScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
-              {showKindPicker ? '3. Enhance audio' : '2. Enhance audio'}
+              {showKindPicker
+                ? '3. Stream enhancement'
+                : '2. Stream enhancement'}
             </Text>
             <Text style={styles.hint}>
-              WAV input (example clips or a file from disk). Output is float32
-              WAV under the app documents directory.
+              Same UX as offline enhancement, but processing runs as a streaming
+              pipeline with live buffers to avoid offline OOM on long audio.
             </Text>
 
             <AudioDeviceDropdown
@@ -1149,7 +1372,7 @@ export default function EnhancementScreen() {
             {!engineReady && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Initialize an enhancement model first.
+                  Initialize a streaming enhancement model first.
                 </Text>
               </View>
             )}
@@ -1160,8 +1383,7 @@ export default function EnhancementScreen() {
                 <View style={styles.decodeProgressContainer}>
                   <View style={styles.decodeProgressHeaderRow}>
                     <Text style={styles.decodeProgressLabel}>
-                      {inputBufferBuildStatus ??
-                        'Preparing OfflineAudioBuffer...'}
+                      {inputBufferBuildStatus ?? 'Preparing LiveAudioBuffer...'}
                     </Text>
                     {inputBufferBuildProgress != null && (
                       <Text style={styles.decodeProgressPercent}>
@@ -1182,11 +1404,10 @@ export default function EnhancementScreen() {
                       ]}
                     />
                   </View>
-                  {preparingInputBuffer && (
-                    <Text style={styles.decodeProgressMeta}>
-                      Large files can take a while to decode.
-                    </Text>
-                  )}
+                  <Text style={styles.decodeProgressMeta}>
+                    Long files are decoded and streamed into a live input
+                    buffer.
+                  </Text>
                 </View>
               )}
 
@@ -1195,7 +1416,7 @@ export default function EnhancementScreen() {
                 <View style={styles.bufferHeaderRow}>
                   <View style={styles.bufferHeaderTextWrap}>
                     <Text style={styles.selectedFileLabel}>
-                      OfflineAudioBuffer ready:
+                      LiveAudioBuffer ready:
                     </Text>
                     <Text style={styles.selectedFileName}>
                       {preparedInputBuffer.sourceLabel}
@@ -1308,6 +1529,7 @@ export default function EnhancementScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+
                 {preparedInputBuffer?.sourceType === 'example' && (
                   <TouchableOpacity
                     style={[
@@ -1321,10 +1543,13 @@ export default function EnhancementScreen() {
                     {enhancing ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.buttonText}>Run enhancement</Text>
+                      <Text style={styles.buttonText}>
+                        Run streaming enhancement
+                      </Text>
                     )}
                   </TouchableOpacity>
                 )}
+
                 {!preparingInputBuffer && !preparedInputBuffer && (
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
@@ -1370,6 +1595,7 @@ export default function EnhancementScreen() {
                     </View>
                   </TouchableOpacity>
                 )}
+
                 {customAudioName && (
                   <View style={styles.selectedFileContainer}>
                     <Text style={styles.selectedFileLabel}>Selected:</Text>
@@ -1395,6 +1621,7 @@ export default function EnhancementScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
+
                 {preparedInputBuffer?.sourceType === 'own' && (
                   <TouchableOpacity
                     style={[
@@ -1409,10 +1636,13 @@ export default function EnhancementScreen() {
                     {enhancing ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.buttonText}>Run enhancement</Text>
+                      <Text style={styles.buttonText}>
+                        Run streaming enhancement
+                      </Text>
                     )}
                   </TouchableOpacity>
                 )}
+
                 {!preparingInputBuffer && !preparedInputBuffer && (
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
@@ -1500,7 +1730,7 @@ export default function EnhancementScreen() {
                         style={styles.iconInline}
                       />
                       <Text style={styles.secondaryButtonText}>
-                        Save enhanced WAV to…
+                        Save enhanced WAV to...
                       </Text>
                     </View>
                   )}
@@ -1518,7 +1748,7 @@ export default function EnhancementScreen() {
         </ScrollView>
       </View>
 
-      <ScreenIntroModal screenId="Enhancement" />
+      <ScreenIntroModal screenId="EnhancementStreaming" />
     </SafeAreaView>
   );
 }
