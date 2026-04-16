@@ -298,6 +298,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);
+        resultDict[@"isStreaming"] = @(result.isStreaming);
         resultDict[@"isHardwareSpecificUnsupported"] = @(result.isHardwareSpecificUnsupported);
         if (!result.error.empty()) {
             resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];

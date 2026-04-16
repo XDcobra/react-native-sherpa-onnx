@@ -541,6 +541,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         return
       }
       val success = result["success"] as? Boolean ?: false
+      val isStreaming = result["isStreaming"] as? Boolean ?: false
       val isHardwareSpecificUnsupported = result["isHardwareSpecificUnsupported"] as? Boolean ?: false
       val detectedModels = result["detectedModels"] as? ArrayList<*>
         ?: arrayListOf<HashMap<String, String>>()
@@ -552,6 +553,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", success)
+      resultMap.putBoolean("isStreaming", isStreaming)
       resultMap.putBoolean("isHardwareSpecificUnsupported", isHardwareSpecificUnsupported)
       val modelsArray = Arguments.createArray()
       for (model in detectedModels) {

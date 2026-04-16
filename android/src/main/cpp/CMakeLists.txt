@@ -88,10 +88,15 @@ set(SOURCES
     jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
+    jni/model_detect/common/sherpa-onnx-ort-guard-utils.cpp
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
     jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-online-guard.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-online-guard-transducer.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-online-guard-paraformer.cpp
+    jni/model_detect/stt/sherpa-onnx-stt-online-guard-ctc.cpp
     jni/model_detect/tts/sherpa-onnx-tts-catalog-metadata.cpp
     jni/model_detect/tts/sherpa-onnx-model-detect-tts.cpp
     jni/model_detect/tts/sherpa-onnx-validate-tts.cpp

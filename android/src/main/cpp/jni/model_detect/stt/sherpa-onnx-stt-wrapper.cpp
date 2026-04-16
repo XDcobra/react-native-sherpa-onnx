@@ -54,6 +54,7 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
   if (!map) return nullptr;
 
   PutBoolean(env, map, mapPut, "success", result.ok);
+  PutBoolean(env, map, mapPut, "isStreaming", result.isStreaming);
   PutString(env, map, mapPut, "error", result.error);
   PutBoolean(env, map, mapPut, "isHardwareSpecificUnsupported", result.isHardwareSpecificUnsupported);
   PutString(env, map, mapPut, "modelType", SttModelKindToString(result.selectedKind));

@@ -29,11 +29,15 @@
  * 4. paths: ApplyPathsForSttKind(selectedKind) copies the relevant candidate paths into
  *    SttModelPaths (encoder/decoder, moonshine encoder/mergedDecoder, etc.) for the chosen kind.
  *
+ * 5. isStreaming: after validation, runs the online-compatibility guard to determine whether
+ *    the model can be used with the OnlineRecognizer (streaming) path.
+ *
  * Result to caller: ok, error, detectedModels (list), selectedKind (single), paths (for selectedKind).
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-stt-catalog-metadata.h"
+#include "sherpa-onnx-stt-online-guard.h"
 #include "sherpa-onnx-validate-stt.h"
 #include <cstdio>
 #include <cstdlib>
@@ -792,6 +796,7 @@ static SttDetectResult DetectSttModelFromFiles(
             }
             AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kExplicitModelType);
             result.selectedKind = sel;
+            result.isStreaming = sherpaonnx::stt::online_guard::IsStreamingCandidate(sel);
             result.detectedModels.clear();
             result.detectedModels.push_back({KindToName(sel), modelDir});
             result.ok = false;
@@ -803,6 +808,7 @@ static SttDetectResult DetectSttModelFromFiles(
             return result;
         }
         result.selectedKind = nameKinds[0];
+        result.isStreaming = sherpaonnx::stt::online_guard::IsStreamingCandidate(nameKinds[0]);
         AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
@@ -955,6 +961,20 @@ static SttDetectResult DetectSttModelFromFiles(
             break;
     }
     LOGI("DetectSttModel: tokens=%s (required=%d)", EmptyOrPath(result.paths.tokens), (int)result.tokensRequired);
+
+    // ── Online-streaming guard ─────────────────────────────────────────
+    if (sherpaonnx::stt::online_guard::IsStreamingCandidate(result.selectedKind)) {
+        auto guard = sherpaonnx::stt::online_guard::RunOnlineCompatibilityGuard(
+            result.selectedKind, result.paths, modelDir);
+        result.isStreaming = guard.passed;
+        if (!guard.passed) {
+            LOGI("DetectSttModel: online guard failed for kind=%s: %s",
+                 KindToName(result.selectedKind), guard.error.c_str());
+        } else {
+            LOGI("DetectSttModel: online guard passed — model is streaming-compatible");
+        }
+    }
+
     LOGI("DetectSttModel: detection OK for %s", modelDir.c_str());
     result.ok = true;
     return result;
