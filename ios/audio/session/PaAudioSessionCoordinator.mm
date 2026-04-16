@@ -214,7 +214,7 @@ static NSString *const kLogTag = @"PaAudioSessionCoordinator";
   AVAudioSession *session = [AVAudioSession sharedInstance];
   AVAudioSessionRouteDescription *route = session.currentRoute;
 
-  NSString *currentInputId = route.inputs.firstObject.UID ?: [NSNull null];
+  NSString * _Nullable currentInputId = route.inputs.firstObject.UID;
   NSString *currentOutputId = nil;
   AVAudioSessionPortDescription *outputPort = route.outputs.firstObject;
   if ([outputPort.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker]) {
@@ -342,6 +342,7 @@ static NSString *const kLogTag = @"PaAudioSessionCoordinator";
 - (void)applyRoutePreferenceInternal {
   AVAudioSession *session = [AVAudioSession sharedInstance];
   NSError *error = nil;
+  BOOL outputUsesPreferredInput = NO;
 
   // Output route preference
   NSString *outputPref = self.policy.preferredOutputDeviceId;
@@ -362,6 +363,7 @@ static NSString *const kLogTag = @"PaAudioSessionCoordinator";
     NSArray<AVAudioSessionPortDescription *> *inputs = session.availableInputs ?: @[];
     for (AVAudioSessionPortDescription *input in inputs) {
       if ([input.UID isEqualToString:outputPref]) {
+        outputUsesPreferredInput = YES;
         [session setPreferredInput:input error:&error];
         if (error) {
           RCTLogWarn(@"%@: setPreferredInput for output %@ failed: %@", kLogTag, outputPref, error.localizedDescription);
@@ -369,6 +371,11 @@ static NSString *const kLogTag = @"PaAudioSessionCoordinator";
         [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
         break;
       }
+    }
+  } else {
+    [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&error];
+    if (error) {
+      RCTLogWarn(@"%@: clear output override failed: %@", kLogTag, error.localizedDescription);
     }
   }
 
@@ -385,6 +392,12 @@ static NSString *const kLogTag = @"PaAudioSessionCoordinator";
         }
         break;
       }
+    }
+  } else if (!outputUsesPreferredInput) {
+    error = nil;
+    [session setPreferredInput:nil error:&error];
+    if (error) {
+      RCTLogWarn(@"%@: clear preferred input failed: %@", kLogTag, error.localizedDescription);
     }
   }
 }

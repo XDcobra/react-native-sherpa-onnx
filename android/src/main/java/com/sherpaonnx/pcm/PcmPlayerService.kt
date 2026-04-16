@@ -30,6 +30,10 @@ internal class PcmPlayerService(
     volume: Double,
     promise: Promise
   ) {
+    var intentId: String? = null
+    var intentAcquired = false
+    var createdTrack: AudioTrack? = null
+    var createdSession: PcmPlayerSession? = null
     try {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
         promise.reject("PCM_PLAYER_INVALID_CONFIG", "PCM playback requires API 21+")
@@ -79,17 +83,19 @@ internal class PcmPlayerService(
         attributes, audioFormat, minBufferSize,
         AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
       )
+      createdTrack = track
 
       // Replace an existing player with the same ID to avoid leaking native resources.
       registry.remove(playerId)?.destroy()
 
       track.setVolume(clampedVolume)
 
+      intentId = "pcm:$playerId"
       // Register PCM player intent with coordinator and apply preferred device
-      val intentId = "pcm:$playerId"
       PaAudioSessionCoordinator.acquireIntent(
         PaAudioSessionCoordinator.Intent(ownerId = intentId, needsInput = false, needsOutput = true)
       )
+      intentAcquired = true
       PaAudioSessionCoordinator.applyPreferredDevice(track)
 
       val session = PcmPlayerSession(
@@ -101,7 +107,7 @@ internal class PcmPlayerService(
         offlineEntry = offlineEntry,
         liveEntry = liveEntry,
       )
-
+      createdSession = session
       // Wire up the onEnded callback to emit events to JS
       session.onEnded = {
         onPlayerEnded?.invoke(session.playerId, session.bufferId)
@@ -118,6 +124,15 @@ internal class PcmPlayerService(
 
       promise.resolve(null)
     } catch (e: Exception) {
+      try {
+        createdSession?.destroy()
+        createdTrack?.let { PaAudioSessionCoordinator.unregisterTrack(it) }
+      } catch (_: Exception) {
+      } finally {
+        if (intentAcquired) {
+          intentId?.let { PaAudioSessionCoordinator.releaseIntent(it) }
+        }
+      }
       Log.e(TAG, "Failed to create PCM player: $playerId", e)
       promise.reject("PCM_PLAYER_INVALID_CONFIG", "Failed to create PCM player: ${e.message}", e)
     }
@@ -265,6 +280,7 @@ internal class PcmPlayerService(
     }
     try {
       session.destroy()
+      PaAudioSessionCoordinator.unregisterTrack(session.track)
       PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
       promise.resolve(null)
     } catch (e: Exception) {
@@ -274,9 +290,18 @@ internal class PcmPlayerService(
   }
 
   fun shutdown() {
-    registry.destroyAll()
-    // Release all PCM intents from coordinator
-    // (Individual releaseIntent calls happen in destroy(), but shutdown may bypass that)
+    val playerIds = registry.keys.toList()
+    for (playerId in playerIds) {
+      val session = registry.remove(playerId) ?: continue
+      try {
+        session.destroy()
+      } catch (e: Exception) {
+        Log.e(TAG, "Failed to destroy PCM player during shutdown: $playerId", e)
+      } finally {
+        PaAudioSessionCoordinator.unregisterTrack(session.track)
+        PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
+      }
+    }
   }
 
   private fun findOutputDeviceById(deviceId: Int): AudioDeviceInfo? {

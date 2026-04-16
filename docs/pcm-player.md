@@ -11,7 +11,11 @@ Import from `react-native-sherpa-onnx/pcm`.
 ```ts
 import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import {
+  listAvailableInputDevices,
+  listAvailableOutputDevices,
+  setPipelineAudioRoutePreference,
+} from 'react-native-sherpa-onnx/audio';
 
 const audioBuffer = await createOfflineAudioBufferFromFile({
   kind: 'fs',
@@ -20,9 +24,15 @@ const audioBuffer = await createOfflineAudioBufferFromFile({
 
 // Optional: set global input/output preference before creating the player.
 // See: [Pipeline Audio Session Coordination](audio-session.md)
+const inputDevices = await listAvailableInputDevices();
+const outputDevices = await listAvailableOutputDevices();
+const preferredInput = inputDevices.find((d) => d.kind === 'built_in_mic') ?? inputDevices[0];
+const preferredOutput =
+  outputDevices.find((d) => d.kind === 'built_in_speaker') ?? outputDevices[0];
+
 await setPipelineAudioRoutePreference({
-  inputDeviceId: 'android_builtin_mic',
-  outputDeviceId: 'android_builtin_speaker',
+  ...(preferredInput ? { inputDeviceId: preferredInput.id } : {}),
+  ...(preferredOutput ? { outputDeviceId: preferredOutput.id } : {}),
 });
 
 const player = await createPcmPlayer(audioBuffer, {

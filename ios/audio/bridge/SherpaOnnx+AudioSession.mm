@@ -30,15 +30,19 @@
   }
 }
 
-- (void)setPipelineAudioRoutePreference:(NSString *)inputDeviceId
-                         outputDeviceId:(NSString *)outputDeviceId
-                                resolve:(RCTPromiseResolveBlock)resolve
-                                 reject:(RCTPromiseRejectBlock)reject
+- (void)setPipelineAudioRoutePreference:(NSString * _Nullable)inputDeviceId
+                         outputDeviceId:(NSString * _Nullable)outputDeviceId
+                                 resolve:(RCTPromiseResolveBlock)resolve
+                                  reject:(RCTPromiseRejectBlock)reject
 {
+  NSString *normalizedInputDeviceId =
+      [inputDeviceId isKindOfClass:[NSString class]] ? inputDeviceId : nil;
+  NSString *normalizedOutputDeviceId =
+      [outputDeviceId isKindOfClass:[NSString class]] ? outputDeviceId : nil;
   NSError *error = nil;
-  BOOL ok = [[PaAudioSessionCoordinator shared] setRoutePreferenceInput:inputDeviceId
-                                                                 output:outputDeviceId
-                                                                  error:&error];
+  BOOL ok = [[PaAudioSessionCoordinator shared] setRoutePreferenceInput:normalizedInputDeviceId
+                                                                 output:normalizedOutputDeviceId
+                                                                   error:&error];
   if (!ok && error) {
     reject(@"AUDIO_SESSION_ROUTE_ERROR", error.localizedDescription, error);
   } else {

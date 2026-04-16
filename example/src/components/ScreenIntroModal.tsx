@@ -196,7 +196,7 @@ export function ScreenIntroModal({ screenId, containerStyle }: Props) {
               ) : null}
             </View>
             <Text style={styles.checkboxLabel}>
-              Dont show this message again
+              Don't show this message again
             </Text>
           </Pressable>
 

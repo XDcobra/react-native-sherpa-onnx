@@ -328,18 +328,14 @@ object PaAudioSessionCoordinator {
     activeRecords.removeAll { it.get() == null }
     activeTracks.removeAll { it.get() == null }
 
-    if (inputPref != null) {
-      val device = findInputDevice(inputPref)
-      for (ref in activeRecords) {
-        ref.get()?.setPreferredDevice(device)
-      }
+    val inputDevice = inputPref?.let { findInputDevice(it) }
+    for (ref in activeRecords) {
+      ref.get()?.setPreferredDevice(inputDevice)
     }
 
-    if (outputPref != null) {
-      val device = findOutputDevice(outputPref)
-      for (ref in activeTracks) {
-        ref.get()?.setPreferredDevice(device)
-      }
+    val outputDevice = outputPref?.let { findOutputDevice(it) }
+    for (ref in activeTracks) {
+      ref.get()?.setPreferredDevice(outputDevice)
     }
   }
 

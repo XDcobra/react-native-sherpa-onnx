@@ -88,8 +88,6 @@ import {
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
-
-<ScreenIntroModal screenId="TTS" />;
 /**
  * Generated audio results from either batch or streaming TTS.
  * Both now produce an OfflineAudioBuffer (buffer-to-buffer pipeline).
@@ -2069,6 +2067,7 @@ export default function TTSScreen() {
           </View>
         </ScrollView>
       </View>
+      <ScreenIntroModal screenId="TTS" />
     </SafeAreaView>
   );
 }
