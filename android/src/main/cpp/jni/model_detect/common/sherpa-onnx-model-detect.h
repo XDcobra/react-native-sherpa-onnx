@@ -232,6 +232,8 @@ struct AlignmentModelPaths {
 
 struct SttDetectResult {
     bool ok = false;
+    /** True when online-streaming compatibility is confirmed (or heuristically inferred in name-only mode). */
+    bool isStreaming = false;
     std::string error;
     /** True when detection failed because the model is for unsupported hardware (RK35xx, Ascend, CANN, etc.). */
     bool isHardwareSpecificUnsupported = false;

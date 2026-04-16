@@ -22,7 +22,6 @@ import { resolveModelPath } from '../utils';
 import { resolveFileSourceForDetect } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
-import { ONLINE_STT_MODEL_TYPES } from './streamingTypes';
 import {
   isDetectionSource,
   type DetectionSource,
@@ -108,15 +107,9 @@ export async function detectSttModel(
       ? raw.quantization
       : undefined;
 
-  // Derive isStreaming: the model supports streaming when its detected type is
-  // one of the canonical online STT model types.  Normalize ctc variants first.
-  const normalizedType =
-    modelType === 'ctc' || modelType === 'zipformer_ctc'
-      ? 'zipformer2_ctc'
-      : modelType;
-  const isStreaming =
-    normalizedType != null &&
-    (ONLINE_STT_MODEL_TYPES as readonly string[]).includes(normalizedType);
+  // isStreaming is now provided by the native online-compatibility guard.
+  // Falls back to false when the native layer does not return the field.
+  const isStreaming = raw.isStreaming === true;
 
   return {
     success: raw.success,
