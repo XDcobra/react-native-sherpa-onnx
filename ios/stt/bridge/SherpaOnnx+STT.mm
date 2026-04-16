@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,7 +32,10 @@ static NSString *const kSttErrBufferNotFound = @"STT_BUFFER_NOT_FOUND";
 static NSString *const kSttErrBufferKindMismatch = @"STT_BUFFER_KIND_MISMATCH";
 static NSString *const kSttErrTextBufferNotFound = @"TEXT_BUFFER_NOT_FOUND";
 static NSString *const kSttErrAlreadyPopulated = @"TEXT_ALREADY_POPULATED";
+static NSString *const kSttErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kSttErrInternalError = @"STT_INTERNAL_ERROR";
+static NSString *const kSttOfflineOomMessage =
+    @"Not enough memory for offline speech-to-text. Please use a streaming mode for large inputs.";
 
 // ==================== Instance State ====================
 struct SttInstanceState {
@@ -501,6 +505,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             return;
         }
         resolve(nil);
+    } catch (const std::bad_alloc&) {
+        reject(kSttErrOfflineOom, kSttOfflineOomMessage, nil);
     } catch (const std::exception& e) {
         NSString *errorMsg = e.what() ? [NSString stringWithUTF8String:e.what()] : @"Recognition failed.";
         if (!errorMsg) errorMsg = @"Recognition failed.";

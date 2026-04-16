@@ -27,7 +27,16 @@
 namespace {
 
 constexpr int kDrainChunkSize = 4096;
+constexpr int kDefaultMaxBufferedMs = 300;
 constexpr auto kWaitDuration = std::chrono::milliseconds(10);
+
+static int32_t pcm_compute_max_buffered_frames(int sampleRate) {
+    return std::max((sampleRate * kDefaultMaxBufferedMs) / 1000, kDrainChunkSize * 2);
+}
+
+static int32_t pcm_compute_resume_buffered_frames(int32_t maxBufferedFrames) {
+    return std::max(maxBufferedFrames / 2, kDrainChunkSize);
+}
 
 class PcmLiveDrainWorker {
  public:
@@ -69,14 +78,18 @@ class PcmLiveDrainWorker {
 
  private:
     void runLoop() {
+        bool reachedSourceEnd = false;
         while (running_.load() && session_->drainGeneration.load() == generation_) {
             auto chunk = liveEntry_->drainCursor(cursorId_, kDrainChunkSize);
             if (!chunk.empty()) {
-                session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size());
+                if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_)) {
+                    break;
+                }
                 continue;
             }
 
             if (liveEntry_->state == PaLiveEntry::FINISHED) {
+                reachedSourceEnd = true;
                 break;
             }
 
@@ -87,7 +100,7 @@ class PcmLiveDrainWorker {
         running_.store(false);
 
         // If not interrupted, mark source as exhausted
-        if (session_->drainGeneration.load() == generation_ && !session_->destroyed) {
+        if (reachedSourceEnd && session_->drainGeneration.load() == generation_ && !session_->destroyed) {
             session_->markSourceExhausted();
         }
     }
@@ -117,8 +130,113 @@ class PcmLiveDrainWorker {
     std::condition_variable cv_;
 };
 
+class PcmOfflineDrainWorker {
+ public:
+    PcmOfflineDrainWorker(
+            std::string playerId,
+            std::shared_ptr<PcmPlayerSession> session,
+            std::string bufferId,
+            int32_t generation,
+            int64_t startSampleIndex = 0)
+            : playerId_(std::move(playerId)),
+                session_(std::move(session)),
+                bufferId_(std::move(bufferId)),
+                generation_(generation),
+                startSampleIndex_(startSampleIndex) {}
+
+    ~PcmOfflineDrainWorker() {
+        stop();
+    }
+
+    void start() {
+        if (!session_) return;
+        running_.store(true);
+        workerThread_ = std::thread([this]() { runLoop(); });
+    }
+
+    void stop() {
+        running_.store(false);
+        if (workerThread_.joinable()) {
+            workerThread_.join();
+        }
+    }
+
+ private:
+    void runLoop() {
+        int64_t cursor = std::max<int64_t>(0, startSampleIndex_);
+        int64_t chunksRead = 0;
+        bool reachedSourceEnd = false;
+
+        
+        while (running_.load() && session_->drainGeneration.load() == generation_ && !session_->destroyed) {
+            std::vector<float> chunk;
+            std::string errorCode;
+            std::string errorMessage;
+            bool ok = pa_get_offline_samples_slice(
+                bufferId_,
+                (int)cursor,
+                kDrainChunkSize,
+                &chunk,
+                &errorCode,
+                &errorMessage
+            );
+
+            if (!ok) {
+                break;
+            }
+
+            if (chunk.empty()) {
+                reachedSourceEnd = true;
+                break;
+            }
+
+            if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_)) {
+                break;
+            }
+
+            cursor += (int64_t)chunk.size();
+            chunksRead++;
+            if (chunksRead % 128 == 0) {
+                int64_t bufferedFrames = 0;
+                {
+                    std::lock_guard<std::mutex> lock(session_->enqueueMutex);
+                    bufferedFrames = session_->bufferedFrames;
+                }
+                int bufferedMs = session_->sampleRate > 0
+                    ? (int)((bufferedFrames * 1000LL) / (int64_t)session_->sampleRate)
+                    : 0;
+                            }
+        }
+
+        running_.store(false);
+        if (reachedSourceEnd && session_->drainGeneration.load() == generation_ && !session_->destroyed) {
+            session_->markSourceExhausted();
+        }
+
+        int64_t bufferedFramesEnd = 0;
+        {
+            std::lock_guard<std::mutex> lock(session_->enqueueMutex);
+            bufferedFramesEnd = session_->bufferedFrames;
+        }
+            }
+
+    std::string playerId_;
+    std::shared_ptr<PcmPlayerSession> session_;
+    std::string bufferId_;
+    int32_t generation_;
+    int64_t startSampleIndex_;
+    std::atomic<bool> running_{false};
+    std::thread workerThread_;
+};
+
 static std::unordered_map<std::string, std::shared_ptr<PcmLiveDrainWorker>> g_pcm_live_workers;
 static std::mutex g_pcm_live_workers_mutex;
+static std::unordered_map<std::string, std::shared_ptr<PcmOfflineDrainWorker>> g_pcm_offline_workers;
+static std::mutex g_pcm_offline_workers_mutex;
+
+/** Store a reference to the live entry associated with a player, for seek/restart. */
+static std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pcm_live_entries;
+static std::mutex g_pcm_live_entries_mutex;
 
 static std::shared_ptr<PcmLiveDrainWorker> pcm_take_live_worker(const std::string &playerId) {
     std::lock_guard<std::mutex> lock(g_pcm_live_workers_mutex);
@@ -131,27 +249,16 @@ static std::shared_ptr<PcmLiveDrainWorker> pcm_take_live_worker(const std::strin
     return worker;
 }
 
-/** Enqueue offline samples from startIndex to end. If not interrupted, mark source exhausted. */
-static void pcm_enqueue_offline_from(
-    std::shared_ptr<PcmPlayerSession> session,
-    int64_t startIndex,
-    int32_t generation
-) {
-    const auto &samples = session->offlineSamples;
-    size_t start = (size_t)std::max((int64_t)0, startIndex);
-    for (size_t i = start; i < samples.size(); i += kDrainChunkSize) {
-        if (session->destroyed || session->drainGeneration.load() != generation) return;
-        size_t count = std::min((size_t)kDrainChunkSize, samples.size() - i);
-        session->enqueueMonoFloat32(samples.data() + i, (int32_t)count);
+static std::shared_ptr<PcmOfflineDrainWorker> pcm_take_offline_worker(const std::string &playerId) {
+    std::lock_guard<std::mutex> lock(g_pcm_offline_workers_mutex);
+    auto it = g_pcm_offline_workers.find(playerId);
+    if (it == g_pcm_offline_workers.end()) {
+        return nullptr;
     }
-    if (!session->destroyed && session->drainGeneration.load() == generation) {
-        session->markSourceExhausted();
-    }
+    auto worker = it->second;
+    g_pcm_offline_workers.erase(it);
+    return worker;
 }
-
-/** Store a reference to the live entry associated with a player, for seek/restart. */
-static std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pcm_live_entries;
-static std::mutex g_pcm_live_entries_mutex;
 
 static NSString *const kPcmOutputSpeakerId = @"ios_builtin_speaker";
 static NSString *const kPcmOutputReceiverId = @"ios_builtin_receiver";
@@ -175,7 +282,50 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
 
 }  // namespace
 
+void pcmPlayerStopAllDrainWorkers() {
+    std::vector<std::shared_ptr<PcmLiveDrainWorker>> liveWorkers;
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_live_workers_mutex);
+        for (auto &pair : g_pcm_live_workers) {
+            liveWorkers.push_back(pair.second);
+        }
+        g_pcm_live_workers.clear();
+    }
+    for (const auto &worker : liveWorkers) {
+        if (worker) worker->stop();
+    }
+
+    std::vector<std::shared_ptr<PcmOfflineDrainWorker>> offlineWorkers;
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_offline_workers_mutex);
+        for (auto &pair : g_pcm_offline_workers) {
+            offlineWorkers.push_back(pair.second);
+        }
+        g_pcm_offline_workers.clear();
+    }
+    for (const auto &worker : offlineWorkers) {
+        if (worker) worker->stop();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_pcm_live_entries_mutex);
+        g_pcm_live_entries.clear();
+    }
+}
+
 @implementation SherpaOnnx (PcmPlayer)
+
+static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
+static NSString *const kOfflinePlaybackOomMessage =
+    @"Not enough memory for offline playback buffering. Please use a streaming playback path for large audio inputs.";
+
+static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &session, RCTPromiseRejectBlock reject) {
+    if (!session || !session->terminalOom.load()) {
+        return NO;
+    }
+    reject(kOfflineOomCode, kOfflinePlaybackOomMessage, nil);
+    return YES;
+}
 
 - (void)so_createPcmPlayer:(NSString *)playerId
                           audioBufferId:(NSString *)audioBufferId
@@ -188,33 +338,50 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
         return;
     }
 
-        if (audioBufferId == nil || [audioBufferId length] == 0) {
-                reject(@"AUDIO_BUFFER_NOT_FOUND", @"audioBufferId is required", nil);
+    if (audioBufferId == nil || [audioBufferId length] == 0) {
+        reject(@"AUDIO_BUFFER_NOT_FOUND", @"audioBufferId is required", nil);
         return;
     }
 
-        const float clampedVolume = std::max(0.0f, std::min(1.0f, (float)volume));
+    const float clampedVolume = std::max(0.0f, std::min(1.0f, (float)volume));
 
-        std::string bufferId = [audioBufferId UTF8String];
-        auto liveEntry = pa_get_live_entry(bufferId);
-        std::vector<float> offlineSamples;
-        int sampleRate = 0;
+    std::string bufferId = [audioBufferId UTF8String];
+    auto liveEntry = pa_get_live_entry(bufferId);
+    int sampleRate = 0;
+    int offlineNumSamples = 0;
+    bool hasOfflineSource = false;
 
-        if (liveEntry) {
-                sampleRate = liveEntry->sampleRate;
-        } else {
-                if (!pa_read_offline_samples(bufferId, &offlineSamples, &sampleRate)) {
-                        reject(@"AUDIO_BUFFER_NOT_FOUND",
-                                     [NSString stringWithFormat:@"Audio buffer not found: %@", audioBufferId],
-                                     nil);
-                        return;
-                }
+    if (liveEntry) {
+        sampleRate = liveEntry->sampleRate;
+    } else {
+        hasOfflineSource = true;
+        std::string errorCode;
+        std::string errorMessage;
+        bool ok = pa_get_offline_metadata(
+            bufferId,
+            &sampleRate,
+            &offlineNumSamples,
+            &errorCode,
+            &errorMessage
+        );
+        if (!ok) {
+            reject(
+                @"AUDIO_BUFFER_NOT_FOUND",
+                [NSString stringWithFormat:@"Audio buffer not found: %@", audioBufferId],
+                nil
+            );
+            return;
         }
+    }
 
-        if (sampleRate <= 0) {
-                reject(@"PCM_PLAYER_INVALID_CONFIG", @"sampleRate must be > 0", nil);
+    if (sampleRate <= 0) {
+        reject(@"PCM_PLAYER_INVALID_CONFIG", @"sampleRate must be > 0", nil);
         return;
     }
+
+     else {
+        long long estBytes = (long long)offlineNumSamples * 4LL;
+            }
 
     NSString *intentId = [NSString stringWithFormat:@"pcm:%@", playerId];
     BOOL intentAcquired = NO;
@@ -237,10 +404,12 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
         session->playerNode = [[AVAudioPlayerNode alloc] init];
         session->playerNode.volume = clampedVolume;
         session->audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:(double)sampleRate channels:1];
+        session->hasOfflineSource = hasOfflineSource;
+        session->offlineTotalSamples = hasOfflineSource ? (int64_t)offlineNumSamples : 0;
+        session->maxBufferedFrames = pcm_compute_max_buffered_frames(sampleRate);
+        session->resumeBufferedFrames = pcm_compute_resume_buffered_frames(session->maxBufferedFrames);
 
-        // Store offline samples for seek/restart
-        session->offlineSamples = std::move(offlineSamples);
-
+        
         [session->audioEngine attachNode:session->playerNode];
         [session->audioEngine connect:session->playerNode
                                    to:session->audioEngine.mainMixerNode
@@ -273,9 +442,13 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
         };
 
         // Clean up old player with same ID
-        auto oldWorker = pcm_take_live_worker(playerIdStr);
-        if (oldWorker) {
-            oldWorker->stop();
+        auto oldLiveWorker = pcm_take_live_worker(playerIdStr);
+        if (oldLiveWorker) {
+            oldLiveWorker->stop();
+        }
+        auto oldOfflineWorker = pcm_take_offline_worker(playerIdStr);
+        if (oldOfflineWorker) {
+            oldOfflineWorker->stop();
         }
 
         std::shared_ptr<PcmPlayerSession> oldSession;
@@ -296,6 +469,7 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
             // Store live entry reference for seek/restart
             {
                 std::lock_guard<std::mutex> lock(g_pcm_live_entries_mutex);
+                g_pcm_live_entries.erase(playerIdStr);
                 g_pcm_live_entries[playerIdStr] = liveEntry;
             }
             int32_t gen = session->drainGeneration.load();
@@ -303,18 +477,58 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
             worker->start();
             std::lock_guard<std::mutex> lock(g_pcm_live_workers_mutex);
             g_pcm_live_workers[playerIdStr] = worker;
-        } else if (!session->offlineSamples.empty()) {
+        } else if (session->hasOfflineSource) {
+            {
+                std::lock_guard<std::mutex> lock(g_pcm_live_entries_mutex);
+                g_pcm_live_entries.erase(playerIdStr);
+            }
             int32_t gen = session->drainGeneration.load();
-            pcm_enqueue_offline_from(session, 0, gen);
+            auto worker = std::make_shared<PcmOfflineDrainWorker>(playerIdStr, session, bufferId, gen, 0);
+            worker->start();
+            std::lock_guard<std::mutex> lock(g_pcm_offline_workers_mutex);
+            g_pcm_offline_workers[playerIdStr] = worker;
+        }
+
+        if (session->terminalOom.load()) {
+            reject(kOfflineOomCode, kOfflinePlaybackOomMessage, nil);
+            return;
         }
 
         createSucceeded = YES;
         resolve(nil);
     } @catch (NSException *exception) {
+        NSString *reason = exception.reason ?: @"";
+        NSString *reasonLower = [reason lowercaseString];
+        if ([reasonLower containsString:@"memory"] || [reasonLower containsString:@"alloc"]) {
+            reject(kOfflineOomCode, kOfflinePlaybackOomMessage, nil);
+            return;
+        }
         reject(@"PCM_PLAYER_INVALID_CONFIG",
                [NSString stringWithFormat:@"Failed to create PCM player: %@", exception.reason], nil);
     } @finally {
         if (!createSucceeded) {
+            std::string playerIdStr = [playerId UTF8String];
+
+            {
+                std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
+                auto it = g_pcm_players.find(playerIdStr);
+                if (it != g_pcm_players.end() && it->second == session) {
+                    g_pcm_players.erase(it);
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(g_pcm_live_entries_mutex);
+                g_pcm_live_entries.erase(playerIdStr);
+            }
+
+            auto liveWorker = pcm_take_live_worker(playerIdStr);
+            if (liveWorker) {
+                liveWorker->stop();
+            }
+            auto offlineWorker = pcm_take_offline_worker(playerIdStr);
+            if (offlineWorker) {
+                offlineWorker->stop();
+            }
             if (session) {
                 session->destroy();
             }
@@ -453,6 +667,9 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
                [NSString stringWithFormat:@"PCM player not found: %@", playerId], nil);
         return;
     }
+    if (so_reject_if_terminal_oom(session, reject)) {
+        return;
+    }
     @try {
         session->pause();
         resolve(nil);
@@ -474,6 +691,9 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
     if (!session) {
         reject(@"PCM_PLAYER_NOT_FOUND",
                [NSString stringWithFormat:@"PCM player not found: %@", playerId], nil);
+        return;
+    }
+    if (so_reject_if_terminal_oom(session, reject)) {
         return;
     }
     @try {
@@ -502,6 +722,9 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
                [NSString stringWithFormat:@"PCM player not found: %@", playerId], nil);
         return;
     }
+    if (so_reject_if_terminal_oom(session, reject)) {
+        return;
+    }
 
     int64_t sampleIndex = (int64_t)((positionMs / 1000.0) * session->sampleRate);
     if (sampleIndex < 0) sampleIndex = 0;
@@ -525,9 +748,11 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
             return;
         }
 
-        // Stop current drain worker
-        auto oldWorker = pcm_take_live_worker(playerIdStr);
-        if (oldWorker) oldWorker->stop();
+        // Stop any current drain workers for this player.
+        auto oldLiveWorker = pcm_take_live_worker(playerIdStr);
+        if (oldLiveWorker) oldLiveWorker->stop();
+        auto oldOfflineWorker = pcm_take_offline_worker(playerIdStr);
+        if (oldOfflineWorker) oldOfflineWorker->stop();
 
         // Reset session for seek
         session->resetForSeek(sampleIndex);
@@ -540,17 +765,34 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
             std::lock_guard<std::mutex> lock(g_pcm_live_workers_mutex);
             g_pcm_live_workers[playerIdStr] = worker;
         }
-    } else if (!session->offlineSamples.empty()) {
+    } else if (session->hasOfflineSource) {
+        // Stop any current drain workers for this player.
+        auto oldLiveWorker = pcm_take_live_worker(playerIdStr);
+        if (oldLiveWorker) oldLiveWorker->stop();
+        auto oldOfflineWorker = pcm_take_offline_worker(playerIdStr);
+        if (oldOfflineWorker) oldOfflineWorker->stop();
+
         // Clamp to end for offline
-        int64_t maxSamples = (int64_t)session->offlineSamples.size();
+        int64_t maxSamples = session->offlineTotalSamples;
         if (sampleIndex > maxSamples) sampleIndex = maxSamples;
 
         // Reset session for seek
         session->resetForSeek(sampleIndex);
 
-        // Re-enqueue from seek position
+        // Restart bounded offline drain from seek position.
         int32_t gen = session->drainGeneration.load();
-        pcm_enqueue_offline_from(session, sampleIndex, gen);
+        auto worker = std::make_shared<PcmOfflineDrainWorker>(
+            playerIdStr,
+            session,
+            session->bufferId,
+            gen,
+            sampleIndex
+        );
+        worker->start();
+        {
+            std::lock_guard<std::mutex> lock(g_pcm_offline_workers_mutex);
+            g_pcm_offline_workers[playerIdStr] = worker;
+        }
     } else {
         reject(@"PCM_PLAYER_ERROR", @"No audio source available for seek", nil);
         return;
@@ -600,6 +842,9 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
                [NSString stringWithFormat:@"PCM player not found: %@", playerId], nil);
         return;
     }
+    if (so_reject_if_terminal_oom(session, reject)) {
+        return;
+    }
     resolve(@(session->getPositionMs()));
 }
 
@@ -616,6 +861,10 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
     auto liveWorker = pcm_take_live_worker(playerIdStr);
     if (liveWorker) {
         liveWorker->stop();
+    }
+    auto offlineWorker = pcm_take_offline_worker(playerIdStr);
+    if (offlineWorker) {
+        offlineWorker->stop();
     }
 
     // Clean up live entry reference

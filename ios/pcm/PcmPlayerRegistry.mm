@@ -3,33 +3,106 @@
  */
 
 #import <AVFoundation/AVFoundation.h>
+#import <React/RCTLog.h>
 
 #include "PcmPlayerRegistry.h"
 
+#include <algorithm>
+#include <chrono>
 #include <mutex>
 #include <string>
+
+// Implemented in SherpaOnnx+PcmPlayer.mm
+extern void pcmPlayerStopAllDrainWorkers(void);
 
 std::unordered_map<std::string, std::shared_ptr<PcmPlayerSession>> g_pcm_players;
 std::mutex g_pcm_player_mutex;
 
-void PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSamples) {
-    if (destroyed || playerNode == nil || audioFormat == nil || numSamples <= 0) return;
+bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration) {
+    if (destroyed || playerNode == nil || audioFormat == nil || numSamples <= 0 || terminalOom.load()) return false;
+
+    bool blocked = false;
+    std::chrono::steady_clock::time_point blockedStart{};
+    {
+        std::unique_lock<std::mutex> lock(enqueueMutex);
+         while (!destroyed &&
+             !terminalOom.load() &&
+               (expectedGeneration < 0 || drainGeneration.load() == expectedGeneration) &&
+               maxBufferedFrames > 0 &&
+               (bufferedFrames + numSamples) > maxBufferedFrames) {
+            if (!highWaterActive) {
+                highWaterActive = true;
+                const int bufferedMs = sampleRate > 0
+                    ? (int)((bufferedFrames * 1000LL) / (int64_t)sampleRate)
+                    : 0;
+                            }
+            if (!blocked) {
+                blocked = true;
+                blockedStart = std::chrono::steady_clock::now();
+            }
+            enqueueCv.wait_for(lock, std::chrono::milliseconds(10));
+        }
+
+        if (destroyed || terminalOom.load() || (expectedGeneration >= 0 && drainGeneration.load() != expectedGeneration)) {
+            return false;
+        }
+        bufferedFrames += numSamples;
+    }
+
     AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:audioFormat
                                                              frameCapacity:(AVAudioFrameCount)numSamples];
+    if (buffer == nil) {
+        terminalOom.store(true);
+        RCTLogError(@"OFFLINE_OOM enqueueMonoFloat32 buffer allocation failed for playerId=%s bufferId=%s", playerId.c_str(), bufferId.c_str());
+        std::lock_guard<std::mutex> lock(enqueueMutex);
+        bufferedFrames = std::max<int64_t>(0, bufferedFrames - numSamples);
+        enqueueCv.notify_all();
+        return false;
+    }
     buffer.frameLength = (AVAudioFrameCount)numSamples;
     memcpy(buffer.floatChannelData[0], samples, numSamples * sizeof(float));
 
     int32_t gen = drainGeneration.load();
+    int32_t chunkFrames = numSamples;
     buffersInFlight.fetch_add(1);
 
-    [playerNode scheduleBuffer:buffer completionCallbackType:AVAudioPlayerNodeCompletionDataConsumed completionHandler:^(AVAudioPlayerNodeCompletionCallbackType callbackType) {
+    [playerNode scheduleBuffer:buffer completionCallbackType:AVAudioPlayerNodeCompletionDataConsumed completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType callbackType) {
         int32_t remaining = buffersInFlight.fetch_sub(1) - 1;
+        bool emitWatermarkExit = false;
+        int64_t bufferedNow = 0;
+        {
+            std::lock_guard<std::mutex> lock(enqueueMutex);
+            bufferedFrames = std::max<int64_t>(0, bufferedFrames - chunkFrames);
+            bufferedNow = bufferedFrames;
+            if (highWaterActive && bufferedFrames <= resumeBufferedFrames) {
+                highWaterActive = false;
+                emitWatermarkExit = true;
+            }
+        }
+        enqueueCv.notify_all();
+        if (emitWatermarkExit) {
+            const int bufferedMs = sampleRate > 0
+                ? (int)((bufferedNow * 1000LL) / (int64_t)sampleRate)
+                : 0;
+                    }
         if (remaining == 0 && sourceExhausted.load() && gen == drainGeneration.load()) {
             if (!endedEmitted.exchange(true)) {
                 if (onEndedCallback) onEndedCallback();
             }
         }
     }];
+
+    if (blocked) {
+        auto blockedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - blockedStart
+        ).count();
+        std::lock_guard<std::mutex> lock(enqueueMutex);
+        const int bufferedMs = sampleRate > 0
+            ? (int)((bufferedFrames * 1000LL) / (int64_t)sampleRate)
+            : 0;
+            }
+
+    return true;
 }
 
 void PcmPlayerSession::markSourceExhausted() {
@@ -64,6 +137,12 @@ void PcmPlayerSession::resetForSeek(int64_t newSeekPositionSamples) {
     sourceExhausted.store(false);
     endedEmitted.store(false);
     seekPositionSamples.store(newSeekPositionSamples);
+    {
+        std::lock_guard<std::mutex> lock(enqueueMutex);
+        bufferedFrames = 0;
+        highWaterActive = false;
+    }
+    enqueueCv.notify_all();
 
     // Restart the player node
     if (playerNode != nil) {
@@ -91,6 +170,12 @@ void PcmPlayerSession::destroy() {
     if (destroyed) return;
     destroyed = true;
     drainGeneration.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(enqueueMutex);
+        bufferedFrames = 0;
+        highWaterActive = false;
+    }
+    enqueueCv.notify_all();
     if (playerNode != nil) [playerNode stop];
     if (audioEngine != nil) {
         [audioEngine stop];
@@ -110,6 +195,7 @@ std::shared_ptr<PcmPlayerSession> pcmPlayerGet(const std::string &playerId) {
 }
 
 void pcmPlayerDestroyAll() {
+    pcmPlayerStopAllDrainWorkers();
     std::lock_guard<std::mutex> lock(g_pcm_player_mutex);
     for (auto &pair : g_pcm_players) {
         pair.second->destroy();

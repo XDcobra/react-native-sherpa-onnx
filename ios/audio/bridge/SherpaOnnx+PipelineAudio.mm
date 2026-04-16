@@ -389,13 +389,7 @@ static void pa_logThresholdPolicyOnce() {
   }
 
   const auto &snapshot = pa_thresholdSnapshot();
-  RCTLogInfo(
-    @"[PipelineAudio] mmap threshold policy: platform=ios ramClass=%s fileOrigin=%ld heapOrigin=%ld",
-    pa_ramClassName(snapshot.ramClass),
-    snapshot.fileOriginThresholdBytes,
-    snapshot.heapOriginThresholdBytes
-  );
-}
+  }
 
 static long pa_computeThresholdBytes(PaThresholdPathType pathType) {
   const auto &snapshot = pa_thresholdSnapshot();
@@ -431,12 +425,13 @@ static std::shared_ptr<PaOfflineEntry> pa_createEntryWithThreshold(
   long rawSize = (long)samples.size() * sizeof(float);
   long threshold = pa_computeThresholdBytes(PaThresholdPathType::HEAP_ORIGIN);
   if (rawSize >= threshold) {
-    auto region = PaMmapRegion::createFromSamples(samples.data(), samples.size(), pa_tempDir(), bufferId);
+        auto region = PaMmapRegion::createFromSamples(samples.data(), samples.size(), pa_tempDir(), bufferId);
     if (region) {
       entry->mmapRegion = std::move(region);
-      return entry; // samples vector not moved — caller can let it destruct
+            return entry; // samples vector not moved — caller can let it destruct
     }
-  }
+      }
+  
   entry->samples = std::move(samples);
   return entry;
 }
@@ -456,12 +451,33 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
   if (entry->isMmapBacked()) return;
   long rawSize = (long)entry->samples.size() * sizeof(float);
   long threshold = pa_computeThresholdBytes(PaThresholdPathType::HEAP_ORIGIN);
-  if (rawSize < threshold) return;
+  if (rawSize < threshold) {
+    RCTLogInfo(
+      @"[PipelineAudio] mmap threshold upgradeSkipped pathType=HEAP_ORIGIN bufferId=%s rawSizeBytes=%ld thresholdBytes=%ld",
+      bufferId.c_str(),
+      rawSize,
+      threshold
+    );
+    return;
+  }
+
+  RCTLogInfo(
+    @"[PipelineAudio] mmap threshold upgradeAttempt pathType=HEAP_ORIGIN bufferId=%s rawSizeBytes=%ld thresholdBytes=%ld",
+    bufferId.c_str(),
+    rawSize,
+    threshold
+  );
 
   auto region = PaMmapRegion::createFromSamples(
     entry->samples.data(), entry->samples.size(), pa_tempDir(), bufferId
   );
-  if (!region) return;
+  if (!region) {
+    RCTLogInfo(
+      @"[PipelineAudio] mmap threshold upgradeAttempt failed pathType=HEAP_ORIGIN bufferId=%s",
+      bufferId.c_str()
+    );
+    return;
+  }
 
   auto upgradedEntry = std::make_shared<PaOfflineEntry>();
   upgradedEntry->bufferId = entry->bufferId;
@@ -477,6 +493,11 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
     if (it->second->isMmapBacked()) return;
     it->second = upgradedEntry;
   }
+
+  RCTLogInfo(
+    @"[PipelineAudio] mmap threshold upgrade finalMode=mmap pathType=HEAP_ORIGIN bufferId=%s",
+    bufferId.c_str()
+  );
 }
 
 /**
@@ -524,7 +545,7 @@ static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
 
     long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
     if (copiedBytes < threshold) {
-      if ((copiedBytes % (int64_t)sizeof(float)) != 0) {
+            if ((copiedBytes % (int64_t)sizeof(float)) != 0) {
         unlink(f32Path.c_str());
         return nullptr;
       }
@@ -567,6 +588,7 @@ static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
       return entry;
     }
 
+    
     // Mmap the .f32 file
     auto region = PaMmapRegion::mapFile(f32Path);
     if (!region) {
@@ -605,454 +627,18 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     NSDate *mod = attrs[NSFileModificationDate];
     if (mod && [now timeIntervalSinceDate:mod] > maxAgeSec) {
       [fm removeItemAtPath:fullPath error:nil];
-      RCTLogInfo(@"Orphan sweep: deleted %@", name);
-    }
-  }
-}
-static std::string pa_generateId(const char *prefix);
-
-// Decode cancel registry: operationId → atomic cancel flag
-static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_decodeCancelFlags;
-static std::mutex g_pa_decodeCancelMutex;
-
-// Audio save cancel registry: operationId → atomic cancel flag
-static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_saveCancelFlags;
-static std::mutex g_pa_saveCancelMutex;
-
-// File ingest status registry
-struct PaFileIngestStatus {
-  bool isRunning = true;
-  int64_t framesIngested = 0;
-  int64_t totalFramesEstimate = 0;
-  int percent = 0;
-  std::string error;
-};
-static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
-static std::mutex g_pa_fileIngestMutex;
-
-std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
-  std::lock_guard<std::mutex> lock(g_pa_mutex);
-  auto it = g_pa_live.find(bufferId);
-  if (it == g_pa_live.end()) {
-    return nullptr;
-  }
-  return it->second;
-}
-
-bool pa_read_offline_samples(
-  const std::string &bufferId,
-  std::vector<float> *samples,
-  int *sampleRate
-) {
-  std::shared_ptr<PaOfflineEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_pa_mutex);
-    auto it = g_pa_offline.find(bufferId);
-    if (it == g_pa_offline.end() || !it->second) {
-      return false;
-    }
-    entry = it->second;
-  }
-
-  if (sampleRate != nullptr) {
-    *sampleRate = entry->sampleRate;
-  }
-  if (samples != nullptr) {
-    *samples = entry->readAllSamples();
-  }
-  return true;
-}
-
-static std::string pa_offline_info_json(const std::shared_ptr<PaOfflineEntry> &entry) {
-  return std::string("{") +
-    "\"bufferId\":\"" + entry->bufferId + "\"," +
-    "\"kind\":\"offlinePcmBuffer\"," +
-    "\"state\":\"immutable\"," +
-    "\"sampleRate\":" + std::to_string(entry->sampleRate) + "," +
-    "\"channelCount\":" + std::to_string(entry->channelCount) + "," +
-    "\"numSamples\":" + std::to_string(entry->numSamples()) + "," +
-    "\"durationMs\":" + std::to_string(entry->durationMs()) +
-    "}";
-}
-
-bool pa_create_offline_from_samples(
-  const float *samples,
-  size_t count,
-  int sampleRate,
-  int channelCount,
-  std::string *json,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  if (samples == nullptr || count == 0) {
-    if (errorCode) *errorCode = "[INVALID_ARGS]";
-    if (errorMessage) *errorMessage = "samples must not be empty";
-    return false;
-  }
-  if (sampleRate <= 0) {
-    if (errorCode) *errorCode = "[INVALID_ARGS]";
-    if (errorMessage) *errorMessage = "sampleRate must be > 0";
-    return false;
-  }
-  if (channelCount != 1) {
-    if (errorCode) *errorCode = "[INVALID_ARGS]";
-    if (errorMessage) *errorMessage = "Only mono (channelCount=1) is supported";
-    return false;
-  }
-
-  std::string bufferId = pa_generateId("off");
-  std::vector<float> sampleVec(samples, samples + count);
-  auto entry = pa_createEntryWithThreshold(bufferId, sampleRate, channelCount, sampleVec);
-
-  {
-    std::lock_guard<std::mutex> lock(g_pa_mutex);
-    g_pa_offline[bufferId] = entry;
-  }
-
-  if (json) {
-    *json = pa_offline_info_json(entry);
-  }
-  return true;
-}
-
-bool pa_get_offline_samples_slice(
-  const std::string &bufferId,
-  int startFrame,
-  int frameCount,
-  std::vector<float> *out,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  if (out) out->clear();
-
-  std::shared_ptr<PaOfflineEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_pa_mutex);
-    auto it = g_pa_offline.find(bufferId);
-    if (it == g_pa_offline.end() || !it->second) {
-      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
-      if (errorMessage) *errorMessage = "Offline buffer not found";
-      return false;
-    }
-    entry = it->second;
-  }
-
-  if (entry->isMmapBacked()) {
-    // mmap-backed: use readSlice for zero-copy
-    if (frameCount <= 0 || out == nullptr) {
-      return true;
-    }
-    *out = entry->readSlice(startFrame, frameCount);
-    return true;
-  }
-
-  if (frameCount <= 0 || out == nullptr) {
-    return true;
-  }
-
-  const int safeStart = std::max(0, startFrame);
-  const int total = (int)entry->samples.size();
-  if (safeStart >= total) {
-    return true;
-  }
-
-  const int endExclusive = std::min(total, safeStart + frameCount);
-  out->assign(entry->samples.begin() + safeStart, entry->samples.begin() + endExclusive);
-  return true;
-}
-
-bool pa_get_live_samples_slice(
-  const std::string &bufferId,
-  int startFrame,
-  int frameCount,
-  std::vector<float> *out,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  if (out) out->clear();
-
-  std::shared_ptr<PaLiveEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_pa_mutex);
-    auto it = g_pa_live.find(bufferId);
-    if (it == g_pa_live.end() || !it->second) {
-      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
-      if (errorMessage) *errorMessage = "Live buffer not found";
-      return false;
-    }
-    entry = it->second;
-  }
-
-  if (frameCount <= 0 || out == nullptr) {
-    return true;
-  }
-
-  *out = entry->getSamplesSlice(std::max(0, startFrame), frameCount);
-  return true;
-}
-
-bool pa_append_samples_to_live(
-  const std::string &bufferId,
-  const float *samples,
-  size_t count,
-  int sampleRate,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  if (samples == nullptr || count == 0) {
-    if (errorCode) *errorCode = "[INVALID_ARGS]";
-    if (errorMessage) *errorMessage = "samples must not be empty";
-    return false;
-  }
-
-  std::shared_ptr<PaLiveEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_pa_mutex);
-    auto it = g_pa_live.find(bufferId);
-    if (it == g_pa_live.end() || !it->second) {
-      if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
-      if (errorMessage) *errorMessage = "Live buffer not found";
-      return false;
-    }
-    entry = it->second;
-  }
-
-  if (entry->state != PaLiveEntry::RECORDING) {
-    if (errorCode) *errorCode = "[BUFFER_NOT_RECORDING]";
-    if (errorMessage) *errorMessage = "Live buffer is finalized";
-    return false;
-  }
-
-  entry->appendSamples(samples, count, sampleRate, kPaAppendSourceAppend);
-  return true;
-}
-
-bool pa_get_offline_metadata(
-  const std::string &bufferId,
-  int *sampleRate,
-  int *numSamples,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  std::lock_guard<std::mutex> lock(g_pa_mutex);
-  auto it = g_pa_offline.find(bufferId);
-  if (it == g_pa_offline.end() || !it->second) {
-    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
-    if (errorMessage) *errorMessage = "Offline buffer not found";
-    return false;
-  }
-  if (sampleRate) *sampleRate = it->second->sampleRate;
-  if (numSamples) *numSamples = it->second->numSamples();
-  return true;
-}
-
-bool pa_adopt_offline_samples_if_empty(
-  const std::string &bufferId,
-  std::vector<float> &&samples,
-  std::string *errorCode,
-  std::string *errorMessage
-) {
-  std::lock_guard<std::mutex> lock(g_pa_mutex);
-  auto it = g_pa_offline.find(bufferId);
-  if (it == g_pa_offline.end() || !it->second) {
-    if (errorCode) *errorCode = "[BUFFER_NOT_FOUND]";
-    if (errorMessage) *errorMessage = "Offline buffer not found";
-    return false;
-  }
-
-  auto entry = it->second;
-  if (entry->numSamples() != 0) {
-    if (errorCode) *errorCode = "[BUFFER_NOT_EMPTY]";
-    if (errorMessage) *errorMessage = "Offline buffer already populated";
-    return false;
-  }
-
-  entry->samples = std::move(samples);
-  return true;
-}
-
-static std::string pa_generateId(const char *prefix) {
-  return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
-}
-
-// ==================== Category Implementation ====================
-
-@implementation SherpaOnnx (PipelineAudio)
-
-// ---- Offline: from source (unified decode via AudioDecodeSession) ----
-#if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
-- (void)decodeFileToOfflineBuffer:(NSDictionary *)source
-             targetSampleRateHz:(double)targetSampleRateHz
-                      forceMono:(BOOL)forceMono
-                    operationId:(NSString *)operationId
-                        resolve:(RCTPromiseResolveBlock)resolve
-                         reject:(RCTPromiseRejectBlock)reject
-{
-  // Register cancel flag
-  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
-  std::string opId = [operationId UTF8String];
-  {
-    std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-    g_pa_decodeCancelFlags[opId] = cancelFlag;
-  }
-
-  __weak SherpaOnnx *weakSelf = self;
-
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    @try {
-      // Resolve FileSource to a local file path
-      NSString *errCode = nil, *errMsg = nil;
-      FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
-      if (!readHandle) {
-        {
-          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-          g_pa_decodeCancelFlags.erase(opId);
-        }
-        reject(errCode, errMsg, nil);
-        return;
-      }
-
-      NSString *sourcePath = nil;
-      NSString *tmpPath = nil;
-      if (readHandle.isFilePath) {
-        sourcePath = readHandle.filePath;
-      } else {
-        // Stream → copy to temp
-        tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                   [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
-        NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
-        [out open];
-        [readHandle.stream open];
-        uint8_t buf[65536];
-        NSInteger bytesRead;
-        while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
-          [out write:buf maxLength:bytesRead];
-        }
-        [out close];
-        sourcePath = tmpPath;
-      }
-
-      std::string path = [sourcePath UTF8String];
-      if (![[NSFileManager defaultManager] fileExistsAtPath:sourcePath]) {
-        [readHandle cleanup];
-        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-        {
-          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-          g_pa_decodeCancelFlags.erase(opId);
-        }
-        reject(kPAErrFileNotFound, @"Audio file does not exist", nil);
-        return;
-      }
-
-      // Configure decode
-      sherpa::AudioDecodeConfig config;
-      config.targetSampleRate = (int)targetSampleRateHz;
-      config.forceMono = forceMono;
-      config.chunkSize = 8192;
-
-      // Stream decoded chunks directly to a raw .f32 temp file on disk.
-      // This avoids building a huge std::vector<float> in heap (OOM fix for large files).
-      std::string bufferId = pa_generateId("off");
-      std::string tmpDir = pa_tempDir();
-      std::string f32Path = tmpDir + "/pa_off_" + bufferId + ".f32";
-      FILE *outFile = fopen(f32Path.c_str(), "wb");
-      if (!outFile) {
-        [readHandle cleanup];
-        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-        {
-          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-          g_pa_decodeCancelFlags.erase(opId);
-        }
-        reject(kPAErrInternalError, @"Cannot open temp file for streaming decode", nil);
-        return;
-      }
-
-      int64_t totalSamplesWritten = 0;
-      bool writeError = false;
-
-      auto onChunk = [&](const float *samples, int count) {
-        if (writeError) return;
-        size_t written = fwrite(samples, sizeof(float), (size_t)count, outFile);
-        if ((int)written != count) {
-          writeError = true;
-        } else {
-          totalSamplesWritten += count;
-        }
-      };
-
-      auto onProgress = [weakSelf, operationId](int64_t framesDecoded, int64_t totalEstimate, int percent) {
-        SherpaOnnx *strongSelf = weakSelf;
-        if (!strongSelf) return;
-        dispatch_async(dispatch_get_main_queue(), ^{
-          [strongSelf sendEventWithName:@"decodeProgress" body:@{
-            @"operationId": operationId,
-            @"framesDecoded": @((double)framesDecoded),
-            @"totalFramesEstimate": @((double)totalEstimate),
-            @"percent": @(percent),
-          }];
-        });
-      };
-
-      sherpa::AudioDecodeResult result;
-      try {
-        result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, nullptr, *cancelFlag);
-      } catch (const std::runtime_error &e) {
-        fclose(outFile);
-        unlink(f32Path.c_str());
-        [readHandle cleanup];
-        if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-        {
-          std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-          g_pa_decodeCancelFlags.erase(opId);
-        }
-        std::string msg = e.what();
-        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
-        NSString *nsCode = @"DECODE_INTERNAL_ERROR";
-        if (msg.find("DECODE_") == 0) {
-          auto colonPos = msg.find(':');
-          if (colonPos != std::string::npos) {
-            nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
-          }
-        }
-        reject(nsCode, nsMsg, nil);
-        return;
-      }
-
-      fclose(outFile);
-      outFile = nullptr;
-
-      [readHandle cleanup];
-      if (tmpPath) [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
-      {
-        std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-        g_pa_decodeCancelFlags.erase(opId);
-      }
-
-      if (writeError || totalSamplesWritten <= 0) {
-        unlink(f32Path.c_str());
-        reject(kPAErrFileReadError, @"Could not decode audio samples", nil);
-        return;
-      }
-
-      int outputRate = config.targetSampleRate > 0 ? config.targetSampleRate : result.sourceSampleRate;
-
-      long rawSize = (long)totalSamplesWritten * sizeof(float);
-      long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
-      std::shared_ptr<PaOfflineEntry> entry;
-      if (rawSize >= threshold) {
-        // Large: mmap the already-written .f32 directly (zero heap copy)
-        auto region = PaMmapRegion::mapFile(f32Path);
+              auto region = PaMmapRegion::mapFile(f32Path);
         if (region) {
           entry = std::make_shared<PaOfflineEntry>();
           entry->bufferId = bufferId;
           entry->sampleRate = outputRate;
           entry->channelCount = 1;
           entry->mmapRegion = std::move(region);
-        }
+                  }
       }
       if (!entry) {
         // Small or mmap failed: load into heap vector, delete temp file
-        int fd = open(f32Path.c_str(), O_RDONLY);
+                int fd = open(f32Path.c_str(), O_RDONLY);
         if (fd >= 0) {
           std::vector<float> samples((size_t)totalSamplesWritten);
           read(fd, samples.data(), (size_t)totalSamplesWritten * sizeof(float));

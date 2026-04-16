@@ -7,12 +7,12 @@
 #import <AVFoundation/AVFoundation.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 struct PcmPlayerSession {
     std::string playerId;
@@ -34,10 +34,24 @@ struct PcmPlayerSession {
     // ---- Position tracking ----
     std::atomic<int64_t> seekPositionSamples{0};
 
-    // ---- Offline sample storage for seek ----
-    std::vector<float> offlineSamples;
+    // ---- Source metadata ----
+    bool hasOfflineSource = false;
+    int64_t offlineTotalSamples = 0;
 
-    void enqueueMonoFloat32(const float *samples, int32_t numSamples);
+    // ---- Bounded buffering/backpressure ----
+    int32_t maxBufferedFrames = 0;
+    int32_t resumeBufferedFrames = 0;
+    int64_t bufferedFrames = 0;
+    bool highWaterActive = false;
+    std::atomic<bool> terminalOom{false};
+    std::mutex enqueueMutex;
+    std::condition_variable enqueueCv;
+
+    /**
+     * Enqueue audio for playback. Returns false if session is destroyed or generation changed.
+     * expectedGeneration < 0 disables generation guard for this enqueue operation.
+     */
+    bool enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration = -1);
     void markSourceExhausted();
     void pause();
     void resume();
@@ -57,6 +71,9 @@ extern std::mutex g_pcm_player_mutex;
 
 // Lookup helper (returns nullptr if not found or destroyed).
 std::shared_ptr<PcmPlayerSession> pcmPlayerGet(const std::string &playerId);
+
+// Stop and clear all active drain workers (live + offline).
+void pcmPlayerStopAllDrainWorkers();
 
 // Destroy and remove all players (for module teardown).
 void pcmPlayerDestroyAll();
