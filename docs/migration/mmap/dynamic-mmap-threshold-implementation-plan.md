@@ -87,8 +87,8 @@ This plan introduces those distinctions without turning threshold selection into
 Use coarse buckets derived from total physical memory:
 
 - `LOW` = `<= 3 GB`
-- `MID` = `4 GB .. 6 GB`
-- `HIGH` = `8 GB .. 12 GB`
+- `MID` = `> 3 GB and <= 6 GB`
+- `HIGH` = `> 6 GB and <= 12 GB`
 - `VERY_HIGH` = `> 12 GB`
 
 These classes should be computed once and reused. Exact byte boundaries should be centralized in one place per platform.

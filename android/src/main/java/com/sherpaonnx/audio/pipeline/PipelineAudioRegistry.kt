@@ -41,8 +41,8 @@ object PipelineAudioRegistry {
 
   /**
    * Create an offline buffer from Float32 PCM samples (in-memory FloatArray).
-    * Uses mmap for large buffers, in-memory for small ones.
-   * 
+   * Uses mmap for large buffers, in-memory for small ones.
+   *
    * WARNING: For large FloatArrays, this may cause OOM. Prefer file-based APIs
    * (decodeFileToOfflineBuffer, createOfflineFromLive with spool files) for big data.
    */

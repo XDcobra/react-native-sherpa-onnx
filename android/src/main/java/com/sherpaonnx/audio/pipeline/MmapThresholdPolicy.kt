@@ -77,9 +77,8 @@ internal object MmapThresholdPolicy {
     synchronized(lock) {
       snapshot?.let { return it }
       // Fallback if initialize() has not run yet.
-      val fallback = createSnapshot(DeviceRamClass.MID)
-      snapshot = fallback
-      return fallback
+      // Do not cache it, so initialize(context) can still detect and persist real RAM class.
+      return createSnapshot(DeviceRamClass.MID)
     }
   }
 

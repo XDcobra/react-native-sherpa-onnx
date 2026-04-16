@@ -54,7 +54,7 @@ sealed class OfflineEntry {
 
   /**
    * In-memory buffer. All samples are held in a FloatArray on the heap.
-    * Suitable for small to medium audio.
+   * Suitable for small to medium audio.
    *
    * For empty buffers created as output targets (e.g. TTS), [samples] starts as an empty array
    * and is filled exactly once via [adoptSamples].
@@ -104,7 +104,7 @@ sealed class OfflineEntry {
   /**
    * Memory-mapped file-backed buffer. Samples are stored as raw float32 in a temp file
    * and accessed via [MappedByteBuffer] for zero-copy random access.
-    * Used for large buffers (effective threshold is selected by mmap policy).
+   * Used for large buffers (effective threshold is selected by mmap policy).
    */
   class MmapBacked(
     override val bufferId: String,

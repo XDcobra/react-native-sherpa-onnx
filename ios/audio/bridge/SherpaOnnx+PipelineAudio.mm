@@ -524,6 +524,10 @@ static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
 
     long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
     if (copiedBytes < threshold) {
+      if ((copiedBytes % (int64_t)sizeof(float)) != 0) {
+        unlink(f32Path.c_str());
+        return nullptr;
+      }
       int sampleCount = (int)(copiedBytes / (int64_t)sizeof(float));
       if (sampleCount <= 0) {
         unlink(f32Path.c_str());
