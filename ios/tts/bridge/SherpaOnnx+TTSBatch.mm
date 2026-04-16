@@ -91,7 +91,7 @@
             return;
         }
         audioEntry = paIt->second;
-        if (audioEntry->isFileBacked || !audioEntry->samples.empty()) {
+        if (audioEntry->isMmapBacked() || !audioEntry->samples.empty()) {
             reject(@"TTS_AUDIO_OUT_ALREADY_POPULATED",
                    [NSString stringWithFormat:@"Audio output buffer is already populated: %@", audioOutBufferId], nil);
             return;
@@ -187,6 +187,9 @@
             }
             audioEntry->samples = std::move(result.samples);
         }
+
+        // Upgrade to mmap if it exceeds the threshold
+        pa_upgradeToMmapIfNeeded(audioOutIdStr);
 
         resolve([NSNull null]);
     } @catch (NSException *exception) {

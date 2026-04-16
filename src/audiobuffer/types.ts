@@ -29,6 +29,8 @@ export interface OfflineAudioBufferInfo {
   channelCount: number;
   numSamples: number;
   durationMs: number;
+  /** Storage strategy: "ram" for heap-backed, "mmap" for memory-mapped file. */
+  storageKind?: 'ram' | 'mmap';
 }
 
 /**

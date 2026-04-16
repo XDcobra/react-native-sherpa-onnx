@@ -144,6 +144,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.initialize()
     tryInstallJsiBindings()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.initialize(reactApplicationContext)
+    PipelineAudioRegistry.initializeWithCacheDir(reactApplicationContext.cacheDir)
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -1557,8 +1558,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
 
     when (entry) {
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.FileBacked -> {
-        encodeViaDecodeFile(entry.filePath, -1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+      is com.sherpaonnx.audio.pipeline.OfflineEntry.MmapBacked -> {
+        val samples = entry.readAllSamples()
+        encodeViaPcm(samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
       }
       is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
         encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)

@@ -78,7 +78,7 @@
     return;
   }
 
-  if (audioOutEntry->isFileBacked || !audioOutEntry->samples.empty()) {
+  if (audioOutEntry->isMmapBacked() || !audioOutEntry->samples.empty()) {
     reject(@"ENHANCEMENT_OUTPUT_NOT_EMPTY",
            [NSString stringWithFormat:@"Output offline audio buffer must be empty: %@", audioOutBufferId],
            nil);
@@ -109,6 +109,9 @@
       }
       audioOutEntry->samples = std::move(enhancedResult.samples);
     }
+
+    // Upgrade output to mmap if it exceeds the threshold
+    pa_upgradeToMmapIfNeeded(audioOutId);
 
     resolve(nil);
   } @catch (NSException *exception) {

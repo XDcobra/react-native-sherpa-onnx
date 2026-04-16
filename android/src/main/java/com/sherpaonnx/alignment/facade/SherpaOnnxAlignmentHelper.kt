@@ -159,31 +159,21 @@ internal class SherpaOnnxAlignmentHelper {
 
           "accurate" -> {
             val modelPath = AlignmentOptionParsers.parseAlignmentModelPath(options)
-            when (audioEntry) {
-              is OfflineEntry.FileBacked -> nativeAlignAccurateFromFile(
-                modelPath,
-                text,
-                audioEntry.filePath,
-                normalizedGranularity,
+            val samples = audioEntry.readAllSamples()
+            if (samples.isEmpty()) {
+              promise.reject(
+                AlignmentErrorCodes.ERR_AUDIO_EMPTY,
+                "Offline audio buffer is empty: $audioInBufferId",
               )
-
-              is OfflineEntry.InMemory -> {
-                if (audioEntry.samples.isEmpty()) {
-                  promise.reject(
-                    AlignmentErrorCodes.ERR_AUDIO_EMPTY,
-                    "Offline audio buffer is empty: $audioInBufferId",
-                  )
-                  return@execute
-                }
-                nativeAlignAccurateFromFloatPcm(
-                  modelPath,
-                  text,
-                  audioEntry.samples,
-                  audioEntry.sampleRate,
-                  normalizedGranularity,
-                )
-              }
+              return@execute
             }
+            nativeAlignAccurateFromFloatPcm(
+              modelPath,
+              text,
+              samples,
+              audioEntry.sampleRate,
+              normalizedGranularity,
+            )
           }
 
           else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")

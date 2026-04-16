@@ -59,3 +59,9 @@ bool pa_append_samples_to_live(
 	std::string *errorCode,
 	std::string *errorMessage
 );
+
+// Orphan sweep for mmap temp files.
+void pa_sweepOrphanedTempFiles(int maxAgeSec = 3600);
+
+// Upgrade an in-memory entry to mmap if it exceeds the threshold.
+void pa_upgradeToMmapIfNeeded(const std::string &bufferId);

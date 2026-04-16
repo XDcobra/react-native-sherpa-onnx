@@ -17,6 +17,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import "audio/session/PaAudioSessionCoordinator.h"
 #include "pcm/PcmPlayerRegistry.h"
+#include "audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
@@ -40,6 +41,8 @@ extern void paMicStopQueue(void);
     self = [super initWithDisabledObservation];
     if (self) {
         [self autoInstallJSI];
+        // Sweep orphaned mmap temp files from previous sessions
+        pa_sweepOrphanedTempFiles();
     }
     return self;
 }

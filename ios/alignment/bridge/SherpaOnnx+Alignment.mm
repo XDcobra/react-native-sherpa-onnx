@@ -210,27 +210,20 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
             granularityStr);
       } else if (modeStr == "accurate") {
         std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
-        if (audioEntry->isFileBacked) {
-          result = sherpa_onnx::alignment::AlignAccurateFromFile(
-              modelPathStr,
-              textEntry->text,
-              audioEntry->filePath,
-              granularityStr);
-        } else {
-          if (audioEntry->samples.empty()) {
-            reject(kAlignmentErrAudioBufferEmpty,
-                   [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
-                   nil);
-            return;
-          }
-          result = sherpa_onnx::alignment::AlignAccurateFromPcm(
-              modelPathStr,
-              textEntry->text,
-              audioEntry->samples.data(),
-              audioEntry->samples.size(),
-              audioEntry->sampleRate,
-              granularityStr);
+        std::vector<float> pcm = audioEntry->readAllSamples();
+        if (pcm.empty()) {
+          reject(kAlignmentErrAudioBufferEmpty,
+                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
+                 nil);
+          return;
         }
+        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+            modelPathStr,
+            textEntry->text,
+            pcm.data(),
+            pcm.size(),
+            audioEntry->sampleRate,
+            granularityStr);
       } else {
         throw std::runtime_error("Unsupported alignment mode");
       }
