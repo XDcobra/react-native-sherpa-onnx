@@ -179,8 +179,6 @@ export interface CreateEmptyLiveAudioBufferOptions {
   windowSeconds?: number;
   /** Optional path for WAV spool file (persistence). */
   persistencePath?: string;
-  /** Spool WAV format: "wav_pcm_s16le" (default) or "wav_pcm_float". */
-  persistenceFormat?: 'wav_pcm_s16le' | 'wav_pcm_float';
 
   /** If true, emit producer-agnostic append events for this live buffer. */
   emitAppendedEvents?: boolean;
