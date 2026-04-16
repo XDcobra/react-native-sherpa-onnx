@@ -3,7 +3,6 @@ import type {
   LiveAudioBufferRef,
   OfflineBufferHandle,
   LiveBufferHandle,
-  PipelineAudioDeviceInfo,
 } from '../audiobuffer/types';
 
 /** Reference or handle to an audio buffer (offline or live). */
@@ -24,17 +23,9 @@ export interface PcmPlayerEndedEvent {
 export interface PcmPlayerOptions {
   /** Optional volume scale [0, 1]. Default: 1.0. */
   volume?: number;
-  /**
-   * Optional preferred output device id from listAvailableOutputDevices().
-   * Best effort: playback still starts if the route cannot be switched.
-   */
-  outputDeviceId?: string;
   /** Callback fired when playback reaches end-of-stream. Fires once per playback run. */
   onEnded?: (event: PcmPlayerEndedEvent) => void;
 }
-
-/** Device metadata returned by listAvailableOutputDevices(). */
-export type PcmOutputDeviceInfo = PipelineAudioDeviceInfo;
 
 /** Pipeline audio buffer player session. */
 export interface PcmPlayer {
