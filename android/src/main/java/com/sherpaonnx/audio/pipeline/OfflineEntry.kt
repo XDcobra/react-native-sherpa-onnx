@@ -12,16 +12,13 @@ import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
-/** 10 MB raw PCM threshold. Buffers at or above this size use file-backed mmap. */
-internal const val PA_FILE_BACKED_THRESHOLD_BYTES: Long = 10L * 1024 * 1024
-
 private const val TAG = "OfflineEntry"
 
 /**
  * Offline audio buffer entry in the pipeline registry.
  * Immutable once created. Two backing strategies:
- * - InMemory: FloatArray in heap (small buffers, < 10 MB raw PCM)
- * - MmapBacked: Raw float32 file on disk, memory-mapped for zero-copy random access (≥ 10 MB)
+ * - InMemory: FloatArray in heap (small buffers)
+ * - MmapBacked: Raw float32 file on disk, memory-mapped for zero-copy random access
  */
 sealed class OfflineEntry {
   abstract val bufferId: String
@@ -57,7 +54,7 @@ sealed class OfflineEntry {
 
   /**
    * In-memory buffer. All samples are held in a FloatArray on the heap.
-   * Suitable for small to medium audio (< 10 MB raw PCM).
+    * Suitable for small to medium audio.
    *
    * For empty buffers created as output targets (e.g. TTS), [samples] starts as an empty array
    * and is filled exactly once via [adoptSamples].
@@ -107,7 +104,7 @@ sealed class OfflineEntry {
   /**
    * Memory-mapped file-backed buffer. Samples are stored as raw float32 in a temp file
    * and accessed via [MappedByteBuffer] for zero-copy random access.
-   * Used for large buffers (≥ 10 MB raw PCM) to reduce heap pressure.
+    * Used for large buffers (effective threshold is selected by mmap policy).
    */
   class MmapBacked(
     override val bufferId: String,
