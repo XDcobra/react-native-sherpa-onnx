@@ -10,8 +10,8 @@ import android.os.Build
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.session.PaAudioSessionCoordinator
 
 internal class PcmPlayerService(
   private val context: Context,
@@ -28,7 +28,6 @@ internal class PcmPlayerService(
     playerId: String,
     audioBufferId: String,
     volume: Double,
-    options: ReadableMap?,
     promise: Promise
   ) {
     try {
@@ -86,25 +85,12 @@ internal class PcmPlayerService(
 
       track.setVolume(clampedVolume)
 
-      val requestedOutputDeviceId = options
-        ?.takeIf { it.hasKey("outputDeviceId") && !it.isNull("outputDeviceId") }
-        ?.getString("outputDeviceId")
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && requestedOutputDeviceId != null) {
-        val requestedDeviceInt = requestedOutputDeviceId.toIntOrNull()
-        if (requestedDeviceInt != null) {
-          val preferredDevice = findOutputDeviceById(requestedDeviceInt)
-          if (preferredDevice != null) {
-            val applied = track.setPreferredDevice(preferredDevice)
-            Log.i(TAG, "Requested preferred output device id=$requestedDeviceInt applied=$applied")
-          } else {
-            Log.w(TAG, "Preferred output device id=$requestedDeviceInt not found; using default route")
-          }
-        } else {
-          Log.w(TAG, "Invalid outputDeviceId '$requestedOutputDeviceId'; expected numeric device id")
-        }
-      }
+      // Register PCM player intent with coordinator and apply preferred device
+      val intentId = "pcm:$playerId"
+      PaAudioSessionCoordinator.acquireIntent(
+        PaAudioSessionCoordinator.Intent(ownerId = intentId, needsInput = false, needsOutput = true)
+      )
+      PaAudioSessionCoordinator.applyPreferredDevice(track)
 
       val session = PcmPlayerSession(
         playerId = playerId,
@@ -279,6 +265,7 @@ internal class PcmPlayerService(
     }
     try {
       session.destroy()
+      PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(TAG, "Failed to destroy PCM player: $playerId", e)
@@ -288,6 +275,8 @@ internal class PcmPlayerService(
 
   fun shutdown() {
     registry.destroyAll()
+    // Release all PCM intents from coordinator
+    // (Individual releaseIntent calls happen in destroy(), but shutdown may bypass that)
   }
 
   private fun findOutputDeviceById(deviceId: Int): AudioDeviceInfo? {

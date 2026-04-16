@@ -11,6 +11,7 @@
 #include "../audio/pipeline/PaLiveEntry.h"
 #include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "PcmPlayerRegistry.h"
+#import "../audio/session/PaAudioSessionCoordinator.h"
 
 #include <algorithm>
 #include <atomic>
@@ -217,71 +218,12 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
     }
 
     @try {
-        NSString *requestedOutputDeviceId = [options[@"outputDeviceId"] isKindOfClass:[NSString class]]
-            ? options[@"outputDeviceId"]
-            : nil;
-
-        AVAudioSession *audioSession = [AVAudioSession sharedInstance];
-        if (requestedOutputDeviceId != nil && requestedOutputDeviceId.length > 0) {
-            NSError *routeError = nil;
-            [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
-                                 mode:AVAudioSessionModeDefault
-                              options:AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionAllowBluetoothA2DP
-                                error:&routeError];
-            if (routeError) {
-                RCTLogWarn(@"createPcmPlayer: failed to switch session category for route selection (%@)", routeError.localizedDescription);
-            }
-
-            routeError = nil;
-            [audioSession setActive:YES error:&routeError];
-            if (routeError) {
-                RCTLogWarn(@"createPcmPlayer: failed to activate audio session before route selection (%@)", routeError.localizedDescription);
-            }
-
-            if ([requestedOutputDeviceId isEqualToString:kPcmOutputSpeakerId]) {
-                routeError = nil;
-                [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&routeError];
-                if (routeError) {
-                    RCTLogWarn(@"createPcmPlayer: failed to route to speaker (%@)", routeError.localizedDescription);
-                }
-            } else if ([requestedOutputDeviceId isEqualToString:kPcmOutputReceiverId]) {
-                routeError = nil;
-                [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&routeError];
-                if (routeError) {
-                    RCTLogWarn(@"createPcmPlayer: failed to route to receiver (%@)", routeError.localizedDescription);
-                }
-            } else {
-                NSArray<AVAudioSessionPortDescription *> *inputs = audioSession.availableInputs ?: @[];
-                AVAudioSessionPortDescription *preferredInput = nil;
-                for (AVAudioSessionPortDescription *input in inputs) {
-                    if ([input.UID isEqualToString:requestedOutputDeviceId]) {
-                        preferredInput = input;
-                        break;
-                    }
-                }
-
-                if (preferredInput != nil) {
-                    routeError = nil;
-                    BOOL setPreferred = [audioSession setPreferredInput:preferredInput error:&routeError];
-                    if (!setPreferred && routeError != nil) {
-                        RCTLogWarn(@"createPcmPlayer: failed to set preferred route input %@ (%@)",
-                                   requestedOutputDeviceId,
-                                   routeError.localizedDescription);
-                    }
-
-                    routeError = nil;
-                    [audioSession overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&routeError];
-                    if (routeError) {
-                        RCTLogWarn(@"createPcmPlayer: failed to clear speaker override after preferred input (%@)", routeError.localizedDescription);
-                    }
-                } else {
-                    RCTLogWarn(@"createPcmPlayer: requested outputDeviceId %@ is not selectable on this route", requestedOutputDeviceId);
-                }
-            }
-        } else {
-            [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
-            [audioSession setActive:YES error:nil];
-        }
+        // Register PCM player intent with coordinator
+        NSString *intentId = [NSString stringWithFormat:@"pcm:%@", playerId];
+        PaAudioSessionIntent *pcmIntent = [PaAudioSessionIntent intentWithOwnerId:intentId
+                                                                       needsInput:NO
+                                                                      needsOutput:YES];
+        [[PaAudioSessionCoordinator shared] acquireIntent:pcmIntent];
 
         auto session = std::make_shared<PcmPlayerSession>();
         session->playerId = [playerId UTF8String];
@@ -681,6 +623,11 @@ static NSString *pa_output_kind_for_port(AVAudioSessionPort portType) {
     if (session) {
         session->destroy();
     }
+
+    // Release PCM player intent from coordinator
+    NSString *intentId = [NSString stringWithFormat:@"pcm:%@", playerId];
+    [[PaAudioSessionCoordinator shared] releaseIntent:intentId];
+
     resolve(nil);
 }
 
