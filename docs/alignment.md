@@ -284,6 +284,7 @@ See [textbuffer.md](textbuffer.md).
 | `ALIGNMENT_MODEL_MISSING` | accurate mode without `alignmentModelPath` |
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
 | `ALIGNMENT_ERROR` | generic native alignment failure |
+| `OFFLINE_OOM` | Not enough memory for offline alignment. Use smaller chunks or a streaming-friendly pipeline. |
 
 ## Notes
 

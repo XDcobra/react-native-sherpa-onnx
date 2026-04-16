@@ -197,6 +197,7 @@ await player.destroy();
 | `PCM_PLAYER_SEEK_OUT_OF_RANGE` | Seek target is outside current playable range |
 | `PCM_PLAYER_BUFFER_NOT_FOUND` | Referenced audio buffer id does not exist |
 | `PCM_PLAYER_BUFFER_INCOMPATIBLE_STATE` | Buffer state cannot be used for requested player operation |
+| `OFFLINE_OOM` | Not enough memory for offline playback buffering. Use a streaming playback path for large audio inputs. |
 
 ## Architecture Notes
 
