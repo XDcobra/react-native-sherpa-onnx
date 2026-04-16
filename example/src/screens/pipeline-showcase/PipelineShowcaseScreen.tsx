@@ -78,6 +78,7 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -1448,6 +1449,8 @@ export default function PipelineShowcaseScreen() {
           </View>
         </ScrollView>
       </View>
+
+      <ScreenIntroModal screenId="PipelineShowcase" />
     </SafeAreaView>
   );
 }

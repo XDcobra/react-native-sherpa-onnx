@@ -89,6 +89,7 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -2283,6 +2284,7 @@ export default function STTScreen() {
           </View>
         </ScrollView>
       </View>
+      <ScreenIntroModal screenId="STT" />
     </SafeAreaView>
   );
 }

@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 export default function VADScreen() {
   return (
@@ -19,6 +20,7 @@ export default function VADScreen() {
           <Text style={styles.featureItem}>• Low latency processing</Text>
         </View>
       </View>
+      <ScreenIntroModal screenId="VAD" />
     </SafeAreaView>
   );
 }

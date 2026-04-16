@@ -33,6 +33,7 @@ import {
   type Progress,
 } from 'react-native-sherpa-onnx/download';
 import { styles } from './DownloadShowcaseScreen.styles';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Stt]: 'Speech-to-text (STT)',
@@ -567,6 +568,8 @@ export default function DownloadShowcaseScreen() {
           })}
         </View>
       </ScrollView>
+
+      <ScreenIntroModal screenId="DownloadShowcase" />
 
       <Modal visible={pickerOpen} transparent animationType="fade">
         <Pressable
