@@ -36,7 +36,8 @@ export interface ModelDetectResultBase {
   modelType?: string;
   /**
    * Whether the detected model supports streaming inference.
-   * For STT: derived from canonical online model types (transducer, paraformer, …).
+   * For STT: supplied by native detection with online-compatibility guard
+   * (safe ORT metadata/shape inspection; falls back to heuristic in name-only mode).
    * For TTS: always `true`.
    * For Enhancement: supplied by native detection with online-compatibility preflight
    * (`success=false` can still occur in name-only heuristic mode).

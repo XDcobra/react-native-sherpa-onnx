@@ -99,6 +99,8 @@ export interface Spec extends TurboModule {
     success: boolean;
     /** Present when success is false (or native included a message). */
     error?: string;
+    /** True when the model's online-streaming compatibility has been confirmed by the native guard (or heuristically inferred in name-only mode). */
+    isStreaming?: boolean;
     /** True when detection failed because the model targets unsupported hardware (RK35xx, Ascend, CANN). Use to show a specific message or block init. */
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
