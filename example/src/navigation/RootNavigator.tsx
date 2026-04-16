@@ -10,6 +10,7 @@ import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcas
 import VADScreen from '../screens/vad/VADScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
+import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -90,6 +91,13 @@ export default function RootNavigator() {
         component={EnhancementScreen}
         options={{
           title: 'Speech Enhancement',
+        }}
+      />
+      <Stack.Screen
+        name="EnhancementStreaming"
+        component={EnhancementStreamingScreen}
+        options={{
+          title: 'Speech Enhancement (Streaming)',
         }}
       />
       <Stack.Screen

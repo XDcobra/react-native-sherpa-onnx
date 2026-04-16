@@ -8,6 +8,7 @@ export type RootStackParamList = {
   VAD: undefined;
   Diarization: undefined;
   Enhancement: undefined;
+  EnhancementStreaming: undefined;
   Separation: undefined;
   Settings: undefined;
 };
@@ -21,6 +22,7 @@ export type FeatureId =
   | 'vad'
   | 'diarization'
   | 'enhancement'
+  | 'enhancement_streaming'
   | 'separation';
 
 export interface Feature {

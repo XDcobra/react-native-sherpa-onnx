@@ -65,6 +65,15 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'enhancement_streaming',
+    title: 'Speech Enhancement (Streaming)',
+    description:
+      'Stream files through live buffers to avoid offline OOM on very long audio',
+    icon: 'swap-horizontal',
+    screen: 'EnhancementStreaming',
+    implemented: true,
+  },
+  {
     id: 'vad',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
