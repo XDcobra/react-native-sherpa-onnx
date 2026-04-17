@@ -31,6 +31,24 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'stt_streaming',
+    title: 'Speech-to-Text (Streaming)',
+    description:
+      'Stream long audio files through LiveAudioBuffer and LiveTextBuffer to avoid offline decode OOM',
+    icon: 'chatbubbles',
+    screen: 'STTStreaming',
+    implemented: true,
+  },
+  {
+    id: 'tts_streaming',
+    title: 'Text-to-Speech (Streaming)',
+    description:
+      'Use incremental TTS to start synthesis before the full prompt is built offline',
+    icon: 'volume-medium',
+    screen: 'TTSStreaming',
+    implemented: true,
+  },
+  {
     id: 'pipeline_showcase',
     title: 'Pipeline Showcase',
     description:

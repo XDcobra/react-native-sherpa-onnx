@@ -2,6 +2,8 @@ export type RootStackParamList = {
   Home: undefined;
   STT: undefined;
   TTS: undefined;
+  STTStreaming: undefined;
+  TTSStreaming: undefined;
   PipelineShowcase: undefined;
   GenerateTimestamp: undefined;
   DownloadShowcase: undefined;
@@ -16,6 +18,8 @@ export type RootStackParamList = {
 export type FeatureId =
   | 'stt'
   | 'tts'
+  | 'stt_streaming'
+  | 'tts_streaming'
   | 'pipeline_showcase'
   | 'generate_timestamp'
   | 'download_showcase'
