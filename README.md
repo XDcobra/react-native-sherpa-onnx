@@ -123,9 +123,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.1.0 |
-| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.2.0 |
-| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.3.0 |
+| Punctuation | ❌ Not yet supported | [Punctuation](./docs/punctuation.md) | Scheduled for release 1.1.0 |
+| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.2.0 |
+| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.3.0 |
+| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.4.0 |
 
 ## SDK pipeline logic
 

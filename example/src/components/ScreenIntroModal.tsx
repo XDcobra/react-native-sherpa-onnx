@@ -45,6 +45,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Text-to-Speech streaming demo',
     body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
+  Punctuation: {
+    title: 'Punctuation preview',
+    body: 'This placeholder screen marks where punctuation restoration will be integrated. It will focus on turning plain transcripts into more readable punctuated text.',
+  },
   PipelineShowcase: {
     title: 'End-to-end pipeline showcase',
     body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',

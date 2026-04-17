@@ -15,6 +15,15 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const FEATURES: Feature[] = [
   {
+    id: 'download_showcase',
+    title: 'Downloadmanager',
+    description:
+      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
+    icon: 'cloud-download-outline',
+    screen: 'DownloadShowcase',
+    implemented: true,
+  },
+  {
     id: 'stt',
     title: 'Speech-to-Text',
     description: 'Convert speech to text using offline models',
@@ -66,15 +75,6 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
-    id: 'download_showcase',
-    title: 'Downloadmanager',
-    description:
-      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
-    icon: 'cloud-download-outline',
-    screen: 'DownloadShowcase',
-    implemented: true,
-  },
-  {
     id: 'enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality (offline)',
@@ -90,6 +90,14 @@ const FEATURES: Feature[] = [
     icon: 'swap-horizontal',
     screen: 'EnhancementStreaming',
     implemented: true,
+  },
+  {
+    id: 'punctuation',
+    title: 'Punctuation',
+    description: 'Add punctuation to text output',
+    icon: 'text-outline',
+    screen: 'Punctuation',
+    implemented: false,
   },
   {
     id: 'vad',

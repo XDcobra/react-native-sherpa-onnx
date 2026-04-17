@@ -53,40 +53,14 @@ function normalizeErrorMessage(error: unknown): string {
   return 'Unknown error';
 }
 
-function splitTextIntoChunks(text: string): string[] {
-  const normalized = text.trim().replace(/\s+/g, ' ');
-  if (!normalized) {
-    return [];
-  }
-  const sentenceChunks = normalized.match(/[^.!?]+[.!?]?(\s+|$)/g);
-  const rawChunks =
-    sentenceChunks && sentenceChunks.length > 0 ? sentenceChunks : [normalized];
-  const chunks: string[] = [];
-  for (const chunk of rawChunks) {
-    const trimmed = chunk.trim();
-    if (!trimmed) continue;
-    if (trimmed.length <= 180) {
-      chunks.push(trimmed);
-      continue;
-    }
-    let remaining = trimmed;
-    while (remaining.length > 180) {
-      let splitAt = remaining.lastIndexOf(' ', 180);
-      if (splitAt <= 40) {
-        splitAt = 180;
-      }
-      chunks.push(remaining.slice(0, splitAt).trim());
-      remaining = remaining.slice(splitAt).trim();
-    }
-    if (remaining.length > 0) {
-      chunks.push(remaining);
-    }
-  }
-  return chunks;
-}
+const LIVE_INPUT_PUSH_DEBOUNCE_MS = 400;
 
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
+function longestCommonPrefixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a[i] === b[i]) i += 1;
+  return i;
+}
 
 type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
 
@@ -128,6 +102,11 @@ export default function TTSStreamingScreen() {
   } | null>(null);
   const isResultPlayingRef = useRef(false);
   const streamedInputLengthRef = useRef(0);
+  const lastInputSnapshotRef = useRef('');
+  const pendingDeltaRef = useRef('');
+  const deltaDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   const resolveModelPath = useCallback(
     (modelFolder: string) => {
@@ -312,7 +291,11 @@ export default function TTSStreamingScreen() {
           },
         },
         segmentation: {
-          // Use library defaults (see resolveSegmentationPolicy in segmenter.ts).
+          // UI/UX tuning for live human typing in this example screen.
+          minCharsPerSegment: 14,
+          maxCharsPerSegment: 220,
+          maxWaitMs: 1300,
+          debounceMs: 150,
         },
         queue: {
           mode: 'fifo',
@@ -349,18 +332,15 @@ export default function TTSStreamingScreen() {
       });
       controllerRef.current = controller;
 
-      const chunks = splitTextIntoChunks(text);
       setStreamingState('running');
       setStatus(
         'Streaming TTS is running. Incremental segmentation and queueing keep playback moving before the whole prompt finishes.'
       );
       streamedInputLengthRef.current = text.length;
-
-      for (let index = 0; index < chunks.length; index += 1) {
-        controller.pushText(chunks[index]! + ' ');
-        setProgress(((index + 1) / Math.max(chunks.length, 1)) * 100);
-        await delay(90);
-      }
+      lastInputSnapshotRef.current = text;
+      pendingDeltaRef.current = '';
+      setProgress(100);
+      controller.pushText(text);
       setStatus(
         'Streaming TTS is active. Add more text and press Stop when done.'
       );
@@ -390,6 +370,14 @@ export default function TTSStreamingScreen() {
       const controller = controllerRef.current;
       const audioBuffer = audioBufferRef.current;
       if (controller && audioBuffer) {
+        if (deltaDebounceTimerRef.current) {
+          clearTimeout(deltaDebounceTimerRef.current);
+          deltaDebounceTimerRef.current = null;
+        }
+        if (pendingDeltaRef.current.length > 0) {
+          controller.pushText(pendingDeltaRef.current);
+          pendingDeltaRef.current = '';
+        }
         await controller.flush();
         await finalizeLiveAudioBuffer(audioBuffer.bufferId);
         await controller.pipeline.completed;
@@ -425,26 +413,51 @@ export default function TTSStreamingScreen() {
 
   useEffect(() => {
     if (streamingState !== 'running') {
+      if (deltaDebounceTimerRef.current) {
+        clearTimeout(deltaDebounceTimerRef.current);
+        deltaDebounceTimerRef.current = null;
+      }
       return;
     }
-    const controller = controllerRef.current;
-    if (!controller) {
+    if (!controllerRef.current) {
       return;
     }
+
     const nextText = inputText;
-    if (nextText.length <= streamedInputLengthRef.current) {
+    const previousText = lastInputSnapshotRef.current;
+    if (nextText === previousText) {
       return;
     }
-    const delta = nextText.slice(streamedInputLengthRef.current);
-    if (!delta) {
-      streamedInputLengthRef.current = nextText.length;
-      return;
+
+    let delta = '';
+    if (nextText.startsWith(previousText)) {
+      delta = nextText.slice(previousText.length);
+    } else {
+      // Some keyboards/autocorrect produce non-append updates. To avoid dropping
+      // user text, resync from the common prefix instead of clearing pending data.
+      const lcp = longestCommonPrefixLength(previousText, nextText);
+      delta = nextText.slice(lcp);
     }
-    const chunks = splitTextIntoChunks(delta);
-    for (const chunk of chunks) {
-      controller.pushText(`${chunk} `);
-    }
+
+    lastInputSnapshotRef.current = nextText;
     streamedInputLengthRef.current = nextText.length;
+    if (delta.length > 0) {
+      pendingDeltaRef.current += delta;
+    }
+    if (deltaDebounceTimerRef.current) {
+      clearTimeout(deltaDebounceTimerRef.current);
+    }
+    deltaDebounceTimerRef.current = setTimeout(() => {
+      deltaDebounceTimerRef.current = null;
+      const activeController = controllerRef.current;
+      if (!activeController || streamingState !== 'running') {
+        return;
+      }
+      const pending = pendingDeltaRef.current;
+      if (!pending) return;
+      pendingDeltaRef.current = '';
+      activeController.pushText(pending);
+    }, LIVE_INPUT_PUSH_DEBOUNCE_MS);
     setProgress(null);
   }, [inputText, streamingState]);
 
@@ -478,6 +491,10 @@ export default function TTSStreamingScreen() {
   useEffect(() => {
     return () => {
       void (async () => {
+        if (deltaDebounceTimerRef.current) {
+          clearTimeout(deltaDebounceTimerRef.current);
+          deltaDebounceTimerRef.current = null;
+        }
         await cleanupStream();
         await releaseResultBuffer();
       })();
