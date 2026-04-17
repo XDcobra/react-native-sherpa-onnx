@@ -783,6 +783,8 @@ export { PipelineAudioErrorCode, DecodeErrorCode } from './types';
 export { isJSIAvailable } from './jsi';
 
 export type {
+  StreamingPipelineCompletion,
+  StreamingPipelineCompletionReason,
   StreamingPipelineStatus,
   StreamingPipelineHandle,
 } from './streamingPipelineTypes';

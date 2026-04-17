@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { resolveModelPath } from '../utils';
 import type { EnhancementModelType } from './types';
 import type {
@@ -14,11 +15,14 @@ function createEnhancementPipelineHandle(
   instanceId: string,
   pipelineId: string
 ): EnhancementPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+
   return {
     instanceId,
     get pipelineId() {
       return pipelineId;
     },
+    completed,
     async stop(): Promise<void> {
       await SherpaOnnx.stopStreamingPipeline(pipelineId);
     },
