@@ -1144,7 +1144,8 @@ export default function STTScreen() {
       const liveAudioBuffer = await createEmptyLiveAudioBuffer({
         sampleRate: LIVE_SAMPLE_RATE,
         channelCount: 1,
-        windowSeconds: 120,
+        ringSeconds: 120,
+        retention: 'auto',
         emitAppendedEvents: false,
       });
       liveAudioBufferId = liveAudioBuffer.bufferId;

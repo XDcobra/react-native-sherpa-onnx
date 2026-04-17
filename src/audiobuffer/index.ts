@@ -451,16 +451,52 @@ export async function createEmptyLiveAudioBuffer(
     onError,
     emitAppendedEvents,
     appendEventMinIntervalMs,
+    retention,
   } = options;
 
   const nativeEmitAppendedEvents =
     emitAppendedEvents ?? Boolean(onFramesAppended);
 
+  // Parse retention union into flat native args
+  let retentionMode: string | undefined;
+  let retentionSeconds: number | undefined;
+  let retentionPath: string | undefined;
+  let retentionTrim: string | undefined;
+  let retentionTrimMaxSeconds: number | undefined;
+
+  if (retention === undefined || retention === 'auto') {
+    retentionMode = 'auto';
+  } else if (retention === 'session') {
+    retentionMode = 'session';
+  } else if (retention === 'none') {
+    retentionMode = 'none';
+  } else if (typeof retention === 'object' && retention.mode === 'maxSeconds') {
+    retentionMode = 'maxSeconds';
+    retentionSeconds = retention.seconds;
+    retentionPath = retention.path;
+  } else if (typeof retention === 'object' && retention.mode === 'path') {
+    retentionMode = 'path';
+    retentionPath = retention.path;
+    if (retention.trim === 'auto' || retention.trim === 'session') {
+      retentionTrim = retention.trim;
+    } else if (
+      typeof retention.trim === 'object' &&
+      'maxSeconds' in retention.trim
+    ) {
+      retentionTrim = 'maxSeconds';
+      retentionTrimMaxSeconds = retention.trim.maxSeconds;
+    }
+  }
+
   const result = await getNative().createEmptyLiveAudioBuffer({
     sampleRate: options.sampleRate,
     channelCount: options.channelCount,
-    windowSeconds: options.windowSeconds,
-    persistencePath: options.persistencePath,
+    ringSeconds: options.ringSeconds,
+    retentionMode,
+    retentionSeconds,
+    retentionPath,
+    retentionTrim,
+    retentionTrimMaxSeconds,
     emitAppendedEvents: nativeEmitAppendedEvents,
     appendEventMinIntervalMs,
   });

@@ -90,7 +90,8 @@ export interface LiveAudioBufferInfo {
   numSamples: number;
   durationMs: number;
   totalSamplesWritten: number;
-  totalSamplesDropped: number;
+  /** Ring cache evictions. Not data loss when spool is active. */
+  ringEvictedSamples: number;
   hasActiveSpool: boolean;
 }
 
@@ -169,16 +170,47 @@ export interface LiveAudioBufferCallbacks {
 
 // ========== Creation Options ==========
 
+// ========== Retention Policy ==========
+
+/**
+ * Controls on-disk retention of appended samples.
+ *
+ * - 'auto' (default): spool exists; trimmed to max(ringSeconds, slowest cursor lag).
+ * - 'session': spool retains every sample until buffer release.
+ * - 'none': no spool; ring-only; lossless only if consumer never lags.
+ * - { mode: 'maxSeconds', seconds, path? }: spool retains up to N seconds.
+ * - { mode: 'path', path, trim? }: explicit persistence path.
+ */
+export type LiveBufferRetention =
+  | 'auto'
+  | 'session'
+  | 'none'
+  | { mode: 'maxSeconds'; seconds: number; path?: string }
+  | {
+      mode: 'path';
+      path: string;
+      trim?: 'auto' | 'session' | { maxSeconds: number };
+    };
+
+/** Backpressure mode for producer append operations. */
+export type AppendBackpressure = 'none' | 'block';
+
 /** Options for creating an empty live audio buffer. */
 export interface CreateEmptyLiveAudioBufferOptions {
   /** Sample rate in Hz (e.g. 16000, 44100). */
   sampleRate: number;
   /** Number of channels. Only 1 (mono) is supported. */
   channelCount?: number;
-  /** Ring buffer window size in seconds. Default: 60. */
-  windowSeconds?: number;
-  /** Optional path for WAV spool file (persistence). */
-  persistencePath?: string;
+  /**
+   * Duration of the in-memory ring cache in seconds. Default: 60.
+   * Samples older than this may still be readable via spool.
+   */
+  ringSeconds?: number;
+  /**
+   * Controls on-disk retention of appended samples.
+   * Default: 'auto'.
+   */
+  retention?: LiveBufferRetention;
 
   /** If true, emit producer-agnostic append events for this live buffer. */
   emitAppendedEvents?: boolean;
@@ -214,6 +246,7 @@ export const PipelineAudioErrorCode = {
   SPOOL_NOT_AVAILABLE: 'AUDIO_SPOOL_NOT_AVAILABLE',
   CAPTURE_ERROR: 'AUDIO_CAPTURE_ERROR',
   ALREADY_FINALIZED: 'AUDIO_ALREADY_FINALIZED',
+  CURSOR_LAG_EXCEEDED: 'AUDIO_CURSOR_LAG_EXCEEDED',
   INTERNAL_ERROR: 'AUDIO_INTERNAL_ERROR',
 } as const;
 
@@ -333,6 +366,13 @@ export interface FileIngestOptions extends AudioDecodeOptions {
    * When true, the buffer transitions to `finished` after the last chunk.
    */
   autoFinalize?: boolean;
+
+  /**
+   * Producer backpressure mode.
+   * - 'block' (default for file ingest): decoder waits until slowest cursor has room.
+   * - 'none': decoder runs at full speed; spool holds all data.
+   */
+  backpressure?: AppendBackpressure;
 }
 
 // ========== Decode Error Codes ==========
