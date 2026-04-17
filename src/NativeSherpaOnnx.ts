@@ -253,16 +253,23 @@ export interface Spec extends TurboModule {
   /**
    * Create an empty live audio buffer with a rolling-window ring buffer.
    * @param options.sampleRate - Sample rate in Hz.
-   * @param options.windowSeconds - Ring buffer window size in seconds (default: 60).
-   * @param options.persistencePath - Optional file path for WAV spool.
+   * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
+   * @param options.retentionMode - Retention mode: 'auto' | 'session' | 'maxSeconds' | 'path' | 'none'.
+   *                                  ('auto'/'maxSeconds' currently do not enforce trim yet.)
+   * @param options.retentionSeconds - Retention seconds for 'maxSeconds' mode (validated when provided).
+   * @param options.retentionPath - Explicit path for spool file.
    * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
    * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
    */
   createEmptyLiveAudioBuffer(options: {
     sampleRate: number;
     channelCount?: number;
-    windowSeconds?: number;
-    persistencePath?: string;
+    ringSeconds?: number;
+    retentionMode?: string;
+    retentionSeconds?: number;
+    retentionPath?: string;
+    retentionTrim?: string;
+    retentionTrimMaxSeconds?: number;
     emitAppendedEvents?: boolean;
     appendEventMinIntervalMs?: number;
   }): Promise<{
@@ -274,7 +281,7 @@ export interface Spec extends TurboModule {
     numSamples: number;
     durationMs: number;
     totalSamplesWritten: number;
-    totalSamplesDropped: number;
+    ringEvictedSamples: number;
     hasActiveSpool: boolean;
   }>;
 
@@ -304,7 +311,7 @@ export interface Spec extends TurboModule {
     numSamples: number;
     durationMs: number;
     totalSamplesWritten?: number;
-    totalSamplesDropped?: number;
+    ringEvictedSamples?: number;
     hasActiveSpool?: boolean;
   }>;
 
@@ -349,6 +356,7 @@ export interface Spec extends TurboModule {
     targetSampleRateHz: number,
     forceMono: boolean,
     autoFinalize: boolean,
+    backpressure: string,
     operationId: string
   ): Promise<{ ingestId: string }>;
 

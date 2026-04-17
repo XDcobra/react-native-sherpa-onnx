@@ -7,6 +7,7 @@ import type {
   SttPipelineHandle,
 } from './streamingTypes';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 
 let streamingSttInstanceCounter = 0;
@@ -224,12 +225,29 @@ export async function createStreamingSTT(
         pipelineOptions?.chunkSize
       );
       activePipelineId = started.pipelineId;
+      const completed = createStreamingPipelineCompletionPromise(
+        started.pipelineId
+      );
+
+      completed.then(
+        () => {
+          if (activePipelineId === started.pipelineId) {
+            activePipelineId = null;
+          }
+        },
+        () => {
+          if (activePipelineId === started.pipelineId) {
+            activePipelineId = null;
+          }
+        }
+      );
 
       const handle: SttPipelineHandle = {
         instanceId,
         get pipelineId() {
           return started.pipelineId;
         },
+        completed,
         async stop(): Promise<void> {
           await SherpaOnnx.stopStreamingPipeline(started.pipelineId);
           if (activePipelineId === started.pipelineId) {

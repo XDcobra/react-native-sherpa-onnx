@@ -33,9 +33,21 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Speech-to-Text demo',
     body: 'This screen focuses on offline and streaming STT. Watch how model selection, buffer-driven input, and live transcription behave under real pipeline conditions.',
   },
+  STTStreaming: {
+    title: 'Speech-to-Text streaming demo',
+    body: 'This screen streams long audio through LiveAudioBuffer and LiveTextBuffer so transcription can start immediately without building a large offline decode buffer. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+  },
   TTS: {
     title: 'Text-to-Speech demo',
     body: 'This screen shows batch and streaming TTS flows. It is useful for inspecting synthesis setup, generation modes, and how audio is produced for playback or export.',
+  },
+  TTSStreaming: {
+    title: 'Text-to-Speech streaming demo',
+    body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+  },
+  Punctuation: {
+    title: 'Punctuation preview',
+    body: 'This placeholder screen marks where punctuation restoration will be integrated. It will focus on turning plain transcripts into more readable punctuated text.',
   },
   PipelineShowcase: {
     title: 'End-to-end pipeline showcase',

@@ -777,8 +777,8 @@ export default function PipelineShowcaseScreen() {
       const outputLiveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: ttsSampleRate,
         channelCount: 1,
-        windowSeconds: 240,
-        persistencePath: outputAudioPath,
+        ringSeconds: 240,
+        retention: { mode: 'path', path: outputAudioPath },
         emitAppendedEvents: true,
         onFramesAppended: (event) => {
           setGeneratedSpeechSeconds(event.totalSamplesWritten / ttsSampleRate);
@@ -817,7 +817,8 @@ export default function PipelineShowcaseScreen() {
       const inputLiveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: STT_INPUT_SAMPLE_RATE,
         channelCount: 1,
-        windowSeconds: 240,
+        ringSeconds: 240,
+        retention: 'auto',
         emitAppendedEvents: false,
       });
       inputAudioBufferRef.current = inputLiveAudio;

@@ -20,6 +20,9 @@ The incremental layer:
 4. Starts/stops the native streaming TTS pipeline automatically.
 5. Exposes lifecycle and metrics via controller and events.
 
+> **Important:** Segmentation defines **when speech is generated**.  
+> Audio is generated only after text is internally committed as a segment (auto-segmentation) or when you explicitly force a commit via `ctrl.commit()`.
+
 ## Choosing a streaming API (decision matrix)
 
 Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text → wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. **Incremental** TTS is the same engine underneath; it adds **automatic segmentation**, **queues**, and **session** semantics for *continuous* text input.
@@ -296,6 +299,23 @@ Error surfaces are the same underlying streaming pipeline errors as in [Streamin
 ## Troubleshooting
 
 For low-level pipeline issues (`TTS_PIPELINE_*`, sample-rate mismatch, provider issues), see [Streaming TTS troubleshooting](tts-streaming.md#troubleshooting).
+
+## Best Practices for Human Typing
+
+Incremental TTS handles segmentation and commits internally, but a text editor UI (`TextInput`) still produces edit events that are not the same as a clean token stream. For a good "human writing" experience, keep a small UI-side text management layer.
+
+Recommended:
+- Push appended text as-is via `pushText()` (do not inject extra spaces).
+- Debounce UI updates briefly (for example 250-500 ms) before pushing.
+- Handle non-append edits (cursor moves, backspace, auto-correct) explicitly; resync from a stable prefix or restart the session if needed.
+- Flush any pending UI buffer before calling `flush()` at stop/end.
+
+Avoid:
+- Pushing each keystroke immediately without buffering.
+- Applying sentence chunking intended for prebuilt paragraphs to raw keystroke deltas.
+- Assuming editor events are always append-only.
+
+>Rule of thumb: internal segmentation decides *when* to commit, while UI text management decides *what exact text stream* reaches segmentation.
 
 ## Mapping to Native API
 

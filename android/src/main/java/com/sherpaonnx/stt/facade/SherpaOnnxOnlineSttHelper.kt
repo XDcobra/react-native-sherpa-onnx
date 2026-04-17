@@ -1,13 +1,15 @@
 package com.sherpaonnx.stt.facade
 
-import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.stt.pipeline.SttPipelineWorker
 import com.sherpaonnx.stt.core.OnlineSttRecognizerConfigFactory
@@ -22,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Manages recognizer instances and streams; resolves model paths by scanning the model directory.
  */
 internal class SherpaOnnxOnlineSttHelper(
-  private val context: Context,
+  private val context: ReactApplicationContext,
   private val logTag: String
 ) {
 
@@ -200,7 +202,9 @@ internal class SherpaOnnxOnlineSttHelper(
         chunkSize = chunkSize ?: 3200,
       )
 
-      StreamingPipelineRegistry.registerAndStart(worker)
+      StreamingPipelineRegistry.registerAndStart(worker) {
+        completion -> emitPipelineCompletedEvent(completion)
+      }
 
       synchronized(inst) {
         inst.activePipelineId = pipelineId
@@ -233,6 +237,29 @@ internal class SherpaOnnxOnlineSttHelper(
       } catch (e: Exception) {
         Log.w(logTag, "shutdown: failed to release instance $instanceId: ${e.message}")
       }
+    }
+  }
+
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
     }
   }
 }

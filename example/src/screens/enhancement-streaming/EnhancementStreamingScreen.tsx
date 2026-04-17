@@ -82,20 +82,6 @@ type SelectedEnhancementInput = {
   customAudioName: string | null;
 };
 
-type PreparedStreamingEnhancementInputBuffer = {
-  bufferId: string;
-  sampleRate: number;
-  sourceType: 'example' | 'own';
-  sourceLabel: string;
-  sourcePathForPlayback: string;
-  selectedAudioId: string | null;
-  customAudioPath: string | null;
-  customAudioName: string | null;
-};
-
-let gEnhancementStreamingPreparedInputBuffer: PreparedStreamingEnhancementInputBuffer | null =
-  null;
-
 function isEnhancementHint(folder: string, hint: string): boolean {
   if (hint === 'enhancement') return true;
   const n = folder.toLowerCase();
@@ -119,6 +105,8 @@ const localStyles = StyleSheet.create({
     opacity: 0.45,
   },
 });
+
+const PIPELINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export default function EnhancementStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -145,25 +133,12 @@ export default function EnhancementStreamingScreen() {
   );
   const [audioSourceType, setAudioSourceType] = useState<
     'example' | 'own' | null
-  >(gEnhancementStreamingPreparedInputBuffer?.sourceType ?? null);
+  >(null);
   const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
-    () => {
-      const selectedId =
-        gEnhancementStreamingPreparedInputBuffer?.selectedAudioId;
-      if (!selectedId) return null;
-      return AUDIO_FILES.find((file) => file.id === selectedId) ?? null;
-    }
+    null
   );
-  const [customAudioPath, setCustomAudioPath] = useState<string | null>(
-    gEnhancementStreamingPreparedInputBuffer?.customAudioPath ?? null
-  );
-  const [customAudioName, setCustomAudioName] = useState<string | null>(
-    gEnhancementStreamingPreparedInputBuffer?.customAudioName ?? null
-  );
-  const [preparedInputBuffer, setPreparedInputBuffer] =
-    useState<PreparedStreamingEnhancementInputBuffer | null>(
-      gEnhancementStreamingPreparedInputBuffer
-    );
+  const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
+  const [customAudioName, setCustomAudioName] = useState<string | null>(null);
   const [preparingInputBuffer, setPreparingInputBuffer] = useState(false);
   const [inputBufferBuildProgress, setInputBufferBuildProgress] = useState<
     number | null
@@ -190,22 +165,9 @@ export default function EnhancementStreamingScreen() {
   const engineRef = useRef<StreamingEnhancementEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
   const fileIngestRef = useRef<FileIngestHandle | null>(null);
-  const preparedInputBufferRef =
-    useRef<PreparedStreamingEnhancementInputBuffer | null>(
-      gEnhancementStreamingPreparedInputBuffer
-    );
   const outputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const pipelineRef = useRef<EnhancementPipelineHandle | null>(null);
   const finalizedOutputBufferIdRef = useRef<string | null>(null);
-  const inputBufferBuildRequestRef = useRef(0);
-
-  const setPreparedInputBufferState = (
-    next: PreparedStreamingEnhancementInputBuffer | null
-  ) => {
-    gEnhancementStreamingPreparedInputBuffer = next;
-    preparedInputBufferRef.current = next;
-    setPreparedInputBuffer(next);
-  };
 
   const getDisplayPath = (path: string) => {
     try {
@@ -271,8 +233,6 @@ export default function EnhancementStreamingScreen() {
   };
 
   const clearPreparedInputBuffer = async () => {
-    inputBufferBuildRequestRef.current += 1;
-
     const ingest = fileIngestRef.current;
     fileIngestRef.current = null;
     if (ingest) {
@@ -286,26 +246,9 @@ export default function EnhancementStreamingScreen() {
       }
     }
 
-    const existing = preparedInputBufferRef.current;
-    setPreparedInputBufferState(null);
     setPreparingInputBuffer(false);
     setInputBufferBuildProgress(null);
     setInputBufferBuildStatus(null);
-    if (existing?.bufferId) {
-      await releasePipelineAudioBuffer(existing.bufferId).catch(() => {});
-    }
-  };
-
-  const handleRemovePreparedInputBuffer = async () => {
-    await clearPreparedInputBuffer();
-    setAudioSourceType(null);
-    setSelectedAudio(null);
-    setCustomAudioPath(null);
-    setCustomAudioName(null);
-    setEnhanceResult(null);
-    setOutputWavPath(null);
-    setLastInputPath(null);
-    setLastEnhancedAudio(null);
   };
 
   const resolveSelectedInputSource = async (
@@ -382,152 +325,6 @@ export default function EnhancementStreamingScreen() {
     }
 
     throw new Error('Select example audio or a local WAV file');
-  };
-
-  const prepareInputBufferFromSelection = async (
-    override?: {
-      selectedAudio?: AudioFileInfo | null;
-      customAudioPath?: string | null;
-      customAudioName?: string | null;
-    } | null
-  ) => {
-    const requestId = ++inputBufferBuildRequestRef.current;
-
-    setPreparingInputBuffer(true);
-    setInputBufferBuildProgress(0);
-    setInputBufferBuildStatus('Preparing LiveAudioBuffer...');
-    setError(null);
-    setErrorSource(null);
-    setEnhanceResult(null);
-    setOutputWavPath(null);
-    setLastInputPath(null);
-    setLastEnhancedAudio(null);
-
-    let createdInputBufferId: string | null = null;
-
-    try {
-      const resolved = await resolveSelectedInputSource(override);
-      if (requestId !== inputBufferBuildRequestRef.current) {
-        return;
-      }
-
-      const engine = engineRef.current;
-      if (!engine) {
-        throw new Error('Streaming enhancement engine is not initialized');
-      }
-
-      const sampleRate = await engine.getSampleRate();
-      if (requestId !== inputBufferBuildRequestRef.current) {
-        return;
-      }
-
-      setAudioSourceType(resolved.sourceType);
-      setSelectedAudio(
-        resolved.sourceType === 'example'
-          ? AUDIO_FILES.find((file) => file.id === resolved.selectedAudioId) ??
-              null
-          : null
-      );
-      setCustomAudioPath(resolved.customAudioPath);
-      setCustomAudioName(resolved.customAudioName);
-
-      const existing = preparedInputBufferRef.current;
-      setPreparedInputBufferState(null);
-      if (existing?.bufferId) {
-        await releasePipelineAudioBuffer(existing.bufferId).catch(() => {});
-      }
-
-      setInputBufferBuildStatus(
-        `Decoding \"${resolved.sourceLabel}\" into LiveAudioBuffer...`
-      );
-
-      const inputLive = await createEmptyLiveAudioBuffer({
-        sampleRate,
-        channelCount: 1,
-        windowSeconds: 240,
-        emitAppendedEvents: false,
-      });
-      createdInputBufferId = inputLive.bufferId;
-
-      if (requestId !== inputBufferBuildRequestRef.current) {
-        await releasePipelineAudioBuffer(inputLive.bufferId).catch(() => {});
-        return;
-      }
-
-      const ingest = await ingestFileToLiveAudioBuffer(
-        inputLive.bufferId,
-        resolved.source,
-        {
-          targetSampleRateHz: sampleRate,
-          forceMono: true,
-          autoFinalize: false,
-          onProgress: (event) => {
-            if (requestId !== inputBufferBuildRequestRef.current) {
-              return;
-            }
-
-            const percent = Math.max(0, Math.min(100, event.percent ?? 0));
-            setInputBufferBuildProgress(percent);
-
-            const totalFrames = event.totalFramesEstimate ?? 0;
-            if (totalFrames > 0) {
-              setInputBufferBuildStatus(
-                `Decoding \"${resolved.sourceLabel}\"... ${Math.round(
-                  percent
-                )}% (${event.framesDecoded}/${totalFrames} frames)`
-              );
-              return;
-            }
-
-            setInputBufferBuildStatus(
-              `Decoding \"${resolved.sourceLabel}\"... ${Math.round(percent)}%`
-            );
-          },
-        }
-      );
-      fileIngestRef.current = ingest;
-      await ingest.done;
-      if (fileIngestRef.current === ingest) {
-        fileIngestRef.current = null;
-      }
-
-      if (requestId !== inputBufferBuildRequestRef.current) {
-        await releasePipelineAudioBuffer(inputLive.bufferId).catch(() => {});
-        return;
-      }
-
-      setPreparedInputBufferState({
-        bufferId: inputLive.bufferId,
-        sampleRate,
-        sourceType: resolved.sourceType,
-        sourceLabel: resolved.sourceLabel,
-        sourcePathForPlayback: resolved.sourcePathForPlayback,
-        selectedAudioId: resolved.selectedAudioId,
-        customAudioPath: resolved.customAudioPath,
-        customAudioName: resolved.customAudioName,
-      });
-      createdInputBufferId = null;
-      setInputBufferBuildProgress(null);
-      setInputBufferBuildStatus(null);
-    } catch (err) {
-      if (requestId !== inputBufferBuildRequestRef.current) {
-        return;
-      }
-
-      if (createdInputBufferId) {
-        await releasePipelineAudioBuffer(createdInputBufferId).catch(() => {});
-      }
-
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorSource('enhance');
-      setError(msg);
-      setInputBufferBuildProgress(null);
-      setInputBufferBuildStatus(null);
-    } finally {
-      if (requestId === inputBufferBuildRequestRef.current) {
-        setPreparingInputBuffer(false);
-      }
-    }
   };
 
   const pickSaveDirectory = async (): Promise<{
@@ -629,7 +426,6 @@ export default function EnhancementStreamingScreen() {
 
   useEffect(() => {
     return () => {
-      inputBufferBuildRequestRef.current += 1;
       if (pcmPlaybackRef.current) {
         stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
         pcmPlaybackRef.current = null;
@@ -833,24 +629,10 @@ export default function EnhancementStreamingScreen() {
         )}\nDetected: ${types}`
       );
 
-      const persistedPrepared = preparedInputBufferRef.current;
-      if (persistedPrepared) {
-        setAudioSourceType(persistedPrepared.sourceType);
-        setSelectedAudio(
-          persistedPrepared.selectedAudioId
-            ? AUDIO_FILES.find(
-                (file) => file.id === persistedPrepared.selectedAudioId
-              ) ?? null
-            : null
-        );
-        setCustomAudioPath(persistedPrepared.customAudioPath);
-        setCustomAudioName(persistedPrepared.customAudioName);
-      } else {
-        setAudioSourceType(null);
-        setSelectedAudio(null);
-        setCustomAudioPath(null);
-        setCustomAudioName(null);
-      }
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
 
       setEnhanceResult(null);
       setOutputWavPath(null);
@@ -965,7 +747,7 @@ export default function EnhancementStreamingScreen() {
         return;
       }
 
-      await prepareInputBufferFromSelection({
+      await handleEnhance({
         customAudioPath: uri,
         customAudioName: name,
       });
@@ -1007,7 +789,13 @@ export default function EnhancementStreamingScreen() {
     }
   };
 
-  const handleEnhance = async () => {
+  const handleEnhance = async (
+    override?: {
+      selectedAudio?: AudioFileInfo | null;
+      customAudioPath?: string | null;
+      customAudioName?: string | null;
+    } | null
+  ) => {
     if (!currentModelFolder) {
       setErrorSource('enhance');
       setError('Please initialize a model first');
@@ -1021,67 +809,120 @@ export default function EnhancementStreamingScreen() {
       return;
     }
 
-    if (preparingInputBuffer) {
-      setErrorSource('enhance');
-      setError('Please wait for LiveAudioBuffer preparation to finish');
-      return;
-    }
-
-    const prepared = preparedInputBufferRef.current;
-    if (!prepared) {
-      setErrorSource('enhance');
-      setError('Select audio and wait until LiveAudioBuffer is ready');
-      return;
-    }
-
     setEnhancing(true);
+    setPreparingInputBuffer(true);
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
     setOutputWavPath(null);
     setLastInputPath(null);
+    setInputBufferBuildProgress(0);
+    setInputBufferBuildStatus('Preparing streaming pipeline...');
 
     let producedOfflineBufferId: string | null = null;
 
     try {
+      const selectedInput = await resolveSelectedInputSource(override);
+      setAudioSourceType(selectedInput.sourceType);
+      setSelectedAudio(
+        selectedInput.sourceType === 'example'
+          ? AUDIO_FILES.find((f) => f.id === selectedInput.selectedAudioId) ??
+              null
+          : null
+      );
+      setCustomAudioPath(selectedInput.customAudioPath);
+      setCustomAudioName(selectedInput.customAudioName);
+
       await stopActivePlayback();
       await cleanupRuntimeResources();
       await clearFinalizedOutput();
 
       const sampleRate = await engine.getSampleRate();
-      if (sampleRate !== prepared.sampleRate) {
-        setErrorSource('enhance');
-        setError(
-          'The prepared LiveAudioBuffer was built for a different sample rate. Remove it and build again for the current model.'
-        );
-        return;
-      }
       const frameShift = await engine.getFrameShiftInSamples();
+      setInputBufferBuildStatus('Creating live buffers...');
 
+      const inputLive = await createEmptyLiveAudioBuffer({
+        sampleRate,
+        channelCount: 1,
+        ringSeconds: 240,
+        retention: 'auto',
+        emitAppendedEvents: false,
+      });
       const outputLivePath = `${DocumentDirectoryPath}/streaming_enhancement_live_${Date.now()}.wav`;
       const outputLive = await createEmptyLiveAudioBuffer({
         sampleRate,
         channelCount: 1,
-        windowSeconds: 240,
-        persistencePath: outputLivePath,
+        ringSeconds: 240,
+        retention: { mode: 'path', path: outputLivePath },
         emitAppendedEvents: false,
       });
       outputLiveBufferRef.current = outputLive;
 
+      setInputBufferBuildStatus('Starting enhancement pipeline...');
       const pipeline = await engine.enhance(
-        prepared.bufferId,
+        inputLive.bufferId,
         outputLive.bufferId
       );
       pipelineRef.current = pipeline;
+      setInputBufferBuildStatus(
+        `Decoding and streaming "${selectedInput.sourceLabel}"...`
+      );
 
-      // Input buffer must be in RECORDING state when pipeline starts.
-      // Finalize right after start so the worker can drain to EOS.
-      await finalizeLiveAudioBuffer(prepared.bufferId).catch(() => {});
+      const ingest = await ingestFileToLiveAudioBuffer(
+        inputLive.bufferId,
+        selectedInput.source,
+        {
+          targetSampleRateHz: sampleRate,
+          forceMono: true,
+          autoFinalize: true,
+          onProgress: (event) => {
+            const percent = Math.max(0, Math.min(100, event.percent ?? 0));
+            setInputBufferBuildProgress(percent);
+            setInputBufferBuildStatus(
+              `Decoding and streaming "${
+                selectedInput.sourceLabel
+              }"... ${Math.round(percent)}%`
+            );
+          },
+        }
+      );
+      fileIngestRef.current = ingest;
+      await ingest.done;
+      if (fileIngestRef.current === ingest) {
+        fileIngestRef.current = null;
+      }
 
-      await pipeline.flush().catch(() => {});
-      await pipeline.stop().catch(() => {});
+      const completion = await new Promise<Awaited<typeof pipeline.completed>>(
+        (resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            reject(
+              new Error(
+                `Enhancement pipeline timeout after ${PIPELINE_WAIT_TIMEOUT_MS}ms`
+              )
+            );
+          }, PIPELINE_WAIT_TIMEOUT_MS);
+
+          pipeline.completed.then(
+            (result) => {
+              clearTimeout(timeoutId);
+              resolve(result);
+            },
+            (pipelineError) => {
+              clearTimeout(timeoutId);
+              reject(pipelineError);
+            }
+          );
+        }
+      );
+
+      if (completion.reason === 'stopped') {
+        throw new Error('Enhancement pipeline was stopped before completion.');
+      }
+
       pipelineRef.current = null;
 
+      setInputBufferBuildProgress(100);
+      setInputBufferBuildStatus('Finalizing output...');
       await finalizeLiveAudioBuffer(outputLive.bufferId).catch(() => {});
 
       const offlineOutput = await createOfflineAudioBufferFromLive(
@@ -1111,11 +952,13 @@ export default function EnhancementStreamingScreen() {
         numSamples,
       });
       setOutputWavPath(outputPath);
-      setLastInputPath(prepared.sourcePathForPlayback);
+      setLastInputPath(selectedInput.sourcePathForPlayback);
       setEnhanceResult(
         `Pipeline: streaming enhancement\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
       );
       producedOfflineBufferId = null;
+      setInputBufferBuildProgress(null);
+      setInputBufferBuildStatus(null);
     } catch (err) {
       if (producedOfflineBufferId) {
         await releasePipelineAudioBuffer(producedOfflineBufferId).catch(
@@ -1138,8 +981,11 @@ export default function EnhancementStreamingScreen() {
       }
       setErrorSource('enhance');
       setError(errorMessage);
+      setInputBufferBuildProgress(null);
+      setInputBufferBuildStatus(null);
     } finally {
       await cleanupRuntimeResources();
+      setPreparingInputBuffer(false);
       setEnhancing(false);
     }
   };
@@ -1411,34 +1257,7 @@ export default function EnhancementStreamingScreen() {
                 </View>
               )}
 
-            {preparedInputBuffer && (
-              <View style={styles.selectedFileContainer}>
-                <View style={styles.bufferHeaderRow}>
-                  <View style={styles.bufferHeaderTextWrap}>
-                    <Text style={styles.selectedFileLabel}>
-                      LiveAudioBuffer ready:
-                    </Text>
-                    <Text style={styles.selectedFileName}>
-                      {preparedInputBuffer.sourceLabel}
-                    </Text>
-                    <Text style={styles.bufferIdText} selectable>
-                      {preparedInputBuffer.bufferId}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.bufferDeleteButton}
-                    onPress={() => {
-                      handleRemovePreparedInputBuffer().catch(() => {});
-                    }}
-                    disabled={loading || enhancing || preparingInputBuffer}
-                  >
-                    <Ionicons name="trash-outline" size={18} color="#b71c1c" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {engineReady && !audioSourceType && !preparedInputBuffer && (
+            {engineReady && !audioSourceType && (
               <>
                 <Text style={styles.subsectionTitle}>Audio source</Text>
                 <View style={styles.sourceChoiceRow}>
@@ -1503,16 +1322,11 @@ export default function EnhancementStreamingScreen() {
                           styles.audioFileButtonActive,
                       ]}
                       onPress={() => {
-                        prepareInputBufferFromSelection({
+                        handleEnhance({
                           selectedAudio: audioFile,
                         }).catch(() => {});
                       }}
-                      disabled={
-                        enhancing ||
-                        loading ||
-                        preparingInputBuffer ||
-                        preparedInputBuffer != null
-                      }
+                      disabled={enhancing || loading || preparingInputBuffer}
                     >
                       <Text
                         style={[
@@ -1530,27 +1344,7 @@ export default function EnhancementStreamingScreen() {
                   ))}
                 </View>
 
-                {preparedInputBuffer?.sourceType === 'example' && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (enhancing || loading || preparingInputBuffer) &&
-                        styles.buttonDisabled,
-                    ]}
-                    onPress={handleEnhance}
-                    disabled={enhancing || loading || preparingInputBuffer}
-                  >
-                    {enhancing ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>
-                        Run streaming enhancement
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                {!preparingInputBuffer && !preparedInputBuffer && (
+                {!preparingInputBuffer && (
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
                     onPress={() => {
@@ -1575,7 +1369,7 @@ export default function EnhancementStreamingScreen() {
             {engineReady && audioSourceType === 'own' && (
               <>
                 <Text style={styles.subsectionTitle}>Local WAV</Text>
-                {!preparingInputBuffer && !preparedInputBuffer && (
+                {!preparingInputBuffer && (
                   <TouchableOpacity
                     style={[
                       styles.button,
@@ -1622,28 +1416,7 @@ export default function EnhancementStreamingScreen() {
                   </View>
                 )}
 
-                {preparedInputBuffer?.sourceType === 'own' && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (enhancing || loading || preparingInputBuffer) &&
-                        styles.buttonDisabled,
-                      styles.mt12,
-                    ]}
-                    onPress={handleEnhance}
-                    disabled={enhancing || loading || preparingInputBuffer}
-                  >
-                    {enhancing ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>
-                        Run streaming enhancement
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                {!preparingInputBuffer && !preparedInputBuffer && (
+                {!preparingInputBuffer && (
                   <TouchableOpacity
                     style={[styles.secondaryButton, styles.mt15]}
                     onPress={() => {

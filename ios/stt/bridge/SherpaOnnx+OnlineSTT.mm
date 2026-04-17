@@ -12,6 +12,7 @@
 
 #include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/SttPipelineWorker.h"
@@ -256,6 +257,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
             g_streaming_pipelines[worker->pipelineId] = worker;
         }
         worker->start();
+        so_start_streaming_pipeline_completion_watcher(self, worker->pipelineId, worker);
 
         {
             std::lock_guard<std::mutex> lock(g_online_stt_mutex);

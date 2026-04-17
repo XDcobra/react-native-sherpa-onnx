@@ -6,8 +6,10 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
@@ -25,6 +27,7 @@ internal class SherpaOnnxTtsCoordinator(
   context: ReactApplicationContext,
   detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,
 ) {
+  private val reactContext = context
   private val repository = TtsEngineRepository()
   private val mainHandler = Handler(Looper.getMainLooper())
   private val ttsInitExecutor = Executors.newSingleThreadExecutor()
@@ -206,7 +209,9 @@ internal class SherpaOnnxTtsCoordinator(
         voiceClone = voiceCloneConfig,
       )
 
-      StreamingPipelineRegistry.registerAndStart(worker)
+      StreamingPipelineRegistry.registerAndStart(worker) {
+        completion -> emitPipelineCompletedEvent(completion)
+      }
       instanceToPipeline[instanceId] = pipelineId
 
       val out = Arguments.createMap()
@@ -214,6 +219,29 @@ internal class SherpaOnnxTtsCoordinator(
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject("STREAMING_PIPELINE_ERROR", "Failed to start TTS pipeline: ${e.message}", e)
+    }
+  }
+
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      reactContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
     }
   }
 }

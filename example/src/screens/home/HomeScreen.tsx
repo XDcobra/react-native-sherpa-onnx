@@ -15,6 +15,15 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const FEATURES: Feature[] = [
   {
+    id: 'download_showcase',
+    title: 'Downloadmanager',
+    description:
+      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
+    icon: 'cloud-download-outline',
+    screen: 'DownloadShowcase',
+    implemented: true,
+  },
+  {
     id: 'stt',
     title: 'Speech-to-Text',
     description: 'Convert speech to text using offline models',
@@ -28,6 +37,24 @@ const FEATURES: Feature[] = [
     description: 'Generate speech from text',
     icon: 'volume-high',
     screen: 'TTS',
+    implemented: true,
+  },
+  {
+    id: 'stt_streaming',
+    title: 'Speech-to-Text (Streaming)',
+    description:
+      'Stream long audio files through LiveAudioBuffer and LiveTextBuffer to avoid offline decode OOM',
+    icon: 'chatbubbles',
+    screen: 'STTStreaming',
+    implemented: true,
+  },
+  {
+    id: 'tts_streaming',
+    title: 'Text-to-Speech (Streaming)',
+    description:
+      'Use incremental TTS to start synthesis before the full prompt is built offline',
+    icon: 'volume-medium',
+    screen: 'TTSStreaming',
     implemented: true,
   },
   {
@@ -48,15 +75,6 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
-    id: 'download_showcase',
-    title: 'Downloadmanager',
-    description:
-      'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
-    icon: 'cloud-download-outline',
-    screen: 'DownloadShowcase',
-    implemented: true,
-  },
-  {
     id: 'enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality (offline)',
@@ -72,6 +90,14 @@ const FEATURES: Feature[] = [
     icon: 'swap-horizontal',
     screen: 'EnhancementStreaming',
     implemented: true,
+  },
+  {
+    id: 'punctuation',
+    title: 'Punctuation',
+    description: 'Add punctuation to text output',
+    icon: 'text-outline',
+    screen: 'Punctuation',
+    implemented: false,
   },
   {
     id: 'vad',
