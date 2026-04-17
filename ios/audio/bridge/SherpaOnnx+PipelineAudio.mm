@@ -752,12 +752,34 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     int sr = (int)options.sampleRate();
     if (sr <= 0) { reject(kPAErrInvalidArgument, @"sampleRate must be > 0", nil); return; }
     int ch = options.channelCount().has_value() ? (int)options.channelCount().value() : 1;
-    double windowSec = options.windowSeconds().has_value() ? options.windowSeconds().value() : 60.0;
-    if (windowSec <= 0) { reject(kPAErrInvalidArgument, @"windowSeconds must be > 0", nil); return; }
+    double ringSec = options.ringSeconds().has_value() ? options.ringSeconds().value() : 60.0;
+    if (ringSec <= 0) { reject(kPAErrInvalidArgument, @"ringSeconds must be > 0", nil); return; }
+
+    // Parse retention options
+    NSString *retentionModeNS = options.retentionMode();
+    std::string retentionMode = retentionModeNS ? [retentionModeNS UTF8String] : "auto";
+    NSString *retentionPathNS = options.retentionPath();
+    std::string retentionPath = retentionPathNS ? [retentionPathNS UTF8String] : "";
+    double retentionSec = options.retentionSeconds().has_value() ? options.retentionSeconds().value() : 0.0;
 
     std::string spoolPath;
-    if (options.persistencePath()) {
-      spoolPath = [options.persistencePath() UTF8String];
+    bool isTemporary = false;
+
+    if (retentionMode == "none") {
+      // No spool
+      spoolPath = "";
+    } else if (retentionMode == "path") {
+      spoolPath = retentionPath;
+    } else {
+      // auto, session, maxSeconds: use temp file
+      if (!retentionPath.empty()) {
+        spoolPath = retentionPath;
+      } else {
+        NSString *tmpDir = NSTemporaryDirectory();
+        NSString *tmpFile = [NSString stringWithFormat:@"live_spool_%llu.wav", (unsigned long long)CFAbsoluteTimeGetCurrent() * 1000];
+        spoolPath = [[tmpDir stringByAppendingPathComponent:tmpFile] UTF8String];
+      }
+      isTemporary = (retentionMode != "path");
     }
 
     bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
@@ -793,12 +815,15 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
       bufferId,
       sr,
       ch,
-      windowSec,
+      ringSec,
       spoolPath,
       emitAppendedEvents,
       appendEventMinIntervalMs,
       onFramesAppended
     );
+    if (isTemporary) {
+      entry->isTemporarySpool = true;
+    }
     {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       g_pa_live[bufferId] = entry;
@@ -1323,7 +1348,7 @@ static std::string pa_encodeViaDecodeFile(
       config.chunkSize = 8192;
 
       auto onChunk = [&liveEntry, &status](const float *samples, int count) {
-        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest);
+        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest, /*backpressure=*/true);
         status->framesIngested += count;
       };
 

@@ -351,6 +351,7 @@ object PipelineAudioRegistry {
     persistence: PersistenceConfig? = null,
     appendEventConfig: LiveAppendEventConfig = LiveAppendEventConfig(),
     onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
+    isTemporarySpool: Boolean = false,
   ): LiveEntry {
     if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
     if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
@@ -365,6 +366,7 @@ object PipelineAudioRegistry {
       persistence = persistence,
       appendEventConfig = appendEventConfig,
       onFramesAppended = onFramesAppended,
+      isTemporarySpool = isTemporarySpool,
     )
     liveEntries[bufferId] = entry
     return entry

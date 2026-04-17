@@ -9,8 +9,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
+import kotlin.concurrent.withLock
 import kotlin.concurrent.write
 
 /**
@@ -66,6 +69,7 @@ class LiveEntry(
   persistence: PersistenceConfig? = null,
   appendEventConfig: LiveAppendEventConfig = LiveAppendEventConfig(),
   onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
+  isTemporarySpool: Boolean = false,
 ) {
   val kind: String = "livePcmBuffer"
 
@@ -82,18 +86,42 @@ class LiveEntry(
   var totalSamplesWritten: Long = 0L
     private set
   @Volatile
-  var totalSamplesDropped: Long = 0L
+  var ringEvictedSamples: Long = 0L
     private set
 
   // Lock: write-lock for append, read-lock for snapshot/peek
   private val rwLock = ReentrantReadWriteLock()
 
+  // ---------- Backpressure ----------
+  private val backpressureLock = ReentrantLock()
+  private val cursorAdvanced = backpressureLock.newCondition()
+
+  /**
+   * Check whether appending [appendSize] samples would NOT overrun any active cursor.
+   * Returns true when there is enough room (i.e., safe to append).
+   */
+  private fun wouldOverrunAnyCursor(appendSize: Long): Boolean {
+    synchronized(cursors) {
+      if (cursors.isEmpty()) return true // No cursors — no constraint
+      val slowest = cursors.values.minOf { it.absoluteReadPos }
+      // Room = distance from slowest cursor to ring capacity limit
+      return (totalSamplesWritten + appendSize - slowest) <= windowCapacity
+    }
+  }
+
+  /** Called after a cursor read advances. Wakes any blocked producer. */
+  private fun notifyCursorAdvanced() {
+    backpressureLock.withLock { cursorAdvanced.signalAll() }
+  }
+
   // ---------- Spool (optional persistence) ----------
   @Volatile
   private var spoolWriter: SpoolWriter? = persistence?.let { SpoolWriter(it, sampleRate, channelCount) }
+  @Volatile
+  private var spoolReader: SpoolReader? = persistence?.let { SpoolReader(it.filePath) }
   val hasActiveSpool: Boolean get() = spoolWriter != null
   @Volatile
-  private var isTemporarySpool: Boolean = false
+  private var isTemporarySpool: Boolean = isTemporarySpool
 
   /**
    * Activate a spool on a live buffer that was created without one.
@@ -106,6 +134,7 @@ class LiveEntry(
     check(state == State.RECORDING) { "Cannot enable spool on finalized buffer" }
     check(spoolWriter == null) { "Spool already active" }
     spoolWriter = SpoolWriter(config, sampleRate, channelCount)
+    spoolReader = SpoolReader(config.filePath)
     isTemporarySpool = temporary
   }
 
@@ -165,7 +194,7 @@ class LiveEntry(
     map.putDouble("numSamples", numSamples.toDouble())
     map.putDouble("durationMs", durationMs)
     map.putDouble("totalSamplesWritten", totalSamplesWritten.toDouble())
-    map.putDouble("totalSamplesDropped", totalSamplesDropped.toDouble())
+    map.putDouble("ringEvictedSamples", ringEvictedSamples.toDouble())
     map.putBoolean("hasActiveSpool", hasActiveSpool)
     return map
   }
@@ -174,12 +203,18 @@ class LiveEntry(
 
   /**
    * Append Float32 samples. Thread-safe.
+   *
+   * @param backpressure If true, blocks until the slowest cursor has room in the ring
+   *   for this append. File ingest uses this to prevent ring overflow and avoid data loss.
+   *   Mic and JS append should use `backpressure = false` (default).
    * @throws IllegalStateException if buffer is finalized.
+   * @throws InterruptedException if the calling thread is interrupted while waiting for backpressure.
    */
   fun appendSamples(
     samples: FloatArray,
     inputSampleRate: Int = sampleRate,
     source: String = LIVE_APPEND_SOURCE_UNKNOWN,
+    backpressure: Boolean = false,
   ) {
     check(state == State.RECORDING) { "Cannot append to finalized LiveBuffer" }
 
@@ -187,6 +222,18 @@ class LiveEntry(
       Resampler.resampleLinear(samples, inputSampleRate, sampleRate)
     } else {
       samples
+    }
+
+    // Backpressure: wait until the slowest cursor has enough room
+    if (backpressure) {
+      backpressureLock.withLock {
+        while (state == State.RECORDING && !wouldOverrunAnyCursor(toAppend.size.toLong())) {
+          // Wait with timeout to re-check state (finalize/release can unblock)
+          cursorAdvanced.await(20, TimeUnit.MILLISECONDS)
+        }
+      }
+      // If finalized while waiting, bail out
+      if (state != State.RECORDING) return
     }
 
     rwLock.write {
@@ -197,19 +244,21 @@ class LiveEntry(
       val prevTotal = totalSamplesWritten
       totalSamplesWritten = prevTotal + toAppend.size
       val usedBefore = minOf(prevTotal, windowCapacity.toLong())
-      val usedAfter = minOf(totalSamplesWritten, windowCapacity.toLong())
       if (usedBefore == windowCapacity.toLong()) {
-        totalSamplesDropped += toAppend.size
+        ringEvictedSamples += toAppend.size
       } else {
         val overflow = (prevTotal + toAppend.size) - windowCapacity
         if (overflow > 0) {
-          totalSamplesDropped += overflow
+          ringEvictedSamples += overflow
         }
       }
     }
 
     // Write to spool file (outside ring lock for better concurrency)
-    spoolWriter?.append(toAppend)
+    spoolWriter?.let { writer ->
+      writer.append(toAppend)
+      spoolReader?.committedSamples = writer.committedSamples
+    }
 
     dispatchFramesAppended(toAppend, source)
 
@@ -321,6 +370,9 @@ class LiveEntry(
     spoolWriter?.finalize_()
     flushPendingFramesAppendedEvent()
 
+    // Wake any blocked producers (backpressure)
+    notifyCursorAdvanced()
+
     // Wake pipeline workers so they detect the FINISHED state immediately
     if (appendListeners.isNotEmpty()) {
       val event = LiveFramesAppendedEvent(
@@ -401,8 +453,11 @@ class LiveEntry(
       val id = nextCursorId++
       val cursor = CursorHandle(
         cursorId = id,
-        // Start from the absolute position of the oldest sample currently in the ring
-        absoluteReadPos = if (totalSamplesWritten > windowCapacity) {
+        // When spool is active, start from absolute 0 so cursor can read all data.
+        // Without spool, start from oldest sample in the ring (legacy behavior).
+        absoluteReadPos = if (hasActiveSpool) {
+          0L
+        } else if (totalSamplesWritten > windowCapacity) {
           totalSamplesWritten - windowCapacity
         } else {
           0L
@@ -419,9 +474,7 @@ class LiveEntry(
    */
   fun peekCursor(cursorId: Int, maxSamples: Int): FloatArray {
     val cursor = synchronized(cursors) { cursors[cursorId] } ?: return FloatArray(0)
-    return rwLock.read {
-      readFromCursor(cursor, maxSamples, advance = false)
-    }
+    return readFromCursorDispatch(cursor, maxSamples, advance = false)
   }
 
   /**
@@ -430,9 +483,11 @@ class LiveEntry(
    */
   fun drainCursor(cursorId: Int, maxSamples: Int): FloatArray {
     val cursor = synchronized(cursors) { cursors[cursorId] } ?: return FloatArray(0)
-    return rwLock.read {
-      readFromCursor(cursor, maxSamples, advance = true)
+    val result = readFromCursorDispatch(cursor, maxSamples, advance = true)
+    if (result.isNotEmpty()) {
+      notifyCursorAdvanced()
     }
+    return result
   }
 
   /** Release a cursor handle. */
@@ -451,26 +506,77 @@ class LiveEntry(
   fun oldestAvailablePos(): Long =
     if (totalSamplesWritten > windowCapacity) totalSamplesWritten - windowCapacity else 0L
 
-  private fun readFromCursor(cursor: CursorHandle, maxSamples: Int, advance: Boolean): FloatArray {
-    val oldestAvailable = if (totalSamplesWritten > windowCapacity) {
+  /**
+   * Dispatch cursor read: ring fast-path (under rwLock) or spool slow-path (independent I/O).
+   * This avoids holding the ring rwLock during file I/O.
+   */
+  private fun readFromCursorDispatch(cursor: CursorHandle, maxSamples: Int, advance: Boolean): FloatArray {
+    // Snapshot volatile state for dispatch decision
+    val readPos = cursor.absoluteReadPos
+    val written = totalSamplesWritten
+    val oldestInRing = if (written > windowCapacity) written - windowCapacity else 0L
+
+    if (readPos >= oldestInRing) {
+      // Fast path: cursor is within ring — read under rwLock
+      return rwLock.read { readFromRing(cursor, maxSamples, advance) }
+    }
+
+    // Slow path: cursor is behind the ring — try spool outside rwLock
+    val reader = spoolReader
+    if (reader != null) {
+      val available = (written - readPos).toInt().coerceAtLeast(0)
+      if (available == 0) return FloatArray(0)
+
+      val count = minOf(maxSamples, available)
+      val spoolCommitted = reader.committedSamples
+      val spoolEnd = minOf(spoolCommitted, written)
+      // Read only what the spool has committed; if cursor is partially in spool and partially in ring,
+      // read spool portion only this iteration — next call will pick up ring portion.
+      val safeEnd = minOf(readPos + count, spoolEnd)
+      val spoolCount = (safeEnd - readPos).toInt().coerceAtLeast(0)
+
+      if (spoolCount > 0) {
+        val out = reader.read(readPos, spoolCount)
+        if (out != null && out.isNotEmpty()) {
+          if (advance) {
+            cursor.absoluteReadPos = readPos + out.size
+          }
+          return out
+        }
+      }
+    }
+
+    // No spool or read failed — fall back to ring with snap-forward
+    // If cursor was truly behind ring AND spool didn't help, this is a lag error
+    // when the buffer has (or had) a spool. For ring-only buffers (no spool ever),
+    // snap-forward is the legacy behavior.
+    if (spoolReader != null) {
+      throw CursorLagExceededException(
+        "Cursor at position $readPos has fallen behind retained data (oldest in ring: $oldestInRing). " +
+        "Spool read failed or data was trimmed beyond cursor position."
+      )
+    }
+    return rwLock.read { readFromRing(cursor, maxSamples, advance) }
+  }
+
+  /** Read from ring buffer. Snaps cursor forward if behind ring window. Must be called under rwLock.read. */
+  private fun readFromRing(cursor: CursorHandle, maxSamples: Int, advance: Boolean): FloatArray {
+    val oldestInRing = if (totalSamplesWritten > windowCapacity) {
       totalSamplesWritten - windowCapacity
     } else {
       0L
     }
 
-    // If cursor has fallen behind the ring, snap forward
-    val readPos = maxOf(cursor.absoluteReadPos, oldestAvailable)
+    val readPos = maxOf(cursor.absoluteReadPos, oldestInRing)
     val available = (totalSamplesWritten - readPos).toInt().coerceAtLeast(0)
     if (available == 0) return FloatArray(0)
 
     val count = minOf(maxSamples, available)
     val out = FloatArray(count)
-
     val ringOffset = (readPos % windowCapacity).toInt()
     for (i in 0 until count) {
       out[i] = ring[(ringOffset + i) % windowCapacity]
     }
-
     if (advance) {
       cursor.absoluteReadPos = readPos + count
     }
@@ -486,6 +592,8 @@ class LiveEntry(
     flushPendingFramesAppendedEvent()
     val path = spoolWriter?.filePath
     spoolWriter?.release()
+    spoolReader?.release()
+    spoolReader = null
     if (isTemporarySpool && path != null) {
       try { File(path).delete() } catch (_: Exception) {}
     }
@@ -500,10 +608,34 @@ class LiveEntry(
   )
 }
 
+// ========== Cursor Lag Error ==========
+
+/**
+ * Thrown when a cursor has fallen irrecoverably behind retained data.
+ * The consumer should treat this as a terminal pipeline error.
+ */
+class CursorLagExceededException(message: String) : RuntimeException(message)
+
 // ========== Persistence Configuration ==========
+
+/** Retention mode for the spool file. */
+enum class RetentionMode {
+  /** Spool exists; trimmed to max(ringSeconds, slowest cursor lag). */
+  AUTO,
+  /** Spool retains every sample until buffer release. */
+  SESSION,
+  /** Spool retains up to N seconds. */
+  MAX_SECONDS,
+  /** Explicit persistence path (replaces legacy persistencePath). */
+  PATH,
+  /** No spool; ring-only. */
+  NONE,
+}
 
 data class PersistenceConfig(
   val filePath: String,
+  val retentionMode: RetentionMode = RetentionMode.SESSION,
+  val retentionSeconds: Double = 0.0,
 )
 
 // ========== Spool Writer ==========
@@ -519,7 +651,9 @@ internal class SpoolWriter(
 ) {
   val filePath: String = config.filePath
   private var raf: RandomAccessFile? = null
-  private var totalSamplesWritten = 0L
+  @Volatile
+  var committedSamples = 0L
+    private set
   private val lock = Object()
 
   init {
@@ -554,7 +688,7 @@ internal class SpoolWriter(
       val buf = ByteBuffer.allocate(samples.size * 4).order(ByteOrder.LITTLE_ENDIAN)
       for (s in samples) buf.putFloat(s)
       r.write(buf.array())
-      totalSamplesWritten += samples.size
+      committedSamples += samples.size
     }
   }
 
@@ -562,7 +696,7 @@ internal class SpoolWriter(
   fun finalize_() {
     synchronized(lock) {
       val r = raf ?: return
-      val dataSize = totalSamplesWritten * 4
+      val dataSize = committedSamples * 4
       val fileSize = 44 + dataSize
 
       // Patch RIFF size (offset 4)
@@ -579,6 +713,90 @@ internal class SpoolWriter(
 
       r.close()
       raf = null
+    }
+  }
+
+  fun release() {
+    synchronized(lock) {
+      try { raf?.close() } catch (_: Exception) {}
+      raf = null
+    }
+  }
+}
+
+// ========== Spool Reader ==========
+
+/**
+ * Reads samples from a F32 WAV spool file at arbitrary absolute positions.
+ * Thread-safe: uses a separate RandomAccessFile opened in read-only mode.
+ * The committedSamples count is obtained from the associated SpoolWriter to
+ * avoid reading bytes that haven't been flushed yet.
+ */
+internal class SpoolReader(
+  private val filePath: String
+) {
+  companion object {
+    private const val WAV_HEADER_SIZE = 44
+    private const val BYTES_PER_SAMPLE = 4
+  }
+
+  private var raf: RandomAccessFile? = null
+  private val lock = Object()
+
+  /**
+   * Number of samples safely committed by the writer.
+   * Updated by [LiveEntry] after each SpoolWriter.append().
+   */
+  @Volatile
+  var committedSamples: Long = 0L
+
+  init {
+    try {
+      raf = RandomAccessFile(File(filePath), "r")
+    } catch (_: Exception) {
+      // Spool file might not exist yet; will retry on first read
+    }
+  }
+
+  /**
+   * Read [count] samples starting at absolute sample position [absolutePos].
+   * Returns null if the spool file is not available or the requested range
+   * extends beyond committed bytes.
+   */
+  fun read(absolutePos: Long, count: Int): FloatArray? {
+    if (count <= 0 || absolutePos < 0) return null
+
+    synchronized(lock) {
+      var r = raf
+      if (r == null) {
+        // Retry open — file may have been created after SpoolReader was constructed
+        try {
+          r = RandomAccessFile(File(filePath), "r")
+          raf = r
+        } catch (_: Exception) {
+          return null
+        }
+      }
+
+      // Clamp to committed range
+      val safeEnd = minOf(absolutePos + count, committedSamples)
+      val safeCount = (safeEnd - absolutePos).toInt()
+      if (safeCount <= 0) return null
+
+      val byteOffset = WAV_HEADER_SIZE + absolutePos * BYTES_PER_SAMPLE
+      try {
+        r.seek(byteOffset)
+        val buf = ByteArray(safeCount * BYTES_PER_SAMPLE)
+        r.readFully(buf)
+        val bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN)
+        val out = FloatArray(safeCount)
+        for (i in 0 until safeCount) {
+          out[i] = bb.getFloat()
+        }
+        return out
+      } catch (_: Exception) {
+        return null
+      }
     }
   }
 

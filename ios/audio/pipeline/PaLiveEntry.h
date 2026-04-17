@@ -91,12 +91,21 @@ struct PaLiveEntry {
   int64_t totalSamplesDropped = 0;
   std::mutex ringMutex;
 
+  // Backpressure
+  std::mutex backpressureMutex;
+  std::condition_variable backpressureCV;
+
   // Spool
   bool hasActiveSpool = false;
   std::string spoolPath;
   std::ofstream spoolFile;
   int64_t spoolSamplesWritten = 0;
   bool isTemporarySpool = false;
+
+  // Spool reader (for cursor reads behind the ring)
+  std::mutex spoolReadMutex;
+  std::ifstream spoolReadFile;
+  bool spoolReadFileOpen = false;
 
   // Cursors
   struct CursorHandle {
@@ -175,6 +184,7 @@ struct PaLiveEntry {
       if (spoolFile) {
         pa_writeWavHeaderToStream(spoolFile, sr, 32, 3, 0); // always F32
         hasActiveSpool = true;
+        openSpoolReader();
       } else {
         spoolPath.clear();
       }
@@ -203,6 +213,57 @@ struct PaLiveEntry {
     }
     pa_writeWavHeaderToStream(spoolFile, sampleRate, 32, 3, 0); // always F32
     hasActiveSpool = true;
+    openSpoolReader();
+  }
+
+  /** Open the spool file for reading (cursor slow path). */
+  void openSpoolReader() {
+    std::lock_guard<std::mutex> lock(spoolReadMutex);
+    if (spoolReadFileOpen) return;
+    if (spoolPath.empty()) return;
+    spoolReadFile.open(spoolPath, std::ios::binary);
+    spoolReadFileOpen = spoolReadFile.is_open();
+  }
+
+  /**
+   * Read [count] samples from the spool file starting at absolute position.
+   * Returns empty vector on failure. Thread-safe.
+   */
+  std::vector<float> readFromSpool(int64_t absolutePos, int count) {
+    if (count <= 0 || absolutePos < 0) return {};
+
+    std::lock_guard<std::mutex> lock(spoolReadMutex);
+    if (!spoolReadFileOpen) {
+      // Retry open — file may have been created after construction
+      if (!spoolPath.empty()) {
+        spoolReadFile.open(spoolPath, std::ios::binary);
+        spoolReadFileOpen = spoolReadFile.is_open();
+      }
+      if (!spoolReadFileOpen) return {};
+    }
+
+    // Clamp to committed range
+    int64_t safeEnd = std::min(absolutePos + count, spoolSamplesWritten);
+    int safeCount = (int)std::max((int64_t)0, safeEnd - absolutePos);
+    if (safeCount <= 0) return {};
+
+    const int64_t WAV_HEADER_SIZE = 44;
+    const int BYTES_PER_SAMPLE = 4;
+    int64_t byteOffset = WAV_HEADER_SIZE + absolutePos * BYTES_PER_SAMPLE;
+
+    spoolReadFile.clear(); // clear any eof/fail bits
+    spoolReadFile.seekg(byteOffset, std::ios::beg);
+    if (!spoolReadFile) return {};
+
+    std::vector<float> out(safeCount);
+    spoolReadFile.read(reinterpret_cast<char*>(out.data()), safeCount * BYTES_PER_SAMPLE);
+    if (spoolReadFile.gcount() < safeCount * BYTES_PER_SAMPLE) {
+      // Partial read — return what we got
+      int samplesRead = (int)(spoolReadFile.gcount() / BYTES_PER_SAMPLE);
+      if (samplesRead <= 0) return {};
+      out.resize(samplesRead);
+    }
+    return out;
   }
 
   int64_t numSamples() const {
@@ -225,13 +286,15 @@ struct PaLiveEntry {
       @"numSamples": @((double)numSamples()),
       @"durationMs": @(durationMs()),
       @"totalSamplesWritten": @((double)totalSamplesWritten),
-      @"totalSamplesDropped": @((double)totalSamplesDropped),
+      @"ringEvictedSamples": @((double)totalSamplesDropped),
       @"hasActiveSpool": @(hasActiveSpool)
     };
   }
 #endif
 
-  void appendSamples(const float *data, size_t count, int inputRate, const std::string &source = kPaAppendSourceUnknown) {
+  void appendSamples(const float *data, size_t count, int inputRate,
+                     const std::string &source = kPaAppendSourceUnknown,
+                     bool backpressure = false) {
     std::vector<float> resampled;
     const float *toAppend = data;
     size_t appendCount = count;
@@ -239,6 +302,27 @@ struct PaLiveEntry {
       resampled = pa_resampleLinear(data, count, inputRate, sampleRate);
       toAppend = resampled.data();
       appendCount = resampled.size();
+    }
+
+    // Backpressure: wait until slowest cursor has room
+    if (backpressure) {
+      std::unique_lock<std::mutex> bpLock(backpressureMutex);
+      while (state == RECORDING) {
+        bool hasRoom = true;
+        {
+          std::lock_guard<std::mutex> cLock(cursorMutex);
+          if (!cursors.empty()) {
+            int64_t slowest = INT64_MAX;
+            for (auto &kv : cursors) {
+              slowest = std::min(slowest, kv.second.absoluteReadPos);
+            }
+            hasRoom = (totalSamplesWritten + (int64_t)appendCount - slowest) <= windowCapacity;
+          }
+        }
+        if (hasRoom) break;
+        backpressureCV.wait_for(bpLock, std::chrono::milliseconds(20));
+      }
+      if (state != RECORDING) return;
     }
 
     {
@@ -267,6 +351,11 @@ struct PaLiveEntry {
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
+  }
+
+  /** Called after cursor advancement to wake blocked producers. */
+  void notifyCursorAdvanced() {
+    backpressureCV.notify_all();
   }
 
   void configureAppendEvents(bool enabled, int minIntervalMs) {
@@ -367,6 +456,9 @@ struct PaLiveEntry {
 
     flushPendingFramesAppended();
 
+    // Wake any blocked producers (backpressure)
+    notifyCursorAdvanced();
+
     // Wake pipeline workers so they detect the FINISHED state immediately
     notifyAppendListeners();
   }
@@ -402,29 +494,136 @@ struct PaLiveEntry {
   int createCursorHandle() {
     std::lock_guard<std::mutex> cLock(cursorMutex);
     int id = nextCursorId++;
-    int64_t startPos = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+    // When spool is active, start from absolute 0 so cursor can read all data.
+    // Without spool, start from oldest sample in the ring (legacy behavior).
+    int64_t startPos = hasActiveSpool ? 0
+      : ((totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0);
     cursors[id] = { id, startPos };
     return id;
   }
 
   std::vector<float> drainCursor(int cursorId, int maxSamples) {
+    std::vector<float> result;
+    {
+      std::lock_guard<std::mutex> cLock(cursorMutex);
+      auto it = cursors.find(cursorId);
+      if (it == cursors.end()) return {};
+
+      int64_t readPos = it->second.absoluteReadPos;
+      int64_t written = totalSamplesWritten;
+      int64_t oldestInRing = (written > windowCapacity) ? written - windowCapacity : 0;
+
+      if (readPos >= oldestInRing) {
+        // Fast path: cursor is within ring — read from RAM under ring lock
+        std::lock_guard<std::mutex> lock(ringMutex);
+        // Re-check under lock
+        int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+        int64_t rp = std::max(readPos, oldestInRingLocked);
+        int available = (int)std::max((int64_t)0, totalSamplesWritten - rp);
+        if (available == 0) return {};
+        int count = std::min(maxSamples, available);
+        result.resize(count);
+        int ringOffset = (int)(rp % windowCapacity);
+        for (int i = 0; i < count; i++) {
+          result[i] = ring[(ringOffset + i) % windowCapacity];
+        }
+        it->second.absoluteReadPos = rp + count;
+      } else if (hasActiveSpool) {
+        // Slow path: cursor is behind ring — read from spool (no ring lock)
+        int available = (int)std::max((int64_t)0, written - readPos);
+        if (available == 0) return {};
+        int count = std::min(maxSamples, available);
+        // Clamp to what spool has committed
+        int64_t spoolEnd = std::min(spoolSamplesWritten, written);
+        int64_t safeEnd = std::min(readPos + count, spoolEnd);
+        int spoolCount = (int)std::max((int64_t)0, safeEnd - readPos);
+
+        if (spoolCount > 0) {
+          result = readFromSpool(readPos, spoolCount);
+          if (!result.empty()) {
+            it->second.absoluteReadPos = readPos + (int64_t)result.size();
+          } else {
+            throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
+          }
+        } else {
+          throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
+        }
+      } else {
+        // Ring-only buffer: snap forward (legacy behavior)
+        std::lock_guard<std::mutex> lock(ringMutex);
+        int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+        int available = (int)std::max((int64_t)0, totalSamplesWritten - oldestInRingLocked);
+        if (available == 0) return {};
+        int count = std::min(maxSamples, available);
+        result.resize(count);
+        int ringOffset = (int)(oldestInRingLocked % windowCapacity);
+        for (int i = 0; i < count; i++) {
+          result[i] = ring[(ringOffset + i) % windowCapacity];
+        }
+        it->second.absoluteReadPos = oldestInRingLocked + count;
+      }
+    } // release cursorMutex
+
+    if (!result.empty()) {
+      notifyCursorAdvanced();
+    }
+    return result;
+  }
+
+  std::vector<float> peekCursor(int cursorId, int maxSamples) {
     std::lock_guard<std::mutex> cLock(cursorMutex);
     auto it = cursors.find(cursorId);
     if (it == cursors.end()) return {};
 
-    std::lock_guard<std::mutex> lock(ringMutex);
-    int64_t oldestAvailable = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
-    int64_t readPos = std::max(it->second.absoluteReadPos, oldestAvailable);
-    int available = (int)std::max((int64_t)0, totalSamplesWritten - readPos);
-    if (available == 0) return {};
-    int count = std::min(maxSamples, available);
-    std::vector<float> out(count);
-    int ringOffset = (int)(readPos % windowCapacity);
-    for (int i = 0; i < count; i++) {
-      out[i] = ring[(ringOffset + i) % windowCapacity];
+    int64_t readPos = it->second.absoluteReadPos;
+    int64_t written = totalSamplesWritten;
+    int64_t oldestInRing = (written > windowCapacity) ? written - windowCapacity : 0;
+
+    if (readPos >= oldestInRing) {
+      std::lock_guard<std::mutex> lock(ringMutex);
+      int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+      int64_t rp = std::max(readPos, oldestInRingLocked);
+      int available = (int)std::max((int64_t)0, totalSamplesWritten - rp);
+      if (available == 0) return {};
+      int count = std::min(maxSamples, available);
+      std::vector<float> out(count);
+      int ringOffset = (int)(rp % windowCapacity);
+      for (int i = 0; i < count; i++) {
+        out[i] = ring[(ringOffset + i) % windowCapacity];
+      }
+      // No advance for peek
+      return out;
     }
-    it->second.absoluteReadPos = readPos + count;
-    return out;
+
+    if (hasActiveSpool) {
+      int available = (int)std::max((int64_t)0, written - readPos);
+      if (available == 0) return {};
+      int count = std::min(maxSamples, available);
+      int64_t spoolEnd = std::min(spoolSamplesWritten, written);
+      int64_t safeEnd = std::min(readPos + count, spoolEnd);
+      int spoolCount = (int)std::max((int64_t)0, safeEnd - readPos);
+      if (spoolCount > 0) {
+        auto out = readFromSpool(readPos, spoolCount);
+        if (!out.empty()) return out;
+      }
+      // Spool exists but read failed — lag error
+      throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
+    }
+
+    // Ring-only: snap forward (legacy)
+    {
+      std::lock_guard<std::mutex> lock(ringMutex);
+      int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+      int available = (int)std::max((int64_t)0, totalSamplesWritten - oldestInRingLocked);
+      if (available == 0) return {};
+      int count = std::min(maxSamples, available);
+      std::vector<float> out(count);
+      int ringOffset = (int)(oldestInRingLocked % windowCapacity);
+      for (int i = 0; i < count; i++) {
+        out[i] = ring[(ringOffset + i) % windowCapacity];
+      }
+      return out;
+    }
   }
 
   void releaseCursor(int cursorId) {
@@ -448,6 +647,11 @@ struct PaLiveEntry {
     if (state == RECORDING) finalize_();
     flushPendingFramesAppended();
     if (spoolFile.is_open()) spoolFile.close();
+    {
+      std::lock_guard<std::mutex> lock(spoolReadMutex);
+      if (spoolReadFile.is_open()) spoolReadFile.close();
+      spoolReadFileOpen = false;
+    }
     if (isTemporarySpool && !spoolPath.empty()) {
       std::remove(spoolPath.c_str());
     }
