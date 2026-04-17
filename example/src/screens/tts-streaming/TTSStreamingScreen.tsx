@@ -312,10 +312,7 @@ export default function TTSStreamingScreen() {
           },
         },
         segmentation: {
-          minCharsPerSegment: 12,
-          maxCharsPerSegment: 220,
-          maxWaitMs: 700,
-          debounceMs: 120,
+          // Use library defaults (see resolveSegmentationPolicy in segmenter.ts).
         },
         queue: {
           mode: 'fifo',
@@ -393,7 +390,6 @@ export default function TTSStreamingScreen() {
       const controller = controllerRef.current;
       const audioBuffer = audioBufferRef.current;
       if (controller && audioBuffer) {
-        controller.commit({ force: true });
         await controller.flush();
         await finalizeLiveAudioBuffer(audioBuffer.bufferId);
         await controller.pipeline.completed;
@@ -439,7 +435,7 @@ export default function TTSStreamingScreen() {
     if (nextText.length <= streamedInputLengthRef.current) {
       return;
     }
-    const delta = nextText.slice(streamedInputLengthRef.current).trim();
+    const delta = nextText.slice(streamedInputLengthRef.current);
     if (!delta) {
       streamedInputLengthRef.current = nextText.length;
       return;
