@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 struct StreamingPipelineStatus {
   bool isRunning = false;
@@ -36,3 +37,11 @@ public:
 // Global streaming pipeline registry
 extern std::unordered_map<std::string, std::shared_ptr<StreamingPipelineWorker>> g_streaming_pipelines;
 extern std::mutex g_streaming_pipeline_mutex;
+
+// Tracks explicit stop requests so terminal completion can distinguish
+// normal drain completion from user-requested stop.
+extern std::unordered_set<std::string> g_streaming_pipeline_stop_requests;
+extern std::mutex g_streaming_pipeline_stop_requests_mutex;
+
+void so_mark_streaming_pipeline_stop_requested(const std::string &pipelineId);
+bool so_take_streaming_pipeline_stop_requested(const std::string &pipelineId);

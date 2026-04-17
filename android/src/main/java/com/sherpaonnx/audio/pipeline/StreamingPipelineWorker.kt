@@ -10,6 +10,15 @@ data class StreamingPipelineStatus(
   val error: String? = null,
 )
 
+data class StreamingPipelineCompletion(
+  val pipelineId: String,
+  val reason: String,
+  val chunksProcessed: Long,
+  val unitsRead: Long,
+  val unitsWritten: Long,
+  val error: String? = null,
+)
+
 interface StreamingPipelineWorker {
   val pipelineId: String
   val isRunning: Boolean

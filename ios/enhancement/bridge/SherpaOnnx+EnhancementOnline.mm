@@ -3,6 +3,7 @@
 #include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../EnhancementPipelineWorker.h"
 #include "../sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
@@ -117,6 +118,7 @@
   }
 
   worker->start();
+  so_start_streaming_pipeline_completion_watcher(self, pid, worker);
 
   resolve(@{
     @"pipelineId": [NSString stringWithUTF8String:pid.c_str()],

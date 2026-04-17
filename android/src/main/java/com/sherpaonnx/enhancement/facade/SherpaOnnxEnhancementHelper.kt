@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserConfig
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
@@ -11,6 +12,7 @@ import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiserConfig
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.enhancement.core.EnhancementErrorCodes
@@ -344,7 +346,9 @@ internal class SherpaOnnxEnhancementHelper(
 
     try {
       val worker = EnhancementPipelineWorker(denoiser, inputEntry, outputEntry)
-      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker)
+      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) {
+        completion -> emitPipelineCompletedEvent(completion)
+      }
 
       val out = Arguments.createMap()
       out.putString("pipelineId", pipelineId)
@@ -361,5 +365,28 @@ internal class SherpaOnnxEnhancementHelper(
   fun unloadOnline(instanceId: String, promise: Promise) {
     onlineInstances.remove(instanceId)?.release()
     promise.resolve(null)
+  }
+
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
+    }
   }
 }

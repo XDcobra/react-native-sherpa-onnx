@@ -30,6 +30,7 @@
         worker = it->second;
         g_streaming_pipelines.erase(it);
     }
+    so_mark_streaming_pipeline_stop_requested(pid);
     worker->stop();
     resolve(nil);
 }

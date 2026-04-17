@@ -2,6 +2,7 @@
 #include "engine/TtsEngineStore.h"
 #include "pipeline/TtsPipelineWorker.h"
 #include "options/TtsGenerationOptionsHelpers.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
@@ -211,6 +212,7 @@ static std::mutex g_tts_pipeline_mutex;
             g_streaming_pipelines[worker->pipelineId] = worker;
         }
         worker->start();
+        so_start_streaming_pipeline_completion_watcher(self, worker->pipelineId, worker);
 
         {
             std::lock_guard<std::mutex> tpLock(g_tts_pipeline_mutex);
