@@ -1281,6 +1281,12 @@ static std::string pa_encodeViaDecodeFile(
 {
   std::string liveBufId = [liveBufferId UTF8String];
   std::string opId = [operationId UTF8String];
+  std::string backpressureMode = backpressure ? [backpressure UTF8String] : "block";
+  if (backpressureMode != "block" && backpressureMode != "none") {
+    reject(kPAErrInvalidArgument, @"backpressure must be 'block' or 'none'", nil);
+    return;
+  }
+  const bool useBackpressure = (backpressureMode == "block");
 
   // Validate live buffer
   auto liveEntry = pa_get_live_entry(liveBufId);
@@ -1529,9 +1535,3 @@ static std::string pa_encodeViaDecodeFile(
 #endif
 
 @end
-  std::string backpressureMode = backpressure ? [backpressure UTF8String] : "block";
-  if (backpressureMode != "block" && backpressureMode != "none") {
-    reject(kPAErrInvalidArgument, @"backpressure must be 'block' or 'none'", nil);
-    return;
-  }
-  const bool useBackpressure = (backpressureMode == "block");

@@ -1291,7 +1291,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             "auto" -> com.sherpaonnx.audio.pipeline.RetentionMode.AUTO
             "maxSeconds" -> com.sherpaonnx.audio.pipeline.RetentionMode.MAX_SECONDS
             "session" -> com.sherpaonnx.audio.pipeline.RetentionMode.SESSION
-            else -> throw IllegalArgumentException("Unknown retentionTrim '$trimStr'")
+            else -> throw IllegalArgumentException("Unknown retentionTrim '$trimStr'. Valid values are: 'auto', 'maxSeconds', 'session'.")
           }
           val trimMaxSeconds = if (trimStr == "maxSeconds" && options.hasKey("retentionTrimMaxSeconds") && !options.isNull("retentionTrimMaxSeconds"))
             options.getDouble("retentionTrimMaxSeconds") else 0.0
