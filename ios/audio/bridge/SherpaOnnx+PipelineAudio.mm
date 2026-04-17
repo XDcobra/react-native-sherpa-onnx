@@ -768,18 +768,38 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     if (retentionMode == "none") {
       // No spool
       spoolPath = "";
-    } else if (retentionMode == "path") {
-      spoolPath = retentionPath;
-    } else {
-      // auto, session, maxSeconds: use temp file
+    } else if (retentionMode == "auto" || retentionMode == "session" || retentionMode == "maxSeconds") {
+      if (retentionMode == "maxSeconds" && retentionSec <= 0) {
+        reject(kPAErrInvalidArgument, @"retention.mode 'maxSeconds' requires seconds > 0", nil);
+        return;
+      }
+      // NOTE: Native trim enforcement for auto/maxSeconds is not implemented yet.
+      // These modes currently keep session-long spool data.
       if (!retentionPath.empty()) {
         spoolPath = retentionPath;
       } else {
         NSString *tmpDir = NSTemporaryDirectory();
-        NSString *tmpFile = [NSString stringWithFormat:@"live_spool_%llu.wav", (unsigned long long)CFAbsoluteTimeGetCurrent() * 1000];
+        NSString *tmpFile = [NSString stringWithFormat:@"live_spool_%llu.wav", (unsigned long long)(CFAbsoluteTimeGetCurrent() * 1000.0)];
         spoolPath = [[tmpDir stringByAppendingPathComponent:tmpFile] UTF8String];
       }
       isTemporary = (retentionMode != "path");
+    } else if (retentionMode == "path") {
+      spoolPath = retentionPath;
+      NSString *retentionTrimNS = options.retentionTrim();
+      std::string retentionTrim = retentionTrimNS ? [retentionTrimNS UTF8String] : "session";
+      if (retentionTrim == "maxSeconds") {
+        double trimMaxSec = options.retentionTrimMaxSeconds().has_value() ? options.retentionTrimMaxSeconds().value() : 0.0;
+        if (trimMaxSec <= 0) {
+          reject(kPAErrInvalidArgument, @"retention.trim.maxSeconds must be > 0", nil);
+          return;
+        }
+      } else if (retentionTrim != "auto" && retentionTrim != "session") {
+        reject(kPAErrInvalidArgument, @"retention.trim must be 'auto', 'session', or {maxSeconds}", nil);
+        return;
+      }
+    } else {
+      reject(kPAErrInvalidArgument, [NSString stringWithFormat:@"Unknown retentionMode '%@'", retentionModeNS ?: @"(null)"], nil);
+      return;
     }
 
     bool emitAppendedEvents = options.emitAppendedEvents().has_value() ? options.emitAppendedEvents().value() : false;
@@ -1252,11 +1272,12 @@ static std::string pa_encodeViaDecodeFile(
 - (void)startFileIngestToLiveBuffer:(NSString *)liveBufferId
                              source:(NSDictionary *)source
                    targetSampleRateHz:(double)targetSampleRateHz
-                          forceMono:(BOOL)forceMono
-                       autoFinalize:(BOOL)autoFinalize
-                        operationId:(NSString *)operationId
-                            resolve:(RCTPromiseResolveBlock)resolve
-                             reject:(RCTPromiseRejectBlock)reject
+                           forceMono:(BOOL)forceMono
+                        autoFinalize:(BOOL)autoFinalize
+                         backpressure:(NSString *)backpressure
+                         operationId:(NSString *)operationId
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
 {
   std::string liveBufId = [liveBufferId UTF8String];
   std::string opId = [operationId UTF8String];
@@ -1347,8 +1368,8 @@ static std::string pa_encodeViaDecodeFile(
       config.forceMono = forceMono;
       config.chunkSize = 8192;
 
-      auto onChunk = [&liveEntry, &status](const float *samples, int count) {
-        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest, /*backpressure=*/true);
+      auto onChunk = [&liveEntry, &status, useBackpressure](const float *samples, int count) {
+        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest, useBackpressure);
         status->framesIngested += count;
       };
 
@@ -1508,3 +1529,9 @@ static std::string pa_encodeViaDecodeFile(
 #endif
 
 @end
+  std::string backpressureMode = backpressure ? [backpressure UTF8String] : "block";
+  if (backpressureMode != "block" && backpressureMode != "none") {
+    reject(kPAErrInvalidArgument, @"backpressure must be 'block' or 'none'", nil);
+    return;
+  }
+  const bool useBackpressure = (backpressureMode == "block");

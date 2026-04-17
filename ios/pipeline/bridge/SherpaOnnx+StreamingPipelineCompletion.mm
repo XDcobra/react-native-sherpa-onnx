@@ -66,5 +66,14 @@ void so_start_streaming_pipeline_completion_watcher(
 
       [strongModule sendEventWithName:@"streamingPipelineCompleted" body:payload];
     });
+
+    {
+      std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+      auto it = g_streaming_pipelines.find(pipelineId);
+      if (it != g_streaming_pipelines.end() && it->second.get() == worker.get()) {
+        g_streaming_pipelines.erase(it);
+      }
+    }
+    worker->release();
   }).detach();
 }

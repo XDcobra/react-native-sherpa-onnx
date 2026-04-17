@@ -175,10 +175,10 @@ export interface LiveAudioBufferCallbacks {
 /**
  * Controls on-disk retention of appended samples.
  *
- * - 'auto' (default): spool exists; trimmed to max(ringSeconds, slowest cursor lag).
+ * - 'auto' (default): spool exists for the session (native trim enforcement not implemented yet).
  * - 'session': spool retains every sample until buffer release.
  * - 'none': no spool; ring-only; lossless only if consumer never lags.
- * - { mode: 'maxSeconds', seconds, path? }: spool retains up to N seconds.
+ * - { mode: 'maxSeconds', seconds, path? }: currently accepted but not trimmed yet; behaves like session retention.
  * - { mode: 'path', path, trim? }: explicit persistence path.
  */
 export type LiveBufferRetention =

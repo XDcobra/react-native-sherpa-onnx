@@ -990,6 +990,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     targetSampleRateHz: Double,
     forceMono: Boolean,
     autoFinalize: Boolean,
+    backpressure: String,
     operationId: String,
     promise: Promise
   ) {
@@ -1008,6 +1009,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
       promise.reject("AUDIO_INVALID_STATE", "Live buffer must be in RECORDING state for file ingest")
       return
+    }
+    val useBackpressure = when (backpressure) {
+      "block" -> true
+      "none" -> false
+      else -> {
+        promise.reject(
+          com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT,
+          "backpressure must be 'block' or 'none'"
+        )
+        return
+      }
     }
 
     // Ensure spool is active — create a temporary one if the buffer was created without persistencePath
@@ -1075,7 +1087,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         // Streaming decode: chunks are appended to live buffer as they arrive
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
-            liveEntry.appendSamples(samples, liveEntry.sampleRate, com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST, backpressure = true)
+            liveEntry.appendSamples(samples, liveEntry.sampleRate, com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST, backpressure = useBackpressure)
             status.framesIngested += frameCount
           }
         }
@@ -1239,7 +1251,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val persistence: com.sherpaonnx.audio.pipeline.PersistenceConfig? = when (retentionModeStr) {
         "none" -> null
         "auto" -> {
-          // Auto: use temp file path, retention auto-trimmed
+          // Auto currently keeps session-long spool data (trim enforcement not implemented yet).
           val tempDir = reactApplicationContext.cacheDir
           val tempPath = java.io.File(tempDir, "live_spool_${System.currentTimeMillis()}.wav").absolutePath
           com.sherpaonnx.audio.pipeline.PersistenceConfig(
@@ -1258,6 +1270,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           )
         }
         "maxSeconds" -> {
+          if (retentionSeconds <= 0.0) {
+            throw IllegalArgumentException("retention mode 'maxSeconds' requires retentionSeconds > 0")
+          }
           val path = retentionPath ?: run {
             val tempDir = reactApplicationContext.cacheDir
             java.io.File(tempDir, "live_spool_${System.currentTimeMillis()}.wav").absolutePath
@@ -1275,17 +1290,21 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           val mode = when (trimStr) {
             "auto" -> com.sherpaonnx.audio.pipeline.RetentionMode.AUTO
             "maxSeconds" -> com.sherpaonnx.audio.pipeline.RetentionMode.MAX_SECONDS
-            else -> com.sherpaonnx.audio.pipeline.RetentionMode.SESSION
+            "session" -> com.sherpaonnx.audio.pipeline.RetentionMode.SESSION
+            else -> throw IllegalArgumentException("Unknown retentionTrim '$trimStr'")
           }
           val trimMaxSeconds = if (trimStr == "maxSeconds" && options.hasKey("retentionTrimMaxSeconds") && !options.isNull("retentionTrimMaxSeconds"))
             options.getDouble("retentionTrimMaxSeconds") else 0.0
+          if (trimStr == "maxSeconds" && trimMaxSeconds <= 0.0) {
+            throw IllegalArgumentException("retentionTrim 'maxSeconds' requires retentionTrimMaxSeconds > 0")
+          }
           com.sherpaonnx.audio.pipeline.PersistenceConfig(
             filePath = path,
             retentionMode = mode,
             retentionSeconds = trimMaxSeconds,
           )
         }
-        else -> null
+        else -> throw IllegalArgumentException("Unknown retentionMode '$retentionModeStr'")
       }
 
       val isTemporary = retentionModeStr != "path" && persistence != null

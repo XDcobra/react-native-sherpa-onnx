@@ -552,7 +552,7 @@ class LiveEntry(
     // snap-forward is the legacy behavior.
     if (spoolReader != null) {
       throw CursorLagExceededException(
-        "Cursor at position $readPos has fallen behind retained data (oldest in ring: $oldestInRing). " +
+        "AUDIO_CURSOR_LAG_EXCEEDED: Cursor at position $readPos has fallen behind retained data (oldest in ring: $oldestInRing). " +
         "Spool read failed or data was trimmed beyond cursor position."
       )
     }

@@ -255,7 +255,8 @@ export interface Spec extends TurboModule {
    * @param options.sampleRate - Sample rate in Hz.
    * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.retentionMode - Retention mode: 'auto' | 'session' | 'maxSeconds' | 'path' | 'none'.
-   * @param options.retentionSeconds - Retention seconds for 'maxSeconds' mode.
+   *                                  ('auto'/'maxSeconds' currently do not enforce trim yet.)
+   * @param options.retentionSeconds - Retention seconds for 'maxSeconds' mode (validated when provided).
    * @param options.retentionPath - Explicit path for spool file.
    * @param options.emitAppendedEvents - If true, emit pipelineLiveAudioChunk when new frames are appended (all producers).
    * @param options.appendEventMinIntervalMs - Optional append-event throttle/coalesce interval in ms (default: 0).
@@ -355,6 +356,7 @@ export interface Spec extends TurboModule {
     targetSampleRateHz: number,
     forceMono: boolean,
     autoFinalize: boolean,
+    backpressure: string,
     operationId: string
   ): Promise<{ ingestId: string }>;
 

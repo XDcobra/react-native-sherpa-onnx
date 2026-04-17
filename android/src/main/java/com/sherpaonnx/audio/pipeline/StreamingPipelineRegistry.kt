@@ -61,7 +61,11 @@ object StreamingPipelineRegistry {
         error = status.error,
       )
 
-      completionCallbacks.remove(worker.pipelineId)?.invoke(completion)
+      try {
+        completionCallbacks.remove(worker.pipelineId)?.invoke(completion)
+      } finally {
+        remove(worker.pipelineId)
+      }
     }
   }
 

@@ -242,13 +242,24 @@ struct PaLiveEntry {
       if (!spoolReadFileOpen) return {};
     }
 
-    // Clamp to committed range
-    int64_t safeEnd = std::min(absolutePos + count, spoolSamplesWritten);
+    const int64_t WAV_HEADER_SIZE = 44;
+    const int BYTES_PER_SAMPLE = 4;
+    spoolReadFile.clear(); // clear any eof/fail bits
+    spoolReadFile.seekg(0, std::ios::end);
+    if (!spoolReadFile) return {};
+
+    std::streamoff fileSize = spoolReadFile.tellg();
+    if (fileSize < WAV_HEADER_SIZE) return {};
+
+    int64_t availableSamplesOnDisk =
+        (static_cast<int64_t>(fileSize) - WAV_HEADER_SIZE) / BYTES_PER_SAMPLE;
+    int64_t committedSamples = std::min(spoolSamplesWritten, availableSamplesOnDisk);
+
+    // Clamp to samples that are both logically written and actually readable on disk.
+    int64_t safeEnd = std::min(absolutePos + (int64_t)count, committedSamples);
     int safeCount = (int)std::max((int64_t)0, safeEnd - absolutePos);
     if (safeCount <= 0) return {};
 
-    const int64_t WAV_HEADER_SIZE = 44;
-    const int BYTES_PER_SAMPLE = 4;
     int64_t byteOffset = WAV_HEADER_SIZE + absolutePos * BYTES_PER_SAMPLE;
 
     spoolReadFile.clear(); // clear any eof/fail bits

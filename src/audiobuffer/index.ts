@@ -679,6 +679,7 @@ export async function ingestFileToLiveAudioBuffer(
   const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
   const forceMono = options?.forceMono ?? true;
   const autoFinalize = options?.autoFinalize ?? false;
+  const backpressure = options?.backpressure ?? 'block';
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;
@@ -723,6 +724,7 @@ export async function ingestFileToLiveAudioBuffer(
     targetSampleRateHz,
     forceMono,
     autoFinalize,
+    backpressure,
     operationId
   );
 
