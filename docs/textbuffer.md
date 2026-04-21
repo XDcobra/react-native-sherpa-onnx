@@ -16,7 +16,7 @@ For offline transcription writing into text buffers, see [stt-offline.md](stt-of
 | Kind | Meaning |
 | --- | --- |
 | **Offline text buffer** | Immutable text snapshot with optional tokens/timestamps/durations/lang/emotion/event metadata. |
-| **Live text buffer** | Incremental partial text stream with revision counter and optional partial/error callbacks. |
+| **Live text buffer** | Incremental partial text stream with revision counter, segment log, and optional file-backed text spool (`spool` info in `LiveTextBufferInfo`). |
 
 Typical flow for offline STT:
 
@@ -122,6 +122,12 @@ await releasePipelineTextBuffer(out);
 await releasePipelineTextBuffer(live);
 ```
 
+Release guarantees:
+
+- Live spool handles are closed on `releasePipelineTextBuffer(...)`.
+- Temporary spool files are deleted best-effort on release.
+- Module teardown releases all live text buffers and cleans temporary spool files.
+
 ### Offline buffer
 
 #### `createEmptyOfflineTextBuffer()`
@@ -147,6 +153,13 @@ function createOfflineTextBufferFromLive(
 ```ts
 const snapshot = await createOfflineTextBufferFromLive(live, 'fullIfSpooled');
 ```
+
+`mode` semantics are strict:
+
+- `windowSnapshot`: always returns the current in-memory window (`currentText`).
+- `fullIfSpooled`: returns full text only from the live spool.
+  If spool is disabled/unavailable/not ready, native rejects with one of:
+  `TEXT_SPOOL_UNAVAILABLE`, `TEXT_SPOOL_WRITE_FAILED`, `TEXT_SPOOL_READ_FAILED`, `TEXT_SPOOL_CORRUPTED`.
 
 #### `getOfflineTextBufferTextSlice(buffer, startUtf16, maxUtf16)`
 
@@ -233,11 +246,24 @@ function createLiveTextBuffer(
 
 ```ts
 const live = await createLiveTextBuffer({
+  spooling: { mode: 'on' },
   emitPartialEvents: true,
   onPartial: (e) => console.log(e.partialText),
   onError: (e) => console.warn(e.message),
 });
+
+const info = await getPipelineTextBufferInfo(live);
+if (info.kind === 'liveTextBuffer') {
+  console.log(info.spool.mode, info.spool.ready, info.spool.bytes);
+}
 ```
+
+`createLiveTextBuffer` accepts optional spooling config:
+
+- `spooling.mode`: `'off' | 'auto' | 'on'` (default: `'on'`)
+- `spooling.path`: explicit spool path
+- `spooling.temporary`: delete spool on release (default true for auto temp path)
+- `spooling.thresholdBytes`: activation threshold for `mode: 'auto'`
 
 #### `createLiveTextBufferFromOffline(offlineBuffer)`
 
