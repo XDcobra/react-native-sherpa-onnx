@@ -35,6 +35,8 @@ import type {
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
   LiveTextSegment,
+  TextBufferSpoolingMode,
+  LiveTextBufferSpoolInfo,
 } from './types';
 
 const getNative = (): Spec =>
@@ -42,6 +44,32 @@ const getNative = (): Spec =>
 
 const TEXT_BUFFER_ID_PATTERN =
   /^(txt_off|txt_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function normalizeSpoolingMode(value: unknown): TextBufferSpoolingMode {
+  if (value === 'off' || value === 'auto' || value === 'on') {
+    return value;
+  }
+  return 'off';
+}
+
+function mapLiveTextSpoolInfo(raw: {
+  spoolMode?: string;
+  spoolEnabled?: boolean;
+  spoolReady?: boolean;
+  spoolBytes?: number;
+  spoolPath?: string;
+}): LiveTextBufferSpoolInfo {
+  const mode = normalizeSpoolingMode(raw.spoolMode);
+  return {
+    mode,
+    enabled: raw.spoolEnabled ?? mode !== 'off',
+    ready: raw.spoolReady ?? false,
+    bytes: raw.spoolBytes ?? 0,
+    ...(typeof raw.spoolPath === 'string' && raw.spoolPath.length > 0
+      ? { path: raw.spoolPath }
+      : {}),
+  };
+}
 
 function createInvalidTextBufferIdError(
   sourceName: string,
@@ -335,6 +363,10 @@ export async function createLiveTextBuffer(
   const raw = await getNative().createLiveTextBuffer({
     windowMaxChars: options.windowMaxChars,
     maxSegments: options.maxSegments,
+    spoolingMode: options.spooling?.mode,
+    spoolingPath: options.spooling?.path,
+    spoolingTemporary: options.spooling?.temporary,
+    spoolingThresholdBytes: options.spooling?.thresholdBytes,
     emitPartialEvents: options.emitPartialEvents,
     partialEventMinIntervalMs: options.partialEventMinIntervalMs,
   });
@@ -348,6 +380,7 @@ export async function createLiveTextBuffer(
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
     segmentCount: raw.segmentCount ?? 0,
+    spool: mapLiveTextSpoolInfo(raw),
   };
 
   const unsubscribeEvents = registerLiveTextCallbacks(liveBufferId, {
@@ -380,6 +413,7 @@ export async function createLiveTextBufferFromOffline(
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
     segmentCount: raw.segmentCount ?? 0,
+    spool: mapLiveTextSpoolInfo(raw),
   };
 
   return {
@@ -419,6 +453,7 @@ export async function getPipelineTextBufferInfo(
       totalCharsWritten: raw.totalCharsWritten ?? 0,
       revision: raw.revision ?? 0,
       segmentCount: raw.segmentCount ?? 0,
+      spool: mapLiveTextSpoolInfo(raw),
     } as LiveTextBufferInfo;
   }
 
@@ -623,6 +658,9 @@ export type {
   OfflineTextBufferState,
   LiveTextBufferState,
   PipelineTextBufferKind,
+  TextBufferSpoolingMode,
+  TextBufferSpoolingOptions,
+  LiveTextBufferSpoolInfo,
   LiveTextBufferPartialSource,
   LiveTextSegment,
   LiveTextBufferPartialEvent,

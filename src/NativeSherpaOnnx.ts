@@ -439,6 +439,10 @@ export interface Spec extends TurboModule {
   createLiveTextBuffer(options: {
     windowMaxChars?: number;
     maxSegments?: number;
+    spoolingMode?: string;
+    spoolingPath?: string;
+    spoolingTemporary?: boolean;
+    spoolingThresholdBytes?: number;
     emitPartialEvents?: boolean;
     partialEventMinIntervalMs?: number;
   }): Promise<{
@@ -448,6 +452,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten: number;
     revision: number;
     segmentCount: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
@@ -460,6 +469,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten: number;
     revision: number;
     segmentCount: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
@@ -484,6 +498,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten?: number;
     revision?: number;
     segmentCount?: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
