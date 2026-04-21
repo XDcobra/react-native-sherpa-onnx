@@ -603,6 +603,118 @@ export interface Spec extends TurboModule {
   /** Return number of committed segments currently retained in the live segment log. */
   getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
 
+  // ==================== Pipeline Segment Buffers ====================
+
+  createLiveSegmentBuffer(options: {
+    sourceAudioBufferId?: string;
+    maxSegments?: number;
+    spoolingMode?: string;
+    spoolingPath?: string;
+    spoolingTemporary?: boolean;
+    spoolingThresholdBytes?: number;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    totalSegmentsWritten?: number;
+    sourceAudioBufferId?: string;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
+  }>;
+
+  createEmptyOfflineSegmentBuffer(options?: {
+    sourceAudioBufferId?: string;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+  }>;
+
+  appendLiveSegment(
+    liveBufferId: string,
+    kind: string,
+    sourceAudioBufferId: string,
+    startSample: number,
+    endSample: number,
+    sampleRate: number,
+    durationMs?: number,
+    confidence?: number,
+    payload?: Object
+  ): Promise<{ segmentId: string; segmentIndex: number }>;
+
+  finalizeLiveSegmentBuffer(liveBufferId: string): Promise<void>;
+
+  createOfflineSegmentBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+  }>;
+
+  getPipelineSegmentBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    totalSegmentsWritten?: number;
+    sourceAudioBufferId?: string;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
+  }>;
+
+  getOfflineSegmentBufferSegments(
+    bufferId: string,
+    start?: number,
+    maxCount?: number
+  ): Promise<{
+    segments: Array<{
+      id: string;
+      kind: string;
+      sourceAudioBufferId: string;
+      startSample: number;
+      endSample: number;
+      sampleRate: number;
+      durationMs: number;
+      confidence?: number;
+      payload?: Object;
+    }>;
+  }>;
+
+  getLiveSegmentBufferSegments(
+    liveBufferId: string,
+    startIndex: number,
+    maxCount: number
+  ): Promise<{
+    segments: Array<{
+      id: string;
+      kind: string;
+      sourceAudioBufferId: string;
+      startSample: number;
+      endSample: number;
+      sampleRate: number;
+      durationMs: number;
+      confidence?: number;
+      payload?: Object;
+    }>;
+  }>;
+
+  getLiveSegmentBufferSegmentCount(liveBufferId: string): Promise<number>;
+
+  releasePipelineSegmentBuffer(bufferId: string): Promise<void>;
+
   // ==================== TTS Methods ====================
 
   /**
