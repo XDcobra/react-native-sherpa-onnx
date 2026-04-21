@@ -204,11 +204,15 @@ const windowOnly = await createOfflineTextBufferFromLive(live, 'windowSnapshot')
 
 ## Error code quick table
 
+The following codes are the relevant runtime outcomes for offline text-buffer reads and live-to-offline conversion in this document.
+
 | Code | Meaning |
 | --- | --- |
 | `TEXT_BUFFER_NOT_FOUND` | Referenced text buffer id does not exist |
 | `TEXT_BUFFER_KIND_MISMATCH` | Buffer kind does not match called API (offline vs live) |
 | `TEXT_INVALID_ARGUMENT` | Invalid argument or malformed buffer id |
+| `TEXT_INVALID_STATE` | Operation is not allowed in the current buffer state |
+| `TEXT_ALREADY_FINALIZED` | A recording-only operation was called on a finished live buffer during conversion flows |
 | `TEXT_SLICE_INVALID` | Slice range is invalid (e.g. negative or out of bounds) |
 | `TEXT_SLICE_TOO_LARGE` | Requested slice exceeds native safety limits |
 | `TEXT_SPOOL_UNAVAILABLE` | `fullIfSpooled` requested but spool is disabled/unavailable |

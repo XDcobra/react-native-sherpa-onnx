@@ -270,12 +270,17 @@ Strict mode semantics:
 
 ## Error code quick table
 
+The following codes are the relevant runtime outcomes for live/streaming text-buffer operations in this document (`create`, `append`, `finalize`, `slice`, `createOfflineFromLive`, `release`).
+
 | Code | Meaning |
 | --- | --- |
 | `TEXT_BUFFER_NOT_FOUND` | Referenced text buffer id does not exist |
 | `TEXT_BUFFER_KIND_MISMATCH` | Buffer kind does not match called API (offline vs live) |
 | `TEXT_INVALID_ARGUMENT` | Invalid argument or malformed buffer id |
+| `TEXT_INVALID_STATE` | Operation is not allowed in the current buffer state |
 | `TEXT_ALREADY_FINALIZED` | Operation requires `recording` buffer but live buffer is already finished |
+| `TEXT_SLICE_INVALID` | Live partial/segment slice range is invalid |
+| `TEXT_SLICE_TOO_LARGE` | Requested live slice exceeds native safety limits |
 | `TEXT_SPOOL_UNAVAILABLE` | Spool-required operation requested but spool is disabled/unavailable |
 | `TEXT_SPOOL_WRITE_FAILED` | Writing to live text spool failed |
 | `TEXT_SPOOL_READ_FAILED` | Reading live text spool failed |

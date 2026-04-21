@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.CRC32
 
 /**
  * A committed text segment in the segment log.
@@ -70,6 +71,18 @@ class LiveTextEntry(
   private val spoolTemporary: Boolean = true,
   private val spoolThresholdBytes: Long = 0,
 ) {
+  companion object {
+    private const val TEXT_SPOOL_MAGIC = 0x32545854 // TXT2
+    private const val TEXT_SPOOL_VERSION = 2
+    private const val TEXT_SPOOL_HEADER_BYTES = 16
+    private const val TEXT_SPOOL_PARTIAL_SET = 1
+    private const val TEXT_SPOOL_PARTIAL_APPEND = 2
+    private const val TEXT_SPOOL_SEGMENT_COMMIT = 3
+    private const val TEXT_SPOOL_CHECKPOINT = 4
+    private const val TEXT_SPOOL_FINALIZE = 5
+    private const val TEXT_SPOOL_CHECKPOINT_EVERY_EVENTS = 128
+    private const val TEXT_SPOOL_CHECKPOINT_EVERY_BYTES = 1_048_576L
+  }
   enum class State { RECORDING, FINISHED }
 
   @Volatile
@@ -122,11 +135,18 @@ class LiveTextEntry(
   private var spoolFailureCode: String? = null
   @Volatile
   private var spoolFailureMessage: String? = null
+  @Volatile
+  private var journalEventCount: Int = 0
+  @Volatile
+  private var journalBytesSinceCheckpoint: Long = 0
 
   init {
     if (spoolingEnabled() && spoolingMode == TextSpoolingMode.ON) {
       val initialSnapshot = snapshotFullTextForSpool()
-      writeSnapshotToSpoolOrThrow(initialSnapshot, mayActivateAuto = false)
+      writeTextSpoolOrThrow(
+        mayActivateAuto = false,
+        checkpointPayload = buildCheckpointPayload(initialSnapshot)
+      )
     }
   }
 
@@ -153,12 +173,77 @@ class LiveTextEntry(
     throw TextPipelineException(code, message, cause)
   }
 
+  private fun journalPath(): String? = spoolPath?.let { "$it.txtj" }
+  private fun checkpointPath(): String? = spoolPath?.let { "$it.txtc" }
+
+  private fun buildCheckpointPayload(fullText: String): String {
+    val escaped = fullText.replace("\\", "\\\\").replace("\"", "\\\"")
+    return """{"fullText":"$escaped","totalCharsWritten":$totalCharsWritten,"revision":$revision}"""
+  }
+
+  private fun extractCheckpointText(payload: String): String {
+    val marker = """"fullText":""""
+    val idx = payload.indexOf(marker)
+    if (idx < 0) return ""
+    val start = payload.indexOf('"', idx + marker.length)
+    if (start < 0) return ""
+    val end = payload.indexOf('"', start + 1)
+    if (end < 0) return ""
+    return payload.substring(start + 1, end).replace("\\\"", "\"").replace("\\\\", "\\")
+  }
+
+  private fun appendSpoolRecordLocked(writer: TextSpoolWriter, recordType: Int, payload: String): Long {
+    val payloadBytes = payload.toByteArray(StandardCharsets.UTF_8)
+    val checksum = CRC32().apply { update(payloadBytes) }.value.toInt()
+    val header = ByteBuffer
+      .allocate(TEXT_SPOOL_HEADER_BYTES)
+      .order(ByteOrder.LITTLE_ENDIAN)
+      .putInt(TEXT_SPOOL_MAGIC)
+      .putShort(TEXT_SPOOL_VERSION.toShort())
+      .putShort(recordType.toShort())
+      .putInt(payloadBytes.size)
+      .putInt(checksum)
+      .array()
+    writer.appendRawRecord(header, payloadBytes)
+    return (header.size + payloadBytes.size).toLong()
+  }
+
+  private fun writeCheckpointFile(checkpointPath: String, payload: String) {
+    val tmpPath = "$checkpointPath.tmp"
+    val tmpFile = RandomAccessFile(tmpPath, "rw")
+    tmpFile.use { raf ->
+      raf.setLength(0L)
+      val payloadBytes = payload.toByteArray(StandardCharsets.UTF_8)
+      val checksum = CRC32().apply { update(payloadBytes) }.value.toInt()
+      val header = ByteBuffer
+        .allocate(TEXT_SPOOL_HEADER_BYTES)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(TEXT_SPOOL_MAGIC)
+        .putShort(TEXT_SPOOL_VERSION.toShort())
+        .putShort(TEXT_SPOOL_CHECKPOINT.toShort())
+        .putInt(payloadBytes.size)
+        .putInt(checksum)
+        .array()
+      raf.write(header)
+      raf.write(payloadBytes)
+      raf.fd.sync()
+    }
+    val target = File(checkpointPath)
+    if (target.exists() && !target.delete()) {
+      throw TextPipelineException(TextErrorCodes.SPOOL_WRITE_FAILED, "Failed to replace text checkpoint: $checkpointPath")
+    }
+    if (!File(tmpPath).renameTo(target)) {
+      throw TextPipelineException(TextErrorCodes.SPOOL_WRITE_FAILED, "Failed to finalize text checkpoint: $checkpointPath")
+    }
+  }
+
   private fun ensureSpoolWriterActivatedLocked(bootstrapSnapshot: String) {
     if (spoolWriter != null) return
-    val resolvedPath = spoolPath ?: markSpoolFailureAndThrow(
+    val basePath = spoolPath ?: markSpoolFailureAndThrow(
       TextErrorCodes.SPOOL_UNAVAILABLE,
       "Text spool path is not configured for live buffer: $bufferId"
     )
+    val resolvedPath = "$basePath.txtj"
 
     val writer = try {
       TextSpoolWriter(resolvedPath)
@@ -171,7 +256,12 @@ class LiveTextEntry(
     }
 
     try {
-      writer.appendSnapshot(bootstrapSnapshot)
+      val cpPath = checkpointPath()
+        ?: markSpoolFailureAndThrow(TextErrorCodes.SPOOL_UNAVAILABLE, "Text checkpoint path missing for $bufferId")
+      writeCheckpointFile(cpPath, buildCheckpointPayload(bootstrapSnapshot))
+      appendSpoolRecordLocked(writer, TEXT_SPOOL_CHECKPOINT, "{}")
+      journalEventCount = 0
+      journalBytesSinceCheckpoint = 0L
     } catch (e: Exception) {
       try {
         writer.release()
@@ -190,7 +280,12 @@ class LiveTextEntry(
     spoolBytes = writer.bytesWritten
   }
 
-  private fun writeSnapshotToSpoolOrThrow(snapshot: String, mayActivateAuto: Boolean) {
+  private fun writeTextSpoolOrThrow(
+    mayActivateAuto: Boolean,
+    recordType: Int? = null,
+    recordPayload: String? = null,
+    checkpointPayload: String? = null,
+  ) {
     if (!spoolingEnabled()) return
 
     val existingFailureCode = spoolFailureCode
@@ -207,26 +302,43 @@ class LiveTextEntry(
         when (spoolingMode) {
           TextSpoolingMode.OFF -> return
           TextSpoolingMode.ON -> {
-            ensureSpoolWriterActivatedLocked(snapshot)
+            ensureSpoolWriterActivatedLocked(snapshotFullTextForSpool())
             return
           }
           TextSpoolingMode.AUTO -> {
             if (!mayActivateAuto) return
             val estimatedRecordBytes =
-              TextSpoolWriter.RECORD_HEADER_BYTES + snapshot.toByteArray(StandardCharsets.UTF_8).size
+              TEXT_SPOOL_HEADER_BYTES + snapshotFullTextForSpool().toByteArray(StandardCharsets.UTF_8).size
             spoolEstimatedBytes += estimatedRecordBytes.toLong()
             if (spoolEstimatedBytes < spoolThresholdBytes.coerceAtLeast(0L)) {
               spoolReady = false
               return
             }
-            ensureSpoolWriterActivatedLocked(snapshot)
+            ensureSpoolWriterActivatedLocked(snapshotFullTextForSpool())
             return
           }
         }
       }
 
       try {
-        writer.appendSnapshot(snapshot)
+        if (recordType != null && recordPayload != null) {
+          val written = appendSpoolRecordLocked(writer, recordType, recordPayload)
+          journalEventCount += 1
+          journalBytesSinceCheckpoint += written
+        }
+        if (checkpointPayload != null && (
+            journalEventCount >= TEXT_SPOOL_CHECKPOINT_EVERY_EVENTS ||
+              journalBytesSinceCheckpoint >= TEXT_SPOOL_CHECKPOINT_EVERY_BYTES
+            )
+        ) {
+          val cpPath = checkpointPath()
+            ?: throw TextPipelineException(TextErrorCodes.SPOOL_UNAVAILABLE, "Text checkpoint path missing for $bufferId")
+          writeCheckpointFile(cpPath, checkpointPayload)
+          writer.truncate()
+          appendSpoolRecordLocked(writer, TEXT_SPOOL_CHECKPOINT, "{}")
+          journalEventCount = 0
+          journalBytesSinceCheckpoint = 0L
+        }
         spoolReady = true
         spoolBytes = writer.bytesWritten
       } catch (e: Exception) {
@@ -254,8 +366,12 @@ class LiveTextEntry(
     totalCharsWritten += text.length
     _revision.incrementAndGet()
 
-    val snapshot = snapshotFullTextForSpool()
-    writeSnapshotToSpoolOrThrow(snapshot, mayActivateAuto = true)
+    writeTextSpoolOrThrow(
+      mayActivateAuto = true,
+      recordType = TEXT_SPOOL_PARTIAL_SET,
+      recordPayload = text,
+      checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
+    )
   }
 
   /**
@@ -274,8 +390,12 @@ class LiveTextEntry(
     totalCharsWritten += text.length
     _revision.incrementAndGet()
 
-    val snapshot = snapshotFullTextForSpool()
-    writeSnapshotToSpoolOrThrow(snapshot, mayActivateAuto = true)
+    writeTextSpoolOrThrow(
+      mayActivateAuto = true,
+      recordType = TEXT_SPOOL_PARTIAL_APPEND,
+      recordPayload = text,
+      checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
+    )
   }
 
   /**
@@ -325,7 +445,12 @@ class LiveTextEntry(
       _revision.incrementAndGet()
     }
 
-    writeSnapshotToSpoolOrThrow(snapshotAfterCommit, mayActivateAuto = true)
+    writeTextSpoolOrThrow(
+      mayActivateAuto = true,
+      recordType = TEXT_SPOOL_SEGMENT_COMMIT,
+      recordPayload = """{"text":${JSONObject.quote(text)}}""",
+      checkpointPayload = buildCheckpointPayload(snapshotAfterCommit)
+    )
     notifyAppendListeners()
     return committedSegmentIndex
   }
@@ -401,7 +526,10 @@ class LiveTextEntry(
 
     synchronized(spoolLock) {
       try {
-        spoolWriter?.finalize_()
+        spoolWriter?.let { writer ->
+          appendSpoolRecordLocked(writer, TEXT_SPOOL_FINALIZE, "{}")
+          writer.finalize_()
+        }
       } catch (e: Exception) {
         markSpoolFailureAndThrow(
           TextErrorCodes.SPOOL_WRITE_FAILED,
@@ -484,17 +612,41 @@ class LiveTextEntry(
       }
     }
 
-    return try {
-      TextSpoolReader.readLatestSnapshot(path)
-    } catch (e: TextPipelineException) {
-      throw e
-    } catch (e: IOException) {
-      throw TextPipelineException(
-        TextErrorCodes.SPOOL_READ_FAILED,
-        "Failed to read text spool for live buffer $bufferId: ${e.message}",
-        e,
-      )
+    val cpPath = "$path.txtc"
+    val jPath = "$path.txtj"
+    val hasSpool = File(cpPath).exists() || File(jPath).exists()
+    if (hasSpool) {
+      try {
+        var fullText = ""
+        val cpPayload = TextSpoolReader.readCheckpoint(cpPath)
+        if (cpPayload != null) {
+          fullText = extractCheckpointText(cpPayload)
+        }
+        TextSpoolReader.readJournal(jPath).forEach { rec ->
+          when (rec.type) {
+            TEXT_SPOOL_PARTIAL_SET -> fullText = rec.payload
+            TEXT_SPOOL_PARTIAL_APPEND -> fullText += rec.payload
+            TEXT_SPOOL_SEGMENT_COMMIT -> {
+              val obj = JSONObject(rec.payload)
+              fullText += obj.optString("text", "")
+            }
+          }
+        }
+        return fullText
+      } catch (e: TextPipelineException) {
+        throw e
+      } catch (e: Exception) {
+        throw TextPipelineException(
+          TextErrorCodes.SPOOL_READ_FAILED,
+          "Failed to read text spool for live buffer $bufferId: ${e.message}",
+          e,
+        )
+      }
     }
+    throw TextPipelineException(
+      TextErrorCodes.SPOOL_UNAVAILABLE,
+      "Text spool files are missing for live buffer: $bufferId"
+    )
   }
 
   fun release() {
@@ -510,9 +662,12 @@ class LiveTextEntry(
 
     if (spoolTemporary && !spoolPath.isNullOrEmpty()) {
       try {
-        File(spoolPath).delete()
+        File("${spoolPath}.txtj").delete()
       } catch (_: Exception) {
-        // best-effort cleanup
+      }
+      try {
+        File("${spoolPath}.txtc").delete()
+      } catch (_: Exception) {
       }
     }
 
@@ -522,10 +677,6 @@ class LiveTextEntry(
 }
 
 private class TextSpoolWriter(filePath: String) {
-  companion object {
-    const val RECORD_HEADER_BYTES = 4
-  }
-
   private val raf: RandomAccessFile
   private val lock = Any()
   @Volatile
@@ -543,24 +694,22 @@ private class TextSpoolWriter(filePath: String) {
     bytesWritten = 0L
   }
 
-  fun appendSnapshot(text: String) {
-    val payload = text.toByteArray(StandardCharsets.UTF_8)
-    val header = ByteBuffer
-      .allocate(RECORD_HEADER_BYTES)
-      .order(ByteOrder.LITTLE_ENDIAN)
-      .putInt(payload.size)
-      .array()
-
+  fun appendRawRecord(header: ByteArray, payload: ByteArray) {
     synchronized(lock) {
-      if (closed) {
-        throw IOException("Text spool writer is closed")
-      }
-      val recordLength = (RECORD_HEADER_BYTES + payload.size).toLong()
-      raf.seek(0L)
+      if (closed) throw IOException("Text spool writer is closed")
+      raf.seek(raf.length())
       raf.write(header)
       raf.write(payload)
-      raf.setLength(recordLength)
-      bytesWritten = recordLength
+      bytesWritten = raf.length()
+    }
+  }
+
+  fun truncate() {
+    synchronized(lock) {
+      if (closed) return
+      raf.setLength(0L)
+      raf.seek(0L)
+      bytesWritten = 0L
     }
   }
 
@@ -594,51 +743,61 @@ private class TextSpoolWriter(filePath: String) {
 }
 
 private object TextSpoolReader {
-  private const val RECORD_HEADER_BYTES = 4
+  data class JournalRecord(val type: Int, val payload: String)
 
-  fun readLatestSnapshot(filePath: String): String {
+  fun readCheckpoint(filePath: String): String? {
     val file = File(filePath)
-    if (!file.exists()) {
-      throw TextPipelineException(
-        TextErrorCodes.SPOOL_UNAVAILABLE,
-        "Text spool file does not exist: $filePath"
-      )
-    }
-
+    if (!file.exists()) return null
     RandomAccessFile(file, "r").use { raf ->
-      val fileLength = raf.length()
-      if (fileLength < RECORD_HEADER_BYTES) {
-        throw TextPipelineException(
-          TextErrorCodes.SPOOL_CORRUPTED,
-          "Corrupted text spool record header in $filePath"
-        )
-      }
-
-      raf.seek(0L)
-      val header = ByteArray(RECORD_HEADER_BYTES)
+      if (raf.length() < 16) throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Corrupted text checkpoint header in $filePath")
+      val header = ByteArray(16)
       raf.readFully(header)
-      val length = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).int
-      if (length < 0) {
-        throw TextPipelineException(
-          TextErrorCodes.SPOOL_CORRUPTED,
-          "Corrupted text spool record length in $filePath"
-        )
+      val bb = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+      val magic = bb.int
+      val version = bb.short.toInt()
+      val type = bb.short.toInt()
+      val length = bb.int
+      val checksum = bb.int
+      if (magic != TEXT_SPOOL_MAGIC || version != TEXT_SPOOL_VERSION || type != TEXT_SPOOL_CHECKPOINT || length < 0) {
+        throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Unexpected text checkpoint format in $filePath")
       }
-
-      val expectedFileLength = RECORD_HEADER_BYTES + length.toLong()
-      if (fileLength != expectedFileLength) {
-        throw TextPipelineException(
-          TextErrorCodes.SPOOL_CORRUPTED,
-          "Unexpected text spool size in $filePath"
-        )
-      }
-
       val payload = ByteArray(length)
-      if (length > 0) {
-        raf.readFully(payload)
-      }
-
+      if (length > 0) raf.readFully(payload)
+      val actual = CRC32().apply { update(payload) }.value.toInt()
+      if (actual != checksum) throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Text checkpoint checksum mismatch in $filePath")
       return String(payload, StandardCharsets.UTF_8)
+    }
+  }
+
+  fun readJournal(filePath: String): List<JournalRecord> {
+    val file = File(filePath)
+    if (!file.exists()) return emptyList()
+    RandomAccessFile(file, "r").use { raf ->
+      val out = ArrayList<JournalRecord>()
+      while (raf.filePointer < raf.length()) {
+        if (raf.length() - raf.filePointer < 16) {
+          throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Corrupted text journal header in $filePath")
+        }
+        val header = ByteArray(16)
+        raf.readFully(header)
+        val bb = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+        val magic = bb.int
+        val version = bb.short.toInt()
+        val type = bb.short.toInt()
+        val length = bb.int
+        val checksum = bb.int
+        if (magic != TEXT_SPOOL_MAGIC || version != TEXT_SPOOL_VERSION || length < 0) {
+          throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Unexpected text journal record format in $filePath")
+        }
+        val payload = ByteArray(length)
+        if (length > 0) raf.readFully(payload)
+        val actual = CRC32().apply { update(payload) }.value.toInt()
+        if (actual != checksum) {
+          throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Text journal checksum mismatch in $filePath")
+        }
+        out.add(JournalRecord(type, String(payload, StandardCharsets.UTF_8)))
+      }
+      return out
     }
   }
 }

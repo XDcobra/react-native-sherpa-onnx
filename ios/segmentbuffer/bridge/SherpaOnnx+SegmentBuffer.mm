@@ -89,6 +89,14 @@ std::vector<SegRecord> segment_records_from_json(const std::string &json) {
 }
 
 struct SegLiveEntry {
+  static constexpr uint32_t kMagic = 0x32474553; // SEG2
+  static constexpr uint16_t kVersion = 2;
+  static constexpr uint16_t kRecordSegmentAppend = 1;
+  static constexpr uint16_t kRecordCheckpointMark = 2;
+  static constexpr uint16_t kRecordFinalizeMark = 3;
+  static constexpr int kHeaderBytes = 16;
+  static constexpr int kCheckpointEveryEvents = 128;
+  static constexpr int64_t kCheckpointEveryBytes = 1048576;
   enum State { RECORDING, FINISHED };
   enum SpoolingMode { SPOOL_OFF, SPOOL_AUTO, SPOOL_ON };
 
@@ -107,9 +115,11 @@ struct SegLiveEntry {
   bool spoolReady = false;
   int64_t spoolBytes = 0;
   int64_t spoolEstimatedBytes = 0;
+  int64_t journalBytesSinceCheckpoint = 0;
+  int journalEventCount = 0;
   std::string spoolFailureCode;
   std::string spoolFailureMessage;
-  FILE *spoolFile = nullptr;
+  FILE *journalFile = nullptr;
 
   std::mutex lock;
   std::mutex spoolLock;
@@ -134,52 +144,98 @@ struct SegLiveEntry {
   }
 
   std::string snapshotForSpoolLocked() { return segment_records_to_json(segments); }
+  std::string journalPath() const { return spoolPath + ".segj"; }
+  std::string checkpointPath() const { return spoolPath + ".segc"; }
 
   void closeSpoolFileLocked(bool flushFirst) {
-    if (!spoolFile) return;
-    if (flushFirst) fflush(spoolFile);
-    fclose(spoolFile);
-    spoolFile = nullptr;
+    if (!journalFile) return;
+    if (flushFirst) fflush(journalFile);
+    fclose(journalFile);
+    journalFile = nullptr;
   }
 
-  void appendSnapshotRecordLocked(const std::string &snapshot) {
-    if (!spoolFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Spool file not open for " + bufferId);
-    const uint32_t len = (uint32_t)snapshot.size();
-    unsigned char header[4] = {
+  void appendJournalRecordLocked(uint16_t type, const std::string &payload) {
+    if (!journalFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Segment journal not open for " + bufferId);
+    const uint32_t len = (uint32_t)payload.size();
+    uint32_t crc = 0;
+    for (char c : payload) crc = (crc * 33u) ^ (uint8_t)c;
+    unsigned char header[kHeaderBytes] = {
+      (unsigned char)(kMagic & 0xFF),
+      (unsigned char)((kMagic >> 8) & 0xFF),
+      (unsigned char)((kMagic >> 16) & 0xFF),
+      (unsigned char)((kMagic >> 24) & 0xFF),
+      (unsigned char)(kVersion & 0xFF),
+      (unsigned char)((kVersion >> 8) & 0xFF),
+      (unsigned char)(type & 0xFF),
+      (unsigned char)((type >> 8) & 0xFF),
       (unsigned char)(len & 0xFF),
       (unsigned char)((len >> 8) & 0xFF),
       (unsigned char)((len >> 16) & 0xFF),
-      (unsigned char)((len >> 24) & 0xFF)
+      (unsigned char)((len >> 24) & 0xFF),
+      (unsigned char)(crc & 0xFF),
+      (unsigned char)((crc >> 8) & 0xFF),
+      (unsigned char)((crc >> 16) & 0xFF),
+      (unsigned char)((crc >> 24) & 0xFF)
     };
-    const int64_t recordLength = 4 + (int64_t)len;
-    if (fseek(spoolFile, 0, SEEK_SET) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to seek spool for " + bufferId);
-    if (fwrite(header, 1, 4, spoolFile) != 4) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to write spool header for " + bufferId);
-    if (len > 0 && fwrite(snapshot.data(), 1, len, spoolFile) != len) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to write spool payload for " + bufferId);
-    if (fflush(spoolFile) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to flush spool for " + bufferId);
-    if (ftruncate(fileno(spoolFile), recordLength) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to truncate spool for " + bufferId);
-    spoolBytes = recordLength;
+    if (fseek(journalFile, 0, SEEK_END) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to seek segment journal for " + bufferId);
+    if (fwrite(header, 1, kHeaderBytes, journalFile) != kHeaderBytes) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to write segment journal header for " + bufferId);
+    if (len > 0 && fwrite(payload.data(), 1, len, journalFile) != len) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to write segment journal payload for " + bufferId);
+    if (fflush(journalFile) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to flush segment journal for " + bufferId);
+    spoolBytes = ftell(journalFile);
     spoolReady = true;
   }
 
+  void writeCheckpointSnapshotLocked(const std::string &snapshot) {
+    std::string cpPath = checkpointPath();
+    std::string tmpPath = cpPath + ".tmp";
+    FILE *tmp = fopen(tmpPath.c_str(), "wb");
+    if (!tmp) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to create segment checkpoint for " + bufferId);
+    const uint32_t len = (uint32_t)snapshot.size();
+    uint32_t crc = 0;
+    for (char c : snapshot) crc = (crc * 33u) ^ (uint8_t)c;
+    unsigned char header[kHeaderBytes] = {
+      (unsigned char)(kMagic & 0xFF), (unsigned char)((kMagic >> 8) & 0xFF), (unsigned char)((kMagic >> 16) & 0xFF), (unsigned char)((kMagic >> 24) & 0xFF),
+      (unsigned char)(kVersion & 0xFF), (unsigned char)((kVersion >> 8) & 0xFF),
+      (unsigned char)(kRecordCheckpointMark & 0xFF), (unsigned char)((kRecordCheckpointMark >> 8) & 0xFF),
+      (unsigned char)(len & 0xFF), (unsigned char)((len >> 8) & 0xFF), (unsigned char)((len >> 16) & 0xFF), (unsigned char)((len >> 24) & 0xFF),
+      (unsigned char)(crc & 0xFF), (unsigned char)((crc >> 8) & 0xFF), (unsigned char)((crc >> 16) & 0xFF), (unsigned char)((crc >> 24) & 0xFF)
+    };
+    if (fwrite(header, 1, kHeaderBytes, tmp) != kHeaderBytes || (len > 0 && fwrite(snapshot.data(), 1, len, tmp) != len)) {
+      fclose(tmp);
+      remove(tmpPath.c_str());
+      throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to write segment checkpoint payload for " + bufferId);
+    }
+    fflush(tmp);
+    fclose(tmp);
+    remove(cpPath.c_str());
+    if (rename(tmpPath.c_str(), cpPath.c_str()) != 0) {
+      remove(tmpPath.c_str());
+      throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to finalize segment checkpoint for " + bufferId);
+    }
+  }
+
   void ensureSpoolWriterActivatedLocked(const std::string &snapshot) {
-    if (spoolFile) return;
+    if (journalFile) return;
     if (spoolPath.empty()) throwSpoolError("SEGMENT_SPOOL_UNAVAILABLE", "Segment spool path is not configured for " + bufferId);
     NSString *spoolPathNs = [NSString stringWithUTF8String:spoolPath.c_str()];
     NSString *parentPath = [spoolPathNs stringByDeletingLastPathComponent];
     if (parentPath.length > 0) {
       [[NSFileManager defaultManager] createDirectoryAtPath:parentPath withIntermediateDirectories:YES attributes:nil error:nil];
     }
-    spoolFile = fopen(spoolPath.c_str(), "wb");
-    if (!spoolFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to create segment spool for " + bufferId);
+    journalFile = fopen(journalPath().c_str(), "ab+");
+    if (!journalFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to create segment journal for " + bufferId);
     spoolBytes = 0;
-    appendSnapshotRecordLocked(snapshot);
+    writeCheckpointSnapshotLocked(snapshot);
+    appendJournalRecordLocked(kRecordCheckpointMark, "{}");
+    journalBytesSinceCheckpoint = 0;
+    journalEventCount = 0;
   }
 
   void maybeWriteSnapshotToSpool(const std::string &snapshot, bool mayActivateAuto) {
     if (!spoolEnabled()) return;
     std::lock_guard<std::mutex> lockGuard(spoolLock);
     if (!spoolFailureCode.empty()) throw std::runtime_error(spoolFailureCode + ": " + spoolFailureMessage);
-    if (!spoolFile) {
+    if (!journalFile) {
       switch (spoolingMode) {
         case SPOOL_OFF: return;
         case SPOOL_ON:
@@ -197,7 +253,18 @@ struct SegLiveEntry {
         }
       }
     }
-    appendSnapshotRecordLocked(snapshot);
+    appendJournalRecordLocked(kRecordSegmentAppend, snapshot);
+    journalEventCount += 1;
+    journalBytesSinceCheckpoint += (kHeaderBytes + snapshot.size());
+    if (journalEventCount >= kCheckpointEveryEvents || journalBytesSinceCheckpoint >= kCheckpointEveryBytes) {
+      writeCheckpointSnapshotLocked(snapshotForSpoolLocked());
+      fclose(journalFile);
+      journalFile = fopen(journalPath().c_str(), "wb");
+      if (!journalFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to rotate segment journal for " + bufferId);
+      appendJournalRecordLocked(kRecordCheckpointMark, "{}");
+      journalBytesSinceCheckpoint = 0;
+      journalEventCount = 0;
+    }
   }
 
   void finalize_() {
@@ -208,8 +275,9 @@ struct SegLiveEntry {
     }
     if (spoolEnabled()) {
       std::lock_guard<std::mutex> guard(spoolLock);
-      if (spoolFile) {
-        if (fflush(spoolFile) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to finalize segment spool for " + bufferId);
+      if (journalFile) {
+        appendJournalRecordLocked(kRecordFinalizeMark, "{}");
+        if (fflush(journalFile) != 0) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to finalize segment spool for " + bufferId);
         closeSpoolFileLocked(false);
       }
     }
@@ -229,28 +297,43 @@ struct SegLiveEntry {
       if (!spoolReady) throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Segment spool is not ready for " + bufferId);
       if (spoolPath.empty()) throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Segment spool path missing for " + bufferId);
       path = spoolPath;
-      if (spoolFile) fflush(spoolFile);
+      if (journalFile) fflush(journalFile);
     }
-    FILE *reader = fopen(path.c_str(), "rb");
-    if (!reader) throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to open segment spool for " + bufferId);
-    unsigned char header[4];
-    if (fread(header, 1, 4, reader) != 4) {
-      fclose(reader);
-      throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment spool header for " + bufferId);
+    std::string cpPath = path + ".segc";
+    std::vector<SegRecord> result;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]]) {
+      FILE *cp = fopen(cpPath.c_str(), "rb");
+      if (!cp) throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to open segment checkpoint for " + bufferId);
+      unsigned char header[kHeaderBytes];
+      if (fread(header, 1, kHeaderBytes, cp) != kHeaderBytes) { fclose(cp); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment checkpoint header for " + bufferId); }
+      uint32_t len = (uint32_t)header[8] | ((uint32_t)header[9] << 8) | ((uint32_t)header[10] << 16) | ((uint32_t)header[11] << 24);
+      std::string payload;
+      payload.resize(len);
+      if (len > 0 && fread(payload.data(), 1, len, cp) != len) { fclose(cp); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment checkpoint payload for " + bufferId); }
+      fclose(cp);
+      result = segment_records_from_json(payload);
+      std::string jPath = path + ".segj";
+      FILE *jr = fopen(jPath.c_str(), "rb");
+      if (jr) {
+        while (true) {
+          unsigned char h[kHeaderBytes];
+          size_t n = fread(h, 1, kHeaderBytes, jr);
+          if (n == 0) break;
+          if (n != kHeaderBytes) { fclose(jr); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment journal header for " + bufferId); }
+          uint16_t type = (uint16_t)h[6] | ((uint16_t)h[7] << 8);
+          uint32_t len = (uint32_t)h[8] | ((uint32_t)h[9] << 8) | ((uint32_t)h[10] << 16) | ((uint32_t)h[11] << 24);
+          std::string payload; payload.resize(len);
+          if (len > 0 && fread(payload.data(), 1, len, jr) != len) { fclose(jr); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment journal payload for " + bufferId); }
+          if (type == kRecordSegmentAppend) {
+            auto parsed = segment_records_from_json(payload);
+            if (!parsed.empty()) result.push_back(parsed[0]);
+          }
+        }
+        fclose(jr);
+      }
+      return result;
     }
-    uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) | ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-    std::string payload;
-    payload.resize(len);
-    if (len > 0 && fread(payload.data(), 1, len, reader) != len) {
-      fclose(reader);
-      throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment spool payload for " + bufferId);
-    }
-    if (fgetc(reader) != EOF) {
-      fclose(reader);
-      throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Unexpected trailing data in segment spool for " + bufferId);
-    }
-    fclose(reader);
-    return segment_records_from_json(payload);
+    throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Missing segment checkpoint for " + bufferId);
   }
 
   void release() {
@@ -264,7 +347,10 @@ struct SegLiveEntry {
         shouldDelete = true;
       }
     }
-    if (shouldDelete) remove(pathToDelete.c_str());
+    if (shouldDelete) {
+      remove((pathToDelete + ".segj").c_str());
+      remove((pathToDelete + ".segc").c_str());
+    }
   }
 };
 
