@@ -177,7 +177,12 @@ struct TxtLiveEntry {
 	}
 
 	std::string committedTextFromSegmentsLocked() {
+		size_t totalSize = 0;
+		for (const auto &seg : segments) {
+			totalSize += seg.text.size();
+		}
 		std::string committed;
+		committed.reserve(totalSize);
 		for (const auto &seg : segments) {
 			committed += seg.text;
 		}
