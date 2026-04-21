@@ -333,16 +333,7 @@ struct SegLiveEntry {
       }
       return result;
     }
-    // Legacy V1 fallback
-    FILE *reader = fopen(path.c_str(), "rb");
-    if (!reader) throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to open segment spool for " + bufferId);
-    unsigned char header[4];
-    if (fread(header, 1, 4, reader) != 4) { fclose(reader); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment spool header for " + bufferId); }
-    uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) | ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-    std::string payload; payload.resize(len);
-    if (len > 0 && fread(payload.data(), 1, len, reader) != len) { fclose(reader); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment spool payload for " + bufferId); }
-    fclose(reader);
-    return segment_records_from_json(payload);
+    throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Missing segment checkpoint for " + bufferId);
   }
 
   void release() {
@@ -357,7 +348,6 @@ struct SegLiveEntry {
       }
     }
     if (shouldDelete) {
-      remove(pathToDelete.c_str());
       remove((pathToDelete + ".segj").c_str());
       remove((pathToDelete + ".segc").c_str());
     }

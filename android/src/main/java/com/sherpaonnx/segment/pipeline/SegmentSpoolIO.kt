@@ -8,7 +8,7 @@ import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.util.zip.CRC32
 
-internal object SegmentSpoolV2 {
+internal object SegmentSpoolFormat {
   const val MAGIC = 0x32474553 // SEG2 little-endian
   const val VERSION = 2
   const val HEADER_BYTES = 16
@@ -26,7 +26,7 @@ internal data class SegmentJournalRecord(
 
 internal class SegmentJournalWriter(private val filePath: String) {
   companion object {
-    private const val HEADER_BYTES = SegmentSpoolV2.HEADER_BYTES
+    private const val HEADER_BYTES = SegmentSpoolFormat.HEADER_BYTES
   }
 
   private val raf: RandomAccessFile
@@ -53,8 +53,8 @@ internal class SegmentJournalWriter(private val filePath: String) {
     val header = ByteBuffer
       .allocate(HEADER_BYTES)
       .order(ByteOrder.LITTLE_ENDIAN)
-      .putInt(SegmentSpoolV2.MAGIC)
-      .putShort(SegmentSpoolV2.VERSION.toShort())
+      .putInt(SegmentSpoolFormat.MAGIC)
+      .putShort(SegmentSpoolFormat.VERSION.toShort())
       .putShort(recordType.toShort())
       .putInt(payload.size)
       .putInt(crc)
@@ -108,7 +108,7 @@ internal class SegmentJournalWriter(private val filePath: String) {
 }
 
 internal object SegmentJournalReader {
-  private const val HEADER_BYTES = SegmentSpoolV2.HEADER_BYTES
+  private const val HEADER_BYTES = SegmentSpoolFormat.HEADER_BYTES
 
   fun readAllRecords(path: String): List<SegmentJournalRecord> {
     val file = File(path)
@@ -134,7 +134,7 @@ internal object SegmentJournalReader {
         val type = bb.short.toInt()
         val len = bb.int
         val crc = bb.int
-        if (magic != SegmentSpoolV2.MAGIC || version != SegmentSpoolV2.VERSION) {
+        if (magic != SegmentSpoolFormat.MAGIC || version != SegmentSpoolFormat.VERSION) {
           throw SegmentPipelineException(
             SegmentErrorCodes.SPOOL_CORRUPTED,
             "Unexpected segment journal record version: $path"
@@ -180,11 +180,11 @@ internal class SegmentCheckpointWriter(private val filePath: String) {
       val payload = snapshotJson.toByteArray(StandardCharsets.UTF_8)
       val crc = CRC32().apply { update(payload) }.value.toInt()
       val header = ByteBuffer
-        .allocate(SegmentSpoolV2.HEADER_BYTES)
+        .allocate(SegmentSpoolFormat.HEADER_BYTES)
         .order(ByteOrder.LITTLE_ENDIAN)
-        .putInt(SegmentSpoolV2.MAGIC)
-        .putShort(SegmentSpoolV2.VERSION.toShort())
-        .putShort(SegmentSpoolV2.RECORD_CHECKPOINT_MARK.toShort())
+        .putInt(SegmentSpoolFormat.MAGIC)
+        .putShort(SegmentSpoolFormat.VERSION.toShort())
+        .putShort(SegmentSpoolFormat.RECORD_CHECKPOINT_MARK.toShort())
         .putInt(payload.size)
         .putInt(crc)
         .array()
@@ -213,13 +213,13 @@ internal object SegmentCheckpointReader {
     val file = File(path)
     if (!file.exists()) return null
     RandomAccessFile(file, "r").use { raf ->
-      if (raf.length() < SegmentSpoolV2.HEADER_BYTES) {
+      if (raf.length() < SegmentSpoolFormat.HEADER_BYTES) {
         throw SegmentPipelineException(
           SegmentErrorCodes.SPOOL_CORRUPTED,
           "Corrupted segment checkpoint header: $path"
         )
       }
-      val header = ByteArray(SegmentSpoolV2.HEADER_BYTES)
+      val header = ByteArray(SegmentSpoolFormat.HEADER_BYTES)
       raf.readFully(header)
       val bb = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
       val magic = bb.int
@@ -227,8 +227,8 @@ internal object SegmentCheckpointReader {
       val type = bb.short.toInt()
       val len = bb.int
       val crc = bb.int
-      if (magic != SegmentSpoolV2.MAGIC || version != SegmentSpoolV2.VERSION ||
-        type != SegmentSpoolV2.RECORD_CHECKPOINT_MARK || len < 0
+      if (magic != SegmentSpoolFormat.MAGIC || version != SegmentSpoolFormat.VERSION ||
+        type != SegmentSpoolFormat.RECORD_CHECKPOINT_MARK || len < 0
       ) {
         throw SegmentPipelineException(
           SegmentErrorCodes.SPOOL_CORRUPTED,
@@ -250,27 +250,6 @@ internal object SegmentCheckpointReader {
           "Segment checkpoint checksum mismatch: $path"
         )
       }
-      return String(payload, StandardCharsets.UTF_8)
-    }
-  }
-}
-
-internal object SegmentSpoolReaderLegacy {
-  private const val RECORD_HEADER_BYTES = 4
-  fun readLatestSnapshot(path: String): String {
-    val file = File(path)
-    if (!file.exists()) throw SegmentPipelineException(SegmentErrorCodes.SPOOL_UNAVAILABLE, "Segment spool file does not exist: $path")
-    RandomAccessFile(file, "r").use { raf ->
-      val fileLength = raf.length()
-      if (fileLength < RECORD_HEADER_BYTES) throw SegmentPipelineException(SegmentErrorCodes.SPOOL_CORRUPTED, "Corrupted segment spool header: $path")
-      val header = ByteArray(RECORD_HEADER_BYTES)
-      raf.readFully(header)
-      val len = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).int
-      if (len < 0) throw SegmentPipelineException(SegmentErrorCodes.SPOOL_CORRUPTED, "Corrupted segment spool length: $path")
-      val expectedLength = RECORD_HEADER_BYTES + len.toLong()
-      if (fileLength != expectedLength) throw SegmentPipelineException(SegmentErrorCodes.SPOOL_CORRUPTED, "Unexpected segment spool size: $path")
-      val payload = ByteArray(len)
-      if (len > 0) raf.readFully(payload)
       return String(payload, StandardCharsets.UTF_8)
     }
   }

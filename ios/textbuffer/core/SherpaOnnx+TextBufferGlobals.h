@@ -489,12 +489,11 @@ struct TxtLiveEntry {
 			}
 		}
 
-		// Prefer V2-style checkpoint+journal files if present.
 		std::string cpPath = path + ".txtc";
 		std::string jPath = path + ".txtj";
-		bool hasV2 = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]] ||
+		bool hasSpool = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]] ||
 			[[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:jPath.c_str()]];
-		if (hasV2) {
+		if (hasSpool) {
 			std::string latest = "";
 			FILE *cp = fopen(cpPath.c_str(), "rb");
 			if (cp != nullptr) {
@@ -522,17 +521,7 @@ struct TxtLiveEntry {
 			}
 			return latest;
 		}
-		// Legacy V1 fallback.
-		FILE *reader = fopen(path.c_str(), "rb");
-		if (reader == nullptr) throw makeCodedError("TEXT_SPOOL_READ_FAILED", "Failed to open text spool for " + bufferId);
-		unsigned char header[4];
-		size_t readHeader = fread(header, 1, 4, reader);
-		if (readHeader != 4) { fclose(reader); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text spool header for " + bufferId); }
-		uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) | ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-		std::string payload; payload.resize(len);
-		if (len > 0 && fread(payload.data(), 1, len, reader) != len) { fclose(reader); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text spool payload for " + bufferId); }
-		fclose(reader);
-		return payload;
+		throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool files are missing for " + bufferId);
 	}
 
 	NSDictionary *toDict() {
@@ -586,7 +575,6 @@ struct TxtLiveEntry {
 			}
 		}
 		if (shouldDelete) {
-			remove(pathToDelete.c_str());
 			remove((pathToDelete + ".txtj").c_str());
 			remove((pathToDelete + ".txtc").c_str());
 		}

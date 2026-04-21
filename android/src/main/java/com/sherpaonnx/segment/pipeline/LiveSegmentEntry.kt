@@ -47,12 +47,12 @@ class LiveSegmentEntry(
   private var journalBytesSinceCheckpoint: Long = 0
 
   private fun spoolingEnabled(): Boolean = spoolingMode != SegmentSpoolingMode.OFF
-  private fun v2JournalPath(): String? = spoolPath?.let { "${it}.segj" }
-  private fun v2CheckpointPath(): String? = spoolPath?.let { "${it}.segc" }
+  private fun journalPath(): String? = spoolPath?.let { "${it}.segj" }
+  private fun checkpointPath(): String? = spoolPath?.let { "${it}.segc" }
 
   init {
     if (spoolingEnabled() && spoolingMode == SegmentSpoolingMode.ON) {
-      writeSpoolV2OrThrow(mayActivateAuto = false, checkpointPayload = snapshotFullForSpool())
+      writeSpoolOrThrow(mayActivateAuto = false, checkpointPayload = snapshotFullForSpool())
     }
   }
 
@@ -102,7 +102,7 @@ class LiveSegmentEntry(
     }
     val appendRecord = appendedRecord
       ?: throw SegmentPipelineException(SegmentErrorCodes.INTERNAL_ERROR, "Missing appended segment record")
-    writeSpoolV2OrThrow(
+    writeSpoolOrThrow(
       mayActivateAuto = true,
       appendRecord = appendRecord,
       checkpointPayload = checkpointSnapshot
@@ -122,7 +122,7 @@ class LiveSegmentEntry(
     }
     synchronized(spoolLock) {
       try {
-        journalWriter?.appendRecord(SegmentSpoolV2.RECORD_FINALIZE_MARK, "{}")
+        journalWriter?.appendRecord(SegmentSpoolFormat.RECORD_FINALIZE_MARK, "{}")
         journalWriter?.finalize_()
       } catch (e: Exception) {
         markSpoolFailureAndThrow(
@@ -201,10 +201,6 @@ class LiveSegmentEntry(
     }
     if (spoolTemporary && !spoolPath.isNullOrEmpty()) {
       try {
-        File(spoolPath).delete()
-      } catch (_: Exception) {
-      }
-      try {
         File("${spoolPath}.segj").delete()
       } catch (_: Exception) {
       }
@@ -274,7 +270,7 @@ class LiveSegmentEntry(
       val cpWriter = SegmentCheckpointWriter(checkpointPath)
       cpWriter.writeSnapshot(snapshotJson)
       checkpointWriter = cpWriter
-      writer.appendRecord(SegmentSpoolV2.RECORD_CHECKPOINT_MARK, "{}")
+      writer.appendRecord(SegmentSpoolFormat.RECORD_CHECKPOINT_MARK, "{}")
       journalEventCount = 0
       journalBytesSinceCheckpoint = 0L
     } catch (e: Exception) {
@@ -293,7 +289,7 @@ class LiveSegmentEntry(
     spoolBytes = writer.bytesWritten
   }
 
-  private fun writeSpoolV2OrThrow(
+  private fun writeSpoolOrThrow(
     mayActivateAuto: Boolean,
     appendRecord: SegmentRecord? = null,
     checkpointPayload: String? = null,
@@ -318,7 +314,7 @@ class LiveSegmentEntry(
           SegmentSpoolingMode.AUTO -> {
             if (!mayActivateAuto) return
             val estimatedBytes =
-              SegmentSpoolV2.HEADER_BYTES + (checkpointPayload ?: "").toByteArray().size
+              SegmentSpoolFormat.HEADER_BYTES + (checkpointPayload ?: "").toByteArray().size
             spoolEstimatedBytes += estimatedBytes.toLong()
             if (spoolEstimatedBytes < spoolThresholdBytes.coerceAtLeast(0L)) {
               spoolReady = false
@@ -332,20 +328,20 @@ class LiveSegmentEntry(
       try {
         if (appendRecord != null) {
           val payload = OfflineSegmentEntry.segmentsToJson(listOf(appendRecord))
-          writer.appendRecord(SegmentSpoolV2.RECORD_SEGMENT_APPEND, payload)
+          writer.appendRecord(SegmentSpoolFormat.RECORD_SEGMENT_APPEND, payload)
           journalEventCount += 1
-          journalBytesSinceCheckpoint += (SegmentSpoolV2.HEADER_BYTES + payload.toByteArray().size).toLong()
+          journalBytesSinceCheckpoint += (SegmentSpoolFormat.HEADER_BYTES + payload.toByteArray().size).toLong()
         }
         if (checkpointPayload != null && (
-            journalEventCount >= SegmentSpoolV2.CHECKPOINT_EVERY_EVENTS ||
-              journalBytesSinceCheckpoint >= SegmentSpoolV2.CHECKPOINT_EVERY_BYTES
+            journalEventCount >= SegmentSpoolFormat.CHECKPOINT_EVERY_EVENTS ||
+              journalBytesSinceCheckpoint >= SegmentSpoolFormat.CHECKPOINT_EVERY_BYTES
             )
         ) {
-          val cp = checkpointWriter ?: SegmentCheckpointWriter(v2CheckpointPath()
+          val cp = checkpointWriter ?: SegmentCheckpointWriter(checkpointPath()
             ?: throw SegmentPipelineException(SegmentErrorCodes.SPOOL_UNAVAILABLE, "Missing checkpoint path for $bufferId"))
           cp.writeSnapshot(checkpointPayload)
           writer.truncate()
-          writer.appendRecord(SegmentSpoolV2.RECORD_CHECKPOINT_MARK, "{}")
+          writer.appendRecord(SegmentSpoolFormat.RECORD_CHECKPOINT_MARK, "{}")
           checkpointWriter = cp
           journalEventCount = 0
           journalBytesSinceCheckpoint = 0L
@@ -365,29 +361,30 @@ class LiveSegmentEntry(
   private fun readFullStateFromSpool(basePath: String): List<SegmentRecord> {
     val journalPath = "$basePath.segj"
     val checkpointPath = "$basePath.segc"
-    val hasV2 = File(journalPath).exists() || File(checkpointPath).exists()
-    return if (hasV2) {
-      val checkpointJson = SegmentCheckpointReader.readSnapshot(checkpointPath) ?: """{"segments":[]}"""
-      val base = OfflineSegmentEntry.segmentsFromJson(checkpointJson).toMutableList()
-      val records = SegmentJournalReader.readAllRecords(journalPath)
-      records.forEach { record ->
-        when (record.type) {
-          SegmentSpoolV2.RECORD_SEGMENT_APPEND -> {
-            val parsed = OfflineSegmentEntry.segmentsFromJson(record.payload)
-            if (parsed.isNotEmpty()) base.add(parsed[0])
-          }
-          SegmentSpoolV2.RECORD_CHECKPOINT_MARK,
-          SegmentSpoolV2.RECORD_FINALIZE_MARK -> {}
-          else -> throw SegmentPipelineException(
-            SegmentErrorCodes.SPOOL_CORRUPTED,
-            "Unknown segment journal record type in $journalPath"
-          )
-        }
-      }
-      base
-    } else {
-      val legacyJson = SegmentSpoolReaderLegacy.readLatestSnapshot(basePath)
-      OfflineSegmentEntry.segmentsFromJson(legacyJson)
+    val hasSpool = File(journalPath).exists() || File(checkpointPath).exists()
+    if (!hasSpool) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.SPOOL_UNAVAILABLE,
+        "Segment spool files are missing for $bufferId"
+      )
     }
+    val checkpointJson = SegmentCheckpointReader.readSnapshot(checkpointPath) ?: """{"segments":[]}"""
+    val base = OfflineSegmentEntry.segmentsFromJson(checkpointJson).toMutableList()
+    val records = SegmentJournalReader.readAllRecords(journalPath)
+    records.forEach { record ->
+      when (record.type) {
+        SegmentSpoolFormat.RECORD_SEGMENT_APPEND -> {
+          val parsed = OfflineSegmentEntry.segmentsFromJson(record.payload)
+          if (parsed.isNotEmpty()) base.add(parsed[0])
+        }
+        SegmentSpoolFormat.RECORD_CHECKPOINT_MARK,
+        SegmentSpoolFormat.RECORD_FINALIZE_MARK -> {}
+        else -> throw SegmentPipelineException(
+          SegmentErrorCodes.SPOOL_CORRUPTED,
+          "Unknown segment journal record type in $journalPath"
+        )
+      }
+    }
+    return base
   }
 }
