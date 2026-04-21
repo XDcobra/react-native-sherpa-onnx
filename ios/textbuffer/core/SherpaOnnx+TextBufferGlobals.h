@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unistd.h>
 #include <vector>
 
 // Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
@@ -37,7 +38,6 @@ struct TxtLiveEntry {
 	std::string bufferId;
 	State state = RECORDING;
 	std::string currentText;
-	std::string committedText;
 	int64_t totalCharsWritten = 0;
 	std::atomic<int> revision{0};
 	int windowMaxChars = 65536;
@@ -176,8 +176,17 @@ struct TxtLiveEntry {
 		throw makeCodedError(code, message);
 	}
 
+	std::string committedTextFromSegmentsLocked() {
+		std::string committed;
+		for (const auto &seg : segments) {
+			committed += seg.text;
+		}
+		return committed;
+	}
+
 	std::string currentFullSnapshotLocked() {
-		return committedText + currentText;
+		std::lock_guard<std::mutex> segmentLock(segmentMutex);
+		return committedTextFromSegmentsLocked() + currentText;
 	}
 
 	void closeSpoolFileLocked(bool flushFirst) {
@@ -204,14 +213,23 @@ struct TxtLiveEntry {
 			(unsigned char)((len >> 24) & 0xFF)
 		};
 
+		const int64_t recordLength = 4 + (int64_t)len;
+		if (fseek(spoolFile, 0, SEEK_SET) != 0) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to seek text spool for " + bufferId);
+		}
 		if (fwrite(header, 1, 4, spoolFile) != 4) {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write spool header for " + bufferId);
 		}
 		if (len > 0 && fwrite(snapshot.data(), 1, len, spoolFile) != len) {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write spool payload for " + bufferId);
 		}
-		fflush(spoolFile);
-		spoolBytes += 4 + (int64_t)len;
+		if (fflush(spoolFile) != 0) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text spool for " + bufferId);
+		}
+		if (ftruncate(fileno(spoolFile), recordLength) != 0) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to truncate text spool for " + bufferId);
+		}
+		spoolBytes = recordLength;
 		spoolReady = true;
 	}
 
@@ -243,14 +261,13 @@ struct TxtLiveEntry {
 	void maybeWriteSnapshotToSpool(const std::string &snapshot, bool mayActivateAuto) {
 		if (!spoolEnabled()) return;
 
+		std::lock_guard<std::mutex> lock(spoolMutex);
 		if (!spoolFailureCode.empty()) {
 			throw makeCodedError(
 				spoolFailureCode,
 				spoolFailureMessage.empty() ? "Text spool is unavailable for " + bufferId : spoolFailureMessage
 			);
 		}
-
-		std::lock_guard<std::mutex> lock(spoolMutex);
 		if (spoolFile == nullptr) {
 			switch (spoolingMode) {
 				case SPOOL_OFF:
@@ -304,52 +321,42 @@ struct TxtLiveEntry {
 	}
 
 	void writePartial(const std::string &text) {
-		std::string snapshot;
-		{
-			std::lock_guard<std::mutex> lock(stateMutex);
-			if (state == FINISHED) {
-				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
-			}
-			NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-			int len = ns ? (int)[ns length] : 0;
-			if (len > windowMaxChars) {
-				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-				currentText = [trimmed UTF8String] ?: "";
-			} else {
-				currentText = text;
-			}
-			totalCharsWritten += len;
-			revision.fetch_add(1);
-			snapshot = currentFullSnapshotLocked();
+		std::lock_guard<std::mutex> lock(stateMutex);
+		if (state == FINISHED) {
+			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 		}
-
-		maybeWriteSnapshotToSpool(snapshot, true);
+		NSString *ns = [NSString stringWithUTF8String:text.c_str()];
+		int len = ns ? (int)[ns length] : 0;
+		if (len > windowMaxChars) {
+			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+			currentText = [trimmed UTF8String] ?: "";
+		} else {
+			currentText = text;
+		}
+		totalCharsWritten += len;
+		revision.fetch_add(1);
+		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
 	}
 
 	void appendText(const std::string &text) {
-		std::string snapshot;
-		{
-			std::lock_guard<std::mutex> lock(stateMutex);
-			if (state == FINISHED) {
-				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
-			}
-			std::string combined = currentText + text;
-			NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
-			int len = ns ? (int)[ns length] : 0;
-			NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-			int appendLen = textNs ? (int)[textNs length] : 0;
-			if (len > windowMaxChars) {
-				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-				currentText = [trimmed UTF8String] ?: "";
-			} else {
-				currentText = combined;
-			}
-			totalCharsWritten += appendLen;
-			revision.fetch_add(1);
-			snapshot = currentFullSnapshotLocked();
+		std::lock_guard<std::mutex> lock(stateMutex);
+		if (state == FINISHED) {
+			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 		}
-
-		maybeWriteSnapshotToSpool(snapshot, true);
+		std::string combined = currentText + text;
+		NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
+		int len = ns ? (int)[ns length] : 0;
+		NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
+		int appendLen = textNs ? (int)[textNs length] : 0;
+		if (len > windowMaxChars) {
+			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+			currentText = [trimmed UTF8String] ?: "";
+		} else {
+			currentText = combined;
+		}
+		totalCharsWritten += appendLen;
+		revision.fetch_add(1);
+		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
 	}
 
 	int commitSegment(const std::string &text,
@@ -358,7 +365,6 @@ struct TxtLiveEntry {
 					  const std::string &source = "unknown",
 					  NSDictionary *meta = nil) {
 		int committedSegmentIndex = -1;
-		std::string snapshot;
 		{
 			std::lock_guard<std::mutex> stateLock(stateMutex);
 			if (state == FINISHED) {
@@ -385,17 +391,13 @@ struct TxtLiveEntry {
 						else pair.second->readPos.store(0);
 					}
 				}
+				NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
+				int charLen = textNs ? (int)[textNs length] : 0;
+				totalCharsWritten += charLen;
+				revision.fetch_add(1);
+				maybeWriteSnapshotToSpool(committedTextFromSegmentsLocked() + currentText, true);
 			}
-
-			committedText += text;
-			NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-			int charLen = textNs ? (int)[textNs length] : 0;
-			totalCharsWritten += charLen;
-			revision.fetch_add(1);
-			snapshot = currentFullSnapshotLocked();
 		}
-
-		maybeWriteSnapshotToSpool(snapshot, true);
 		notifyAppendListeners();
 		return committedSegmentIndex;
 	}
@@ -431,79 +433,103 @@ struct TxtLiveEntry {
 		if (!spoolEnabled()) {
 			throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spooling is disabled for " + bufferId);
 		}
-		if (!spoolFailureCode.empty()) {
-			throw makeCodedError(
-				spoolFailureCode,
-				spoolFailureMessage.empty() ? "Text spool is unavailable for " + bufferId : spoolFailureMessage
-			);
-		}
-		if (!spoolReady) {
-			throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool is not ready for " + bufferId);
-		}
-		if (spoolPath.empty()) {
-			throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool path is missing for " + bufferId);
-		}
-
+		std::string failureCode;
+		std::string failureMessage;
+		bool ready = false;
+		std::string path;
 		{
 			std::lock_guard<std::mutex> lock(spoolMutex);
+			failureCode = spoolFailureCode;
+			failureMessage = spoolFailureMessage;
+			ready = spoolReady;
+			path = spoolPath;
+			if (!failureCode.empty()) {
+				throw makeCodedError(
+					failureCode,
+					failureMessage.empty() ? "Text spool is unavailable for " + bufferId : failureMessage
+				);
+			}
+			if (!ready) {
+				throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool is not ready for " + bufferId);
+			}
+			if (path.empty()) {
+				throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool path is missing for " + bufferId);
+			}
 			if (spoolFile != nullptr) {
 				fflush(spoolFile);
 			}
 		}
 
-		FILE *reader = fopen(spoolPath.c_str(), "rb");
+		FILE *reader = fopen(path.c_str(), "rb");
 		if (reader == nullptr) {
 			throw makeCodedError("TEXT_SPOOL_READ_FAILED", "Failed to open text spool for " + bufferId);
 		}
 
-		std::string latest;
-		while (true) {
-			unsigned char header[4];
-			size_t readHeader = fread(header, 1, 4, reader);
-			if (readHeader == 0) {
-				break; // EOF
-			}
-			if (readHeader != 4) {
-				fclose(reader);
-				throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text spool header for " + bufferId);
-			}
-			uint32_t len =
-				(uint32_t)header[0] |
-				((uint32_t)header[1] << 8) |
-				((uint32_t)header[2] << 16) |
-				((uint32_t)header[3] << 24);
+		unsigned char header[4];
+		size_t readHeader = fread(header, 1, 4, reader);
+		if (readHeader != 4) {
+			fclose(reader);
+			throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text spool header for " + bufferId);
+		}
+		uint32_t len =
+			(uint32_t)header[0] |
+			((uint32_t)header[1] << 8) |
+			((uint32_t)header[2] << 16) |
+			((uint32_t)header[3] << 24);
 
-			std::string payload;
-			payload.resize(len);
-			if (len > 0) {
-				size_t readPayload = fread(payload.data(), 1, len, reader);
-				if (readPayload != len) {
-					fclose(reader);
-					throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text spool payload for " + bufferId);
-				}
+		std::string payload;
+		payload.resize(len);
+		if (len > 0) {
+			size_t readPayload = fread(payload.data(), 1, len, reader);
+			if (readPayload != len) {
+				fclose(reader);
+				throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text spool payload for " + bufferId);
 			}
-			latest = payload;
 		}
 
+		if (fgetc(reader) != EOF) {
+			fclose(reader);
+			throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Unexpected trailing data in text spool for " + bufferId);
+		}
 		fclose(reader);
-		return latest;
+		return payload;
 	}
 
 	NSDictionary *toDict() {
+		std::string stateValue;
+		int64_t totalChars = 0;
+		bool enabled = false;
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+			stateValue = state == RECORDING ? "recording" : "finished";
+			totalChars = totalCharsWritten;
+			enabled = spoolEnabled();
+		}
+		std::string spoolModeRaw;
+		bool ready = false;
+		int64_t bytes = 0;
+		std::string path;
+		{
+			std::lock_guard<std::mutex> lock(spoolMutex);
+			spoolModeRaw = spoolingModeRaw(spoolingMode);
+			ready = spoolReady;
+			bytes = spoolBytes;
+			path = spoolPath;
+		}
 		NSMutableDictionary *dict = [@{
 			@"bufferId": [NSString stringWithUTF8String:bufferId.c_str()],
 			@"kind": @"liveTextBuffer",
-			@"state": state == RECORDING ? @"recording" : @"finished",
-			@"totalCharsWritten": @(totalCharsWritten),
+			@"state": [NSString stringWithUTF8String:stateValue.c_str()],
+			@"totalCharsWritten": @(totalChars),
 			@"revision": @(revision.load()),
 			@"segmentCount": @(segmentCount()),
-			@"spoolMode": [NSString stringWithUTF8String:spoolingModeRaw(spoolingMode).c_str()],
-			@"spoolEnabled": @(spoolEnabled()),
-			@"spoolReady": @(spoolReady),
-			@"spoolBytes": @(spoolBytes),
+			@"spoolMode": [NSString stringWithUTF8String:spoolModeRaw.c_str()],
+			@"spoolEnabled": @(enabled),
+			@"spoolReady": @(ready),
+			@"spoolBytes": @(bytes),
 		} mutableCopy];
-		if (!spoolPath.empty()) {
-			dict[@"spoolPath"] = [NSString stringWithUTF8String:spoolPath.c_str()];
+		if (!path.empty()) {
+			dict[@"spoolPath"] = [NSString stringWithUTF8String:path.c_str()];
 		}
 		return dict;
 	}

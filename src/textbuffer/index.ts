@@ -45,11 +45,14 @@ const getNative = (): Spec =>
 const TEXT_BUFFER_ID_PATTERN =
   /^(txt_off|txt_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-function normalizeSpoolingMode(value: unknown): TextBufferSpoolingMode {
+function normalizeSpoolingMode(
+  value: unknown,
+  spoolEnabled?: boolean
+): TextBufferSpoolingMode {
   if (value === 'off' || value === 'auto' || value === 'on') {
     return value;
   }
-  return 'off';
+  return spoolEnabled === false ? 'off' : 'on';
 }
 
 function mapLiveTextSpoolInfo(raw: {
@@ -59,7 +62,7 @@ function mapLiveTextSpoolInfo(raw: {
   spoolBytes?: number;
   spoolPath?: string;
 }): LiveTextBufferSpoolInfo {
-  const mode = normalizeSpoolingMode(raw.spoolMode);
+  const mode = normalizeSpoolingMode(raw.spoolMode, raw.spoolEnabled);
   return {
     mode,
     enabled: raw.spoolEnabled ?? mode !== 'off',

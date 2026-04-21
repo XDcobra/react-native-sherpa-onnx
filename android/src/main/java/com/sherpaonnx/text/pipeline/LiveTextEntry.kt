@@ -96,8 +96,6 @@ class LiveTextEntry(
   private val segmentLock = Any()
   @Volatile
   private var evictedCount: Long = 0
-  @Volatile
-  private var committedText: String = ""
 
   /** Total number of committed segments currently in the log. */
   val segmentCount: Int get() = synchronized(segmentLock) { segments.size }
@@ -134,8 +132,14 @@ class LiveTextEntry(
 
   private fun spoolingEnabled(): Boolean = spoolingMode != TextSpoolingMode.OFF
 
+  private fun buildCommittedTextFromSegmentsLocked(): String {
+    return buildString {
+      segments.forEach { append(it.text) }
+    }
+  }
+
   private fun snapshotFullTextForSpool(): String {
-    val committed = synchronized(segmentLock) { committedText }
+    val committed = synchronized(segmentLock) { buildCommittedTextFromSegmentsLocked() }
     return committed + currentText
   }
 
@@ -302,7 +306,6 @@ class LiveTextEntry(
       )
       segments.add(segment)
       committedSegmentIndex = segmentIndex
-      committedText += text
 
       // Evict oldest if over capacity
       if (segments.size > maxSegments) {
@@ -317,7 +320,7 @@ class LiveTextEntry(
       }
       totalCharsWritten += text.length
       _revision.incrementAndGet()
-      snapshotAfterCommit = committedText + currentText
+      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + currentText
     }
 
     writeSnapshotToSpoolOrThrow(snapshotAfterCommit, mayActivateAuto = true)
@@ -550,10 +553,12 @@ private class TextSpoolWriter(filePath: String) {
       if (closed) {
         throw IOException("Text spool writer is closed")
       }
-      raf.seek(raf.length())
+      val recordLength = (RECORD_HEADER_BYTES + payload.size).toLong()
+      raf.seek(0L)
       raf.write(header)
       raf.write(payload)
-      bytesWritten = raf.length()
+      raf.setLength(recordLength)
+      bytesWritten = recordLength
     }
   }
 
@@ -600,44 +605,38 @@ private object TextSpoolReader {
 
     RandomAccessFile(file, "r").use { raf ->
       val fileLength = raf.length()
-      var cursor = 0L
-      var latest = ""
-
-      while (cursor < fileLength) {
-        if (fileLength - cursor < RECORD_HEADER_BYTES) {
-          throw TextPipelineException(
-            TextErrorCodes.SPOOL_CORRUPTED,
-            "Corrupted text spool record header in $filePath"
-          )
-        }
-
-        raf.seek(cursor)
-        val header = ByteArray(RECORD_HEADER_BYTES)
-        raf.readFully(header)
-        val length = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).int
-        if (length < 0) {
-          throw TextPipelineException(
-            TextErrorCodes.SPOOL_CORRUPTED,
-            "Corrupted text spool record length in $filePath"
-          )
-        }
-
-        cursor += RECORD_HEADER_BYTES
-
-        if (fileLength - cursor < length.toLong()) {
-          throw TextPipelineException(
-            TextErrorCodes.SPOOL_CORRUPTED,
-            "Truncated text spool record payload in $filePath"
-          )
-        }
-
-        val payload = ByteArray(length)
-        raf.readFully(payload)
-        latest = String(payload, StandardCharsets.UTF_8)
-        cursor += length.toLong()
+      if (fileLength < RECORD_HEADER_BYTES) {
+        throw TextPipelineException(
+          TextErrorCodes.SPOOL_CORRUPTED,
+          "Corrupted text spool record header in $filePath"
+        )
       }
 
-      return latest
+      raf.seek(0L)
+      val header = ByteArray(RECORD_HEADER_BYTES)
+      raf.readFully(header)
+      val length = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).int
+      if (length < 0) {
+        throw TextPipelineException(
+          TextErrorCodes.SPOOL_CORRUPTED,
+          "Corrupted text spool record length in $filePath"
+        )
+      }
+
+      val expectedFileLength = RECORD_HEADER_BYTES + length.toLong()
+      if (fileLength != expectedFileLength) {
+        throw TextPipelineException(
+          TextErrorCodes.SPOOL_CORRUPTED,
+          "Unexpected text spool size in $filePath"
+        )
+      }
+
+      val payload = ByteArray(length)
+      if (length > 0) {
+        raf.readFully(payload)
+      }
+
+      return String(payload, StandardCharsets.UTF_8)
     }
   }
 }
