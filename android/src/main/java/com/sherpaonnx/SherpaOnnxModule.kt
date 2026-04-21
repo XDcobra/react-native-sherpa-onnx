@@ -1547,8 +1547,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         true, // force mono
         8192,
         cancelFlagAddr,
-        object : java.util.function.BiConsumer<FloatArray, Int> {
-          override fun accept(samples: FloatArray, frameCount: Int) {
+        object {
+          fun onChunk(samples: FloatArray, frameCount: Int) {
             if (!encodeSessionCreated) {
               // Lazily create encode session on first chunk — we now know the source rate.
               // The source sample rate is embedded in the decode callback context;
