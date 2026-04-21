@@ -194,6 +194,9 @@ struct TxtLiveEntry {
 		return committedTextFromSegmentsLocked() + currentText;
 	}
 
+	std::string journalPath() const { return spoolPath + ".txtj"; }
+	std::string checkpointPath() const { return spoolPath + ".txtc"; }
+
 	void closeSpoolFileLocked(bool flushFirst) {
 		if (spoolFile == nullptr) {
 			return;
@@ -218,24 +221,44 @@ struct TxtLiveEntry {
 			(unsigned char)((len >> 24) & 0xFF)
 		};
 
-		const int64_t recordLength = 4 + (int64_t)len;
-		if (fseek(spoolFile, 0, SEEK_SET) != 0) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to seek text spool for " + bufferId);
+		if (fseek(spoolFile, 0, SEEK_END) != 0) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to seek text journal for " + bufferId);
 		}
 		if (fwrite(header, 1, 4, spoolFile) != 4) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write spool header for " + bufferId);
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write text journal header for " + bufferId);
 		}
 		if (len > 0 && fwrite(snapshot.data(), 1, len, spoolFile) != len) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write spool payload for " + bufferId);
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write text journal payload for " + bufferId);
 		}
 		if (fflush(spoolFile) != 0) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text spool for " + bufferId);
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text journal for " + bufferId);
 		}
-		if (ftruncate(fileno(spoolFile), recordLength) != 0) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to truncate text spool for " + bufferId);
-		}
-		spoolBytes = recordLength;
+		spoolBytes = ftell(spoolFile);
 		spoolReady = true;
+	}
+
+	void writeCheckpointSnapshotLocked(const std::string &snapshot) {
+		if (spoolPath.empty()) {
+			throwSpoolError("TEXT_SPOOL_UNAVAILABLE", "Text checkpoint path is not configured for " + bufferId);
+		}
+		std::string path = checkpointPath();
+		FILE *cp = fopen(path.c_str(), "wb");
+		if (cp == nullptr) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to create text checkpoint for " + bufferId);
+		}
+		const uint32_t len = (uint32_t)snapshot.size();
+		unsigned char header[4] = {
+			(unsigned char)(len & 0xFF),
+			(unsigned char)((len >> 8) & 0xFF),
+			(unsigned char)((len >> 16) & 0xFF),
+			(unsigned char)((len >> 24) & 0xFF)
+		};
+		if (fwrite(header, 1, 4, cp) != 4 || (len > 0 && fwrite(snapshot.data(), 1, len, cp) != len)) {
+			fclose(cp);
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write text checkpoint for " + bufferId);
+		}
+		fflush(cp);
+		fclose(cp);
 	}
 
 	void ensureSpoolWriterActivatedLocked(const std::string &bootstrapSnapshot) {
@@ -255,11 +278,12 @@ struct TxtLiveEntry {
 													  error:nil];
 		}
 
-		spoolFile = fopen(spoolPath.c_str(), "wb");
+		spoolFile = fopen(journalPath().c_str(), "ab+");
 		if (spoolFile == nullptr) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to create text spool file for " + bufferId);
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to create text journal file for " + bufferId);
 		}
 		spoolBytes = 0;
+		writeCheckpointSnapshotLocked(bootstrapSnapshot);
 		appendSnapshotRecordLocked(bootstrapSnapshot);
 	}
 
@@ -465,37 +489,48 @@ struct TxtLiveEntry {
 			}
 		}
 
-		FILE *reader = fopen(path.c_str(), "rb");
-		if (reader == nullptr) {
-			throw makeCodedError("TEXT_SPOOL_READ_FAILED", "Failed to open text spool for " + bufferId);
+		// Prefer V2-style checkpoint+journal files if present.
+		std::string cpPath = path + ".txtc";
+		std::string jPath = path + ".txtj";
+		bool hasV2 = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]] ||
+			[[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:jPath.c_str()]];
+		if (hasV2) {
+			std::string latest = "";
+			FILE *cp = fopen(cpPath.c_str(), "rb");
+			if (cp != nullptr) {
+				unsigned char h[4];
+				if (fread(h, 1, 4, cp) == 4) {
+					uint32_t len = (uint32_t)h[0] | ((uint32_t)h[1] << 8) | ((uint32_t)h[2] << 16) | ((uint32_t)h[3] << 24);
+					std::string payload; payload.resize(len);
+					if (len == 0 || fread(payload.data(), 1, len, cp) == len) latest = payload;
+				}
+				fclose(cp);
+			}
+			FILE *jr = fopen(jPath.c_str(), "rb");
+			if (jr != nullptr) {
+				while (true) {
+					unsigned char h[4];
+					size_t n = fread(h, 1, 4, jr);
+					if (n == 0) break;
+					if (n != 4) { fclose(jr); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text journal header for " + bufferId); }
+					uint32_t len = (uint32_t)h[0] | ((uint32_t)h[1] << 8) | ((uint32_t)h[2] << 16) | ((uint32_t)h[3] << 24);
+					std::string payload; payload.resize(len);
+					if (len > 0 && fread(payload.data(), 1, len, jr) != len) { fclose(jr); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text journal payload for " + bufferId); }
+					latest = payload;
+				}
+				fclose(jr);
+			}
+			return latest;
 		}
-
+		// Legacy V1 fallback.
+		FILE *reader = fopen(path.c_str(), "rb");
+		if (reader == nullptr) throw makeCodedError("TEXT_SPOOL_READ_FAILED", "Failed to open text spool for " + bufferId);
 		unsigned char header[4];
 		size_t readHeader = fread(header, 1, 4, reader);
-		if (readHeader != 4) {
-			fclose(reader);
-			throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text spool header for " + bufferId);
-		}
-		uint32_t len =
-			(uint32_t)header[0] |
-			((uint32_t)header[1] << 8) |
-			((uint32_t)header[2] << 16) |
-			((uint32_t)header[3] << 24);
-
-		std::string payload;
-		payload.resize(len);
-		if (len > 0) {
-			size_t readPayload = fread(payload.data(), 1, len, reader);
-			if (readPayload != len) {
-				fclose(reader);
-				throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text spool payload for " + bufferId);
-			}
-		}
-
-		if (fgetc(reader) != EOF) {
-			fclose(reader);
-			throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Unexpected trailing data in text spool for " + bufferId);
-		}
+		if (readHeader != 4) { fclose(reader); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Corrupted text spool header for " + bufferId); }
+		uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) | ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
+		std::string payload; payload.resize(len);
+		if (len > 0 && fread(payload.data(), 1, len, reader) != len) { fclose(reader); throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Truncated text spool payload for " + bufferId); }
 		fclose(reader);
 		return payload;
 	}
@@ -552,6 +587,8 @@ struct TxtLiveEntry {
 		}
 		if (shouldDelete) {
 			remove(pathToDelete.c_str());
+			remove((pathToDelete + ".txtj").c_str());
+			remove((pathToDelete + ".txtc").c_str());
 		}
 		{
 			std::lock_guard<std::mutex> lock(cursorMutex);
