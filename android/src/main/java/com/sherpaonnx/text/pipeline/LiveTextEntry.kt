@@ -306,6 +306,9 @@ class LiveTextEntry(
       )
       segments.add(segment)
       committedSegmentIndex = segmentIndex
+      // Capture full history snapshot before any ring eviction. This preserves
+      // strict fullIfSpooled guarantees even when maxSegments is exceeded.
+      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + currentText
 
       // Evict oldest if over capacity
       if (segments.size > maxSegments) {
@@ -320,7 +323,6 @@ class LiveTextEntry(
       }
       totalCharsWritten += text.length
       _revision.incrementAndGet()
-      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + currentText
     }
 
     writeSnapshotToSpoolOrThrow(snapshotAfterCommit, mayActivateAuto = true)
