@@ -71,6 +71,12 @@ Dieses Dokument beschreibt das **Zielbild** und die **Anforderungen** für **nat
 
 Modi und Grenzfälle (leer, noch nicht finalisiert) **native** validieren mit klaren Fehlern.
 
+`fullIfSpooled` ist **strict**:
+
+- Liefert vollständigen Text nur, wenn Spool aktiv und lesbar ist.
+- Kein stiller Fallback auf Window-Snapshot.
+- Fehlercodes: `TEXT_SPOOL_UNAVAILABLE`, `TEXT_SPOOL_WRITE_FAILED`, `TEXT_SPOOL_READ_FAILED`, `TEXT_SPOOL_CORRUPTED`.
+
 ---
 
 ## TypeScript-Öffentlichkeit
@@ -152,6 +158,13 @@ export interface LiveTextBufferInfo {
   totalCharsWritten: number;
   /** Optional: Generation/Revision für Partial-Events (native Coalescing). */
   revision: number;
+  spool: {
+    mode: 'off' | 'auto' | 'on';
+    enabled: boolean;
+    ready: boolean;
+    bytes: number;
+    path?: string;
+  };
 }
 
 export type PipelineTextBufferInfo = OfflineTextBufferInfo | LiveTextBufferInfo;
@@ -210,6 +223,12 @@ export interface CreateLiveTextBufferOptions {
    * Default: native/SDK.
    */
   windowMaxChars?: number;
+  spooling?: {
+    mode?: 'off' | 'auto' | 'on';
+    path?: string;
+    temporary?: boolean;
+    thresholdBytes?: number;
+  };
   emitPartialEvents?: boolean;
   partialEventMinIntervalMs?: number;
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
@@ -223,6 +242,9 @@ export interface CreateLiveTextBufferOptions {
 /** Analog OfflineFromLiveMode bei Audio. */
 export type OfflineTextBufferFromLiveMode = 'fullIfSpooled' | 'windowSnapshot';
 ```
+
+- `windowSnapshot`: aktuelles In-Memory-Fenster.
+- `fullIfSpooled`: nur aus Spool; bei fehlendem Spool klarer `TEXT_SPOOL_*` Fehler.
 
 ### Facades (`textbuffer`-Modul, Ziel)
 

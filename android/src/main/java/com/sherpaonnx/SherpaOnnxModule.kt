@@ -148,6 +148,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       reactApplicationContext,
       reactApplicationContext.cacheDir
     )
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.initializeWithCacheDir(
+      reactApplicationContext.cacheDir
+    )
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -180,6 +183,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
   }
 
   /**
@@ -1960,8 +1964,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createOfflineFromLive(liveBufferId, mode ?: "fullIfSpooled")
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+      val code = if ((e.message ?: "").startsWith("Live text buffer not found")) {
+        com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND
+      } else {
+        com.sherpaonnx.text.pipeline.TextErrorCodes.INVALID_ARGUMENT
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1989,13 +2000,39 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
+      val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
+        com.sherpaonnx.text.pipeline.TextSpoolingMode.fromRaw(options.getString("spoolingMode"))
+      } else {
+        com.sherpaonnx.text.pipeline.TextSpoolingMode.ON
+      }
+      val spoolingPath = if (options.hasKey("spoolingPath") && !options.isNull("spoolingPath")) {
+        options.getString("spoolingPath")
+      } else {
+        null
+      }
+      val spoolingTemporary = if (options.hasKey("spoolingTemporary") && !options.isNull("spoolingTemporary")) {
+        options.getBoolean("spoolingTemporary")
+      } else {
+        null
+      }
+      val spoolingThresholdBytes = if (options.hasKey("spoolingThresholdBytes") && !options.isNull("spoolingThresholdBytes")) {
+        options.getDouble("spoolingThresholdBytes").toLong()
+      } else {
+        0L
+      }
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLive(
         windowMaxChars = windowMaxChars,
         maxSegments = maxSegments,
         emitPartialEvents = emitPartialEvents,
-        partialEventMinIntervalMs = partialEventMinIntervalMs
+        partialEventMinIntervalMs = partialEventMinIntervalMs,
+        spoolingMode = spoolingMode,
+        spoolingPath = spoolingPath,
+        spoolingTemporary = spoolingTemporary,
+        spoolingThresholdBytes = spoolingThresholdBytes,
       )
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -2005,6 +2042,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLiveFromOffline(offlineBufferId)
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
     } catch (e: Exception) {
@@ -2021,6 +2060,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       entry.finalize_()
       promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
     } catch (e: Exception) {
@@ -2285,6 +2326,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val out = Arguments.createMap()
       out.putInt("segmentIndex", segmentIndex)
       promise.resolve(out)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
     } catch (e: Exception) {

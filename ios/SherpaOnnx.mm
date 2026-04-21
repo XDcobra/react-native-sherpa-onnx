@@ -18,6 +18,7 @@
 #import "audio/session/PaAudioSessionCoordinator.h"
 #include "pcm/PcmPlayerRegistry.h"
 #include "audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
@@ -50,6 +51,7 @@ extern void paMicStopQueue(void);
 - (void)invalidate
 {
     paMicStopQueue();
+    txt_release_all_entries();
     pcmPlayerDestroyAll();
     [[PaAudioSessionCoordinator shared] resetAll];
     [super invalidate];
