@@ -83,6 +83,8 @@ await releasePipelineSegmentBuffer(live);
 
 ## Error code quick table
 
+The following codes are the relevant runtime outcomes for live/streaming segment-buffer operations in this document (`create`, `append`, `finalize`, `slice`, `createOfflineFromLive`, `release`).
+
 | Code | Meaning |
 | --- | --- |
 | `SEGMENT_BUFFER_NOT_FOUND` | Referenced segment buffer does not exist |

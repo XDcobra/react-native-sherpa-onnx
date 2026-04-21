@@ -55,11 +55,17 @@ await releasePipelineSegmentBuffer(live);
 
 ## Error code quick table
 
+The following codes are the relevant runtime outcomes for offline segment-buffer reads and live-to-offline conversion in this document.
+
 | Code | Meaning |
 | --- | --- |
 | `SEGMENT_BUFFER_NOT_FOUND` | Referenced segment buffer does not exist |
+| `SEGMENT_BUFFER_KIND_MISMATCH` | Buffer kind does not match called API |
 | `SEGMENT_INVALID_ARGUMENT` | Invalid argument or malformed id |
+| `SEGMENT_INVALID_STATE` | Operation not allowed in current state |
+| `SEGMENT_ALREADY_FINALIZED` | A recording-only operation was called on an already finished live buffer during conversion flows |
 | `SEGMENT_SLICE_INVALID` | Invalid slice range |
+| `SEGMENT_SPOOL_WRITE_FAILED` | Writing checkpoint/journal spool data failed in preceding live-buffer stages |
 | `SEGMENT_SPOOL_UNAVAILABLE` | `fullIfSpooled` requested but spool unavailable |
 | `SEGMENT_SPOOL_READ_FAILED` | Failed to read spool |
 | `SEGMENT_SPOOL_CORRUPTED` | Corrupted spool content |
