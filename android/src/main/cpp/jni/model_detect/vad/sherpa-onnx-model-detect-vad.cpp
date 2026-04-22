@@ -56,8 +56,7 @@ std::vector<sherpaonnx::VadModelKind> GetKindsFromDirNameVad(
         lower.find("silero_vad") != std::string::npos) {
         add(sherpaonnx::VadModelKind::kSileroVad);
     }
-    if (lower.find("ten") != std::string::npos ||
-        lower.find("ten-vad") != std::string::npos ||
+    if (lower.find("ten-vad") != std::string::npos ||
         lower.find("ten_vad") != std::string::npos) {
         add(sherpaonnx::VadModelKind::kTenVad);
     }

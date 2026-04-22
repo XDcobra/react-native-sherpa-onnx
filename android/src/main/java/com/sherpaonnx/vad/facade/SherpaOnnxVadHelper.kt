@@ -150,17 +150,23 @@ class SherpaOnnxVadHelper(
     }
     val chunkSize = options?.takeIf { it.hasKey("chunkSize") && !it.isNull("chunkSize") }?.getDouble("chunkSize")?.toInt()
       ?: 512
+    var workerRef: VadPipelineWorker? = null
     val worker = VadPipelineWorker(
       instanceId = instanceId,
       inputEntry = inEntry,
       outputEntry = outEntry,
       config = cfg,
       chunkSize = chunkSize,
-      emitEvent = { type, payload -> emitVadEvent(instanceId, "", type, payload) }
+      emitEvent = { type, payload -> emitVadEvent(instanceId, workerRef?.pipelineId ?: "", type, payload) }
     )
+    workerRef = worker
+    // Register instance->pipeline before startup so early events are correlated.
+    instancePipeline[instanceId] = worker.pipelineId
     val pipelineId = StreamingPipelineRegistry.registerAndStart(worker)
     workers[pipelineId] = worker
-    instancePipeline[instanceId] = pipelineId
+    if (pipelineId != worker.pipelineId) {
+      instancePipeline[instanceId] = pipelineId
+    }
     val map = Arguments.createMap()
     map.putString("pipelineId", pipelineId)
     promise.resolve(map)
