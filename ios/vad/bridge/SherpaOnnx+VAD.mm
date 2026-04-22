@@ -2,12 +2,14 @@
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "../pipeline/VadPipelineWorker.h"
 
 #include <cmath>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <optional>
+#include <future>
 
 #include "sherpa-onnx-model-detect.h"
 
@@ -39,19 +41,17 @@ struct VadInstanceState {
 
 struct VadPipelineState {
   std::string instanceId;
+  std::shared_ptr<VadPipelineWorker> worker;
   bool running = true;
   bool flushing = false;
   int queueDepth = 0;
-  int64_t chunksProcessed = 0;
-  int64_t unitsRead = 0;
-  int64_t unitsWritten = 0;
   std::string error;
 };
 
 std::mutex g_vad_mutex;
 std::unordered_map<std::string, VadInstanceState> g_vad_instances;
 std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
-int64_t g_vad_pipeline_counter = 0;
+std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
 } // namespace
 
 @implementation SherpaOnnx (VAD)
@@ -152,7 +152,6 @@ int64_t g_vad_pipeline_counter = 0;
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
-  (void)options;
   if (instanceId == nil || [instanceId length] == 0) {
     reject(@"VAD_INVALID_ARGUMENT", @"instanceId is required", nil);
     return;
@@ -170,17 +169,24 @@ int64_t g_vad_pipeline_counter = 0;
   std::string iid = [instanceId UTF8String];
   std::string aid = [audioInBufferId UTF8String];
   std::string sid = [segmentOutBufferId UTF8String];
+  VadInstanceState cfg;
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
-    if (g_vad_instances.find(iid) == g_vad_instances.end()) {
+    auto it = g_vad_instances.find(iid);
+    if (it == g_vad_instances.end()) {
       reject(@"VAD_MODEL_INIT_FAILED", @"VAD instance not initialized", nil);
       return;
     }
-    for (const auto &it : g_vad_pipelines) {
-      if (it.second.instanceId == iid && it.second.running) {
+    cfg = it->second;
+    auto pit = g_vad_instance_to_pipeline.find(iid);
+    if (pit != g_vad_instance_to_pipeline.end()) {
+      auto p = g_vad_pipelines.find(pit->second);
+      if (p != g_vad_pipelines.end() && p->second.running) {
         reject(@"VAD_PIPELINE_ALREADY_RUNNING", @"VAD pipeline already running for instance", nil);
         return;
       }
+      g_vad_pipelines.erase(pit->second);
+      g_vad_instance_to_pipeline.erase(pit);
     }
   }
 
@@ -196,25 +202,67 @@ int64_t g_vad_pipeline_counter = 0;
       return;
     }
   }
+  const int chunkSize = ([options[@"chunkSize"] respondsToSelector:@selector(intValue)] ? MAX(1, [options[@"chunkSize"] intValue]) : 512);
+  auto worker = std::make_shared<VadPipelineWorker>(
+    iid,
+    liveAudio,
+    VadPipelineWorker::Config{
+      cfg.sampleRate,
+      cfg.threshold,
+      cfg.minSpeechDurationMs,
+      MAX(0, ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)] ? [options[@"silenceDurationMs"] intValue] : 250)),
+      chunkSize,
+      aid,
+      sid
+    },
+    [weakSelf = self, iid](const std::string &type,
+                           const std::unordered_map<std::string, double> &numbers,
+                           const std::unordered_map<std::string, std::string> &strings,
+                           const std::unordered_map<std::string, bool> &flags) {
+      if (!weakSelf) return;
+      std::string pid;
+      {
+        std::lock_guard<std::mutex> lock(g_vad_mutex);
+        auto it = g_vad_instance_to_pipeline.find(iid);
+        if (it != g_vad_instance_to_pipeline.end()) {
+          pid = it->second;
+        }
+      }
+      NSString *pipelineId = [NSString stringWithUTF8String:pid.c_str()];
+      NSMutableDictionary *body = [NSMutableDictionary dictionary];
+      body[@"type"] = [NSString stringWithUTF8String:type.c_str()];
+      body[@"instanceId"] = [NSString stringWithUTF8String:iid.c_str()];
+      body[@"pipelineId"] = pipelineId;
+      body[@"ts"] = @((double)([[NSDate date] timeIntervalSince1970] * 1000.0));
 
-  std::string pid;
+      for (const auto &it : numbers) {
+        body[[NSString stringWithUTF8String:it.first.c_str()]] = @(it.second);
+      }
+      for (const auto &it : strings) {
+        body[[NSString stringWithUTF8String:it.first.c_str()]] = [NSString stringWithUTF8String:it.second.c_str()];
+      }
+      for (const auto &it : flags) {
+        body[[NSString stringWithUTF8String:it.first.c_str()]] = @(it.second);
+      }
+
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf sendEventWithName:@"vadEvent" body:body];
+      });
+    }
+  );
+
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
-    pid = "vad_pipeline_" + std::to_string(++g_vad_pipeline_counter);
-    VadPipelineState p;
-    p.instanceId = iid;
-    p.running = true;
-    g_vad_pipelines[pid] = p;
+    VadPipelineState state;
+    state.instanceId = iid;
+    state.worker = worker;
+    state.running = true;
+    g_vad_pipelines[worker->pipelineId] = state;
+    g_vad_instance_to_pipeline[iid] = worker->pipelineId;
   }
 
-  [self sendEventWithName:@"vadEvent"
-                     body:@{
-                       @"type": @"pipeline.started",
-                       @"instanceId": instanceId,
-                       @"pipelineId": [NSString stringWithUTF8String:pid.c_str()],
-                       @"ts": @((double)([[NSDate date] timeIntervalSince1970] * 1000.0))
-                     }];
-  resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pid.c_str()] });
+  worker->start();
+  resolve(@{ @"pipelineId": [NSString stringWithUTF8String:worker->pipelineId.c_str()] });
 }
 
 - (void)runVadOffline:(NSString *)instanceId
@@ -312,35 +360,106 @@ int64_t g_vad_pipeline_counter = 0;
   }
 
   std::string outId = [segmentOutBufferId UTF8String];
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_offline.find(outId);
-    if (it != g_seg_offline.end()) {
-      it->second->segments = records;
-      resolve(@{
-        @"chunksProcessed": @((double)ceil((double)samples.size() / (double)chunkSize)),
-        @"unitsRead": @((double)samples.size()),
-        @"unitsWritten": @((double)segmentCount),
-        @"segmentCount": @((double)segmentCount),
-        @"speechDurationMs": @((double)speechDurationMs)
-      });
-      return;
+  if ([segmentOutBufferId hasPrefix:@"seg_off_"]) {
+    {
+      std::lock_guard<std::mutex> lock(g_seg_mutex);
+      auto it = g_seg_offline.find(outId);
+      if (it != g_seg_offline.end()) {
+        it->second->segments = records;
+        resolve(@{
+          @"chunksProcessed": @((double)ceil((double)samples.size() / (double)chunkSize)),
+          @"unitsRead": @((double)samples.size()),
+          @"unitsWritten": @((double)segmentCount),
+          @"segmentCount": @((double)segmentCount),
+          @"speechDurationMs": @((double)speechDurationMs)
+        });
+        return;
+      }
     }
+    reject(@"VAD_BUFFER_NOT_FOUND", @"Output offline segment buffer not found", nil);
+    return;
   }
-  reject(@"VAD_BUFFER_KIND_MISMATCH", @"runVadOffline currently requires an offline segment buffer output on iOS", nil);
+
+  if ([segmentOutBufferId hasPrefix:@"seg_live_"]) {
+    for (const auto &record : records) {
+      std::string segId;
+      int segIndex = -1;
+      std::string err;
+      const bool ok = seg_live_append_segment(
+        outId,
+        record.kind,
+        record.sourceAudioBufferId,
+        record.startSample,
+        record.endSample,
+        record.sampleRate,
+        record.durationMs,
+        record.hasConfidence,
+        record.confidence,
+        record.payloadJson,
+        &segId,
+        &segIndex,
+        &err
+      );
+      if (!ok) {
+        reject(@"VAD_BUFFER_KIND_MISMATCH",
+               [NSString stringWithUTF8String:err.empty() ? "Failed to append VAD segments to live segment buffer" : err.c_str()],
+               nil);
+        return;
+      }
+    }
+    resolve(@{
+      @"chunksProcessed": @((double)ceil((double)samples.size() / (double)chunkSize)),
+      @"unitsRead": @((double)samples.size()),
+      @"unitsWritten": @((double)segmentCount),
+      @"segmentCount": @((double)segmentCount),
+      @"speechDurationMs": @((double)speechDurationMs)
+    });
+    return;
+  }
+
+  reject(@"VAD_BUFFER_KIND_MISMATCH", @"runVadOffline expects seg_off_* or seg_live_* segment output buffer", nil);
 }
 
 - (void)flushVad:(NSString *)pipelineId
          resolve:(RCTPromiseResolveBlock)resolve
           reject:(RCTPromiseRejectBlock)reject
 {
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  auto it = g_vad_pipelines.find([pipelineId UTF8String]);
-  if (it == g_vad_pipelines.end()) {
-    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+  std::string pid = pipelineId ? [pipelineId UTF8String] : "";
+  std::shared_ptr<VadPipelineWorker> worker;
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_pipelines.find(pid);
+    if (it == g_vad_pipelines.end()) {
+      reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+      return;
+    }
+    worker = it->second.worker;
+    it->second.flushing = true;
+  }
+  if (!worker) {
+    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD worker not found", nil);
     return;
   }
-  it->second.flushing = false;
+  try {
+    auto future = worker->flush();
+    future.get();
+  } catch (const std::exception &e) {
+    {
+      std::lock_guard<std::mutex> lock(g_vad_mutex);
+      auto it = g_vad_pipelines.find(pid);
+      if (it != g_vad_pipelines.end()) it->second.flushing = false;
+    }
+    reject(@"VAD_INTERNAL_ERROR", [NSString stringWithUTF8String:e.what()], nil);
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_pipelines.find(pid);
+    if (it != g_vad_pipelines.end()) {
+      it->second.flushing = false;
+    }
+  }
   resolve(nil);
 }
 
@@ -348,16 +467,27 @@ int64_t g_vad_pipeline_counter = 0;
          resolve:(RCTPromiseResolveBlock)resolve
           reject:(RCTPromiseRejectBlock)reject
 {
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  auto it = g_vad_pipelines.find([pipelineId UTF8String]);
-  if (it == g_vad_pipelines.end()) {
-    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+  std::shared_ptr<VadPipelineWorker> worker;
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_pipelines.find([pipelineId UTF8String]);
+    if (it == g_vad_pipelines.end()) {
+      reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+      return;
+    }
+    worker = it->second.worker;
+  }
+  if (!worker) {
+    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD worker not found", nil);
     return;
   }
-  it->second.chunksProcessed = 0;
-  it->second.unitsRead = 0;
-  it->second.unitsWritten = 0;
-  it->second.error.clear();
+  try {
+    auto future = worker->reset();
+    future.get();
+  } catch (const std::exception &e) {
+    reject(@"VAD_INTERNAL_ERROR", [NSString stringWithUTF8String:e.what()], nil);
+    return;
+  }
   resolve(nil);
 }
 
@@ -367,6 +497,7 @@ int64_t g_vad_pipeline_counter = 0;
 {
   std::string pid = [pipelineId UTF8String];
   std::string iid;
+  std::shared_ptr<VadPipelineWorker> worker;
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
     auto it = g_vad_pipelines.find(pid);
@@ -375,21 +506,21 @@ int64_t g_vad_pipeline_counter = 0;
       return;
     }
     iid = it->second.instanceId;
+    worker = it->second.worker;
     it->second.running = false;
-    g_vad_pipelines.erase(it);
   }
-  [self sendEventWithName:@"vadEvent"
-                     body:@{
-                       @"type": @"pipeline.completed",
-                       @"instanceId": [NSString stringWithUTF8String:iid.c_str()],
-                       @"pipelineId": pipelineId,
-                       @"ts": @((double)([[NSDate date] timeIntervalSince1970] * 1000.0)),
-                       @"chunksProcessed": @(0),
-                       @"unitsRead": @(0),
-                       @"unitsWritten": @(0),
-                       @"segmentCount": @(0),
-                       @"speechDurationMs": @(0)
-                     }];
+
+  if (worker) {
+    worker->stop();
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    g_vad_pipelines.erase(pid);
+    auto mapping = g_vad_instance_to_pipeline.find(iid);
+    if (mapping != g_vad_instance_to_pipeline.end() && mapping->second == pid) {
+      g_vad_instance_to_pipeline.erase(mapping);
+    }
+  }
   resolve(nil);
 }
 
@@ -397,21 +528,32 @@ int64_t g_vad_pipeline_counter = 0;
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  auto it = g_vad_pipelines.find([pipelineId UTF8String]);
-  if (it == g_vad_pipelines.end()) {
-    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+  std::shared_ptr<VadPipelineWorker> worker;
+  bool isFlushing = false;
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_pipelines.find([pipelineId UTF8String]);
+    if (it == g_vad_pipelines.end()) {
+      reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
+      return;
+    }
+    worker = it->second.worker;
+    isFlushing = it->second.flushing;
+  }
+  if (!worker) {
+    reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD worker not found", nil);
     return;
   }
+  StreamingPipelineStatus status = worker->getStatus();
   resolve(@{
     @"pipelineId": pipelineId,
-    @"isRunning": @(it->second.running),
-    @"isFlushing": @(it->second.flushing),
-    @"queueDepth": @(it->second.queueDepth),
-    @"chunksProcessed": @((double)it->second.chunksProcessed),
-    @"unitsRead": @((double)it->second.unitsRead),
-    @"unitsWritten": @((double)it->second.unitsWritten),
-    @"error": it->second.error.empty() ? [NSNull null] : [NSString stringWithUTF8String:it->second.error.c_str()]
+    @"isRunning": @(status.isRunning),
+    @"isFlushing": @(isFlushing),
+    @"queueDepth": @(worker->queueDepthNow()),
+    @"chunksProcessed": @((double)status.chunksProcessed),
+    @"unitsRead": @((double)status.unitsRead),
+    @"unitsWritten": @((double)status.unitsWritten),
+    @"error": status.error.empty() ? [NSNull null] : [NSString stringWithUTF8String:status.error.c_str()]
   });
 }
 
@@ -419,13 +561,36 @@ int64_t g_vad_pipeline_counter = 0;
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject
 {
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  auto it = g_vad_instances.find([instanceId UTF8String]);
-  if (it == g_vad_instances.end()) {
-    reject(@"VAD_MODEL_INIT_FAILED", @"VAD instance not initialized", nil);
+  std::string iid = [instanceId UTF8String];
+  std::shared_ptr<VadPipelineWorker> worker;
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_instances.find(iid);
+    if (it == g_vad_instances.end()) {
+      reject(@"VAD_MODEL_INIT_FAILED", @"VAD instance not initialized", nil);
+      return;
+    }
+    auto pit = g_vad_instance_to_pipeline.find(iid);
+    if (pit != g_vad_instance_to_pipeline.end()) {
+      auto p = g_vad_pipelines.find(pit->second);
+      if (p != g_vad_pipelines.end()) {
+        worker = p->second.worker;
+      }
+    }
+  }
+  if (worker) {
+    resolve(@(worker->isSpeechDetectedNow()));
     return;
   }
-  resolve(@(it->second.speechDetected));
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    auto it = g_vad_instances.find(iid);
+    if (it == g_vad_instances.end()) {
+      reject(@"VAD_MODEL_INIT_FAILED", @"VAD instance not initialized", nil);
+      return;
+    }
+    resolve(@(it->second.speechDetected));
+  }
 }
 
 - (void)unloadVad:(NSString *)instanceId
@@ -434,14 +599,29 @@ int64_t g_vad_pipeline_counter = 0;
 {
   (void)reject;
   std::string iid = [instanceId UTF8String];
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  g_vad_instances.erase(iid);
-  for (auto it = g_vad_pipelines.begin(); it != g_vad_pipelines.end();) {
-    if (it->second.instanceId == iid) {
-      it = g_vad_pipelines.erase(it);
-    } else {
-      ++it;
+  std::vector<std::shared_ptr<VadPipelineWorker>> workersToStop;
+  {
+    std::lock_guard<std::mutex> lock(g_vad_mutex);
+    g_vad_instances.erase(iid);
+    auto pit = g_vad_instance_to_pipeline.find(iid);
+    if (pit != g_vad_instance_to_pipeline.end()) {
+      auto it = g_vad_pipelines.find(pit->second);
+      if (it != g_vad_pipelines.end()) {
+        if (it->second.worker) workersToStop.push_back(it->second.worker);
+      }
+      g_vad_instance_to_pipeline.erase(pit);
     }
+    for (auto it = g_vad_pipelines.begin(); it != g_vad_pipelines.end();) {
+      if (it->second.instanceId == iid) {
+        if (it->second.worker) workersToStop.push_back(it->second.worker);
+        it = g_vad_pipelines.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto &w : workersToStop) {
+    if (w) w->stop();
   }
   resolve(nil);
 }
