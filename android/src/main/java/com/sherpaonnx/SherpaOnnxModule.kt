@@ -31,6 +31,7 @@ import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
+import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
 
@@ -102,6 +103,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
+  private val vadHelper = SherpaOnnxVadHelper(reactApplicationContext)
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
 
   private fun normalizeInputDeviceKind(type: Int): String {
@@ -184,6 +186,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
@@ -2959,6 +2962,56 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
+  }
+
+  // ==================== VAD Methods ====================
+
+  override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
+    vadHelper.initializeVad(instanceId, options, promise)
+  }
+
+  override fun startVadPipeline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    vadHelper.startVadPipeline(instanceId, audioInBufferId, segmentOutBufferId, options, promise)
+  }
+
+  override fun runVadOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    vadHelper.runVadOffline(instanceId, audioInBufferId, segmentOutBufferId, options, promise)
+  }
+
+  override fun flushVad(pipelineId: String, promise: Promise) {
+    vadHelper.flushVad(pipelineId, promise)
+  }
+
+  override fun resetVad(pipelineId: String, promise: Promise) {
+    vadHelper.resetVad(pipelineId, promise)
+  }
+
+  override fun stopVadPipeline(pipelineId: String, promise: Promise) {
+    vadHelper.stopVadPipeline(pipelineId, promise)
+  }
+
+  override fun getVadPipelineStatus(pipelineId: String, promise: Promise) {
+    vadHelper.getVadPipelineStatus(pipelineId, promise)
+  }
+
+  override fun isVadSpeechDetected(instanceId: String, promise: Promise) {
+    vadHelper.isVadSpeechDetected(instanceId, promise)
+  }
+
+  override fun unloadVad(instanceId: String, promise: Promise) {
+    vadHelper.unloadVad(instanceId, promise)
   }
 
   // ==================== Streaming Pipeline Control (generic) ====================
