@@ -715,6 +715,51 @@ export interface Spec extends TurboModule {
 
   releasePipelineSegmentBuffer(bufferId: string): Promise<void>;
 
+  // ==================== VAD Methods ====================
+
+  initializeVad(instanceId: string, options: Object): Promise<void>;
+
+  startVadPipeline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentOutBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
+
+  runVadOffline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentOutBufferId: string,
+    options?: Object
+  ): Promise<{
+    chunksProcessed: number;
+    unitsRead: number;
+    unitsWritten: number;
+    segmentCount: number;
+    speechDurationMs: number;
+  }>;
+
+  flushVad(pipelineId: string): Promise<void>;
+
+  resetVad(pipelineId: string): Promise<void>;
+
+  stopVadPipeline(pipelineId: string): Promise<void>;
+
+  getVadPipelineStatus(pipelineId: string): Promise<{
+    pipelineId: string;
+    isRunning: boolean;
+    isFlushing: boolean;
+    queueDepth: number;
+    chunksProcessed: number;
+    unitsRead: number;
+    unitsWritten: number;
+    error: string | null;
+  }>;
+
+  isVadSpeechDetected(instanceId: string): Promise<boolean>;
+
+  unloadVad(instanceId: string): Promise<void>;
+
   // ==================== TTS Methods ====================
 
   /**
