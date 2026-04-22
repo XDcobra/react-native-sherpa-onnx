@@ -1,14 +1,18 @@
 # Voice Activity Detection (VAD)
 
-This feature is not yet supported in the React Native SDK.
+VAD engine APIs are being migrated to a new streaming-first model.
 
-## Quick Usage
+## Current status
 
-There is no VAD API available yet. This page will be updated once VAD support ships.
+- Legacy placeholder functions are being replaced as part of the VAD migration.
+- `SegmentBuffer` is now the core output primitive for VAD-oriented pipelines.
+- Public SegmentBuffer docs:
+  - [segmentbuffer-streaming.md](segmentbuffer-streaming.md)
+  - [segmentbuffer-offline.md](segmentbuffer-offline.md)
 
-## Status
+## Migration docs
 
-- Planned for a future release
-- API and configuration are not available yet
+- [VAD spec](migration/vad/vad-spec.md)
+- [VAD TypeScript API proposal](migration/vad/typescript-api-proposal.md)
 
-Follow the project roadmap or open an issue to track progress.
+This page will be expanded with full VAD runtime usage once the engine migration is finalized.

@@ -85,6 +85,11 @@
       "types": "./lib/typescript/src/textbuffer/index.d.ts",
       "default": "./lib/module/textbuffer/index.js"
     },
+    "./segmentbuffer": {
+      "source": "./src/segmentbuffer/index.ts",
+      "types": "./lib/typescript/src/segmentbuffer/index.d.ts",
+      "default": "./lib/module/segmentbuffer/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

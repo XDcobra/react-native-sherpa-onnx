@@ -11,6 +11,7 @@
       "react-native-sherpa-onnx/pcm": ["./src/pcm/index.ts"],
       "react-native-sherpa-onnx/audiobuffer": ["./src/audiobuffer/index.ts"],
       "react-native-sherpa-onnx/textbuffer": ["./src/textbuffer/index.ts"],
+      "react-native-sherpa-onnx/segmentbuffer": ["./src/segmentbuffer/index.ts"],
       "react-native-sherpa-onnx/fileio": ["./src/fileio/index.ts"],
       "react-native-sherpa-onnx/stt": ["./src/stt/index.ts"],
       "react-native-sherpa-onnx/model-languages": ["./src/model-languages/index.ts"],

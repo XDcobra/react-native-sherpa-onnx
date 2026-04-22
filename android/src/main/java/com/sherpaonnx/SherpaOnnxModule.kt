@@ -151,6 +151,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.initializeWithCacheDir(
       reactApplicationContext.cacheDir
     )
+    com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.initializeWithCacheDir(
+      reactApplicationContext.cacheDir
+    )
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -184,6 +187,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
+    com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.releaseAll()
   }
 
   /**
@@ -2422,6 +2426,232 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(entry.segmentCount)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  // ==================== Pipeline Segment Buffers ====================
+
+  override fun createLiveSegmentBuffer(options: ReadableMap, promise: Promise) {
+    try {
+      val sourceAudioBufferId =
+        if (options.hasKey("sourceAudioBufferId") && !options.isNull("sourceAudioBufferId")) {
+          options.getString("sourceAudioBufferId")
+        } else {
+          null
+        }
+      val maxSegments =
+        if (options.hasKey("maxSegments") && !options.isNull("maxSegments")) {
+          options.getDouble("maxSegments").toInt()
+        } else {
+          1000
+        }
+      val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
+        options.getString("spoolingMode")
+      } else {
+        "on"
+      }
+      val spoolingPath = if (options.hasKey("spoolingPath") && !options.isNull("spoolingPath")) {
+        options.getString("spoolingPath")
+      } else {
+        null
+      }
+      val spoolingTemporary =
+        if (options.hasKey("spoolingTemporary") && !options.isNull("spoolingTemporary")) {
+          options.getBoolean("spoolingTemporary")
+        } else {
+          null
+        }
+      val spoolingThresholdBytes =
+        if (options.hasKey("spoolingThresholdBytes") && !options.isNull("spoolingThresholdBytes")) {
+          options.getDouble("spoolingThresholdBytes").toLong()
+        } else {
+          null
+        }
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createLive(
+        sourceAudioBufferId = sourceAudioBufferId,
+        maxSegments = maxSegments,
+        spoolingModeRaw = spoolingMode,
+        spoolingPath = spoolingPath,
+        spoolingTemporary = spoolingTemporary,
+        spoolingThresholdBytes = spoolingThresholdBytes
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createEmptyOfflineSegmentBuffer(options: ReadableMap?, promise: Promise) {
+    try {
+      val sourceAudioBufferId =
+        if (options != null && options.hasKey("sourceAudioBufferId") && !options.isNull("sourceAudioBufferId")) {
+          options.getString("sourceAudioBufferId")
+        } else {
+          null
+        }
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createEmptyOffline(sourceAudioBufferId)
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendLiveSegment(
+    liveBufferId: String,
+    kind: String,
+    sourceAudioBufferId: String,
+    startSample: Double,
+    endSample: Double,
+    sampleRate: Double,
+    durationMs: Double?,
+    confidence: Double?,
+    payload: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      val result = entry.appendSegment(
+        kind = kind,
+        sourceAudioBufferId = sourceAudioBufferId,
+        startSample = startSample.toInt(),
+        endSample = endSample.toInt(),
+        sampleRate = sampleRate.toInt(),
+        durationMs = durationMs?.toInt(),
+        confidence = confidence,
+        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() }
+      )
+      val out = Arguments.createMap()
+      out.putString("segmentId", result.first)
+      out.putInt("segmentIndex", result.second)
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun finalizeLiveSegmentBuffer(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      entry.finalize_()
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineSegmentBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createOfflineFromLive(
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getPipelineSegmentBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      val offline = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
+      if (offline != null) {
+        promise.resolve(offline.toWritableMap())
+        return
+      }
+      val live = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(bufferId)
+      if (live != null) {
+        promise.resolve(live.toWritableMap())
+        return
+      }
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Segment buffer not found: $bufferId")
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineSegmentBufferSegments(
+    bufferId: String,
+    start: Double,
+    maxCount: Double,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Offline segment buffer not found: $bufferId")
+        return
+      }
+      val segments = entry.snapshotSegments(start.toInt(), maxCount.toInt())
+      val out = Arguments.createMap()
+      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveSegmentBufferSegments(
+    liveBufferId: String,
+    startIndex: Double,
+    maxCount: Double,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
+      val out = Arguments.createMap()
+      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveSegmentBufferSegmentCount(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      promise.resolve(entry.segmentCount())
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun releasePipelineSegmentBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.release(bufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
     }
   }
 
