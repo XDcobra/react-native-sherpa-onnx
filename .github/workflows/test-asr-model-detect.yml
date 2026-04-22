@@ -1,5 +1,6 @@
-# ASR model detection tests: C++ tests that compare detector output with asr-models-expected.csv.
-# Triggered on PR (via test-model-detect) or manually. Uses test/fixtures (asr-models-structure.txt, asr-models-expected.csv).
+# ASR model detection tests: C++ tests that compare detector output with asr-models-expected.csv
+# and VAD detector output with vad-models-expected.csv (same ASR asset universe).
+# Triggered on PR (via test-model-detect) or manually.
 
 name: Test – ASR model detection
 
@@ -31,4 +32,4 @@ jobs:
 
       - name: Run ASR model detection tests
         working-directory: ${{ github.workspace }}
-        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectSttFromFileListMatchesExpected
+        run: ./test/cpp/build/model_detect_test --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectSttFromFileListMatchesExpected:ModelDetectTest.DetectVadFromAsrFileListMatchesExpected

@@ -7,6 +7,7 @@
       "tree_cache_dir": "tree-cache/asr-models",
       "structure_file": "test/fixtures/asr-models-structure.txt",
       "expected_csv": "test/fixtures/asr-models-expected.csv",
+      "secondary_expected_csv": "test/fixtures/vad-models-expected.csv",
       "license_csv": "android/src/main/assets/model_licenses/asr-models-license-status.csv"
     },
     {
