@@ -915,7 +915,8 @@ sherpa-onnx-streaming-zipformer-korean-2024-06-16/decoder-epoch-99-avg-1.int8.on
 sherpa-onnx-streaming-zipformer-korean-2024-06-16/bpe.model
 
 # Asset: silero_vad_v5.onnx
-single file: silero_vad_v5.onnx
+./
+./silero_vad_v5.onnx
 
 # Asset: sherpa-onnx-zipformer-en-libriheavy-20230926-small.tar.bz2
 sherpa-onnx-zipformer-en-libriheavy-20230926-small/
