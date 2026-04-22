@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 class LiveSegmentEntry(
   val bufferId: String,
-  private val sourceAudioBufferId: String? = null,
+  val sourceAudioBufferId: String? = null,
   private val maxSegments: Int = 1000,
   private val spoolingMode: SegmentSpoolingMode = SegmentSpoolingMode.ON,
   private val spoolPath: String? = null,
@@ -66,6 +66,25 @@ class LiveSegmentEntry(
     confidence: Double?,
     payloadJson: String?,
   ): Pair<String, Int> {
+    if (sampleRate <= 0) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_ARGUMENT,
+        "sampleRate must be > 0; received $sampleRate"
+      )
+    }
+    if (endSample < startSample) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_ARGUMENT,
+        "endSample must be >= startSample; received startSample=$startSample endSample=$endSample"
+      )
+    }
+    if (durationMs != null && durationMs < 0) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_ARGUMENT,
+        "durationMs must be >= 0 when provided; received $durationMs"
+      )
+    }
+
     val effectiveDurationMs = durationMs ?: (((endSample - startSample).coerceAtLeast(0) * 1000L) / sampleRate).toInt()
     var segmentId = ""
     var segmentIndex = -1

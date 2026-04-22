@@ -77,7 +77,7 @@ object SegmentPipelineRegistry {
       )
     }
     val id = newId("seg_off")
-    val entry = OfflineSegmentEntry(id)
+    val entry = OfflineSegmentEntry(id, live.sourceAudioBufferId)
     entry.populate(records)
     offlineMap[id] = entry
     return entry

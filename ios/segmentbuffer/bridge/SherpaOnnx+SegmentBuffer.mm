@@ -7,6 +7,7 @@
 #include <random>
 #include <sstream>
 #include <unistd.h>
+#include <zlib.h>
 
 std::unordered_map<std::string, std::shared_ptr<SegOfflineEntry>> g_seg_offline;
 std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> g_seg_live;
@@ -147,6 +148,62 @@ struct SegLiveEntry {
   std::string journalPath() const { return spoolPath + ".segj"; }
   std::string checkpointPath() const { return spoolPath + ".segc"; }
 
+  uint32_t computeSpoolChecksum(const std::string &payload) const {
+    uLong crc = ::crc32(0L, Z_NULL, 0);
+    if (!payload.empty()) {
+      crc = ::crc32(
+        crc,
+        reinterpret_cast<const Bytef *>(payload.data()),
+        static_cast<uInt>(payload.size())
+      );
+    }
+    return static_cast<uint32_t>(crc);
+  }
+
+  bool isKnownRecordType(uint16_t type) const {
+    return type == kRecordSegmentAppend ||
+      type == kRecordCheckpointMark ||
+      type == kRecordFinalizeMark;
+  }
+
+  void decodeHeaderOrThrow(
+    const unsigned char *header,
+    const std::string &path,
+    uint16_t *recordType,
+    uint32_t *payloadLength,
+    uint32_t *checksum
+  ) const {
+    uint32_t magic =
+      (static_cast<uint32_t>(header[0])) |
+      (static_cast<uint32_t>(header[1]) << 8) |
+      (static_cast<uint32_t>(header[2]) << 16) |
+      (static_cast<uint32_t>(header[3]) << 24);
+    uint16_t version =
+      (static_cast<uint16_t>(header[4])) |
+      (static_cast<uint16_t>(header[5]) << 8);
+    uint16_t type =
+      (static_cast<uint16_t>(header[6])) |
+      (static_cast<uint16_t>(header[7]) << 8);
+    uint32_t len =
+      (static_cast<uint32_t>(header[8])) |
+      (static_cast<uint32_t>(header[9]) << 8) |
+      (static_cast<uint32_t>(header[10]) << 16) |
+      (static_cast<uint32_t>(header[11]) << 24);
+    uint32_t crc =
+      (static_cast<uint32_t>(header[12])) |
+      (static_cast<uint32_t>(header[13]) << 8) |
+      (static_cast<uint32_t>(header[14]) << 16) |
+      (static_cast<uint32_t>(header[15]) << 24);
+
+    if (magic != kMagic || version != kVersion || !isKnownRecordType(type)) {
+      throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Unexpected segment spool record format in " + path);
+    }
+
+    *recordType = type;
+    *payloadLength = len;
+    *checksum = crc;
+  }
+
   void closeSpoolFileLocked(bool flushFirst) {
     if (!journalFile) return;
     if (flushFirst) fflush(journalFile);
@@ -157,8 +214,7 @@ struct SegLiveEntry {
   void appendJournalRecordLocked(uint16_t type, const std::string &payload) {
     if (!journalFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Segment journal not open for " + bufferId);
     const uint32_t len = (uint32_t)payload.size();
-    uint32_t crc = 0;
-    for (char c : payload) crc = (crc * 33u) ^ (uint8_t)c;
+    const uint32_t crc = computeSpoolChecksum(payload);
     unsigned char header[kHeaderBytes] = {
       (unsigned char)(kMagic & 0xFF),
       (unsigned char)((kMagic >> 8) & 0xFF),
@@ -191,8 +247,7 @@ struct SegLiveEntry {
     FILE *tmp = fopen(tmpPath.c_str(), "wb");
     if (!tmp) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to create segment checkpoint for " + bufferId);
     const uint32_t len = (uint32_t)snapshot.size();
-    uint32_t crc = 0;
-    for (char c : snapshot) crc = (crc * 33u) ^ (uint8_t)c;
+    const uint32_t crc = computeSpoolChecksum(snapshot);
     unsigned char header[kHeaderBytes] = {
       (unsigned char)(kMagic & 0xFF), (unsigned char)((kMagic >> 8) & 0xFF), (unsigned char)((kMagic >> 16) & 0xFF), (unsigned char)((kMagic >> 24) & 0xFF),
       (unsigned char)(kVersion & 0xFF), (unsigned char)((kVersion >> 8) & 0xFF),
@@ -243,7 +298,7 @@ struct SegLiveEntry {
           return;
         case SPOOL_AUTO: {
           if (!mayActivateAuto) return;
-          spoolEstimatedBytes += (int64_t)(4 + snapshot.size());
+          spoolEstimatedBytes += (int64_t)(kHeaderBytes + snapshot.size());
           if (spoolEstimatedBytes < std::max<int64_t>(0, spoolThresholdBytes)) {
             spoolReady = false;
             return;
@@ -300,40 +355,119 @@ struct SegLiveEntry {
       if (journalFile) fflush(journalFile);
     }
     std::string cpPath = path + ".segc";
+    std::string jPath = path + ".segj";
+    bool hasCheckpoint = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]];
+    bool hasJournal = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:jPath.c_str()]];
+    if (!hasCheckpoint && !hasJournal) {
+      throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Missing segment spool files for " + bufferId);
+    }
+
     std::vector<SegRecord> result;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]]) {
+    if (hasCheckpoint) {
       FILE *cp = fopen(cpPath.c_str(), "rb");
       if (!cp) throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to open segment checkpoint for " + bufferId);
+
+      if (fseek(cp, 0, SEEK_END) != 0) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to inspect segment checkpoint for " + bufferId);
+      }
+      long checkpointSize = ftell(cp);
+      if (checkpointSize < kHeaderBytes) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment checkpoint header for " + bufferId);
+      }
+      if (fseek(cp, 0, SEEK_SET) != 0) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to read segment checkpoint for " + bufferId);
+      }
+
       unsigned char header[kHeaderBytes];
       if (fread(header, 1, kHeaderBytes, cp) != kHeaderBytes) { fclose(cp); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment checkpoint header for " + bufferId); }
-      uint32_t len = (uint32_t)header[8] | ((uint32_t)header[9] << 8) | ((uint32_t)header[10] << 16) | ((uint32_t)header[11] << 24);
+
+      uint16_t type = 0;
+      uint32_t len = 0;
+      uint32_t checksum = 0;
+      decodeHeaderOrThrow(header, cpPath, &type, &len, &checksum);
+      if (type != kRecordCheckpointMark) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Unexpected segment checkpoint record type for " + bufferId);
+      }
+      if (checkpointSize != static_cast<long>(kHeaderBytes + len)) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Unexpected segment checkpoint size for " + bufferId);
+      }
+
       std::string payload;
       payload.resize(len);
       if (len > 0 && fread(payload.data(), 1, len, cp) != len) { fclose(cp); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment checkpoint payload for " + bufferId); }
+
+      uint32_t actualChecksum = computeSpoolChecksum(payload);
+      if (actualChecksum != checksum) {
+        fclose(cp);
+        throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Segment checkpoint checksum mismatch for " + bufferId);
+      }
+
       fclose(cp);
       result = segment_records_from_json(payload);
-      std::string jPath = path + ".segj";
-      FILE *jr = fopen(jPath.c_str(), "rb");
-      if (jr) {
-        while (true) {
-          unsigned char h[kHeaderBytes];
-          size_t n = fread(h, 1, kHeaderBytes, jr);
-          if (n == 0) break;
-          if (n != kHeaderBytes) { fclose(jr); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment journal header for " + bufferId); }
-          uint16_t type = (uint16_t)h[6] | ((uint16_t)h[7] << 8);
-          uint32_t len = (uint32_t)h[8] | ((uint32_t)h[9] << 8) | ((uint32_t)h[10] << 16) | ((uint32_t)h[11] << 24);
-          std::string payload; payload.resize(len);
-          if (len > 0 && fread(payload.data(), 1, len, jr) != len) { fclose(jr); throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment journal payload for " + bufferId); }
-          if (type == kRecordSegmentAppend) {
-            auto parsed = segment_records_from_json(payload);
-            if (!parsed.empty()) result.push_back(parsed[0]);
-          }
-        }
-        fclose(jr);
-      }
-      return result;
     }
-    throw std::runtime_error("SEGMENT_SPOOL_UNAVAILABLE: Missing segment checkpoint for " + bufferId);
+
+    if (hasJournal) {
+      FILE *jr = fopen(jPath.c_str(), "rb");
+      if (!jr) throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to open segment journal for " + bufferId);
+
+      if (fseek(jr, 0, SEEK_END) != 0) {
+        fclose(jr);
+        throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to inspect segment journal for " + bufferId);
+      }
+      long journalSize = ftell(jr);
+      if (journalSize < 0 || fseek(jr, 0, SEEK_SET) != 0) {
+        fclose(jr);
+        throw std::runtime_error("SEGMENT_SPOOL_READ_FAILED: Failed to read segment journal for " + bufferId);
+      }
+
+      while (true) {
+        unsigned char h[kHeaderBytes];
+        size_t n = fread(h, 1, kHeaderBytes, jr);
+        if (n == 0) break;
+        if (n != kHeaderBytes) {
+          fclose(jr);
+          throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Corrupted segment journal header for " + bufferId);
+        }
+
+        uint16_t type = 0;
+        uint32_t len = 0;
+        uint32_t checksum = 0;
+        decodeHeaderOrThrow(h, jPath, &type, &len, &checksum);
+
+        long payloadStart = ftell(jr);
+        if (payloadStart < 0 || payloadStart + static_cast<long>(len) > journalSize) {
+          fclose(jr);
+          throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment journal payload for " + bufferId);
+        }
+
+        std::string payload;
+        payload.resize(len);
+        if (len > 0 && fread(payload.data(), 1, len, jr) != len) {
+          fclose(jr);
+          throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Truncated segment journal payload for " + bufferId);
+        }
+
+        uint32_t actualChecksum = computeSpoolChecksum(payload);
+        if (actualChecksum != checksum) {
+          fclose(jr);
+          throw std::runtime_error("SEGMENT_SPOOL_CORRUPTED: Segment journal checksum mismatch for " + bufferId);
+        }
+
+        if (type == kRecordSegmentAppend) {
+          auto parsed = segment_records_from_json(payload);
+          if (!parsed.empty()) result.push_back(parsed[0]);
+        }
+      }
+
+      fclose(jr);
+    }
+
+    return result;
   }
 
   void release() {
