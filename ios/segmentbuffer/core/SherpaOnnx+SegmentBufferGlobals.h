@@ -35,5 +35,22 @@ extern std::unordered_map<std::string, std::shared_ptr<SegOfflineEntry>> g_seg_o
 extern std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> g_seg_live;
 extern std::mutex g_seg_mutex;
 
+std::shared_ptr<SegLiveEntry> seg_get_live_entry(const std::string &bufferId);
+bool seg_live_append_segment(
+  const std::string &liveBufferId,
+  const std::string &kind,
+  const std::string &sourceAudioBufferId,
+  int startSample,
+  int endSample,
+  int sampleRate,
+  int durationMs,
+  bool hasConfidence,
+  double confidence,
+  const std::string &payloadJson,
+  std::string *segmentId,
+  int *segmentIndex,
+  std::string *error
+);
+
 void seg_release_all_entries();
 #endif

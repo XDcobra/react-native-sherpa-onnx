@@ -9,13 +9,14 @@ REPO_ROOT=""
 RELEASE_TAG=""
 STRUCTURE_FILE=""
 EXPECTED_CSV=""
+SECONDARY_EXPECTED_CSV=""
 TREE_CACHE_DIR=""
 LICENSE_CSV=""
 STREAM_ID=""
 
 usage() {
   echo "Usage: $0 --repo-root <dir> --release-tag <tag> --structure-file <rel> --expected-csv <rel> \\"
-  echo "         --tree-cache-dir <rel> [--github-repo owner/name] [--license-csv <rel>] [--stream-id <id>]"
+  echo "         --tree-cache-dir <rel> [--secondary-expected-csv <rel>] [--github-repo owner/name] [--license-csv <rel>] [--stream-id <id>]"
   exit 1
 }
 
@@ -26,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --release-tag) RELEASE_TAG="$2"; shift 2 ;;
     --structure-file) STRUCTURE_FILE="$2"; shift 2 ;;
     --expected-csv) EXPECTED_CSV="$2"; shift 2 ;;
+    --secondary-expected-csv) SECONDARY_EXPECTED_CSV="$2"; shift 2 ;;
     --tree-cache-dir) TREE_CACHE_DIR="$2"; shift 2 ;;
     --license-csv) LICENSE_CSV="$2"; shift 2 ;;
     --stream-id) STREAM_ID="$2"; shift 2 ;;
@@ -43,6 +45,10 @@ CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _abs_tree="$REPO_ROOT/$TREE_CACHE_DIR"
 _abs_structure="$REPO_ROOT/$STRUCTURE_FILE"
 _abs_expected="$REPO_ROOT/$EXPECTED_CSV"
+_abs_secondary_expected=""
+if [[ -n "$SECONDARY_EXPECTED_CSV" ]]; then
+  _abs_secondary_expected="$REPO_ROOT/$SECONDARY_EXPECTED_CSV"
+fi
 
 WORK="$(mktemp -d -t sherpa-collect-XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
@@ -173,6 +179,28 @@ while IFS='|' read -r asset _; do
 done < "$ASSET_LIST"
 mv "$tmp" "$_abs_expected"
 echo "  Expected CSV rows: $(($(wc -l < "$_abs_expected" | tr -d ' ') - 1)) data (+ header)"
+
+if [[ -n "$_abs_secondary_expected" ]]; then
+  mkdir -p "$(dirname "$_abs_secondary_expected")"
+  if [[ ! -f "$_abs_secondary_expected" ]]; then
+    echo "asset_name,model_type" > "$_abs_secondary_expected"
+  fi
+  tmp_secondary="$(mktemp)"
+  echo "asset_name,model_type" > "$tmp_secondary"
+  while IFS='|' read -r asset _; do
+    [[ -z "$asset" ]] && continue
+    asset="${asset%$'\r'}"
+    esc="${asset//./\\.}"
+    line="$(grep -E "^(\"${esc}\"|${esc})," "$_abs_secondary_expected" 2>/dev/null | head -1 || true)"
+    if [[ -n "$line" ]]; then
+      echo "$line" >> "$tmp_secondary"
+    else
+      echo "${asset}," >> "$tmp_secondary"
+    fi
+  done < "$ASSET_LIST"
+  mv "$tmp_secondary" "$_abs_secondary_expected"
+  echo "  Secondary expected CSV rows: $(($(wc -l < "$_abs_secondary_expected" | tr -d ' ') - 1)) data (+ header)"
+fi
 
 if [[ -n "$LICENSE_CSV" ]]; then
   _abs_license="$REPO_ROOT/$LICENSE_CSV"

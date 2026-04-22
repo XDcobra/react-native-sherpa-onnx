@@ -12,6 +12,8 @@
  * Fixtures (speech enhancement):
  *   - speech-enhancement-models-structure.txt, speech-enhancement-models-expected.csv
  *     (see collect-speech-enhancement-model-structures workflow).
+ * Fixtures (VAD):
+ *   - asr-models-structure.txt + vad-models-expected.csv (VAD assets live in asr-models release).
  *
  * The tests build a FileEntry list from each structure file, call DetectSttModelFromFileList
  * or DetectTtsModelFromFileList (test-only APIs, no filesystem), and assert outcomes per CSV
@@ -24,6 +26,7 @@
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
+#include "sherpa-onnx-validate-vad.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -57,12 +60,14 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream ttsCsv(dir + "/tts-models-expected.csv");
     std::ifstream enhStruct(dir + "/speech-enhancement-models-structure.txt");
     std::ifstream enhCsv(dir + "/speech-enhancement-models-expected.csv");
+    std::ifstream vadCsv(dir + "/vad-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
     ASSERT_TRUE(ttsCsv.is_open()) << "Missing: " << dir << "/tts-models-expected.csv";
     ASSERT_TRUE(enhStruct.is_open()) << "Missing: " << dir << "/speech-enhancement-models-structure.txt";
     ASSERT_TRUE(enhCsv.is_open()) << "Missing: " << dir << "/speech-enhancement-models-expected.csv";
+    ASSERT_TRUE(vadCsv.is_open()) << "Missing: " << dir << "/vad-models-expected.csv";
 }
 
 /**
@@ -278,6 +283,52 @@ TEST(ModelDetectTest, DetectEnhancementFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
             << ") but got " << model_detect_test::EnhancementKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
+TEST(ModelDetectTest, DetectVadFromAsrFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/asr-models-structure.txt";
+    std::string csvPath = dir + "/vad-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectVadModelFromFileList(files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::VadModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::VadModelKind expectedKind = model_detect_test::VadKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::VadModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result = sherpaonnx::DetectVadModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got " << model_detect_test::VadKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
 }
@@ -730,6 +781,30 @@ TEST(ModelDetectValidation, ValidateEnhancementPathsUnknownKindPassesThrough) {
     sherpaonnx::EnhancementModelPaths paths;
     auto v = sherpaonnx::ValidateEnhancementPaths(
         sherpaonnx::EnhancementModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, ValidateVadPathsDirectOk) {
+    sherpaonnx::VadModelPaths paths;
+    paths.model = "/m/silero_vad.onnx";
+    auto v = sherpaonnx::ValidateVadPaths(
+        sherpaonnx::VadModelKind::kSileroVad, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateVadPathsDirectMissingModel) {
+    sherpaonnx::VadModelPaths paths;
+    auto v = sherpaonnx::ValidateVadPaths(
+        sherpaonnx::VadModelKind::kTenVad, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateVadPathsUnknownKindPassesThrough) {
+    sherpaonnx::VadModelPaths paths;
+    auto v = sherpaonnx::ValidateVadPaths(
+        sherpaonnx::VadModelKind::kUnknown, paths, "/m");
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
 }
 

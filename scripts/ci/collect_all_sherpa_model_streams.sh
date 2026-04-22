@@ -58,7 +58,7 @@ CONFIG="$(resolve_config_path "$CONFIG_REL")"
 
 if [[ "$PRINT_PATHS" -eq 1 ]]; then
   {
-    jq -r '.streams[] | .structure_file, .expected_csv' "$CONFIG"
+    jq -r '.streams[] | .structure_file, .expected_csv, .secondary_expected_csv | strings' "$CONFIG"
     jq -r '.streams[] | .license_csv | strings' "$CONFIG"
     jq -r '.streams[] | .license_csv | strings | select(startswith("android/src/main/assets/model_licenses/")) | ("ios/Resources/model_licenses/" + (split("/") | .[-1]))' "$CONFIG"
   } | sort -u
@@ -79,6 +79,7 @@ for ((i = 0; i < n; i++)); do
   tree="$(echo "$row" | jq -r '.tree_cache_dir')"
   struct="$(echo "$row" | jq -r '.structure_file')"
   expected="$(echo "$row" | jq -r '.expected_csv')"
+  secondary_expected="$(echo "$row" | jq -r '.secondary_expected_csv | strings')"
   lic="$(echo "$row" | jq -r '.license_csv | strings')"
   sid="$(echo "$row" | jq -r '.id // empty')"
 
@@ -91,6 +92,9 @@ for ((i = 0; i < n; i++)); do
     --expected-csv "$expected"
     --tree-cache-dir "$tree"
   )
+  if [[ -n "$secondary_expected" ]]; then
+    args+=(--secondary-expected-csv "$secondary_expected")
+  fi
   if [[ -n "$lic" ]]; then
     args+=(--license-csv "$lic")
   fi

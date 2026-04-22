@@ -85,15 +85,25 @@ std::map<std::string, std::string> ParseAsrExpectedCsv(const std::string& filePa
         if (outError) *outError = "Expected header asset_name,model_type in " + filePath;
         return map;
     }
+    int lineNo = 1;  // header line
     while (std::getline(in, line)) {
+        ++lineNo;
         line = Trim(line);
         if (line.empty()) continue;
         size_t comma = line.find(',');
         if (comma == std::string::npos) continue;
         std::string assetName = Trim(line.substr(0, comma));
         std::string modelType = Trim(line.substr(comma + 1));
-        if (!assetName.empty())
-            map[assetName] = modelType;
+        if (assetName.empty()) continue;
+        if (modelType.empty()) {
+            if (outError) {
+                *outError = "Empty model_type for asset '" + assetName + "' at line " +
+                            std::to_string(lineNo) + " in " + filePath;
+            }
+            map.clear();
+            return map;
+        }
+        map[assetName] = modelType;
     }
     return map;
 }
@@ -204,6 +214,24 @@ std::string EnhancementKindToString(EnhancementModelKind kind) {
             return "gtcrn";
         case EnhancementModelKind::kDpdfNet:
             return "dpdfnet";
+        default:
+            return "unknown";
+    }
+}
+
+VadModelKind VadKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "silero_vad") return VadModelKind::kSileroVad;
+    if (t == "ten_vad") return VadModelKind::kTenVad;
+    return VadModelKind::kUnknown;
+}
+
+std::string VadKindToString(VadModelKind kind) {
+    switch (kind) {
+        case VadModelKind::kSileroVad:
+            return "silero_vad";
+        case VadModelKind::kTenVad:
+            return "ten_vad";
         default:
             return "unknown";
     }

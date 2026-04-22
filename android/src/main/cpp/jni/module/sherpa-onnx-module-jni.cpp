@@ -22,6 +22,7 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
 
 extern "C" {
@@ -241,6 +242,36 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
   sherpaonnx::EnhancementDetectResult result =
       sherpaonnx::DetectEnhancementModel(model_dir, asset_name, model_type);
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
+}
+
+// Detect VAD model from optional directory and/or asset name. Returns HashMap with unified detect fields.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectVadModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  if (j_model_dir) {
+    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
+    if (c && c[0] != '\0') model_dir = std::string(c);
+    env->ReleaseStringUTFChars(j_model_dir, c);
+  }
+  if (j_asset_name) {
+    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
+    if (c && c[0] != '\0') asset_name = std::string(c);
+    env->ReleaseStringUTFChars(j_asset_name, c);
+  }
+  const char* model_type_c =
+      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
+  std::string model_type(model_type_c ? model_type_c : "auto");
+  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
+
+  sherpaonnx::VadDetectResult result =
+      sherpaonnx::DetectVadModel(model_dir, asset_name, model_type);
+  return sherpaonnx::VadDetectResultToJava(env, result);
 }
 
 // Detect alignment model in directory. Returns HashMap with success, error, detectedModels, modelType, paths.

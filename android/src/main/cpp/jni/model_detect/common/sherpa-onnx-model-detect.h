@@ -77,6 +77,12 @@ enum class EnhancementModelKind {
     kDpdfNet
 };
 
+enum class VadModelKind {
+    kUnknown,
+    kSileroVad,
+    kTenVad
+};
+
 enum class AlignmentModelKind {
     kUnknown,
     kWav2Vec2
@@ -230,6 +236,10 @@ struct AlignmentModelPaths {
     std::string model;
 };
 
+struct VadModelPaths {
+    std::string model;
+};
+
 struct SttDetectResult {
     bool ok = false;
     /** True when online-streaming compatibility is confirmed (or heuristically inferred in name-only mode). */
@@ -294,6 +304,22 @@ struct AlignmentDetectResult {
     /** Heuristic languages from folder name; currently empty for alignment. */
     std::vector<std::string> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
+    std::string quantization;
+};
+
+struct VadDetectResult {
+    bool ok = false;
+    /** True when online-streaming compatibility is confirmed (or heuristically inferred in name-only mode). */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    VadModelKind selectedKind = VadModelKind::kUnknown;
+    VadModelPaths paths;
+    /** Ordered trace of detection mechanisms (see DetectionSource). */
+    std::vector<DetectionSource> detectionSources;
+    /** Heuristic languages from asset/folder name; usually empty for VAD. */
+    std::vector<std::string> derivedLanguages;
+    /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
     std::string quantization;
 };
 
@@ -362,6 +388,12 @@ EnhancementDetectResult DetectEnhancementModel(
     const std::string& modelType = "auto"
 );
 
+VadDetectResult DetectVadModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto"
+);
+
 AlignmentDetectResult DetectAlignmentModel(
     const std::string& modelDir,
     const std::string& modelType
@@ -370,6 +402,14 @@ AlignmentDetectResult DetectAlignmentModel(
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectVadModel but takes a pre-built file list; no filesystem access.
+ *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
+VadDetectResult DetectVadModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"

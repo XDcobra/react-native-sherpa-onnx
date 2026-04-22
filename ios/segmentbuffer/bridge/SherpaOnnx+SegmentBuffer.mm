@@ -519,6 +519,72 @@ void seg_release_all_entries() {
     try { pair.second->release(); } catch (...) {}
   }
 }
+
+std::shared_ptr<SegLiveEntry> seg_get_live_entry(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_seg_mutex);
+  auto it = g_seg_live.find(bufferId);
+  if (it == g_seg_live.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+bool seg_live_append_segment(
+  const std::string &liveBufferId,
+  const std::string &kind,
+  const std::string &sourceAudioBufferId,
+  int startSample,
+  int endSample,
+  int sampleRate,
+  int durationMs,
+  bool hasConfidence,
+  double confidence,
+  const std::string &payloadJson,
+  std::string *segmentId,
+  int *segmentIndex,
+  std::string *error
+) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) {
+    if (error) *error = "SEGMENT_BUFFER_NOT_FOUND: Live segment buffer not found: " + liveBufferId;
+    return false;
+  }
+  try {
+    std::lock_guard<std::mutex> lock(entry->lock);
+    if (entry->state == SegLiveEntry::FINISHED) {
+      if (error) *error = "SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized";
+      return false;
+    }
+    SegRecord seg;
+    seg.id = "seg_" + seg_uuid();
+    seg.kind = kind.empty() ? "speech" : kind;
+    seg.sourceAudioBufferId = sourceAudioBufferId.empty() ? entry->sourceAudioBufferId : sourceAudioBufferId;
+    seg.startSample = startSample;
+    seg.endSample = endSample;
+    seg.sampleRate = sampleRate;
+    seg.durationMs = durationMs > 0 ? durationMs : static_cast<int>(((seg.endSample - seg.startSample) * 1000.0) / std::max(1, seg.sampleRate));
+    seg.hasConfidence = hasConfidence;
+    if (hasConfidence) seg.confidence = confidence;
+    seg.payloadJson = payloadJson;
+
+    const int idx = static_cast<int>(entry->evictedCount + static_cast<int64_t>(entry->segments.size()));
+    entry->segments.push_back(seg);
+    std::string snapshot = entry->snapshotForSpoolLocked();
+    if (static_cast<int>(entry->segments.size()) > entry->maxSegments) {
+      entry->segments.erase(entry->segments.begin());
+      entry->evictedCount++;
+    }
+    entry->totalSegmentsWritten++;
+    entry->maybeWriteSnapshotToSpool(snapshot, true);
+
+    if (segmentId) *segmentId = seg.id;
+    if (segmentIndex) *segmentIndex = idx;
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  }
+}
 #endif
 
 @implementation SherpaOnnx (SegmentBuffer)
