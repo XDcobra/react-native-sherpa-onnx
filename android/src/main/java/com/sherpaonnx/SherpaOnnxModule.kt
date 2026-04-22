@@ -103,7 +103,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
-  private val vadHelper = SherpaOnnxVadHelper(reactApplicationContext)
+  private val vadHelper = SherpaOnnxVadHelper(
+    reactApplicationContext,
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectVadModel(modelDir, assetName, modelType)
+    }
+  )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
 
   private fun normalizeInputDeviceKind(type: Int): String {
@@ -2970,6 +2975,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     vadHelper.initializeVad(instanceId, options, promise)
   }
 
+  override fun detectVadModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
+  }
+
   override fun startVadPipeline(
     instanceId: String,
     audioInBufferId: String,
@@ -3228,6 +3242,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
     private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectVadModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

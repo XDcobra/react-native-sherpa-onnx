@@ -14,10 +14,80 @@ import com.sherpaonnx.vad.core.VadInstanceConfig
 import com.sherpaonnx.vad.pipeline.VadPipelineWorker
 import java.util.concurrent.ConcurrentHashMap
 
-class SherpaOnnxVadHelper(private val context: ReactApplicationContext) {
+class SherpaOnnxVadHelper(
+  private val context: ReactApplicationContext,
+  private val nativeDetectVadModel: (
+    modelDir: String?,
+    assetName: String?,
+    modelType: String
+  ) -> HashMap<String, Any>?
+) {
   private val instances = ConcurrentHashMap<String, VadInstanceConfig>()
   private val instancePipeline = ConcurrentHashMap<String, String>()
   private val workers = ConcurrentHashMap<String, VadPipelineWorker>()
+
+  fun detectVadModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = nativeDetectVadModel(modelDir, assetName, modelType ?: "auto")
+      if (result == null) {
+        promise.reject(VadErrorCodes.INTERNAL_ERROR, "VAD model detection returned null")
+        return
+      }
+      val map = Arguments.createMap()
+      map.putBoolean("success", result["success"] as? Boolean ?: false)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      val mt = result["modelType"] as? String
+      if (!mt.isNullOrBlank()) map.putString("modelType", mt)
+      map.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
+      val models = Arguments.createArray()
+      @Suppress("UNCHECKED_CAST")
+      val detected = result["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+      for (entry in detected) {
+        val m = Arguments.createMap()
+        m.putString("type", entry["type"] ?: "")
+        m.putString("modelDir", entry["modelDir"] ?: "")
+        models.pushMap(m)
+      }
+      map.putArray("detectedModels", models)
+      val languages = result["languages"] as? ArrayList<*>
+      if (!languages.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in languages) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("languages", arr)
+      }
+      val quantization = result["quantization"] as? String
+      if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (!detectionSources.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in detectionSources) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("detectionSources", arr)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val paths = result["paths"] as? HashMap<String, Any?>
+      if (paths != null) {
+        val writablePaths = Arguments.createMap()
+        val modelPath = paths["model"] as? String
+        if (!modelPath.isNullOrBlank()) writablePaths.putString("model", modelPath)
+        map.putMap("paths", writablePaths)
+      }
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject(VadErrorCodes.INTERNAL_ERROR, "VAD model detection failed: ${e.message}", e)
+    }
+  }
 
   fun initializeVad(instanceId: String, options: ReadableMap?, promise: Promise) {
     if (instanceId.isBlank()) {
@@ -32,6 +102,18 @@ class SherpaOnnxVadHelper(private val context: ReactApplicationContext) {
       ?: 120
     val minSilence = options?.takeIf { it.hasKey("silenceDurationMs") && !it.isNull("silenceDurationMs") }?.getDouble("silenceDurationMs")?.toInt()
       ?: 250
+    val modelDir = options?.takeIf { it.hasKey("modelDir") && !it.isNull("modelDir") }?.getString("modelDir")
+    val requestedModelType = options?.takeIf { it.hasKey("modelType") && !it.isNull("modelType") }?.getString("modelType")
+      ?: "auto"
+    if (!modelDir.isNullOrBlank()) {
+      val detect = nativeDetectVadModel(modelDir, null, requestedModelType)
+      val ok = detect?.get("success") as? Boolean ?: false
+      if (!ok) {
+        val reason = detect?.get("error") as? String ?: "Failed to detect VAD model"
+        promise.reject(VadErrorCodes.MODEL_INIT_FAILED, reason)
+        return
+      }
+    }
     instances[instanceId] = VadInstanceConfig(sampleRate, threshold, minSpeech, minSilence)
     promise.resolve(null)
   }

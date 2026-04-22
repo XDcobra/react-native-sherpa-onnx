@@ -7,8 +7,29 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <optional>
+
+#include "sherpa-onnx-model-detect.h"
 
 namespace {
+std::optional<std::string> OptionalUtf8String(NSString *value) {
+  if (value == nil || [value length] == 0) {
+    return std::nullopt;
+  }
+  return std::string([value UTF8String]);
+}
+
+NSString *VadModelKindToNSString(sherpaonnx::VadModelKind kind) {
+  switch (kind) {
+    case sherpaonnx::VadModelKind::kSileroVad:
+      return @"silero_vad";
+    case sherpaonnx::VadModelKind::kTenVad:
+      return @"ten_vad";
+    default:
+      return @"unknown";
+  }
+}
+
 struct VadInstanceState {
   int sampleRate = 16000;
   double threshold = 0.015;
@@ -34,6 +55,72 @@ int64_t g_vad_pipeline_counter = 0;
 } // namespace
 
 @implementation SherpaOnnx (VAD)
+
+- (void)detectVadModel:(NSString *)modelDir
+             assetName:(NSString *)assetName
+             modelType:(NSString *)modelType
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    auto modelDirOpt = OptionalUtf8String(modelDir);
+    auto assetNameOpt = OptionalUtf8String(assetName);
+    const std::string modelTypeStr =
+        (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
+
+    sherpaonnx::VadDetectResult result =
+        sherpaonnx::DetectVadModel(modelDirOpt, assetNameOpt, modelTypeStr);
+
+    NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
+    resultDict[@"success"] = @(result.ok);
+    resultDict[@"isStreaming"] = @(result.isStreaming);
+    if (!result.error.empty()) {
+      resultDict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
+    }
+    resultDict[@"modelType"] = VadModelKindToNSString(result.selectedKind);
+
+    NSMutableArray *detectedModels = [NSMutableArray array];
+    for (const auto &model : result.detectedModels) {
+      [detectedModels addObject:@{
+        @"type": [NSString stringWithUTF8String:model.type.c_str()] ?: @"",
+        @"modelDir": [NSString stringWithUTF8String:model.modelDir.c_str()] ?: @""
+      }];
+    }
+    resultDict[@"detectedModels"] = detectedModels;
+
+    if (!result.detectionSources.empty()) {
+      NSMutableArray *sources = [NSMutableArray array];
+      for (const auto source : result.detectionSources) {
+        [sources addObject:[NSString stringWithUTF8String:sherpaonnx::DetectionSourceToLiteral(source)]];
+      }
+      resultDict[@"detectionSources"] = sources;
+    }
+
+    if (!result.derivedLanguages.empty()) {
+      NSMutableArray *langs = [NSMutableArray array];
+      for (const auto &lang : result.derivedLanguages) {
+        [langs addObject:[NSString stringWithUTF8String:lang.c_str()]];
+      }
+      resultDict[@"languages"] = langs;
+    }
+
+    if (!result.quantization.empty()) {
+      resultDict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()];
+    }
+
+    NSMutableDictionary *paths = [NSMutableDictionary dictionary];
+    if (!result.paths.model.empty()) {
+      paths[@"model"] = [NSString stringWithUTF8String:result.paths.model.c_str()];
+    }
+    resultDict[@"paths"] = paths;
+
+    resolve(resultDict);
+  } @catch (NSException *exception) {
+    reject(@"DETECT_ERROR",
+           [NSString stringWithFormat:@"VAD detect failed: %@", exception.reason],
+           nil);
+  }
+}
 
 - (void)initializeVad:(NSString *)instanceId
               options:(NSDictionary *)options

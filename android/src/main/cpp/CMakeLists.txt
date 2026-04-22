@@ -106,6 +106,10 @@ set(SOURCES
     jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
+    jni/model_detect/vad/sherpa-onnx-vad-catalog-metadata.cpp
+    jni/model_detect/vad/sherpa-onnx-model-detect-vad.cpp
+    jni/model_detect/vad/sherpa-onnx-validate-vad.cpp
+    jni/model_detect/vad/sherpa-onnx-vad-wrapper.cpp
     jni/model_detect/alignment/sherpa-onnx-model-detect-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-validate-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
@@ -222,6 +226,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/stt
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/include
