@@ -1025,6 +1025,24 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
+  detectVadModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
+  }>;
+
   initializeEnhancement(
     instanceId: string,
     modelDir: string,

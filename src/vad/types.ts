@@ -1,4 +1,5 @@
 import type { ModelPathConfig } from '../types';
+import type { VadDetectModelResult } from '../types/modelDetect';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
@@ -7,6 +8,22 @@ import type {
   LiveSegmentBufferIdSource,
   OfflineSegmentBufferIdSource,
 } from '../segmentbuffer/types';
+
+export {
+  DETECTION_SOURCES,
+  isDetectionSource,
+  type DetectionSource,
+  type DetectedModelEntry,
+  type ModelDetectResultBase,
+  type VadDetectModelResult,
+} from '../types/modelDetect';
+
+export type VADModelType = 'silero_vad' | 'ten_vad';
+
+export const VAD_MODEL_TYPES: readonly VADModelType[] = [
+  'silero_vad',
+  'ten_vad',
+] as const;
 
 export type VADPipelineStatus = {
   pipelineId: string;
@@ -29,7 +46,7 @@ export type VADSummary = {
 
 export type VADInitializeOptions = {
   modelPath: ModelPathConfig;
-  modelType?: 'silero_vad' | 'ten_vad' | 'auto';
+  modelType?: VADModelType | 'auto';
   sampleRate?: number;
   silenceDurationMs?: number;
   speechDurationMs?: number;
@@ -112,6 +129,8 @@ export type VADOfflineResult = {
   summary: VADSummary;
   segmentBufferId: string;
 };
+
+export type VADDetectResult = VadDetectModelResult;
 
 export type VADPipelineHandle = {
   instanceId: string;
