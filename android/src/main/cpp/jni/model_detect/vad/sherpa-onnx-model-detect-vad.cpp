@@ -176,12 +176,25 @@ sherpaonnx::VadDetectResult DetectVadModelFromFiles(
             return result;
         }
         AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
+        std::vector<std::string> explicitMatches;
+        explicitMatches.reserve(onnxCandidates.size());
         for (const auto& candidate : onnxCandidates) {
             const auto inferred = InferKindFromModelName(candidate);
-            if (inferred == selected || inferred == sherpaonnx::VadModelKind::kUnknown) {
-                selectedModel = candidate;
-                break;
+            if (inferred == selected) {
+                explicitMatches.push_back(candidate);
             }
+        }
+        if (!explicitMatches.empty()) {
+            selectedModel = explicitMatches.front();
+        } else if (onnxCandidates.size() == 1) {
+            selectedModel = onnxCandidates.front();
+            AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
+        } else {
+            result.error =
+                "VAD: explicit modelType '" + requestedModelType +
+                "' did not match any .onnx candidate in " + modelDir +
+                "; ambiguous directory contains multiple .onnx files";
+            return result;
         }
     }
 

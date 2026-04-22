@@ -203,29 +203,39 @@ class SherpaOnnxVadHelper(
     var segmentCount = 0
     while (idx < samples.size) {
       val end = minOf(idx + chunkSize, samples.size)
-      val chunk = samples.copyOfRange(idx, end)
-      val energy = chunk.fold(0.0) { acc, sample -> acc + kotlin.math.abs(sample.toDouble()) } / chunk.size
+      var energySum = 0.0
+      var i = idx
+      while (i < end) {
+        energySum += kotlin.math.abs(samples[i].toDouble())
+        i++
+      }
+      val energy = energySum / (end - idx).coerceAtLeast(1)
       val speechNow = energy >= cfg.threshold
       if (speechNow && !inSpeech) {
         inSpeech = true
         segStart = idx
       } else if (!speechNow && inSpeech) {
-        appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, idx)
         val dMs = ((idx - segStart).toLong() * 1000L) / cfg.sampleRate.toLong()
-        speechDurationMs += dMs
-        segmentCount++
+        if (dMs >= cfg.minSpeechDurationMs.toLong()) {
+          appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, idx)
+          speechDurationMs += dMs
+          segmentCount++
+        }
         inSpeech = false
       }
       idx = end
     }
     if (inSpeech) {
-      appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, samples.size)
-    if (offlineOut != null) {
-      offlineOut.populate(records)
-    }
       val dMs = ((samples.size - segStart).toLong() * 1000L) / cfg.sampleRate.toLong()
-      speechDurationMs += dMs
-      segmentCount++
+      if (dMs >= cfg.minSpeechDurationMs.toLong()) {
+        appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, samples.size)
+        speechDurationMs += dMs
+        segmentCount++
+      }
+    }
+    if (offlineOut != null) {
+      // Always replace offline output content, even when no segments were detected.
+      offlineOut.populate(records)
     }
     val out = Arguments.createMap().apply {
       putDouble("chunksProcessed", kotlin.math.ceil(samples.size.toDouble() / chunkSize.toDouble()))
