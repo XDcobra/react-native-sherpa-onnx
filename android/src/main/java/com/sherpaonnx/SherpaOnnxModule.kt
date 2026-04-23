@@ -2650,8 +2650,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun getOfflineSegmentBufferSegments(
     bufferId: String,
-    start: Double,
-    maxCount: Double,
+    start: Double?,
+    maxCount: Double?,
     promise: Promise
   ) {
     try {
@@ -2660,7 +2660,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Offline segment buffer not found: $bufferId")
         return
       }
-      val segments = entry.snapshotSegments(start.toInt(), maxCount.toInt())
+      val from = start?.toInt() ?: 0
+      val count = maxCount?.toInt() ?: 1024
+      val segments = entry.snapshotSegments(from, count)
       val out = Arguments.createMap()
       out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
       promise.resolve(out)

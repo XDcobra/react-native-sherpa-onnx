@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.CRC32
+import org.json.JSONObject
 
 /**
  * A committed text segment in the segment log.
@@ -743,6 +744,10 @@ private class TextSpoolWriter(filePath: String) {
 }
 
 private object TextSpoolReader {
+  private const val TEXT_SPOOL_MAGIC = 0x32545854 // TXT2
+  private const val TEXT_SPOOL_VERSION = 2
+  private const val TEXT_SPOOL_CHECKPOINT = 4
+
   data class JournalRecord(val type: Int, val payload: String)
 
   fun readCheckpoint(filePath: String): String? {
