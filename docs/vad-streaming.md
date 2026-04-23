@@ -21,7 +21,11 @@ Import path: `react-native-sherpa-onnx/vad`
 
 ```ts
 import { createStreamingVAD, detectVadModel } from 'react-native-sherpa-onnx/vad';
-import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
   releasePipelineSegmentBuffer,
@@ -48,8 +52,12 @@ const segmentOut = await createLiveSegmentBuffer({
 // 3) Create VAD engine (auto-detect is resolved natively before init).
 const vad = await createStreamingVAD({
   modelPath: { type: 'file', path: '/absolute/path/to/vad-model-dir' },
-  modelType: 'auto',
+  modelType: det.modelType ?? 'auto',
   sampleRate: 16000,
+  runtimeOptions:
+    (det.modelType ?? 'silero_vad') === 'ten_vad'
+      ? { tenVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250, windowSize: 256 } }
+      : { sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250, windowSize: 512 } },
 });
 
 const pipeline = await vad.process({
@@ -62,9 +70,9 @@ pipeline.onSpeechStateChanged = (e) => {
 };
 
 // Feed mic/appended audio into `audioIn` from your audio pipeline.
-// Then finalize the run:
-await pipeline.flush();
-await pipeline.stop();
+// For a graceful/natural completion, finalize the live input buffer and wait for completion.
+// Do not call pipeline.flush() after finalize; finalize already triggers terminal draining.
+await finalizeLiveAudioBuffer(audioIn);
 await pipeline.completed;
 
 await vad.destroy();
@@ -146,7 +154,7 @@ await releasePipelineAudioBuffer(audioIn);
 | Input format | Float PCM `[-1, 1]` in a pipeline audio buffer |
 | Sample rate | VAD `sampleRate` and input buffer sample rate must match model expectations (typically 16kHz) |
 | Model detection | Run `detectVadModel(...)` before engine init when you want explicit preflight checks |
-| Lifecycle | Stop pipeline(s), destroy engine(s), then release buffers |
+| Lifecycle | Finalize input for graceful completion, or stop explicitly for early abort; destroy engine(s), then release buffers |
 
 ## API reference
 
@@ -182,8 +190,17 @@ function createStreamingVAD(options: VADInitializeOptions): Promise<VADEngine>;
 ```ts
 const engine = await createStreamingVAD({
   modelPath: { type: 'asset', path: 'models/vad' },
-  modelType: 'auto',
+  modelType: 'silero_vad',
   sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: {
+      scoreThreshold: 0.5,
+      minSpeechDurationMs: 250,
+      minSilenceDurationMs: 250,
+      maxSpeechDurationMs: 5000,
+      windowSize: 512,
+    },
+  },
 });
 ```
 
@@ -241,6 +258,9 @@ Assign after `process` returns to receive VAD speech/activity without polling. T
 stop(): Promise<void>;
 ```
 
+`stop()` resolves only after native worker teardown is complete. After a successful stop,
+the pipeline id is terminal and may return `VAD_PIPELINE_NOT_FOUND` for later control calls.
+
 #### `pipeline.flush()`
 
 ```ts
@@ -284,6 +304,15 @@ import type {
 - `VADModelType`: `'silero_vad' | 'ten_vad'`
 - `VAD_MODEL_TYPES`: readonly model type list for UI/model picker usage
 - `VADDetectResult`: shared detection contract (`success`, optional `error`, `modelType`, `detectedModels`, `paths`, `languages`, `quantization`, `detectionSources`)
+- `runtimeOptions`: strict model-matched options (`sileroVad` or `tenVad`) with model-score based thresholding (`scoreThreshold`)
+
+### Runtime options by model
+
+- `silero_vad`: `runtimeOptions.sileroVad = { scoreThreshold, minSpeechDurationMs, minSilenceDurationMs, maxSpeechDurationMs, windowSize }`
+- `ten_vad`: `runtimeOptions.tenVad = { scoreThreshold, minSpeechDurationMs, minSilenceDurationMs, maxSpeechDurationMs, windowSize }`
+- Session-level options stay common: `sampleRate`, `provider`, `numThreads`, `debug`
+- `scoreThreshold` is the model score/probability cut-off used for speech/non-speech decisions
+- `neg_threshold` is intentionally not exposed in this JS SDK contract
 
 ## Error quick table
 
@@ -299,6 +328,14 @@ Typical VAD-native error codes and reasons:
 | `VAD_PIPELINE_NOT_FOUND` | Unknown or already-stopped pipeline id |
 | `VAD_PIPELINE_ALREADY_RUNNING` | Engine already has an active live pipeline |
 | `VAD_INTERNAL_ERROR` | Unexpected native/runtime failure |
+
+## Deterministic lifecycle contract
+
+- Graceful finish path (no active ingest): `finalizeLiveAudioBuffer(audioIn)` -> `await pipeline.completed`
+- Graceful finish path (active file ingest): `ingest.cancel()` -> `await ingest.done` -> `finalizeLiveAudioBuffer(audioIn)` -> `await pipeline.completed`
+- Early abort path: `await pipeline.stop()`
+- Do not call `pipeline.flush()` after finalize (redundant and race-prone)
+- Treat `VAD_PIPELINE_NOT_FOUND` as a real terminal-state signal, not as success
 
 ## See also
 

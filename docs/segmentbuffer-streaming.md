@@ -4,18 +4,36 @@
 
 **Import path:** `react-native-sherpa-onnx/segmentbuffer`
 
----
-
 ## Concepts
 
 | Kind | What it is | Typical use |
 | --- | --- | --- |
-| **Live segment buffer** | Mutable segment stream (`recording` -> `finished`) with bounded in-memory log and optional spool-backed full history. | VAD live segmentation, real-time subtitle boundaries, incremental post-processing. |
-| **Offline segment buffer** | Immutable snapshot of segments. | Batch consumers, export, deterministic replay. |
+| **[Offline segment buffer](segmentbuffer-offline.md)** | Mutable segment stream (`recording` -> `finished`) with bounded in-memory log and optional spool-backed full history. | VAD live segmentation, runtime subtitle boundaries, incremental post-processing. |
+| **[Live segment buffer](segmentbuffer-streaming.md)** | Immutable snapshot of segments. | Batch consumers, export, deterministic replay. |
 
 `fullIfSpooled` is strict: if spool is unavailable, conversion rejects with `SEGMENT_SPOOL_*`.
 
-**Live events (opt-in):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (same `enabled` + `minIntervalMs` pattern as live audio and text buffers). Pipelines such as VAD use this for fat segment metadata without polling; see [vad-streaming.md](vad-streaming.md).
+**Live events (opt-in):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (`enabled` + `minIntervalMs`).
+
+`sourceAudioBufferId` accepts `PipelineAudioBufferIdSource` (audio ref/info/handle/id), not only raw strings.
+
+---
+
+## Main API (summary)
+
+### Create and lifecycle
+
+- `createLiveSegmentBuffer`
+- `finalizeLiveSegmentBuffer`
+- `createOfflineSegmentBufferFromLive`
+- `releasePipelineSegmentBuffer`
+
+### Write and read
+
+- `appendLiveSegment`
+- `getLiveSegmentBufferSegmentCount`
+- `getLiveSegmentBufferSegments`
+- `getPipelineSegmentBufferInfo`
 
 ---
 
@@ -31,15 +49,21 @@ import {
   getLiveSegmentBufferSegments,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
+import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
+const liveAudio = await createEmptyLiveAudioBuffer({ sampleRate: 16000 });
 const live = await createLiveSegmentBuffer({
-  sourceAudioBufferId: 'live_123',
+  sourceAudioBufferId: liveAudio, // or: 'live_<uuid>'
   maxSegments: 2048,
   spooling: { mode: 'on' },
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: (e) => {
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample);
+  },
 });
 
 await appendLiveSegment(live, {
-  sourceAudioBufferId: 'live_123',
+  sourceAudioBufferId: liveAudio,
   startSample: 0,
   endSample: 16000,
   sampleRate: 16000,
@@ -63,23 +87,117 @@ await releasePipelineSegmentBuffer(live);
 
 ### Create and lifecycle
 
-- `createLiveSegmentBuffer(options?)`
-- `createEmptyOfflineSegmentBuffer(options?)`
-- `finalizeLiveSegmentBuffer(liveBuffer)`
-- `releasePipelineSegmentBuffer(buffer)`
+#### `createLiveSegmentBuffer(options?)`
+
+```ts
+function createLiveSegmentBuffer(
+  options?: CreateLiveSegmentBufferOptions
+): Promise<LiveSegmentBufferRef>;
+```
+
+```ts
+const live = await createLiveSegmentBuffer({
+  sourceAudioBufferId: liveAudioRef, // or: 'live_<uuid>'
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: (e) => console.log(e.segmentIndex),
+});
+```
+
+#### `finalizeLiveSegmentBuffer(liveBuffer)`
+
+```ts
+function finalizeLiveSegmentBuffer(
+  buffer: LiveSegmentBufferRecordingSource
+): Promise<void>;
+```
+
+```ts
+await finalizeLiveSegmentBuffer(live);
+```
+
+#### `createOfflineSegmentBufferFromLive(liveBuffer, mode?)`
+
+```ts
+function createOfflineSegmentBufferFromLive(
+  liveBuffer: LiveSegmentBufferIdSource,
+  mode?: OfflineSegmentBufferFromLiveMode
+): Promise<OfflineSegmentBufferRef>;
+```
+
+```ts
+const offline = await createOfflineSegmentBufferFromLive(live, 'windowSnapshot');
+```
+
+#### `releasePipelineSegmentBuffer(buffer)`
+
+```ts
+function releasePipelineSegmentBuffer(
+  buffer: PipelineSegmentBufferIdSource
+): Promise<void>;
+```
+
+```ts
+await releasePipelineSegmentBuffer(live);
+```
 
 ### Write and read
 
-- `appendLiveSegment(liveBuffer, segment)`
-- `getLiveSegmentBufferSegmentCount(liveBuffer)`
-- `getLiveSegmentBufferSegments(liveBuffer, startIndex, maxCount)`
-- `getOfflineSegmentBufferSegments(offlineBuffer, start?, maxCount?)`
+#### `appendLiveSegment(liveBuffer, segment)`
 
-### Conversion
+```ts
+function appendLiveSegment(
+  buffer: LiveSegmentBufferRecordingSource,
+  segment: SegmentInput
+): Promise<{ segmentId: string; segmentIndex: number }>;
+```
 
-- `createOfflineSegmentBufferFromLive(liveBuffer, mode?)`
-  - `windowSnapshot`
-  - `fullIfSpooled` (strict)
+```ts
+await appendLiveSegment(live, {
+  sourceAudioBufferId: liveAudioRef,
+  startSample: 3200,
+  endSample: 9600,
+  sampleRate: 16000,
+});
+```
+
+#### `getLiveSegmentBufferSegmentCount(liveBuffer)`
+
+```ts
+function getLiveSegmentBufferSegmentCount(
+  liveBuffer: LiveSegmentBufferIdSource
+): Promise<number>;
+```
+
+```ts
+const count = await getLiveSegmentBufferSegmentCount(live);
+```
+
+#### `getLiveSegmentBufferSegments(liveBuffer, startIndex, maxCount)`
+
+```ts
+function getLiveSegmentBufferSegments(
+  liveBuffer: LiveSegmentBufferIdSource,
+  startIndex: number,
+  maxCount: number
+): Promise<SegmentMeta[]>;
+```
+
+```ts
+const items = await getLiveSegmentBufferSegments(live, 0, 32);
+```
+
+#### `getPipelineSegmentBufferInfo(buffer)`
+
+```ts
+function getPipelineSegmentBufferInfo(
+  buffer: PipelineSegmentBufferIdSource
+): Promise<PipelineSegmentBufferInfo>;
+```
+
+```ts
+const info = await getPipelineSegmentBufferInfo(live);
+console.log(info.kind, info.state);
+```
 
 ---
 

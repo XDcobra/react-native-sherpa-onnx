@@ -305,6 +305,19 @@ Use this when the source audio is still a file and you want downstream native co
 - Append source: `onFramesAppended` receives `source: 'file_ingest'`
 - Completion: `ingest.done` resolves with `FileIngestResult`
 
+Robust stop ordering for active ingest:
+
+```ts
+ingest.cancel();
+await ingest.done.catch(() => {
+  // DECODE_CANCELLED is expected after cancel
+});
+await finalizeLiveAudioBuffer(live);
+```
+
+Call `finalizeLiveAudioBuffer` only after ingest reached a terminal state. This avoids
+producer/finalize races and ensures decode work is stopped before finalization.
+
 
 #### `subscribeLiveAudioBufferEvents(liveBuffer, callbacks)`
 
