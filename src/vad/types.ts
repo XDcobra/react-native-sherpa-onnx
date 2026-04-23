@@ -44,16 +44,31 @@ export type VADSummary = {
   speechDurationMs: number;
 };
 
+export type VADRuntimeTuningOptions = {
+  scoreThreshold?: number;
+  minSilenceDurationMs?: number;
+  minSpeechDurationMs?: number;
+  maxSpeechDurationMs?: number;
+  windowSize?: number;
+};
+
+export type SileroVadRuntimeOptions = {
+  sileroVad: VADRuntimeTuningOptions;
+  tenVad?: never;
+};
+
+export type TenVadRuntimeOptions = {
+  tenVad: VADRuntimeTuningOptions;
+  sileroVad?: never;
+};
+
+export type VADRuntimeOptions = SileroVadRuntimeOptions | TenVadRuntimeOptions;
+
 export type VADInitializeOptions = {
   modelPath: ModelPathConfig;
   modelType?: VADModelType | 'auto';
   sampleRate?: number;
-  silenceDurationMs?: number;
-  speechDurationMs?: number;
-  maxSpeechDurationS?: number;
-  minSpeechDurationMs?: number;
-  threshold?: number;
-  windowSize?: number;
+  runtimeOptions?: VADRuntimeOptions;
   provider?: string;
   numThreads?: number;
   debug?: boolean;

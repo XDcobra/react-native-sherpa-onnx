@@ -63,6 +63,35 @@ function toSummary(raw: any): VADSummary {
   };
 }
 
+function resolveRuntimeTuningOptions(
+  runtimeOptions: VADInitializeOptions['runtimeOptions'],
+  modelType: VADModelType
+) {
+  if (!runtimeOptions) {
+    return undefined;
+  }
+  if (modelType === 'silero_vad') {
+    if ('sileroVad' in runtimeOptions) {
+      return runtimeOptions.sileroVad;
+    }
+    throw Object.assign(
+      new Error(
+        'VAD runtime options mismatch: expected sileroVad options for silero_vad model'
+      ),
+      { code: 'VAD_INVALID_OPTIONS' }
+    );
+  }
+  if ('tenVad' in runtimeOptions) {
+    return runtimeOptions.tenVad;
+  }
+  throw Object.assign(
+    new Error(
+      'VAD runtime options mismatch: expected tenVad options for ten_vad model'
+    ),
+    { code: 'VAD_INVALID_OPTIONS' }
+  );
+}
+
 export async function detectVadModel(
   source: FileSource,
   options?: {
@@ -154,16 +183,23 @@ export async function createStreamingVAD(
     }
     resolvedModelType = detect.modelType as VADModelType;
   }
+  const runtimeTuning = resolveRuntimeTuningOptions(
+    options.runtimeOptions,
+    resolvedModelType
+  );
   await SherpaOnnx.initializeVad(instanceId, {
     modelDir,
     modelType: resolvedModelType,
     sampleRate: options.sampleRate,
-    silenceDurationMs: options.silenceDurationMs,
-    speechDurationMs: options.speechDurationMs,
-    maxSpeechDurationS: options.maxSpeechDurationS,
-    minSpeechDurationMs: options.minSpeechDurationMs,
-    threshold: options.threshold,
-    windowSize: options.windowSize,
+    silenceDurationMs: runtimeTuning?.minSilenceDurationMs,
+    speechDurationMs: runtimeTuning?.minSpeechDurationMs,
+    maxSpeechDurationS:
+      typeof runtimeTuning?.maxSpeechDurationMs === 'number'
+        ? runtimeTuning.maxSpeechDurationMs / 1000
+        : undefined,
+    minSpeechDurationMs: runtimeTuning?.minSpeechDurationMs,
+    threshold: runtimeTuning?.scoreThreshold,
+    windowSize: runtimeTuning?.windowSize,
     provider: options.provider,
     numThreads: options.numThreads,
     debug: options.debug,
