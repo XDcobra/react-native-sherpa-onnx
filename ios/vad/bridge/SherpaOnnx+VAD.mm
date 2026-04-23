@@ -325,6 +325,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     VadPipelineWorker::Config{
       cfg.sampleRate,
       chunkSize,
+      MAX(1, cfg.windowSize),
       aid,
       sid,
       cfg.runtime,

@@ -109,16 +109,27 @@ void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
   if (chunk.empty()) {
     return;
   }
-  config_.runtime->AcceptWaveform(
-    chunk.data(),
-    static_cast<int32_t>(chunk.size())
-  );
-  const bool detected = config_.runtime->IsSpeechDetected();
-  const bool prior = speechDetected_.exchange(detected);
-  if (prior != detected) {
-    emit("vad.stateChanged", {}, {}, {{"isSpeechDetected", detected}});
+  // VAD-only rule:
+  // VAD model compute is sensitive to undersized chunks from live mic scheduling.
+  // We normalize arbitrary buffer reads into fixed VAD frames before runtime input.
+  pendingVadSamples_.insert(pendingVadSamples_.end(), chunk.begin(), chunk.end());
+  const int frameSize = std::max(1, config_.vadFrameSize);
+  while ((int)pendingVadSamples_.size() >= frameSize) {
+    config_.runtime->AcceptWaveform(
+      pendingVadSamples_.data(),
+      frameSize
+    );
+    const bool detected = config_.runtime->IsSpeechDetected();
+    const bool prior = speechDetected_.exchange(detected);
+    if (prior != detected) {
+      emit("vad.stateChanged", {}, {}, {{"isSpeechDetected", detected}});
+    }
+    appendDetectedSegments();
+    pendingVadSamples_.erase(
+      pendingVadSamples_.begin(),
+      pendingVadSamples_.begin() + frameSize
+    );
   }
-  appendDetectedSegments();
   {
     std::lock_guard<std::mutex> lock(statusMutex_);
     chunksProcessed_++;
@@ -137,6 +148,17 @@ void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
 }
 
 void VadPipelineWorker::flushInternal() {
+  if (!pendingVadSamples_.empty()) {
+    const int frameSize = std::max(1, config_.vadFrameSize);
+    std::vector<float> tail(frameSize, 0.0f);
+    std::copy(
+      pendingVadSamples_.begin(),
+      pendingVadSamples_.end(),
+      tail.begin()
+    );
+    config_.runtime->AcceptWaveform(tail.data(), frameSize);
+    pendingVadSamples_.clear();
+  }
   config_.runtime->Flush();
   appendDetectedSegments();
   emit("pipeline.flushed");

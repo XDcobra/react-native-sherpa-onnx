@@ -21,6 +21,7 @@ public:
   struct Config {
     int sampleRate = 16000;
     int chunkSize = 512;
+    int vadFrameSize = 512;
     std::string sourceAudioBufferId;
     std::string segmentOutBufferId;
     std::shared_ptr<VadRuntime> runtime;
@@ -95,4 +96,5 @@ private:
 
   int cursorId_ = -1;
   int appendListenerToken_ = -1;
+  std::vector<float> pendingVadSamples_;
 };

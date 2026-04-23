@@ -53,6 +53,8 @@ class VadPipelineWorker(
   private var absoluteSample = 0L
   private var speechScoreSum = 0.0
   private var speechScoreCount = 0
+  private val vadFrameSize = config.runtimeOptions.windowSize.coerceAtLeast(1)
+  private var pendingVadSamples = FloatArray(0)
 
   private sealed class Cmd {
     class Flush(val done: CompletableFuture<Unit>) : Cmd()
@@ -108,32 +110,24 @@ class VadPipelineWorker(
   }
 
   private fun processChunk(chunk: FloatArray) {
-    val decision = config.runtime.infer(chunk, config.sampleRate)
-    val detected = decision.isSpeech
-    if (detected != speech) {
-      speech = detected
-      emitEvent("vad.stateChanged", mapOf("isSpeechDetected" to speech))
+    // VAD-only rule:
+    // Unlike STT/TTS/enhancement, the Sherpa-ONNX VAD compute path is sensitive to
+    // undersized input windows (seen as model pad/reflect runtime failures on mic jitter).
+    // We therefore batch arbitrary live-buffer reads into fixed model-sized frames here.
+    val merged = FloatArray(pendingVadSamples.size + chunk.size)
+    pendingVadSamples.copyInto(merged, 0, 0, pendingVadSamples.size)
+    chunk.copyInto(merged, pendingVadSamples.size, 0, chunk.size)
+    var offset = 0
+    while (offset + vadFrameSize <= merged.size) {
+      val frame = merged.copyOfRange(offset, offset + vadFrameSize)
+      processVadFrame(frame)
+      offset += vadFrameSize
     }
-    if (detected) {
-      if (speechSamples == 0L) {
-        segStartSample = absoluteSample
-      }
-      speechSamples += chunk.size.toLong()
-      silenceSamples = 0L
-      if (decision.score != null) {
-        speechScoreSum += decision.score
-        speechScoreCount += 1
-      }
-    } else if (speechSamples > 0L) {
-      silenceSamples += chunk.size.toLong()
-      val silenceMs = samplesToMs(silenceSamples)
-      if (silenceMs >= config.runtimeOptions.minSilenceDurationMs.toLong()) {
-        appendSegment()
-        speechSamples = 0L
-        silenceSamples = 0L
-      }
+    pendingVadSamples = if (offset < merged.size) {
+      merged.copyOfRange(offset, merged.size)
+    } else {
+      FloatArray(0)
     }
-    absoluteSample += chunk.size.toLong()
     chunksProcessed++
     unitsRead += chunk.size
     emitEvent(
@@ -145,6 +139,35 @@ class VadPipelineWorker(
         "queueDepth" to queueDepth.get(),
       )
     )
+  }
+
+  private fun processVadFrame(frame: FloatArray) {
+    val decision = config.runtime.infer(frame, config.sampleRate)
+    val detected = decision.isSpeech
+    if (detected != speech) {
+      speech = detected
+      emitEvent("vad.stateChanged", mapOf("isSpeechDetected" to speech))
+    }
+    if (detected) {
+      if (speechSamples == 0L) {
+        segStartSample = absoluteSample
+      }
+      speechSamples += frame.size.toLong()
+      silenceSamples = 0L
+      if (decision.score != null) {
+        speechScoreSum += decision.score
+        speechScoreCount += 1
+      }
+    } else if (speechSamples > 0L) {
+      silenceSamples += frame.size.toLong()
+      val silenceMs = samplesToMs(silenceSamples)
+      if (silenceMs >= config.runtimeOptions.minSilenceDurationMs.toLong()) {
+        appendSegment()
+        speechSamples = 0L
+        silenceSamples = 0L
+      }
+    }
+    absoluteSample += frame.size.toLong()
   }
 
   private fun appendSegment() {
@@ -174,6 +197,12 @@ class VadPipelineWorker(
   }
 
   private fun flushInternal() {
+    if (pendingVadSamples.isNotEmpty()) {
+      val tail = FloatArray(vadFrameSize)
+      pendingVadSamples.copyInto(tail, 0, 0, pendingVadSamples.size)
+      processVadFrame(tail)
+      pendingVadSamples = FloatArray(0)
+    }
     if (speechSamples > 0L) {
       appendSegment()
       speechSamples = 0L
