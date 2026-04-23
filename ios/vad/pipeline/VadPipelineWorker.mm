@@ -198,16 +198,6 @@ void VadPipelineWorker::appendSegment(int64_t segmentEndSample) {
     segmentCount_++;
     speechDurationMs_ += durationMs;
   }
-
-  emit(
-    "segment.appended",
-    {
-      {"segmentIndex", static_cast<double>(segmentIndex)},
-    },
-    {
-      {"segmentId", segmentId},
-    }
-  );
 }
 
 int64_t VadPipelineWorker::samplesToMs(int64_t samples) const {
