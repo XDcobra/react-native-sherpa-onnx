@@ -156,6 +156,8 @@ export default function VADScreen() {
   const [summary, setSummary] = useState<VADSummary | null>(null);
   const [segments, setSegments] = useState<SegmentMeta[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [timelineExpanded, setTimelineExpanded] = useState(true);
+  const [segmentsExpanded, setSegmentsExpanded] = useState(true);
 
   const liveEngineRef = useRef<VADEngine | null>(null);
   const livePipelineRef = useRef<VADPipelineHandle | null>(null);
@@ -201,12 +203,27 @@ export default function VADScreen() {
   }, []);
 
   const logOfflineLifecycle = useCallback((step: string, detail: string) => {
-    console.log(`[VADScreen][offline][segment] ${step}: ${detail}`);
+    void step;
+    void detail;
   }, []);
 
   const logLiveLifecycle = useCallback((step: string, detail: string) => {
-    console.log(`[VADScreen][live] ${step}: ${detail}`);
+    void step;
+    void detail;
   }, []);
+
+  const waitForIngestDone = useCallback(
+    async (ingest: FileIngestHandle, timeoutMs = 2000) => {
+      const timeout = new Promise<never>((_, reject) => {
+        const id = setTimeout(() => {
+          clearTimeout(id);
+          reject(new Error('Timed out waiting for ingest termination.'));
+        }, timeoutMs);
+      });
+      await Promise.race([ingest.done, timeout]);
+    },
+    []
+  );
 
   const resolveModelPath = useCallback(
     (modelFolder: string) => {
@@ -323,10 +340,24 @@ export default function VADScreen() {
         livePipelineRef.current = null;
 
         if (ingestRef.current) {
+          const ingest = ingestRef.current;
           try {
-            ingestRef.current.cancel();
+            ingest.cancel();
+            logLiveLifecycle(
+              'teardown.ingest.cancel.requested',
+              ingest.ingestId
+            );
           } catch {
             // Ignore cancel races.
+          }
+          try {
+            await waitForIngestDone(ingest);
+            logLiveLifecycle('teardown.ingest.done', ingest.ingestId);
+          } catch (ingestErr) {
+            logLiveLifecycle(
+              'teardown.ingest.done.error',
+              normalizeErrorMessage(ingestErr)
+            );
           }
           ingestRef.current = null;
         }
@@ -365,7 +396,7 @@ export default function VADScreen() {
         cleanupLockRef.current = false;
       }
     },
-    [clearStatusPoll, logLiveLifecycle]
+    [clearStatusPoll, logLiveLifecycle, waitForIngestDone]
   );
 
   const clearOfflineBuffers = useCallback(async () => {
@@ -729,7 +760,7 @@ export default function VADScreen() {
             );
             logLiveLifecycle(
               'ingest.completed',
-              'Audio fully appended. Press Finish to finalize input, flush and complete.'
+              'Audio fully appended. Press Finish to finalize input and complete.'
             );
             pushTimeline('ingest.completed', 'Live input file fully appended.');
             setStatus(
@@ -787,6 +818,7 @@ export default function VADScreen() {
   const stopLiveGraceful = useCallback(async () => {
     const pipeline = livePipelineRef.current;
     if (!pipeline || streamState !== 'running') return;
+    setStreamState('stopping');
     setError(null);
     setStatus('Stopping live pipeline gracefully...');
     pushTimeline(
@@ -818,6 +850,32 @@ export default function VADScreen() {
       }
 
       if (liveSource === 'file') {
+        const ingest = ingestRef.current;
+        if (ingest) {
+          try {
+            ingest.cancel();
+            logLiveLifecycle(
+              'stop.graceful.ingest.cancel.requested',
+              ingest.ingestId
+            );
+          } catch (cancelErr) {
+            logLiveLifecycle(
+              'stop.graceful.ingest.cancel.error',
+              normalizeErrorMessage(cancelErr)
+            );
+          }
+          try {
+            await waitForIngestDone(ingest);
+            logLiveLifecycle('stop.graceful.ingest.done', ingest.ingestId);
+          } catch (ingestErr) {
+            logLiveLifecycle(
+              'stop.graceful.ingest.done.error',
+              normalizeErrorMessage(ingestErr)
+            );
+          } finally {
+            ingestRef.current = null;
+          }
+        }
         const audio = liveAudioRef.current;
         if (audio) {
           await finalizeLiveAudioBuffer(audio);
@@ -900,6 +958,7 @@ export default function VADScreen() {
     pushTimeline,
     streamState,
     teardownLiveResources,
+    waitForIngestDone,
   ]);
 
   const abortLive = useCallback(async () => {
@@ -1301,7 +1360,7 @@ export default function VADScreen() {
               <>
                 <Text style={styles.mutedText}>
                   Start begins ingest + streaming VAD. Stop performs graceful
-                  finalize/flush completion. Abort cancels immediately.
+                  finalize completion. Abort cancels immediately.
                 </Text>
                 <Pressable
                   style={[
@@ -1330,8 +1389,8 @@ export default function VADScreen() {
               <>
                 <Text style={styles.mutedText}>
                   Mic mode captures directly into LiveAudioBuffer when starting.
-                  Stop performs graceful finalize/flush completion. Abort
-                  cancels immediately.
+                  Stop performs graceful finalize completion. Abort cancels
+                  immediately.
                 </Text>
               </>
             )}
@@ -1498,49 +1557,69 @@ export default function VADScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Event timeline</Text>
-          {timeline.length === 0 ? (
-            <Text style={styles.mutedText}>No events yet.</Text>
-          ) : (
-            timeline.map((item) => (
-              <View key={item.id} style={styles.timelineRow}>
-                <Text style={styles.timelineTime}>{item.at}</Text>
-                <View style={styles.timelineBody}>
-                  <Text style={styles.timelineType}>{item.type}</Text>
-                  <Text style={styles.timelineDetail}>{item.detail}</Text>
+          <Pressable
+            style={styles.sectionHeaderButton}
+            onPress={() => setTimelineExpanded((prev) => !prev)}
+          >
+            <Text style={styles.cardTitle}>Event timeline</Text>
+            <Text style={styles.sectionHeaderChevron}>
+              {timelineExpanded ? 'Hide' : 'Show'}
+            </Text>
+          </Pressable>
+          {timelineExpanded ? (
+            timeline.length === 0 ? (
+              <Text style={styles.mutedText}>No events yet.</Text>
+            ) : (
+              timeline.map((item) => (
+                <View key={item.id} style={styles.timelineRow}>
+                  <Text style={styles.timelineTime}>{item.at}</Text>
+                  <View style={styles.timelineBody}>
+                    <Text style={styles.timelineType}>{item.type}</Text>
+                    <Text style={styles.timelineDetail}>{item.detail}</Text>
+                  </View>
                 </View>
-              </View>
-            ))
-          )}
+              ))
+            )
+          ) : null}
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            Segment results ({segments.length})
-          </Text>
-          {segments.length === 0 ? (
-            <Text style={styles.mutedText}>No segments yet.</Text>
-          ) : (
-            segments.map((segment, idx) => (
-              <View key={`${segment.id}_${idx}`} style={styles.segmentRow}>
-                <Text style={styles.segmentTitle}>
-                  #{idx} {segment.id}
-                </Text>
-                <Text style={styles.segmentMeta}>
-                  {segment.startSample}-{segment.endSample} (
-                  {segment.durationMs}ms)
-                </Text>
-                <Text style={styles.segmentMeta}>
-                  sampleRate={segment.sampleRate}
-                </Text>
-                {typeof segment.confidence === 'number' ? (
-                  <Text style={styles.segmentMeta}>
-                    confidence={segment.confidence.toFixed(3)}
+          <Pressable
+            style={styles.sectionHeaderButton}
+            onPress={() => setSegmentsExpanded((prev) => !prev)}
+          >
+            <Text style={styles.cardTitle}>
+              Segment results ({segments.length})
+            </Text>
+            <Text style={styles.sectionHeaderChevron}>
+              {segmentsExpanded ? 'Hide' : 'Show'}
+            </Text>
+          </Pressable>
+          {segmentsExpanded ? (
+            segments.length === 0 ? (
+              <Text style={styles.mutedText}>No segments yet.</Text>
+            ) : (
+              segments.map((segment, idx) => (
+                <View key={`${segment.id}_${idx}`} style={styles.segmentRow}>
+                  <Text style={styles.segmentTitle}>
+                    #{idx} {segment.id}
                   </Text>
-                ) : null}
-              </View>
-            ))
-          )}
+                  <Text style={styles.segmentMeta}>
+                    {segment.startSample}-{segment.endSample} (
+                    {segment.durationMs}ms)
+                  </Text>
+                  <Text style={styles.segmentMeta}>
+                    sampleRate={segment.sampleRate}
+                  </Text>
+                  {typeof segment.confidence === 'number' ? (
+                    <Text style={styles.segmentMeta}>
+                      confidence={segment.confidence.toFixed(3)}
+                    </Text>
+                  ) : null}
+                </View>
+              ))
+            )
+          ) : null}
         </View>
       </ScrollView>
       <ScreenIntroModal screenId="VAD" />
@@ -1588,6 +1667,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#111827',
+  },
+  sectionHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionHeaderChevron: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563EB',
   },
   description: {
     fontSize: 14,
