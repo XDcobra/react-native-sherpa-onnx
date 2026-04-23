@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <stdexcept>
 
 namespace {
@@ -35,6 +34,10 @@ VadPipelineWorker::~VadPipelineWorker() {
 }
 
 void VadPipelineWorker::start() {
+  if (!config_.runtime) {
+    throw std::runtime_error("VAD runtime is not initialized");
+  }
+  config_.runtime->Reset();
   running.store(true);
   cursorId_ = inputEntry_->createCursorHandle();
   appendListenerToken_ = inputEntry_->addAppendListener([this]() {
@@ -106,35 +109,16 @@ void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
   if (chunk.empty()) {
     return;
   }
-  double energy = 0.0;
-  for (float sample : chunk) {
-    energy += std::fabs(sample);
-  }
-  energy /= static_cast<double>(chunk.size());
-
-  const bool detected = energy >= config_.threshold;
+  config_.runtime->AcceptWaveform(
+    chunk.data(),
+    static_cast<int32_t>(chunk.size())
+  );
+  const bool detected = config_.runtime->IsSpeechDetected();
   const bool prior = speechDetected_.exchange(detected);
   if (prior != detected) {
     emit("vad.stateChanged", {}, {}, {{"isSpeechDetected", detected}});
   }
-
-  if (detected) {
-    if (speechSamples_ == 0) {
-      segmentStartSample_ = absoluteSample_;
-    }
-    speechSamples_ += static_cast<int64_t>(chunk.size());
-    silenceSamples_ = 0;
-  } else if (speechSamples_ > 0) {
-    silenceSamples_ += static_cast<int64_t>(chunk.size());
-    const int64_t silenceMs = samplesToMs(silenceSamples_);
-    if (silenceMs >= static_cast<int64_t>(config_.minSilenceDurationMs)) {
-      appendSegment(absoluteSample_ + static_cast<int64_t>(chunk.size()));
-      speechSamples_ = 0;
-      silenceSamples_ = 0;
-    }
-  }
-
-  absoluteSample_ += static_cast<int64_t>(chunk.size());
+  appendDetectedSegments();
   {
     std::lock_guard<std::mutex> lock(statusMutex_);
     chunksProcessed_++;
@@ -153,55 +137,44 @@ void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
 }
 
 void VadPipelineWorker::flushInternal() {
-  if (speechSamples_ > 0) {
-    appendSegment(absoluteSample_);
-    speechSamples_ = 0;
-    silenceSamples_ = 0;
-  }
+  config_.runtime->Flush();
+  appendDetectedSegments();
   emit("pipeline.flushed");
 }
 
-void VadPipelineWorker::appendSegment(int64_t segmentEndSample) {
-  const int64_t durationSamples = std::max<int64_t>(0, segmentEndSample - segmentStartSample_);
-  const int64_t durationMs = samplesToMs(durationSamples);
-  if (durationMs < static_cast<int64_t>(config_.minSpeechDurationMs)) {
-    return;
-  }
-
-  std::string segmentId;
-  int segmentIndex = -1;
-  std::string error;
-  const bool ok = seg_live_append_segment(
-    config_.segmentOutBufferId,
-    "speech",
-    config_.sourceAudioBufferId,
-    static_cast<int>(segmentStartSample_),
-    static_cast<int>(segmentEndSample),
-    config_.sampleRate,
-    static_cast<int>(durationMs),
-    true,
-    1.0,
-    "{\"engine\":\"vad\"}",
-    &segmentId,
-    &segmentIndex,
-    &error
-  );
-  if (!ok) {
-    throw std::runtime_error(
-      error.empty() ? "Failed to append live VAD segment" : error
+void VadPipelineWorker::appendDetectedSegments() {
+  const auto segments = config_.runtime->PopSegments();
+  for (const auto &segment : segments) {
+    std::string segmentId;
+    int segmentIndex = -1;
+    std::string error;
+    const bool ok = seg_live_append_segment(
+      config_.segmentOutBufferId,
+      "speech",
+      config_.sourceAudioBufferId,
+      segment.startSample,
+      segment.endSample,
+      config_.sampleRate,
+      segment.durationMs,
+      true,
+      1.0,
+      "{\"engine\":\"vad\",\"decision\":\"model\"}",
+      &segmentId,
+      &segmentIndex,
+      &error
     );
+    if (!ok) {
+      throw std::runtime_error(
+        error.empty() ? "Failed to append live VAD segment" : error
+      );
+    }
+    {
+      std::lock_guard<std::mutex> lock(statusMutex_);
+      unitsWritten_++;
+      segmentCount_++;
+      speechDurationMs_ += static_cast<int64_t>(segment.durationMs);
+    }
   }
-
-  {
-    std::lock_guard<std::mutex> lock(statusMutex_);
-    unitsWritten_++;
-    segmentCount_++;
-    speechDurationMs_ += durationMs;
-  }
-}
-
-int64_t VadPipelineWorker::samplesToMs(int64_t samples) const {
-  return (samples * 1000LL) / static_cast<int64_t>(std::max(1, config_.sampleRate));
 }
 
 void VadPipelineWorker::processCommands() {
@@ -218,10 +191,8 @@ void VadPipelineWorker::processCommands() {
       }
     } else {
       try {
+        config_.runtime->Reset();
         speechDetected_.store(false);
-        speechSamples_ = 0;
-        silenceSamples_ = 0;
-        segmentStartSample_ = absoluteSample_;
         {
           std::lock_guard<std::mutex> sLock(statusMutex_);
           chunksProcessed_ = 0;

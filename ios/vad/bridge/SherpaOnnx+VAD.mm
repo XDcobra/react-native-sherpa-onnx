@@ -2,6 +2,7 @@
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "../core/VadRuntime.h"
 #include "../pipeline/VadPipelineWorker.h"
 
 #include <cmath>
@@ -33,10 +34,19 @@ NSString *VadModelKindToNSString(sherpaonnx::VadModelKind kind) {
 }
 
 struct VadInstanceState {
+  std::string modelType;
+  std::string modelPath;
   int sampleRate = 16000;
-  double threshold = 0.015;
-  int minSpeechDurationMs = 120;
+  int numThreads = 1;
+  std::string provider = "cpu";
+  bool debug = false;
+  double scoreThreshold = 0.5;
+  int minSpeechDurationMs = 250;
+  int minSilenceDurationMs = 250;
+  int maxSpeechDurationMs = 5000;
+  int windowSize = 512;
   bool speechDetected = false;
+  std::shared_ptr<VadRuntime> runtime;
 };
 
 struct VadPipelineState {
@@ -131,14 +141,94 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
     reject(@"VAD_INVALID_ARGUMENT", @"instanceId is required", nil);
     return;
   }
+  NSString *modelDir = options[@"modelDir"];
+  if (modelDir == nil || [modelDir length] == 0) {
+    reject(@"VAD_MODEL_INIT_FAILED", @"modelDir is required for VAD initialization", nil);
+    return;
+  }
+
+  const std::string requestedModelType =
+      ([options[@"modelType"] isKindOfClass:[NSString class]] &&
+       [options[@"modelType"] length] > 0)
+          ? std::string([options[@"modelType"] UTF8String])
+          : "auto";
+
+  sherpaonnx::VadDetectResult detect =
+      sherpaonnx::DetectVadModel(OptionalUtf8String(modelDir), std::nullopt, requestedModelType);
+  if (!detect.ok) {
+    const std::string reason = detect.error.empty() ? "Failed to detect VAD model" : detect.error;
+    reject(@"VAD_MODEL_INIT_FAILED", [NSString stringWithUTF8String:reason.c_str()], nil);
+    return;
+  }
+  NSString *resolvedModelType = VadModelKindToNSString(detect.selectedKind);
+  if (![resolvedModelType isEqualToString:@"silero_vad"] &&
+      ![resolvedModelType isEqualToString:@"ten_vad"]) {
+    reject(@"VAD_MODEL_INIT_FAILED", @"Unsupported VAD model type", nil);
+    return;
+  }
+  if (detect.paths.model.empty()) {
+    reject(@"VAD_MODEL_INIT_FAILED", @"Detected VAD model path is empty", nil);
+    return;
+  }
+
   VadInstanceState state;
-  NSNumber *sampleRate = options[@"sampleRate"];
-  NSNumber *threshold = options[@"threshold"];
-  NSNumber *minSpeechDurationMs = options[@"minSpeechDurationMs"];
-  if (sampleRate != nil) state.sampleRate = MAX(1, [sampleRate intValue]);
-  if (threshold != nil) state.threshold = MAX(0.0, [threshold doubleValue]);
-  if (minSpeechDurationMs != nil) {
-    state.minSpeechDurationMs = MAX(0, [minSpeechDurationMs intValue]);
+  state.modelType = [resolvedModelType UTF8String];
+  state.modelPath = detect.paths.model;
+  if ([options[@"sampleRate"] respondsToSelector:@selector(intValue)]) {
+    state.sampleRate = MAX(1, [options[@"sampleRate"] intValue]);
+  }
+  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
+    state.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  }
+  if ([options[@"provider"] isKindOfClass:[NSString class]] &&
+      [options[@"provider"] length] > 0) {
+    state.provider = std::string([options[@"provider"] UTF8String]);
+  }
+  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
+    state.debug = [options[@"debug"] boolValue];
+  }
+  if ([options[@"threshold"] respondsToSelector:@selector(doubleValue)]) {
+    state.scoreThreshold = MAX(0.0, [options[@"threshold"] doubleValue]);
+  }
+  if ([options[@"minSpeechDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSpeechDurationMs = MAX(0, [options[@"minSpeechDurationMs"] intValue]);
+  } else if ([options[@"speechDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSpeechDurationMs = MAX(0, [options[@"speechDurationMs"] intValue]);
+  }
+  if ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSilenceDurationMs = MAX(0, [options[@"silenceDurationMs"] intValue]);
+  }
+  if ([options[@"windowSize"] respondsToSelector:@selector(intValue)]) {
+    state.windowSize = MAX(1, [options[@"windowSize"] intValue]);
+  } else if ([resolvedModelType isEqualToString:@"ten_vad"]) {
+    state.windowSize = 256;
+  }
+  if ([options[@"maxSpeechDurationS"] respondsToSelector:@selector(doubleValue)]) {
+    state.maxSpeechDurationMs =
+        MAX(0, (int)llround([options[@"maxSpeechDurationS"] doubleValue] * 1000.0));
+  }
+
+  VadRuntimeConfig runtimeCfg;
+  runtimeCfg.modelType = state.modelType;
+  runtimeCfg.modelPath = state.modelPath;
+  runtimeCfg.sampleRate = state.sampleRate;
+  runtimeCfg.numThreads = state.numThreads;
+  runtimeCfg.provider = state.provider;
+  runtimeCfg.debug = state.debug;
+  runtimeCfg.scoreThreshold = state.scoreThreshold;
+  runtimeCfg.minSpeechDurationMs = state.minSpeechDurationMs;
+  runtimeCfg.minSilenceDurationMs = state.minSilenceDurationMs;
+  runtimeCfg.maxSpeechDurationMs = state.maxSpeechDurationMs;
+  runtimeCfg.windowSize = state.windowSize;
+  std::string runtimeErr;
+  state.runtime = VadRuntime::Create(runtimeCfg, &runtimeErr);
+  if (!state.runtime) {
+    reject(
+      @"VAD_MODEL_INIT_FAILED",
+      [NSString stringWithUTF8String:(runtimeErr.empty() ? "Failed to create iOS VAD runtime" : runtimeErr.c_str())],
+      nil
+    );
+    return;
   }
   std::lock_guard<std::mutex> lock(g_vad_mutex);
   g_vad_instances[[instanceId UTF8String]] = state;
@@ -203,17 +293,19 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
     }
   }
   const int chunkSize = ([options[@"chunkSize"] respondsToSelector:@selector(intValue)] ? MAX(1, [options[@"chunkSize"] intValue]) : 512);
+  if (!cfg.runtime) {
+    reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
+    return;
+  }
   auto worker = std::make_shared<VadPipelineWorker>(
     iid,
     liveAudio,
     VadPipelineWorker::Config{
       cfg.sampleRate,
-      cfg.threshold,
-      cfg.minSpeechDurationMs,
-      MAX(0, ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)] ? [options[@"silenceDurationMs"] intValue] : 250)),
       chunkSize,
       aid,
-      sid
+      sid,
+      cfg.runtime,
     },
     [weakSelf = self, iid](const std::string &type,
                            const std::unordered_map<std::string, double> &numbers,
@@ -301,62 +393,59 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
     return;
   }
   if (sampleRate > 0) cfg.sampleRate = sampleRate;
-  const int chunkSize = 512;
-  bool inSpeech = false;
-  int segStart = 0;
+  const int chunkSize = ([options[@"chunkSize"] respondsToSelector:@selector(intValue)]
+                             ? MAX(1, [options[@"chunkSize"] intValue])
+                             : 512);
+  if (!cfg.runtime) {
+    reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
+    return;
+  }
+  cfg.runtime->Reset();
   int segmentCount = 0;
   int64_t speechDurationMs = 0;
+  int chunksProcessed = 0;
   std::vector<SegRecord> records;
   for (int i = 0; i < (int)samples.size(); i += chunkSize) {
-    int end = std::min(i + chunkSize, (int)samples.size());
-    double energy = 0.0;
-    for (int j = i; j < end; ++j) energy += std::fabs(samples[j]);
-    energy /= std::max(1, end - i);
-    bool speech = energy >= cfg.threshold;
-    if (speech && !inSpeech) {
-      inSpeech = true;
-      segStart = i;
-    } else if (!speech && inSpeech) {
-      int durMs = ((end - segStart) * 1000) / std::max(1, cfg.sampleRate);
-      if (durMs >= cfg.minSpeechDurationMs) {
-        SegRecord r;
-        r.id = "seg_off_" + std::to_string(segStart) + "_" + std::to_string(end);
-        r.kind = "speech";
-        r.sourceAudioBufferId = [audioInBufferId UTF8String];
-        r.startSample = segStart;
-        r.endSample = end;
-        r.sampleRate = cfg.sampleRate;
-        r.durationMs = durMs;
-        r.hasConfidence = true;
-        r.confidence = 1.0;
-        r.payloadJson = "{\"engine\":\"vad\"}";
-        records.push_back(r);
-        segmentCount++;
-        speechDurationMs += durMs;
-      }
-      inSpeech = false;
-    }
-  }
-
-  if (inSpeech) {
-    int end = (int)samples.size();
-    int durMs = ((end - segStart) * 1000) / std::max(1, cfg.sampleRate);
-    if (durMs >= cfg.minSpeechDurationMs) {
+    const int n = std::min(chunkSize, static_cast<int>(samples.size()) - i);
+    cfg.runtime->AcceptWaveform(samples.data() + i, n);
+    chunksProcessed += 1;
+    const auto segments = cfg.runtime->PopSegments();
+    for (const auto &segment : segments) {
       SegRecord r;
-      r.id = "seg_off_" + std::to_string(segStart) + "_" + std::to_string(end);
+      r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
+             std::to_string(segment.endSample);
       r.kind = "speech";
       r.sourceAudioBufferId = [audioInBufferId UTF8String];
-      r.startSample = segStart;
-      r.endSample = end;
+      r.startSample = segment.startSample;
+      r.endSample = segment.endSample;
       r.sampleRate = cfg.sampleRate;
-      r.durationMs = durMs;
+      r.durationMs = segment.durationMs;
       r.hasConfidence = true;
       r.confidence = 1.0;
-      r.payloadJson = "{\"engine\":\"vad\"}";
+      r.payloadJson = "{\"engine\":\"vad\",\"decision\":\"model\"}";
       records.push_back(r);
       segmentCount++;
-      speechDurationMs += durMs;
+      speechDurationMs += segment.durationMs;
     }
+  }
+  cfg.runtime->Flush();
+  const auto finalSegments = cfg.runtime->PopSegments();
+  for (const auto &segment : finalSegments) {
+    SegRecord r;
+    r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
+           std::to_string(segment.endSample);
+    r.kind = "speech";
+    r.sourceAudioBufferId = [audioInBufferId UTF8String];
+    r.startSample = segment.startSample;
+    r.endSample = segment.endSample;
+    r.sampleRate = cfg.sampleRate;
+    r.durationMs = segment.durationMs;
+    r.hasConfidence = true;
+    r.confidence = 1.0;
+    r.payloadJson = "{\"engine\":\"vad\",\"decision\":\"model\"}";
+    records.push_back(r);
+    segmentCount++;
+    speechDurationMs += segment.durationMs;
   }
 
   std::string outId = [segmentOutBufferId UTF8String];
@@ -367,7 +456,7 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
       if (it != g_seg_offline.end()) {
         it->second->segments = records;
         resolve(@{
-          @"chunksProcessed": @((double)ceil((double)samples.size() / (double)chunkSize)),
+          @"chunksProcessed": @((double)chunksProcessed),
           @"unitsRead": @((double)samples.size()),
           @"unitsWritten": @((double)segmentCount),
           @"segmentCount": @((double)segmentCount),
@@ -408,7 +497,7 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
       }
     }
     resolve(@{
-      @"chunksProcessed": @((double)ceil((double)samples.size() / (double)chunkSize)),
+      @"chunksProcessed": @((double)chunksProcessed),
       @"unitsRead": @((double)samples.size()),
       @"unitsWritten": @((double)segmentCount),
       @"segmentCount": @((double)segmentCount),
@@ -589,7 +678,11 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
       reject(@"VAD_MODEL_INIT_FAILED", @"VAD instance not initialized", nil);
       return;
     }
-    resolve(@(it->second.speechDetected));
+    if (it->second.runtime) {
+      resolve(@(it->second.runtime->IsSpeechDetected()));
+      return;
+    }
+    resolve(@(false));
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
+#include "../core/VadRuntime.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -19,12 +20,10 @@ class VadPipelineWorker : public StreamingPipelineWorker {
 public:
   struct Config {
     int sampleRate = 16000;
-    double threshold = 0.015;
-    int minSpeechDurationMs = 120;
-    int minSilenceDurationMs = 250;
     int chunkSize = 512;
     std::string sourceAudioBufferId;
     std::string segmentOutBufferId;
+    std::shared_ptr<VadRuntime> runtime;
   };
 
   using EventEmitter = std::function<void(const std::string &, const std::unordered_map<std::string, double> &, const std::unordered_map<std::string, std::string> &, const std::unordered_map<std::string, bool> &)>;
@@ -61,9 +60,8 @@ private:
   void processCommands();
   void drainRemainingCommands();
   void processChunk(const std::vector<float> &chunk);
+  void appendDetectedSegments();
   void flushInternal();
-  void appendSegment(int64_t segmentEndSample);
-  int64_t samplesToMs(int64_t samples) const;
   void emit(
     const std::string &type,
     const std::unordered_map<std::string, double> &numbers = {},
@@ -97,9 +95,4 @@ private:
 
   int cursorId_ = -1;
   int appendListenerToken_ = -1;
-
-  int64_t absoluteSample_ = 0;
-  int64_t speechSamples_ = 0;
-  int64_t silenceSamples_ = 0;
-  int64_t segmentStartSample_ = 0;
 };
