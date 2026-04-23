@@ -9,11 +9,7 @@
  * future TTS will consume them as input.
  */
 
-import {
-  NativeEventEmitter,
-  NativeModules,
-  TurboModuleRegistry,
-} from 'react-native';
+import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { PipelineTextErrorCode } from './types';
 import type {
@@ -148,7 +144,7 @@ let textErrorSubscription: NativeSubscription | null = null;
 function ensureLiveTextEventSubscriptions(): void {
   if (partialSubscription && textErrorSubscription) return;
 
-  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+  const emitter = new NativeEventEmitter();
 
   if (!partialSubscription) {
     partialSubscription = emitter.addListener(

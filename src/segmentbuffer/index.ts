@@ -1,8 +1,4 @@
-import {
-  NativeEventEmitter,
-  NativeModules,
-  TurboModuleRegistry,
-} from 'react-native';
+import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { PipelineSegmentErrorCode } from './types';
@@ -196,7 +192,7 @@ let segmentErrorSub: NativeSubscription | null = null;
 
 function ensureLiveSegmentEventSubscriptions(): void {
   if (segmentAppendedSub && segmentErrorSub) return;
-  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+  const emitter = new NativeEventEmitter();
 
   if (!segmentAppendedSub) {
     segmentAppendedSub = emitter.addListener(
