@@ -1,4 +1,5 @@
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
 
 /**
  * Pipeline segment buffer types for react-native-sherpa-onnx/segmentbuffer.
@@ -44,7 +45,7 @@ export interface SegmentMeta {
 
 export interface SegmentInput {
   kind?: SegmentKind;
-  sourceAudioBufferId: string;
+  sourceAudioBufferId: PipelineAudioBufferIdSource;
   startSample: number;
   endSample: number;
   sampleRate: number;
@@ -152,7 +153,7 @@ export interface LiveSegmentBufferErrorEvent {
 }
 
 export interface CreateLiveSegmentBufferOptions {
-  sourceAudioBufferId?: string;
+  sourceAudioBufferId?: PipelineAudioBufferIdSource;
   maxSegments?: number;
   spooling?: SegmentBufferSpoolingOptions;
   /**
@@ -166,7 +167,7 @@ export interface CreateLiveSegmentBufferOptions {
 }
 
 export interface CreateEmptyOfflineSegmentBufferOptions {
-  sourceAudioBufferId?: string;
+  sourceAudioBufferId?: PipelineAudioBufferIdSource;
 }
 
 export const PipelineSegmentErrorCode = {

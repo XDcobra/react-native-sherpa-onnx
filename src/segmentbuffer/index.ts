@@ -4,6 +4,7 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { PipelineSegmentErrorCode } from './types';
 import type {
   CreateEmptyOfflineSegmentBufferOptions,
@@ -326,8 +327,13 @@ export async function createLiveSegmentBuffer(
         : 0
       : 0;
 
+  const sourceAudioBufferId =
+    options.sourceAudioBufferId !== undefined
+      ? resolvePipelineAudioBufferId(options.sourceAudioBufferId)
+      : undefined;
+
   const raw = await getNative().createLiveSegmentBuffer({
-    sourceAudioBufferId: options.sourceAudioBufferId,
+    sourceAudioBufferId,
     maxSegments: options.maxSegments,
     spoolingMode: options.spooling?.mode,
     spoolingPath: options.spooling?.path,
@@ -354,8 +360,13 @@ export async function createLiveSegmentBuffer(
 export async function createEmptyOfflineSegmentBuffer(
   options: CreateEmptyOfflineSegmentBufferOptions = {}
 ): Promise<OfflineSegmentBufferRef> {
+  const sourceAudioBufferId =
+    options.sourceAudioBufferId !== undefined
+      ? resolvePipelineAudioBufferId(options.sourceAudioBufferId)
+      : undefined;
+
   const raw = await getNative().createEmptyOfflineSegmentBuffer({
-    sourceAudioBufferId: options.sourceAudioBufferId,
+    sourceAudioBufferId,
   });
   return {
     info: mapOfflineInfo(raw),
@@ -374,10 +385,14 @@ export async function appendLiveSegment(
           String(buffer),
           'live segment buffer recording source'
         );
+  const sourceAudioBufferId = resolvePipelineAudioBufferId(
+    segment.sourceAudioBufferId
+  );
+
   return getNative().appendLiveSegment(
     id,
     segment.kind ?? 'speech',
-    segment.sourceAudioBufferId,
+    sourceAudioBufferId,
     segment.startSample,
     segment.endSample,
     segment.sampleRate,
