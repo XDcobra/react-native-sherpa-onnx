@@ -4,7 +4,8 @@ On-device streaming VAD with a pipeline-first API:
 
 - **Input:** live or offline pipeline audio buffer (`audiobuffer`)
 - **Output:** live or offline segment buffer (`segmentbuffer`)
-- **Engine:** `createStreamingVAD` exposes `process(...)`, `addListener(...)`, `isSpeechDetected()`, and `destroy()`
+- **Engine:** `createStreamingVAD` exposes `process(...)`, `isSpeechDetected()`, and `destroy()` (no engine-level data events)
+- **Pipeline handle (live):** `onSpeechStateChanged` for speech activity; **segment buffer:** `onSegmentAppended` / `streamEvents.segmentAppended` for new segments (fat metadata; pull APIs remain)
 
 Import path: `react-native-sherpa-onnx/vad`
 
@@ -23,8 +24,6 @@ import { createStreamingVAD, detectVadModel } from 'react-native-sherpa-onnx/vad
 import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
-  getLiveSegmentBufferSegmentCount,
-  getLiveSegmentBufferSegments,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -40,6 +39,10 @@ const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCou
 const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
   spooling: { mode: 'on' },
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: (e) => {
+    console.log('[vad]', e.segmentId, `${e.startSample}-${e.endSample}`, `${e.durationMs}ms`);
+  },
 });
 
 // 3) Create VAD engine (auto-detect is resolved natively before init).
@@ -49,25 +52,14 @@ const vad = await createStreamingVAD({
   sampleRate: 16000,
 });
 
-let printedSegments = 0;
-const off = vad.addListener(async (event) => {
-  if (event.type !== 'segment.appended') return;
-  // Read only newly appended segments to avoid reprinting old ones.
-  const total = await getLiveSegmentBufferSegmentCount(segmentOut);
-  const next = total - printedSegments;
-  if (next <= 0) return;
-  const segs = await getLiveSegmentBufferSegments(segmentOut, printedSegments, next);
-  printedSegments = total;
-  for (const s of segs) {
-    console.log('[vad]', s.id, `${s.startSample}-${s.endSample}`, `${s.durationMs}ms`);
-  }
-});
-
 const pipeline = await vad.process({
   audioIn,
   segmentOut,
-  options: { chunkSize: 512, autoFlushOnInputEnded: true },
+  options: { chunkSize: 512, autoFlushOnInputEnded: true, speechStateEventMinIntervalMs: 0 },
 });
+pipeline.onSpeechStateChanged = (e) => {
+  console.log('[vad speech]', e.isSpeechDetected);
+};
 
 // Feed mic/appended audio into `audioIn` from your audio pipeline.
 // Then finalize the run:
@@ -75,7 +67,6 @@ await pipeline.flush();
 await pipeline.stop();
 await pipeline.completed;
 
-off();
 await vad.destroy();
 await releasePipelineSegmentBuffer(segmentOut);
 await releasePipelineAudioBuffer(audioIn);
@@ -214,19 +205,6 @@ const run = await engine.process({
 });
 ```
 
-#### `engine.addListener(listener)`
-
-```ts
-addListener(listener: (event: VADEvent) => void): () => void;
-```
-
-```ts
-const off = engine.addListener((e) => {
-  if (e.type === 'vad.stateChanged') console.log(e.isSpeechDetected);
-});
-off();
-```
-
 #### `engine.isSpeechDetected()`
 
 ```ts
@@ -248,6 +226,14 @@ await engine.destroy();
 ```
 
 ### Pipeline handle (`VADPipelineHandle`)
+
+#### `pipeline.onSpeechStateChanged` (optional)
+
+```ts
+onSpeechStateChanged?: (event: VADSpeechStateChangedEvent) => void;
+```
+
+Assign after `process` returns to receive VAD speech/activity without polling. Throttle with `speechStateEventMinIntervalMs` in `VADLiveRunOptions`.
 
 #### `pipeline.stop()`
 
@@ -287,7 +273,7 @@ import type {
   VADDetectResult,
   VADInitializeOptions,
   VADEngine,
-  VADEvent,
+  VADSpeechStateChangedEvent,
   VADPipelineHandle,
   VADPipelineStatus,
   VADSummary,
