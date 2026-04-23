@@ -71,6 +71,11 @@ class LiveEntry(
   onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
   isTemporarySpool: Boolean = false,
 ) {
+  enum class AppendResult {
+    APPENDED,
+    BUFFER_FINALIZED,
+  }
+
   val kind: String = "livePcmBuffer"
 
   // ---------- State machine ----------
@@ -210,13 +215,15 @@ class LiveEntry(
    * @throws IllegalStateException if buffer is finalized.
    * @throws InterruptedException if the calling thread is interrupted while waiting for backpressure.
    */
-  fun appendSamples(
+  fun tryAppendSamples(
     samples: FloatArray,
     inputSampleRate: Int = sampleRate,
     source: String = LIVE_APPEND_SOURCE_UNKNOWN,
     backpressure: Boolean = false,
-  ) {
-    check(state == State.RECORDING) { "Cannot append to finalized LiveBuffer" }
+  ): AppendResult {
+    if (state != State.RECORDING) {
+      return AppendResult.BUFFER_FINALIZED
+    }
 
     val toAppend = if (inputSampleRate != sampleRate) {
       Resampler.resampleLinear(samples, inputSampleRate, sampleRate)
@@ -233,7 +240,7 @@ class LiveEntry(
         }
       }
       // If finalized while waiting, bail out
-      if (state != State.RECORDING) return
+      if (state != State.RECORDING) return AppendResult.BUFFER_FINALIZED
     }
 
     rwLock.write {
@@ -275,6 +282,17 @@ class LiveEntry(
         listener(event)
       }
     }
+    return AppendResult.APPENDED
+  }
+
+  fun appendSamples(
+    samples: FloatArray,
+    inputSampleRate: Int = sampleRate,
+    source: String = LIVE_APPEND_SOURCE_UNKNOWN,
+    backpressure: Boolean = false,
+  ) {
+    val result = tryAppendSamples(samples, inputSampleRate, source, backpressure)
+    check(result == AppendResult.APPENDED) { "Cannot append to finalized LiveBuffer" }
   }
 
   fun configureAppendEvents(

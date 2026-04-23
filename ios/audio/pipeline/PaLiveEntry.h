@@ -15,6 +15,7 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -77,6 +78,7 @@ inline void pa_writeWavHeaderToStream(std::ofstream &f, int sampleRate, int bits
 
 struct PaLiveEntry {
   enum State { RECORDING, FINISHED };
+  enum class AppendResult { APPENDED, BUFFER_FINALIZED };
 
   std::string bufferId;
   int sampleRate;
@@ -303,9 +305,10 @@ struct PaLiveEntry {
   }
 #endif
 
-  void appendSamples(const float *data, size_t count, int inputRate,
-                     const std::string &source = kPaAppendSourceUnknown,
-                     bool backpressure = false) {
+  AppendResult tryAppendSamples(const float *data, size_t count, int inputRate,
+                                const std::string &source = kPaAppendSourceUnknown,
+                                bool backpressure = false) {
+    if (state != RECORDING) return AppendResult::BUFFER_FINALIZED;
     std::vector<float> resampled;
     const float *toAppend = data;
     size_t appendCount = count;
@@ -333,7 +336,7 @@ struct PaLiveEntry {
         if (hasRoom) break;
         backpressureCV.wait_for(bpLock, std::chrono::milliseconds(20));
       }
-      if (state != RECORDING) return;
+      if (state != RECORDING) return AppendResult::BUFFER_FINALIZED;
     }
 
     {
@@ -362,6 +365,16 @@ struct PaLiveEntry {
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
+    return AppendResult::APPENDED;
+  }
+
+  void appendSamples(const float *data, size_t count, int inputRate,
+                     const std::string &source = kPaAppendSourceUnknown,
+                     bool backpressure = false) {
+    auto result = tryAppendSamples(data, count, inputRate, source, backpressure);
+    if (result != AppendResult::APPENDED) {
+      throw std::runtime_error("Cannot append to finalized LiveBuffer");
+    }
   }
 
   /** Called after cursor advancement to wake blocked producers. */

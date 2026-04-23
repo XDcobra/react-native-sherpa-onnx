@@ -47,10 +47,18 @@ void EnhancementPipelineWorker::runLoop() {
           // Input stream ended → auto-flush and stop
           auto flushed = wrapper_->flush();
           if (!flushed.samples.empty()) {
-            outputEntry_->appendSamples(flushed.samples.data(), flushed.samples.size(),
-                                        sr, kPaAppendSourceEnhancement);
-            std::lock_guard<std::mutex> sLock(statusMtx_);
-            unitsWritten_ += (int64_t)flushed.samples.size();
+            auto appendResult = outputEntry_->tryAppendSamples(
+              flushed.samples.data(),
+              flushed.samples.size(),
+              sr,
+              kPaAppendSourceEnhancement
+            );
+            if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
+              std::lock_guard<std::mutex> sLock(statusMtx_);
+              unitsWritten_ += (int64_t)flushed.samples.size();
+            } else {
+              running.store(false);
+            }
           }
           break;
         }
@@ -62,8 +70,16 @@ void EnhancementPipelineWorker::runLoop() {
 
       // 3. Denoise and write to output
       auto denoised = wrapper_->runSamples(chunk, sr);
-      outputEntry_->appendSamples(denoised.samples.data(), denoised.samples.size(),
-                                  sr, kPaAppendSourceEnhancement);
+      auto appendResult = outputEntry_->tryAppendSamples(
+        denoised.samples.data(),
+        denoised.samples.size(),
+        sr,
+        kPaAppendSourceEnhancement
+      );
+      if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
+        running.store(false);
+        break;
+      }
 
       {
         std::lock_guard<std::mutex> sLock(statusMtx_);
@@ -102,10 +118,18 @@ void EnhancementPipelineWorker::processCommands() {
         try {
           auto flushed = wrapper_->flush();
           if (!flushed.samples.empty()) {
-            outputEntry_->appendSamples(flushed.samples.data(), flushed.samples.size(),
-                                        wrapper_->getSampleRate(), kPaAppendSourceEnhancement);
-            std::lock_guard<std::mutex> sLock(statusMtx_);
-            unitsWritten_ += (int64_t)flushed.samples.size();
+            auto appendResult = outputEntry_->tryAppendSamples(
+              flushed.samples.data(),
+              flushed.samples.size(),
+              wrapper_->getSampleRate(),
+              kPaAppendSourceEnhancement
+            );
+            if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
+              std::lock_guard<std::mutex> sLock(statusMtx_);
+              unitsWritten_ += (int64_t)flushed.samples.size();
+            } else {
+              running.store(false);
+            }
           }
           cmd.completion.set_value();
         } catch (...) {

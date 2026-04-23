@@ -117,7 +117,16 @@ void TtsPipelineWorker::synthesizeSegment(
   // Chunk callback: write PCM directly to output audio buffer
   auto callback = [this, sampleRate](const float *samples, int32_t n, float) -> int32_t {
     if (!running.load()) return 0;
-    outputEntry_->appendSamples(samples, n, sampleRate, kPaAppendSourceTts);
+    auto appendResult = outputEntry_->tryAppendSamples(
+      samples,
+      static_cast<size_t>(n),
+      sampleRate,
+      kPaAppendSourceTts
+    );
+    if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
+      running.store(false);
+      return 0;
+    }
     {
       std::lock_guard<std::mutex> sLock(statusMtx_);
       unitsWritten_ += n;

@@ -1142,8 +1142,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         // Streaming decode: chunks are appended to live buffer as they arrive
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
-            liveEntry.appendSamples(samples, liveEntry.sampleRate, com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST, backpressure = useBackpressure)
-            status.framesIngested += frameCount
+            if (cancelFlag.get()) return
+            when (
+              liveEntry.tryAppendSamples(
+                samples,
+                liveEntry.sampleRate,
+                com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                backpressure = useBackpressure
+              )
+            ) {
+              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
+                status.framesIngested += frameCount
+              }
+              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                cancelFlag.set(true)
+              }
+            }
           }
         }
 

@@ -101,11 +101,19 @@ class MicToLiveBufferSink(
           }
 
           // Write directly to the live entry's ring buffer (no JS roundtrip)
-          liveEntry.appendSamples(
-            rawSamples,
-            targetRate,
-            LIVE_APPEND_SOURCE_MIC,
-          )
+          when (
+            liveEntry.tryAppendSamples(
+              rawSamples,
+              targetRate,
+              LIVE_APPEND_SOURCE_MIC,
+            )
+          ) {
+            LiveEntry.AppendResult.APPENDED -> Unit
+            LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+              running = false
+              break
+            }
+          }
         }
       } catch (e: Exception) {
         if (running) {

@@ -126,7 +126,16 @@ static void paMicAQInputCallback(
   for (size_t i = 0; i < count16; i++) {
     floatSamples[i] = (float)samples16[i] / 32768.0f;
   }
-  liveEntry->appendSamples(floatSamples.data(), floatSamples.size(), targetRate, kPaAppendSourceMic);
+  auto appendResult = liveEntry->tryAppendSamples(
+    floatSamples.data(),
+    floatSamples.size(),
+    targetRate,
+    kPaAppendSourceMic
+  );
+  if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
+    g_pa_mic_aq_running = false;
+    return;
+  }
 
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 }

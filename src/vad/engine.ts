@@ -348,6 +348,7 @@ export async function createStreamingVAD(
           completed,
           async stop() {
             if (removeVadEvent) removeVadEvent();
+            // Native stop is synchronous wrt worker teardown.
             await SherpaOnnx.stopVadPipeline(pipelineId);
             if (activePipelineId === pipelineId) {
               activePipelineId = null;
@@ -386,6 +387,7 @@ export async function createStreamingVAD(
       destroyed = true;
       if (activePipelineId != null) {
         try {
+          // Ignore already-removed pipeline races during destroy.
           await SherpaOnnx.stopVadPipeline(activePipelineId);
         } catch {
           // Ignore teardown races.
