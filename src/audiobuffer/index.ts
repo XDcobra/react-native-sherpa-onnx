@@ -446,16 +446,18 @@ export async function createEmptyOfflineAudioBuffer(
 export async function createEmptyLiveAudioBuffer(
   options: CreateEmptyLiveAudioBufferOptions
 ): Promise<LiveAudioBufferRef> {
-  const {
-    onFramesAppended,
-    onError,
-    emitAppendedEvents,
-    appendEventMinIntervalMs,
-    retention,
-  } = options;
+  const { onFramesAppended, onError, streamEvents, retention } = options;
 
+  const fr = streamEvents?.framesAppended;
   const nativeEmitAppendedEvents =
-    emitAppendedEvents ?? Boolean(onFramesAppended);
+    fr !== undefined ? fr.enabled === true : Boolean(onFramesAppended);
+  const appendEventMinIntervalMs =
+    fr !== undefined
+      ? typeof fr.minIntervalMs === 'number' &&
+        Number.isFinite(fr.minIntervalMs)
+        ? Math.max(0, Math.trunc(fr.minIntervalMs))
+        : 0
+      : 0;
 
   // Parse retention union into flat native args
   let retentionMode: string | undefined;
@@ -818,6 +820,7 @@ export type {
 } from './types';
 
 export { PipelineAudioErrorCode, DecodeErrorCode } from './types';
+export type { StreamEventSpec } from '../pipeline/streamEvents';
 export { isJSIAvailable } from './jsi';
 
 export type {

@@ -15,6 +15,8 @@
 
 `fullIfSpooled` is strict: if spool is unavailable, conversion rejects with `SEGMENT_SPOOL_*`.
 
+**Live events (opt-in):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (same `enabled` + `minIntervalMs` pattern as live audio and text buffers). Pipelines such as VAD use this for fat segment metadata without polling; see [vad-streaming.md](vad-streaming.md).
+
 ---
 
 ## Quick start: append + snapshot

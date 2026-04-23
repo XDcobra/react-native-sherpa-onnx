@@ -312,7 +312,7 @@ export default function TTSStreamingScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: 'auto',
-        emitAppendedEvents: true,
+        streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
         onFramesAppended: (event) => {
           setGeneratedSamples(event.totalSamplesWritten);
         },

@@ -1100,7 +1100,7 @@ export default function TTSScreen() {
       const liveAudioBuf = await createEmptyLiveAudioBuffer({
         sampleRate: sr,
         channelCount: 1,
-        emitAppendedEvents: true,
+        streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
         onFramesAppended: (event) => {
           setStreamSampleCount((prev) => prev + event.frameCount);
         },
@@ -1109,7 +1109,7 @@ export default function TTSScreen() {
 
       // Create a live text buffer and commit the initial text
       const liveTextBuf = await createLiveTextBuffer({
-        emitPartialEvents: false,
+        streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
       });
       streamTextBufferIdRef.current = liveTextBuf.bufferId;
 

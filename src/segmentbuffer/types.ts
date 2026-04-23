@@ -1,3 +1,5 @@
+import type { StreamEventSpec } from '../pipeline/streamEvents';
+
 /**
  * Pipeline segment buffer types for react-native-sherpa-onnx/segmentbuffer.
  */
@@ -96,6 +98,8 @@ export interface OfflineSegmentBufferRef {
 export interface LiveSegmentBufferRef {
   info: LiveSegmentBufferInfo;
   bufferId: LiveSegmentBufferHandleRecording;
+  /** Unsubscribe from live segment buffer `onSegmentAppended` / `onError` listeners created with this ref. */
+  unsubscribeEvents: () => void;
 }
 
 export type OfflineSegmentBufferIdSource =
@@ -127,10 +131,38 @@ export type OfflineSegmentBufferFromLiveMode =
   | 'fullIfSpooled'
   | 'windowSnapshot';
 
+/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
+export interface LiveSegmentBufferSegmentAppendedEvent {
+  liveBufferId: string;
+  segmentId: string;
+  segmentIndex: number;
+  sourceAudioBufferId: string;
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  durationMs: number;
+  confidence?: number;
+  payload?: Record<string, unknown>;
+}
+
+/** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
+export interface LiveSegmentBufferErrorEvent {
+  liveBufferId?: string;
+  message: string;
+}
+
 export interface CreateLiveSegmentBufferOptions {
   sourceAudioBufferId?: string;
   maxSegments?: number;
   spooling?: SegmentBufferSpoolingOptions;
+  /**
+   * When `streamEvents.segmentAppended` is omitted, events are opt-in if `onSegmentAppended` is set.
+   */
+  streamEvents?: {
+    segmentAppended?: StreamEventSpec;
+  };
+  onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
+  onError?: (event: LiveSegmentBufferErrorEvent) => void;
 }
 
 export interface CreateEmptyOfflineSegmentBufferOptions {

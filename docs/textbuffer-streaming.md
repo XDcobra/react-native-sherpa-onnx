@@ -46,7 +46,7 @@ const liveAudio = await createEmptyLiveAudioBuffer({
 
 const liveText = await createLiveTextBuffer({
   spooling: { mode: 'on' },
-  emitPartialEvents: true,
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   // Event-driven partial stream: no polling timer required.
   onPartial: async (event) => {
     if (event.partialText.length > 0) {
@@ -102,6 +102,8 @@ All signatures below are exported from `react-native-sherpa-onnx/textbuffer`.
 
 Ref-first usage is recommended: pass `LiveTextBufferRef` directly.
 
+Partial events: optional `streamEvents.partial` (`enabled` + `minIntervalMs`); if omitted, registering `onPartial` opts in to events (see [`CreateLiveTextBufferOptions`](../src/textbuffer/types.ts)).
+
 ### General
 
 #### `getPipelineTextBufferInfo(buffer)`
@@ -149,7 +151,7 @@ function createLiveTextBuffer(
 ```ts
 const live = await createLiveTextBuffer({
   spooling: { mode: 'auto', thresholdBytes: 262144 },
-  emitPartialEvents: true,
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   onPartial: (e) => console.log(e.partialText),
   onError: (e) => console.warn(e.message),
 });

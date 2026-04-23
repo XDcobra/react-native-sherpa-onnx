@@ -14,6 +14,8 @@ class LiveSegmentEntry(
   private val spoolPath: String? = null,
   private val spoolTemporary: Boolean = true,
   private val spoolThresholdBytes: Long = 0,
+  private val emitSegmentAppendedEvents: Boolean = false,
+  private val segmentEventMinIntervalMs: Long = 0L,
 ) {
   enum class State { RECORDING, FINISHED }
 
@@ -25,6 +27,8 @@ class LiveSegmentEntry(
   private val segments = ArrayList<SegmentRecord>()
   private var evictedCount: Long = 0
   private val totalSegmentsWritten = AtomicLong(0)
+  @Volatile
+  private var lastSegmentEventEmitAtMs: Long = 0L
 
   private val spoolLock = Any()
   @Volatile
@@ -126,6 +130,16 @@ class LiveSegmentEntry(
       appendRecord = appendRecord,
       checkpointPayload = checkpointSnapshot
     )
+    if (emitSegmentAppendedEvents) {
+      val now = System.currentTimeMillis()
+      if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {
+        lastSegmentEventEmitAtMs = now
+        try {
+          SegmentBufferEventBridge.emitSegmentAppended?.invoke(bufferId, appendRecord, segmentIndex)
+        } catch (_: Exception) {
+        }
+      }
+    }
     return Pair(segmentId, segmentIndex)
   }
 

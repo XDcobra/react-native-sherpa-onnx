@@ -73,7 +73,7 @@ extern void paMicStopQueue(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config

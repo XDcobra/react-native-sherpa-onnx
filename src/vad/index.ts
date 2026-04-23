@@ -7,7 +7,6 @@ export type {
   VADModelType,
   VADDetectResult,
   VADEngine,
-  VADEvent,
   VADInitializeOptions,
   VADLiveRunOptions,
   VADOfflineRunOptions,
@@ -18,5 +17,6 @@ export type {
   VADOfflineResult,
   VADLiveProcessInput,
   VADOfflineProcessInput,
+  VADSpeechStateChangedEvent,
 } from './types';
 export { DETECTION_SOURCES, VAD_MODEL_TYPES, isDetectionSource } from './types';

@@ -1,3 +1,4 @@
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveModelPath } from '../utils';
 import { resolveFileSourceForDetect } from '../detect';
@@ -5,13 +6,11 @@ import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { resolvePipelineSegmentBufferId } from '../segmentbuffer';
-import { subscribeVadEvents } from './events';
 import type {
   DetectedModelEntry,
   DetectionSource,
   VADDetectResult,
   VADEngine,
-  VADEvent,
   VADInitializeOptions,
   VADLiveProcessInput,
   VADOfflineProcessInput,
@@ -172,18 +171,6 @@ export async function createStreamingVAD(
 
   let destroyed = false;
   let activePipelineId: string | null = null;
-  const listeners = new Set<(event: VADEvent) => void>();
-  const unsubscribeNative = subscribeVadEvents(instanceId, (event) => {
-    if (
-      event.type === 'pipeline.completed' ||
-      event.type === 'pipeline.error'
-    ) {
-      if (activePipelineId === event.pipelineId) {
-        activePipelineId = null;
-      }
-    }
-    listeners.forEach((listener) => listener(event));
-  });
 
   const ensureUsable = () => {
     if (destroyed) {
@@ -217,36 +204,118 @@ export async function createStreamingVAD(
           }
           activePipelineId = null;
         }
+        const liveOptions = (input as VADLiveProcessInput).options ?? {};
         const started = await SherpaOnnx.startVadPipeline(
           instanceId,
           audioInBufferId,
           segmentOutBufferId,
-          (input as VADLiveProcessInput).options ?? {}
+          liveOptions
         );
         const pipelineId = started.pipelineId;
         activePipelineId = pipelineId;
+
+        const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+        const speechStateMin = Math.max(
+          0,
+          typeof liveOptions.speechStateEventMinIntervalMs === 'number'
+            ? Math.trunc(liveOptions.speechStateEventMinIntervalMs)
+            : 0
+        );
+        let lastSpeechEmit = 0;
+        let removeVadEvent: (() => void) | null = null;
+
+        let onSpeechStateChanged:
+          | VADPipelineHandle['onSpeechStateChanged']
+          | undefined;
+
         const completed = new Promise<VADSummary>((resolve, reject) => {
-          const off = engine.addListener((event) => {
-            if (event.pipelineId !== pipelineId) return;
-            if (event.type === 'pipeline.completed') {
-              off();
-              resolve(event.summary);
-            } else if (event.type === 'pipeline.error') {
-              off();
-              reject(
-                Object.assign(new Error(event.error), {
-                  code: 'VAD_INTERNAL_ERROR',
-                })
-              );
+          const sub = emitter.addListener(
+            'vadEvent',
+            (raw: {
+              type?: string;
+              instanceId?: string;
+              pipelineId?: string;
+              ts?: number;
+              isSpeechDetected?: boolean;
+              error?: string;
+              summary?: any;
+            }) => {
+              if (!raw || raw.instanceId !== instanceId) return;
+              if (raw.pipelineId !== pipelineId) return;
+              if (raw.type === 'pipeline.completed') {
+                if (removeVadEvent) {
+                  removeVadEvent();
+                } else {
+                  sub.remove();
+                }
+                activePipelineId = null;
+                if (raw.summary && typeof raw.summary === 'object') {
+                  resolve(toSummary(raw.summary));
+                } else {
+                  resolve(toSummary(raw));
+                }
+                return;
+              }
+              if (raw.type === 'pipeline.error') {
+                if (removeVadEvent) {
+                  removeVadEvent();
+                } else {
+                  sub.remove();
+                }
+                activePipelineId = null;
+                reject(
+                  Object.assign(
+                    new Error(
+                      typeof raw.error === 'string'
+                        ? raw.error
+                        : 'Unknown VAD pipeline error'
+                    ),
+                    { code: 'VAD_INTERNAL_ERROR' }
+                  )
+                );
+                return;
+              }
+              if (raw.type === 'vad.stateChanged' && onSpeechStateChanged) {
+                const now = Date.now();
+                if (
+                  speechStateMin > 0 &&
+                  now - lastSpeechEmit < speechStateMin
+                ) {
+                  return;
+                }
+                lastSpeechEmit = now;
+                onSpeechStateChanged({
+                  isSpeechDetected: raw.isSpeechDetected === true,
+                  pipelineId,
+                  ts: typeof raw.ts === 'number' ? raw.ts : now,
+                });
+              }
             }
-          });
+          );
+          removeVadEvent = () => {
+            sub.remove();
+            removeVadEvent = null;
+          };
         });
-        return {
+
+        const handle: VADPipelineHandle = {
           instanceId,
           pipelineId,
+          get onSpeechStateChanged() {
+            return onSpeechStateChanged;
+          },
+          set onSpeechStateChanged(
+            h: VADPipelineHandle['onSpeechStateChanged'] | undefined
+          ) {
+            onSpeechStateChanged = h;
+          },
           completed,
           async stop() {
+            if (removeVadEvent) removeVadEvent();
             await SherpaOnnx.stopVadPipeline(pipelineId);
+            if (activePipelineId === pipelineId) {
+              activePipelineId = null;
+            }
           },
           async flush() {
             await SherpaOnnx.flushVad(pipelineId);
@@ -258,6 +327,7 @@ export async function createStreamingVAD(
             return toStatus(await SherpaOnnx.getVadPipelineStatus(pipelineId));
           },
         };
+        return handle;
       }
 
       const result = await SherpaOnnx.runVadOffline(
@@ -270,10 +340,6 @@ export async function createStreamingVAD(
         summary: toSummary(result),
         segmentBufferId: segmentOutBufferId,
       };
-    },
-    addListener(listener: (event: VADEvent) => void): () => void {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
     },
     async isSpeechDetected(): Promise<boolean> {
       ensureUsable();
@@ -289,8 +355,6 @@ export async function createStreamingVAD(
           // Ignore teardown races.
         }
       }
-      unsubscribeNative();
-      listeners.clear();
       await SherpaOnnx.unloadVad(instanceId);
     },
   };

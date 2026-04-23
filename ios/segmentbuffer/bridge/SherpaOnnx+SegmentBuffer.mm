@@ -4,6 +4,7 @@
 #ifdef __cplusplus
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include <sstream>
 #include <unistd.h>
@@ -121,6 +122,14 @@ struct SegLiveEntry {
   std::string spoolFailureCode;
   std::string spoolFailureMessage;
   FILE *journalFile = nullptr;
+  bool emitSegmentAppended = false;
+  int64_t segmentEventMinIntervalMs = 0;
+  int64_t lastSegmentEmitWallMs = 0;
+  std::function<void(
+    const std::string &liveBufferId,
+    const SegRecord &rec,
+    int segmentIndex)>
+    segmentAppendedEmitter;
 
   std::mutex lock;
   std::mutex spoolLock;
@@ -506,6 +515,23 @@ static NSDictionary *segRecordToDict(const SegRecord &r) {
   }
   return dict;
 }
+
+static void seg_notify_segment_appended(
+  const std::shared_ptr<SegLiveEntry> &entry,
+  const SegRecord &seg,
+  int segmentIndex
+) {
+  if (!entry->emitSegmentAppended || !entry->segmentAppendedEmitter) {
+    return;
+  }
+  const int64_t now = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+  if (entry->segmentEventMinIntervalMs > 0 &&
+      now - entry->lastSegmentEmitWallMs < entry->segmentEventMinIntervalMs) {
+    return;
+  }
+  entry->lastSegmentEmitWallMs = now;
+  entry->segmentAppendedEmitter(entry->bufferId, seg, segmentIndex);
+}
 } // namespace
 
 void seg_release_all_entries() {
@@ -577,6 +603,8 @@ bool seg_live_append_segment(
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
 
+    seg_notify_segment_appended(entry, seg, idx);
+
     if (segmentId) *segmentId = seg.id;
     if (segmentIndex) *segmentIndex = idx;
     return true;
@@ -623,6 +651,47 @@ bool seg_live_append_segment(
     if ([opts[@"spoolingThresholdBytes"] respondsToSelector:@selector(longLongValue)]) {
       entry->spoolThresholdBytes = [opts[@"spoolingThresholdBytes"] longLongValue];
     }
+    entry->emitSegmentAppended =
+      [opts[@"emitSegmentAppendedEvents"] respondsToSelector:@selector(boolValue)] &&
+      [opts[@"emitSegmentAppendedEvents"] boolValue];
+    if ([opts[@"segmentEventMinIntervalMs"] respondsToSelector:@selector(longLongValue)]) {
+      entry->segmentEventMinIntervalMs = [opts[@"segmentEventMinIntervalMs"] longLongValue];
+    }
+    __weak SherpaOnnx *weakModule = self;
+    entry->segmentAppendedEmitter = [weakModule](
+      const std::string &bufId,
+      const SegRecord &rec,
+      int segIdx
+    ) {
+      SherpaOnnx *m = weakModule;
+      if (!m) {
+        return;
+      }
+      NSMutableDictionary *body = [NSMutableDictionary dictionary];
+      body[@"liveBufferId"] = [NSString stringWithUTF8String:bufId.c_str()];
+      body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()];
+      body[@"segmentIndex"] = @(segIdx);
+      body[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:rec.sourceAudioBufferId.c_str()];
+      body[@"startSample"] = @(rec.startSample);
+      body[@"endSample"] = @(rec.endSample);
+      body[@"sampleRate"] = @(rec.sampleRate);
+      body[@"durationMs"] = @(rec.durationMs);
+      if (rec.hasConfidence) {
+        body[@"confidence"] = @(rec.confidence);
+      }
+      if (!rec.payloadJson.empty()) {
+        NSData *payloadData = [[NSString stringWithUTF8String:rec.payloadJson.c_str()]
+          dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *payloadObj =
+          payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
+        if (payloadObj) {
+          body[@"payload"] = payloadObj;
+        }
+      }
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [m sendEventWithName:@"pipelineLiveSegmentAppended" body:body];
+      });
+    };
     if (entry->spoolingMode == SegLiveEntry::SPOOL_ON) {
       entry->maybeWriteSnapshotToSpool(entry->snapshotForSpoolLocked(), false);
     }
@@ -741,6 +810,7 @@ bool seg_live_append_segment(
     }
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
+    seg_notify_segment_appended(entry, seg, segmentIndex);
     resolve(@{ @"segmentId": [NSString stringWithUTF8String:seg.id.c_str()], @"segmentIndex": @(segmentIndex) });
   } catch (const std::exception &e) {
     NSString *msg = [NSString stringWithUTF8String:e.what()];
