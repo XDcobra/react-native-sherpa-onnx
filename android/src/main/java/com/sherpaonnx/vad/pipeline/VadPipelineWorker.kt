@@ -5,6 +5,7 @@ import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
 import com.sherpaonnx.segment.pipeline.LiveSegmentEntry
+import com.sherpaonnx.vad.core.VadDecision
 import com.sherpaonnx.vad.core.VadInstanceConfig
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -14,7 +15,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import kotlin.math.abs
 
 class VadPipelineWorker(
   private val instanceId: String,
@@ -51,6 +51,8 @@ class VadPipelineWorker(
   private var speechDurationMs = 0L
   private var segmentCount = 0
   private var absoluteSample = 0L
+  private var speechScoreSum = 0.0
+  private var speechScoreCount = 0
 
   private sealed class Cmd {
     class Flush(val done: CompletableFuture<Unit>) : Cmd()
@@ -58,6 +60,7 @@ class VadPipelineWorker(
   }
 
   override fun start() {
+    config.runtime.reset()
     isRunning = true
     emitEvent("pipeline.started", emptyMap())
     cursorId = inputEntry.createCursorHandle()
@@ -105,8 +108,8 @@ class VadPipelineWorker(
   }
 
   private fun processChunk(chunk: FloatArray) {
-    val energy = chunk.fold(0.0) { acc, sample -> acc + abs(sample.toDouble()) } / chunk.size
-    val detected = energy >= config.threshold
+    val decision = config.runtime.infer(chunk, config.sampleRate)
+    val detected = decision.isSpeech
     if (detected != speech) {
       speech = detected
       emitEvent("vad.stateChanged", mapOf("isSpeechDetected" to speech))
@@ -117,10 +120,14 @@ class VadPipelineWorker(
       }
       speechSamples += chunk.size.toLong()
       silenceSamples = 0L
+      if (decision.score != null) {
+        speechScoreSum += decision.score
+        speechScoreCount += 1
+      }
     } else if (speechSamples > 0L) {
       silenceSamples += chunk.size.toLong()
       val silenceMs = samplesToMs(silenceSamples)
-      if (silenceMs >= config.minSilenceDurationMs) {
+      if (silenceMs >= config.runtimeOptions.minSilenceDurationMs.toLong()) {
         appendSegment()
         speechSamples = 0L
         silenceSamples = 0L
@@ -142,8 +149,13 @@ class VadPipelineWorker(
 
   private fun appendSegment() {
     val speechMs = samplesToMs(speechSamples)
-    if (speechMs < config.minSpeechDurationMs) return
+    if (speechMs < config.runtimeOptions.minSpeechDurationMs.toLong()) return
     val end = segStartSample + speechSamples
+    val confidence = if (speechScoreCount > 0) {
+      speechScoreSum / speechScoreCount.toDouble()
+    } else {
+      1.0
+    }
     val out = outputEntry.appendSegment(
       kind = "speech",
       sourceAudioBufferId = inputEntry.bufferId,
@@ -151,9 +163,11 @@ class VadPipelineWorker(
       endSample = end.toInt(),
       sampleRate = config.sampleRate,
       durationMs = speechMs.toInt(),
-      confidence = 1.0,
-      payloadJson = """{"engine":"vad"}""",
+      confidence = confidence,
+      payloadJson = """{"engine":"vad","decision":"model","score":$confidence}""",
     )
+    speechScoreSum = 0.0
+    speechScoreCount = 0
     unitsWritten++
     segmentCount++
     speechDurationMs += speechMs
@@ -182,10 +196,13 @@ class VadPipelineWorker(
           }
         }
         is Cmd.Reset -> {
+          config.runtime.reset()
           speech = false
           speechSamples = 0L
           silenceSamples = 0L
           segStartSample = absoluteSample
+          speechScoreSum = 0.0
+          speechScoreCount = 0
           cmd.done.complete(Unit)
         }
       }

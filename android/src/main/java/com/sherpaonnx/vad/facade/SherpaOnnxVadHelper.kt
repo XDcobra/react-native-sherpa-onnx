@@ -11,6 +11,10 @@ import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.vad.core.VadErrorCodes
 import com.sherpaonnx.vad.core.VadInstanceConfig
+import com.sherpaonnx.vad.core.VadRuntimeOptions
+import com.sherpaonnx.vad.core.createVadRuntime
+import com.sherpaonnx.vad.core.defaultRuntimeOptions
+import com.sherpaonnx.vad.core.withRuntimeOverrides
 import com.sherpaonnx.vad.pipeline.VadPipelineWorker
 import java.util.concurrent.ConcurrentHashMap
 
@@ -97,15 +101,30 @@ class SherpaOnnxVadHelper(
     val sampleRate = options?.takeIf { it.hasKey("sampleRate") && !it.isNull("sampleRate") }?.getDouble("sampleRate")?.toInt()
       ?: 16000
     val threshold = options?.takeIf { it.hasKey("threshold") && !it.isNull("threshold") }?.getDouble("threshold")
-      ?: 0.015
     val minSpeech = options?.takeIf { it.hasKey("minSpeechDurationMs") && !it.isNull("minSpeechDurationMs") }?.getDouble("minSpeechDurationMs")?.toInt()
-      ?: 120
+      ?: options?.takeIf { it.hasKey("speechDurationMs") && !it.isNull("speechDurationMs") }?.getDouble("speechDurationMs")?.toInt()
+      ?: 250
     val minSilence = options?.takeIf { it.hasKey("silenceDurationMs") && !it.isNull("silenceDurationMs") }?.getDouble("silenceDurationMs")?.toInt()
       ?: 250
+    val windowSize = options?.takeIf { it.hasKey("windowSize") && !it.isNull("windowSize") }?.getDouble("windowSize")?.toInt()
+    val maxSpeechDurationMs = options
+      ?.takeIf { it.hasKey("maxSpeechDurationS") && !it.isNull("maxSpeechDurationS") }
+      ?.getDouble("maxSpeechDurationS")
+      ?.times(1000.0)
+      ?.toInt()
+    val provider = options?.takeIf { it.hasKey("provider") && !it.isNull("provider") }?.getString("provider")
+      ?: "cpu"
+    val numThreads = options?.takeIf { it.hasKey("numThreads") && !it.isNull("numThreads") }?.getDouble("numThreads")?.toInt()
+      ?: 1
+    val debug = options?.takeIf { it.hasKey("debug") && !it.isNull("debug") }?.getBoolean("debug") ?: false
     val modelDir = options?.takeIf { it.hasKey("modelDir") && !it.isNull("modelDir") }?.getString("modelDir")
     val requestedModelType = options?.takeIf { it.hasKey("modelType") && !it.isNull("modelType") }?.getString("modelType")
       ?: "auto"
-    if (!modelDir.isNullOrBlank()) {
+    if (modelDir.isNullOrBlank()) {
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "modelDir is required for VAD initialization")
+      return
+    }
+    try {
       val detect = nativeDetectVadModel(modelDir, null, requestedModelType)
       val ok = detect?.get("success") as? Boolean ?: false
       if (!ok) {
@@ -113,9 +132,62 @@ class SherpaOnnxVadHelper(
         promise.reject(VadErrorCodes.MODEL_INIT_FAILED, reason)
         return
       }
+      val resolvedModelType = (detect["modelType"] as? String)?.trim().orEmpty()
+      if (resolvedModelType != "silero_vad" && resolvedModelType != "ten_vad") {
+        promise.reject(
+          VadErrorCodes.MODEL_INIT_FAILED,
+          "Unsupported VAD model type: $resolvedModelType",
+        )
+        return
+      }
+      @Suppress("UNCHECKED_CAST")
+      val detectedPaths = detect["paths"] as? HashMap<String, Any?>
+      val modelPath = (detectedPaths?.get("model") as? String)?.takeIf { it.isNotBlank() } ?: modelDir
+      val baseRuntime = defaultRuntimeOptions(resolvedModelType)
+      val runtimeOptions = withRuntimeOverrides(
+        base = baseRuntime,
+        scoreThreshold = threshold,
+        minSpeechDurationMs = minSpeech,
+        minSilenceDurationMs = minSilence,
+        windowSize = windowSize,
+        maxSpeechDurationMs = maxSpeechDurationMs,
+      )
+      // Enforce strict model/options pairing.
+      val strictRuntimeOptions = when (resolvedModelType) {
+        "silero_vad" -> (runtimeOptions as? VadRuntimeOptions.Silero)
+        "ten_vad" -> (runtimeOptions as? VadRuntimeOptions.Ten)
+        else -> null
+      }
+      if (strictRuntimeOptions == null) {
+        promise.reject(
+          VadErrorCodes.MODEL_INIT_FAILED,
+          "VAD runtime options mismatch for model type: $resolvedModelType",
+        )
+        return
+      }
+      val runtime = createVadRuntime(
+        modelType = resolvedModelType,
+        modelPath = modelPath,
+        sampleRate = sampleRate,
+        provider = provider,
+        numThreads = numThreads,
+        debug = debug,
+        runtimeOptions = strictRuntimeOptions,
+      )
+      instances[instanceId] = VadInstanceConfig(
+        modelType = resolvedModelType,
+        modelDir = modelDir,
+        sampleRate = sampleRate,
+        provider = provider,
+        numThreads = numThreads,
+        debug = debug,
+        runtimeOptions = strictRuntimeOptions,
+        runtime = runtime,
+      )
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "Failed to initialize VAD runtime: ${e.message}", e)
     }
-    instances[instanceId] = VadInstanceConfig(sampleRate, threshold, minSpeech, minSilence)
-    promise.resolve(null)
   }
 
   fun startVadPipeline(instanceId: String, audioInBufferId: String, segmentOutBufferId: String, options: ReadableMap?, promise: Promise) {
@@ -196,61 +268,132 @@ class SherpaOnnxVadHelper(
     val records = mutableListOf<SegmentRecord>()
     val chunkSize = options?.takeIf { it.hasKey("chunkSize") && !it.isNull("chunkSize") }?.getDouble("chunkSize")?.toInt() ?: 512
     val samples = audio.readAllSamples()
-    var idx = 0
-    var inSpeech = false
-    var segStart = 0
-    var speechDurationMs = 0L
-    var segmentCount = 0
-    while (idx < samples.size) {
-      val end = minOf(idx + chunkSize, samples.size)
-      var energySum = 0.0
-      var i = idx
-      while (i < end) {
-        energySum += kotlin.math.abs(samples[i].toDouble())
-        i++
-      }
-      val energy = energySum / (end - idx).coerceAtLeast(1)
-      val speechNow = energy >= cfg.threshold
-      if (speechNow && !inSpeech) {
-        inSpeech = true
-        segStart = idx
-      } else if (!speechNow && inSpeech) {
-        val dMs = ((idx - segStart).toLong() * 1000L) / cfg.sampleRate.toLong()
-        if (dMs >= cfg.minSpeechDurationMs.toLong()) {
-          appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, idx)
-          speechDurationMs += dMs
-          segmentCount++
-        }
-        inSpeech = false
-      }
-      idx = end
-    }
-    if (inSpeech) {
-      val dMs = ((samples.size - segStart).toLong() * 1000L) / cfg.sampleRate.toLong()
-      if (dMs >= cfg.minSpeechDurationMs.toLong()) {
-        appendSegmentRecord(records, liveOut, audioInBufferId, cfg, segStart, samples.size)
-        speechDurationMs += dMs
-        segmentCount++
-      }
-    }
+    cfg.runtime.reset()
+    val stats = runModelInferenceSegmentation(
+      cfg = cfg,
+      samples = samples,
+      chunkSize = chunkSize,
+      sourceAudioBufferId = audioInBufferId,
+      liveOut = liveOut,
+      records = records,
+    )
     if (offlineOut != null) {
-      // Always replace offline output content, even when no segments were detected.
+      // Fill exactly once for empty offline output buffers.
       offlineOut.populate(records)
     }
     val out = Arguments.createMap().apply {
-      putDouble("chunksProcessed", kotlin.math.ceil(samples.size.toDouble() / chunkSize.toDouble()))
+      putDouble("chunksProcessed", stats.chunksProcessed.toDouble())
       putDouble("unitsRead", samples.size.toDouble())
-      putDouble("unitsWritten", segmentCount.toDouble())
-      putDouble("segmentCount", segmentCount.toDouble())
-      putDouble("speechDurationMs", speechDurationMs.toDouble())
+      putDouble("unitsWritten", stats.segmentCount.toDouble())
+      putDouble("segmentCount", stats.segmentCount.toDouble())
+      putDouble("speechDurationMs", stats.speechDurationMs.toDouble())
     }
     promise.resolve(out)
   }
 
-  private fun appendSegmentRecord(records: MutableList<SegmentRecord>, liveTarget: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?, sourceAudioBufferId: String, cfg: VadInstanceConfig, start: Int, end: Int) {
+  private data class OfflineInferenceStats(
+    val chunksProcessed: Int,
+    val segmentCount: Int,
+    val speechDurationMs: Long,
+  )
+
+  private fun runModelInferenceSegmentation(
+    cfg: VadInstanceConfig,
+    samples: FloatArray,
+    chunkSize: Int,
+    sourceAudioBufferId: String,
+    liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
+    records: MutableList<SegmentRecord>,
+  ): OfflineInferenceStats {
+    var idx = 0
+    var inSpeech = false
+    var segStart = 0
+    var speechSamples = 0
+    var silenceSamples = 0
+    var speechDurationMs = 0L
+    var segmentCount = 0
+    var chunksProcessed = 0
+    var speechScoreSum = 0.0
+    var speechScoreCount = 0
+    while (idx < samples.size) {
+      val end = minOf(idx + chunkSize, samples.size)
+      val chunk = samples.copyOfRange(idx, end)
+      chunksProcessed += 1
+      val decision = cfg.runtime.infer(chunk, cfg.sampleRate)
+      if (decision.isSpeech) {
+        if (!inSpeech) {
+          inSpeech = true
+          segStart = idx
+          speechSamples = 0
+          silenceSamples = 0
+          speechScoreSum = 0.0
+          speechScoreCount = 0
+        }
+        speechSamples += (end - idx)
+        silenceSamples = 0
+        if (decision.score != null) {
+          speechScoreSum += decision.score
+          speechScoreCount += 1
+        }
+      } else if (inSpeech) {
+        silenceSamples += (end - idx)
+        val silenceMs = ((silenceSamples.toLong() * 1000L) / cfg.sampleRate.toLong()).toInt()
+        if (silenceMs >= cfg.runtimeOptions.minSilenceDurationMs) {
+          val segmentEnd = segStart + speechSamples
+          val dMs = ((speechSamples.toLong() * 1000L) / cfg.sampleRate.toLong())
+          if (dMs >= cfg.runtimeOptions.minSpeechDurationMs.toLong()) {
+            val confidence = if (speechScoreCount > 0) speechScoreSum / speechScoreCount.toDouble() else 1.0
+            appendSegmentRecord(records, liveOut, sourceAudioBufferId, cfg, segStart, segmentEnd, confidence)
+            speechDurationMs += dMs
+            segmentCount += 1
+          }
+          inSpeech = false
+          speechSamples = 0
+          silenceSamples = 0
+          speechScoreSum = 0.0
+          speechScoreCount = 0
+        }
+      }
+      idx = end
+    }
+    if (inSpeech && speechSamples > 0) {
+      val segmentEnd = segStart + speechSamples
+      val dMs = ((speechSamples.toLong() * 1000L) / cfg.sampleRate.toLong())
+      if (dMs >= cfg.runtimeOptions.minSpeechDurationMs.toLong()) {
+        val confidence = if (speechScoreCount > 0) speechScoreSum / speechScoreCount.toDouble() else 1.0
+        appendSegmentRecord(records, liveOut, sourceAudioBufferId, cfg, segStart, segmentEnd, confidence)
+        speechDurationMs += dMs
+        segmentCount += 1
+      }
+    }
+    return OfflineInferenceStats(
+      chunksProcessed = chunksProcessed,
+      segmentCount = segmentCount,
+      speechDurationMs = speechDurationMs,
+    )
+  }
+
+  private fun appendSegmentRecord(
+    records: MutableList<SegmentRecord>,
+    liveTarget: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
+    sourceAudioBufferId: String,
+    cfg: VadInstanceConfig,
+    start: Int,
+    end: Int,
+    confidence: Double,
+  ) {
     val durationMs = ((end - start) * 1000) / cfg.sampleRate
     if (liveTarget != null) {
-      liveTarget.appendSegment("speech", sourceAudioBufferId, start, end, cfg.sampleRate, durationMs, 1.0, """{"engine":"vad"}""")
+      liveTarget.appendSegment(
+        "speech",
+        sourceAudioBufferId,
+        start,
+        end,
+        cfg.sampleRate,
+        durationMs,
+        confidence,
+        """{"engine":"vad","decision":"model","score":$confidence}"""
+      )
     } else {
       records.add(
         SegmentRecord(
@@ -261,8 +404,8 @@ class SherpaOnnxVadHelper(
           endSample = end,
           sampleRate = cfg.sampleRate,
           durationMs = durationMs,
-          confidence = 1.0,
-          payloadJson = """{"engine":"vad"}"""
+          confidence = confidence,
+          payloadJson = """{"engine":"vad","decision":"model","score":$confidence}"""
         )
       )
     }
@@ -317,7 +460,11 @@ class SherpaOnnxVadHelper(
       }
       workers.remove(pid)
     }
-    instances.remove(instanceId)
+    val instance = instances.remove(instanceId)
+    try {
+      instance?.runtime?.close()
+    } catch (_: Exception) {
+    }
     promise.resolve(null)
   }
 
@@ -327,6 +474,12 @@ class SherpaOnnxVadHelper(
       try {
         StreamingPipelineRegistry.stop(it)
         StreamingPipelineRegistry.remove(it)
+      } catch (_: Exception) {
+      }
+    }
+    instances.values.forEach {
+      try {
+        it.runtime.close()
       } catch (_: Exception) {
       }
     }

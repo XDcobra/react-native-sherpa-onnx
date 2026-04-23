@@ -59,7 +59,6 @@ object SegmentPipelineRegistry {
   fun createEmptyOffline(sourceAudioBufferId: String?): OfflineSegmentEntry {
     val id = newId("seg_off")
     val entry = OfflineSegmentEntry(id, sourceAudioBufferId)
-    entry.populate(emptyList())
     offlineMap[id] = entry
     return entry
   }
