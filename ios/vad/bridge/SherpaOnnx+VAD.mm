@@ -62,6 +62,30 @@ std::mutex g_vad_mutex;
 std::unordered_map<std::string, VadInstanceState> g_vad_instances;
 std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
 std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
+
+std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
+  const std::string &pipelineId,
+  std::string *instanceIdOut = nullptr
+) {
+  auto pipelineIt = g_vad_pipelines.find(pipelineId);
+  if (pipelineIt == g_vad_pipelines.end()) {
+    return nullptr;
+  }
+  if (instanceIdOut != nullptr) {
+    *instanceIdOut = pipelineIt->second.instanceId;
+  }
+  auto worker = pipelineIt->second.worker;
+  g_vad_pipelines.erase(pipelineIt);
+  for (auto mapping = g_vad_instance_to_pipeline.begin();
+       mapping != g_vad_instance_to_pipeline.end();) {
+    if (mapping->second == pipelineId) {
+      mapping = g_vad_instance_to_pipeline.erase(mapping);
+    } else {
+      ++mapping;
+    }
+  }
+  return worker;
+}
 } // namespace
 
 @implementation SherpaOnnx (VAD)
@@ -260,6 +284,7 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
   std::string aid = [audioInBufferId UTF8String];
   std::string sid = [segmentOutBufferId UTF8String];
   VadInstanceState cfg;
+  std::shared_ptr<VadPipelineWorker> staleWorker;
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
     auto it = g_vad_instances.find(iid);
@@ -270,14 +295,11 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
     cfg = it->second;
     auto pit = g_vad_instance_to_pipeline.find(iid);
     if (pit != g_vad_instance_to_pipeline.end()) {
-      auto p = g_vad_pipelines.find(pit->second);
-      if (p != g_vad_pipelines.end() && p->second.running) {
-        reject(@"VAD_PIPELINE_ALREADY_RUNNING", @"VAD pipeline already running for instance", nil);
-        return;
-      }
-      g_vad_pipelines.erase(pit->second);
-      g_vad_instance_to_pipeline.erase(pit);
+      staleWorker = DetachPipelineLocked(pit->second, nullptr);
     }
+  }
+  if (staleWorker) {
+    staleWorker->stop();
   }
 
   auto liveAudio = pa_get_live_entry(aid);
@@ -594,21 +616,11 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
       reject(@"VAD_PIPELINE_NOT_FOUND", @"VAD pipeline not found", nil);
       return;
     }
-    iid = it->second.instanceId;
-    worker = it->second.worker;
-    it->second.running = false;
+    worker = DetachPipelineLocked(pid, &iid);
   }
 
   if (worker) {
     worker->stop();
-  }
-  {
-    std::lock_guard<std::mutex> lock(g_vad_mutex);
-    g_vad_pipelines.erase(pid);
-    auto mapping = g_vad_instance_to_pipeline.find(iid);
-    if (mapping != g_vad_instance_to_pipeline.end() && mapping->second == pid) {
-      g_vad_instance_to_pipeline.erase(mapping);
-    }
   }
   resolve(nil);
 }
@@ -693,28 +705,40 @@ std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
   (void)reject;
   std::string iid = [instanceId UTF8String];
   std::vector<std::shared_ptr<VadPipelineWorker>> workersToStop;
+  std::shared_ptr<VadRuntime> runtimeToClose;
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
-    g_vad_instances.erase(iid);
-    auto pit = g_vad_instance_to_pipeline.find(iid);
-    if (pit != g_vad_instance_to_pipeline.end()) {
-      auto it = g_vad_pipelines.find(pit->second);
-      if (it != g_vad_pipelines.end()) {
-        if (it->second.worker) workersToStop.push_back(it->second.worker);
-      }
-      g_vad_instance_to_pipeline.erase(pit);
+    auto instanceIt = g_vad_instances.find(iid);
+    if (instanceIt != g_vad_instances.end()) {
+      runtimeToClose = instanceIt->second.runtime;
+      g_vad_instances.erase(instanceIt);
     }
-    for (auto it = g_vad_pipelines.begin(); it != g_vad_pipelines.end();) {
-      if (it->second.instanceId == iid) {
-        if (it->second.worker) workersToStop.push_back(it->second.worker);
-        it = g_vad_pipelines.erase(it);
-      } else {
-        ++it;
+    auto mapping = g_vad_instance_to_pipeline.find(iid);
+    if (mapping != g_vad_instance_to_pipeline.end()) {
+      auto worker = DetachPipelineLocked(mapping->second, nullptr);
+      if (worker) {
+        workersToStop.push_back(worker);
+      }
+    }
+    std::vector<std::string> stalePipelineIds;
+    stalePipelineIds.reserve(g_vad_pipelines.size());
+    for (const auto &entry : g_vad_pipelines) {
+      if (entry.second.instanceId == iid) {
+        stalePipelineIds.push_back(entry.first);
+      }
+    }
+    for (const auto &pipelineId : stalePipelineIds) {
+      auto worker = DetachPipelineLocked(pipelineId, nullptr);
+      if (worker) {
+        workersToStop.push_back(worker);
       }
     }
   }
   for (auto &w : workersToStop) {
     if (w) w->stop();
+  }
+  if (runtimeToClose) {
+    runtimeToClose->close();
   }
   resolve(nil);
 }

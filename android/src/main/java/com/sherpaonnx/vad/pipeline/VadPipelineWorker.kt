@@ -229,8 +229,13 @@ class VadPipelineWorker(
   }
 
   override fun stop() {
+    if (!isRunning) return
     isRunning = false
     lock.withLock { dataAvailable.signal() }
+    executor.shutdown()
+    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+      executor.shutdownNow()
+    }
   }
 
   override fun flush(): CompletableFuture<Unit> {

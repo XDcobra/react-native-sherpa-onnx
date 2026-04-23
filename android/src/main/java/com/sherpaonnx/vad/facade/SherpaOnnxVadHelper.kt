@@ -30,6 +30,37 @@ class SherpaOnnxVadHelper(
   private val instancePipeline = ConcurrentHashMap<String, String>()
   private val workers = ConcurrentHashMap<String, VadPipelineWorker>()
 
+  private fun stopAndRemovePipelineInternal(pipelineId: String): String? {
+    val worker = workers[pipelineId]
+    try {
+      worker?.stop()
+    } catch (_: Exception) {
+    }
+    try {
+      StreamingPipelineRegistry.stop(pipelineId)
+    } catch (_: Exception) {
+    }
+    try {
+      StreamingPipelineRegistry.remove(pipelineId)
+    } catch (_: Exception) {
+    }
+    workers.remove(pipelineId)
+    var removedInstanceId: String? = null
+    instancePipeline.entries.removeIf { entry ->
+      val match = entry.value == pipelineId
+      if (match) {
+        removedInstanceId = entry.key
+      }
+      match
+    }
+    return removedInstanceId
+  }
+
+  private fun stopAndRemovePipelineForInstance(instanceId: String): String? {
+    val pipelineId = instancePipeline[instanceId] ?: return null
+    return stopAndRemovePipelineInternal(pipelineId)
+  }
+
   fun detectVadModel(
     modelDir: String,
     assetName: String?,
@@ -198,13 +229,7 @@ class SherpaOnnxVadHelper(
     }
     val oldPid = instancePipeline[instanceId]
     if (oldPid != null) {
-      val s = StreamingPipelineRegistry.getStatus(oldPid)
-      if (s != null && s.isRunning) {
-        promise.reject(VadErrorCodes.PIPELINE_ALREADY_RUNNING, "VAD pipeline already running for instance: $instanceId")
-        return
-      }
-      instancePipeline.remove(instanceId)
-      workers.remove(oldPid)
+      stopAndRemovePipelineInternal(oldPid)
     }
     if (!audioInBufferId.startsWith("live_")) {
       promise.reject(VadErrorCodes.BUFFER_KIND_MISMATCH, "audioInBufferId must be a live audio buffer")
@@ -418,10 +443,14 @@ class SherpaOnnxVadHelper(
     if (err != null) promise.reject(VadErrorCodes.INTERNAL_ERROR, err.message, err) else promise.resolve(null)
   }
   fun stopVadPipeline(pipelineId: String, promise: Promise) {
-    StreamingPipelineRegistry.stop(pipelineId)
-    StreamingPipelineRegistry.remove(pipelineId)
-    workers.remove(pipelineId)
-    instancePipeline.entries.removeIf { it.value == pipelineId }
+    val knownByWorker = workers.containsKey(pipelineId)
+    val knownByInstance = instancePipeline.containsValue(pipelineId)
+    val knownByRegistry = StreamingPipelineRegistry.getStatus(pipelineId) != null
+    if (!knownByWorker && !knownByInstance && !knownByRegistry) {
+      promise.reject(VadErrorCodes.PIPELINE_NOT_FOUND, "VAD pipeline not found: $pipelineId")
+      return
+    }
+    stopAndRemovePipelineInternal(pipelineId)
     promise.resolve(null)
   }
 
@@ -451,15 +480,7 @@ class SherpaOnnxVadHelper(
   }
 
   fun unloadVad(instanceId: String, promise: Promise) {
-    val pid = instancePipeline.remove(instanceId)
-    if (pid != null) {
-      try {
-        StreamingPipelineRegistry.stop(pid)
-        StreamingPipelineRegistry.remove(pid)
-      } catch (_: Exception) {
-      }
-      workers.remove(pid)
-    }
+    stopAndRemovePipelineForInstance(instanceId)
     val instance = instances.remove(instanceId)
     try {
       instance?.runtime?.close()
@@ -469,14 +490,10 @@ class SherpaOnnxVadHelper(
   }
 
   fun shutdown() {
-    val ids = instancePipeline.values.toList()
-    ids.forEach {
-      try {
-        StreamingPipelineRegistry.stop(it)
-        StreamingPipelineRegistry.remove(it)
-      } catch (_: Exception) {
-      }
-    }
+    val pipelineIds = mutableSetOf<String>()
+    pipelineIds.addAll(instancePipeline.values)
+    pipelineIds.addAll(workers.keys)
+    pipelineIds.forEach { stopAndRemovePipelineInternal(it) }
     instances.values.forEach {
       try {
         it.runtime.close()
