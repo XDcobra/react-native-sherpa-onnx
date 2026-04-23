@@ -92,19 +92,19 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
-    id: 'punctuation',
-    title: 'Punctuation',
-    description: 'Add punctuation to text output',
-    icon: 'text-outline',
-    screen: 'Punctuation',
-    implemented: false,
-  },
-  {
     id: 'vad',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
     icon: 'stats-chart',
     screen: 'VAD',
+    implemented: true,
+  },
+  {
+    id: 'punctuation',
+    title: 'Punctuation',
+    description: 'Add punctuation to text output',
+    icon: 'text-outline',
+    screen: 'Punctuation',
     implemented: false,
   },
   {

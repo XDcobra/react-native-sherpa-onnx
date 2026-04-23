@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,10 +11,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import {
+  listAssetModels,
+  type ModelPathConfig,
+} from 'react-native-sherpa-onnx';
 import {
   createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromFile,
+  finalizeLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
@@ -26,6 +30,7 @@ import {
 import {
   createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
+  getPipelineSegmentBufferInfo,
   getLiveSegmentBufferSegmentCount,
   getLiveSegmentBufferSegments,
   getOfflineSegmentBufferSegments,
@@ -40,6 +45,7 @@ import {
   createStreamingVAD,
   detectVadModel,
   type VADEngine,
+  type VADModelType,
   type VADPipelineHandle,
   type VADPipelineStatus,
   type VADSummary,
@@ -66,6 +72,12 @@ type TimelineEntry = {
   at: string;
   type: string;
   detail: string;
+};
+
+type PreparedOfflineInputBuffer = {
+  bufferId: string;
+  sourceLabel: string;
+  sourceUri: string;
 };
 
 const TIMELINE_LIMIT = 200;
@@ -122,10 +134,17 @@ export default function VADScreen() {
   const [selectedLiveFileName, setSelectedLiveFileName] = useState<
     string | null
   >(null);
-  const [selectedOfflineFileUri, setSelectedOfflineFileUri] = useState<
+  const [selectedOfflineFileName, setSelectedOfflineFileName] = useState<
     string | null
   >(null);
-  const [selectedOfflineFileName, setSelectedOfflineFileName] = useState<
+  const [preparedOfflineInputBuffer, setPreparedOfflineInputBuffer] =
+    useState<PreparedOfflineInputBuffer | null>(null);
+  const [preparingOfflineInputBuffer, setPreparingOfflineInputBuffer] =
+    useState(false);
+  const [offlineInputBuildProgress, setOfflineInputBuildProgress] = useState<
+    number | null
+  >(null);
+  const [offlineInputBuildStatus, setOfflineInputBuildStatus] = useState<
     string | null
   >(null);
   const [ingestProgress, setIngestProgress] = useState<number | null>(null);
@@ -149,6 +168,7 @@ export default function VADScreen() {
   const timelineIdRef = useRef(0);
   const liveUsingMicRef = useRef(false);
   const cleanupLockRef = useRef(false);
+  const offlineInputRequestRef = useRef(0);
 
   const canStartLive =
     streamState === 'idle' &&
@@ -160,7 +180,7 @@ export default function VADScreen() {
     !busyOffline &&
     streamState === 'idle' &&
     !!selectedModelFolder &&
-    !!selectedOfflineFileUri;
+    preparedOfflineInputBuffer != null;
 
   const isBusy = streamState !== 'idle' || busyOffline;
 
@@ -180,6 +200,14 @@ export default function VADScreen() {
     });
   }, []);
 
+  const logOfflineLifecycle = useCallback((step: string, detail: string) => {
+    console.log(`[VADScreen][offline][segment] ${step}: ${detail}`);
+  }, []);
+
+  const logLiveLifecycle = useCallback((step: string, detail: string) => {
+    console.log(`[VADScreen][live] ${step}: ${detail}`);
+  }, []);
+
   const resolveModelPath = useCallback(
     (modelFolder: string) => {
       if (downloadedModelIds.includes(modelFolder)) {
@@ -188,6 +216,30 @@ export default function VADScreen() {
       return getAssetModelPath(modelFolder);
     },
     [downloadedModelIds]
+  );
+
+  const detectResolvedModelType = useCallback(
+    async (modelPath: ModelPathConfig): Promise<VADModelType> => {
+      const detection = await detectVadModel(await toDetectSource(modelPath), {
+        modelType: 'auto',
+      });
+      if (!detection.success || !detection.modelType) {
+        throw new Error(
+          detection.error ||
+            'Unable to detect VAD model type for selected model folder.'
+        );
+      }
+      if (
+        detection.modelType !== 'silero_vad' &&
+        detection.modelType !== 'ten_vad'
+      ) {
+        throw new Error(
+          `Unsupported detected VAD model type: ${detection.modelType}`
+        );
+      }
+      return detection.modelType;
+    },
+    []
   );
 
   const loadModels = useCallback(async () => {
@@ -252,10 +304,17 @@ export default function VADScreen() {
       try {
         const pipeline = livePipelineRef.current;
         if (pipeline) {
+          logLiveLifecycle(
+            'teardown.pipeline',
+            `pipelineId=${pipeline.pipelineId}, attemptStop=${String(
+              attemptStopPipeline
+            )}`
+          );
           pipeline.onSpeechStateChanged = undefined;
           if (attemptStopPipeline) {
             try {
               await pipeline.stop();
+              logLiveLifecycle('teardown.pipeline.stop', pipeline.pipelineId);
             } catch {
               // Ignore stop races during teardown.
             }
@@ -290,6 +349,7 @@ export default function VADScreen() {
         const segment = liveSegmentRef.current;
         liveSegmentRef.current = null;
         if (segment) {
+          logLiveLifecycle('teardown.segment.release', segment.bufferId);
           segment.unsubscribeEvents();
           await releasePipelineSegmentBuffer(segment).catch(() => {});
         }
@@ -297,6 +357,7 @@ export default function VADScreen() {
         const audio = liveAudioRef.current;
         liveAudioRef.current = null;
         if (audio) {
+          logLiveLifecycle('teardown.audio.release', audio.bufferId);
           audio.unsubscribeEvents();
           await releasePipelineAudioBuffer(audio).catch(() => {});
         }
@@ -304,13 +365,16 @@ export default function VADScreen() {
         cleanupLockRef.current = false;
       }
     },
-    [clearStatusPoll]
+    [clearStatusPoll, logLiveLifecycle]
   );
 
   const clearOfflineBuffers = useCallback(async () => {
     const seg = offlineSegmentRef.current;
     offlineSegmentRef.current = null;
     if (seg) {
+      console.log(
+        `[VADScreen][offline][segment] clearOfflineBuffers.release: ${seg.bufferId}`
+      );
       await releasePipelineSegmentBuffer(seg).catch(() => {});
     }
     const audio = offlineAudioRef.current;
@@ -319,6 +383,93 @@ export default function VADScreen() {
       await releasePipelineAudioBuffer(audio).catch(() => {});
     }
   }, []);
+
+  const clearPreparedOfflineInputBuffer = useCallback(async () => {
+    offlineInputRequestRef.current += 1;
+    setPreparingOfflineInputBuffer(false);
+    setOfflineInputBuildProgress(null);
+    setOfflineInputBuildStatus(null);
+    setPreparedOfflineInputBuffer(null);
+
+    const existing = offlineAudioRef.current;
+    offlineAudioRef.current = null;
+    if (existing) {
+      console.log(
+        `[VADScreen][offline][audio] clearPrepared.release: ${existing.bufferId}`
+      );
+      await releasePipelineAudioBuffer(existing).catch(() => {});
+    }
+  }, []);
+
+  const prepareOfflineInputBufferFromUri = useCallback(
+    async (uri: string, displayName: string) => {
+      const requestId = ++offlineInputRequestRef.current;
+      setPreparingOfflineInputBuffer(true);
+      setOfflineInputBuildProgress(0);
+      setOfflineInputBuildStatus(
+        `Decoding "${displayName}" into OfflineAudioBuffer...`
+      );
+      setPreparedOfflineInputBuffer(null);
+      setSummary(null);
+      setSegments([]);
+      setError(null);
+
+      try {
+        const existing = offlineAudioRef.current;
+        offlineAudioRef.current = null;
+        if (existing) {
+          console.log(
+            `[VADScreen][offline][audio] prepare.releaseExisting: ${existing.bufferId}`
+          );
+          await releasePipelineAudioBuffer(existing).catch(() => {});
+        }
+
+        const inputRef = await createOfflineAudioBufferFromFile(
+          toFileSource(uri),
+          {
+            onProgress: (event) => {
+              if (requestId !== offlineInputRequestRef.current) return;
+              const percent = Math.max(0, Math.min(100, event.percent ?? 0));
+              setOfflineInputBuildProgress(percent);
+              setOfflineInputBuildStatus(
+                `Decoding "${displayName}"... ${Math.round(percent)}%`
+              );
+            },
+          }
+        );
+
+        if (requestId !== offlineInputRequestRef.current) {
+          await releasePipelineAudioBuffer(inputRef).catch(() => {});
+          return;
+        }
+
+        offlineAudioRef.current = inputRef;
+        console.log(
+          `[VADScreen][offline][audio] prepare.created: ${inputRef.bufferId}`
+        );
+        setPreparedOfflineInputBuffer({
+          bufferId: inputRef.bufferId,
+          sourceLabel: displayName,
+          sourceUri: uri,
+        });
+        setOfflineInputBuildProgress(null);
+        setOfflineInputBuildStatus(null);
+        setStatus('Offline input prepared. Ready to run VAD.');
+      } catch (err) {
+        if (requestId !== offlineInputRequestRef.current) return;
+        const msg = normalizeErrorMessage(err);
+        setError(msg);
+        setOfflineInputBuildProgress(null);
+        setOfflineInputBuildStatus(null);
+        setStatus('Failed to prepare offline input buffer.');
+      } finally {
+        if (requestId === offlineInputRequestRef.current) {
+          setPreparingOfflineInputBuffer(false);
+        }
+      }
+    },
+    []
+  );
 
   const pickLiveFile = useCallback(async () => {
     try {
@@ -360,11 +511,9 @@ export default function VADScreen() {
         (file as any).localUri ??
         (file as any).nativeUri;
       if (!uri) throw new Error('Could not resolve a file URI from picker.');
-      setSelectedOfflineFileUri(uri);
-      setSelectedOfflineFileName(
-        file.name || uri.split('/').pop() || 'audio-file'
-      );
-      setStatus('Offline input file selected.');
+      const displayName = file.name || uri.split('/').pop() || 'audio-file';
+      setSelectedOfflineFileName(displayName);
+      await prepareOfflineInputBufferFromUri(uri, displayName);
     } catch (pickErr: any) {
       const isCancel =
         (DocumentPicker as any)?.isCancel?.(pickErr) ||
@@ -374,7 +523,7 @@ export default function VADScreen() {
         Alert.alert('File pick error', normalizeErrorMessage(pickErr));
       }
     }
-  }, []);
+  }, [prepareOfflineInputBufferFromUri]);
 
   const startLive = useCallback(async () => {
     if (!selectedModelFolder) return;
@@ -393,6 +542,12 @@ export default function VADScreen() {
     setStreamState('starting');
     setStatus('Starting VAD live pipeline...');
     pushTimeline('run.started', 'Preparing live buffers and VAD engine.');
+    logLiveLifecycle(
+      'run.start',
+      `source=${liveSource}, model=${selectedModelFolder ?? '-'}, file=${
+        selectedLiveFileName ?? '-'
+      }`
+    );
 
     try {
       const sampleRate = Math.max(
@@ -407,11 +562,33 @@ export default function VADScreen() {
       );
 
       const modelPath = resolveModelPath(selectedModelFolder);
+      const resolvedModelType = await detectResolvedModelType(modelPath);
+      logLiveLifecycle('model.detected', resolvedModelType);
+      const runtimeOptions =
+        resolvedModelType === 'ten_vad'
+          ? {
+              tenVad: {
+                scoreThreshold: Number.isFinite(threshold)
+                  ? threshold
+                  : undefined,
+              },
+            }
+          : {
+              sileroVad: {
+                scoreThreshold: Number.isFinite(threshold)
+                  ? threshold
+                  : undefined,
+              },
+            };
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate,
         channelCount: 1,
       });
       liveAudioRef.current = liveAudio;
+      logLiveLifecycle(
+        'audio.created',
+        `bufferId=${liveAudio.bufferId}, sampleRate=${sampleRate}`
+      );
 
       const liveSegment = await createLiveSegmentBuffer({
         sourceAudioBufferId: liveAudio.bufferId,
@@ -419,6 +596,10 @@ export default function VADScreen() {
         spooling: { mode: 'on' },
         streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
         onSegmentAppended: (event: LiveSegmentBufferSegmentAppendedEvent) => {
+          logLiveLifecycle(
+            'segment.appended',
+            `index=${event.segmentIndex}, id=${event.segmentId}, samples=${event.startSample}-${event.endSample}, durationMs=${event.durationMs}`
+          );
           pushTimeline(
             'segment.appended',
             `#${event.segmentIndex} ${event.startSample}-${event.endSample} (${event.durationMs}ms)`
@@ -442,20 +623,23 @@ export default function VADScreen() {
           });
         },
         onError: (event: LiveSegmentBufferErrorEvent) => {
+          logLiveLifecycle('segment.error', event.message);
           pushTimeline('segment.error', event.message);
           setError(event.message);
         },
       });
       liveSegmentRef.current = liveSegment;
+      logLiveLifecycle('segment.created', `bufferId=${liveSegment.bufferId}`);
 
       const engine = await createStreamingVAD({
         modelPath,
-        modelType: 'auto',
+        modelType: resolvedModelType,
         sampleRate,
-        threshold: Number.isFinite(threshold) ? threshold : undefined,
+        runtimeOptions,
       });
       liveEngineRef.current = engine;
       setEngineInstanceId(engine.instanceId);
+      logLiveLifecycle('engine.created', `instanceId=${engine.instanceId}`);
 
       const run = await engine.process({
         audioIn: liveAudio,
@@ -474,9 +658,14 @@ export default function VADScreen() {
       livePipelineRef.current = run;
       setPipelineId(run.pipelineId);
       pushTimeline('pipeline.ready', run.pipelineId);
+      logLiveLifecycle('pipeline.ready', run.pipelineId);
 
       run.onSpeechStateChanged = (event) => {
         setIsSpeechDetected(event.isSpeechDetected);
+        logLiveLifecycle(
+          'speech.stateChanged',
+          `detected=${String(event.isSpeechDetected)}, ts=${event.ts}`
+        );
         pushTimeline(
           'speech.stateChanged',
           `detected=${String(event.isSpeechDetected)}`
@@ -489,37 +678,73 @@ export default function VADScreen() {
         pipeline
           .getStatus()
           .then((s) => {
+            logLiveLifecycle(
+              'pipeline.status',
+              `running=${String(s.isRunning)}, queueDepth=${
+                s.queueDepth
+              }, chunks=${s.chunksProcessed}, unitsRead=${
+                s.unitsRead
+              }, unitsWritten=${s.unitsWritten}`
+            );
             setPipelineStatus(s);
           })
-          .catch(() => {});
+          .catch((statusErr) => {
+            logLiveLifecycle(
+              'pipeline.status.error',
+              normalizeErrorMessage(statusErr)
+            );
+          });
       }, 600);
 
       if (liveSource === 'file' && selectedLiveFileUri) {
+        logLiveLifecycle(
+          'ingest.start',
+          `audioBufferId=${liveAudio.bufferId}, file=${selectedLiveFileUri}`
+        );
         const ingest = await ingestFileToLiveAudioBuffer(
           liveAudio,
           toFileSource(selectedLiveFileUri),
           {
-            autoFinalize: true,
+            // Deterministic template flow: user explicitly finishes the pipeline.
+            autoFinalize: false,
             onProgress: (event) => {
               setIngestProgress(event.percent);
+              logLiveLifecycle(
+                'ingest.progress',
+                `${Math.round(event.percent ?? 0)}%`
+              );
             },
           }
         );
         ingestRef.current = ingest;
         ingest.done
-          .then(() => {
+          .then((result) => {
+            logLiveLifecycle(
+              'ingest.done.result',
+              `autoFinalized=${String(result.autoFinalized)}, totalFrames=${
+                result.totalFramesIngested
+              }, sourceRate=${result.sourceSampleRate}, sourceChannels=${
+                result.sourceChannels
+              }`
+            );
+            logLiveLifecycle(
+              'ingest.completed',
+              'Audio fully appended. Press Finish to finalize input, flush and complete.'
+            );
             pushTimeline('ingest.completed', 'Live input file fully appended.');
             setStatus(
-              'File ingest finished. Use "Finish" to flush and complete.'
+              'File ingest finished. Use "Finish" to finalize input and complete.'
             );
           })
           .catch((ingestErr) => {
+            logLiveLifecycle('ingest.error', normalizeErrorMessage(ingestErr));
             setError(normalizeErrorMessage(ingestErr));
             pushTimeline('ingest.error', normalizeErrorMessage(ingestErr));
           });
       } else {
         await startMicToLiveAudioBuffer(liveAudio);
         liveUsingMicRef.current = true;
+        logLiveLifecycle('mic.started', `audioBufferId=${liveAudio.bufferId}`);
         setStatus(
           'Microphone capture active. Speak, then press Finish or Stop.'
         );
@@ -534,6 +759,7 @@ export default function VADScreen() {
       );
     } catch (startErr) {
       const message = normalizeErrorMessage(startErr);
+      logLiveLifecycle('run.error', message);
       setError(message);
       setStatus('Live VAD failed to start.');
       pushTimeline('run.error', message);
@@ -545,9 +771,12 @@ export default function VADScreen() {
   }, [
     chunkSizeInput,
     liveSource,
+    logLiveLifecycle,
     pushTimeline,
     resolveModelPath,
+    detectResolvedModelType,
     sampleRateInput,
+    selectedLiveFileName,
     selectedLiveFileUri,
     selectedModelFolder,
     speechEventMinInput,
@@ -555,15 +784,81 @@ export default function VADScreen() {
     thresholdInput,
   ]);
 
-  const finishLive = useCallback(async () => {
+  const stopLiveGraceful = useCallback(async () => {
     const pipeline = livePipelineRef.current;
     if (!pipeline || streamState !== 'running') return;
     setError(null);
-    setStatus('Flushing live pipeline...');
-    pushTimeline('run.flush.requested', 'Calling pipeline.flush()');
+    setStatus('Stopping live pipeline gracefully...');
+    pushTimeline(
+      'run.stop.graceful.requested',
+      'Finalizing input and awaiting completion.'
+    );
+    logLiveLifecycle(
+      'stop.graceful.requested',
+      `pipelineId=${pipeline.pipelineId}`
+    );
     try {
-      await pipeline.flush();
+      try {
+        const statusBeforeStop = await pipeline.getStatus();
+        logLiveLifecycle(
+          'stop.graceful.status.before',
+          `running=${String(statusBeforeStop.isRunning)}, queueDepth=${
+            statusBeforeStop.queueDepth
+          }, chunks=${statusBeforeStop.chunksProcessed}, unitsRead=${
+            statusBeforeStop.unitsRead
+          }, unitsWritten=${statusBeforeStop.unitsWritten}, error=${
+            statusBeforeStop.error ?? 'null'
+          }`
+        );
+      } catch (statusErr) {
+        logLiveLifecycle(
+          'stop.graceful.status.before.error',
+          normalizeErrorMessage(statusErr)
+        );
+      }
+
+      if (liveSource === 'file') {
+        const audio = liveAudioRef.current;
+        if (audio) {
+          await finalizeLiveAudioBuffer(audio);
+          logLiveLifecycle(
+            'stop.graceful.input.finalized',
+            `live buffer finalized: ${audio.bufferId}`
+          );
+        }
+      } else if (liveUsingMicRef.current) {
+        try {
+          await stopMicToLiveAudioBuffer();
+          liveUsingMicRef.current = false;
+          logLiveLifecycle(
+            'stop.graceful.mic.stopped',
+            'Microphone capture stopped.'
+          );
+        } catch (micErr) {
+          logLiveLifecycle(
+            'stop.graceful.mic.stop.error',
+            normalizeErrorMessage(micErr)
+          );
+        }
+        const audio = liveAudioRef.current;
+        if (audio) {
+          await finalizeLiveAudioBuffer(audio);
+          logLiveLifecycle(
+            'stop.graceful.input.finalized',
+            `live buffer finalized: ${audio.bufferId}`
+          );
+        }
+      }
+
+      logLiveLifecycle(
+        'stop.graceful.await.completed',
+        'Input finalized; awaiting pipeline.completed.'
+      );
       const result = await pipeline.completed;
+      logLiveLifecycle(
+        'stop.graceful.completed',
+        `segments=${result.segmentCount}, speechMs=${result.speechDurationMs}`
+      );
       setSummary(result);
       pushTimeline(
         'run.completed',
@@ -573,6 +868,7 @@ export default function VADScreen() {
       const segBuffer = liveSegmentRef.current;
       if (segBuffer) {
         const count = await getLiveSegmentBufferSegmentCount(segBuffer);
+        logLiveLifecycle('stop.graceful.segment.count', String(count));
         const all =
           count > 0
             ? await getLiveSegmentBufferSegments(segBuffer, 0, count)
@@ -580,16 +876,17 @@ export default function VADScreen() {
         setSegments(all.slice(-SEGMENT_PREVIEW_LIMIT));
       }
 
-      setStatus('Live run completed successfully.');
+      setStatus('Live run completed successfully (graceful stop).');
       await teardownLiveResources(false);
       setStreamState('idle');
       setPipelineStatus(null);
       setEngineInstanceId(null);
       setPipelineId(null);
-    } catch (finishErr) {
-      const message = normalizeErrorMessage(finishErr);
+    } catch (stopErr) {
+      const message = normalizeErrorMessage(stopErr);
+      logLiveLifecycle('stop.graceful.error', message);
       setError(message);
-      setStatus('Live run completion failed.');
+      setStatus('Live graceful stop failed.');
       pushTimeline('run.error', message);
       await teardownLiveResources(true);
       setStreamState('idle');
@@ -597,23 +894,30 @@ export default function VADScreen() {
       setEngineInstanceId(null);
       setPipelineId(null);
     }
-  }, [pushTimeline, streamState, teardownLiveResources]);
+  }, [
+    liveSource,
+    logLiveLifecycle,
+    pushTimeline,
+    streamState,
+    teardownLiveResources,
+  ]);
 
-  const stopLive = useCallback(async () => {
+  const abortLive = useCallback(async () => {
     if (streamState === 'idle') return;
     setStreamState('stopping');
-    setStatus('Stopping live pipeline...');
-    pushTimeline('run.stop.requested', 'Stopping active live pipeline.');
+    setStatus('Aborting live pipeline...');
+    pushTimeline('run.abort.requested', 'Aborting active live pipeline.');
+    logLiveLifecycle('run.abort.requested', 'stop() without graceful flush');
     await teardownLiveResources(true);
     setStreamState('idle');
     setPipelineStatus(null);
     setEngineInstanceId(null);
     setPipelineId(null);
-    setStatus('Live run stopped.');
-  }, [pushTimeline, streamState, teardownLiveResources]);
+    setStatus('Live run aborted.');
+  }, [logLiveLifecycle, pushTimeline, streamState, teardownLiveResources]);
 
   const runOffline = useCallback(async () => {
-    if (!selectedModelFolder || !selectedOfflineFileUri) return;
+    if (!selectedModelFolder || !preparedOfflineInputBuffer) return;
     setBusyOffline(true);
     setError(null);
     setSummary(null);
@@ -623,7 +927,28 @@ export default function VADScreen() {
     setIsSpeechDetected(false);
     setStatus('Running offline VAD...');
     pushTimeline('run.started', 'Preparing offline buffers and VAD engine.');
+    logOfflineLifecycle(
+      'run.start',
+      `audioIn=${preparedOfflineInputBuffer.bufferId}`
+    );
+    let createdSegment: OfflineSegmentBufferRef | null = null;
+    let createdEngine: VADEngine | null = null;
     try {
+      // Recreate output segment buffer every run to avoid reusing populated state.
+      const existingSegment = offlineSegmentRef.current;
+      offlineSegmentRef.current = null;
+      if (existingSegment) {
+        logOfflineLifecycle(
+          'segment.release.prev.start',
+          existingSegment.bufferId
+        );
+        await releasePipelineSegmentBuffer(existingSegment);
+        logOfflineLifecycle(
+          'segment.release.prev.done',
+          existingSegment.bufferId
+        );
+      }
+
       const sampleRate = Math.max(
         8000,
         Number.parseInt(sampleRateInput, 10) || 16000
@@ -631,23 +956,45 @@ export default function VADScreen() {
       const chunkSize = Math.max(1, Number.parseInt(chunkSizeInput, 10) || 512);
       const threshold = Number.parseFloat(thresholdInput);
       const modelPath = resolveModelPath(selectedModelFolder);
-      const audio = await createOfflineAudioBufferFromFile(
-        toFileSource(selectedOfflineFileUri)
-      );
-      offlineAudioRef.current = audio;
-      const segment = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: audio.bufferId,
-      });
+      const resolvedModelType = await detectResolvedModelType(modelPath);
+      logOfflineLifecycle('model.detected', resolvedModelType);
+      const runtimeOptions =
+        resolvedModelType === 'ten_vad'
+          ? {
+              tenVad: {
+                scoreThreshold: Number.isFinite(threshold)
+                  ? threshold
+                  : undefined,
+              },
+            }
+          : {
+              sileroVad: {
+                scoreThreshold: Number.isFinite(threshold)
+                  ? threshold
+                  : undefined,
+              },
+            };
+      const segment = await createEmptyOfflineSegmentBuffer();
+      createdSegment = segment;
       offlineSegmentRef.current = segment;
+      logOfflineLifecycle('segment.create', segment.bufferId);
+      const beforeInfo = await getPipelineSegmentBufferInfo(segment);
+      logOfflineLifecycle(
+        'segment.info.beforeProcess',
+        `id=${segment.bufferId}, count=${beforeInfo.segmentCount ?? 0}, state=${
+          beforeInfo.state
+        }`
+      );
 
       const engine = await createStreamingVAD({
         modelPath,
-        modelType: 'auto',
+        modelType: resolvedModelType,
         sampleRate,
-        threshold: Number.isFinite(threshold) ? threshold : undefined,
+        runtimeOptions,
       });
+      createdEngine = engine;
       const run = await engine.process({
-        audioIn: audio,
+        audioIn: preparedOfflineInputBuffer.bufferId,
         segmentOut: segment,
         options: { chunkSize },
       });
@@ -658,6 +1005,13 @@ export default function VADScreen() {
       pushTimeline(
         'run.completed',
         `segments=${run.summary.segmentCount}, speechMs=${run.summary.speechDurationMs}`
+      );
+      const afterInfo = await getPipelineSegmentBufferInfo(segment);
+      logOfflineLifecycle(
+        'segment.info.afterProcess',
+        `id=${segment.bufferId}, count=${afterInfo.segmentCount ?? 0}, state=${
+          afterInfo.state
+        }`
       );
       const all =
         run.summary.segmentCount > 0
@@ -670,48 +1024,58 @@ export default function VADScreen() {
       setSegments(all.slice(-SEGMENT_PREVIEW_LIMIT));
 
       await engine.destroy();
-      await clearOfflineBuffers();
+      createdEngine = null;
       setStatus('Offline run completed successfully.');
     } catch (offlineErr) {
       const message = normalizeErrorMessage(offlineErr);
       setError(message);
       setStatus('Offline run failed.');
       pushTimeline('run.error', message);
-      await clearOfflineBuffers();
+      logOfflineLifecycle('run.error', message);
     } finally {
+      if (createdEngine) {
+        await createdEngine.destroy().catch(() => {});
+      }
+      if (createdSegment) {
+        logOfflineLifecycle(
+          'segment.release.finally.start',
+          createdSegment.bufferId
+        );
+        await releasePipelineSegmentBuffer(createdSegment).catch((err) => {
+          logOfflineLifecycle(
+            'segment.release.finally.error',
+            normalizeErrorMessage(err)
+          );
+        });
+        logOfflineLifecycle(
+          'segment.release.finally.done',
+          createdSegment.bufferId
+        );
+      }
+      if (
+        offlineSegmentRef.current &&
+        createdSegment &&
+        offlineSegmentRef.current.bufferId === createdSegment.bufferId
+      ) {
+        offlineSegmentRef.current = null;
+      }
       setBusyOffline(false);
     }
   }, [
     chunkSizeInput,
-    clearOfflineBuffers,
+    logOfflineLifecycle,
+    preparedOfflineInputBuffer,
     pushTimeline,
     resolveModelPath,
+    detectResolvedModelType,
     sampleRateInput,
     selectedModelFolder,
-    selectedOfflineFileUri,
     thresholdInput,
   ]);
 
   const clearError = useCallback(() => {
     setError(null);
   }, []);
-
-  const snippet = useMemo(
-    () => `const vad = await createStreamingVAD({ modelPath, modelType: 'auto', sampleRate: 16000 });
-const segmentOut = await createLiveSegmentBuffer({
-  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
-  onSegmentAppended: (e) => console.log(e.segmentIndex, e.durationMs),
-});
-const pipeline = await vad.process({
-  audioIn,
-  segmentOut,
-  options: { chunkSize: 512, speechStateEventMinIntervalMs: 0 },
-});
-pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
-await pipeline.flush();
-const summary = await pipeline.completed;`,
-    []
-  );
 
   useEffect(() => {
     loadModels().catch(() => {});
@@ -721,10 +1085,15 @@ const summary = await pipeline.completed;`,
     return () => {
       (async () => {
         await teardownLiveResources(true);
+        await clearPreparedOfflineInputBuffer();
         await clearOfflineBuffers();
       })().catch(() => {});
     };
-  }, [clearOfflineBuffers, teardownLiveResources]);
+  }, [
+    clearOfflineBuffers,
+    clearPreparedOfflineInputBuffer,
+    teardownLiveResources,
+  ]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -930,6 +1299,10 @@ const summary = await pipeline.completed;`,
 
             {liveSource === 'file' ? (
               <>
+                <Text style={styles.mutedText}>
+                  Start begins ingest + streaming VAD. Stop performs graceful
+                  finalize/flush completion. Abort cancels immediately.
+                </Text>
                 <Pressable
                   style={[
                     styles.secondaryButton,
@@ -954,9 +1327,13 @@ const summary = await pipeline.completed;`,
                 ) : null}
               </>
             ) : (
-              <Text style={styles.mutedText}>
-                Mic mode captures directly into LiveAudioBuffer when starting.
-              </Text>
+              <>
+                <Text style={styles.mutedText}>
+                  Mic mode captures directly into LiveAudioBuffer when starting.
+                  Stop performs graceful finalize/flush completion. Abort
+                  cancels immediately.
+                </Text>
+              </>
             )}
 
             <View style={styles.actionRow}>
@@ -978,11 +1355,11 @@ const summary = await pipeline.completed;`,
                   streamState !== 'running' && styles.buttonDisabled,
                 ]}
                 onPress={() => {
-                  finishLive().catch(() => {});
+                  stopLiveGraceful().catch(() => {});
                 }}
                 disabled={streamState !== 'running'}
               >
-                <Text style={styles.primaryButtonText}>Finish</Text>
+                <Text style={styles.primaryButtonText}>Stop</Text>
               </Pressable>
               <Pressable
                 style={[
@@ -990,43 +1367,85 @@ const summary = await pipeline.completed;`,
                   streamState === 'idle' && styles.buttonDisabled,
                 ]}
                 onPress={() => {
-                  stopLive().catch(() => {});
+                  abortLive().catch(() => {});
                 }}
                 disabled={streamState === 'idle'}
               >
-                <Text style={styles.primaryButtonText}>Stop</Text>
+                <Text style={styles.primaryButtonText}>Abort</Text>
               </Pressable>
             </View>
           </View>
         ) : (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Input / output setup (Offline)</Text>
+            {(preparingOfflineInputBuffer || offlineInputBuildStatus) && (
+              <View style={styles.errorBox}>
+                <Text style={styles.mutedText}>
+                  {offlineInputBuildStatus ?? 'Preparing OfflineAudioBuffer...'}
+                </Text>
+                {offlineInputBuildProgress != null ? (
+                  <Text style={styles.mutedText}>
+                    {Math.round(offlineInputBuildProgress)}%
+                  </Text>
+                ) : null}
+              </View>
+            )}
             <Pressable
               style={[
                 styles.secondaryButton,
-                busyOffline && styles.buttonDisabled,
+                (busyOffline || preparingOfflineInputBuffer) &&
+                  styles.buttonDisabled,
               ]}
               onPress={() => {
                 pickOfflineFile().catch(() => {});
               }}
-              disabled={busyOffline}
+              disabled={busyOffline || preparingOfflineInputBuffer}
             >
               <Text style={styles.secondaryButtonText}>
                 Pick offline input file
               </Text>
             </Pressable>
-            <Text style={styles.mutedText}>
-              {selectedOfflineFileName ?? 'No file selected'}
-            </Text>
+            {preparedOfflineInputBuffer ? (
+              <View style={styles.segmentRow}>
+                <Text style={styles.segmentTitle}>
+                  OfflineAudioBuffer ready
+                </Text>
+                <Text style={styles.segmentMeta}>
+                  {preparedOfflineInputBuffer.sourceLabel}
+                </Text>
+                <Text style={styles.segmentMeta} selectable>
+                  {preparedOfflineInputBuffer.bufferId}
+                </Text>
+                <Pressable
+                  style={[
+                    styles.smallButton,
+                    busyOffline && styles.buttonDisabled,
+                  ]}
+                  disabled={busyOffline}
+                  onPress={() => {
+                    clearPreparedOfflineInputBuffer().catch(() => {});
+                    setSelectedOfflineFileName(null);
+                    setStatus('Offline input buffer removed.');
+                  }}
+                >
+                  <Text style={styles.smallButtonText}>Remove buffer</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text style={styles.mutedText}>
+                {selectedOfflineFileName ?? 'No file selected'}
+              </Text>
+            )}
             <Pressable
               style={[
                 styles.primaryButton,
-                !canStartOffline && styles.buttonDisabled,
+                (!canStartOffline || preparingOfflineInputBuffer) &&
+                  styles.buttonDisabled,
               ]}
               onPress={() => {
                 runOffline().catch(() => {});
               }}
-              disabled={!canStartOffline}
+              disabled={!canStartOffline || preparingOfflineInputBuffer}
             >
               <Text style={styles.primaryButtonText}>Run Offline VAD</Text>
             </Pressable>
@@ -1122,11 +1541,6 @@ const summary = await pipeline.completed;`,
               </View>
             ))
           )}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Minimal integration snippet</Text>
-          <Text style={styles.snippetText}>{snippet}</Text>
         </View>
       </ScrollView>
       <ScreenIntroModal screenId="VAD" />
@@ -1374,11 +1788,5 @@ const styles = StyleSheet.create({
   segmentMeta: {
     fontSize: 12,
     color: '#4B5563',
-  },
-  snippetText: {
-    fontFamily: 'Menlo',
-    fontSize: 11,
-    lineHeight: 16,
-    color: '#111827',
   },
 });
