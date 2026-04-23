@@ -10,6 +10,7 @@ REPO="${SHERPA_ONNX_REPO:-k2-fsa/sherpa-onnx}"
 ASR_CSV="${ASR_CSV:-test/fixtures/asr-models-expected.csv}"
 TTS_CSV="${TTS_CSV:-test/fixtures/tts-models-expected.csv}"
 SPEECH_ENH_CSV="${SPEECH_ENH_CSV:-test/fixtures/speech-enhancement-models-expected.csv}"
+VAD_CSV="${VAD_CSV:-test/fixtures/vad-models-expected.csv}"
 
 # Optional: GITHUB_TOKEN or GH_TOKEN for api.github.com rate limits / private forks
 CURL_GH_API=(-sL)
@@ -28,6 +29,10 @@ if [ ! -f "$TTS_CSV" ]; then
 fi
 if [ ! -f "$SPEECH_ENH_CSV" ]; then
   echo "::warning::Missing $SPEECH_ENH_CSV (run from repo root or set SPEECH_ENH_CSV)"
+  exit 0
+fi
+if [ ! -f "$VAD_CSV" ]; then
+  echo "::warning::Missing $VAD_CSV (run from repo root or set VAD_CSV)"
   exit 0
 fi
 
@@ -64,6 +69,7 @@ csv_asset_names() { awk -F',' '{ gsub(/^ *"|" *$/, "", $1); gsub(/^ | $/, "", $1
 ASR_CSV_NAMES=$(csv_asset_names "$ASR_CSV")
 TTS_CSV_NAMES=$(csv_asset_names "$TTS_CSV")
 SPEECH_CSV_NAMES=$(csv_asset_names "$SPEECH_ENH_CSV")
+VAD_CSV_NAMES=$(csv_asset_names "$VAD_CSV")
 
 ASR_MISSING=""
 while IFS= read -r asset; do
@@ -89,11 +95,20 @@ while IFS= read -r asset; do
   fi
 done <<< "$SPEECH_ASSETS"
 
-if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ]; then
+VAD_MISSING=""
+while IFS= read -r asset; do
+  [ -z "$asset" ] && continue
+  if ! grep -qFx -- "$asset" <<< "$VAD_CSV_NAMES"; then
+    VAD_MISSING="${VAD_MISSING}  - ${asset}\n"
+  fi
+done <<< "$ASR_ASSETS"
+
+if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] || [ -n "$VAD_MISSING" ]; then
   echo "::warning::New assets are available on GitHub but not yet listed in the expected CSV files."
   [ -n "$ASR_MISSING" ] && echo -e "ASR (asr-models) assets missing from $ASR_CSV:\n$ASR_MISSING"
   [ -n "$TTS_MISSING" ] && echo -e "TTS (tts-models) assets missing from $TTS_CSV:\n$TTS_MISSING"
   [ -n "$SPEECH_MISSING" ] && echo -e "Speech enhancement (speech-enhancement-models) assets missing from $SPEECH_ENH_CSV:\n$SPEECH_MISSING"
+  [ -n "$VAD_MISSING" ] && echo -e "ASR release assets missing from VAD expected CSV ($VAD_CSV):\n$VAD_MISSING"
   echo "Please run the collect workflows to update fixtures:"
   echo "  - Testdata - Collect ASR model structures (workflow_dispatch)"
   echo "  - Testdata - Collect TTS model structures (workflow_dispatch)"

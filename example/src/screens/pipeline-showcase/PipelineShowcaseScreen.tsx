@@ -779,7 +779,7 @@ export default function PipelineShowcaseScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: { mode: 'path', path: outputAudioPath },
-        emitAppendedEvents: true,
+        streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
         onFramesAppended: (event) => {
           setGeneratedSpeechSeconds(event.totalSamplesWritten / ttsSampleRate);
           if (
@@ -819,7 +819,7 @@ export default function PipelineShowcaseScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: 'auto',
-        emitAppendedEvents: false,
+        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       inputAudioBufferRef.current = inputLiveAudio;
 

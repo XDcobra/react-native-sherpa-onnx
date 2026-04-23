@@ -133,8 +133,17 @@ internal class TtsPipelineWorker(
         cancelled.set(true)
         return@ttsStreamChunkCallbackForJni
       }
-      outputEntry.appendSamples(samples, sampleRate, LIVE_APPEND_SOURCE_TTS)
-      unitsWritten += samples.size
+      when (
+        outputEntry.tryAppendSamples(samples, sampleRate, LIVE_APPEND_SOURCE_TTS)
+      ) {
+        LiveEntry.AppendResult.APPENDED -> {
+          unitsWritten += samples.size
+        }
+        LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+          cancelled.set(true)
+          isRunning = false
+        }
+      }
     }
 
     val tts = ttsInstance.tts ?: return

@@ -6,6 +6,8 @@
  * - LivePcmBuffer: streaming, mutable PCM with recording/finished state machine
  */
 
+import type { StreamEventSpec } from '../pipeline/streamEvents';
+
 // ========== Buffer Kinds ==========
 
 export type PipelineBufferKind = 'offlinePcmBuffer' | 'livePcmBuffer';
@@ -212,10 +214,14 @@ export interface CreateEmptyLiveAudioBufferOptions {
    */
   retention?: LiveBufferRetention;
 
-  /** If true, emit producer-agnostic append events for this live buffer. */
-  emitAppendedEvents?: boolean;
-  /** Optional native event throttle/coalesce interval in ms. Default: 0 (no throttle). */
-  appendEventMinIntervalMs?: number;
+  /**
+   * High-frequency data-plane events for this live buffer.
+   * - `framesAppended`: new PCM was appended (mic, spool, STT, etc.)
+   * When `streamEvents.framesAppended` is omitted, events are opt-in if `onFramesAppended` is set.
+   */
+  streamEvents?: {
+    framesAppended?: StreamEventSpec;
+  };
 
   /** Optional JS callback for producer-agnostic append events. */
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;

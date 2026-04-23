@@ -540,7 +540,7 @@ static SttModelKind ResolveSttKind(
         *outSource = SttResolutionSource::kUnknown;
     }
     if (hints.isLikelyVad) {
-        outError = "VAD models are not yet supported by the React Native SDK.";
+        outError = "This model appears to be a VAD model, not an STT model. Please use the VAD pipeline (detectVadModel + createStreamingVAD).";
         return SttModelKind::kUnknown;
     }
     if (hints.isLikelyTdnn) {
@@ -819,6 +819,12 @@ static SttDetectResult DetectSttModelFromFiles(
 
     SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
     SttPathHints hints = GetSttPathHints(modelDir);
+    if (!hints.isLikelyVad) {
+        const auto vadProbe = DetectVadModelFromFileList(files, modelDir, "auto");
+        if (vadProbe.selectedKind != VadModelKind::kUnknown) {
+            hints.isLikelyVad = true;
+        }
+    }
     ApplyQnnBinaryModel(files, modelDir, hints, candidate);
     SttCapabilities cap = ComputeSttCapabilities(candidate, hints);
     if (debug) {

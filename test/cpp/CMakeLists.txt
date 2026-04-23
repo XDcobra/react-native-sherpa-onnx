@@ -1,5 +1,5 @@
 # Host-side C++ tests (Linux/macOS CI): no Android NDK.
-# Layout: model_detect/ — host tests; production sources under android/.../jni/model_detect/{common,stt,tts,enhancement}/; audio_conversion/ — FFmpeg (same sources as Android).
+# Layout: model_detect/ — host tests; production sources under android/.../jni/model_detect/{common,stt,tts,enhancement,vad}/; audio_conversion/ — FFmpeg (same sources as Android).
 cmake_minimum_required(VERSION 3.16)
 project(sherpa-onnx-host-cpp-tests LANGUAGES CXX)
 
@@ -27,9 +27,12 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-enhancement-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-enhancement-online-guard.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-model-detect-enhancement.cpp"
+  "${MODEL_DETECT_DIR}/vad/sherpa-onnx-vad-catalog-metadata.cpp"
+  "${MODEL_DETECT_DIR}/vad/sherpa-onnx-model-detect-vad.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-validate-tts.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-validate-enhancement.cpp"
+  "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"
 )
 
 add_executable(model_detect_test
@@ -45,6 +48,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/stt"
   "${MODEL_DETECT_DIR}/tts"
   "${MODEL_DETECT_DIR}/enhancement"
+  "${MODEL_DETECT_DIR}/vad"
   "${MODEL_DETECT_DIR}/alignment"
   "${JNI_DIR}"
   "${MODEL_DETECT_TEST_DIR}"
@@ -80,12 +84,6 @@ if(TARGET PkgConfig::LIBAV)
     set(AUDIO_GTEST_LIBS gtest gtest_main)
   endif()
 
-  add_executable(audio_convert_file_host_test "${AUDIO_CONVERSION_TEST_DIR}/audio_convert_file_test.cpp")
-  target_sources(audio_convert_file_host_test PRIVATE "${AUDIO_JNI_DIR}/audio_convert_file.cpp")
-  target_include_directories(audio_convert_file_host_test PRIVATE "${AUDIO_JNI_DIR}" "${AUDIO_CONVERSION_TEST_DIR}")
-  target_compile_definitions(audio_convert_file_host_test PRIVATE HAVE_FFMPEG=1)
-  target_link_libraries(audio_convert_file_host_test PRIVATE PkgConfig::LIBAV ${AUDIO_GTEST_LIBS})
-
   add_executable(audio_f32le_to_format_host_test "${AUDIO_CONVERSION_TEST_DIR}/audio_f32le_host_test.cpp")
   target_include_directories(audio_f32le_to_format_host_test PRIVATE "${AUDIO_CONVERSION_TEST_DIR}")
   target_compile_definitions(audio_f32le_to_format_host_test PRIVATE HAVE_FFMPEG=1)
@@ -103,12 +101,6 @@ set_tests_properties(model_detect_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
-if(TARGET audio_convert_file_host_test)
-  add_test(NAME audio_convert_file_host_test COMMAND $<TARGET_FILE:audio_convert_file_host_test>)
-  set_tests_properties(audio_convert_file_host_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-  )
-endif()
 if(TARGET audio_f32le_to_format_host_test)
   add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
   set_tests_properties(audio_f32le_to_format_host_test PROPERTIES

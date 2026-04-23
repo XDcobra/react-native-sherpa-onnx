@@ -75,8 +75,21 @@ class EnhancementPipelineWorker(
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             val flushed = denoiser.flush()
             if (flushed.samples.isNotEmpty()) {
-              outputEntry.appendSamples(flushed.samples, sampleRate, LIVE_APPEND_SOURCE_ENHANCEMENT)
-              unitsWritten += flushed.samples.size
+              when (
+                outputEntry.tryAppendSamples(
+                  flushed.samples,
+                  sampleRate,
+                  LIVE_APPEND_SOURCE_ENHANCEMENT
+                )
+              ) {
+                LiveEntry.AppendResult.APPENDED -> {
+                  unitsWritten += flushed.samples.size
+                }
+                LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                  isRunning = false
+                  break
+                }
+              }
             }
             break
           }
@@ -87,10 +100,23 @@ class EnhancementPipelineWorker(
         }
 
         val denoised = denoiser.run(chunk, sampleRate)
-        outputEntry.appendSamples(denoised.samples, sampleRate, LIVE_APPEND_SOURCE_ENHANCEMENT)
+        when (
+          outputEntry.tryAppendSamples(
+            denoised.samples,
+            sampleRate,
+            LIVE_APPEND_SOURCE_ENHANCEMENT
+          )
+        ) {
+          LiveEntry.AppendResult.APPENDED -> {
+            unitsWritten += denoised.samples.size
+          }
+          LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+            isRunning = false
+            break
+          }
+        }
 
         unitsRead += chunk.size
-        unitsWritten += denoised.samples.size
         chunksProcessed++
       }
     } catch (e: Exception) {
@@ -113,8 +139,20 @@ class EnhancementPipelineWorker(
           try {
             val flushed = denoiser.flush()
             if (flushed.samples.isNotEmpty()) {
-              outputEntry.appendSamples(flushed.samples, denoiser.sampleRate, LIVE_APPEND_SOURCE_ENHANCEMENT)
-              unitsWritten += flushed.samples.size
+              when (
+                outputEntry.tryAppendSamples(
+                  flushed.samples,
+                  denoiser.sampleRate,
+                  LIVE_APPEND_SOURCE_ENHANCEMENT
+                )
+              ) {
+                LiveEntry.AppendResult.APPENDED -> {
+                  unitsWritten += flushed.samples.size
+                }
+                LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                  isRunning = false
+                }
+              }
             }
             cmd.completion.complete(Unit)
           } catch (e: Exception) {

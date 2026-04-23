@@ -31,9 +31,56 @@ static NSString *const kTxtErrAlreadyFinalized = @"TEXT_ALREADY_FINALIZED";
 static NSString *const kTxtErrAlreadyPopulated = @"TEXT_ALREADY_POPULATED";
 static NSString *const kTxtErrSliceInvalid     = @"TEXT_SLICE_INVALID";
 static NSString *const kTxtErrSliceTooLarge    = @"TEXT_SLICE_TOO_LARGE";
+static NSString *const kTxtErrSpoolUnavailable = @"TEXT_SPOOL_UNAVAILABLE";
+static NSString *const kTxtErrSpoolWriteFailed = @"TEXT_SPOOL_WRITE_FAILED";
+static NSString *const kTxtErrSpoolReadFailed  = @"TEXT_SPOOL_READ_FAILED";
+static NSString *const kTxtErrSpoolCorrupted   = @"TEXT_SPOOL_CORRUPTED";
 static NSString *const kTxtErrInternalError    = @"TEXT_INTERNAL_ERROR";
 
 static const int kTxtMaxSliceCount = 16384;
+
+static NSDictionary<NSString *, NSString *> *txtCodedErrorsMap() {
+    static NSDictionary<NSString *, NSString *> *map;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = @{
+            kTxtErrBufferNotFound: kTxtErrBufferNotFound,
+            kTxtErrKindMismatch: kTxtErrKindMismatch,
+            kTxtErrInvalidArgument: kTxtErrInvalidArgument,
+            kTxtErrInvalidState: kTxtErrInvalidState,
+            kTxtErrBufferEmpty: kTxtErrBufferEmpty,
+            kTxtErrAlreadyFinalized: kTxtErrAlreadyFinalized,
+            kTxtErrAlreadyPopulated: kTxtErrAlreadyPopulated,
+            kTxtErrSliceInvalid: kTxtErrSliceInvalid,
+            kTxtErrSliceTooLarge: kTxtErrSliceTooLarge,
+            kTxtErrSpoolUnavailable: kTxtErrSpoolUnavailable,
+            kTxtErrSpoolWriteFailed: kTxtErrSpoolWriteFailed,
+            kTxtErrSpoolReadFailed: kTxtErrSpoolReadFailed,
+            kTxtErrSpoolCorrupted: kTxtErrSpoolCorrupted,
+            kTxtErrInternalError: kTxtErrInternalError,
+        };
+    });
+    return map;
+}
+
+static void txtRejectWithStdException(RCTPromiseRejectBlock reject, const std::exception &e) {
+    std::string raw = e.what() ? e.what() : "";
+    size_t sep = raw.find(':');
+    if (sep != std::string::npos) {
+        std::string codeRaw = raw.substr(0, sep);
+        std::string messageRaw = raw.substr(sep + 1);
+        while (!messageRaw.empty() && messageRaw.front() == ' ') {
+            messageRaw.erase(messageRaw.begin());
+        }
+        NSString *code = [NSString stringWithUTF8String:codeRaw.c_str()] ?: kTxtErrInternalError;
+        NSString *message = [NSString stringWithUTF8String:messageRaw.c_str()] ?: @"Unknown text buffer error";
+        if (txtCodedErrorsMap()[code] != nil) {
+            reject(code, message, nil);
+            return;
+        }
+    }
+    reject(kTxtErrInternalError, [NSString stringWithUTF8String:raw.c_str()] ?: @"Unknown text buffer error", nil);
+}
 
 // ==================== Offline Text Entry ====================
 struct TxtOfflineEntry {
@@ -202,6 +249,25 @@ bool txt_populate_offline_if_empty(
     return true;
 }
 
+void txt_release_all_entries() {
+    std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> liveToRelease;
+    {
+        std::lock_guard<std::mutex> lock(g_txt_mutex);
+        liveToRelease = std::move(g_txt_live);
+        g_txt_live.clear();
+        g_txt_offline.clear();
+    }
+    for (auto &pair : liveToRelease) {
+        if (pair.second) {
+            try {
+                pair.second->release();
+            } catch (...) {
+                // best-effort cleanup
+            }
+        }
+    }
+}
+
 static std::string txt_generateId(const char *prefix) {
     return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
@@ -232,19 +298,34 @@ static std::string txt_generateId(const char *prefix) {
                                 resolve:(RCTPromiseResolveBlock)resolve
                                  reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
+    try {
         std::string liveId = [liveBufferId UTF8String] ?: "";
         std::string modeStr = mode ? [mode UTF8String] : "fullIfSpooled";
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_live.find(liveId);
-        if (it == g_txt_live.end()) {
-            reject(kTxtErrBufferNotFound,
-                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+        std::shared_ptr<TxtLiveEntry> live;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(liveId);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            live = it->second;
+        }
+
+        std::string text;
+        if (modeStr == "windowSnapshot") {
+            text = live->snapshotText();
+        } else if (modeStr == "fullIfSpooled") {
+            text = live->snapshotFullTextIfSpooled();
+        } else {
+            reject(kTxtErrInvalidArgument,
+                   [NSString stringWithFormat:@"Unknown mode: %s. Use 'fullIfSpooled' or 'windowSnapshot'.", modeStr.c_str()],
+                   nil);
             return;
         }
 
-        std::string text = it->second->snapshotText();
         std::string bufferId = txt_generateId("txt_off");
         auto entry = std::make_shared<TxtOfflineEntry>();
         entry->bufferId = bufferId;
@@ -252,10 +333,15 @@ static std::string txt_generateId(const char *prefix) {
             entry->text = text;
             entry->populated = true;
         }
-        g_txt_offline[bufferId] = entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            g_txt_offline[bufferId] = entry;
+        }
         resolve(entry->toDict());
-    } @catch (NSException *exception) {
-        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown createOfflineTextBufferFromLive error", nil);
     }
 }
 
@@ -299,11 +385,15 @@ static std::string txt_generateId(const char *prefix) {
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
+    try {
         int windowMaxChars = 65536;
         int maxSegments = 1000;
         bool emitPartialEvents = false;
         int64_t partialEventMinIntervalMs = 0;
+        TxtLiveEntry::SpoolingMode spoolingMode = TxtLiveEntry::SPOOL_ON;
+        int64_t spoolingThresholdBytes = 0;
+        std::string spoolingPath;
+        bool spoolingTemporary = true;
 
         if (options[@"windowMaxChars"]) {
             windowMaxChars = [options[@"windowMaxChars"] intValue];
@@ -317,6 +407,43 @@ static std::string txt_generateId(const char *prefix) {
         if (options[@"partialEventMinIntervalMs"]) {
             partialEventMinIntervalMs = [options[@"partialEventMinIntervalMs"] longLongValue];
         }
+        if ([options[@"spoolingMode"] isKindOfClass:[NSString class]]) {
+            NSString *rawMode = (NSString *)options[@"spoolingMode"];
+            if ([rawMode isEqualToString:@"off"]) {
+                spoolingMode = TxtLiveEntry::SPOOL_OFF;
+            } else if ([rawMode isEqualToString:@"auto"]) {
+                spoolingMode = TxtLiveEntry::SPOOL_AUTO;
+            } else if ([rawMode isEqualToString:@"on"] || rawMode.length == 0) {
+                spoolingMode = TxtLiveEntry::SPOOL_ON;
+            } else {
+                reject(kTxtErrInvalidArgument,
+                       [NSString stringWithFormat:@"Invalid text spooling mode: %@. Use 'off', 'auto', or 'on'.", rawMode],
+                       nil);
+                return;
+            }
+        }
+        if (options[@"spoolingThresholdBytes"]) {
+            spoolingThresholdBytes = [options[@"spoolingThresholdBytes"] longLongValue];
+        }
+        if ([options[@"spoolingPath"] isKindOfClass:[NSString class]]) {
+            NSString *path = (NSString *)options[@"spoolingPath"];
+            if (path.length > 0) {
+                spoolingPath = [path UTF8String] ?: "";
+            }
+        }
+        if (options[@"spoolingTemporary"]) {
+            spoolingTemporary = [options[@"spoolingTemporary"] boolValue];
+        } else {
+            spoolingTemporary = spoolingPath.empty();
+        }
+
+        if (spoolingMode != TxtLiveEntry::SPOOL_OFF && spoolingPath.empty()) {
+            NSString *tmpDir = NSTemporaryDirectory();
+            if (tmpDir == nil || tmpDir.length == 0) tmpDir = @"/tmp";
+            NSString *fileName = [NSString stringWithFormat:@"txt_spool_%@.bin", [[NSUUID UUID] UUIDString]];
+            NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
+            spoolingPath = [joined UTF8String] ?: "";
+        }
 
         std::string bufferId = txt_generateId("txt_live");
         auto entry = std::make_shared<TxtLiveEntry>();
@@ -325,13 +452,16 @@ static std::string txt_generateId(const char *prefix) {
         entry->maxSegments = maxSegments;
         entry->emitPartialEvents = emitPartialEvents;
         entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
+        entry->configureSpooling(spoolingMode, spoolingPath, spoolingTemporary, spoolingThresholdBytes);
         {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_live[bufferId] = entry;
         }
         resolve(entry->toDict());
-    } @catch (NSException *exception) {
-        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown createLiveTextBuffer error", nil);
     }
 }
 
@@ -339,27 +469,43 @@ static std::string txt_generateId(const char *prefix) {
                                  resolve:(RCTPromiseResolveBlock)resolve
                                   reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
+    try {
         std::string offId = [offlineBufferId UTF8String] ?: "";
+        std::string seedText;
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_offline.find(offId);
-        if (it == g_txt_offline.end()) {
-            reject(kTxtErrBufferNotFound,
-                   [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId], nil);
-            return;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_offline.find(offId);
+            if (it == g_txt_offline.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId], nil);
+                return;
+            }
+            seedText = it->second->text;
         }
 
         std::string bufferId = txt_generateId("txt_live");
         auto entry = std::make_shared<TxtLiveEntry>();
         entry->bufferId = bufferId;
-        if (!it->second->text.empty()) {
-            entry->writePartial(it->second->text);
+        NSString *tmpDir = NSTemporaryDirectory();
+        if (tmpDir == nil || tmpDir.length == 0) tmpDir = @"/tmp";
+        NSString *fileName = [NSString stringWithFormat:@"txt_spool_%@.bin", [[NSUUID UUID] UUIDString]];
+        NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
+        std::string spoolPath = [joined UTF8String] ?: "";
+        entry->configureSpooling(TxtLiveEntry::SPOOL_ON, spoolPath, true, 0);
+        if (!seedText.empty()) {
+            entry->writePartial(seedText);
         }
-        g_txt_live[bufferId] = entry;
+
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            g_txt_live[bufferId] = entry;
+        }
         resolve(entry->toDict());
-    } @catch (NSException *exception) {
-        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown createLiveTextBufferFromOffline error", nil);
     }
 }
 
@@ -367,24 +513,31 @@ static std::string txt_generateId(const char *prefix) {
                         resolve:(RCTPromiseResolveBlock)resolve
                          reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
+    try {
         std::string liveId = [liveBufferId UTF8String] ?: "";
+        std::shared_ptr<TxtLiveEntry> entry;
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_live.find(liveId);
-        if (it == g_txt_live.end()) {
-            reject(kTxtErrBufferNotFound,
-                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
-            return;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(liveId);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
         }
-        if (it->second->state == TxtLiveEntry::FINISHED) {
+
+        if (entry->state == TxtLiveEntry::FINISHED) {
             reject(kTxtErrAlreadyFinalized, @"Live text buffer already finalized", nil);
             return;
         }
-        it->second->finalize_();
+        entry->finalize_();
         resolve(nil);
-    } @catch (NSException *exception) {
-        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown finalizeLiveTextBuffer error", nil);
     }
 }
 
@@ -417,16 +570,26 @@ static std::string txt_generateId(const char *prefix) {
                            resolve:(RCTPromiseResolveBlock)resolve
                             reject:(RCTPromiseRejectBlock)reject
 {
-    @try {
+    try {
         std::string bid = [bufferId UTF8String] ?: "";
+        std::shared_ptr<TxtLiveEntry> liveToRelease;
         {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_offline.erase(bid);
-            g_txt_live.erase(bid);
+            auto liveIt = g_txt_live.find(bid);
+            if (liveIt != g_txt_live.end()) {
+                liveToRelease = liveIt->second;
+                g_txt_live.erase(liveIt);
+            }
+        }
+        if (liveToRelease) {
+            liveToRelease->release();
         }
         resolve(nil);
-    } @catch (NSException *exception) {
-        reject(kTxtErrInternalError, exception.reason, nil);
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown releasePipelineTextBuffer error", nil);
     }
 }
 
@@ -686,15 +849,20 @@ static std::string txt_generateId(const char *prefix) {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_live.find(lid);
-        if (it == g_txt_live.end()) {
-            reject(kTxtErrBufferNotFound,
-                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
-            return;
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
         }
 
-        NSString *full = [NSString stringWithUTF8String:it->second->currentText.c_str()] ?: @"";
+        std::string current = entry->snapshotText();
+        NSString *full = [NSString stringWithUTF8String:current.c_str()] ?: @"";
         int totalLen = (int)[full length];
         if (s >= totalLen) {
             resolve(@"");
@@ -759,10 +927,8 @@ static std::string txt_generateId(const char *prefix) {
         reject(kTxtErrInternalError, exception.reason, nil);
         return;
     }
-    } catch (const std::runtime_error &e) {
-        reject(kTxtErrAlreadyFinalized, [NSString stringWithUTF8String:e.what()], nil);
     } catch (const std::exception &e) {
-        reject(kTxtErrInternalError, [NSString stringWithUTF8String:e.what()], nil);
+        txtRejectWithStdException(reject, e);
     } catch (...) {
         reject(kTxtErrInternalError, @"Unknown appendLiveTextSegment error", nil);
     }

@@ -5,7 +5,7 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 export default function SeparationScreen() {
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <View style={styles.content}>
         <Ionicons name="musical-notes" size={72} style={styles.icon} />
         <Text style={styles.title}>Source Separation</Text>

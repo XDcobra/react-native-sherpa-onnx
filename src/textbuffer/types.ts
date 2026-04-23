@@ -9,6 +9,8 @@
  * future TTS will consume them as input.
  */
 
+import type { StreamEventSpec } from '../pipeline/streamEvents';
+
 // ========== Buffer Kinds ==========
 
 /** Pipeline text buffer discriminator (Info.kind). */
@@ -21,6 +23,49 @@ export type OfflineTextBufferState = 'immutable';
 
 /** Live text: recording → finished (no reverse). */
 export type LiveTextBufferState = 'recording' | 'finished';
+
+// ========== Spooling ==========
+
+/** Spooling mode for live text buffers. */
+export type TextBufferSpoolingMode = 'off' | 'auto' | 'on';
+
+/** Spooling configuration passed to `createLiveTextBuffer`. */
+export interface TextBufferSpoolingOptions {
+  /**
+   * Spooling mode.
+   * - `off`: no spool file (only in-memory window/segment log)
+   * - `auto`: activate spool once threshold is exceeded
+   * - `on`: spool from the beginning
+   *
+   * Default: `on`
+   */
+  mode?: TextBufferSpoolingMode;
+  /**
+   * Optional explicit spool path.
+   * When omitted, native chooses a temporary cache path.
+   */
+  path?: string;
+  /**
+   * Delete spool file on release.
+   * Default: true when `path` is omitted; false when `path` is set.
+   */
+  temporary?: boolean;
+  /**
+   * Activation threshold for `mode: "auto"` in bytes.
+   * Default: native/SDK.
+   */
+  thresholdBytes?: number;
+}
+
+/** Runtime spool status exposed in live buffer info snapshots. */
+export interface LiveTextBufferSpoolInfo {
+  mode: TextBufferSpoolingMode;
+  enabled: boolean;
+  ready: boolean;
+  bytes: number;
+  /** Optional native path (debug/advanced use). */
+  path?: string;
+}
 
 // ========== Info Types ==========
 
@@ -50,6 +95,7 @@ export interface LiveTextBufferInfo {
   revision: number;
   /** Number of committed segments currently retained in the segment log. */
   segmentCount: number;
+  spool: LiveTextBufferSpoolInfo;
 }
 
 /** A committed text segment from a live text buffer segment log. */
@@ -196,8 +242,15 @@ export interface CreateLiveTextBufferOptions {
   windowMaxChars?: number;
   /** Max committed segments retained in the live segment log. Default: 1000. */
   maxSegments?: number;
-  emitPartialEvents?: boolean;
-  partialEventMinIntervalMs?: number;
+  /** Optional spooling config (default is native `mode: "on"`). */
+  spooling?: TextBufferSpoolingOptions;
+  /**
+   * High-frequency partial text stream. When `streamEvents.partial` is omitted,
+   * events are opt-in if `onPartial` is set.
+   */
+  streamEvents?: {
+    partial?: StreamEventSpec;
+  };
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
 }
@@ -217,6 +270,10 @@ export const PipelineTextErrorCode = {
   ALREADY_POPULATED: 'TEXT_ALREADY_POPULATED',
   SLICE_INVALID: 'TEXT_SLICE_INVALID',
   SLICE_TOO_LARGE: 'TEXT_SLICE_TOO_LARGE',
+  SPOOL_UNAVAILABLE: 'TEXT_SPOOL_UNAVAILABLE',
+  SPOOL_WRITE_FAILED: 'TEXT_SPOOL_WRITE_FAILED',
+  SPOOL_READ_FAILED: 'TEXT_SPOOL_READ_FAILED',
+  SPOOL_CORRUPTED: 'TEXT_SPOOL_CORRUPTED',
   INTERNAL_ERROR: 'TEXT_INTERNAL_ERROR',
 } as const;
 

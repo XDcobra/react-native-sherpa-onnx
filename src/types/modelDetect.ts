@@ -85,3 +85,12 @@ export interface AlignmentDetectModelResult extends ModelDetectResultBase {
     model?: string;
   };
 }
+
+// ─── VAD extension ──────────────────────────────────────────────────────
+
+export interface VadDetectModelResult extends ModelDetectResultBase {
+  /** Resolved model file path from detection. */
+  paths?: {
+    model?: string;
+  };
+}

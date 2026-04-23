@@ -18,6 +18,8 @@
 #import "audio/session/PaAudioSessionCoordinator.h"
 #include "pcm/PcmPlayerRegistry.h"
 #include "audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
@@ -50,6 +52,8 @@ extern void paMicStopQueue(void);
 - (void)invalidate
 {
     paMicStopQueue();
+    txt_release_all_entries();
+    seg_release_all_entries();
     pcmPlayerDestroyAll();
     [[PaAudioSessionCoordinator shared] resetAll];
     [super invalidate];
@@ -69,7 +73,7 @@ extern void paMicStopQueue(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
