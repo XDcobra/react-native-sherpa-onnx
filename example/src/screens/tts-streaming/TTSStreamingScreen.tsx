@@ -502,7 +502,7 @@ export default function TTSStreamingScreen() {
   }, [cleanupStream, releaseResultBuffer]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.headerRow}>
           <View style={styles.headerIconWrap}>
