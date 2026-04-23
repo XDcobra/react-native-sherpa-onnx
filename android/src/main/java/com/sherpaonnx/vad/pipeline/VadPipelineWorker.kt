@@ -157,10 +157,6 @@ class VadPipelineWorker(
     unitsWritten++
     segmentCount++
     speechDurationMs += speechMs
-    emitEvent(
-      "segment.appended",
-      mapOf("segmentId" to out.id, "segmentIndex" to out.segmentIndex)
-    )
   }
 
   private fun flushInternal() {

@@ -29,6 +29,8 @@ object SegmentPipelineRegistry {
     spoolingPath: String?,
     spoolingTemporary: Boolean?,
     spoolingThresholdBytes: Long?,
+    emitSegmentAppendedEvents: Boolean = false,
+    segmentEventMinIntervalMs: Long = 0L,
   ): LiveSegmentEntry {
     val id = newId("seg_live")
     val mode = SegmentSpoolingMode.fromRaw(spoolingModeRaw)
@@ -47,6 +49,8 @@ object SegmentPipelineRegistry {
       spoolPath = effectivePath,
       spoolTemporary = temporary,
       spoolThresholdBytes = spoolingThresholdBytes ?: 0L,
+      emitSegmentAppendedEvents = emitSegmentAppendedEvents,
+      segmentEventMinIntervalMs = segmentEventMinIntervalMs,
     )
     liveMap[id] = entry
     return entry

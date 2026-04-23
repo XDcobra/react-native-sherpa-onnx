@@ -63,6 +63,45 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
+    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { liveId, rec, segIdx ->
+      try {
+        val eventEmitter = reactApplicationContext
+          .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val m = com.facebook.react.bridge.Arguments.createMap()
+        m.putString("liveBufferId", liveId)
+        m.putString("segmentId", rec.id)
+        m.putInt("segmentIndex", segIdx)
+        m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)
+        m.putInt("startSample", rec.startSample)
+        m.putInt("endSample", rec.endSample)
+        m.putInt("sampleRate", rec.sampleRate)
+        m.putInt("durationMs", rec.durationMs)
+        rec.confidence?.let { m.putDouble("confidence", it) }
+        if (!rec.payloadJson.isNullOrEmpty()) {
+          try {
+            val jo = org.json.JSONObject(rec.payloadJson)
+            val p = com.facebook.react.bridge.Arguments.createMap()
+            val keys = jo.keys()
+            while (keys.hasNext()) {
+              val k = keys.next()
+              if (!jo.isNull(k)) {
+                when (val v = jo.get(k)) {
+                  is String -> p.putString(k, v)
+                  is Int -> p.putInt(k, v)
+                  is Long -> p.putDouble(k, v.toDouble())
+                  is Double -> p.putDouble(k, v)
+                  is Boolean -> p.putBoolean(k, v)
+                }
+              }
+            }
+            m.putMap("payload", p)
+          } catch (_: Exception) {
+          }
+        }
+        eventEmitter.emit("pipelineLiveSegmentAppended", m)
+      } catch (_: Exception) {
+      }
+    }
     tryInstallJsiBindings()
   }
 
@@ -2475,13 +2514,27 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         } else {
           null
         }
+      val emitSegmentAppendedEvents =
+        if (options.hasKey("emitSegmentAppendedEvents") && !options.isNull("emitSegmentAppendedEvents")) {
+          options.getBoolean("emitSegmentAppendedEvents")
+        } else {
+          false
+        }
+      val segmentEventMinIntervalMs =
+        if (options.hasKey("segmentEventMinIntervalMs") && !options.isNull("segmentEventMinIntervalMs")) {
+          options.getDouble("segmentEventMinIntervalMs").toLong()
+        } else {
+          0L
+        }
       val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createLive(
         sourceAudioBufferId = sourceAudioBufferId,
         maxSegments = maxSegments,
         spoolingModeRaw = spoolingMode,
         spoolingPath = spoolingPath,
         spoolingTemporary = spoolingTemporary,
-        spoolingThresholdBytes = spoolingThresholdBytes
+        spoolingThresholdBytes = spoolingThresholdBytes,
+        emitSegmentAppendedEvents = emitSegmentAppendedEvents,
+        segmentEventMinIntervalMs = segmentEventMinIntervalMs
       )
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
