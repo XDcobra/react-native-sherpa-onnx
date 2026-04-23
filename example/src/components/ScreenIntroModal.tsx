@@ -62,8 +62,8 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen is a practical view of model acquisition. It helps you inspect how downloads, extraction, pause and resume states are handled for different model categories.',
   },
   VAD: {
-    title: 'Voice activity detection preview',
-    body: 'This placeholder screen exists to show where VAD will fit into the SDK. It is mainly useful for understanding how future streaming features will integrate with the rest of the app.',
+    title: 'Voice activity detection showcase',
+    body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
   },
   Diarization: {
     title: 'Speaker diarization preview',
@@ -150,7 +150,7 @@ export function ScreenIntroModal({ screenId, containerStyle }: Props) {
       setVisible(false);
       setDismissAgain(true);
 
-      void (async () => {
+      (async () => {
         const dismissed = await loadState();
         if (!isActive) {
           return;
@@ -159,7 +159,7 @@ export function ScreenIntroModal({ screenId, containerStyle }: Props) {
           setDismissAgain(true);
           setVisible(true);
         }
-      })();
+      })().catch(() => {});
 
       return () => {
         isActive = false;
@@ -216,7 +216,12 @@ export function ScreenIntroModal({ screenId, containerStyle }: Props) {
             </Text>
           </Pressable>
 
-          <Pressable style={styles.button} onPress={() => void handleOk()}>
+          <Pressable
+            style={styles.button}
+            onPress={() => {
+              handleOk().catch(() => {});
+            }}
+          >
             <Text style={styles.buttonText}>OK</Text>
           </Pressable>
         </View>
