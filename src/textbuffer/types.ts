@@ -9,6 +9,8 @@
  * future TTS will consume them as input.
  */
 
+import type { StreamEventSpec } from '../pipeline/streamEvents';
+
 // ========== Buffer Kinds ==========
 
 /** Pipeline text buffer discriminator (Info.kind). */
@@ -242,8 +244,13 @@ export interface CreateLiveTextBufferOptions {
   maxSegments?: number;
   /** Optional spooling config (default is native `mode: "on"`). */
   spooling?: TextBufferSpoolingOptions;
-  emitPartialEvents?: boolean;
-  partialEventMinIntervalMs?: number;
+  /**
+   * High-frequency partial text stream. When `streamEvents.partial` is omitted,
+   * events are opt-in if `onPartial` is set.
+   */
+  streamEvents?: {
+    partial?: StreamEventSpec;
+  };
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
 }

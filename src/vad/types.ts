@@ -63,6 +63,11 @@ export type VADLiveRunOptions = {
   chunkSize?: number;
   autoFlushOnInputEnded?: boolean;
   sourceTag?: string;
+  /**
+   * Minimum time between `onSpeechStateChanged` invocations on the returned pipeline handle.
+   * `0` (default) = unthrottled.
+   */
+  speechStateEventMinIntervalMs?: number;
 };
 
 export type VADOfflineRunOptions = {
@@ -72,58 +77,12 @@ export type VADOfflineRunOptions = {
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
 
-export type VADEvent =
-  | {
-      type: 'pipeline.started';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-    }
-  | {
-      type: 'pipeline.progress';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-      chunksProcessed: number;
-      unitsRead: number;
-      unitsWritten: number;
-      queueDepth: number;
-    }
-  | {
-      type: 'vad.stateChanged';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-      isSpeechDetected: boolean;
-    }
-  | {
-      type: 'segment.appended';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-      segmentId: string;
-      segmentIndex: number;
-    }
-  | {
-      type: 'pipeline.flushed';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-    }
-  | {
-      type: 'pipeline.completed';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-      summary: VADSummary;
-    }
-  | {
-      type: 'pipeline.error';
-      instanceId: string;
-      pipelineId: string;
-      ts: number;
-      error: string;
-    };
+/** Payload for {@link VADPipelineHandle.onSpeechStateChanged} (VAD live activity, not segment data). */
+export type VADSpeechStateChangedEvent = {
+  isSpeechDetected: boolean;
+  pipelineId: string;
+  ts?: number;
+};
 
 export type VADOfflineResult = {
   summary: VADSummary;
@@ -136,6 +95,11 @@ export type VADPipelineHandle = {
   instanceId: string;
   pipelineId: string;
   completed: Promise<VADSummary>;
+  /**
+   * Optional: react to VAD speech/activity without polling.
+   * Throttle with `speechStateEventMinIntervalMs` in `VADLiveRunOptions` when starting the live pipeline.
+   */
+  onSpeechStateChanged?: (event: VADSpeechStateChangedEvent) => void;
   stop(): Promise<void>;
   flush(): Promise<void>;
   reset(): Promise<void>;
@@ -159,7 +123,6 @@ export interface VADEngine {
   process(
     input: VADLiveProcessInput | VADOfflineProcessInput
   ): Promise<VADPipelineHandle | VADOfflineResult>;
-  addListener(listener: (event: VADEvent) => void): () => void;
   isSpeechDetected(): Promise<boolean>;
   destroy(): Promise<void>;
 }

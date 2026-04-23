@@ -612,6 +612,10 @@ export interface Spec extends TurboModule {
     spoolingPath?: string;
     spoolingTemporary?: boolean;
     spoolingThresholdBytes?: number;
+    /** When true, emit `pipelineLiveSegmentAppended` for each new segment. */
+    emitSegmentAppendedEvents?: boolean;
+    /** Optional throttle (ms) for segment-appended events. */
+    segmentEventMinIntervalMs?: number;
   }): Promise<{
     bufferId: string;
     kind: string;

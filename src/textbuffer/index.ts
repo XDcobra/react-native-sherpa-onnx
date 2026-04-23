@@ -363,6 +363,16 @@ export async function createOfflineTextBufferFromText(
 export async function createLiveTextBuffer(
   options: CreateLiveTextBufferOptions = {}
 ): Promise<LiveTextBufferRef> {
+  const p = options.streamEvents?.partial;
+  const emitPartialEvents =
+    p !== undefined ? p.enabled === true : Boolean(options.onPartial);
+  const partialEventMinIntervalMs =
+    p !== undefined
+      ? typeof p.minIntervalMs === 'number' && Number.isFinite(p.minIntervalMs)
+        ? Math.max(0, Math.trunc(p.minIntervalMs))
+        : 0
+      : 0;
+
   const raw = await getNative().createLiveTextBuffer({
     windowMaxChars: options.windowMaxChars,
     maxSegments: options.maxSegments,
@@ -370,8 +380,8 @@ export async function createLiveTextBuffer(
     spoolingPath: options.spooling?.path,
     spoolingTemporary: options.spooling?.temporary,
     spoolingThresholdBytes: options.spooling?.thresholdBytes,
-    emitPartialEvents: options.emitPartialEvents,
-    partialEventMinIntervalMs: options.partialEventMinIntervalMs,
+    emitPartialEvents,
+    partialEventMinIntervalMs,
   });
 
   const liveBufferId = raw.bufferId;
@@ -673,6 +683,8 @@ export type {
   OfflineTextBufferFromLiveMode,
   PipelineTextErrorCodeValue,
 } from './types';
+
+export type { StreamEventSpec } from '../pipeline/streamEvents';
 
 export {
   PipelineTextErrorCode,

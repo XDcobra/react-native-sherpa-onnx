@@ -1,4 +1,8 @@
-import { TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { PipelineSegmentErrorCode } from './types';
 import type {
@@ -9,6 +13,8 @@ import type {
   LiveSegmentBufferSpoolInfo,
   LiveSegmentBufferIdSource,
   LiveSegmentBufferRecordingSource,
+  LiveSegmentBufferErrorEvent,
+  LiveSegmentBufferSegmentAppendedEvent,
   OfflineSegmentBufferFromLiveMode,
   OfflineSegmentBufferIdSource,
   OfflineSegmentBufferInfo,
@@ -173,9 +179,153 @@ export function resolvePipelineSegmentBufferId(
   );
 }
 
+type NativeSubscription = { remove: () => void };
+
+const segmentAppendedCallbacks = new Map<
+  string,
+  Set<(event: LiveSegmentBufferSegmentAppendedEvent) => void>
+>();
+const segmentErrorCallbacks = new Map<
+  string,
+  Set<(event: LiveSegmentBufferErrorEvent) => void>
+>();
+
+let segmentAppendedSub: NativeSubscription | null = null;
+let segmentErrorSub: NativeSubscription | null = null;
+
+function ensureLiveSegmentEventSubscriptions(): void {
+  if (segmentAppendedSub && segmentErrorSub) return;
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+
+  if (!segmentAppendedSub) {
+    segmentAppendedSub = emitter.addListener(
+      'pipelineLiveSegmentAppended',
+      (raw: {
+        liveBufferId?: string;
+        segmentId?: string;
+        segmentIndex?: number;
+        sourceAudioBufferId?: string;
+        startSample?: number;
+        endSample?: number;
+        sampleRate?: number;
+        durationMs?: number;
+        confidence?: number;
+        payload?: Record<string, unknown>;
+      }) => {
+        const liveBufferId = raw?.liveBufferId;
+        if (!liveBufferId) return;
+        const cbs = segmentAppendedCallbacks.get(liveBufferId);
+        if (!cbs || cbs.size === 0) return;
+        const event: LiveSegmentBufferSegmentAppendedEvent = {
+          liveBufferId,
+          segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
+          segmentIndex:
+            typeof raw.segmentIndex === 'number'
+              ? Math.trunc(raw.segmentIndex)
+              : 0,
+          sourceAudioBufferId:
+            typeof raw.sourceAudioBufferId === 'string'
+              ? raw.sourceAudioBufferId
+              : '',
+          startSample:
+            typeof raw.startSample === 'number'
+              ? Math.trunc(raw.startSample)
+              : 0,
+          endSample:
+            typeof raw.endSample === 'number' ? Math.trunc(raw.endSample) : 0,
+          sampleRate:
+            typeof raw.sampleRate === 'number' ? Math.trunc(raw.sampleRate) : 0,
+          durationMs:
+            typeof raw.durationMs === 'number' ? Math.trunc(raw.durationMs) : 0,
+          ...(typeof raw.confidence === 'number'
+            ? { confidence: raw.confidence }
+            : {}),
+          ...(raw.payload && typeof raw.payload === 'object'
+            ? { payload: raw.payload }
+            : {}),
+        };
+        for (const cb of cbs) {
+          cb(event);
+        }
+      }
+    );
+  }
+
+  if (!segmentErrorSub) {
+    segmentErrorSub = emitter.addListener(
+      'pipelineLiveSegmentError',
+      (raw: { liveBufferId?: string; message?: string }) => {
+        const id = raw?.liveBufferId;
+        if (typeof id !== 'string' || id.length === 0) return;
+        const cbs = segmentErrorCallbacks.get(id);
+        if (!cbs || cbs.size === 0) return;
+        const e: LiveSegmentBufferErrorEvent = {
+          liveBufferId: id,
+          message: raw?.message ?? 'Unknown live segment buffer error',
+        };
+        for (const cb of cbs) cb(e);
+      }
+    );
+  }
+}
+
+function registerLiveSegmentBufferCallbacks(
+  liveBufferId: string,
+  callbacks: {
+    onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
+    onError?: (event: LiveSegmentBufferErrorEvent) => void;
+  }
+): () => void {
+  if (callbacks.onSegmentAppended) {
+    ensureLiveSegmentEventSubscriptions();
+    let set = segmentAppendedCallbacks.get(liveBufferId);
+    if (!set) {
+      set = new Set();
+      segmentAppendedCallbacks.set(liveBufferId, set);
+    }
+    set.add(callbacks.onSegmentAppended);
+  }
+  if (callbacks.onError) {
+    ensureLiveSegmentEventSubscriptions();
+    let setE = segmentErrorCallbacks.get(liveBufferId);
+    if (!setE) {
+      setE = new Set();
+      segmentErrorCallbacks.set(liveBufferId, setE);
+    }
+    setE.add(callbacks.onError);
+  }
+  return () => {
+    if (callbacks.onSegmentAppended) {
+      const set = segmentAppendedCallbacks.get(liveBufferId);
+      if (set) {
+        set.delete(callbacks.onSegmentAppended);
+        if (set.size === 0) segmentAppendedCallbacks.delete(liveBufferId);
+      }
+    }
+    if (callbacks.onError) {
+      const setE = segmentErrorCallbacks.get(liveBufferId);
+      if (setE) {
+        setE.delete(callbacks.onError);
+        if (setE.size === 0) segmentErrorCallbacks.delete(liveBufferId);
+      }
+    }
+  };
+}
+
 export async function createLiveSegmentBuffer(
   options: CreateLiveSegmentBufferOptions = {}
 ): Promise<LiveSegmentBufferRef> {
+  const sa = options.streamEvents?.segmentAppended;
+  const emitSegmentAppendedEvents =
+    sa !== undefined ? sa.enabled === true : Boolean(options.onSegmentAppended);
+  const segmentEventMinIntervalMs =
+    sa !== undefined
+      ? typeof sa.minIntervalMs === 'number' &&
+        Number.isFinite(sa.minIntervalMs)
+        ? Math.max(0, Math.trunc(sa.minIntervalMs))
+        : 0
+      : 0;
+
   const raw = await getNative().createLiveSegmentBuffer({
     sourceAudioBufferId: options.sourceAudioBufferId,
     maxSegments: options.maxSegments,
@@ -183,10 +333,21 @@ export async function createLiveSegmentBuffer(
     spoolingPath: options.spooling?.path,
     spoolingTemporary: options.spooling?.temporary,
     spoolingThresholdBytes: options.spooling?.thresholdBytes,
+    emitSegmentAppendedEvents,
+    segmentEventMinIntervalMs,
   });
+
+  const liveBufferId = raw.bufferId as string;
+
+  const unsubscribeEvents = registerLiveSegmentBufferCallbacks(liveBufferId, {
+    onSegmentAppended: options.onSegmentAppended,
+    onError: options.onError,
+  });
+
   return {
     info: mapLiveInfo(raw),
     bufferId: raw.bufferId as LiveSegmentBufferRef['bufferId'],
+    unsubscribeEvents,
   };
 }
 
@@ -351,6 +512,9 @@ export type {
   OfflineSegmentBufferFromLiveMode,
   CreateLiveSegmentBufferOptions,
   CreateEmptyOfflineSegmentBufferOptions,
+  LiveSegmentBufferSegmentAppendedEvent,
+  LiveSegmentBufferErrorEvent,
   PipelineSegmentErrorCodeValue,
 } from './types';
 export { PipelineSegmentErrorCode } from './types';
+export type { StreamEventSpec } from '../pipeline/streamEvents';
