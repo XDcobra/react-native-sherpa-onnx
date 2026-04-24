@@ -88,6 +88,18 @@ try {
 }
 ```
 
+### Derive subtitle rows from alignment segments (app-layer)
+
+Derive subtitle rows from `alignment` segments:
+
+```ts
+const subtitleRows = alignmentSegments.map((segment) => ({
+  text: segment.payload?.text ?? '',
+  startSec: segment.startSample / Math.max(1, segment.sampleRate),
+  endSec: segment.endSample / Math.max(1, segment.sampleRate),
+}));
+```
+
 ## API reference
 
 ### `alignTextToAudio(textIn, audioIn, segmentOut, options)`
@@ -116,7 +128,7 @@ function detectAlignmentModel(
 
 ```ts
 function assertAlignmentGranularityForMode(
-  mode: 'proportional' | 'estimated' | 'aligned' | 'off',
+  mode: 'proportional' | 'estimated' | 'aligned' | 'vad' | 'off' ,
   granularity: AlignmentGranularity
 ): void;
 ```
