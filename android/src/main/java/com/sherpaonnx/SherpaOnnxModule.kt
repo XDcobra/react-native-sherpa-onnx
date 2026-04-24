@@ -222,8 +222,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return NAME
   }
 
-  override fun onCatalystInstanceDestroy() {
-    super.onCatalystInstanceDestroy()
+  override fun invalidate() {
+    super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
     onlineSttHelper.shutdown()
@@ -1488,7 +1488,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputKind = "contentUri"
         resolvedOutputPath = handle.resultUri.toString()
       }
-      null -> throw RuntimeException("Resolved write handle is null")
     }
 
     return ResolvedDestination(outputPath, outputKind, resolvedOutputPath, writeHandle, tmpFile)
@@ -1831,16 +1830,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-        val sourcePath: String?
-        val sourceFd: Int
-        when (val handle = readHandle) {
+        val source = when (val handle = readHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            sourcePath = handle.file.absolutePath
-            sourceFd = -1
+            handle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            sourcePath = null
-            sourceFd = handle.pfd.fd
+            null to handle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -1850,6 +1845,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
           null -> throw RuntimeException("Resolved read handle is null")
         }
+        val sourcePath = source.first
+        val sourceFd = source.second
 
         dest = resolveDestinationForSave(destination, fmt)
 
@@ -2575,6 +2572,66 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun validateStrictSpeechPayload(payload: ReadableMap?) {
+    if (payload == null) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload is required and must include source"
+      )
+    }
+    if (!payload.hasKey("source") || payload.isNull("source")) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+    val source = payload.getString("source")?.trim() ?: ""
+    val allowedKeys = when (source) {
+      "vad" -> setOf("source", "engine", "decision", "score")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+
+    val itr = payload.keySetIterator()
+    while (itr.hasNextKey()) {
+      val key = itr.nextKey()
+      if (!allowedKeys.contains(key)) {
+        throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "speech payload.$key is not allowed for source=$source"
+        )
+      }
+    }
+
+    when (source) {
+      "vad" -> {
+        if (payload.hasKey("engine") && !payload.isNull("engine")) {
+          val engine = payload.getString("engine")
+          if (engine != "vad") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.engine must be vad"
+            )
+          }
+        }
+        if (payload.hasKey("decision") && !payload.isNull("decision")) {
+          val decision = payload.getString("decision")
+          if (decision != "model") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.decision must be model"
+            )
+          }
+        }
+      }
+      "stt", "tts" -> Unit
+    }
+  }
+
   override fun appendLiveSegment(
     liveBufferId: String,
     kind: String,
@@ -2588,13 +2645,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
+      val normalizedKind = kind.trim().ifEmpty { "speech" }
+      if (normalizedKind != "speech" && normalizedKind != "alignment") {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "kind must be one of speech or alignment"
+        )
+        return
+      }
+      if (normalizedKind == "speech") {
+        validateStrictSpeechPayload(payload)
+      }
       val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
       if (entry == null) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
         return
       }
       val result = entry.appendSegment(
-        kind = kind,
+        kind = normalizedKind,
         sourceAudioBufferId = sourceAudioBufferId,
         startSample = startSample.toInt(),
         endSample = endSample.toInt(),
@@ -2816,6 +2884,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
+    segmentOutBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
@@ -2824,6 +2893,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.alignOfflineTextToAudio(
       textInBufferId,
       audioInBufferId,
+      segmentOutBufferId,
       mode,
       granularity,
       options,

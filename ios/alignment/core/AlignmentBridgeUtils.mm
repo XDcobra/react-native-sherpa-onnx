@@ -10,27 +10,6 @@ namespace sherpaonnx {
 namespace alignment {
 namespace bridge {
 
-static NSArray *SubtitleItemsToNSArray(
-    const std::vector<sherpa_onnx::alignment::SubtitleItem> &items) {
-  NSMutableArray *array = [NSMutableArray arrayWithCapacity:items.size()];
-  for (const auto &item : items) {
-    [array addObject:@{
-      @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
-      @"start": @(item.start_s),
-      @"end": @(item.end_s),
-    }];
-  }
-  return array;
-}
-
-NSDictionary *AlignmentResultToNSDictionary(
-    const sherpa_onnx::alignment::AlignmentResult &result) {
-  return @{
-    @"subtitles": SubtitleItemsToNSArray(result.subtitles),
-    @"timingMode": [NSString stringWithUTF8String:result.timing_mode.c_str()] ?: @"",
-  };
-}
-
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
   if (options == nil) {
     throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");
@@ -107,6 +86,22 @@ std::string ParseAlignmentModelPath(NSDictionary *options) {
   return std::string([trimmed UTF8String]);
 }
 
+std::string ParseSegmentationBufferId(NSDictionary *options) {
+  if (options == nil) {
+    throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");
+  }
+  NSString *value = [options[@"segmentationBufferId"] isKindOfClass:[NSString class]]
+      ? options[@"segmentationBufferId"]
+      : nil;
+  NSString *trimmed = value != nil
+      ? [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmed.length > 0) {
+    return std::string([trimmed UTF8String]);
+  }
+  throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");
+}
+
 std::string NormalizeMode(NSString *mode) {
   NSString *m = [mode isKindOfClass:[NSString class]]
       ? [[mode lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
@@ -114,6 +109,7 @@ std::string NormalizeMode(NSString *mode) {
   if ([m isEqualToString:@"proportional"]) return "proportional";
   if ([m isEqualToString:@"estimated"]) return "estimated";
   if ([m isEqualToString:@"accurate"]) return "accurate";
+  if ([m isEqualToString:@"vad"]) return "vad";
   throw std::runtime_error("Unsupported alignment mode");
 }
 

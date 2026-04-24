@@ -68,8 +68,9 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'generate_timestamp',
-    title: 'Generate timestamp',
-    description: 'Generate subtitles/timestamps from a WAV file',
+    title: 'Alignment (Subtitles/Timestamps)',
+    description:
+      'Use the alignment API to generate subtitle/timestamp segments from audio + transcript',
     icon: 'time',
     screen: 'GenerateTimestamp',
     implemented: true,

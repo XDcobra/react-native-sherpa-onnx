@@ -17,6 +17,10 @@ class LiveSegmentEntry(
   private val emitSegmentAppendedEvents: Boolean = false,
   private val segmentEventMinIntervalMs: Long = 0L,
 ) {
+  companion object {
+    private val ALLOWED_KINDS = setOf("speech", "alignment")
+  }
+
   enum class State { RECORDING, FINISHED }
 
   @Volatile
@@ -70,6 +74,13 @@ class LiveSegmentEntry(
     confidence: Double?,
     payloadJson: String?,
   ): Pair<String, Int> {
+    val normalizedKind = kind.trim().ifEmpty { "speech" }
+    if (!ALLOWED_KINDS.contains(normalizedKind)) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_ARGUMENT,
+        "kind must be one of speech or alignment; received $kind"
+      )
+    }
     if (sampleRate <= 0) {
       throw SegmentPipelineException(
         SegmentErrorCodes.INVALID_ARGUMENT,
@@ -106,7 +117,7 @@ class LiveSegmentEntry(
       segments.add(
         SegmentRecord(
           id = segmentId,
-          kind = kind,
+          kind = normalizedKind,
           sourceAudioBufferId = sourceAudioBufferId,
           startSample = startSample,
           endSample = endSample,

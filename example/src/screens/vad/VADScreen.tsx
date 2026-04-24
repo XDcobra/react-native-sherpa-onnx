@@ -202,14 +202,12 @@ export default function VADScreen() {
     });
   }, []);
 
-  const logOfflineLifecycle = useCallback((step: string, detail: string) => {
-    void step;
-    void detail;
+  const logOfflineLifecycle = useCallback((_step: string, _detail: string) => {
+    // Intentionally no-op; keep call sites for fast local tracing toggles.
   }, []);
 
-  const logLiveLifecycle = useCallback((step: string, detail: string) => {
-    void step;
-    void detail;
+  const logLiveLifecycle = useCallback((_step: string, _detail: string) => {
+    // Intentionally no-op; keep call sites for fast local tracing toggles.
   }, []);
 
   const waitForIngestDone = useCallback(
@@ -636,9 +634,8 @@ export default function VADScreen() {
             `#${event.segmentIndex} ${event.startSample}-${event.endSample} (${event.durationMs}ms)`
           );
           setSegments((prev) => {
-            const next: SegmentMeta = {
+            const base = {
               id: event.segmentId,
-              kind: 'speech',
               sourceAudioBufferId: event.sourceAudioBufferId,
               startSample: event.startSample,
               endSample: event.endSample,
@@ -647,8 +644,19 @@ export default function VADScreen() {
               ...(typeof event.confidence === 'number'
                 ? { confidence: event.confidence }
                 : {}),
-              ...(event.payload ? { payload: event.payload } : {}),
             };
+            const next: SegmentMeta =
+              event.kind === 'alignment'
+                ? {
+                    ...base,
+                    kind: 'alignment',
+                    ...(event.payload ? { payload: event.payload } : {}),
+                  }
+                : {
+                    ...base,
+                    kind: 'speech',
+                    ...(event.payload ? { payload: event.payload } : {}),
+                  };
             const merged = [...prev, next];
             return merged.slice(-SEGMENT_PREVIEW_LIMIT);
           });

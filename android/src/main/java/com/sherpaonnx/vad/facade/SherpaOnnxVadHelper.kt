@@ -417,7 +417,7 @@ class SherpaOnnxVadHelper(
         cfg.sampleRate,
         durationMs,
         confidence,
-        """{"engine":"vad","decision":"model","score":$confidence}"""
+        """{"source":"vad","engine":"vad","decision":"model","score":$confidence}"""
       )
     } else {
       records.add(
@@ -430,7 +430,7 @@ class SherpaOnnxVadHelper(
           sampleRate = cfg.sampleRate,
           durationMs = durationMs,
           confidence = confidence,
-          payloadJson = """{"engine":"vad","decision":"model","score":$confidence}"""
+          payloadJson = """{"source":"vad","engine":"vad","decision":"model","score":$confidence}"""
         )
       )
     }

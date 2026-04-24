@@ -115,6 +115,24 @@ const segments = await getOfflineSegmentBufferSegments(offline, 0, 64);
 console.log(segments.map((s) => s.durationMs));
 ```
 
+Returned segment payloads are kind-discriminated:
+
+- `kind: 'speech'` -> strict `SpeechSegmentPayload` subtype by `payload.source`:
+  - `source: 'vad'` -> `source`, `engine`, `decision`, `score`
+  - `source: 'stt'` -> `source`, `transcript`, `tokenCount`, `isFinal`
+  - `source: 'tts'` -> `source`, `text`, `chunkIndex`, `isFinalChunk`
+- `kind: 'alignment'` -> strict `AlignmentSegmentPayload` (`text`, `timingMode`, `granularity`, ...)
+
+```ts
+for (const seg of segments) {
+  if (seg.kind === 'alignment') {
+    console.log(seg.payload?.text, seg.payload?.granularity);
+  } else {
+    console.log(seg.payload);
+  }
+}
+```
+
 ---
 
 ## Error code quick table
