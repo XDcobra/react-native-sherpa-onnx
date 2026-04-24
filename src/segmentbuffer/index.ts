@@ -3,6 +3,9 @@ import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { PipelineSegmentErrorCode } from './types';
 import type {
+  AlignmentSegmentPayload,
+  AlignmentGranularity,
+  AlignmentTimingMode,
   CreateEmptyOfflineSegmentBufferOptions,
   CreateLiveSegmentBufferOptions,
   LiveSegmentBufferInfo,
@@ -20,6 +23,7 @@ import type {
   PipelineSegmentBufferInfo,
   SegmentInput,
   SegmentMeta,
+  SegmentKind,
   SegmentBufferSpoolingMode,
 } from './types';
 
@@ -28,6 +32,27 @@ const getNative = (): Spec =>
 
 const SEGMENT_BUFFER_ID_PATTERN =
   /^(seg_off|seg_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const SEGMENT_KIND_VALUES = new Set<SegmentKind>(['speech', 'alignment']);
+const ALIGNMENT_TIMING_MODE_VALUES = new Set<AlignmentTimingMode>([
+  'proportional',
+  'estimated',
+  'accurate',
+  'vad',
+]);
+const ALIGNMENT_GRANULARITY_VALUES = new Set<AlignmentGranularity>([
+  'sentence',
+  'word',
+  'character',
+]);
+const ALIGNMENT_PAYLOAD_ALLOWED_KEYS = new Set([
+  'text',
+  'timingMode',
+  'granularity',
+  'confidence',
+  'tokenMetadata',
+  'wordMetadata',
+  'languageHints',
+]);
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
   const id = value.trim();
@@ -37,6 +62,128 @@ function assertValidSegmentBufferId(value: string, sourceName: string): string {
     );
   }
   return id;
+}
+
+function assertValidSegmentKind(
+  value: unknown,
+  sourceName: string
+): SegmentKind {
+  const kind = typeof value === 'string' ? value.trim() : '';
+  if (SEGMENT_KIND_VALUES.has(kind as SegmentKind)) return kind as SegmentKind;
+  throw new Error(
+    `${
+      PipelineSegmentErrorCode.INVALID_ARGUMENT
+    }: ${sourceName} must be one of "speech" or "alignment"; received "${String(
+      value
+    )}".`
+  );
+}
+
+function assertAlignmentPayload(
+  payload: unknown,
+  sourceName: string
+): AlignmentSegmentPayload {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} must be an object for alignment segments.`
+    );
+  }
+  const obj = payload as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (!ALIGNMENT_PAYLOAD_ALLOWED_KEYS.has(key)) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.${key} is not allowed for alignment payloads.`
+      );
+    }
+  }
+  const text = typeof obj.text === 'string' ? obj.text.trim() : '';
+  if (text.length === 0) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.text must be a non-empty string.`
+    );
+  }
+  if (
+    !ALIGNMENT_TIMING_MODE_VALUES.has(obj.timingMode as AlignmentTimingMode)
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.timingMode must be one of proportional, estimated, accurate, vad.`
+    );
+  }
+  if (
+    !ALIGNMENT_GRANULARITY_VALUES.has(obj.granularity as AlignmentGranularity)
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.granularity must be one of sentence, word, character.`
+    );
+  }
+  if (
+    obj.confidence !== undefined &&
+    (typeof obj.confidence !== 'number' || !Number.isFinite(obj.confidence))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.confidence must be a finite number when provided.`
+    );
+  }
+  if (
+    obj.tokenMetadata !== undefined &&
+    (typeof obj.tokenMetadata !== 'object' ||
+      obj.tokenMetadata === null ||
+      Array.isArray(obj.tokenMetadata))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.tokenMetadata must be an object when provided.`
+    );
+  }
+  if (
+    obj.wordMetadata !== undefined &&
+    (typeof obj.wordMetadata !== 'object' ||
+      obj.wordMetadata === null ||
+      Array.isArray(obj.wordMetadata))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.wordMetadata must be an object when provided.`
+    );
+  }
+  if (obj.languageHints !== undefined) {
+    if (!Array.isArray(obj.languageHints)) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.languageHints must be an array of strings when provided.`
+      );
+    }
+    if (!obj.languageHints.every((it) => typeof it === 'string' && it.trim())) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.languageHints must only contain non-empty strings.`
+      );
+    }
+  }
+  return obj as unknown as AlignmentSegmentPayload;
+}
+
+function assertValidSegmentInput(segment: SegmentInput): {
+  kind: SegmentKind;
+  payload?: Record<string, unknown> | AlignmentSegmentPayload;
+} {
+  const kind = assertValidSegmentKind(segment.kind ?? 'speech', 'segment.kind');
+  if (kind === 'alignment') {
+    return {
+      kind,
+      payload: assertAlignmentPayload(segment.payload, 'segment.payload'),
+    };
+  }
+  if (
+    segment.payload !== undefined &&
+    (typeof segment.payload !== 'object' ||
+      segment.payload === null ||
+      Array.isArray(segment.payload))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: segment.payload must be an object when provided.`
+    );
+  }
+  return {
+    kind,
+    payload: segment.payload as Record<string, unknown> | undefined,
+  };
 }
 
 function normalizeSpoolingMode(value: unknown): SegmentBufferSpoolingMode {
@@ -202,6 +349,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
         segmentId?: string;
         segmentIndex?: number;
         sourceAudioBufferId?: string;
+        kind?: string;
         startSample?: number;
         endSample?: number;
         sampleRate?: number;
@@ -220,6 +368,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
             typeof raw.segmentIndex === 'number'
               ? Math.trunc(raw.segmentIndex)
               : 0,
+          kind: assertValidSegmentKind(raw.kind ?? 'speech', 'event.kind'),
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId
@@ -385,16 +534,17 @@ export async function appendLiveSegment(
     segment.sourceAudioBufferId
   );
 
+  const normalized = assertValidSegmentInput(segment);
   return getNative().appendLiveSegment(
     id,
-    segment.kind ?? 'speech',
+    normalized.kind,
     sourceAudioBufferId,
     segment.startSample,
     segment.endSample,
     segment.sampleRate,
     segment.durationMs,
     segment.confidence,
-    segment.payload
+    normalized.payload
   );
 }
 
@@ -444,7 +594,7 @@ export async function getOfflineSegmentBufferSegments(
   );
   return raw.segments.map((segment) => ({
     id: segment.id,
-    kind: 'speech',
+    kind: assertValidSegmentKind(segment.kind, 'segment.kind'),
     sourceAudioBufferId: segment.sourceAudioBufferId,
     startSample: segment.startSample,
     endSample: segment.endSample,
@@ -470,7 +620,7 @@ export async function getLiveSegmentBufferSegments(
   );
   return raw.segments.map((segment) => ({
     id: segment.id,
-    kind: 'speech',
+    kind: assertValidSegmentKind(segment.kind, 'segment.kind'),
     sourceAudioBufferId: segment.sourceAudioBufferId,
     startSample: segment.startSample,
     endSample: segment.endSample,
@@ -498,6 +648,9 @@ export async function releasePipelineSegmentBuffer(
 }
 
 export type {
+  AlignmentTimingMode,
+  AlignmentGranularity,
+  AlignmentSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,
   SegmentMeta,

@@ -642,7 +642,7 @@ export interface Spec extends TurboModule {
 
   appendLiveSegment(
     liveBufferId: string,
-    kind: string,
+    kind: 'speech' | 'alignment',
     sourceAudioBufferId: string,
     startSample: number,
     endSample: number,
@@ -686,7 +686,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     segments: Array<{
       id: string;
-      kind: string;
+      kind: 'speech' | 'alignment';
       sourceAudioBufferId: string;
       startSample: number;
       endSample: number;
@@ -704,7 +704,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     segments: Array<{
       id: string;
-      kind: string;
+      kind: 'speech' | 'alignment';
       sourceAudioBufferId: string;
       startSample: number;
       endSample: number;

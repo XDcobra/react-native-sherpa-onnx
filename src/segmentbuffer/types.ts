@@ -12,7 +12,25 @@ export type PipelineSegmentBufferKind =
 export type OfflineSegmentBufferState = 'immutable';
 export type LiveSegmentBufferState = 'recording' | 'finished';
 
-export type SegmentKind = 'speech';
+export type SegmentKind = 'speech' | 'alignment';
+
+export type AlignmentTimingMode =
+  | 'proportional'
+  | 'estimated'
+  | 'accurate'
+  | 'vad';
+
+export type AlignmentGranularity = 'sentence' | 'word' | 'character';
+
+export interface AlignmentSegmentPayload {
+  text: string;
+  timingMode: AlignmentTimingMode;
+  granularity: AlignmentGranularity;
+  confidence?: number;
+  tokenMetadata?: Record<string, unknown>;
+  wordMetadata?: Record<string, unknown>;
+  languageHints?: string[];
+}
 
 export type SegmentBufferSpoolingMode = 'off' | 'auto' | 'on';
 
@@ -40,10 +58,10 @@ export interface SegmentMeta {
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown>;
+  payload?: Record<string, unknown> | AlignmentSegmentPayload;
 }
 
-export interface SegmentInput {
+interface SegmentInputBase {
   kind?: SegmentKind;
   sourceAudioBufferId: PipelineAudioBufferIdSource;
   startSample: number;
@@ -51,8 +69,19 @@ export interface SegmentInput {
   sampleRate: number;
   durationMs?: number;
   confidence?: number;
+}
+
+export interface SpeechSegmentInput extends SegmentInputBase {
+  kind?: 'speech';
   payload?: Record<string, unknown>;
 }
+
+export interface AlignmentSegmentInput extends SegmentInputBase {
+  kind: 'alignment';
+  payload: AlignmentSegmentPayload;
+}
+
+export type SegmentInput = SpeechSegmentInput | AlignmentSegmentInput;
 
 export interface OfflineSegmentBufferInfo {
   bufferId: string;
@@ -137,13 +166,14 @@ export interface LiveSegmentBufferSegmentAppendedEvent {
   liveBufferId: string;
   segmentId: string;
   segmentIndex: number;
+  kind: SegmentKind;
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown>;
+  payload?: Record<string, unknown> | AlignmentSegmentPayload;
 }
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
