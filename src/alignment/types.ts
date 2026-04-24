@@ -24,7 +24,17 @@ export interface AlignmentChunkTimeline {
   segmentSampleCounts: readonly number[];
 }
 
-export type AlignmentTimingMode = 'proportional' | 'estimated' | 'aligned';
+export interface AlignmentVadSegmentationConfig {
+  source: 'vad';
+  segmentBuffer: OfflineSegmentBufferIdSource;
+}
+
+export type AlignmentTimingMode =
+  | 'proportional'
+  | 'estimated'
+  | 'aligned'
+  | 'accurate'
+  | 'vad';
 
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
@@ -36,6 +46,7 @@ export type AlignTextToAudioOptionsProportional = {
   mode: 'proportional';
   granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation?: never;
 };
 
 /** Estimated: segment sample counts from synthesis, STT, or other engines. */
@@ -44,20 +55,39 @@ export type AlignTextToAudioOptionsEstimated = {
   chunks: AlignmentChunkTimeline;
   granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation?: never;
 };
 
 /** Accurate: wav2vec2 CTC forced alignment. */
-export type AlignTextToAudioOptionsAccurate = {
-  mode: 'accurate';
-  alignmentModelPath: string;
-  granularity?: AlignmentGranularity;
+export type AlignTextToAudioOptionsAccurate =
+  | {
+      mode: 'accurate';
+      alignmentModelPath: string;
+      granularity?: AlignmentGranularity;
+      language?: string;
+      segmentation?: never;
+    }
+  | {
+      mode: 'accurate';
+      alignmentModelPath: string;
+      granularity?: AlignmentGranularity;
+      language?: string;
+      segmentation: AlignmentVadSegmentationConfig;
+    };
+
+/** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
+export type AlignTextToAudioOptionsVad = {
+  mode: 'vad';
+  granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation: AlignmentVadSegmentationConfig;
 };
 
 export type AlignTextToAudioOptions =
   | AlignTextToAudioOptionsProportional
   | AlignTextToAudioOptionsEstimated
-  | AlignTextToAudioOptionsAccurate;
+  | AlignTextToAudioOptionsAccurate
+  | AlignTextToAudioOptionsVad;
 
 export type AlignTextToAudioFn = (
   textIn: OfflineTextBufferIdSource,

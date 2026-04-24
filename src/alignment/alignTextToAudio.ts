@@ -1,6 +1,9 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolveOfflineSegmentBufferId } from '../segmentbuffer';
+import {
+  getOfflineSegmentBufferSegments,
+  resolveOfflineSegmentBufferId,
+} from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import type {
   AlignTextToAudioFn,
@@ -8,7 +11,7 @@ import type {
   AlignmentGranularity,
 } from './types';
 
-type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate';
+type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate' | 'vad';
 type NativeGranularity = 'sentence' | 'word' | 'character';
 
 function normalizeGranularity(
@@ -24,7 +27,7 @@ function normalizeGranularity(
  * Character granularity requires accurate (CTC) mode.
  */
 export function assertAlignmentGranularityForMode(
-  mode: 'proportional' | 'estimated' | 'aligned' | 'off',
+  mode: 'proportional' | 'estimated' | 'aligned' | 'off' | 'vad',
   granularity: AlignmentGranularity
 ): void {
   if (granularity === 'character' && mode !== 'aligned') {
@@ -37,7 +40,12 @@ export function assertAlignmentGranularityForMode(
 function toNativeMode(
   mode: AlignTextToAudioOptions['mode']
 ): NativeAlignmentMode {
-  if (mode === 'proportional' || mode === 'estimated' || mode === 'accurate') {
+  if (
+    mode === 'proportional' ||
+    mode === 'estimated' ||
+    mode === 'accurate' ||
+    mode === 'vad'
+  ) {
     return mode;
   }
   throw new Error(`Unsupported alignment mode: ${String(mode)}`);
@@ -83,6 +91,22 @@ function buildNativeOptions(
     };
   }
 
+  if (options.mode === 'vad') {
+    const segmentation = options.segmentation;
+    if (!segmentation || segmentation.source !== 'vad') {
+      throw new Error(
+        'ALIGNMENT_ERROR: mode=vad requires options.segmentation with source="vad".'
+      );
+    }
+    const segmentationBufferId = resolveOfflineSegmentBufferId(
+      segmentation.segmentBuffer
+    );
+    return {
+      segmentationSource: 'vad',
+      segmentationBufferId,
+    };
+  }
+
   return language.length > 0 ? { language } : {};
 }
 
@@ -97,10 +121,48 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
 ) => {
   const mode = toNativeMode(options.mode);
   const granularity = normalizeGranularity(options.granularity);
-  assertAlignmentGranularityForMode(
-    mode === 'accurate' ? 'aligned' : mode,
-    granularity
-  );
+  const normalizedMode = mode === 'accurate' ? 'aligned' : mode;
+  assertAlignmentGranularityForMode(normalizedMode, granularity);
+  if (mode === 'vad' && granularity === 'character') {
+    throw new Error(
+      'ALIGNMENT_ERROR: mode=vad supports only sentence or word granularity.'
+    );
+  }
+  if (mode === 'accurate' && options.segmentation?.source === 'vad') {
+    throw new Error(
+      'ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet.'
+    );
+  }
+  if (
+    mode === 'vad' &&
+    (!options.segmentation || options.segmentation.source !== 'vad')
+  ) {
+    throw new Error(
+      'ALIGNMENT_ERROR: mode=vad requires options.segmentation with source="vad".'
+    );
+  }
+  if (mode === 'vad') {
+    const segmentation = options.segmentation;
+    if (!segmentation || segmentation.source !== 'vad') {
+      throw new Error(
+        'ALIGNMENT_ERROR: mode=vad requires options.segmentation with source="vad".'
+      );
+    }
+    const anchors = await getOfflineSegmentBufferSegments(
+      segmentation.segmentBuffer,
+      0,
+      4096
+    );
+    const speechAnchorCount = anchors.filter(
+      (it) => it.kind === 'speech'
+    ).length;
+    if (speechAnchorCount === 0) {
+      return {
+        outputSegmentBufferId: resolveOfflineSegmentBufferId(segmentOut),
+        segmentsWritten: 0,
+      };
+    }
+  }
 
   const textInBufferId = resolvePipelineTextBufferId(textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(audioIn);

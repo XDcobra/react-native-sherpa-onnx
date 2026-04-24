@@ -899,7 +899,7 @@ export interface Spec extends TurboModule {
     textInBufferId: string,
     audioInBufferId: string,
     segmentOutBufferId: string,
-    mode: 'proportional' | 'estimated' | 'accurate',
+    mode: 'proportional' | 'estimated' | 'accurate' | 'vad',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object
   ): Promise<{
