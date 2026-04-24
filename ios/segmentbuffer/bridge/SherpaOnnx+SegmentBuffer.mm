@@ -33,6 +33,10 @@ std::string seg_new_id(const std::string &prefix) {
   return prefix + "_" + seg_uuid();
 }
 
+bool seg_is_valid_kind(const std::string &kind) {
+  return kind == "speech" || kind == "alignment";
+}
+
 std::string segment_records_to_json(const std::vector<SegRecord> &segments) {
   NSMutableArray *arr = [NSMutableArray arrayWithCapacity:segments.size()];
   for (const auto &s : segments) {
@@ -584,6 +588,10 @@ bool seg_live_append_segment(
     SegRecord seg;
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.empty() ? "speech" : kind;
+    if (!seg_is_valid_kind(seg.kind)) {
+      if (error) *error = "SEGMENT_INVALID_ARGUMENT: kind must be one of speech or alignment";
+      return false;
+    }
     seg.sourceAudioBufferId = sourceAudioBufferId.empty() ? entry->sourceAudioBufferId : sourceAudioBufferId;
     seg.startSample = startSample;
     seg.endSample = endSample;
@@ -788,6 +796,10 @@ bool seg_live_append_segment(
     SegRecord seg;
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.length > 0 ? kind.UTF8String : "speech";
+    if (!seg_is_valid_kind(seg.kind)) {
+      reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech or alignment", nil);
+      return;
+    }
     seg.sourceAudioBufferId = sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : entry->sourceAudioBufferId;
     seg.startSample = (int)startSample;
     seg.endSample = (int)endSample;

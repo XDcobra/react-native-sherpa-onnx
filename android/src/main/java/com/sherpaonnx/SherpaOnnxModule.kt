@@ -2588,13 +2588,21 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
+      val normalizedKind = kind.trim().ifEmpty { "speech" }
+      if (normalizedKind != "speech" && normalizedKind != "alignment") {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "kind must be one of speech or alignment"
+        )
+        return
+      }
       val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
       if (entry == null) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
         return
       }
       val result = entry.appendSegment(
-        kind = kind,
+        kind = normalizedKind,
         sourceAudioBufferId = sourceAudioBufferId,
         startSample = startSample.toInt(),
         endSample = endSample.toInt(),
