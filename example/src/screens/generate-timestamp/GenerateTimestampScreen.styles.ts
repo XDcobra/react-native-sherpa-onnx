@@ -198,6 +198,10 @@ export const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
   },
+  vadConfigContainer: {
+    marginBottom: 12,
+    gap: 8,
+  },
   optionRow: {
     gap: 10,
     marginBottom: 12,
@@ -365,6 +369,12 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1C1C1E',
     marginBottom: 4,
+  },
+  resultAccordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   resultCodeText: {
     fontSize: 12,

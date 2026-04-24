@@ -657,7 +657,7 @@ export interface Spec extends TurboModule {
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      * - kind='alignment': strict alignment payload contract
      */
-    payload?: Record<string, unknown>
+    payload?: Object
   ): Promise<{ segmentId: string; segmentIndex: number }>;
 
   finalizeLiveSegmentBuffer(liveBufferId: string): Promise<void>;
@@ -701,7 +701,7 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
-      payload?: Record<string, unknown>;
+      payload?: Object;
     }>;
   }>;
 
@@ -719,7 +719,7 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
-      payload?: Record<string, unknown>;
+      payload?: Object;
     }>;
   }>;
 
