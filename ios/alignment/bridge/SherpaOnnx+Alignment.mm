@@ -1,5 +1,6 @@
 #import "../../SherpaOnnx.h"
 #import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include "../core/AlignmentBridgeUtils.h"
@@ -81,6 +82,18 @@ static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_
 static NSString *const kAlignmentErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kAlignmentOfflineOomMessage =
     @"Not enough memory for offline alignment. Please use smaller chunks or a streaming-friendly pipeline.";
+static NSString *const kSegmentErrBufferNotFound = @"SEGMENT_BUFFER_NOT_FOUND";
+static NSString *const kSegmentErrBufferKindMismatch = @"SEGMENT_BUFFER_KIND_MISMATCH";
+static NSString *const kSegmentErrInvalidArgument = @"SEGMENT_INVALID_ARGUMENT";
+static NSString *const kSegmentErrInvalidState = @"SEGMENT_INVALID_STATE";
+
+static std::string alignmentTimingModeToSegmentTimingMode(const std::string &timingMode, const std::string &fallbackMode) {
+  if (timingMode == "aligned") return "accurate";
+  if (timingMode == "proportional" || timingMode == "estimated" || timingMode == "accurate" || timingMode == "vad") {
+    return timingMode;
+  }
+  return fallbackMode;
+}
 
 }  // namespace
 
@@ -108,6 +121,7 @@ static NSString *const kAlignmentOfflineOomMessage =
 
 - (void)alignOfflineTextToAudio:(NSString *)textInBufferId
                  audioInBufferId:(NSString *)audioInBufferId
+               segmentOutBufferId:(NSString *)segmentOutBufferId
                             mode:(NSString *)mode
                      granularity:(NSString *)granularity
                          options:(NSDictionary *)options
@@ -122,11 +136,16 @@ static NSString *const kAlignmentOfflineOomMessage =
     reject(kAlignmentErrAudioBufferNotFound, @"audioInBufferId is required", nil);
     return;
   }
+  if (segmentOutBufferId == nil || [segmentOutBufferId length] == 0) {
+    reject(kSegmentErrInvalidArgument, @"segmentOutBufferId is required", nil);
+    return;
+  }
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     try {
       std::string textId = [textInBufferId UTF8String];
       std::string audioId = [audioInBufferId UTF8String];
+      std::string segmentOutId = [segmentOutBufferId UTF8String];
 
       if (textId.find("txt_off_") != 0) {
         reject(kAlignmentErrTextBufferKindMismatch,
@@ -183,6 +202,24 @@ static NSString *const kAlignmentOfflineOomMessage =
           }
           return;
         }
+      }
+      if (segmentOutId.find("seg_off_") != 0) {
+        reject(kSegmentErrBufferKindMismatch,
+               [NSString stringWithFormat:@"Expected offline segment buffer (seg_off_*), got: %@", segmentOutBufferId],
+               nil);
+        return;
+      }
+      std::shared_ptr<SegOfflineEntry> outputEntry;
+      {
+        std::lock_guard<std::mutex> segLock(g_seg_mutex);
+        auto segIt = g_seg_offline.find(segmentOutId);
+        if (segIt == g_seg_offline.end()) {
+          reject(kSegmentErrBufferNotFound,
+                 [NSString stringWithFormat:@"Offline segment buffer not found: %@", segmentOutBufferId],
+                 nil);
+          return;
+        }
+        outputEntry = segIt->second;
       }
 
       int inputSampleRate = 0;
@@ -241,8 +278,46 @@ static NSString *const kAlignmentOfflineOomMessage =
       } else {
         throw std::runtime_error("Unsupported alignment mode");
       }
-
-      resolve(sherpaonnx::alignment::bridge::AlignmentResultToNSDictionary(result));
+      const std::string timingMode = alignmentTimingModeToSegmentTimingMode(result.timing_mode, modeStr);
+      std::vector<SegRecord> records;
+      records.reserve(result.subtitles.size());
+      for (int i = 0; i < (int)result.subtitles.size(); ++i) {
+        const auto &item = result.subtitles[i];
+        const int startSample = std::max(0, static_cast<int>(std::round(item.start_s * inputSampleRate)));
+        const int endSample = std::max(startSample, static_cast<int>(std::round(item.end_s * inputSampleRate)));
+        SegRecord r;
+        r.id = "seg_align_" + std::to_string(i) + "_" + std::to_string(startSample) + "_" + std::to_string(endSample);
+        r.kind = "alignment";
+        r.sourceAudioBufferId = audioId;
+        r.startSample = startSample;
+        r.endSample = endSample;
+        r.sampleRate = inputSampleRate;
+        r.durationMs = static_cast<int>(((std::max(0, endSample - startSample) * 1000.0) / std::max(1, inputSampleRate)));
+        NSDictionary *payload = @{
+          @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
+          @"timingMode": [NSString stringWithUTF8String:timingMode.c_str()] ?: @"",
+          @"granularity": [NSString stringWithUTF8String:granularityStr.c_str()] ?: @"sentence",
+        };
+        NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+        if (payloadData != nil) {
+          r.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+        }
+        records.push_back(std::move(r));
+      }
+      {
+        std::lock_guard<std::mutex> segLock(g_seg_mutex);
+        if (outputEntry->segments.size() > 0) {
+          reject(kSegmentErrInvalidState,
+                 [NSString stringWithFormat:@"Offline segment buffer already populated: %@", segmentOutBufferId],
+                 nil);
+          return;
+        }
+        outputEntry->segments = records;
+      }
+      resolve(@{
+        @"outputSegmentBufferId": segmentOutBufferId,
+        @"segmentsWritten": @((int)records.size()),
+      });
     } catch (const std::bad_alloc &) {
       reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
     } catch (const std::exception &e) {

@@ -11,9 +11,15 @@ import com.sherpaonnx.alignment.core.SttAlignmentSegment
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.segment.pipeline.SegmentErrorCodes
+import com.sherpaonnx.segment.pipeline.SegmentPipelineException
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
+import org.json.JSONObject
 import java.util.HashMap
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 internal class SherpaOnnxAlignmentHelper {
   private val executor = Executors.newSingleThreadExecutor()
@@ -54,6 +60,7 @@ internal class SherpaOnnxAlignmentHelper {
   fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
+    segmentOutBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
@@ -136,6 +143,30 @@ internal class SherpaOnnxAlignmentHelper {
           return@execute
         }
 
+        val segmentOutId = segmentOutBufferId.trim()
+        if (segmentOutId.isEmpty()) {
+          promise.reject(
+            SegmentErrorCodes.INVALID_ARGUMENT,
+            "segmentOutBufferId is required"
+          )
+          return@execute
+        }
+        if (!segmentOutId.startsWith("seg_off_")) {
+          promise.reject(
+            SegmentErrorCodes.BUFFER_KIND_MISMATCH,
+            "Expected offline segment buffer (seg_off_*), got: $segmentOutBufferId"
+          )
+          return@execute
+        }
+        val outputEntry = SegmentPipelineRegistry.getOffline(segmentOutId)
+        if (outputEntry == null) {
+          promise.reject(
+            SegmentErrorCodes.BUFFER_NOT_FOUND,
+            "Offline segment buffer not found: $segmentOutBufferId"
+          )
+          return@execute
+        }
+
         val normalizedMode = AlignmentOptionParsers.normalizeMode(mode)
         val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
 
@@ -179,8 +210,45 @@ internal class SherpaOnnxAlignmentHelper {
 
           else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")
         }
-
-        promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
+        val (subtitleItems, timingModeRaw) = AlignmentResultMapper.parseSubtitleItems(raw)
+        val timingMode = when (timingModeRaw.trim().lowercase()) {
+          "aligned" -> "accurate"
+          "proportional", "estimated", "accurate", "vad" -> timingModeRaw.trim().lowercase()
+          else -> normalizedMode
+        }
+        val records = subtitleItems.mapIndexed { index, item ->
+          val startSample = (item.startSec * audioEntry.sampleRate.toDouble())
+            .roundToInt()
+            .coerceAtLeast(0)
+          val endSample = (item.endSec * audioEntry.sampleRate.toDouble())
+            .roundToInt()
+            .coerceAtLeast(startSample)
+          val durationMs =
+            (((endSample - startSample).coerceAtLeast(0) * 1000L) / audioEntry.sampleRate.toLong()).toInt()
+          SegmentRecord(
+            id = "seg_align_${index}_${startSample}_$endSample",
+            kind = "alignment",
+            sourceAudioBufferId = audioId,
+            startSample = startSample,
+            endSample = endSample,
+            sampleRate = audioEntry.sampleRate,
+            durationMs = durationMs,
+            payloadJson = JSONObject().apply {
+              put("text", item.text)
+              put("timingMode", timingMode)
+              put("granularity", normalizedGranularity)
+            }.toString(),
+          )
+        }
+        outputEntry.populate(records)
+        promise.resolve(
+          com.facebook.react.bridge.Arguments.createMap().apply {
+            putString("outputSegmentBufferId", segmentOutId)
+            putInt("segmentsWritten", records.size)
+          }
+        )
+      } catch (e: SegmentPipelineException) {
+        promise.reject(e.code, e.message, e)
       } catch (e: OutOfMemoryError) {
         Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
         promise.reject(

@@ -10,27 +10,6 @@ namespace sherpaonnx {
 namespace alignment {
 namespace bridge {
 
-static NSArray *SubtitleItemsToNSArray(
-    const std::vector<sherpa_onnx::alignment::SubtitleItem> &items) {
-  NSMutableArray *array = [NSMutableArray arrayWithCapacity:items.size()];
-  for (const auto &item : items) {
-    [array addObject:@{
-      @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
-      @"start": @(item.start_s),
-      @"end": @(item.end_s),
-    }];
-  }
-  return array;
-}
-
-NSDictionary *AlignmentResultToNSDictionary(
-    const sherpa_onnx::alignment::AlignmentResult &result) {
-  return @{
-    @"subtitles": SubtitleItemsToNSArray(result.subtitles),
-    @"timingMode": [NSString stringWithUTF8String:result.timing_mode.c_str()] ?: @"",
-  };
-}
-
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
   if (options == nil) {
     throw std::runtime_error("ALIGNMENT_CHUNKS_MISSING: Provide options.segmentSampleCounts for estimated mode.");

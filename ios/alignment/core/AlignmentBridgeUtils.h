@@ -23,7 +23,6 @@ namespace sherpaonnx {
 namespace alignment {
 namespace bridge {
 
-NSDictionary *AlignmentResultToNSDictionary(const sherpa_onnx::alignment::AlignmentResult &result);
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options);
 int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRate);
 std::string ParseAlignmentModelPath(NSDictionary *options);

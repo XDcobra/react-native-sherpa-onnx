@@ -2887,6 +2887,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
+    segmentOutBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
@@ -2895,6 +2896,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.alignOfflineTextToAudio(
       textInBufferId,
       audioInBufferId,
+      segmentOutBufferId,
       mode,
       granularity,
       options,
