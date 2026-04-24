@@ -7,7 +7,7 @@ internal object AlignmentOptionParsers {
   fun normalizeMode(mode: String): String {
     val normalized = mode.trim().lowercase()
     return when (normalized) {
-      "proportional", "estimated", "accurate" -> normalized
+      "proportional", "estimated", "accurate", "vad" -> normalized
       else -> throw IllegalArgumentException("Unsupported alignment mode: $mode")
     }
   }
@@ -71,6 +71,22 @@ internal object AlignmentOptionParsers {
     }
 
     return fallbackSampleRate
+  }
+
+  fun parseSegmentationBufferId(options: ReadableMap?): String {
+    val direct = options?.getString("segmentationBufferId")?.trim().orEmpty()
+    if (direct.isNotEmpty()) {
+      return direct
+    }
+    val source = options?.getString("segmentationSource")?.trim().orEmpty()
+    if (source == "vad") {
+      throw IllegalArgumentException(
+        "ALIGNMENT_ERROR: options.segmentationBufferId is required when segmentationSource='vad'.",
+      )
+    }
+    throw IllegalArgumentException(
+      "ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.",
+    )
   }
 
   private fun readableArrayToIntArray(array: ReadableArray): IntArray {

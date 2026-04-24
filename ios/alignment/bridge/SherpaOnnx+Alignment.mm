@@ -9,6 +9,8 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <cctype>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -93,6 +95,88 @@ static std::string alignmentTimingModeToSegmentTimingMode(const std::string &tim
     return timingMode;
   }
   return fallbackMode;
+}
+
+static std::vector<std::string> splitTextUnits(const std::string &text, const std::string &granularity) {
+  std::vector<std::string> units;
+  if (granularity == "word") {
+    std::string current;
+    for (char c : text) {
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        if (!current.empty()) {
+          units.push_back(current);
+          current.clear();
+        }
+      } else {
+        current.push_back(c);
+      }
+    }
+    if (!current.empty()) units.push_back(current);
+    return units;
+  }
+
+  std::string current;
+  for (size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    current.push_back(c);
+    if (c == '.' || c == '!' || c == '?') {
+      size_t j = i + 1;
+      while (j < text.size() && std::isspace(static_cast<unsigned char>(text[j]))) j++;
+      if (!current.empty()) {
+        units.push_back(current);
+        current.clear();
+      }
+      i = j - 1;
+    }
+  }
+  if (!current.empty()) units.push_back(current);
+  return units;
+}
+
+static double unitWeight(const std::string &unit) {
+  size_t count = 0;
+  for (char c : unit) {
+    if (!std::isspace(static_cast<unsigned char>(c))) count++;
+  }
+  return static_cast<double>(std::max<size_t>(1, count));
+}
+
+static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
+    const std::vector<std::string> &units,
+    const std::vector<SegRecord> &anchors) {
+  std::vector<std::vector<std::string>> out(anchors.size());
+  if (units.empty() || anchors.empty()) return out;
+
+  std::vector<double> anchorCum(anchors.size(), 0.0);
+  double totalAnchor = 0.0;
+  for (const auto &a : anchors) {
+    totalAnchor += std::max(1, a.endSample - a.startSample);
+  }
+  totalAnchor = std::max(1.0, totalAnchor);
+  double accAnchor = 0.0;
+  for (size_t i = 0; i < anchors.size(); ++i) {
+    accAnchor += std::max(1, anchors[i].endSample - anchors[i].startSample);
+    anchorCum[i] = accAnchor / totalAnchor;
+  }
+
+  std::vector<double> weights(units.size(), 1.0);
+  double totalWeight = 0.0;
+  for (size_t i = 0; i < units.size(); ++i) {
+    weights[i] = unitWeight(units[i]);
+    totalWeight += weights[i];
+  }
+  totalWeight = std::max(1.0, totalWeight);
+  double accUnits = 0.0;
+  for (size_t i = 0; i < units.size(); ++i) {
+    const double mid = (accUnits + (weights[i] / 2.0)) / totalWeight;
+    size_t anchorIdx = 0;
+    while (anchorIdx + 1 < anchorCum.size() && anchorCum[anchorIdx] < mid) {
+      anchorIdx++;
+    }
+    out[anchorIdx].push_back(units[i]);
+    accUnits += weights[i];
+  }
+  return out;
 }
 
 }  // namespace
@@ -242,6 +326,17 @@ static std::string alignmentTimingModeToSegmentTimingMode(const std::string &tim
 
       std::string modeStr = sherpaonnx::alignment::bridge::NormalizeMode(mode);
       std::string granularityStr = sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
+      if (modeStr == "vad" && granularityStr == "character") {
+        reject(kSegmentErrInvalidArgument, @"mode=vad supports only sentence or word granularity", nil);
+        return;
+      }
+      if (modeStr == "accurate") {
+        NSString *segSource = [options[@"segmentationSource"] isKindOfClass:[NSString class]] ? options[@"segmentationSource"] : nil;
+        if (segSource != nil && [[segSource lowercaseString] isEqualToString:@"vad"]) {
+          reject(kAlignmentErrCode, @"ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet", nil);
+          return;
+        }
+      }
 
       sherpa_onnx::alignment::AlignmentResult result;
       if (modeStr == "proportional") {
@@ -275,6 +370,110 @@ static std::string alignmentTimingModeToSegmentTimingMode(const std::string &tim
             pcm.size(),
             pcmSampleRate,
             granularityStr);
+      } else if (modeStr == "vad") {
+        const std::string segSourceId = sherpaonnx::alignment::bridge::ParseSegmentationBufferId(options);
+        if (segSourceId.find("seg_off_") != 0) {
+          reject(kSegmentErrBufferKindMismatch,
+                 [NSString stringWithFormat:@"Expected offline segment buffer (seg_off_*), got: %s", segSourceId.c_str()],
+                 nil);
+          return;
+        }
+        std::shared_ptr<SegOfflineEntry> anchorEntry;
+        {
+          std::lock_guard<std::mutex> segLock(g_seg_mutex);
+          auto it = g_seg_offline.find(segSourceId);
+          if (it == g_seg_offline.end()) {
+            reject(kSegmentErrBufferNotFound,
+                   [NSString stringWithFormat:@"Offline segment buffer not found: %s", segSourceId.c_str()],
+                   nil);
+            return;
+          }
+          anchorEntry = it->second;
+        }
+        std::vector<SegRecord> anchors;
+        {
+          std::lock_guard<std::mutex> anchorLock(anchorEntry->lock);
+          for (const auto &segment : anchorEntry->segments) {
+            if (segment.kind == "speech" && segment.endSample >= segment.startSample) {
+              anchors.push_back(segment);
+            }
+          }
+        }
+        if (anchors.empty()) {
+          std::lock_guard<std::mutex> segLock(g_seg_mutex);
+          if (outputEntry->segments.size() > 0) {
+            reject(kSegmentErrInvalidState,
+                   [NSString stringWithFormat:@"Offline segment buffer already populated: %@", segmentOutBufferId],
+                   nil);
+            return;
+          }
+          outputEntry->segments.clear();
+          resolve(@{
+            @"outputSegmentBufferId": segmentOutBufferId,
+            @"segmentsWritten": @(0),
+          });
+          return;
+        }
+
+        const auto units = splitTextUnits(inputText, granularityStr);
+        const auto mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors);
+        std::vector<SegRecord> records;
+        records.reserve(anchors.size());
+        const size_t unmappedCount = std::count_if(mapped.begin(), mapped.end(), [](const auto &group) {
+          return group.empty();
+        });
+        for (size_t i = 0; i < anchors.size(); ++i) {
+          const auto &group = mapped[i];
+          if (group.empty()) continue;
+          std::string textJoined;
+          for (size_t j = 0; j < group.size(); ++j) {
+            if (j > 0) textJoined += " ";
+            textJoined += group[j];
+          }
+          if (textJoined.empty()) continue;
+          const auto &anchor = anchors[i];
+          SegRecord r;
+          r.id = "seg_align_vad_" + std::to_string(i) + "_" + std::to_string(anchor.startSample) + "_" + std::to_string(anchor.endSample);
+          r.kind = "alignment";
+          r.sourceAudioBufferId = audioId;
+          r.startSample = anchor.startSample;
+          r.endSample = anchor.endSample;
+          r.sampleRate = inputSampleRate;
+          r.durationMs = static_cast<int>(((std::max(0, anchor.endSample - anchor.startSample) * 1000.0) / std::max(1, inputSampleRate)));
+          NSDictionary *tokenMetadata = @{
+            @"mappingStrategy": @"vadMonotonicWeightDP",
+            @"textUnitCount": @(units.size()),
+            @"vadAnchorCount": @(anchors.size()),
+            @"mappedUnitCount": @(group.size()),
+            @"unmappedVadAnchorCount": @(unmappedCount),
+          };
+          NSDictionary *payload = @{
+            @"text": [NSString stringWithUTF8String:textJoined.c_str()] ?: @"",
+            @"timingMode": @"vad",
+            @"granularity": [NSString stringWithUTF8String:granularityStr.c_str()] ?: @"sentence",
+            @"tokenMetadata": tokenMetadata,
+          };
+          NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+          if (payloadData != nil) {
+            r.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+          }
+          records.push_back(std::move(r));
+        }
+        {
+          std::lock_guard<std::mutex> segLock(g_seg_mutex);
+          if (outputEntry->segments.size() > 0) {
+            reject(kSegmentErrInvalidState,
+                   [NSString stringWithFormat:@"Offline segment buffer already populated: %@", segmentOutBufferId],
+                   nil);
+            return;
+          }
+          outputEntry->segments = records;
+        }
+        resolve(@{
+          @"outputSegmentBufferId": segmentOutBufferId,
+          @"segmentsWritten": @((int)records.size()),
+        });
+        return;
       } else {
         throw std::runtime_error("Unsupported alignment mode");
       }

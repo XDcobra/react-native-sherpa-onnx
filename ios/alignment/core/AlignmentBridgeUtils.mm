@@ -86,6 +86,22 @@ std::string ParseAlignmentModelPath(NSDictionary *options) {
   return std::string([trimmed UTF8String]);
 }
 
+std::string ParseSegmentationBufferId(NSDictionary *options) {
+  if (options == nil) {
+    throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");
+  }
+  NSString *value = [options[@"segmentationBufferId"] isKindOfClass:[NSString class]]
+      ? options[@"segmentationBufferId"]
+      : nil;
+  NSString *trimmed = value != nil
+      ? [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmed.length > 0) {
+    return std::string([trimmed UTF8String]);
+  }
+  throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");
+}
+
 std::string NormalizeMode(NSString *mode) {
   NSString *m = [mode isKindOfClass:[NSString class]]
       ? [[mode lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
@@ -93,6 +109,7 @@ std::string NormalizeMode(NSString *mode) {
   if ([m isEqualToString:@"proportional"]) return "proportional";
   if ([m isEqualToString:@"estimated"]) return "estimated";
   if ([m isEqualToString:@"accurate"]) return "accurate";
+  if ([m isEqualToString:@"vad"]) return "vad";
   throw std::runtime_error("Unsupported alignment mode");
 }
 

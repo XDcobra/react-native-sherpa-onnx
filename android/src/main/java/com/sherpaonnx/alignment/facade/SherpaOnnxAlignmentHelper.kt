@@ -57,6 +57,56 @@ internal class SherpaOnnxAlignmentHelper {
     granularity: String,
   ): HashMap<String, Any>
 
+  private data class VadaAnchor(
+    val startSample: Int,
+    val endSample: Int,
+  )
+
+  private fun splitTextUnits(text: String, granularity: String): List<String> {
+    if (granularity == "word") {
+      return text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    }
+    return text
+      .split(Regex("(?<=[.!?])\\s+"))
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+  }
+
+  private fun unitWeight(unit: String): Double {
+    val compact = unit.filterNot { it.isWhitespace() }
+    return compact.length.coerceAtLeast(1).toDouble()
+  }
+
+  private fun mapUnitsToAnchorsMonotonicWeight(
+    units: List<String>,
+    anchors: List<VadaAnchor>,
+  ): List<List<String>> {
+    val out = MutableList(anchors.size) { mutableListOf<String>() }
+    if (units.isEmpty() || anchors.isEmpty()) return out
+    val anchorDurations = anchors.map { (it.endSample - it.startSample).coerceAtLeast(1).toDouble() }
+    val totalAnchor = anchorDurations.sum().coerceAtLeast(1.0)
+    val anchorCum = DoubleArray(anchorDurations.size)
+    var accA = 0.0
+    for (i in anchorDurations.indices) {
+      accA += anchorDurations[i]
+      anchorCum[i] = accA / totalAnchor
+    }
+    val unitWeights = units.map(::unitWeight)
+    val totalUnits = unitWeights.sum().coerceAtLeast(1.0)
+    var accU = 0.0
+    for (i in units.indices) {
+      val w = unitWeights[i]
+      val mid = (accU + (w / 2.0)) / totalUnits
+      var anchorIdx = 0
+      while (anchorIdx < anchorCum.lastIndex && anchorCum[anchorIdx] < mid) {
+        anchorIdx += 1
+      }
+      out[anchorIdx].add(units[i])
+      accU += w
+    }
+    return out
+  }
+
   fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
@@ -169,6 +219,20 @@ internal class SherpaOnnxAlignmentHelper {
 
         val normalizedMode = AlignmentOptionParsers.normalizeMode(mode)
         val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
+        if (normalizedMode == "vad" && normalizedGranularity == "character") {
+          promise.reject(
+            SegmentErrorCodes.INVALID_ARGUMENT,
+            "mode=vad supports only sentence or word granularity"
+          )
+          return@execute
+        }
+        if (normalizedMode == "accurate" && options?.getString("segmentationSource") == "vad") {
+          promise.reject(
+            AlignmentErrorCodes.ERR_ALIGNMENT,
+            "ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet"
+          )
+          return@execute
+        }
 
         val raw = when (normalizedMode) {
           "proportional" -> nativeAlignProportional(
@@ -206,6 +270,86 @@ internal class SherpaOnnxAlignmentHelper {
               audioEntry.sampleRate,
               normalizedGranularity,
             )
+          }
+
+          "vad" -> {
+            val segmentationBufferId = AlignmentOptionParsers.parseSegmentationBufferId(options)
+            if (!segmentationBufferId.startsWith("seg_off_")) {
+              promise.reject(
+                SegmentErrorCodes.BUFFER_KIND_MISMATCH,
+                "Expected offline segment buffer (seg_off_*), got: $segmentationBufferId"
+              )
+              return@execute
+            }
+            val anchorEntry = SegmentPipelineRegistry.getOffline(segmentationBufferId)
+            if (anchorEntry == null) {
+              promise.reject(
+                SegmentErrorCodes.BUFFER_NOT_FOUND,
+                "Offline segment buffer not found: $segmentationBufferId"
+              )
+              return@execute
+            }
+            val anchors = anchorEntry.snapshotSegments(0, Int.MAX_VALUE)
+              .filter { it.kind == "speech" && it.endSample >= it.startSample }
+              .map { VadaAnchor(it.startSample, it.endSample) }
+            if (anchors.isEmpty()) {
+              outputEntry.populate(emptyList())
+              promise.resolve(
+                com.facebook.react.bridge.Arguments.createMap().apply {
+                  putString("outputSegmentBufferId", segmentOutId)
+                  putInt("segmentsWritten", 0)
+                }
+              )
+              return@execute
+            }
+            val units = splitTextUnits(text, normalizedGranularity)
+            val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
+            val records = mutableListOf<SegmentRecord>()
+            for (i in anchors.indices) {
+              val unitGroup = mapped[i]
+              if (unitGroup.isEmpty()) continue
+              val joined = if (normalizedGranularity == "word") {
+                unitGroup.joinToString(" ")
+              } else {
+                unitGroup.joinToString(" ")
+              }.trim()
+              if (joined.isEmpty()) continue
+              val anchor = anchors[i]
+              val durationMs =
+                (((anchor.endSample - anchor.startSample).coerceAtLeast(0) * 1000L) / audioEntry.sampleRate.toLong()).toInt()
+              val tokenMetadata = JSONObject().apply {
+                put("mappingStrategy", "vadMonotonicWeightDP")
+                put("textUnitCount", units.size)
+                put("vadAnchorCount", anchors.size)
+                put("mappedUnitCount", unitGroup.size)
+                put("unmappedVadAnchorCount", mapped.count { it.isEmpty() })
+              }
+              records.add(
+                SegmentRecord(
+                  id = "seg_align_vad_${i}_${anchor.startSample}_${anchor.endSample}",
+                  kind = "alignment",
+                  sourceAudioBufferId = audioId,
+                  startSample = anchor.startSample,
+                  endSample = anchor.endSample,
+                  sampleRate = audioEntry.sampleRate,
+                  durationMs = durationMs,
+                  payloadJson = JSONObject().apply {
+                    put("text", joined)
+                    put("timingMode", "vad")
+                    put("granularity", normalizedGranularity)
+                    put("tokenMetadata", tokenMetadata)
+                  }.toString(),
+                )
+              )
+            }
+            outputEntry.populate(records)
+            promise.resolve(
+              com.facebook.react.bridge.Arguments.createMap().apply {
+                putString("outputSegmentBufferId", segmentOutId)
+                putInt("segmentsWritten", records.size)
+              }
+            )
+            return@execute
           }
 
           else -> throw IllegalArgumentException("Unsupported alignment mode: $normalizedMode")
