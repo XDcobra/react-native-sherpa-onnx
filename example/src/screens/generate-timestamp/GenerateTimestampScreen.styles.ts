@@ -358,6 +358,11 @@ export const styles = StyleSheet.create({
     color: '#1C1C1E',
     marginBottom: 4,
   },
+  resultCodeText: {
+    fontSize: 12,
+    color: '#6D6D72',
+    marginBottom: 2,
+  },
   subtitleList: {
     gap: 8,
   },

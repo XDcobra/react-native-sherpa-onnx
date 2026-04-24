@@ -22,7 +22,6 @@ import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
   alignTextToAudio,
   detectAlignmentModel,
-  type AlignTextToAudioResult,
   type AlignmentGranularity,
   type AlignmentModelType,
 } from 'react-native-sherpa-onnx/alignment';
@@ -30,6 +29,12 @@ import {
   createOfflineAudioBufferFromFile,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineSegmentBuffer,
+  getOfflineSegmentBufferSegments,
+  releasePipelineSegmentBuffer,
+  type SegmentMeta,
+} from 'react-native-sherpa-onnx/segmentbuffer';
 import {
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
@@ -61,6 +66,16 @@ function isAlignmentModelFolder(folder: string, hint: string): boolean {
 }
 
 type AlignmentModelEntry = { id: string; label: string };
+type AlignmentSegmentView = Extract<SegmentMeta, { kind: 'alignment' }>;
+type AlignmentPipelineResult = {
+  textInBufferId: string;
+  audioInBufferId: string;
+  segmentOutBufferId: string;
+  segmentsWritten: number;
+  writeDurationMs: number;
+  alignmentSegments: AlignmentSegmentView[];
+  errorCode?: string;
+};
 
 type DropdownType = 'mode' | 'granularity' | null;
 type ScreenSubtitleMode = 'proportional' | 'accurate';
@@ -109,11 +124,21 @@ const ALL_GRANULARITY_OPTIONS: GranularityOption[] = [
   },
 ];
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return '0.00';
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return '0';
   }
-  return seconds.toFixed(2);
+  return `${Math.round(ms)}`;
+}
+
+function extractErrorCode(message: string): string | null {
+  const trimmed = message.trim();
+  const idx = trimmed.indexOf(':');
+  if (idx <= 0) {
+    return null;
+  }
+  const maybeCode = trimmed.slice(0, idx).trim();
+  return maybeCode.length > 0 ? maybeCode : null;
 }
 
 function normalizeUriToPath(uri: string): string {
@@ -201,7 +226,7 @@ export default function GenerateTimestampScreen() {
   const [errorSource, setErrorSource] = useState<'init' | 'generate' | null>(
     null
   );
-  const [result, setResult] = useState<AlignTextToAudioResult | null>(null);
+  const [result, setResult] = useState<AlignmentPipelineResult | null>(null);
 
   const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
@@ -481,6 +506,7 @@ export default function GenerateTimestampScreen() {
     let cleanupPath: string | null = null;
     let textBufferId: string | null = null;
     let audioBufferId: string | null = null;
+    let segmentOutBufferId: string | null = null;
     try {
       let audioPath = normalizeUriToPath(selectedAudioUri);
       if (selectedAudioUri.startsWith('content://')) {
@@ -506,23 +532,54 @@ export default function GenerateTimestampScreen() {
       });
       audioBufferId = audioBuffer.bufferId;
 
-      const subtitleResult =
+      const segmentOut = await createEmptyOfflineSegmentBuffer({
+        sourceAudioBufferId: audioBuffer.bufferId,
+      });
+      segmentOutBufferId = segmentOut.bufferId;
+      const writeStartedAt = Date.now();
+      const writeResult =
         mode === 'accurate'
-          ? await alignTextToAudio(textBuffer, audioBuffer, {
+          ? await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
               mode: 'accurate',
               granularity,
               alignmentModelPath: initializedModelPath,
             })
-          : await alignTextToAudio(textBuffer, audioBuffer, {
+          : await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
               mode: 'proportional',
               granularity: proportionalGranularity,
             });
-      setResult(subtitleResult);
+      const writeDurationMs = Date.now() - writeStartedAt;
+      const segments = await getOfflineSegmentBufferSegments(
+        segmentOut,
+        0,
+        4096
+      );
+      const alignmentSegments = segments.filter(
+        (segment): segment is AlignmentSegmentView =>
+          segment.kind === 'alignment'
+      );
+      setResult({
+        textInBufferId: textBuffer.bufferId,
+        audioInBufferId: audioBuffer.bufferId,
+        segmentOutBufferId: writeResult.outputSegmentBufferId,
+        segmentsWritten: writeResult.segmentsWritten,
+        writeDurationMs,
+        alignmentSegments,
+      });
+      await releasePipelineSegmentBuffer(segmentOut.bufferId).catch(() => {
+        // ignore cleanup errors
+      });
+      segmentOutBufferId = null;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to generate timestamps';
       setError(message);
       setErrorSource('generate');
+      setResult((prev) =>
+        prev
+          ? { ...prev, errorCode: extractErrorCode(message) ?? undefined }
+          : null
+      );
     } finally {
       if (textBufferId) {
         await releasePipelineTextBuffer(textBufferId).catch(() => {
@@ -536,6 +593,11 @@ export default function GenerateTimestampScreen() {
       }
       if (cleanupPath) {
         unlink(cleanupPath).catch(() => {
+          // ignore cleanup errors
+        });
+      }
+      if (segmentOutBufferId) {
+        await releasePipelineSegmentBuffer(segmentOutBufferId).catch(() => {
           // ignore cleanup errors
         });
       }
@@ -786,37 +848,65 @@ export default function GenerateTimestampScreen() {
             {result ? (
               <>
                 <View style={styles.resultCard}>
-                  <Text style={styles.resultMetaText}>
-                    Timing mode: {result.timingMode}
+                  <Text style={styles.resultMetaText}>Pipeline I/O</Text>
+                  <Text style={styles.resultCodeText}>
+                    textInBufferId: {result.textInBufferId}
                   </Text>
-                  <Text style={styles.resultMetaText}>
-                    Subtitle items: {result.subtitles.length}
+                  <Text style={styles.resultCodeText}>
+                    audioInBufferId: {result.audioInBufferId}
+                  </Text>
+                  <Text style={styles.resultCodeText}>
+                    segmentOutBufferId: {result.segmentOutBufferId}
                   </Text>
                 </View>
 
-                {result.subtitles.length > 0 ? (
+                <View style={styles.resultCard}>
+                  <Text style={styles.resultMetaText}>Write Result</Text>
+                  <Text style={styles.resultMetaText}>
+                    segmentsWritten: {result.segmentsWritten}
+                  </Text>
+                  <Text style={styles.resultMetaText}>
+                    writeDurationMs: {formatMs(result.writeDurationMs)}
+                  </Text>
+                  <Text style={styles.resultMetaText}>
+                    errorCode: {result.errorCode ?? 'none'}
+                  </Text>
+                </View>
+
+                {result.alignmentSegments.length > 0 ? (
                   <View style={styles.subtitleList}>
-                    {result.subtitles.map((item, index) => (
+                    <Text style={styles.resultMetaText}>
+                      Alignment Segments
+                    </Text>
+                    {result.alignmentSegments.map((segment, index) => (
                       <View
-                        key={`${item.text}-${item.start}-${index}`}
+                        key={`${segment.id}-${index}`}
                         style={styles.subtitleItem}
                       >
                         <Text style={styles.subtitleText}>
-                          {item.text.trim().length > 0 ? item.text : '...'}
+                          #{index} {segment.startSample}-{segment.endSample} (
+                          {segment.durationMs}ms)
                         </Text>
                         <Text style={styles.subtitleTime}>
-                          {formatTime(item.start)}s - {formatTime(item.end)}s
+                          {segment.payload?.text ?? '...'}
+                        </Text>
+                        <Text style={styles.subtitleTime}>
+                          mode={segment.payload?.timingMode ?? 'n/a'}{' '}
+                          granularity=
+                          {segment.payload?.granularity ?? 'n/a'}
                         </Text>
                       </View>
                     ))}
                   </View>
                 ) : (
-                  <Text style={styles.emptyText}>No subtitles generated.</Text>
+                  <Text style={styles.emptyText}>
+                    Output buffer is empty (no alignment segments written).
+                  </Text>
                 )}
               </>
             ) : (
               <Text style={styles.emptyText}>
-                No result yet. Initialize a model and run generation.
+                No pipeline output yet. Initialize a model and run generation.
               </Text>
             )}
           </View>
