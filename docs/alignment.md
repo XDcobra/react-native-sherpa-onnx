@@ -14,10 +14,12 @@ Alignment is offline and buffer-first:
 | `proportional` | text + audio duration | `proportional` |
 | `estimated` | text + `segmentSampleCounts` | `estimated` |
 | `accurate` | text + audio + wav2vec2 ONNX | `accurate` |
+| `vad` | text + VAD `speech` anchors from `seg_off_*` | `vad` |
 
 Granularity rules:
 - `proportional` / `estimated`: `sentence` or `word`
 - `accurate`: `sentence`, `word`, or `character`
+- `vad`: `sentence` or `word` (`character` rejected)
 
 ## Quick start
 
@@ -104,6 +106,7 @@ function assertAlignmentGranularityForMode(
 | `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; alignmentModelPath: string; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string }` |
+| `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
 | `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number }` |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
 | `OfflineAudioBufferIdSource` | From `react-native-sherpa-onnx/audiobuffer` |
