@@ -1,4 +1,5 @@
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 
 export interface AlignmentTimestamp {
@@ -10,13 +11,6 @@ export interface AlignmentTimestamp {
 export type AlignmentModelType = 'wav2vec2' | 'auto';
 
 export type { AlignmentDetectModelResult as AlignmentDetectResult } from '../types/modelDetect';
-
-/** One subtitle cue with times in seconds. */
-export interface SubtitleTimingItem {
-  text: string;
-  start: number;
-  end: number;
-}
 
 /** Subtitle/timestamp granularity (character only with `accurate`). */
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
@@ -32,9 +26,9 @@ export interface AlignmentChunkTimeline {
 
 export type AlignmentTimingMode = 'proportional' | 'estimated' | 'aligned';
 
-export interface AlignTextToAudioResult {
-  subtitles: SubtitleTimingItem[];
-  timingMode: AlignmentTimingMode;
+export interface AlignTextToAudioWriteResult {
+  outputSegmentBufferId: string;
+  segmentsWritten: number;
 }
 
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
@@ -68,5 +62,6 @@ export type AlignTextToAudioOptions =
 export type AlignTextToAudioFn = (
   textIn: OfflineTextBufferIdSource,
   audioIn: OfflineAudioBufferIdSource,
+  segmentOut: OfflineSegmentBufferIdSource,
   options: AlignTextToAudioOptions
-) => Promise<AlignTextToAudioResult>;
+) => Promise<AlignTextToAudioWriteResult>;

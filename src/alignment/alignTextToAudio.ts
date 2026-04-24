@@ -1,58 +1,15 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolveOfflineSegmentBufferId } from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
-  AlignTextToAudioResult,
   AlignmentGranularity,
-  AlignmentTimingMode,
-  SubtitleTimingItem,
 } from './types';
 
 type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate';
 type NativeGranularity = 'sentence' | 'word' | 'character';
-
-function normalizeAlignmentItems(
-  items: Array<{ text: string; start: number; end: number }> | null | undefined
-): SubtitleTimingItem[] {
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
-  return items
-    .map((item) => ({
-      text: typeof item.text === 'string' ? item.text : '',
-      start: Number.isFinite(item.start) ? Math.max(0, item.start) : 0,
-      end: Number.isFinite(item.end) ? Math.max(0, item.end) : 0,
-    }))
-    .map((item) => ({
-      ...item,
-      end: item.end < item.start ? item.start : item.end,
-    }))
-    .filter((item) => item.text.trim().length > 0);
-}
-
-function expectedTimingMode(mode: NativeAlignmentMode): AlignmentTimingMode {
-  if (mode === 'accurate') {
-    return 'aligned';
-  }
-  return mode;
-}
-
-function normalizeTimingMode(
-  mode: NativeAlignmentMode,
-  rawTimingMode: unknown
-): AlignmentTimingMode {
-  if (
-    rawTimingMode === 'proportional' ||
-    rawTimingMode === 'estimated' ||
-    rawTimingMode === 'aligned'
-  ) {
-    return rawTimingMode;
-  }
-  return expectedTimingMode(mode);
-}
 
 function normalizeGranularity(
   granularity: AlignmentGranularity | undefined
@@ -129,25 +86,13 @@ function buildNativeOptions(
   return language.length > 0 ? { language } : {};
 }
 
-function normalizeAlignmentResult(
-  mode: NativeAlignmentMode,
-  raw: {
-    subtitles?: Array<{ text: string; start: number; end: number }>;
-    timingMode?: unknown;
-  }
-): AlignTextToAudioResult {
-  return {
-    subtitles: normalizeAlignmentItems(raw.subtitles),
-    timingMode: normalizeTimingMode(mode, raw.timingMode),
-  };
-}
-
 /**
- * Build subtitle timelines from offline text/audio buffers by delegating all modes to native.
+ * Build alignment segments into a caller-provided offline segment buffer.
  */
 export const alignTextToAudio: AlignTextToAudioFn = async (
   textIn,
   audioIn,
+  segmentOut,
   options
 ) => {
   const mode = toNativeMode(options.mode);
@@ -159,16 +104,16 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
 
   const textInBufferId = resolvePipelineTextBufferId(textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
+  const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
 
   const nativeOptions = buildNativeOptions(options);
 
-  const raw = await SherpaOnnx.alignOfflineTextToAudio(
+  return SherpaOnnx.alignOfflineTextToAudio(
     textInBufferId,
     audioInBufferId,
+    segmentOutBufferId,
     mode,
     granularity,
     nativeOptions
   );
-
-  return normalizeAlignmentResult(mode, raw);
 };

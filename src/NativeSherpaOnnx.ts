@@ -891,18 +891,20 @@ export interface Spec extends TurboModule {
    *
    * - `textInBufferId`: offline text buffer (`txt_off_*`)
    * - `audioInBufferId`: offline audio buffer (`off_*`)
+   * - `segmentOutBufferId`: caller-provided offline segment buffer (`seg_off_*`)
    *
-   * Both buffers are read-only for alignment.
+   * Text/audio buffers are read-only; alignment writes only into `segmentOutBufferId`.
    */
   alignOfflineTextToAudio(
     textInBufferId: string,
     audioInBufferId: string,
+    segmentOutBufferId: string,
     mode: 'proportional' | 'estimated' | 'accurate',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object
   ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
+    outputSegmentBufferId: string;
+    segmentsWritten: number;
   }>;
 
   detectAlignmentModel(

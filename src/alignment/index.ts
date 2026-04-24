@@ -22,14 +22,13 @@ export type {
   AlignTextToAudioOptionsAccurate,
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
-  AlignTextToAudioResult,
+  AlignTextToAudioWriteResult,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
   AlignmentGranularity,
   AlignmentModelType,
   AlignmentTimestamp,
   AlignmentTimingMode,
-  SubtitleTimingItem,
 } from './types';
 export type { AlignmentDetectModelResult } from '../types/modelDetect';
 
