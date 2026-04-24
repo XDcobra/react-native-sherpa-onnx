@@ -78,7 +78,7 @@ type AlignmentPipelineResult = {
 };
 
 type DropdownType = 'mode' | 'granularity' | null;
-type ScreenSubtitleMode = 'proportional' | 'accurate';
+type ScreenSubtitleMode = 'proportional' | 'accurate' | 'vad';
 
 type ModeOption = {
   value: ScreenSubtitleMode;
@@ -102,6 +102,11 @@ const MODE_OPTIONS: ModeOption[] = [
     value: 'accurate',
     label: 'accurate',
     description: 'CTC forced alignment (wav2vec2; requires model)',
+  },
+  {
+    value: 'vad',
+    label: 'vad',
+    description: 'Use VAD speech segments from an offline segment buffer',
   },
 ];
 
@@ -219,6 +224,7 @@ export default function GenerateTimestampScreen() {
   const [mode, setMode] = useState<ScreenSubtitleMode>('proportional');
   const [granularity, setGranularity] =
     useState<AlignmentGranularity>('sentence');
+  const [vadSegmentBufferId, setVadSegmentBufferId] = useState<string>('');
   const [openDropdown, setOpenDropdown] = useState<DropdownType>(null);
 
   const [running, setRunning] = useState(false);
@@ -479,9 +485,14 @@ export default function GenerateTimestampScreen() {
   };
 
   const handleGenerateTimestamps = async () => {
-    if (!initializedModelPath) {
+    if (mode === 'accurate' && !initializedModelPath) {
       setErrorSource('generate');
       setError('Please initialize a subtitle model first.');
+      return;
+    }
+    if (mode === 'vad' && vadSegmentBufferId.trim().length === 0) {
+      setErrorSource('generate');
+      setError('Please provide an offline VAD segment buffer id (seg_off_*).');
       return;
     }
 
@@ -542,7 +553,16 @@ export default function GenerateTimestampScreen() {
           ? await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
               mode: 'accurate',
               granularity,
-              alignmentModelPath: initializedModelPath,
+              alignmentModelPath: initializedModelPath!,
+            })
+          : mode === 'vad'
+          ? await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
+              mode: 'vad',
+              granularity: proportionalGranularity,
+              segmentation: {
+                source: 'vad',
+                segmentBuffer: vadSegmentBufferId.trim(),
+              },
             })
           : await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
               mode: 'proportional',
@@ -820,6 +840,22 @@ export default function GenerateTimestampScreen() {
               </TouchableOpacity>
             </View>
 
+            {mode === 'vad' && (
+              <View style={styles.optionRow}>
+                <Text style={styles.inputLabel}>
+                  VAD segmentation buffer (offline)
+                </Text>
+                <TextInput
+                  style={styles.inlineInput}
+                  value={vadSegmentBufferId}
+                  onChangeText={setVadSegmentBufferId}
+                  placeholder="seg_off_* from VAD pipeline snapshot"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            )}
+
             <TouchableOpacity
               style={[
                 styles.button,
@@ -895,6 +931,25 @@ export default function GenerateTimestampScreen() {
                           granularity=
                           {segment.payload?.granularity ?? 'n/a'}
                         </Text>
+                        {segment.payload?.tokenMetadata && (
+                          <Text style={styles.subtitleTime}>
+                            mapping=
+                            {String(
+                              segment.payload.tokenMetadata.mappingStrategy ??
+                                'n/a'
+                            )}{' '}
+                            units=
+                            {String(
+                              segment.payload.tokenMetadata.textUnitCount ??
+                                'n/a'
+                            )}{' '}
+                            anchors=
+                            {String(
+                              segment.payload.tokenMetadata.vadAnchorCount ??
+                                'n/a'
+                            )}
+                          </Text>
+                        )}
                       </View>
                     ))}
                   </View>

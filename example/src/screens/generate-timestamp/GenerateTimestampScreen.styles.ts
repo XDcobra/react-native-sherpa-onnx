@@ -190,6 +190,14 @@ export const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: 'top',
   },
+  inlineInput: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#000000',
+    fontSize: 14,
+  },
   optionRow: {
     gap: 10,
     marginBottom: 12,
