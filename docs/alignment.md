@@ -21,6 +21,28 @@ Granularity rules:
 - `accurate`: `sentence`, `word`, or `character`
 - `vad`: `sentence` or `word` (`character` rejected)
 
+### Detailed behavior matrix (mode x granularity)
+
+| Mode | Granularity | Input assumptions | Runtime behavior | Notes |
+| --- | --- | --- | --- | --- |
+| `proportional` | `sentence`, `word` | Offline text + offline audio duration | Splits text by granularity and distributes timing by text weight over full audio duration | No acoustic boundaries; purely duration/text-weight based |
+| `estimated` | `sentence`, `word` | Offline text + `segmentSampleCounts` (+ optional `sampleRate`) | Uses estimated chunk/sample timeline to assign timestamps | Not forced alignment; quality depends on provided chunk counts |
+| `accurate` | `sentence`, `word`, `character` | Offline text + offline audio + wav2vec2 alignment model | CTC forced alignment on waveform and text | `character` is supported only in `accurate` |
+| `vad` | `sentence`, `word` | Offline text + VAD speech anchors from `seg_off_*` | Splits text by granularity, then maps units monotonically to VAD speech anchors (`vadMonotonicWeightDP`) and writes `alignment` segments only for mapped units | If `textUnits > vadAnchors`, multiple units merge into one output segment |
+
+For `vad` mode, mismatch behavior is deterministic by design:
+- `textUnits > vadAnchors`: multiple text units can be merged into one anchor/segment.
+- `vadAnchors > textUnits`: extra anchors remain unmapped (reported in diagnostics).
+- `vadAnchorCount = 0`: valid success path with `segmentsWritten = 0` (no reject).
+
+### Common surprises
+
+- `vad + word` does **not** guarantee one output segment per word.
+  - Output count follows available VAD speech anchors first, then text-unit mapping.
+- Short utterances such as `"Hello World"` often become a single VAD speech anchor.
+  - With one anchor and two words, output is typically one `alignment` segment with combined text.
+- If you need fine word/character boundaries independent of VAD anchor count, prefer `accurate` or even better `accurate` with segmentation via `vad`.
+
 ## Quick start
 
 ```ts
