@@ -37,6 +37,26 @@
 
 ---
 
+## Segment payload contracts
+
+`SegmentMeta.kind` defines the payload contract:
+
+- `kind: 'speech'` -> strict `SpeechSegmentPayload` subtype by `payload.source`:
+  - `source: 'vad'` -> allowed keys: `source`, `engine`, `decision`, `score`
+  - `source: 'stt'` -> allowed keys: `source`, `transcript`, `tokenCount`, `isFinal`
+  - `source: 'tts'` -> allowed keys: `source`, `text`, `chunkIndex`, `isFinalChunk`
+- `kind: 'alignment'` -> `AlignmentSegmentPayload` (strict contract):
+  - required: `text`, `timingMode`, `granularity`
+  - optional: `confidence`, `tokenMetadata`, `wordMetadata`, `languageHints`
+
+Runtime validation behavior:
+
+- `speech` payload is validated strictly by `source` discriminator and source-specific key allowlist.
+- `alignment` payload is validated strictly (required fields + allowed keys + value checks).
+- invalid payloads fail with `SEGMENT_INVALID_ARGUMENT`.
+
+---
+
 ## Quick start: append + snapshot
 
 ```ts
@@ -67,12 +87,40 @@ await appendLiveSegment(live, {
   startSample: 0,
   endSample: 16000,
   sampleRate: 16000,
+  kind: 'speech',
   confidence: 0.93,
+  payload: {
+    source: 'vad',
+    engine: 'vad',
+    decision: 'model',
+    score: 0.93,
+  },
+});
+
+await appendLiveSegment(live, {
+  sourceAudioBufferId: liveAudio,
+  startSample: 16000,
+  endSample: 32000,
+  sampleRate: 16000,
+  kind: 'alignment',
+  payload: {
+    text: 'Hello world',
+    timingMode: 'vad',
+    granularity: 'word',
+    confidence: 0.97,
+    languageHints: ['en'],
+  },
 });
 
 const count = await getLiveSegmentBufferSegmentCount(live);
 const latest = await getLiveSegmentBufferSegments(live, 0, count);
-console.log(latest.length);
+for (const seg of latest) {
+  if (seg.kind === 'alignment') {
+    console.log(seg.payload?.text, seg.payload?.timingMode);
+  } else {
+    console.log(seg.payload);
+  }
+}
 
 await finalizeLiveSegmentBuffer(live);
 const offline = await createOfflineSegmentBufferFromLive(live, 'fullIfSpooled');
