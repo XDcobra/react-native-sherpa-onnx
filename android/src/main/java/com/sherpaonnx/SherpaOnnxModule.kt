@@ -222,8 +222,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return NAME
   }
 
-  override fun onCatalystInstanceDestroy() {
-    super.onCatalystInstanceDestroy()
+  override fun invalidate() {
+    super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
     onlineSttHelper.shutdown()
@@ -1488,7 +1488,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputKind = "contentUri"
         resolvedOutputPath = handle.resultUri.toString()
       }
-      null -> throw RuntimeException("Resolved write handle is null")
     }
 
     return ResolvedDestination(outputPath, outputKind, resolvedOutputPath, writeHandle, tmpFile)
@@ -1831,16 +1830,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-        val sourcePath: String?
-        val sourceFd: Int
-        when (val handle = readHandle) {
+        val source = when (val handle = readHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            sourcePath = handle.file.absolutePath
-            sourceFd = -1
+            handle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            sourcePath = null
-            sourceFd = handle.pfd.fd
+            null to handle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -1850,6 +1845,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
           null -> throw RuntimeException("Resolved read handle is null")
         }
+        val sourcePath = source.first
+        val sourceFd = source.second
 
         dest = resolveDestinationForSave(destination, fmt)
 
