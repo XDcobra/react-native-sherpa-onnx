@@ -180,7 +180,7 @@ void VadPipelineWorker::appendDetectedSegments() {
       segment.durationMs,
       true,
       1.0,
-      "{\"engine\":\"vad\",\"decision\":\"model\"}",
+      "{\"source\":\"vad\",\"engine\":\"vad\",\"decision\":\"model\"}",
       &segmentId,
       &segmentIndex,
       &error

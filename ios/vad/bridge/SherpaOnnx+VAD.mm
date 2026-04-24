@@ -445,7 +445,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
       r.durationMs = segment.durationMs;
       r.hasConfidence = true;
       r.confidence = 1.0;
-      r.payloadJson = "{\"engine\":\"vad\",\"decision\":\"model\"}";
+      r.payloadJson = "{\"source\":\"vad\",\"engine\":\"vad\",\"decision\":\"model\"}";
       records.push_back(r);
       segmentCount++;
       speechDurationMs += segment.durationMs;
@@ -465,7 +465,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     r.durationMs = segment.durationMs;
     r.hasConfidence = true;
     r.confidence = 1.0;
-    r.payloadJson = "{\"engine\":\"vad\",\"decision\":\"model\"}";
+    r.payloadJson = "{\"source\":\"vad\",\"engine\":\"vad\",\"decision\":\"model\"}";
     records.push_back(r);
     segmentCount++;
     speechDurationMs += segment.durationMs;

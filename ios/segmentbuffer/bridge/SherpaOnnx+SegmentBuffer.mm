@@ -37,6 +37,52 @@ bool seg_is_valid_kind(const std::string &kind) {
   return kind == "speech" || kind == "alignment";
 }
 
+bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorMessage) {
+  if (![payload isKindOfClass:[NSDictionary class]]) {
+    if (errorMessage) *errorMessage = @"speech payload is required and must include source";
+    return false;
+  }
+  NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
+  if (source.length == 0) {
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts";
+    return false;
+  }
+  NSSet<NSString *> *allowed = nil;
+  if ([source isEqualToString:@"vad"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"engine", @"decision", @"score"]];
+  } else if ([source isEqualToString:@"stt"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal"]];
+  } else if ([source isEqualToString:@"tts"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk"]];
+  } else {
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts";
+    return false;
+  }
+
+  for (NSString *key in payload) {
+    if (![allowed containsObject:key]) {
+      if (errorMessage) *errorMessage = [NSString stringWithFormat:@"speech payload.%@ is not allowed for source=%@", key, source];
+      return false;
+    }
+  }
+
+  if ([source isEqualToString:@"vad"] && payload[@"engine"] != nil) {
+    NSString *engine = [payload[@"engine"] isKindOfClass:[NSString class]] ? payload[@"engine"] : nil;
+    if (!(engine && [engine isEqualToString:@"vad"])) {
+      if (errorMessage) *errorMessage = @"speech payload.engine must be vad";
+      return false;
+    }
+  }
+  if ([source isEqualToString:@"vad"] && payload[@"decision"] != nil) {
+    NSString *decision = [payload[@"decision"] isKindOfClass:[NSString class]] ? payload[@"decision"] : nil;
+    if (!(decision && [decision isEqualToString:@"model"])) {
+      if (errorMessage) *errorMessage = @"speech payload.decision must be model";
+      return false;
+    }
+  }
+  return true;
+}
+
 std::string segment_records_to_json(const std::vector<SegRecord> &segments) {
   NSMutableArray *arr = [NSMutableArray arrayWithCapacity:segments.size()];
   for (const auto &s : segments) {
@@ -592,6 +638,20 @@ bool seg_live_append_segment(
       if (error) *error = "SEGMENT_INVALID_ARGUMENT: kind must be one of speech or alignment";
       return false;
     }
+    if (seg.kind == "speech") {
+      NSData *payloadData = [[NSString stringWithUTF8String:payloadJson.c_str()] dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary *payloadObj =
+        payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
+      NSString *validationError = nil;
+      if (!seg_validate_strict_speech_payload(payloadObj, &validationError)) {
+        if (error) {
+          *error =
+            std::string("SEGMENT_INVALID_ARGUMENT: ") +
+            (validationError ? validationError.UTF8String : "Invalid speech payload");
+        }
+        return false;
+      }
+    }
     seg.sourceAudioBufferId = sourceAudioBufferId.empty() ? entry->sourceAudioBufferId : sourceAudioBufferId;
     seg.startSample = startSample;
     seg.endSample = endSample;
@@ -799,6 +859,13 @@ bool seg_live_append_segment(
     if (!seg_is_valid_kind(seg.kind)) {
       reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech or alignment", nil);
       return;
+    }
+    if (seg.kind == "speech") {
+      NSString *validationError = nil;
+      if (!seg_validate_strict_speech_payload(payload, &validationError)) {
+        reject(@"SEGMENT_INVALID_ARGUMENT", validationError ?: @"Invalid speech payload", nil);
+        return;
+      }
     }
     seg.sourceAudioBufferId = sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : entry->sourceAudioBufferId;
     seg.startSample = (int)startSample;

@@ -2575,6 +2575,66 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun validateStrictSpeechPayload(payload: ReadableMap?) {
+    if (payload == null) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload is required and must include source"
+      )
+    }
+    if (!payload.hasKey("source") || payload.isNull("source")) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+    val source = payload.getString("source")?.trim() ?: ""
+    val allowedKeys = when (source) {
+      "vad" -> setOf("source", "engine", "decision", "score")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+
+    val itr = payload.keySetIterator()
+    while (itr.hasNextKey()) {
+      val key = itr.nextKey()
+      if (!allowedKeys.contains(key)) {
+        throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "speech payload.$key is not allowed for source=$source"
+        )
+      }
+    }
+
+    when (source) {
+      "vad" -> {
+        if (payload.hasKey("engine") && !payload.isNull("engine")) {
+          val engine = payload.getString("engine")
+          if (engine != "vad") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.engine must be vad"
+            )
+          }
+        }
+        if (payload.hasKey("decision") && !payload.isNull("decision")) {
+          val decision = payload.getString("decision")
+          if (decision != "model") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.decision must be model"
+            )
+          }
+        }
+      }
+      "stt", "tts" -> Unit
+    }
+  }
+
   override fun appendLiveSegment(
     liveBufferId: String,
     kind: String,
@@ -2595,6 +2655,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           "kind must be one of speech or alignment"
         )
         return
+      }
+      if (normalizedKind == "speech") {
+        validateStrictSpeechPayload(payload)
       }
       val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
       if (entry == null) {
