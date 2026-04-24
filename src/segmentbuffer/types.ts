@@ -22,7 +22,36 @@ export type AlignmentTimingMode =
 
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
 
+export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts';
+
+export interface VadSpeechSegmentPayload {
+  source: 'vad';
+  engine?: 'vad';
+  decision?: 'model';
+  score?: number;
+}
+
+export interface SttSpeechSegmentPayload {
+  source: 'stt';
+  transcript?: string;
+  tokenCount?: number;
+  isFinal?: boolean;
+}
+
+export interface TtsSpeechSegmentPayload {
+  source: 'tts';
+  text?: string;
+  chunkIndex?: number;
+  isFinalChunk?: boolean;
+}
+
+export type SpeechSegmentPayload =
+  | VadSpeechSegmentPayload
+  | SttSpeechSegmentPayload
+  | TtsSpeechSegmentPayload;
+
 export interface AlignmentSegmentPayload {
+  [key: string]: unknown;
   text: string;
   timingMode: AlignmentTimingMode;
   granularity: AlignmentGranularity;
@@ -49,16 +78,24 @@ export interface LiveSegmentBufferSpoolInfo {
   path?: string;
 }
 
-export interface SegmentMeta {
+interface SegmentMetaBase {
   id: string;
-  kind: SegmentKind;
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown> | AlignmentSegmentPayload;
+}
+
+export interface SpeechSegmentMeta extends SegmentMetaBase {
+  kind: 'speech';
+  payload?: SpeechSegmentPayload;
+}
+
+export interface AlignmentSegmentMeta extends SegmentMetaBase {
+  kind: 'alignment';
+  payload?: AlignmentSegmentPayload;
 }
 
 interface SegmentInputBase {
@@ -73,7 +110,7 @@ interface SegmentInputBase {
 
 export interface SpeechSegmentInput extends SegmentInputBase {
   kind?: 'speech';
-  payload?: Record<string, unknown>;
+  payload?: SpeechSegmentPayload;
 }
 
 export interface AlignmentSegmentInput extends SegmentInputBase {
@@ -82,6 +119,7 @@ export interface AlignmentSegmentInput extends SegmentInputBase {
 }
 
 export type SegmentInput = SpeechSegmentInput | AlignmentSegmentInput;
+export type SegmentMeta = SpeechSegmentMeta | AlignmentSegmentMeta;
 
 export interface OfflineSegmentBufferInfo {
   bufferId: string;
@@ -161,20 +199,35 @@ export type OfflineSegmentBufferFromLiveMode =
   | 'fullIfSpooled'
   | 'windowSnapshot';
 
-/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
-export interface LiveSegmentBufferSegmentAppendedEvent {
+interface LiveSegmentBufferSegmentAppendedEventBase {
   liveBufferId: string;
   segmentId: string;
   segmentIndex: number;
-  kind: SegmentKind;
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown> | AlignmentSegmentPayload;
 }
+
+/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
+export interface LiveSpeechSegmentAppendedEvent
+  extends LiveSegmentBufferSegmentAppendedEventBase {
+  kind: 'speech';
+  payload?: SpeechSegmentPayload;
+}
+
+/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
+export interface LiveAlignmentSegmentAppendedEvent
+  extends LiveSegmentBufferSegmentAppendedEventBase {
+  kind: 'alignment';
+  payload?: AlignmentSegmentPayload;
+}
+
+export type LiveSegmentBufferSegmentAppendedEvent =
+  | LiveSpeechSegmentAppendedEvent
+  | LiveAlignmentSegmentAppendedEvent;
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
 export interface LiveSegmentBufferErrorEvent {

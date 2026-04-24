@@ -649,7 +649,15 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     durationMs?: number,
     confidence?: number,
-    payload?: Object
+    /**
+     * Strict payload contract (validated in JS/native):
+     * - kind='speech': payload.source must be one of 'vad' | 'stt' | 'tts'
+     *   - source='vad' -> allowed keys: source, engine, decision, score
+     *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
+     *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
+     * - kind='alignment': strict alignment payload contract
+     */
+    payload?: Record<string, unknown>
   ): Promise<{ segmentId: string; segmentIndex: number }>;
 
   finalizeLiveSegmentBuffer(liveBufferId: string): Promise<void>;
@@ -693,7 +701,7 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
-      payload?: Object;
+      payload?: Record<string, unknown>;
     }>;
   }>;
 
@@ -711,7 +719,7 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
-      payload?: Object;
+      payload?: Record<string, unknown>;
     }>;
   }>;
 
