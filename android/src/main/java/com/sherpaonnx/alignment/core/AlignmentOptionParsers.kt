@@ -7,7 +7,7 @@ internal object AlignmentOptionParsers {
   fun normalizeMode(mode: String): String {
     val normalized = mode.trim().lowercase()
     return when (normalized) {
-      "proportional", "estimated", "accurate" -> normalized
+      "proportional", "estimated", "accurate", "vad" -> normalized
       else -> throw IllegalArgumentException("Unsupported alignment mode: $mode")
     }
   }
@@ -71,6 +71,42 @@ internal object AlignmentOptionParsers {
     }
 
     return fallbackSampleRate
+  }
+
+  fun parseSegmentationBufferId(options: ReadableMap?): String {
+    val direct = options?.getString("segmentationBufferId")?.trim().orEmpty()
+    if (direct.isNotEmpty()) {
+      return direct
+    }
+    val source = options?.getString("segmentationSource")?.trim().orEmpty()
+    if (source == "vad") {
+      throw IllegalArgumentException(
+        "ALIGNMENT_ERROR: options.segmentationBufferId is required when segmentationSource='vad'.",
+      )
+    }
+    throw IllegalArgumentException(
+      "ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.",
+    )
+  }
+
+  fun parseSegmentationSource(options: ReadableMap?): String {
+    return options?.getString("segmentationSource")?.trim()?.lowercase().orEmpty()
+  }
+
+  fun parseMinAnchors(options: ReadableMap?, defaultValue: Int = 2): Int {
+    val raw = options?.takeIf { it.hasKey("minAnchors") }?.getDouble("minAnchors")
+    val value = if (raw == null || !raw.isFinite()) {
+      defaultValue.toDouble()
+    } else {
+      raw
+    }
+    val intValue = value.toInt()
+    if (value != intValue.toDouble() || intValue !in 1..10) {
+      throw IllegalArgumentException(
+        "ALIGNMENT_ERROR: options.minAnchors must be an integer between 1 and 10.",
+      )
+    }
+    return intValue
   }
 
   private fun readableArrayToIntArray(array: ReadableArray): IntArray {

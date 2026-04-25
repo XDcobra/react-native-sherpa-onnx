@@ -187,7 +187,7 @@ class VadPipelineWorker(
       sampleRate = config.sampleRate,
       durationMs = speechMs.toInt(),
       confidence = confidence,
-      payloadJson = """{"engine":"vad","decision":"model","score":$confidence}""",
+      payloadJson = """{"source":"vad","engine":"vad","decision":"model","score":$confidence}""",
     )
     speechScoreSum = 0.0
     speechScoreCount = 0

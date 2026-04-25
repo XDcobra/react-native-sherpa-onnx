@@ -190,6 +190,18 @@ export const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: 'top',
   },
+  inlineInput: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#000000',
+    fontSize: 14,
+  },
+  vadConfigContainer: {
+    marginBottom: 12,
+    gap: 8,
+  },
   optionRow: {
     gap: 10,
     marginBottom: 12,
@@ -357,6 +369,17 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1C1C1E',
     marginBottom: 4,
+  },
+  resultAccordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  resultCodeText: {
+    fontSize: 12,
+    color: '#6D6D72',
+    marginBottom: 2,
   },
   subtitleList: {
     gap: 8,

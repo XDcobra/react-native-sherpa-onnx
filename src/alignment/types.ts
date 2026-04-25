@@ -1,4 +1,5 @@
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 
 export interface AlignmentTimestamp {
@@ -10,13 +11,6 @@ export interface AlignmentTimestamp {
 export type AlignmentModelType = 'wav2vec2' | 'auto';
 
 export type { AlignmentDetectModelResult as AlignmentDetectResult } from '../types/modelDetect';
-
-/** One subtitle cue with times in seconds. */
-export interface SubtitleTimingItem {
-  text: string;
-  start: number;
-  end: number;
-}
 
 /** Subtitle/timestamp granularity (character only with `accurate`). */
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
@@ -30,11 +24,26 @@ export interface AlignmentChunkTimeline {
   segmentSampleCounts: readonly number[];
 }
 
-export type AlignmentTimingMode = 'proportional' | 'estimated' | 'aligned';
+export interface AlignmentVadSegmentationConfig {
+  source: 'vad';
+  segmentBuffer: OfflineSegmentBufferIdSource;
+  /** Minimum required speech anchors before constrained accurate execution starts. Default: 2 */
+  minAnchors?: number;
+}
 
-export interface AlignTextToAudioResult {
-  subtitles: SubtitleTimingItem[];
-  timingMode: AlignmentTimingMode;
+export type AlignmentTimingMode =
+  | 'proportional'
+  | 'estimated'
+  | 'aligned'
+  | 'accurate'
+  | 'vad';
+
+export interface AlignTextToAudioWriteResult {
+  outputSegmentBufferId: string;
+  segmentsWritten: number;
+  warningCode?: string;
+  vadAnchorCount?: number;
+  minAnchorsApplied?: number;
 }
 
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
@@ -42,6 +51,7 @@ export type AlignTextToAudioOptionsProportional = {
   mode: 'proportional';
   granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation?: never;
 };
 
 /** Estimated: segment sample counts from synthesis, STT, or other engines. */
@@ -50,23 +60,43 @@ export type AlignTextToAudioOptionsEstimated = {
   chunks: AlignmentChunkTimeline;
   granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation?: never;
 };
 
 /** Accurate: wav2vec2 CTC forced alignment. */
-export type AlignTextToAudioOptionsAccurate = {
-  mode: 'accurate';
-  alignmentModelPath: string;
-  granularity?: AlignmentGranularity;
+export type AlignTextToAudioOptionsAccurate =
+  | {
+      mode: 'accurate';
+      alignmentModelPath: string;
+      granularity?: AlignmentGranularity;
+      language?: string;
+      segmentation?: never;
+    }
+  | {
+      mode: 'accurate';
+      alignmentModelPath: string;
+      granularity?: 'sentence' | 'word';
+      language?: string;
+      segmentation: AlignmentVadSegmentationConfig;
+    };
+
+/** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
+export type AlignTextToAudioOptionsVad = {
+  mode: 'vad';
+  granularity?: 'sentence' | 'word';
   language?: string;
+  segmentation: AlignmentVadSegmentationConfig;
 };
 
 export type AlignTextToAudioOptions =
   | AlignTextToAudioOptionsProportional
   | AlignTextToAudioOptionsEstimated
-  | AlignTextToAudioOptionsAccurate;
+  | AlignTextToAudioOptionsAccurate
+  | AlignTextToAudioOptionsVad;
 
 export type AlignTextToAudioFn = (
   textIn: OfflineTextBufferIdSource,
   audioIn: OfflineAudioBufferIdSource,
+  segmentOut: OfflineSegmentBufferIdSource,
   options: AlignTextToAudioOptions
-) => Promise<AlignTextToAudioResult>;
+) => Promise<AlignTextToAudioWriteResult>;

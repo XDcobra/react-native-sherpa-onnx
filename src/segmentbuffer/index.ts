@@ -3,6 +3,9 @@ import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { PipelineSegmentErrorCode } from './types';
 import type {
+  AlignmentSegmentPayload,
+  AlignmentGranularity,
+  AlignmentTimingMode,
   CreateEmptyOfflineSegmentBufferOptions,
   CreateLiveSegmentBufferOptions,
   LiveSegmentBufferInfo,
@@ -20,6 +23,11 @@ import type {
   PipelineSegmentBufferInfo,
   SegmentInput,
   SegmentMeta,
+  SegmentKind,
+  SpeechSegmentPayloadSource,
+  SpeechSegmentPayload,
+  SpeechSegmentMeta,
+  AlignmentSegmentMeta,
   SegmentBufferSpoolingMode,
 } from './types';
 
@@ -28,6 +36,40 @@ const getNative = (): Spec =>
 
 const SEGMENT_BUFFER_ID_PATTERN =
   /^(seg_off|seg_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const SEGMENT_KIND_VALUES = new Set<SegmentKind>(['speech', 'alignment']);
+const ALIGNMENT_TIMING_MODE_VALUES = new Set<AlignmentTimingMode>([
+  'proportional',
+  'estimated',
+  'accurate',
+  'vad',
+]);
+const ALIGNMENT_GRANULARITY_VALUES = new Set<AlignmentGranularity>([
+  'sentence',
+  'word',
+  'character',
+]);
+const ALIGNMENT_PAYLOAD_ALLOWED_KEYS = new Set([
+  'text',
+  'timingMode',
+  'granularity',
+  'confidence',
+  'tokenMetadata',
+  'wordMetadata',
+  'languageHints',
+]);
+const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
+  'vad',
+  'stt',
+  'tts',
+]);
+const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
+  SpeechSegmentPayloadSource,
+  Set<string>
+> = {
+  vad: new Set(['source', 'engine', 'decision', 'score']),
+  stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
+  tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
+};
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
   const id = value.trim();
@@ -37,6 +79,225 @@ function assertValidSegmentBufferId(value: string, sourceName: string): string {
     );
   }
   return id;
+}
+
+function assertValidSegmentKind(
+  value: unknown,
+  sourceName: string
+): SegmentKind {
+  const kind = typeof value === 'string' ? value.trim() : '';
+  if (SEGMENT_KIND_VALUES.has(kind as SegmentKind)) return kind as SegmentKind;
+  throw new Error(
+    `${
+      PipelineSegmentErrorCode.INVALID_ARGUMENT
+    }: ${sourceName} must be one of "speech" or "alignment"; received "${String(
+      value
+    )}".`
+  );
+}
+
+function assertAlignmentPayload(
+  payload: unknown,
+  sourceName: string
+): AlignmentSegmentPayload {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} must be an object for alignment segments.`
+    );
+  }
+  const obj = payload as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (!ALIGNMENT_PAYLOAD_ALLOWED_KEYS.has(key)) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.${key} is not allowed for alignment payloads.`
+      );
+    }
+  }
+  const text = typeof obj.text === 'string' ? obj.text.trim() : '';
+  if (text.length === 0) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.text must be a non-empty string.`
+    );
+  }
+  if (
+    !ALIGNMENT_TIMING_MODE_VALUES.has(obj.timingMode as AlignmentTimingMode)
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.timingMode must be one of proportional, estimated, accurate, vad.`
+    );
+  }
+  if (
+    !ALIGNMENT_GRANULARITY_VALUES.has(obj.granularity as AlignmentGranularity)
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.granularity must be one of sentence, word, character.`
+    );
+  }
+  if (
+    obj.confidence !== undefined &&
+    (typeof obj.confidence !== 'number' || !Number.isFinite(obj.confidence))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.confidence must be a finite number when provided.`
+    );
+  }
+  if (
+    obj.tokenMetadata !== undefined &&
+    (typeof obj.tokenMetadata !== 'object' ||
+      obj.tokenMetadata === null ||
+      Array.isArray(obj.tokenMetadata))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.tokenMetadata must be an object when provided.`
+    );
+  }
+  if (
+    obj.wordMetadata !== undefined &&
+    (typeof obj.wordMetadata !== 'object' ||
+      obj.wordMetadata === null ||
+      Array.isArray(obj.wordMetadata))
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.wordMetadata must be an object when provided.`
+    );
+  }
+  if (obj.languageHints !== undefined) {
+    if (!Array.isArray(obj.languageHints)) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.languageHints must be an array of strings when provided.`
+      );
+    }
+    if (!obj.languageHints.every((it) => typeof it === 'string' && it.trim())) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.languageHints must only contain non-empty strings.`
+      );
+    }
+  }
+  return obj as unknown as AlignmentSegmentPayload;
+}
+
+function assertSpeechPayload(
+  payload: unknown,
+  sourceName: string
+): SpeechSegmentPayload {
+  if (payload === undefined) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} is required for speech segments and must include source discriminator.`
+    );
+  }
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} must be an object when provided.`
+    );
+  }
+  const obj = payload as Record<string, unknown>;
+  const source = obj.source;
+  if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts.`
+    );
+  }
+  const typedSource = source as SpeechSegmentPayloadSource;
+  const allowedKeys = SPEECH_PAYLOAD_KEYS_BY_SOURCE[typedSource];
+  for (const key of Object.keys(obj)) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.${key} is not allowed for speech source "${typedSource}".`
+      );
+    }
+  }
+  if (typedSource === 'vad') {
+    if (obj.engine !== undefined && obj.engine !== 'vad') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.engine must be "vad" when provided.`
+      );
+    }
+    if (obj.decision !== undefined && obj.decision !== 'model') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.decision must be "model" when provided.`
+      );
+    }
+    if (
+      obj.score !== undefined &&
+      (typeof obj.score !== 'number' || !Number.isFinite(obj.score))
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.score must be a finite number when provided.`
+      );
+    }
+  } else if (typedSource === 'stt') {
+    if (obj.transcript !== undefined && typeof obj.transcript !== 'string') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.transcript must be a string when provided.`
+      );
+    }
+    if (
+      obj.tokenCount !== undefined &&
+      (typeof obj.tokenCount !== 'number' ||
+        !Number.isFinite(obj.tokenCount) ||
+        !Number.isInteger(obj.tokenCount) ||
+        obj.tokenCount < 0)
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.tokenCount must be a non-negative integer when provided.`
+      );
+    }
+    if (obj.isFinal !== undefined && typeof obj.isFinal !== 'boolean') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinal must be a boolean when provided.`
+      );
+    }
+  } else {
+    if (obj.text !== undefined && typeof obj.text !== 'string') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.text must be a string when provided.`
+      );
+    }
+    if (
+      obj.chunkIndex !== undefined &&
+      (typeof obj.chunkIndex !== 'number' ||
+        !Number.isFinite(obj.chunkIndex) ||
+        !Number.isInteger(obj.chunkIndex) ||
+        obj.chunkIndex < 0)
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.chunkIndex must be a non-negative integer when provided.`
+      );
+    }
+    if (
+      obj.isFinalChunk !== undefined &&
+      typeof obj.isFinalChunk !== 'boolean'
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinalChunk must be a boolean when provided.`
+      );
+    }
+  }
+  return obj as unknown as SpeechSegmentPayload;
+}
+
+function assertValidSegmentInput(segment: SegmentInput): {
+  kind: SegmentKind;
+  payload?: SpeechSegmentPayload | AlignmentSegmentPayload;
+} {
+  const kind = assertValidSegmentKind(segment.kind ?? 'speech', 'segment.kind');
+  if (kind === 'alignment') {
+    return {
+      kind,
+      payload: assertAlignmentPayload(segment.payload, 'segment.payload'),
+    };
+  }
+  return {
+    kind,
+    payload:
+      segment.payload === undefined
+        ? undefined
+        : assertSpeechPayload(segment.payload, 'segment.payload'),
+  };
 }
 
 function normalizeSpoolingMode(value: unknown): SegmentBufferSpoolingMode {
@@ -202,6 +463,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
         segmentId?: string;
         segmentIndex?: number;
         sourceAudioBufferId?: string;
+        kind?: string;
         startSample?: number;
         endSample?: number;
         sampleRate?: number;
@@ -213,7 +475,11 @@ function ensureLiveSegmentEventSubscriptions(): void {
         if (!liveBufferId) return;
         const cbs = segmentAppendedCallbacks.get(liveBufferId);
         if (!cbs || cbs.size === 0) return;
-        const event: LiveSegmentBufferSegmentAppendedEvent = {
+        const eventKind = assertValidSegmentKind(
+          raw.kind ?? 'speech',
+          'event.kind'
+        );
+        const eventBase = {
           liveBufferId,
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
           segmentIndex:
@@ -237,10 +503,33 @@ function ensureLiveSegmentEventSubscriptions(): void {
           ...(typeof raw.confidence === 'number'
             ? { confidence: raw.confidence }
             : {}),
-          ...(raw.payload && typeof raw.payload === 'object'
-            ? { payload: raw.payload }
-            : {}),
         };
+        const event: LiveSegmentBufferSegmentAppendedEvent =
+          eventKind === 'alignment'
+            ? {
+                ...eventBase,
+                kind: 'alignment',
+                ...(raw.payload !== undefined
+                  ? {
+                      payload: assertAlignmentPayload(
+                        raw.payload,
+                        'event.payload'
+                      ),
+                    }
+                  : {}),
+              }
+            : {
+                ...eventBase,
+                kind: 'speech',
+                ...(raw.payload !== undefined
+                  ? {
+                      payload: assertSpeechPayload(
+                        raw.payload,
+                        'event.payload'
+                      ),
+                    }
+                  : {}),
+              };
         for (const cb of cbs) {
           cb(event);
         }
@@ -385,16 +674,17 @@ export async function appendLiveSegment(
     segment.sourceAudioBufferId
   );
 
+  const normalized = assertValidSegmentInput(segment);
   return getNative().appendLiveSegment(
     id,
-    segment.kind ?? 'speech',
+    normalized.kind,
     sourceAudioBufferId,
     segment.startSample,
     segment.endSample,
     segment.sampleRate,
     segment.durationMs,
     segment.confidence,
-    segment.payload
+    normalized.payload as unknown as Record<string, unknown> | undefined
   );
 }
 
@@ -442,19 +732,37 @@ export async function getOfflineSegmentBufferSegments(
     start,
     maxCount
   );
-  return raw.segments.map((segment) => ({
-    id: segment.id,
-    kind: 'speech',
-    sourceAudioBufferId: segment.sourceAudioBufferId,
-    startSample: segment.startSample,
-    endSample: segment.endSample,
-    sampleRate: segment.sampleRate,
-    durationMs: segment.durationMs,
-    ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
-    ...(segment.payload != null
-      ? { payload: segment.payload as unknown as Record<string, unknown> }
-      : {}),
-  }));
+  return raw.segments.map((segment) => {
+    const kind = assertValidSegmentKind(segment.kind, 'segment.kind');
+    const base = {
+      id: segment.id,
+      kind,
+      sourceAudioBufferId: segment.sourceAudioBufferId,
+      startSample: segment.startSample,
+      endSample: segment.endSample,
+      sampleRate: segment.sampleRate,
+      durationMs: segment.durationMs,
+      ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+    };
+    if (kind === 'alignment') {
+      const payload =
+        segment.payload != null
+          ? assertAlignmentPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as AlignmentSegmentMeta;
+    }
+    const payload =
+      segment.payload != null
+        ? assertSpeechPayload(segment.payload, 'segment.payload')
+        : undefined;
+    return {
+      ...base,
+      ...(payload !== undefined ? { payload } : {}),
+    } as SpeechSegmentMeta;
+  });
 }
 
 export async function getLiveSegmentBufferSegments(
@@ -468,19 +776,37 @@ export async function getLiveSegmentBufferSegments(
     startIndex,
     maxCount
   );
-  return raw.segments.map((segment) => ({
-    id: segment.id,
-    kind: 'speech',
-    sourceAudioBufferId: segment.sourceAudioBufferId,
-    startSample: segment.startSample,
-    endSample: segment.endSample,
-    sampleRate: segment.sampleRate,
-    durationMs: segment.durationMs,
-    ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
-    ...(segment.payload != null
-      ? { payload: segment.payload as unknown as Record<string, unknown> }
-      : {}),
-  }));
+  return raw.segments.map((segment) => {
+    const kind = assertValidSegmentKind(segment.kind, 'segment.kind');
+    const base = {
+      id: segment.id,
+      kind,
+      sourceAudioBufferId: segment.sourceAudioBufferId,
+      startSample: segment.startSample,
+      endSample: segment.endSample,
+      sampleRate: segment.sampleRate,
+      durationMs: segment.durationMs,
+      ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+    };
+    if (kind === 'alignment') {
+      const payload =
+        segment.payload != null
+          ? assertAlignmentPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as AlignmentSegmentMeta;
+    }
+    const payload =
+      segment.payload != null
+        ? assertSpeechPayload(segment.payload, 'segment.payload')
+        : undefined;
+    return {
+      ...base,
+      ...(payload !== undefined ? { payload } : {}),
+    } as SpeechSegmentMeta;
+  });
 }
 
 export async function getLiveSegmentBufferSegmentCount(
@@ -498,6 +824,10 @@ export async function releasePipelineSegmentBuffer(
 }
 
 export type {
+  AlignmentTimingMode,
+  AlignmentGranularity,
+  AlignmentSegmentPayload,
+  SpeechSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,
   SegmentMeta,

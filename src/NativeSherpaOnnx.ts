@@ -642,13 +642,21 @@ export interface Spec extends TurboModule {
 
   appendLiveSegment(
     liveBufferId: string,
-    kind: string,
+    kind: 'speech' | 'alignment',
     sourceAudioBufferId: string,
     startSample: number,
     endSample: number,
     sampleRate: number,
     durationMs?: number,
     confidence?: number,
+    /**
+     * Strict payload contract (validated in JS/native):
+     * - kind='speech': payload.source must be one of 'vad' | 'stt' | 'tts'
+     *   - source='vad' -> allowed keys: source, engine, decision, score
+     *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
+     *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
+     * - kind='alignment': strict alignment payload contract
+     */
     payload?: Object
   ): Promise<{ segmentId: string; segmentIndex: number }>;
 
@@ -686,7 +694,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     segments: Array<{
       id: string;
-      kind: string;
+      kind: 'speech' | 'alignment';
       sourceAudioBufferId: string;
       startSample: number;
       endSample: number;
@@ -704,7 +712,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     segments: Array<{
       id: string;
-      kind: string;
+      kind: 'speech' | 'alignment';
       sourceAudioBufferId: string;
       startSample: number;
       endSample: number;
@@ -883,18 +891,23 @@ export interface Spec extends TurboModule {
    *
    * - `textInBufferId`: offline text buffer (`txt_off_*`)
    * - `audioInBufferId`: offline audio buffer (`off_*`)
+   * - `segmentOutBufferId`: caller-provided offline segment buffer (`seg_off_*`)
    *
-   * Both buffers are read-only for alignment.
+   * Text/audio buffers are read-only; alignment writes only into `segmentOutBufferId`.
    */
   alignOfflineTextToAudio(
     textInBufferId: string,
     audioInBufferId: string,
-    mode: 'proportional' | 'estimated' | 'accurate',
+    segmentOutBufferId: string,
+    mode: 'proportional' | 'estimated' | 'accurate' | 'vad',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object
   ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
+    outputSegmentBufferId: string;
+    segmentsWritten: number;
+    warningCode?: string;
+    vadAnchorCount?: number;
+    minAnchorsApplied?: number;
   }>;
 
   detectAlignmentModel(

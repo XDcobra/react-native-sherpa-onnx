@@ -12,7 +12,54 @@ export type PipelineSegmentBufferKind =
 export type OfflineSegmentBufferState = 'immutable';
 export type LiveSegmentBufferState = 'recording' | 'finished';
 
-export type SegmentKind = 'speech';
+export type SegmentKind = 'speech' | 'alignment';
+
+export type AlignmentTimingMode =
+  | 'proportional'
+  | 'estimated'
+  | 'accurate'
+  | 'vad';
+
+export type AlignmentGranularity = 'sentence' | 'word' | 'character';
+
+export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts';
+
+export interface VadSpeechSegmentPayload {
+  source: 'vad';
+  engine?: 'vad';
+  decision?: 'model';
+  score?: number;
+}
+
+export interface SttSpeechSegmentPayload {
+  source: 'stt';
+  transcript?: string;
+  tokenCount?: number;
+  isFinal?: boolean;
+}
+
+export interface TtsSpeechSegmentPayload {
+  source: 'tts';
+  text?: string;
+  chunkIndex?: number;
+  isFinalChunk?: boolean;
+}
+
+export type SpeechSegmentPayload =
+  | VadSpeechSegmentPayload
+  | SttSpeechSegmentPayload
+  | TtsSpeechSegmentPayload;
+
+export interface AlignmentSegmentPayload {
+  [key: string]: unknown;
+  text: string;
+  timingMode: AlignmentTimingMode;
+  granularity: AlignmentGranularity;
+  confidence?: number;
+  tokenMetadata?: Record<string, unknown>;
+  wordMetadata?: Record<string, unknown>;
+  languageHints?: string[];
+}
 
 export type SegmentBufferSpoolingMode = 'off' | 'auto' | 'on';
 
@@ -31,19 +78,27 @@ export interface LiveSegmentBufferSpoolInfo {
   path?: string;
 }
 
-export interface SegmentMeta {
+interface SegmentMetaBase {
   id: string;
-  kind: SegmentKind;
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown>;
 }
 
-export interface SegmentInput {
+export interface SpeechSegmentMeta extends SegmentMetaBase {
+  kind: 'speech';
+  payload?: SpeechSegmentPayload;
+}
+
+export interface AlignmentSegmentMeta extends SegmentMetaBase {
+  kind: 'alignment';
+  payload?: AlignmentSegmentPayload;
+}
+
+interface SegmentInputBase {
   kind?: SegmentKind;
   sourceAudioBufferId: PipelineAudioBufferIdSource;
   startSample: number;
@@ -51,8 +106,20 @@ export interface SegmentInput {
   sampleRate: number;
   durationMs?: number;
   confidence?: number;
-  payload?: Record<string, unknown>;
 }
+
+export interface SpeechSegmentInput extends SegmentInputBase {
+  kind?: 'speech';
+  payload?: SpeechSegmentPayload;
+}
+
+export interface AlignmentSegmentInput extends SegmentInputBase {
+  kind: 'alignment';
+  payload: AlignmentSegmentPayload;
+}
+
+export type SegmentInput = SpeechSegmentInput | AlignmentSegmentInput;
+export type SegmentMeta = SpeechSegmentMeta | AlignmentSegmentMeta;
 
 export interface OfflineSegmentBufferInfo {
   bufferId: string;
@@ -132,8 +199,7 @@ export type OfflineSegmentBufferFromLiveMode =
   | 'fullIfSpooled'
   | 'windowSnapshot';
 
-/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
-export interface LiveSegmentBufferSegmentAppendedEvent {
+interface LiveSegmentBufferSegmentAppendedEventBase {
   liveBufferId: string;
   segmentId: string;
   segmentIndex: number;
@@ -143,8 +209,25 @@ export interface LiveSegmentBufferSegmentAppendedEvent {
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-  payload?: Record<string, unknown>;
 }
+
+/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
+export interface LiveSpeechSegmentAppendedEvent
+  extends LiveSegmentBufferSegmentAppendedEventBase {
+  kind: 'speech';
+  payload?: SpeechSegmentPayload;
+}
+
+/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
+export interface LiveAlignmentSegmentAppendedEvent
+  extends LiveSegmentBufferSegmentAppendedEventBase {
+  kind: 'alignment';
+  payload?: AlignmentSegmentPayload;
+}
+
+export type LiveSegmentBufferSegmentAppendedEvent =
+  | LiveSpeechSegmentAppendedEvent
+  | LiveAlignmentSegmentAppendedEvent;
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
 export interface LiveSegmentBufferErrorEvent {

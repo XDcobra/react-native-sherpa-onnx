@@ -86,7 +86,7 @@ export default function RootNavigator() {
         name="GenerateTimestamp"
         component={GenerateTimestampScreen}
         options={{
-          title: 'Generate timestamp',
+          title: 'Alignment (Subtitles/Timestamps)',
         }}
       />
       <Stack.Screen
