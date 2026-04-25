@@ -88,6 +88,17 @@ static NSString *const kSegmentErrBufferNotFound = @"SEGMENT_BUFFER_NOT_FOUND";
 static NSString *const kSegmentErrBufferKindMismatch = @"SEGMENT_BUFFER_KIND_MISMATCH";
 static NSString *const kSegmentErrInvalidArgument = @"SEGMENT_INVALID_ARGUMENT";
 static NSString *const kSegmentErrInvalidState = @"SEGMENT_INVALID_STATE";
+static NSString *extractAlignmentCodeFromMessage(NSString *message) {
+  if (message == nil) return kAlignmentErrCode;
+  NSRange r = [message rangeOfString:@":"];
+  if (r.location == NSNotFound || r.location == 0) return kAlignmentErrCode;
+  NSString *prefix = [[message substringToIndex:r.location]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([prefix hasPrefix:@"ALIGNMENT_"]) {
+    return prefix;
+  }
+  return kAlignmentErrCode;
+}
 
 static std::string alignmentTimingModeToSegmentTimingMode(const std::string &timingMode, const std::string &fallbackMode) {
   if (timingMode == "aligned") return "accurate";
@@ -330,14 +341,6 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
         reject(kSegmentErrInvalidArgument, @"mode=vad supports only sentence or word granularity", nil);
         return;
       }
-      if (modeStr == "accurate") {
-        NSString *segSource = [options[@"segmentationSource"] isKindOfClass:[NSString class]] ? options[@"segmentationSource"] : nil;
-        if (segSource != nil && [[segSource lowercaseString] isEqualToString:@"vad"]) {
-          reject(kAlignmentErrCode, @"ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet", nil);
-          return;
-        }
-      }
-
       sherpa_onnx::alignment::AlignmentResult result;
       if (modeStr == "proportional") {
         result = sherpa_onnx::alignment::AlignProportional(
@@ -355,6 +358,158 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
             granularityStr);
       } else if (modeStr == "accurate") {
         std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
+        const std::string segmentationSource = sherpaonnx::alignment::bridge::ParseSegmentationSource(options);
+        if (segmentationSource == "vad") {
+          if (granularityStr == "character") {
+            reject(kSegmentErrInvalidArgument, @"accurate+vad supports only sentence or word granularity", nil);
+            return;
+          }
+          const std::string segSourceId = sherpaonnx::alignment::bridge::ParseSegmentationBufferId(options);
+          if (segSourceId.find("seg_off_") != 0) {
+            reject(kSegmentErrBufferKindMismatch,
+                   [NSString stringWithFormat:@"Expected offline segment buffer (seg_off_*), got: %s", segSourceId.c_str()],
+                   nil);
+            return;
+          }
+          const int minAnchors = sherpaonnx::alignment::bridge::ParseMinAnchors(options, 2);
+          std::shared_ptr<SegOfflineEntry> anchorEntry;
+          {
+            std::lock_guard<std::mutex> segLock(g_seg_mutex);
+            auto it = g_seg_offline.find(segSourceId);
+            if (it == g_seg_offline.end()) {
+              reject(kSegmentErrBufferNotFound,
+                     [NSString stringWithFormat:@"Offline segment buffer not found: %s", segSourceId.c_str()],
+                     nil);
+              return;
+            }
+            anchorEntry = it->second;
+          }
+          std::vector<SegRecord> anchors;
+          {
+            std::lock_guard<std::mutex> anchorLock(anchorEntry->lock);
+            for (const auto &segment : anchorEntry->segments) {
+              if (segment.kind == "speech" && segment.endSample >= segment.startSample) {
+                anchors.push_back(segment);
+              }
+            }
+          }
+          if ((int)anchors.size() < minAnchors) {
+            std::lock_guard<std::mutex> segLock(g_seg_mutex);
+            if (outputEntry->segments.size() > 0) {
+              reject(kSegmentErrInvalidState,
+                     [NSString stringWithFormat:@"Offline segment buffer already populated: %@", segmentOutBufferId],
+                     nil);
+              return;
+            }
+            outputEntry->segments.clear();
+            NSString *warningCode = anchors.empty()
+                ? @"ALIGNMENT_EMPTY_VAD_ANCHORS"
+                : @"ALIGNMENT_BELOW_MIN_VAD_ANCHORS";
+            resolve(@{
+              @"outputSegmentBufferId": segmentOutBufferId,
+              @"segmentsWritten": @(0),
+              @"warningCode": warningCode,
+              @"vadAnchorCount": @((int)anchors.size()),
+              @"minAnchorsApplied": @(minAnchors),
+            });
+            return;
+          }
+          std::vector<float> pcm;
+          int pcmSampleRate = 0;
+          if (!pa_read_offline_samples(audioId, &pcm, &pcmSampleRate) || pcm.empty()) {
+            reject(kAlignmentErrAudioBufferEmpty,
+                   [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
+                   nil);
+            return;
+          }
+          const auto units = splitTextUnits(inputText, granularityStr);
+          const auto mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors);
+          const size_t unmappedCount = std::count_if(mapped.begin(), mapped.end(), [](const auto &group) {
+            return group.empty();
+          });
+          std::vector<SegRecord> records;
+          for (size_t i = 0; i < anchors.size(); ++i) {
+            const auto &group = mapped[i];
+            if (group.empty()) continue;
+            std::string textJoined;
+            for (size_t j = 0; j < group.size(); ++j) {
+              if (j > 0) textJoined += " ";
+              textJoined += group[j];
+            }
+            if (textJoined.empty()) continue;
+            const auto &anchor = anchors[i];
+            const int start = std::max(0, std::min(anchor.startSample, (int)pcm.size()));
+            const int end = std::max(start, std::min(anchor.endSample, (int)pcm.size()));
+            if (end <= start) continue;
+            sherpa_onnx::alignment::AlignmentResult chunkResult;
+            try {
+              chunkResult = sherpa_onnx::alignment::AlignAccurateFromPcm(
+                  modelPathStr,
+                  textJoined,
+                  pcm.data() + start,
+                  end - start,
+                  pcmSampleRate,
+                  granularityStr);
+            } catch (const std::exception &e) {
+              throw std::runtime_error(
+                  std::string("ALIGNMENT_CONSTRAINED_ACCURATE_ERROR: constrained accurate run failed for anchor ") +
+                  std::to_string(i) + ": " + e.what());
+            }
+            const std::string timingMode = alignmentTimingModeToSegmentTimingMode(chunkResult.timing_mode, "accurate");
+            for (size_t itemIndex = 0; itemIndex < chunkResult.subtitles.size(); ++itemIndex) {
+              const auto &item = chunkResult.subtitles[itemIndex];
+              const int localStart = std::max(0, static_cast<int>(std::round(item.start_s * pcmSampleRate)));
+              const int localEnd = std::max(localStart, static_cast<int>(std::round(item.end_s * pcmSampleRate)));
+              const int startSample = std::max(start, std::min(start + localStart, end));
+              const int endSample = std::max(startSample, std::min(start + localEnd, end));
+              SegRecord r;
+              r.id = "seg_align_acc_vad_" + std::to_string(i) + "_" + std::to_string(itemIndex) + "_" +
+                     std::to_string(startSample) + "_" + std::to_string(endSample);
+              r.kind = "alignment";
+              r.sourceAudioBufferId = audioId;
+              r.startSample = startSample;
+              r.endSample = endSample;
+              r.sampleRate = inputSampleRate;
+              r.durationMs = static_cast<int>(((std::max(0, endSample - startSample) * 1000.0) / std::max(1, inputSampleRate)));
+              NSDictionary *tokenMetadata = @{
+                @"constraintSource": @"vad",
+                @"constraintMode": @"hard",
+                @"mappingStrategy": @"vadMonotonicWeightDP",
+                @"textUnitCount": @(units.size()),
+                @"vadAnchorCount": @(anchors.size()),
+                @"mappedUnitCount": @(group.size()),
+                @"unmappedVadAnchorCount": @(unmappedCount),
+                @"minAnchorsApplied": @(minAnchors),
+              };
+              NSDictionary *payload = @{
+                @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
+                @"timingMode": [NSString stringWithUTF8String:timingMode.c_str()] ?: @"accurate",
+                @"granularity": [NSString stringWithUTF8String:granularityStr.c_str()] ?: @"sentence",
+                @"tokenMetadata": tokenMetadata,
+              };
+              NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+              if (payloadData != nil) {
+                r.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+              }
+              records.push_back(std::move(r));
+            }
+          }
+          {
+            std::lock_guard<std::mutex> segLock(g_seg_mutex);
+            if (outputEntry->segments.size() > 0) {
+              reject(kSegmentErrInvalidState,
+                     [NSString stringWithFormat:@"Offline segment buffer already populated: %@", segmentOutBufferId],
+                     nil);
+              return;
+            }
+            outputEntry->segments = records;
+          }
+          resolve(@{
+            @"outputSegmentBufferId": segmentOutBufferId,
+            @"segmentsWritten": @((int)records.size()),
+          });
+          return;
+        }
         std::vector<float> pcm;
         int pcmSampleRate = 0;
         if (!pa_read_offline_samples(audioId, &pcm, &pcmSampleRate) || pcm.empty()) {
@@ -521,7 +676,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
       reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
     } catch (const std::exception &e) {
       NSString *errorMsg = [NSString stringWithUTF8String:e.what()] ?: @"Alignment failed";
-      reject(kAlignmentErrCode, errorMsg, nil);
+      reject(extractAlignmentCodeFromMessage(errorMsg), errorMsg, nil);
     } catch (...) {
       reject(kAlignmentErrCode, @"Alignment failed", nil);
     }

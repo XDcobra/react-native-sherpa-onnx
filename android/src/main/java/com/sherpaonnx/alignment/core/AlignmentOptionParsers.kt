@@ -89,6 +89,26 @@ internal object AlignmentOptionParsers {
     )
   }
 
+  fun parseSegmentationSource(options: ReadableMap?): String {
+    return options?.getString("segmentationSource")?.trim()?.lowercase().orEmpty()
+  }
+
+  fun parseMinAnchors(options: ReadableMap?, defaultValue: Int = 2): Int {
+    val raw = options?.takeIf { it.hasKey("minAnchors") }?.getDouble("minAnchors")
+    val value = if (raw == null || !raw.isFinite()) {
+      defaultValue.toDouble()
+    } else {
+      raw
+    }
+    val intValue = value.toInt()
+    if (value != intValue.toDouble() || intValue !in 1..10) {
+      throw IllegalArgumentException(
+        "ALIGNMENT_ERROR: options.minAnchors must be an integer between 1 and 10.",
+      )
+    }
+    return intValue
+  }
+
   private fun readableArrayToIntArray(array: ReadableArray): IntArray {
     val n = array.size()
     val out = IntArray(n)

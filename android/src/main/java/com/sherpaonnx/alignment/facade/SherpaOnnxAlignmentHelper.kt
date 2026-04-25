@@ -107,6 +107,39 @@ internal class SherpaOnnxAlignmentHelper {
     return out
   }
 
+  private fun resolveVadAnchorsFromOfflineBuffer(segmentationBufferId: String): List<VadaAnchor> {
+    val anchorEntry = SegmentPipelineRegistry.getOffline(segmentationBufferId)
+      ?: throw SegmentPipelineException(
+        SegmentErrorCodes.BUFFER_NOT_FOUND,
+        "Offline segment buffer not found: $segmentationBufferId"
+      )
+    return anchorEntry
+      .snapshotSegments(0, Int.MAX_VALUE)
+      .filter { it.kind == "speech" && it.endSample >= it.startSample }
+      .map { VadaAnchor(it.startSample, it.endSample) }
+  }
+
+  private fun writeAlignmentResult(
+    promise: Promise,
+    segmentOutId: String,
+    outputEntry: com.sherpaonnx.segment.pipeline.OfflineSegmentEntry,
+    records: List<SegmentRecord>,
+    warningCode: String? = null,
+    vadAnchorCount: Int? = null,
+    minAnchorsApplied: Int? = null,
+  ) {
+    outputEntry.populate(records)
+    promise.resolve(
+      com.facebook.react.bridge.Arguments.createMap().apply {
+        putString("outputSegmentBufferId", segmentOutId)
+        putInt("segmentsWritten", records.size)
+        warningCode?.let { putString("warningCode", it) }
+        vadAnchorCount?.let { putInt("vadAnchorCount", it) }
+        minAnchorsApplied?.let { putInt("minAnchorsApplied", it) }
+      }
+    )
+  }
+
   fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
@@ -226,14 +259,6 @@ internal class SherpaOnnxAlignmentHelper {
           )
           return@execute
         }
-        if (normalizedMode == "accurate" && options?.getString("segmentationSource") == "vad") {
-          promise.reject(
-            AlignmentErrorCodes.ERR_ALIGNMENT,
-            "ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet"
-          )
-          return@execute
-        }
-
         val raw = when (normalizedMode) {
           "proportional" -> nativeAlignProportional(
             text,
@@ -255,6 +280,123 @@ internal class SherpaOnnxAlignmentHelper {
 
           "accurate" -> {
             val modelPath = AlignmentOptionParsers.parseAlignmentModelPath(options)
+            val segmentationSource = AlignmentOptionParsers.parseSegmentationSource(options)
+            if (segmentationSource == "vad") {
+              if (normalizedGranularity == "character") {
+                promise.reject(
+                  SegmentErrorCodes.INVALID_ARGUMENT,
+                  "accurate+vad supports only sentence or word granularity"
+                )
+                return@execute
+              }
+              val segmentationBufferId = AlignmentOptionParsers.parseSegmentationBufferId(options)
+              if (!segmentationBufferId.startsWith("seg_off_")) {
+                promise.reject(
+                  SegmentErrorCodes.BUFFER_KIND_MISMATCH,
+                  "Expected offline segment buffer (seg_off_*), got: $segmentationBufferId"
+                )
+                return@execute
+              }
+              val anchors = resolveVadAnchorsFromOfflineBuffer(segmentationBufferId)
+              val minAnchors = AlignmentOptionParsers.parseMinAnchors(options)
+              if (anchors.size < minAnchors) {
+                val warningCode = if (anchors.isEmpty()) {
+                  "ALIGNMENT_EMPTY_VAD_ANCHORS"
+                } else {
+                  "ALIGNMENT_BELOW_MIN_VAD_ANCHORS"
+                }
+                writeAlignmentResult(
+                  promise,
+                  segmentOutId,
+                  outputEntry,
+                  emptyList(),
+                  warningCode = warningCode,
+                  vadAnchorCount = anchors.size,
+                  minAnchorsApplied = minAnchors,
+                )
+                return@execute
+              }
+              val allSamples = audioEntry.readAllSamples()
+              if (allSamples.isEmpty()) {
+                promise.reject(
+                  AlignmentErrorCodes.ERR_AUDIO_EMPTY,
+                  "Offline audio buffer is empty: $audioInBufferId",
+                )
+                return@execute
+              }
+              val units = splitTextUnits(text, normalizedGranularity)
+              val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
+              val unmappedAnchorCount = mapped.count { it.isEmpty() }
+              val records = mutableListOf<SegmentRecord>()
+              for (i in anchors.indices) {
+                val unitGroup = mapped[i]
+                if (unitGroup.isEmpty()) continue
+                val joined = unitGroup.joinToString(" ").trim()
+                if (joined.isEmpty()) continue
+                val anchor = anchors[i]
+                val start = anchor.startSample.coerceAtLeast(0).coerceAtMost(allSamples.size)
+                val end = anchor.endSample.coerceAtLeast(start).coerceAtMost(allSamples.size)
+                if (end <= start) continue
+                val slice = allSamples.copyOfRange(start, end)
+                val chunkRaw = try {
+                  nativeAlignAccurateFromFloatPcm(
+                    modelPath,
+                    joined,
+                    slice,
+                    audioEntry.sampleRate,
+                    normalizedGranularity,
+                  )
+                } catch (e: Exception) {
+                  throw IllegalStateException(
+                    "${AlignmentErrorCodes.ERR_CONSTRAINED_ACCURATE}: constrained accurate run failed for anchor $i: ${e.message}",
+                    e,
+                  )
+                }
+                val (subtitleItems) = AlignmentResultMapper.parseSubtitleItems(chunkRaw)
+                val textUnitCountForGroup = splitTextUnits(joined, normalizedGranularity).size
+                subtitleItems.forEachIndexed { itemIndex, item ->
+                  val localStart = (item.startSec * audioEntry.sampleRate.toDouble())
+                    .roundToInt()
+                    .coerceAtLeast(0)
+                  val localEnd = (item.endSec * audioEntry.sampleRate.toDouble())
+                    .roundToInt()
+                    .coerceAtLeast(localStart)
+                  val startSample = (start + localStart).coerceAtMost(end)
+                  val endSample = (start + localEnd).coerceAtLeast(startSample).coerceAtMost(end)
+                  val durationMs =
+                    (((endSample - startSample).coerceAtLeast(0) * 1000L) / audioEntry.sampleRate.toLong()).toInt()
+                  val tokenMetadata = JSONObject().apply {
+                    put("constraintSource", "vad")
+                    put("constraintMode", "hard")
+                    put("mappingStrategy", "vadMonotonicWeightDP")
+                    put("textUnitCount", units.size)
+                    put("vadAnchorCount", anchors.size)
+                    put("mappedUnitCount", textUnitCountForGroup)
+                    put("unmappedVadAnchorCount", unmappedAnchorCount)
+                    put("minAnchorsApplied", minAnchors)
+                  }
+                  records.add(
+                    SegmentRecord(
+                      id = "seg_align_acc_vad_${i}_${itemIndex}_${startSample}_$endSample",
+                      kind = "alignment",
+                      sourceAudioBufferId = audioId,
+                      startSample = startSample,
+                      endSample = endSample,
+                      sampleRate = audioEntry.sampleRate,
+                      durationMs = durationMs,
+                      payloadJson = JSONObject().apply {
+                        put("text", item.text)
+                        put("timingMode", "accurate")
+                        put("granularity", normalizedGranularity)
+                        put("tokenMetadata", tokenMetadata)
+                      }.toString(),
+                    )
+                  )
+                }
+              }
+              writeAlignmentResult(promise, segmentOutId, outputEntry, records)
+              return@execute
+            }
             val samples = audioEntry.readAllSamples()
             if (samples.isEmpty()) {
               promise.reject(
@@ -281,25 +423,9 @@ internal class SherpaOnnxAlignmentHelper {
               )
               return@execute
             }
-            val anchorEntry = SegmentPipelineRegistry.getOffline(segmentationBufferId)
-            if (anchorEntry == null) {
-              promise.reject(
-                SegmentErrorCodes.BUFFER_NOT_FOUND,
-                "Offline segment buffer not found: $segmentationBufferId"
-              )
-              return@execute
-            }
-            val anchors = anchorEntry.snapshotSegments(0, Int.MAX_VALUE)
-              .filter { it.kind == "speech" && it.endSample >= it.startSample }
-              .map { VadaAnchor(it.startSample, it.endSample) }
+            val anchors = resolveVadAnchorsFromOfflineBuffer(segmentationBufferId)
             if (anchors.isEmpty()) {
-              outputEntry.populate(emptyList())
-              promise.resolve(
-                com.facebook.react.bridge.Arguments.createMap().apply {
-                  putString("outputSegmentBufferId", segmentOutId)
-                  putInt("segmentsWritten", 0)
-                }
-              )
+              writeAlignmentResult(promise, segmentOutId, outputEntry, emptyList())
               return@execute
             }
             val units = splitTextUnits(text, normalizedGranularity)
@@ -342,13 +468,7 @@ internal class SherpaOnnxAlignmentHelper {
                 )
               )
             }
-            outputEntry.populate(records)
-            promise.resolve(
-              com.facebook.react.bridge.Arguments.createMap().apply {
-                putString("outputSegmentBufferId", segmentOutId)
-                putInt("segmentsWritten", records.size)
-              }
-            )
+            writeAlignmentResult(promise, segmentOutId, outputEntry, records)
             return@execute
           }
 

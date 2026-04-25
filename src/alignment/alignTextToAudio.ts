@@ -64,10 +64,35 @@ function buildNativeOptions(
         'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.'
       );
     }
-    return {
+    const base: Record<string, unknown> = {
       alignmentModelPath,
       ...(language.length > 0 ? { language } : {}),
     };
+    const hasSegmentation = Object.prototype.hasOwnProperty.call(
+      options,
+      'segmentation'
+    );
+    if (hasSegmentation && options.segmentation?.source !== 'vad') {
+      throw new Error(
+        'ALIGNMENT_ERROR: accurate+segmentation requires options.segmentation.source="vad".'
+      );
+    }
+    if (options.segmentation?.source === 'vad') {
+      const segmentationBufferId = resolveOfflineSegmentBufferId(
+        options.segmentation.segmentBuffer
+      );
+      const rawMinAnchors = options.segmentation.minAnchors;
+      const minAnchors = rawMinAnchors == null ? 2 : Number(rawMinAnchors);
+      if (!Number.isInteger(minAnchors) || minAnchors < 1 || minAnchors > 10) {
+        throw new Error(
+          'ALIGNMENT_ERROR: segmentation.minAnchors must be an integer between 1 and 10.'
+        );
+      }
+      base.segmentationSource = 'vad';
+      base.segmentationBufferId = segmentationBufferId;
+      base.minAnchors = minAnchors;
+    }
+    return base;
   }
 
   if (options.mode === 'estimated') {
@@ -128,9 +153,13 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
       'ALIGNMENT_ERROR: mode=vad supports only sentence or word granularity.'
     );
   }
-  if (mode === 'accurate' && options.segmentation?.source === 'vad') {
+  if (
+    mode === 'accurate' &&
+    options.segmentation?.source === 'vad' &&
+    granularity === 'character'
+  ) {
     throw new Error(
-      'ALIGNMENT_ERROR: accurate+vad is prepared but not implemented yet.'
+      'ALIGNMENT_ERROR: accurate+vad supports only sentence or word granularity.'
     );
   }
   if (

@@ -93,13 +93,16 @@ type AlignmentPipelineResult = {
   segmentOutBufferId: string;
   segmentsWritten: number;
   writeDurationMs: number;
+  warningCode?: string;
+  vadAnchorCount?: number;
+  minAnchorsApplied?: number;
   vadSegmentationBufferId?: string;
   alignmentSegments: AlignmentSegmentView[];
   errorCode?: string;
 };
 
 type DropdownType = 'mode' | 'granularity' | null;
-type ScreenSubtitleMode = 'proportional' | 'accurate' | 'vad';
+type ScreenSubtitleMode = 'proportional' | 'accurate' | 'vad' | 'accurate_vad';
 
 type ModeOption = {
   value: ScreenSubtitleMode;
@@ -128,6 +131,12 @@ const MODE_OPTIONS: ModeOption[] = [
     value: 'vad',
     label: 'vad',
     description: 'Use VAD speech segments from an offline segment buffer',
+  },
+  {
+    value: 'accurate_vad',
+    label: 'accurate + vad',
+    description:
+      'Run accurate alignment constrained by VAD speech anchors (offline)',
   },
 ];
 
@@ -285,6 +294,7 @@ export default function GenerateTimestampScreen() {
   );
   const [transcriptText, setTranscriptText] = useState<string>('');
   const [mode, setMode] = useState<ScreenSubtitleMode>('proportional');
+  const [minAnchorsInput, setMinAnchorsInput] = useState<string>('2');
   const [granularity, setGranularity] =
     useState<AlignmentGranularity>('sentence');
   const [openDropdown, setOpenDropdown] = useState<DropdownType>(null);
@@ -671,23 +681,34 @@ export default function GenerateTimestampScreen() {
   };
 
   const handleGenerateTimestamps = async () => {
-    if (mode === 'accurate' && !initializedModelPath) {
+    if (
+      (mode === 'accurate' || mode === 'accurate_vad') &&
+      !initializedModelPath
+    ) {
       setErrorSource('generate');
       setError('Please initialize a subtitle model first.');
       return;
     }
-    if (mode === 'vad' && !initializedVadModelPath) {
+    if (
+      (mode === 'vad' || mode === 'accurate_vad') &&
+      !initializedVadModelPath
+    ) {
       setErrorSource('generate');
       setError('Please initialize a VAD model first.');
       return;
     }
-    if (mode === 'vad' && !initializedVadModelId) {
+    if ((mode === 'vad' || mode === 'accurate_vad') && !initializedVadModelId) {
       setErrorSource('generate');
       setError(
         'Initialized VAD model metadata is missing; reinitialize VAD model.'
       );
       return;
     }
+    const parsedMinAnchors = Number(minAnchorsInput.trim());
+    const minAnchors =
+      Number.isInteger(parsedMinAnchors) && parsedMinAnchors >= 1
+        ? parsedMinAnchors
+        : 2;
 
     if (!selectedAudioUri) {
       setErrorSource('generate');
@@ -750,7 +771,7 @@ export default function GenerateTimestampScreen() {
               granularity,
               alignmentModelPath: initializedModelPath!,
             })
-          : mode === 'vad'
+          : mode === 'vad' || mode === 'accurate_vad'
           ? await (async () => {
               const vadConfig = getVadModelPathConfig(initializedVadModelId!, {
                 padModelIds: padVadModelIds,
@@ -775,6 +796,18 @@ export default function GenerateTimestampScreen() {
                   sourceTag: 'generate-timestamp-vad',
                 },
               });
+              if (mode === 'accurate_vad') {
+                return alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
+                  mode: 'accurate',
+                  granularity: proportionalGranularity,
+                  alignmentModelPath: initializedModelPath!,
+                  segmentation: {
+                    source: 'vad',
+                    segmentBuffer: vadSegmentOut,
+                    minAnchors,
+                  },
+                });
+              }
               return alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
                 mode: 'vad',
                 granularity: proportionalGranularity,
@@ -804,6 +837,9 @@ export default function GenerateTimestampScreen() {
         segmentOutBufferId: writeResult.outputSegmentBufferId,
         segmentsWritten: writeResult.segmentsWritten,
         writeDurationMs,
+        warningCode: writeResult.warningCode,
+        vadAnchorCount: writeResult.vadAnchorCount,
+        minAnchorsApplied: writeResult.minAnchorsApplied,
         vadSegmentationBufferId: vadSegmentationBufferId ?? undefined,
         alignmentSegments,
       });
@@ -1073,7 +1109,7 @@ export default function GenerateTimestampScreen() {
               </TouchableOpacity>
             </View>
 
-            {mode === 'vad' && (
+            {(mode === 'vad' || mode === 'accurate_vad') && (
               <View style={styles.vadConfigContainer}>
                 <Text style={styles.inputLabel}>
                   VAD model for segmentation
@@ -1150,6 +1186,22 @@ export default function GenerateTimestampScreen() {
                     <Text style={styles.initResultText}>{vadInitResult}</Text>
                   </View>
                 )}
+                {mode === 'accurate_vad' && (
+                  <View style={styles.optionRow}>
+                    <Text style={styles.inputLabel}>Minimum VAD anchors</Text>
+                    <TextInput
+                      style={styles.inlineInput}
+                      value={minAnchorsInput}
+                      onChangeText={setMinAnchorsInput}
+                      keyboardType="number-pad"
+                      placeholder="2"
+                    />
+                    <Text style={styles.sectionDescription}>
+                      Default is 2. If anchor count is below threshold,
+                      alignment returns success with zero written segments.
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -1209,6 +1261,16 @@ export default function GenerateTimestampScreen() {
                   <Text style={styles.resultMetaText}>
                     errorCode: {result.errorCode ?? 'none'}
                   </Text>
+                  <Text style={styles.resultMetaText}>
+                    warningCode: {result.warningCode ?? 'none'}
+                  </Text>
+                  <Text style={styles.resultMetaText}>
+                    vadAnchorCount: {String(result.vadAnchorCount ?? 'n/a')}
+                  </Text>
+                  <Text style={styles.resultMetaText}>
+                    minAnchorsApplied:{' '}
+                    {String(result.minAnchorsApplied ?? 'n/a')}
+                  </Text>
                 </View>
 
                 <View style={styles.resultCard}>
@@ -1263,6 +1325,11 @@ export default function GenerateTimestampScreen() {
                                 {String(
                                   segment.payload.tokenMetadata
                                     .vadAnchorCount ?? 'n/a'
+                                )}{' '}
+                                minAnchors=
+                                {String(
+                                  segment.payload.tokenMetadata
+                                    .minAnchorsApplied ?? 'n/a'
                                 )}
                               </Text>
                             )}
