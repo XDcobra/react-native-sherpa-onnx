@@ -13,12 +13,12 @@ Alignment is offline and buffer-first:
 | --- | --- | --- |
 | `proportional` | text + audio duration | `proportional` |
 | `estimated` | text + `segmentSampleCounts` | `estimated` |
-| `accurate` | text + audio + wav2vec2 ONNX | `accurate` |
+| `accurate` | text + audio + wav2vec2 ONNX (optional VAD segmentation) | `accurate` |
 | `vad` | text + VAD `speech` anchors from `seg_off_*` | `vad` |
 
 Granularity rules:
 - `proportional` / `estimated`: `sentence` or `word`
-- `accurate`: `sentence`, `word`, or `character`
+- `accurate`: `sentence`, `word`, or `character` (with VAD segmentation: `sentence` or `word`)
 - `vad`: `sentence` or `word` (`character` rejected)
 
 ### Detailed behavior matrix (mode x granularity)
@@ -27,13 +27,21 @@ Granularity rules:
 | --- | --- | --- | --- | --- |
 | `proportional` | `sentence`, `word` | Offline text + offline audio duration | Splits text by granularity and distributes timing by text weight over full audio duration | No acoustic boundaries; purely duration/text-weight based |
 | `estimated` | `sentence`, `word` | Offline text + `segmentSampleCounts` (+ optional `sampleRate`) | Uses estimated chunk/sample timeline to assign timestamps | Not forced alignment; quality depends on provided chunk counts |
-| `accurate` | `sentence`, `word`, `character` | Offline text + offline audio + wav2vec2 alignment model | CTC forced alignment on waveform and text | `character` is supported only in `accurate` |
+| `accurate` | `sentence`, `word`, `character` | Offline text + offline audio + wav2vec2 alignment model | CTC forced alignment on waveform and text | `character` is supported only in plain `accurate` (without segmentation) |
 | `vad` | `sentence`, `word` | Offline text + VAD speech anchors from `seg_off_*` | Splits text by granularity, then maps units monotonically to VAD speech anchors (`vadMonotonicWeightDP`) and writes `alignment` segments only for mapped units | If `textUnits > vadAnchors`, multiple units merge into one output segment |
+| `accurate` + `segmentation.source='vad'` | `sentence`, `word` | Offline text + offline audio + wav2vec2 + VAD speech anchors from `seg_off_*` | Runs constrained accurate alignment sequentially per mapped VAD anchor and writes canonical `alignment` segments (`timingMode: accurate`) | `segmentation.minAnchors` default is `2`; below threshold returns success with `segmentsWritten=0` |
 
 For `vad` mode, mismatch behavior is deterministic by design:
 - `textUnits > vadAnchors`: multiple text units can be merged into one anchor/segment.
 - `vadAnchors > textUnits`: extra anchors remain unmapped (reported in diagnostics).
 - `vadAnchorCount = 0`: valid success path with `segmentsWritten = 0` (no reject).
+
+For `accurate` + `segmentation.source='vad'`, threshold behavior is deterministic:
+- `segmentation.minAnchors` is optional, default `2` (integer range `1..10`).
+- `vadAnchorCount = 0`: success with `segmentsWritten = 0` and warning `ALIGNMENT_EMPTY_VAD_ANCHORS`.
+- `0 < vadAnchorCount < minAnchors`: success with `segmentsWritten = 0` and warning `ALIGNMENT_BELOW_MIN_VAD_ANCHORS`.
+- `vadAnchorCount >= minAnchors`: constrained accurate execution starts.
+- On zero-write threshold exits, native write result may include `warningCode`, `vadAnchorCount`, and `minAnchorsApplied`.
 
 ### Common surprises
 
@@ -42,8 +50,12 @@ For `vad` mode, mismatch behavior is deterministic by design:
 - Short utterances such as `"Hello World"` often become a single VAD speech anchor.
   - With one anchor and two words, output is typically one `alignment` segment with combined text.
 - If you need fine word/character boundaries independent of VAD anchor count, prefer `accurate` or even better `accurate` with segmentation via `vad`.
+- `accurate` + `segmentation.source='vad'` keeps offline memory characteristics.
+  - It is constrained/sequential per anchor, but still offline-first (no fake-streaming in this path yet).
 
 ## Quick start
+
+All modes share the same offline buffer setup:
 
 ```ts
 import { alignTextToAudio } from 'react-native-sherpa-onnx/alignment';
@@ -60,6 +72,7 @@ import {
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 
 const textBuf = await createOfflineTextBufferFromText('Hello world.');
 const audioBuf = await createOfflineAudioBufferFromFile({
@@ -69,23 +82,99 @@ const audioBuf = await createOfflineAudioBufferFromFile({
 const segmentOut = await createEmptyOfflineSegmentBuffer({
   sourceAudioBufferId: audioBuf,
 });
+```
 
-try {
-  const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
-    mode: 'proportional',
-    granularity: 'sentence',
-  });
+### `proportional`
 
-  const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 256);
-  const alignmentSegments = segments.filter((s) => s.kind === 'alignment');
+```ts
+// No model, no chunks, no segmentation: pure duration/text-weight timing.
+const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'proportional',
+  granularity: 'sentence',
+});
+```
 
-  console.log(write.outputSegmentBufferId, write.segmentsWritten);
-  console.log(alignmentSegments.map((s) => s.payload?.text));
-} finally {
-  await releasePipelineTextBuffer(textBuf).catch(() => {});
-  await releasePipelineAudioBuffer(audioBuf).catch(() => {});
-  await releasePipelineSegmentBuffer(segmentOut).catch(() => {});
-}
+### `estimated`
+
+```ts
+// Uses caller-provided timeline chunks.
+const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'estimated',
+  granularity: 'word',
+  chunks: {
+    sampleRate: 16000,
+    segmentSampleCounts: [3200, 4000, 2800],
+  },
+});
+```
+
+### `accurate` (plain)
+
+```ts
+// wav2vec2 CTC forced alignment over full offline audio.
+const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  alignmentModelPath: '/abs/path/to/model.onnx',
+});
+```
+
+### `vad` (standalone)
+
+```ts
+// Uses VAD speech anchors from an existing offline segment buffer.
+const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'vad',
+  granularity: 'word',
+  segmentation: {
+    source: 'vad',
+    segmentBuffer: vadSegmentBufferId, // seg_off_*
+  },
+});
+```
+
+### `accurate + vad` (constrained)
+
+```ts
+// 1) VAD standalone: create speech anchors in an offline segment buffer.
+const vadSegmentOut = await createEmptyOfflineSegmentBuffer({
+  sourceAudioBufferId: audioBuf,
+});
+
+const vad = await createStreamingVAD({
+  modelPath: '/abs/path/to/vad/model',
+  modelType: 'auto',
+  sampleRate: 16000,
+});
+await vad.process({
+  audioIn: audioBuf,
+  segmentOut: vadSegmentOut, // VAD writes speech-anchor segments into this offline segment buffer
+  options: { chunkSize: 512 },
+});
+
+// 2) Alignment standalone (accurate), but constrained by VAD standalone output.
+const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word', // sentence|word only for accurate+vad
+  alignmentModelPath: '/abs/path/to/model.onnx',
+  segmentation: {
+    source: 'vad',
+    segmentBuffer: vadSegmentOut, // pass buffer handle directly
+    minAnchors: 2, // optional (default 2): if VAD finds fewer anchors, alignment returns success with segmentsWritten=0
+  },
+});
+```
+
+### Read result segments + cleanup (all modes)
+
+```ts
+const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 256);
+const alignmentSegments = segments.filter((s) => s.kind === 'alignment');
+console.log(write.outputSegmentBufferId, write.segmentsWritten, write.warningCode);
+
+await releasePipelineTextBuffer(textBuf).catch(() => {});
+await releasePipelineAudioBuffer(audioBuf).catch(() => {});
+await releasePipelineSegmentBuffer(segmentOut).catch(() => {});
 ```
 
 ### Derive subtitle rows from alignment segments (app-layer)
@@ -139,7 +228,7 @@ function assertAlignmentGranularityForMode(
 | --- | --- |
 | `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; alignmentModelPath: string; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; alignmentModelPath: string; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource; minAnchors?: number } }` |
 | `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
 | `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number }` |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
@@ -162,5 +251,6 @@ function assertAlignmentGranularityForMode(
 | `SEGMENT_INVALID_STATE` | output segment buffer already populated |
 | `ALIGNMENT_MODEL_MISSING` | accurate mode without `alignmentModelPath` |
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
+| `ALIGNMENT_CONSTRAINED_ACCURATE_ERROR` | constrained accurate execution failed inside valid `accurate + vad` run |
 | `ALIGNMENT_ERROR` | generic native alignment failure |
 | `OFFLINE_OOM` | not enough memory for offline alignment |
