@@ -102,6 +102,36 @@ std::string ParseSegmentationBufferId(NSDictionary *options) {
   throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");
 }
 
+std::string ParseSegmentationSource(NSDictionary *options) {
+  if (options == nil) return "";
+  NSString *value = [options[@"segmentationSource"] isKindOfClass:[NSString class]]
+      ? options[@"segmentationSource"]
+      : nil;
+  NSString *trimmed = value != nil
+      ? [[value lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  return std::string([trimmed UTF8String]);
+}
+
+int32_t ParseMinAnchors(NSDictionary *options, int32_t defaultValue) {
+  if (options == nil) {
+    return defaultValue;
+  }
+  id raw = options[@"minAnchors"];
+  if (raw == nil) {
+    return defaultValue;
+  }
+  if (![raw isKindOfClass:[NSNumber class]]) {
+    throw std::runtime_error("ALIGNMENT_ERROR: options.minAnchors must be an integer between 1 and 10.");
+  }
+  double value = [(NSNumber *)raw doubleValue];
+  int32_t intValue = static_cast<int32_t>(value);
+  if (!std::isfinite(value) || value != static_cast<double>(intValue) || intValue < 1 || intValue > 10) {
+    throw std::runtime_error("ALIGNMENT_ERROR: options.minAnchors must be an integer between 1 and 10.");
+  }
+  return intValue;
+}
+
 std::string NormalizeMode(NSString *mode) {
   NSString *m = [mode isKindOfClass:[NSString class]]
       ? [[mode lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
