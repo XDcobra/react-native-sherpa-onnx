@@ -27,6 +27,8 @@ export interface AlignmentChunkTimeline {
 export interface AlignmentVadSegmentationConfig {
   source: 'vad';
   segmentBuffer: OfflineSegmentBufferIdSource;
+  /** Minimum required speech anchors before constrained accurate execution starts. Default: 2 */
+  minAnchors?: number;
 }
 
 export type AlignmentTimingMode =
@@ -39,6 +41,9 @@ export type AlignmentTimingMode =
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
+  warningCode?: string;
+  vadAnchorCount?: number;
+  minAnchorsApplied?: number;
 }
 
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
@@ -70,7 +75,7 @@ export type AlignTextToAudioOptionsAccurate =
   | {
       mode: 'accurate';
       alignmentModelPath: string;
-      granularity?: AlignmentGranularity;
+      granularity?: 'sentence' | 'word';
       language?: string;
       segmentation: AlignmentVadSegmentationConfig;
     };

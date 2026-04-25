@@ -905,6 +905,9 @@ export interface Spec extends TurboModule {
   ): Promise<{
     outputSegmentBufferId: string;
     segmentsWritten: number;
+    warningCode?: string;
+    vadAnchorCount?: number;
+    minAnchorsApplied?: number;
   }>;
 
   detectAlignmentModel(
