@@ -50,6 +50,8 @@ function resolvePublicLanguageHintStrings(
       return iso6391HintsForAlignmentModelType(input.modelType) ?? [];
     case ModelCategory.Vad:
       return [];
+    case ModelCategory.Punctuation:
+      return [];
     default: {
       return [];
     }

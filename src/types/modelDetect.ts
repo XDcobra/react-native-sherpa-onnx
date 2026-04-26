@@ -94,3 +94,14 @@ export interface VadDetectModelResult extends ModelDetectResultBase {
     model?: string;
   };
 }
+
+// ─── Punctuation extension ────────────────────────────────────────────────
+
+export interface PunctuationDetectModelResult extends ModelDetectResultBase {
+  /** Resolved paths (offline: ct_transformer; online: cnn_bilstm + bpe_vocab). */
+  paths?: {
+    ct_transformer?: string;
+    cnn_bilstm?: string;
+    bpe_vocab?: string;
+  };
+}

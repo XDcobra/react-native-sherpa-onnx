@@ -1060,6 +1060,30 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Punctuation model detection: offline (CT-Transformer) vs online (CNN-BiLSTM + bpe.vocab).
+   * `isStreaming` is reserved; currently false until streaming handling is implemented.
+   */
+  detectPunctuationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      ct_transformer?: string;
+      cnn_bilstm?: string;
+      bpe_vocab?: string;
+    };
+  }>;
+
   initializeEnhancement(
     instanceId: string,
     modelDir: string,

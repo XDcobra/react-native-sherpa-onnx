@@ -45,6 +45,7 @@ export { getModelLicenses, type ModelLicense } from './licenses';
 // - import { ... } from 'react-native-sherpa-onnx/vad'
 // - import { ... } from 'react-native-sherpa-onnx/diarization'
 // - import { ... } from 'react-native-sherpa-onnx/enhancement'
+// - import { detectPunctuationModel, ... } from 'react-native-sherpa-onnx/punctuation'
 // - import { ... } from 'react-native-sherpa-onnx/separation'
 // - import { ... } from 'react-native-sherpa-onnx/audiobuffer'  // offline/live pipeline buffers
 // - import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'  // play from pipeline buffers
