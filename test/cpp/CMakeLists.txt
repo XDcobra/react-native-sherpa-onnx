@@ -28,6 +28,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-enhancement-online-guard.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-model-detect-enhancement.cpp"
   "${MODEL_DETECT_DIR}/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp"
+  "${MODEL_DETECT_DIR}/punctuation/sherpa-onnx-punctuation-online-guard.cpp"
   "${MODEL_DETECT_DIR}/punctuation/sherpa-onnx-model-detect-punctuation.cpp"
   "${MODEL_DETECT_DIR}/punctuation/sherpa-onnx-validate-punctuation.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-vad-catalog-metadata.cpp"

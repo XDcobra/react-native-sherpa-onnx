@@ -1,6 +1,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-punctuation-catalog-metadata.h"
+#include "sherpa-onnx-punctuation-online-guard.h"
 #include "sherpa-onnx-validate-punctuation.h"
 
 #include <algorithm>
@@ -10,6 +11,9 @@
 namespace {
 
 using namespace sherpaonnx::model_detect;
+using sherpaonnx::punctuation::online_guard::IsStreamingCandidate;
+using sherpaonnx::punctuation::online_guard::LooksLikeAbsolutePath;
+using sherpaonnx::punctuation::online_guard::RunOnlineCompatibilityGuard;
 
 sherpaonnx::PunctuationModelKind ParsePunctuationModelTypeStrict(const std::string& modelType) {
     const std::string t = ToLower(modelType);
@@ -180,11 +184,34 @@ sherpaonnx::PunctuationDetectResult DetectPunctuationModelFromFiles(
 
     auto validation = sherpaonnx::ValidatePunctuationPaths(selected, result.paths, modelDir);
     if (!validation.ok) {
+        result.isStreaming = false;
         result.error = validation.error;
         return result;
     }
 
-    result.isStreaming = false;
+    if (selected == PK::kCtTransformer) {
+        result.isStreaming = false;
+    } else {
+        result.isStreaming = IsStreamingCandidate(PK::kCnnBilstm);
+        if (result.isStreaming) {
+            if (FileExists(result.paths.cnn_bilstm)) {
+                const auto guard = RunOnlineCompatibilityGuard(result.paths.cnn_bilstm);
+                if (!guard.passed) {
+                    result.isStreaming = false;
+                    result.error =
+                        "Punctuation: online compatibility guard failed for cnn_bilstm model '" +
+                        result.paths.cnn_bilstm + "': " +
+                        (guard.error.empty() ? "unknown reason" : guard.error);
+                    return result;
+                }
+            } else if (LooksLikeAbsolutePath(result.paths.cnn_bilstm)) {
+                result.isStreaming = false;
+                result.error = "Punctuation: resolved cnn_bilstm file does not exist: " +
+                               result.paths.cnn_bilstm;
+                return result;
+            }
+        }
+    }
     result.ok = true;
     return result;
 }

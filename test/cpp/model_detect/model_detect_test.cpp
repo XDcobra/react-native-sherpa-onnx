@@ -320,6 +320,12 @@ TEST(ModelDetectTest, DetectPunctuationFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType
             << " but got " << model_detect_test::PunctuationKindToString(result.selectedKind);
+        if (expectedType == "cnn_bilstm") {
+            EXPECT_TRUE(result.isStreaming)
+                << "Asset " << block.assetName << " should report streaming (online) compatibility";
+        } else if (expectedType == "ct_transformer") {
+            EXPECT_FALSE(result.isStreaming) << "Asset " << block.assetName << " is offline CT";
+        }
     }
 }
 

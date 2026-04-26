@@ -311,7 +311,9 @@ struct EnhancementDetectResult {
 
 struct PunctuationDetectResult {
     bool ok = false;
-    /** Future: true when native online punctuation is selected and validated. Currently always false. */
+    /** True when the CNN-BiLSTM (online) layout is selected and the ORT online-compatibility
+     *  preflight passes; false for offline CT-Transformer. Name-only or missing-file
+     *  heuristics mirror enhancement detect behavior. */
     bool isStreaming = false;
     std::string error;
     std::vector<DetectedModel> detectedModels;
