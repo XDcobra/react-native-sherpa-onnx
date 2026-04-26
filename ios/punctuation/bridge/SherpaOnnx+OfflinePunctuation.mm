@@ -1,0 +1,285 @@
+#import "../../SherpaOnnx.h"
+
+#include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx/c-api/cxx-api.h"
+#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace {
+
+std::mutex g_punct_offline_mutex;
+std::map<std::string, sherpa_onnx::cxx::OfflinePunctuation> g_punct_offline;
+
+static NSString *kInitErr = @"PUNCTUATION_INIT_ERROR";
+static NSString *kPunctErr = @"PUNCTUATION_ERROR";
+static NSString *kNotFound = @"PUNCTUATION_INSTANCE_NOT_FOUND";
+static NSString *kTxtNotFound = @"TEXT_BUFFER_NOT_FOUND";
+static NSString *kTxtKind = @"TEXT_BUFFER_KIND_MISMATCH";
+static NSString *kTxtEmpty = @"TEXT_BUFFER_EMPTY";
+static NSString *kTxtPop = @"TEXT_ALREADY_POPULATED";
+
+}  // namespace
+
+extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
+  std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+  g_punct_offline.clear();
+}
+
+@implementation SherpaOnnx (OfflinePunctuation)
+
+- (void)initializeOfflinePunctuation:(NSString *)instanceId
+                            modelDir:(NSString *)modelDir
+                           modelType:(NSString *)modelType
+                          numThreads:(NSNumber *)numThreads
+                            provider:(NSString *)provider
+                               debug:(NSNumber *)debug
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(kInitErr, @"instanceId is required", nil);
+    return;
+  }
+  if (modelDir == nil || [modelDir length] == 0) {
+    reject(kInitErr, @"modelDir is required", nil);
+    return;
+  }
+  std::string idStr = [instanceId UTF8String];
+  std::string dirStr = [modelDir UTF8String];
+  (void)modelType;
+
+  @try {
+    auto det = sherpaonnx::DetectPunctuationModel(
+        std::optional<std::string>(dirStr),
+        std::nullopt,
+        "ct_transformer");
+    if (!det.ok) {
+      NSString *msg = det.error.empty()
+          ? @"Punctuation: model is not a valid offline CT-Transformer layout"
+          : [NSString stringWithUTF8String:det.error.c_str()];
+      reject(kInitErr, msg, nil);
+      return;
+    }
+    if (det.selectedKind != sherpaonnx::PunctuationModelKind::kCtTransformer) {
+      reject(kInitErr, @"Offline punctuation requires ct_transformer (native detect mismatch)", nil);
+      return;
+    }
+    if (det.paths.ct_transformer.empty()) {
+      reject(kInitErr, @"Punctuation: missing ct_transformer onnx path", nil);
+      return;
+    }
+    int32_t nt = numThreads != nil ? (int32_t)[numThreads intValue] : 1;
+    if (nt < 1) {
+      nt = 1;
+    }
+    bool dbg = debug != nil && [debug boolValue];
+    std::string prov = "cpu";
+    if (provider != nil && [provider length] > 0) {
+      prov = std::string([provider UTF8String]);
+    }
+
+    sherpa_onnx::cxx::OfflinePunctuationConfig cfg;
+    cfg.model.ct_transformer = det.paths.ct_transformer;
+    cfg.model.num_threads = nt;
+    cfg.model.debug = dbg;
+    cfg.model.provider = prov;
+
+    auto created = sherpa_onnx::cxx::OfflinePunctuation::Create(cfg);
+    {
+      std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+      g_punct_offline[idStr] = std::move(created);
+    }
+
+    NSMutableArray *models = [NSMutableArray array];
+    for (const auto &m : det.detectedModels) {
+      [models addObject:@ {
+        @"type" : [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
+        @"modelDir" : [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @""
+      }];
+    }
+    resolve(@{
+      @"success" : @YES,
+      @"modelType" : @"ct_transformer",
+      @"detectedModels" : models
+    });
+  } @catch (NSException *exception) {
+    reject(kInitErr, [NSString stringWithFormat:@"Offline punctuation init: %@", exception.reason], nil);
+  }
+}
+
+- (void)punctuateOfflineTextBuffers:(NSString *)instanceId
+                   textInBufferId:(NSString *)textInId
+                  textOutBufferId:(NSString *)textOutId
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(kPunctErr, @"instanceId is required", nil);
+    return;
+  }
+  std::string iid = [instanceId UTF8String];
+  sherpa_onnx::cxx::OfflinePunctuation *eng = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+    auto it = g_punct_offline.find(iid);
+    if (it == g_punct_offline.end()) {
+      reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
+      return;
+    }
+    eng = &it->second;
+  }
+  if (textInId == nil || [textInId hasPrefix:@"txt_off_"] == NO) {
+    reject(kTxtKind, [NSString stringWithFormat:@"Expected txt_off_* for text in, got %@", textInId], nil);
+    return;
+  }
+  if (textOutId == nil || [textOutId hasPrefix:@"txt_off_"] == NO) {
+    reject(kTxtKind, [NSString stringWithFormat:@"Expected txt_off_* for text out, got %@", textOutId], nil);
+    return;
+  }
+  std::string plain;
+  std::string lang;
+  {
+    std::string inId = std::string([textInId UTF8String]);
+    std::string err;
+    if (!txt_read_offline_text_with_lang(inId, &plain, &lang, &err)) {
+      NSString *c = kTxtNotFound;
+      if (err.find("not found") == std::string::npos) {
+        c = kTxtEmpty;
+      }
+      reject(c, [NSString stringWithUTF8String:err.c_str()], nil);
+      return;
+    }
+  }
+  std::string outId = std::string([textOutId UTF8String]);
+  {
+    std::lock_guard<std::mutex> tlock(g_txt_mutex);
+    auto oi = g_txt_offline.find(outId);
+    if (oi == g_txt_offline.end() || !oi->second) {
+      reject(kTxtNotFound, [NSString stringWithFormat:@"Output buffer not found: %@", textOutId], nil);
+      return;
+    }
+    if (oi->second->populated) {
+      reject(kTxtPop, @"Output offline text buffer is already populated", nil);
+      return;
+    }
+  }
+  CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
+  std::string outText;
+  @try {
+    outText = eng->AddPunctuation(plain);
+  } @catch (NSException *exception) {
+    reject(kPunctErr, [NSString stringWithFormat:@"Punctuation: %@", exception.reason], nil);
+    return;
+  }
+  CFTimeInterval t1 = CFAbsoluteTimeGetCurrent();
+  double ms = (t1 - t0) * 1000.0;
+  std::string perr;
+  if (!txt_populate_offline_if_empty(
+          outId,
+          outText,
+          {},
+          {},
+          {},
+          lang,
+          "",
+          "",
+          &perr)) {
+    reject(kTxtPop, [NSString stringWithUTF8String:perr.c_str()], nil);
+    return;
+  }
+  resolve(@{@"processingTimeMs" : @(ms)});
+}
+
+- (void)punctuateOfflineString:(NSString *)instanceId
+                        plain:(NSString *)plain
+               textOutBufferId:(NSString *)textOutId
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(kPunctErr, @"instanceId is required", nil);
+    return;
+  }
+  if (plain == nil) {
+    reject(kPunctErr, @"plain is required", nil);
+    return;
+  }
+  std::string iid = [instanceId UTF8String];
+  sherpa_onnx::cxx::OfflinePunctuation *eng = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+    auto it = g_punct_offline.find(iid);
+    if (it == g_punct_offline.end()) {
+      reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
+      return;
+    }
+    eng = &it->second;
+  }
+  if (textOutId == nil || [textOutId hasPrefix:@"txt_off_"] == NO) {
+    reject(kTxtKind, [NSString stringWithFormat:@"Expected txt_off_* for text out, got %@", textOutId], nil);
+    return;
+  }
+  std::string outId = std::string([textOutId UTF8String]);
+  {
+    std::lock_guard<std::mutex> tlock(g_txt_mutex);
+    auto oi = g_txt_offline.find(outId);
+    if (oi == g_txt_offline.end() || !oi->second) {
+      reject(kTxtNotFound, [NSString stringWithFormat:@"Output buffer not found: %@", textOutId], nil);
+      return;
+    }
+    if (oi->second->populated) {
+      reject(kTxtPop, @"Output offline text buffer is already populated", nil);
+      return;
+    }
+  }
+  std::string plainStr = [plain UTF8String];
+  CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
+  std::string outText;
+  @try {
+    outText = eng->AddPunctuation(plainStr);
+  } @catch (NSException *exception) {
+    reject(kPunctErr, [NSString stringWithFormat:@"Punctuation: %@", exception.reason], nil);
+    return;
+  }
+  CFTimeInterval t1 = CFAbsoluteTimeGetCurrent();
+  double ms = (t1 - t0) * 1000.0;
+  std::string perr;
+  if (!txt_populate_offline_if_empty(
+          outId,
+          outText,
+          {},
+          {},
+          {},
+          "",
+          "",
+          "",
+          &perr)) {
+    reject(kTxtPop, [NSString stringWithUTF8String:perr.c_str()], nil);
+    return;
+  }
+  resolve(@{@"processingTimeMs" : @(ms)});
+}
+
+- (void)unloadOfflinePunctuation:(NSString *)instanceId
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    resolve(nil);
+    return;
+  }
+  std::string iid = [instanceId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+    g_punct_offline.erase(iid);
+  }
+  resolve(nil);
+}
+
+@end

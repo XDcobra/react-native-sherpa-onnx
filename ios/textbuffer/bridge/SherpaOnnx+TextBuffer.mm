@@ -224,6 +224,31 @@ bool txt_read_offline_text(
     return true;
 }
 
+bool txt_read_offline_text_with_lang(
+    const std::string &bufferId,
+    std::string *text,
+    std::string *lang,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (!it->second->populated || it->second->text.empty()) {
+        if (error) *error = "Text buffer is empty or not populated";
+        return false;
+    }
+    if (text) {
+        *text = it->second->text;
+    }
+    if (lang) {
+        *lang = it->second->lang;
+    }
+    return true;
+}
+
 bool txt_populate_offline_if_empty(
     const std::string &bufferId,
     const std::string &text,

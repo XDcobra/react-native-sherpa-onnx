@@ -795,6 +795,14 @@ bool txt_read_offline_text(
 	std::string *error = nullptr
 );
 
+// Like txt_read_offline_text but also returns `lang` for downstream pass-through.
+bool txt_read_offline_text_with_lang(
+	const std::string &bufferId,
+	std::string *text,
+	std::string *lang,
+	std::string *error = nullptr
+);
+
 bool txt_populate_offline_if_empty(
 	const std::string &bufferId,
 	const std::string &text,

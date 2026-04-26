@@ -236,6 +236,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    punctuationHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -3136,6 +3137,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeOfflinePunctuation(
+    instanceId: String,
+    modelDir: String,
+    modelType: String?,
+    numThreads: Double?,
+    provider: String?,
+    debug: Boolean?,
+    promise: Promise
+  ) {
+    punctuationHelper.initializeOfflinePunctuation(
+      instanceId,
+      modelDir,
+      modelType,
+      numThreads,
+      provider,
+      debug,
+      promise
+    )
+  }
+
+  override fun punctuateOfflineTextBuffers(
+    instanceId: String,
+    textInBufferId: String,
+    textOutBufferId: String,
+    promise: Promise
+  ) {
+    punctuationHelper.punctuateOfflineTextBuffers(instanceId, textInBufferId, textOutBufferId, promise)
+  }
+
+  override fun punctuateOfflineString(
+    instanceId: String,
+    plain: String,
+    textOutBufferId: String,
+    promise: Promise
+  ) {
+    punctuationHelper.punctuateOfflineString(instanceId, plain, textOutBufferId, promise)
+  }
+
+  override fun unloadOfflinePunctuation(
+    instanceId: String,
+    promise: Promise
+  ) {
+    punctuationHelper.unloadOfflinePunctuation(instanceId, promise)
   }
 
   override fun startVadPipeline(

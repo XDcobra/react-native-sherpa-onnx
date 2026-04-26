@@ -26,6 +26,8 @@
 
 // Defined in SherpaOnnx+PipelineAudioMic.mm
 extern void paMicStopQueue(void);
+// ios/punctuation/bridge/SherpaOnnx+OfflinePunctuation.mm
+extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
 
 @interface SherpaOnnx (JSI)
 - (BOOL)autoInstallJSI;
@@ -52,6 +54,7 @@ extern void paMicStopQueue(void);
 - (void)invalidate
 {
     paMicStopQueue();
+    sherpaonnx_punct_offline_invalidate_all();
     txt_release_all_entries();
     seg_release_all_entries();
     pcmPlayerDestroyAll();
