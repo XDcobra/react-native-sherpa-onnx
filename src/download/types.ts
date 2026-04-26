@@ -4,6 +4,7 @@ export enum ModelCategory {
   Tts = 'tts',
   Stt = 'stt',
   Vad = 'vad',
+  Punctuation = 'punctuation',
   Diarization = 'diarization',
   Enhancement = 'enhancement',
   Separation = 'separation',
