@@ -1,0 +1,30 @@
+---
+description: Always load internal buffer architecture context
+alwaysApply: true
+---
+
+# Buffer Internal Context
+
+## Purpose
+
+Ensure every chat in this project has immediate access to the internal behavior of live and offline buffers.
+
+## Required Behavior
+
+- Treat the following files as canonical internal references for buffer logic.
+- Proactively consult these references whenever the user request mentions `buffer` (including names like `LiveAudioBuffer`, `OfflineTextBuffer`, `SegmentBuffer`, or similar).
+- Use these references for implementation decisions, debugging, refactors, and explanations that involve buffering or segmentation flow.
+
+## Internal Buffer References
+
+- `docs/internal/liveaudiobuffer-internal.md`
+- `docs/internal/livesegmentbuffer-internal.md`
+- `docs/internal/livetextbuffer-internal.md`
+- `docs/internal/offlineaudiobuffer-internal.md`
+- `docs/internal/offlinesegmentbuffer-internal.md`
+- `docs/internal/offlinetextbuffer-internal.md`
+
+## Notes
+
+- If multiple buffer types are involved, synthesize behavior across the relevant internal docs before proposing code changes.
+- Prefer these internal docs over assumptions when describing buffer invariants and state transitions.
