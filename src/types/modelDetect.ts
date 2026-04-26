@@ -41,6 +41,8 @@ export interface ModelDetectResultBase {
    * For TTS: always `true`.
    * For Enhancement: supplied by native detection with online-compatibility preflight
    * (`success=false` can still occur in name-only heuristic mode).
+   * For Punctuation: `true` for CNN-BiLSTM (online) when the ORT preflight passes; `false` for
+   * offline CT-Transformer; heuristics mirror Enhancement when files are not on disk.
    * For Alignment: always `false`.
    */
   isStreaming: boolean;
@@ -92,5 +94,16 @@ export interface VadDetectModelResult extends ModelDetectResultBase {
   /** Resolved model file path from detection. */
   paths?: {
     model?: string;
+  };
+}
+
+// ─── Punctuation extension ────────────────────────────────────────────────
+
+export interface PunctuationDetectModelResult extends ModelDetectResultBase {
+  /** Resolved paths (offline: ct_transformer; online: cnn_bilstm + bpe_vocab). */
+  paths?: {
+    ct_transformer?: string;
+    cnn_bilstm?: string;
+    bpe_vocab?: string;
   };
 }

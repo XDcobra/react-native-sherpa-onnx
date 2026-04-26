@@ -22,6 +22,7 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
@@ -146,6 +147,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     reactApplicationContext,
     { modelDir, assetName, modelType ->
       Companion.nativeDetectVadModel(modelDir, assetName, modelType)
+    }
+  )
+  private val punctuationHelper = SherpaOnnxPunctuationHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
     }
   )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
@@ -3123,6 +3129,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
   }
 
+  override fun detectPunctuationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, promise)
+  }
+
   override fun startVadPipeline(
     instanceId: String,
     audioInBufferId: String,
@@ -3388,6 +3403,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     @JvmStatic
     private external fun nativeDetectVadModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectPunctuationModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

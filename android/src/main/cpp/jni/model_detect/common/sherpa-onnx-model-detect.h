@@ -77,6 +77,13 @@ enum class EnhancementModelKind {
     kDpdfNet
 };
 
+/** Offline=CT-Transformer (ct_transformer); online=CNN-BiLSTM (cnn_bilstm + bpe.vocab) per sherpa-onnx. */
+enum class PunctuationModelKind {
+    kUnknown,
+    kCtTransformer,
+    kCnnBilstm
+};
+
 enum class VadModelKind {
     kUnknown,
     kSileroVad,
@@ -232,6 +239,15 @@ struct EnhancementModelPaths {
     std::string model;
 };
 
+struct PunctuationModelPaths {
+    /** OfflinePunctuationModelConfig.ct_transformer */
+    std::string ct_transformer;
+    /** OnlinePunctuationModelConfig.cnn_bilstm */
+    std::string cnn_bilstm;
+    /** OnlinePunctuationModelConfig.bpe_vocab */
+    std::string bpe_vocab;
+};
+
 struct AlignmentModelPaths {
     std::string model;
 };
@@ -290,6 +306,21 @@ struct EnhancementDetectResult {
     /** Heuristic languages from asset/folder name; currently usually empty for enhancement. */
     std::vector<std::string> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
+    std::string quantization;
+};
+
+struct PunctuationDetectResult {
+    bool ok = false;
+    /** True when the CNN-BiLSTM (online) layout is selected and the ORT online-compatibility
+     *  preflight passes; false for offline CT-Transformer. Name-only or missing-file
+     *  heuristics mirror enhancement detect behavior. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    PunctuationModelKind selectedKind = PunctuationModelKind::kUnknown;
+    PunctuationModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<std::string> derivedLanguages;
     std::string quantization;
 };
 
@@ -394,6 +425,17 @@ VadDetectResult DetectVadModel(
     const std::string& modelType = "auto"
 );
 
+/**
+ * Punctuation model detection. Pass at least one of `model_dir` or `asset_name`.
+ * Offline (CT) vs online (CNN-BiLSTM) heuristics follow sherpa's Offline/OnlinePunctuationModelConfig.
+ * `isStreaming` is false until streaming selection is implemented.
+ */
+PunctuationDetectResult DetectPunctuationModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto"
+);
+
 AlignmentDetectResult DetectAlignmentModel(
     const std::string& modelDir,
     const std::string& modelType
@@ -410,6 +452,13 @@ EnhancementDetectResult DetectEnhancementModelFromFileList(
 /** Test-only: Like DetectVadModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 VadDetectResult DetectVadModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectPunctuationModel but takes a pre-built file list; no filesystem access. */
+PunctuationDetectResult DetectPunctuationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"
