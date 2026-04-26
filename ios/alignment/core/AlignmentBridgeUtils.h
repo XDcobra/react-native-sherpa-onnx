@@ -23,10 +23,12 @@ namespace sherpaonnx {
 namespace alignment {
 namespace bridge {
 
-NSDictionary *AlignmentResultToNSDictionary(const sherpa_onnx::alignment::AlignmentResult &result);
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options);
 int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRate);
 std::string ParseAlignmentModelPath(NSDictionary *options);
+std::string ParseSegmentationBufferId(NSDictionary *options);
+std::string ParseSegmentationSource(NSDictionary *options);
+int32_t ParseMinAnchors(NSDictionary *options, int32_t defaultValue = 2);
 std::string NormalizeMode(NSString *mode);
 std::string NormalizeGranularity(NSString *granularity);
 

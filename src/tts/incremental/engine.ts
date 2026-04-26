@@ -167,7 +167,7 @@ async function createPipelineSession(
 
   // Create internal LiveTextBuffer
   const textBufferRef = await createLiveTextBuffer({
-    emitPartialEvents: false,
+    streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
   });
   const textBufferId = textBufferRef.bufferId;
 

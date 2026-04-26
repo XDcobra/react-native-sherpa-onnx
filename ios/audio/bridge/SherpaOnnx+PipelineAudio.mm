@@ -1374,9 +1374,20 @@ static std::string pa_encodeViaDecodeFile(
       config.forceMono = forceMono;
       config.chunkSize = 8192;
 
-      auto onChunk = [&liveEntry, &status, useBackpressure](const float *samples, int count) {
-        liveEntry->appendSamples(samples, count, liveEntry->sampleRate, kPaAppendSourceFileIngest, useBackpressure);
-        status->framesIngested += count;
+      auto onChunk = [&liveEntry, &status, useBackpressure, cancelFlag](const float *samples, int count) {
+        if (cancelFlag->load()) return;
+        auto appendResult = liveEntry->tryAppendSamples(
+          samples,
+          count,
+          liveEntry->sampleRate,
+          kPaAppendSourceFileIngest,
+          useBackpressure
+        );
+        if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
+          status->framesIngested += count;
+          return;
+        }
+        cancelFlag->store(true);
       };
 
       auto onStreamInfo = [&srcSampleRate, &srcChannels](int sr, int ch) {

@@ -5,7 +5,7 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 export default function PunctuationScreen() {
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <View style={styles.content}>
         <Ionicons name="text-outline" size={72} style={styles.icon} />
         <Text style={styles.title}>Punctuation</Text>

@@ -313,12 +313,12 @@ export default function STTStreamingScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: 'auto',
-        emitAppendedEvents: false,
+        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       liveAudioBufferRef.current = liveAudio;
 
       const liveText = await createLiveTextBuffer({
-        emitPartialEvents: false,
+        streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
       });
       liveTextBufferRef.current = liveText;
 
@@ -451,7 +451,7 @@ export default function STTStreamingScreen() {
   }, [streamingState]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.headerRow}>
           <View style={styles.headerIconWrap}>

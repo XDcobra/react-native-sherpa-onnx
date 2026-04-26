@@ -68,8 +68,9 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'generate_timestamp',
-    title: 'Generate timestamp',
-    description: 'Generate subtitles/timestamps from a WAV file',
+    title: 'Alignment (Subtitles/Timestamps)',
+    description:
+      'Use the alignment API to generate subtitle/timestamp segments from audio + transcript',
     icon: 'time',
     screen: 'GenerateTimestamp',
     implemented: true,
@@ -92,19 +93,19 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
-    id: 'punctuation',
-    title: 'Punctuation',
-    description: 'Add punctuation to text output',
-    icon: 'text-outline',
-    screen: 'Punctuation',
-    implemented: false,
-  },
-  {
     id: 'vad',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
     icon: 'stats-chart',
     screen: 'VAD',
+    implemented: true,
+  },
+  {
+    id: 'punctuation',
+    title: 'Punctuation',
+    description: 'Add punctuation to text output',
+    icon: 'text-outline',
+    screen: 'Punctuation',
     implemented: false,
   },
   {
@@ -170,7 +171,7 @@ export default function HomeScreen({ navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       <View style={styles.header}>
         <View style={styles.headerRow}>

@@ -8,11 +8,7 @@
  * Buffers are pipeline building blocks: pass handles to STT, TTS, Enhancement, Alignment, PCM Player.
  */
 
-import {
-  NativeEventEmitter,
-  NativeModules,
-  TurboModuleRegistry,
-} from 'react-native';
+import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import {
   installJSI as installJSIBindings,
@@ -147,7 +143,7 @@ let errorSubscription: NativeSubscription | null = null;
 function ensureLiveEventSubscriptions(): void {
   if (framesSubscription && errorSubscription) return;
 
-  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+  const emitter = new NativeEventEmitter();
 
   if (!framesSubscription) {
     framesSubscription = emitter.addListener(
@@ -329,7 +325,7 @@ export async function createOfflineAudioBufferFromFile(
 
   try {
     if (options?.onProgress) {
-      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+      const emitter = new NativeEventEmitter();
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
@@ -446,16 +442,18 @@ export async function createEmptyOfflineAudioBuffer(
 export async function createEmptyLiveAudioBuffer(
   options: CreateEmptyLiveAudioBufferOptions
 ): Promise<LiveAudioBufferRef> {
-  const {
-    onFramesAppended,
-    onError,
-    emitAppendedEvents,
-    appendEventMinIntervalMs,
-    retention,
-  } = options;
+  const { onFramesAppended, onError, streamEvents, retention } = options;
 
+  const fr = streamEvents?.framesAppended;
   const nativeEmitAppendedEvents =
-    emitAppendedEvents ?? Boolean(onFramesAppended);
+    fr !== undefined ? fr.enabled === true : Boolean(onFramesAppended);
+  const appendEventMinIntervalMs =
+    fr !== undefined
+      ? typeof fr.minIntervalMs === 'number' &&
+        Number.isFinite(fr.minIntervalMs)
+        ? Math.max(0, Math.trunc(fr.minIntervalMs))
+        : 0
+      : 0;
 
   // Parse retention union into flat native args
   let retentionMode: string | undefined;
@@ -686,7 +684,7 @@ export async function ingestFileToLiveAudioBuffer(
   const abortController = new AbortController();
 
   if (options?.onProgress) {
-    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+    const emitter = new NativeEventEmitter();
     const onProgress = options.onProgress;
     progressSubscription = emitter.addListener(
       'decodeProgress',
@@ -731,7 +729,7 @@ export async function ingestFileToLiveAudioBuffer(
   // The done promise listens for the native completion event
   const done = new Promise<import('./types').FileIngestResult>(
     (resolve, reject) => {
-      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+      const emitter = new NativeEventEmitter();
       const sub = emitter.addListener('decodeComplete', (event: any) => {
         if (event?.operationId !== operationId) return;
         sub.remove();
@@ -818,6 +816,7 @@ export type {
 } from './types';
 
 export { PipelineAudioErrorCode, DecodeErrorCode } from './types';
+export type { StreamEventSpec } from '../pipeline/streamEvents';
 export { isJSIAvailable } from './jsi';
 
 export type {

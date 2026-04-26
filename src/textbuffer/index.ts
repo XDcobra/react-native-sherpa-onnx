@@ -9,11 +9,7 @@
  * future TTS will consume them as input.
  */
 
-import {
-  NativeEventEmitter,
-  NativeModules,
-  TurboModuleRegistry,
-} from 'react-native';
+import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { PipelineTextErrorCode } from './types';
 import type {
@@ -35,6 +31,8 @@ import type {
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
   LiveTextSegment,
+  TextBufferSpoolingMode,
+  LiveTextBufferSpoolInfo,
 } from './types';
 
 const getNative = (): Spec =>
@@ -42,6 +40,35 @@ const getNative = (): Spec =>
 
 const TEXT_BUFFER_ID_PATTERN =
   /^(txt_off|txt_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function normalizeSpoolingMode(
+  value: unknown,
+  spoolEnabled?: boolean
+): TextBufferSpoolingMode {
+  if (value === 'off' || value === 'auto' || value === 'on') {
+    return value;
+  }
+  return spoolEnabled === false ? 'off' : 'on';
+}
+
+function mapLiveTextSpoolInfo(raw: {
+  spoolMode?: string;
+  spoolEnabled?: boolean;
+  spoolReady?: boolean;
+  spoolBytes?: number;
+  spoolPath?: string;
+}): LiveTextBufferSpoolInfo {
+  const mode = normalizeSpoolingMode(raw.spoolMode, raw.spoolEnabled);
+  return {
+    mode,
+    enabled: raw.spoolEnabled ?? mode !== 'off',
+    ready: raw.spoolReady ?? false,
+    bytes: raw.spoolBytes ?? 0,
+    ...(typeof raw.spoolPath === 'string' && raw.spoolPath.length > 0
+      ? { path: raw.spoolPath }
+      : {}),
+  };
+}
 
 function createInvalidTextBufferIdError(
   sourceName: string,
@@ -117,7 +144,7 @@ let textErrorSubscription: NativeSubscription | null = null;
 function ensureLiveTextEventSubscriptions(): void {
   if (partialSubscription && textErrorSubscription) return;
 
-  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx);
+  const emitter = new NativeEventEmitter();
 
   if (!partialSubscription) {
     partialSubscription = emitter.addListener(
@@ -332,11 +359,25 @@ export async function createOfflineTextBufferFromText(
 export async function createLiveTextBuffer(
   options: CreateLiveTextBufferOptions = {}
 ): Promise<LiveTextBufferRef> {
+  const p = options.streamEvents?.partial;
+  const emitPartialEvents =
+    p !== undefined ? p.enabled === true : Boolean(options.onPartial);
+  const partialEventMinIntervalMs =
+    p !== undefined
+      ? typeof p.minIntervalMs === 'number' && Number.isFinite(p.minIntervalMs)
+        ? Math.max(0, Math.trunc(p.minIntervalMs))
+        : 0
+      : 0;
+
   const raw = await getNative().createLiveTextBuffer({
     windowMaxChars: options.windowMaxChars,
     maxSegments: options.maxSegments,
-    emitPartialEvents: options.emitPartialEvents,
-    partialEventMinIntervalMs: options.partialEventMinIntervalMs,
+    spoolingMode: options.spooling?.mode,
+    spoolingPath: options.spooling?.path,
+    spoolingTemporary: options.spooling?.temporary,
+    spoolingThresholdBytes: options.spooling?.thresholdBytes,
+    emitPartialEvents,
+    partialEventMinIntervalMs,
   });
 
   const liveBufferId = raw.bufferId;
@@ -348,6 +389,7 @@ export async function createLiveTextBuffer(
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
     segmentCount: raw.segmentCount ?? 0,
+    spool: mapLiveTextSpoolInfo(raw),
   };
 
   const unsubscribeEvents = registerLiveTextCallbacks(liveBufferId, {
@@ -380,6 +422,7 @@ export async function createLiveTextBufferFromOffline(
     totalCharsWritten: raw.totalCharsWritten ?? 0,
     revision: raw.revision ?? 0,
     segmentCount: raw.segmentCount ?? 0,
+    spool: mapLiveTextSpoolInfo(raw),
   };
 
   return {
@@ -419,6 +462,7 @@ export async function getPipelineTextBufferInfo(
       totalCharsWritten: raw.totalCharsWritten ?? 0,
       revision: raw.revision ?? 0,
       segmentCount: raw.segmentCount ?? 0,
+      spool: mapLiveTextSpoolInfo(raw),
     } as LiveTextBufferInfo;
   }
 
@@ -623,6 +667,9 @@ export type {
   OfflineTextBufferState,
   LiveTextBufferState,
   PipelineTextBufferKind,
+  TextBufferSpoolingMode,
+  TextBufferSpoolingOptions,
+  LiveTextBufferSpoolInfo,
   LiveTextBufferPartialSource,
   LiveTextSegment,
   LiveTextBufferPartialEvent,
@@ -632,6 +679,8 @@ export type {
   OfflineTextBufferFromLiveMode,
   PipelineTextErrorCodeValue,
 } from './types';
+
+export type { StreamEventSpec } from '../pipeline/streamEvents';
 
 export {
   PipelineTextErrorCode,

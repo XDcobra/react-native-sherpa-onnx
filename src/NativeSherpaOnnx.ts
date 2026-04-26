@@ -439,6 +439,10 @@ export interface Spec extends TurboModule {
   createLiveTextBuffer(options: {
     windowMaxChars?: number;
     maxSegments?: number;
+    spoolingMode?: string;
+    spoolingPath?: string;
+    spoolingTemporary?: boolean;
+    spoolingThresholdBytes?: number;
     emitPartialEvents?: boolean;
     partialEventMinIntervalMs?: number;
   }): Promise<{
@@ -448,6 +452,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten: number;
     revision: number;
     segmentCount: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
@@ -460,6 +469,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten: number;
     revision: number;
     segmentCount: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
@@ -484,6 +498,11 @@ export interface Spec extends TurboModule {
     totalCharsWritten?: number;
     revision?: number;
     segmentCount?: number;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
   }>;
 
   /**
@@ -583,6 +602,175 @@ export interface Spec extends TurboModule {
 
   /** Return number of committed segments currently retained in the live segment log. */
   getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
+
+  // ==================== Pipeline Segment Buffers ====================
+
+  createLiveSegmentBuffer(options: {
+    sourceAudioBufferId?: string;
+    maxSegments?: number;
+    spoolingMode?: string;
+    spoolingPath?: string;
+    spoolingTemporary?: boolean;
+    spoolingThresholdBytes?: number;
+    /** When true, emit `pipelineLiveSegmentAppended` for each new segment. */
+    emitSegmentAppendedEvents?: boolean;
+    /** Optional throttle (ms) for segment-appended events. */
+    segmentEventMinIntervalMs?: number;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    totalSegmentsWritten?: number;
+    sourceAudioBufferId?: string;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
+  }>;
+
+  createEmptyOfflineSegmentBuffer(options?: {
+    sourceAudioBufferId?: string;
+  }): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+  }>;
+
+  appendLiveSegment(
+    liveBufferId: string,
+    kind: 'speech' | 'alignment',
+    sourceAudioBufferId: string,
+    startSample: number,
+    endSample: number,
+    sampleRate: number,
+    durationMs?: number,
+    confidence?: number,
+    /**
+     * Strict payload contract (validated in JS/native):
+     * - kind='speech': payload.source must be one of 'vad' | 'stt' | 'tts'
+     *   - source='vad' -> allowed keys: source, engine, decision, score
+     *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
+     *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
+     * - kind='alignment': strict alignment payload contract
+     */
+    payload?: Object
+  ): Promise<{ segmentId: string; segmentIndex: number }>;
+
+  finalizeLiveSegmentBuffer(liveBufferId: string): Promise<void>;
+
+  createOfflineSegmentBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+  }>;
+
+  getPipelineSegmentBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    totalSegmentsWritten?: number;
+    sourceAudioBufferId?: string;
+    spoolMode?: string;
+    spoolEnabled?: boolean;
+    spoolReady?: boolean;
+    spoolBytes?: number;
+    spoolPath?: string;
+  }>;
+
+  getOfflineSegmentBufferSegments(
+    bufferId: string,
+    start?: number,
+    maxCount?: number
+  ): Promise<{
+    segments: Array<{
+      id: string;
+      kind: 'speech' | 'alignment';
+      sourceAudioBufferId: string;
+      startSample: number;
+      endSample: number;
+      sampleRate: number;
+      durationMs: number;
+      confidence?: number;
+      payload?: Object;
+    }>;
+  }>;
+
+  getLiveSegmentBufferSegments(
+    liveBufferId: string,
+    startIndex: number,
+    maxCount: number
+  ): Promise<{
+    segments: Array<{
+      id: string;
+      kind: 'speech' | 'alignment';
+      sourceAudioBufferId: string;
+      startSample: number;
+      endSample: number;
+      sampleRate: number;
+      durationMs: number;
+      confidence?: number;
+      payload?: Object;
+    }>;
+  }>;
+
+  getLiveSegmentBufferSegmentCount(liveBufferId: string): Promise<number>;
+
+  releasePipelineSegmentBuffer(bufferId: string): Promise<void>;
+
+  // ==================== VAD Methods ====================
+
+  initializeVad(instanceId: string, options: Object): Promise<void>;
+
+  startVadPipeline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentOutBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
+
+  runVadOffline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentOutBufferId: string,
+    options?: Object
+  ): Promise<{
+    chunksProcessed: number;
+    unitsRead: number;
+    unitsWritten: number;
+    segmentCount: number;
+    speechDurationMs: number;
+  }>;
+
+  flushVad(pipelineId: string): Promise<void>;
+
+  resetVad(pipelineId: string): Promise<void>;
+
+  stopVadPipeline(pipelineId: string): Promise<void>;
+
+  getVadPipelineStatus(pipelineId: string): Promise<{
+    pipelineId: string;
+    isRunning: boolean;
+    isFlushing: boolean;
+    queueDepth: number;
+    chunksProcessed: number;
+    unitsRead: number;
+    unitsWritten: number;
+    error: string | null;
+  }>;
+
+  isVadSpeechDetected(instanceId: string): Promise<boolean>;
+
+  unloadVad(instanceId: string): Promise<void>;
 
   // ==================== TTS Methods ====================
 
@@ -703,18 +891,23 @@ export interface Spec extends TurboModule {
    *
    * - `textInBufferId`: offline text buffer (`txt_off_*`)
    * - `audioInBufferId`: offline audio buffer (`off_*`)
+   * - `segmentOutBufferId`: caller-provided offline segment buffer (`seg_off_*`)
    *
-   * Both buffers are read-only for alignment.
+   * Text/audio buffers are read-only; alignment writes only into `segmentOutBufferId`.
    */
   alignOfflineTextToAudio(
     textInBufferId: string,
     audioInBufferId: string,
-    mode: 'proportional' | 'estimated' | 'accurate',
+    segmentOutBufferId: string,
+    mode: 'proportional' | 'estimated' | 'accurate' | 'vad',
     granularity: 'sentence' | 'word' | 'character',
     options?: Object
   ): Promise<{
-    subtitles: Array<{ text: string; start: number; end: number }>;
-    timingMode: string;
+    outputSegmentBufferId: string;
+    segmentsWritten: number;
+    warningCode?: string;
+    vadAnchorCount?: number;
+    minAnchorsApplied?: number;
   }>;
 
   detectAlignmentModel(
@@ -847,6 +1040,24 @@ export interface Spec extends TurboModule {
     languages?: string[];
     quantization?: string;
     detectionSources?: string[];
+  }>;
+
+  detectVadModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
   }>;
 
   initializeEnhancement(

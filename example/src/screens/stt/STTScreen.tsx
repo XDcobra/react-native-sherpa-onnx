@@ -1146,7 +1146,7 @@ export default function STTScreen() {
         channelCount: 1,
         ringSeconds: 120,
         retention: 'auto',
-        emitAppendedEvents: false,
+        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       liveAudioBufferId = liveAudioBuffer.bufferId;
       audioUnsubscribe = liveAudioBuffer.unsubscribeEvents;

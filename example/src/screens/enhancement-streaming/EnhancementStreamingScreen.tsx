@@ -846,7 +846,7 @@ export default function EnhancementStreamingScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: 'auto',
-        emitAppendedEvents: false,
+        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       const outputLivePath = `${DocumentDirectoryPath}/streaming_enhancement_live_${Date.now()}.wav`;
       const outputLive = await createEmptyLiveAudioBuffer({
@@ -854,7 +854,7 @@ export default function EnhancementStreamingScreen() {
         channelCount: 1,
         ringSeconds: 240,
         retention: { mode: 'path', path: outputLivePath },
-        emitAppendedEvents: false,
+        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       outputLiveBufferRef.current = outputLive;
 

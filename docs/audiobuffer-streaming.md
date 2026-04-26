@@ -99,8 +99,7 @@ const live = await createEmptyLiveAudioBuffer({
   sampleRate: SAMPLE_RATE,
   channelCount: 1,
   windowSeconds: 120,
-  emitAppendedEvents: true,
-  appendEventMinIntervalMs: 0,
+  streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
   onFramesAppended: (e) => {
     // Producer-agnostic: mic, JS append, offline append, or native pipeline `source`.
     console.log(`[${e.source}] +${e.frameCount} frames`);
@@ -184,8 +183,7 @@ const offline = await createOfflineAudioBufferFromFile({
 
 const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
-  emitAppendedEvents: true,
-  appendEventMinIntervalMs: 50,
+  streamEvents: { framesAppended: { enabled: true, minIntervalMs: 50 } },
   onFramesAppended: (e) => {
     console.log(`[${e.source}] +${e.frameCount} frames, total=${e.totalSamplesWritten}`);
     // Example output: [append] +3 frames, total=3
@@ -217,6 +215,7 @@ await releasePipelineAudioBuffer(live);
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 - Callbacks: `onFramesAppended` / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
+- High-frequency native → JS for appends: optional `streamEvents.framesAppended` (`enabled` + `minIntervalMs`); if omitted, registering `onFramesAppended` opts in to events (see [`CreateEmptyLiveAudioBufferOptions`](../src/audiobuffer/types.ts))
 
 Device routing belongs to `react-native-sherpa-onnx/audio`: use `listAvailableInputDevices()`, `listAvailableOutputDevices()`, and `setPipelineAudioRoutePreference(...)`.
 
@@ -268,7 +267,7 @@ function createEmptyLiveAudioBuffer(
 ```ts
 const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
-  emitAppendedEvents: true,
+  streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
   onFramesAppended: (e) => console.log(e.frameCount),
 });
 ```
@@ -305,6 +304,19 @@ Use this when the source audio is still a file and you want downstream native co
 - Cancellation: `ingest.cancel()` or `options.signal`
 - Append source: `onFramesAppended` receives `source: 'file_ingest'`
 - Completion: `ingest.done` resolves with `FileIngestResult`
+
+Robust stop ordering for active ingest:
+
+```ts
+ingest.cancel();
+await ingest.done.catch(() => {
+  // DECODE_CANCELLED is expected after cancel
+});
+await finalizeLiveAudioBuffer(live);
+```
+
+Call `finalizeLiveAudioBuffer` only after ingest reached a terminal state. This avoids
+producer/finalize races and ensures decode work is stopped before finalization.
 
 
 #### `subscribeLiveAudioBufferEvents(liveBuffer, callbacks)`
@@ -438,7 +450,7 @@ await appendOfflineToLiveAudioBuffer(live, offline);
 
 ## Migration from removed `createPcmLiveStream`
 
-The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`** (events `pcmLiveStreamData` / `pcmLiveStreamError`) has been **removed**. Use **`audiobuffer`**: create a **live buffer** with `emitAppendedEvents: true`, start mic capture (or append from other producers), and consume `onFramesAppended` callbacks.
+The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`** (events `pcmLiveStreamData` / `pcmLiveStreamError`) has been **removed**. Use **`audiobuffer`**: create a **live buffer** with `onFramesAppended` (and optional `streamEvents.framesAppended` for throttling), start mic capture (or append from other producers), and consume those callbacks.
 
 ---
 

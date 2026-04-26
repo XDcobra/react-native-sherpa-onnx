@@ -31,6 +31,7 @@ import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
+import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
 
@@ -62,6 +63,45 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
+    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { liveId, rec, segIdx ->
+      try {
+        val eventEmitter = reactApplicationContext
+          .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val m = com.facebook.react.bridge.Arguments.createMap()
+        m.putString("liveBufferId", liveId)
+        m.putString("segmentId", rec.id)
+        m.putInt("segmentIndex", segIdx)
+        m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)
+        m.putInt("startSample", rec.startSample)
+        m.putInt("endSample", rec.endSample)
+        m.putInt("sampleRate", rec.sampleRate)
+        m.putInt("durationMs", rec.durationMs)
+        rec.confidence?.let { m.putDouble("confidence", it) }
+        if (!rec.payloadJson.isNullOrEmpty()) {
+          try {
+            val jo = org.json.JSONObject(rec.payloadJson)
+            val p = com.facebook.react.bridge.Arguments.createMap()
+            val keys = jo.keys()
+            while (keys.hasNext()) {
+              val k = keys.next()
+              if (!jo.isNull(k)) {
+                when (val v = jo.get(k)) {
+                  is String -> p.putString(k, v)
+                  is Int -> p.putInt(k, v)
+                  is Long -> p.putDouble(k, v.toDouble())
+                  is Double -> p.putDouble(k, v)
+                  is Boolean -> p.putBoolean(k, v)
+                }
+              }
+            }
+            m.putMap("payload", p)
+          } catch (_: Exception) {
+          }
+        }
+        eventEmitter.emit("pipelineLiveSegmentAppended", m)
+      } catch (_: Exception) {
+      }
+    }
     tryInstallJsiBindings()
   }
 
@@ -102,6 +142,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
+  private val vadHelper = SherpaOnnxVadHelper(
+    reactApplicationContext,
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectVadModel(modelDir, assetName, modelType)
+    }
+  )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
 
   private fun normalizeInputDeviceKind(type: Int): String {
@@ -148,6 +194,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       reactApplicationContext,
       reactApplicationContext.cacheDir
     )
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.initializeWithCacheDir(
+      reactApplicationContext.cacheDir
+    )
+    com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.initializeWithCacheDir(
+      reactApplicationContext.cacheDir
+    )
   }
 
   private fun emitPipelineLiveAudioChunk(event: com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent) {
@@ -170,16 +222,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return NAME
   }
 
-  override fun onCatalystInstanceDestroy() {
-    super.onCatalystInstanceDestroy()
+  override fun invalidate() {
+    super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
+    com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.releaseAll()
   }
 
   /**
@@ -1087,8 +1142,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         // Streaming decode: chunks are appended to live buffer as they arrive
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
-            liveEntry.appendSamples(samples, liveEntry.sampleRate, com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST, backpressure = useBackpressure)
-            status.framesIngested += frameCount
+            if (cancelFlag.get()) return
+            when (
+              liveEntry.tryAppendSamples(
+                samples,
+                liveEntry.sampleRate,
+                com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                backpressure = useBackpressure
+              )
+            ) {
+              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
+                status.framesIngested += frameCount
+              }
+              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                cancelFlag.set(true)
+              }
+            }
           }
         }
 
@@ -1419,7 +1488,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputKind = "contentUri"
         resolvedOutputPath = handle.resultUri.toString()
       }
-      null -> throw RuntimeException("Resolved write handle is null")
     }
 
     return ResolvedDestination(outputPath, outputKind, resolvedOutputPath, writeHandle, tmpFile)
@@ -1762,16 +1830,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
       try {
         readHandle = fileIOHelper.resolveSource(source)
-        val sourcePath: String?
-        val sourceFd: Int
-        when (val handle = readHandle) {
+        val source = when (val handle = readHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            sourcePath = handle.file.absolutePath
-            sourceFd = -1
+            handle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            sourcePath = null
-            sourceFd = handle.pfd.fd
+            null to handle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -1781,6 +1845,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
           null -> throw RuntimeException("Resolved read handle is null")
         }
+        val sourcePath = source.first
+        val sourceFd = source.second
 
         dest = resolveDestinationForSave(destination, fmt)
 
@@ -1960,8 +2026,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createOfflineFromLive(liveBufferId, mode ?: "fullIfSpooled")
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
-      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+      val code = if ((e.message ?: "").startsWith("Live text buffer not found")) {
+        com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND
+      } else {
+        com.sherpaonnx.text.pipeline.TextErrorCodes.INVALID_ARGUMENT
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1989,13 +2062,39 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
+      val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
+        com.sherpaonnx.text.pipeline.TextSpoolingMode.fromRaw(options.getString("spoolingMode"))
+      } else {
+        com.sherpaonnx.text.pipeline.TextSpoolingMode.ON
+      }
+      val spoolingPath = if (options.hasKey("spoolingPath") && !options.isNull("spoolingPath")) {
+        options.getString("spoolingPath")
+      } else {
+        null
+      }
+      val spoolingTemporary = if (options.hasKey("spoolingTemporary") && !options.isNull("spoolingTemporary")) {
+        options.getBoolean("spoolingTemporary")
+      } else {
+        null
+      }
+      val spoolingThresholdBytes = if (options.hasKey("spoolingThresholdBytes") && !options.isNull("spoolingThresholdBytes")) {
+        options.getDouble("spoolingThresholdBytes").toLong()
+      } else {
+        0L
+      }
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLive(
         windowMaxChars = windowMaxChars,
         maxSegments = maxSegments,
         emitPartialEvents = emitPartialEvents,
-        partialEventMinIntervalMs = partialEventMinIntervalMs
+        partialEventMinIntervalMs = partialEventMinIntervalMs,
+        spoolingMode = spoolingMode,
+        spoolingPath = spoolingPath,
+        spoolingTemporary = spoolingTemporary,
+        spoolingThresholdBytes = spoolingThresholdBytes,
       )
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -2005,6 +2104,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLiveFromOffline(offlineBufferId)
       promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, e.message, e)
     } catch (e: Exception) {
@@ -2021,6 +2122,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       entry.finalize_()
       promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
     } catch (e: Exception) {
@@ -2285,6 +2388,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val out = Arguments.createMap()
       out.putInt("segmentIndex", segmentIndex)
       promise.resolve(out)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
     } catch (e: Exception) {
@@ -2382,6 +2487,319 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ==================== Pipeline Segment Buffers ====================
+
+  override fun createLiveSegmentBuffer(options: ReadableMap, promise: Promise) {
+    try {
+      val sourceAudioBufferId =
+        if (options.hasKey("sourceAudioBufferId") && !options.isNull("sourceAudioBufferId")) {
+          options.getString("sourceAudioBufferId")
+        } else {
+          null
+        }
+      val maxSegments =
+        if (options.hasKey("maxSegments") && !options.isNull("maxSegments")) {
+          options.getDouble("maxSegments").toInt()
+        } else {
+          1000
+        }
+      val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
+        options.getString("spoolingMode")
+      } else {
+        "on"
+      }
+      val spoolingPath = if (options.hasKey("spoolingPath") && !options.isNull("spoolingPath")) {
+        options.getString("spoolingPath")
+      } else {
+        null
+      }
+      val spoolingTemporary =
+        if (options.hasKey("spoolingTemporary") && !options.isNull("spoolingTemporary")) {
+          options.getBoolean("spoolingTemporary")
+        } else {
+          null
+        }
+      val spoolingThresholdBytes =
+        if (options.hasKey("spoolingThresholdBytes") && !options.isNull("spoolingThresholdBytes")) {
+          options.getDouble("spoolingThresholdBytes").toLong()
+        } else {
+          null
+        }
+      val emitSegmentAppendedEvents =
+        if (options.hasKey("emitSegmentAppendedEvents") && !options.isNull("emitSegmentAppendedEvents")) {
+          options.getBoolean("emitSegmentAppendedEvents")
+        } else {
+          false
+        }
+      val segmentEventMinIntervalMs =
+        if (options.hasKey("segmentEventMinIntervalMs") && !options.isNull("segmentEventMinIntervalMs")) {
+          options.getDouble("segmentEventMinIntervalMs").toLong()
+        } else {
+          0L
+        }
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createLive(
+        sourceAudioBufferId = sourceAudioBufferId,
+        maxSegments = maxSegments,
+        spoolingModeRaw = spoolingMode,
+        spoolingPath = spoolingPath,
+        spoolingTemporary = spoolingTemporary,
+        spoolingThresholdBytes = spoolingThresholdBytes,
+        emitSegmentAppendedEvents = emitSegmentAppendedEvents,
+        segmentEventMinIntervalMs = segmentEventMinIntervalMs
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createEmptyOfflineSegmentBuffer(options: ReadableMap?, promise: Promise) {
+    try {
+      val sourceAudioBufferId =
+        if (options != null && options.hasKey("sourceAudioBufferId") && !options.isNull("sourceAudioBufferId")) {
+          options.getString("sourceAudioBufferId")
+        } else {
+          null
+        }
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createEmptyOffline(sourceAudioBufferId)
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  private fun validateStrictSpeechPayload(payload: ReadableMap?) {
+    if (payload == null) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload is required and must include source"
+      )
+    }
+    if (!payload.hasKey("source") || payload.isNull("source")) {
+      throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+    val source = payload.getString("source")?.trim() ?: ""
+    val allowedKeys = when (source) {
+      "vad" -> setOf("source", "engine", "decision", "score")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+        com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+        "speech payload.source must be one of vad, stt, tts"
+      )
+    }
+
+    val itr = payload.keySetIterator()
+    while (itr.hasNextKey()) {
+      val key = itr.nextKey()
+      if (!allowedKeys.contains(key)) {
+        throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "speech payload.$key is not allowed for source=$source"
+        )
+      }
+    }
+
+    when (source) {
+      "vad" -> {
+        if (payload.hasKey("engine") && !payload.isNull("engine")) {
+          val engine = payload.getString("engine")
+          if (engine != "vad") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.engine must be vad"
+            )
+          }
+        }
+        if (payload.hasKey("decision") && !payload.isNull("decision")) {
+          val decision = payload.getString("decision")
+          if (decision != "model") {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.decision must be model"
+            )
+          }
+        }
+      }
+      "stt", "tts" -> Unit
+    }
+  }
+
+  override fun appendLiveSegment(
+    liveBufferId: String,
+    kind: String,
+    sourceAudioBufferId: String,
+    startSample: Double,
+    endSample: Double,
+    sampleRate: Double,
+    durationMs: Double?,
+    confidence: Double?,
+    payload: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      val normalizedKind = kind.trim().ifEmpty { "speech" }
+      if (normalizedKind != "speech" && normalizedKind != "alignment") {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+          "kind must be one of speech or alignment"
+        )
+        return
+      }
+      if (normalizedKind == "speech") {
+        validateStrictSpeechPayload(payload)
+      }
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      val result = entry.appendSegment(
+        kind = normalizedKind,
+        sourceAudioBufferId = sourceAudioBufferId,
+        startSample = startSample.toInt(),
+        endSample = endSample.toInt(),
+        sampleRate = sampleRate.toInt(),
+        durationMs = durationMs?.toInt(),
+        confidence = confidence,
+        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() }
+      )
+      val out = Arguments.createMap()
+      out.putString("segmentId", result.first)
+      out.putInt("segmentIndex", result.second)
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun finalizeLiveSegmentBuffer(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      entry.finalize_()
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineSegmentBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.createOfflineFromLive(
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getPipelineSegmentBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      val offline = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
+      if (offline != null) {
+        promise.resolve(offline.toWritableMap())
+        return
+      }
+      val live = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(bufferId)
+      if (live != null) {
+        promise.resolve(live.toWritableMap())
+        return
+      }
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Segment buffer not found: $bufferId")
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getOfflineSegmentBufferSegments(
+    bufferId: String,
+    start: Double?,
+    maxCount: Double?,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Offline segment buffer not found: $bufferId")
+        return
+      }
+      val from = start?.toInt() ?: 0
+      val count = maxCount?.toInt() ?: 1024
+      val segments = entry.snapshotSegments(from, count)
+      val out = Arguments.createMap()
+      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveSegmentBufferSegments(
+    liveBufferId: String,
+    startIndex: Double,
+    maxCount: Double,
+    promise: Promise
+  ) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
+      val out = Arguments.createMap()
+      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      promise.resolve(out)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun getLiveSegmentBufferSegmentCount(liveBufferId: String, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
+        return
+      }
+      promise.resolve(entry.segmentCount())
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun releasePipelineSegmentBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.release(bufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   // ==================== STT Methods ====================
 
   override fun transcribe(instanceId: String, bufferId: String, textOutBufferId: String, promise: Promise) {
@@ -2466,6 +2884,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
+    segmentOutBufferId: String,
     mode: String,
     granularity: String,
     options: ReadableMap?,
@@ -2474,6 +2893,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.alignOfflineTextToAudio(
       textInBufferId,
       audioInBufferId,
+      segmentOutBufferId,
       mode,
       granularity,
       options,
@@ -2686,6 +3106,65 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
+  }
+
+  // ==================== VAD Methods ====================
+
+  override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
+    vadHelper.initializeVad(instanceId, options, promise)
+  }
+
+  override fun detectVadModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun startVadPipeline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    vadHelper.startVadPipeline(instanceId, audioInBufferId, segmentOutBufferId, options, promise)
+  }
+
+  override fun runVadOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    vadHelper.runVadOffline(instanceId, audioInBufferId, segmentOutBufferId, options, promise)
+  }
+
+  override fun flushVad(pipelineId: String, promise: Promise) {
+    vadHelper.flushVad(pipelineId, promise)
+  }
+
+  override fun resetVad(pipelineId: String, promise: Promise) {
+    vadHelper.resetVad(pipelineId, promise)
+  }
+
+  override fun stopVadPipeline(pipelineId: String, promise: Promise) {
+    vadHelper.stopVadPipeline(pipelineId, promise)
+  }
+
+  override fun getVadPipelineStatus(pipelineId: String, promise: Promise) {
+    vadHelper.getVadPipelineStatus(pipelineId, promise)
+  }
+
+  override fun isVadSpeechDetected(instanceId: String, promise: Promise) {
+    vadHelper.isVadSpeechDetected(instanceId, promise)
+  }
+
+  override fun unloadVad(instanceId: String, promise: Promise) {
+    vadHelper.unloadVad(instanceId, promise)
   }
 
   // ==================== Streaming Pipeline Control (generic) ====================
@@ -2902,6 +3381,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
     private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectVadModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

@@ -142,8 +142,7 @@ export interface CreateEmptyLiveAudioBufferOptions {
     | { mode: 'maxSeconds'; seconds: number; path?: string }
     | { mode: 'path'; path: string; trim?: 'auto' | 'session' | { maxSeconds: number } };
 
-  emitAppendedEvents?: boolean;
-  appendEventMinIntervalMs?: number;
+  streamEvents?: { framesAppended?: { enabled: boolean; minIntervalMs: number } };
   onFramesAppended?: (e: LiveFramesAppendedEvent) => void;
   onError?: (e: LiveAudioBufferError) => void;
 }
