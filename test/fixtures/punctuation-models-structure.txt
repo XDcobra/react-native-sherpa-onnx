@@ -5,20 +5,20 @@
 ./sherpa-onnx-online-punct-en-2024-08-06/model.onnx
 ./sherpa-onnx-online-punct-en-2024-08-06/bpe.vocab
 # Asset: sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/model.int8.onnx
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/show-model-input-output.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/config.yaml
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/test.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/README.md
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/add-model-metadata.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/tokens.json
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/model.int8.onnx
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/show-model-input-output.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/config.yaml
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/test.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/README.md
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/add-model-metadata.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/tokens.json
 # Asset: sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/show-model-input-output.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/config.yaml
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/test.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/README.md
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/add-model-metadata.py
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/model.onnx
-sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/tokens.json
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/show-model-input-output.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/config.yaml
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/test.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/README.md
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/add-model-metadata.py
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/model.onnx
+./sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/tokens.json

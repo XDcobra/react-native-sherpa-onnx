@@ -16,6 +16,7 @@ Use **`ModelMeta.id`** from **`listModels(category)`** after **`refreshModels(ca
 | --- | --- |
 | `Tts` | [`tts-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 | `Stt`, `Vad` | [`asr-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) |
+| `Punctuation` | [`punctuation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/punctuation-models) |
 | `Diarization` | [`speaker-segmentation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
 | `Enhancement` | [`speech-enhancement-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 | `Separation` | [`source-separation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
@@ -541,7 +542,7 @@ const basePath = await getStorageBasePath();
 
 | Type | Notes |
 | --- | --- |
-| `ModelCategory` | Enum: `Tts`, `Stt`, `Vad`, `Diarization`, `Enhancement`, `Separation`, `Qnn`, `Alignment` |
+| `ModelCategory` | Enum: `Tts`, `Stt`, `Vad`, `Punctuation`, `Diarization`, `Enhancement`, `Separation`, `Qnn`, `Alignment` |
 | `ModelMeta` | Unified model metadata type (TTS fields are optional) |
 | `Progress` | `{ bytesProcessed, totalBytes, percent, phase, archiveEntryIndex?, speed?, eta? }` |
 | `isActiveExtractionPhase(phase)` | `true` for `extracting` or `extracting_resume_skipping` (e.g. pause-extract UI) |
