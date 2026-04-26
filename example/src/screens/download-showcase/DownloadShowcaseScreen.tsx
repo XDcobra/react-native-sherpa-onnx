@@ -39,6 +39,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Stt]: 'Speech-to-text (STT)',
   [ModelCategory.Tts]: 'Text-to-speech (TTS)',
   [ModelCategory.Vad]: 'VAD',
+  [ModelCategory.Punctuation]: 'Punctuation',
   [ModelCategory.Diarization]: 'Diarization',
   [ModelCategory.Enhancement]: 'Enhancement',
   [ModelCategory.Separation]: 'Separation',

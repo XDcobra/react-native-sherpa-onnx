@@ -13,6 +13,8 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   const asrPath = 'model_licenses/asr-models-license-status.csv';
   const qnnPath = 'model_licenses/qnn-asr-models-license-status.csv';
   const ttsPath = 'model_licenses/tts-models-license-status.csv';
+  const punctuationPath =
+    'model_licenses/punctuation-models-license-status.csv';
   const alignmentPath = 'model_licenses/alignment-models-license-status.csv';
   const speechEnhancementPath =
     'model_licenses/speech-enhancement-models-license-status.csv';
@@ -21,12 +23,19 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
     SherpaOnnx.readAssetFileAsUtf8(qnnPath),
     SherpaOnnx.readAssetFileAsUtf8(ttsPath),
+    SherpaOnnx.readAssetFileAsUtf8(punctuationPath),
     SherpaOnnx.readAssetFileAsUtf8(alignmentPath),
     SherpaOnnx.readAssetFileAsUtf8(speechEnhancementPath),
   ]);
 
-  const [asrResult, qnnResult, ttsResult, alignmentResult, enhancementResult] =
-    results;
+  const [
+    asrResult,
+    qnnResult,
+    ttsResult,
+    punctuationResult,
+    alignmentResult,
+    enhancementResult,
+  ] = results;
 
   const licenses: ModelLicense[] = [];
 
@@ -51,6 +60,14 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load TTS model licenses: ${ttsResult.reason}`
+    );
+  }
+
+  if (punctuationResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(punctuationResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load punctuation model licenses: ${punctuationResult.reason}`
     );
   }
 

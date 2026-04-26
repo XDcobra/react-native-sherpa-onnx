@@ -216,6 +216,8 @@ function isAssetSupportedForCategory(
       return ext === 'tar.bz2' && !lower.includes('vad');
     case ModelCategory.Vad:
       return ext === 'onnx' && lower.includes('vad');
+    case ModelCategory.Punctuation:
+      return ext === 'tar.bz2' || ext === 'onnx';
     case ModelCategory.Diarization:
       return ext === 'tar.bz2';
     case ModelCategory.Enhancement:
