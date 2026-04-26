@@ -121,6 +121,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
@@ -130,6 +131,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
     "\"#{pod_root}/ios/enhancement\"",
+    "\"#{pod_root}/ios/punctuation\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]
