@@ -287,6 +287,42 @@ TEST(ModelDetectTest, DetectEnhancementFromFileListMatchesExpected) {
     }
 }
 
+TEST(ModelDetectTest, DetectPunctuationFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/punctuation-models-structure.txt";
+    std::string csvPath = dir + "/punctuation-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        sherpaonnx::PunctuationModelKind expectedKind = model_detect_test::PunctuationKindFromString(
+            expectedType
+        );
+        if (expectedKind == sherpaonnx::PunctuationModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result = sherpaonnx::DetectPunctuationModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType
+            << " but got " << model_detect_test::PunctuationKindToString(result.selectedKind);
+    }
+}
+
 TEST(ModelDetectTest, DetectVadFromAsrFileListMatchesExpected) {
     std::string dir = GetFixturesDir();
     std::string structurePath = dir + "/asr-models-structure.txt";

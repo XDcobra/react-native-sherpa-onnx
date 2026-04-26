@@ -237,4 +237,22 @@ std::string VadKindToString(VadModelKind kind) {
     }
 }
 
+PunctuationModelKind PunctuationKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "ct_transformer") return PunctuationModelKind::kCtTransformer;
+    if (t == "cnn_bilstm") return PunctuationModelKind::kCnnBilstm;
+    return PunctuationModelKind::kUnknown;
+}
+
+std::string PunctuationKindToString(PunctuationModelKind kind) {
+    switch (kind) {
+        case PunctuationModelKind::kCtTransformer:
+            return "ct_transformer";
+        case PunctuationModelKind::kCnnBilstm:
+            return "cnn_bilstm";
+        default:
+            return "unknown";
+    }
+}
+
 }  // namespace model_detect_test
