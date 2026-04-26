@@ -1084,6 +1084,45 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with
+   * `ct_transformer` only (no online/CNN auto-pick).
+   */
+  initializeOfflinePunctuation(
+    instanceId: string,
+    modelDir: string,
+    modelType?: string | null,
+    numThreads?: number,
+    provider?: string,
+    debug?: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
+   * Read full text from `textIn` offline buffer, run offline punctuation, write to empty `textOut`.
+   */
+  punctuateOfflineTextBuffers(
+    instanceId: string,
+    textInBufferId: string,
+    textOutBufferId: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /**
+   * Punctuate a plain string into caller-owned `textOut` (same populate rules as `punctuate`).
+   */
+  punctuateOfflineString(
+    instanceId: string,
+    plain: string,
+    textOutBufferId: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /** Release native `OfflinePunctuation` for this instance. */
+  unloadOfflinePunctuation(instanceId: string): Promise<void>;
+
   initializeEnhancement(
     instanceId: string,
     modelDir: string,
