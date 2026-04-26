@@ -1,1 +1,4 @@
 asset_name,license_type,commercial_use,confidence,detection_source,license_file
+sherpa-onnx-online-punct-en-2024-08-06.tar.bz2,exhausted,unknown,high,scan_exhausted,
+sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2,exhausted,unknown,high,scan_exhausted,
+sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2,apache-2.0,yes,high,modelscope_detail_json,https://modelscope.cn/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/summary
