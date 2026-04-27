@@ -46,8 +46,8 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
   Punctuation: {
-    title: 'Punctuation preview',
-    body: 'This placeholder screen marks where punctuation restoration will be integrated. It will focus on turning plain transcripts into more readable punctuated text.',
+    title: 'Offline punctuation',
+    body: 'This screen loads an offline CT-Transformer model, builds plain text into offline text buffers, runs the punctuation engine buffer-to-buffer, and shows a read-only punctuated result with a copy action. Re-run releases previous buffers; options mirror the library’s init and pass-through language field.',
   },
   PipelineShowcase: {
     title: 'End-to-end pipeline showcase',

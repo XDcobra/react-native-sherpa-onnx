@@ -72,7 +72,7 @@ export default function RootNavigator() {
         name="Punctuation"
         component={PunctuationScreen}
         options={{
-          title: 'Punctuation',
+          title: 'Punctuation (offline)',
         }}
       />
       <Stack.Screen
