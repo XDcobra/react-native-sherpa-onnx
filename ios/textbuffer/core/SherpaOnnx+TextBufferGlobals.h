@@ -133,9 +133,17 @@ struct TxtLiveEntry {
 		int token;
 		std::function<void()> callback;
 	};
+
+	struct NativeCommitListener {
+		int token;
+		std::function<void(const TextSegment &)> callback;
+	};
 	std::vector<NativeAppendListener> appendListeners;
+	std::vector<NativeCommitListener> commitListeners;
 	std::mutex appendListenerMutex;
+	std::mutex commitListenerMutex;
 	std::atomic<int> nextListenerToken{0};
+	std::atomic<int> nextCommitListenerToken{0};
 
 	int addAppendListener(std::function<void()> listener) {
 		int token = nextListenerToken.fetch_add(1);
@@ -160,6 +168,31 @@ struct TxtLiveEntry {
 			for (auto &l : appendListeners) callbacks.push_back(l.callback);
 		}
 		for (auto &cb : callbacks) cb();
+	}
+
+	int addCommitListener(std::function<void(const TextSegment &)> listener) {
+		int token = nextCommitListenerToken.fetch_add(1);
+		std::lock_guard<std::mutex> lock(commitListenerMutex);
+		commitListeners.push_back({token, std::move(listener)});
+		return token;
+	}
+
+	void removeCommitListener(int token) {
+		std::lock_guard<std::mutex> lock(commitListenerMutex);
+		commitListeners.erase(
+			std::remove_if(commitListeners.begin(), commitListeners.end(),
+						   [token](const NativeCommitListener &l) { return l.token == token; }),
+			commitListeners.end());
+	}
+
+	void notifyCommitListeners(const TextSegment &segment) {
+		std::vector<std::function<void(const TextSegment &)>> callbacks;
+		{
+			std::lock_guard<std::mutex> lock(commitListenerMutex);
+			callbacks.reserve(commitListeners.size());
+			for (auto &l : commitListeners) callbacks.push_back(l.callback);
+		}
+		for (auto &cb : callbacks) cb(segment);
 	}
 
 	static std::string spoolingModeRaw(SpoolingMode mode) {
@@ -487,6 +520,8 @@ struct TxtLiveEntry {
 					  const std::string &source = "unknown",
 					  NSDictionary *meta = nil) {
 		int committedSegmentIndex = -1;
+		TextSegment committedSegment;
+		bool hasCommittedSegment = false;
 		{
 			std::lock_guard<std::mutex> stateLock(stateMutex);
 			if (state == FINISHED) {
@@ -501,6 +536,8 @@ struct TxtLiveEntry {
 				seg.source = source;
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
 				seg.meta = meta;
+				committedSegment = seg;
+				hasCommittedSegment = true;
 				committedSegmentIndex = seg.segmentIndex;
 				segments.push_back(std::move(seg));
 				if ((int)segments.size() > maxSegments) {
@@ -521,6 +558,9 @@ struct TxtLiveEntry {
 			}
 		}
 		notifyAppendListeners();
+		if (hasCommittedSegment) {
+			notifyCommitListeners(committedSegment);
+		}
 		return committedSegmentIndex;
 	}
 
@@ -761,6 +801,10 @@ struct TxtLiveEntry {
 		{
 			std::lock_guard<std::mutex> lock(appendListenerMutex);
 			appendListeners.clear();
+		}
+		{
+			std::lock_guard<std::mutex> lock(commitListenerMutex);
+			commitListeners.clear();
 		}
 	}
 };

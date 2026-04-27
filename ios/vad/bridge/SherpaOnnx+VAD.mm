@@ -739,7 +739,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     if (w) w->stop();
   }
   if (runtimeToClose) {
-    runtimeToClose->close();
+    runtimeToClose->Reset();
   }
   resolve(nil);
 }
