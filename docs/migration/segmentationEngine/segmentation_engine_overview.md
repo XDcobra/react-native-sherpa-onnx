@@ -12,6 +12,7 @@ Alle Dateien liegen unter `docs/migration/segmentationEngine/`:
 | [sub-03-buffer-integration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/segmentationEngine/sub-03-buffer-integration.md) | **Buffer Integration** — Symmetric Write Model, onSegment Events, Segment Storage (`getSegmentBuffer`), Commit Mechanics |
 | [sub-04-transfer-offline-orchestration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/segmentationEngine/sub-04-transfer-offline-orchestration.md) | **Transfer & Orchestration** — Zero-Copy Transfer, Lifecycle Management, Error Recovery Strategien |
 | [sub-05-feature-pipeline-migration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/segmentationEngine/sub-05-feature-pipeline-migration.md) | **Feature Migration** — STT (+stt_produced), TTS (+tts_produced), Punctuation, Enhancement, Alignment (+alignment links), VAD |
+| [sub-06-cleanup-contract-parity.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/segmentationEngine/sub-06-cleanup-contract-parity.md) | **Cleanup & Contract Parity** — Plan-Audit je Sub-Plan, verbleibende Contract-Lücken schließen (z. B. Sync-JSI Fast-Path), Legacy/Dead-Code entfernen, finale Release-Härtung |
 
 ---
 
@@ -78,8 +79,8 @@ Da das Fundament (Phase 1) sehr umfangreich ist, wird es in vier machbare Schrit
 
 | Phase | Was | Details |
 |---|---|---|
-| **Phase 1a** | Core Types & Linkage (Sub-Plan 01) | TypeScript, Kotlin, C++ Datentypen für `Segment`, `SegmentLink`, `SegmentLinkMap` + Serialisierung. Noch keine Logik. |
-| **Phase 1b** | Storage & Write APIs (Sub-Plan 03) | Symmetric Write API (`setPartial`, `appendPartial`), `getSegmentBuffer()` Abstraktion, Event-Payloads. |
+| **Phase 1a** | Core Types & Linkage (Sub-Plan 01) | TypeScript, Kotlin, C++ Datentypen für `Segment`, `SegmentLink`, `SegmentLinkMap` + Serialisierung. **Contract only, keine Runtime-APIs/Store-Logik.** **Status: Completed** |
+| **Phase 1b** | Storage & Write APIs (Sub-Plan 03 + Sub-Plan 01 Runtime-Teil) | Symmetric Write API (`setPartial`, `appendPartial`), `getSegmentBuffer()` Abstraktion, Event-Payloads **sowie SegmentLinkMap Runtime-APIs** (`createSegmentLinkMap`, `addSegmentLink(s)`, `getSpeechSegmentsForText`, `getTextSegmentsForSpeech`, `getAllSegmentLinks`, `getSegmentLinkCount`, `getSegmentLinkMapInfo`, `removeSegmentLink`, `releaseSegmentLinkMap`) inkl. nativer LinkMap-Store/Indizes. |
 | **Phase 1c** | Orchestration & Transfer (Sub-Plan 04) | `transferOfflineAudioBufferFromLive`, `OrchestrationSession` State Machine, Error Recovery Strategien (abort, skip, retry, partial). |
 | **Phase 1d** | Engine Core (Sub-Plan 02) | Native Evaluatoren (Energy, Punctuation, etc.), Buffer Attachment, Offline-Segmentation Loop. |
 | **Phase 2** | VAD + STT (+ `stt_produced` Links) | VAD liefert Grenzen, STT nutzt diese und produziert Text. |
@@ -87,8 +88,12 @@ Da das Fundament (Phase 1) sehr umfangreich ist, wird es in vier machbare Schrit
 | **Phase 4** | Punctuation | Verifizierung der Text-Orchestration. |
 | **Phase 5** | TTS (Incremental entfernen, + `tts_produced` Links) | Höchstes Risiko, benötigt Parity. Produziert Links für Playback-Highlighting. |
 | **Phase 6** | Alignment (Fake-Live, + `alignment` Links) | Basiert auf `SegmentLinkMap` aus Phase 1a. Komplexe Cross-Domain Strategien. |
+| **Phase 7** | Cleanup & Contract-Parity (Sub-Plan 06) | Systematischer Soll-Ist-Audit aller Sub-Pläne, verbleibende Abweichungen nachziehen (inkl. **JSI-Fast-Path Kandidaten** mit Priorisierung/Messung), Legacy-/Dead-Code entfernen, release-ready Hardening. |
 
-> `SegmentLink` und `SegmentLinkMap` werden bereits in **Phase 1a** implementiert. Features rufen ab Phase 2 einfach `addSegmentLink()` auf.
+> `SegmentLink` und `SegmentLinkMap`-**Contracts** werden in **Phase 1a** implementiert; die `SegmentLinkMap`-**Runtime-APIs/Store-Logik** folgen in **Phase 1b**. Ab Phase 2 rufen Features dann `addSegmentLink()` auf.
+
+> Hinweis zu `setPartial()` / `appendPartial()`:
+> Der aktuelle Stand nutzt bewusst den Promise-basierten TurboModule-Contract (funktional vollständig). Ein expliziter synchroner JSI-Fast-Path benötigt eine zusätzliche Host-API-Erweiterung und ist als Cleanup/Parity-Item für **Phase 7** eingeplant.
 
 ---
 
