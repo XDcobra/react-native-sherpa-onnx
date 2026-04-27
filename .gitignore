@@ -44,6 +44,19 @@ android.iml
 app-voicelab-*.json
 android-codegen-out/
 
+# AI
+.cursor/
+.claude/
+.chatgpt/
+.deepseek/
+.gemini/
+.google/
+.openai/
+.perplexity/
+.qwen/
+.sora/
+.x/
+
 # CMake build artifacts
 CMakeCache.txt
 CMakeFiles/

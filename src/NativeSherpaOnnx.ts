@@ -1060,6 +1060,69 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Punctuation model detection: offline (CT-Transformer) vs online (CNN-BiLSTM + bpe.vocab).
+   * `isStreaming` is reserved; currently false until streaming handling is implemented.
+   */
+  detectPunctuationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      ct_transformer?: string;
+      cnn_bilstm?: string;
+      bpe_vocab?: string;
+    };
+  }>;
+
+  /**
+   * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with
+   * `ct_transformer` only (no online/CNN auto-pick).
+   */
+  initializeOfflinePunctuation(
+    instanceId: string,
+    modelDir: string,
+    modelType?: string | null,
+    numThreads?: number,
+    provider?: string,
+    debug?: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
+   * Read full text from `textIn` offline buffer, run offline punctuation, write to empty `textOut`.
+   */
+  punctuateOfflineTextBuffers(
+    instanceId: string,
+    textInBufferId: string,
+    textOutBufferId: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /**
+   * Punctuate a plain string into caller-owned `textOut` (same populate rules as `punctuate`).
+   */
+  punctuateOfflineString(
+    instanceId: string,
+    plain: string,
+    textOutBufferId: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /** Release native `OfflinePunctuation` for this instance. */
+  unloadOfflinePunctuation(instanceId: string): Promise<void>;
+
   initializeEnhancement(
     instanceId: string,
     modelDir: string,

@@ -103,10 +103,11 @@ const FEATURES: Feature[] = [
   {
     id: 'punctuation',
     title: 'Punctuation',
-    description: 'Add punctuation to text output',
+    description:
+      'Offline CT-Transformer: plain text in, punctuated text out (buffers)',
     icon: 'text-outline',
     screen: 'Punctuation',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'diarization',

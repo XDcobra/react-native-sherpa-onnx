@@ -692,4 +692,4 @@ export {
  * Resolve a text buffer source to a native buffer ID string.
  * Accepts buffer references, info objects, handles, or raw strings.
  */
-export { resolvePipelineTextBufferId };
+export { resolvePipelineTextBufferId, resolveOfflineTextBufferId };

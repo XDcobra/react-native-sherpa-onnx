@@ -25,6 +25,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'vad-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/vad`,
   },
+  [ModelCategory.Punctuation]: {
+    tag: 'punctuation-models',
+    cacheFile: 'punctuation-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/punctuation`,
+  },
   [ModelCategory.Diarization]: {
     tag: 'speaker-segmentation-models',
     cacheFile: 'diarization-models.json',

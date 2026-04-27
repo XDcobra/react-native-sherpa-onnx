@@ -19,6 +19,7 @@ namespace sherpaonnx {
 enum class SttModelKind;
 enum class TtsModelKind;
 enum class EnhancementModelKind;
+enum class PunctuationModelKind;
 enum class VadModelKind;
 }
 
@@ -62,6 +63,10 @@ std::string EnhancementKindToString(sherpaonnx::EnhancementModelKind kind);
 sherpaonnx::VadModelKind VadKindFromString(const std::string& modelType);
 
 std::string VadKindToString(sherpaonnx::VadModelKind kind);
+
+sherpaonnx::PunctuationModelKind PunctuationKindFromString(const std::string& modelType);
+
+std::string PunctuationKindToString(sherpaonnx::PunctuationModelKind kind);
 
 }  // namespace model_detect_test
 

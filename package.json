@@ -45,6 +45,11 @@
       "types": "./lib/typescript/src/enhancement/index.d.ts",
       "default": "./lib/module/enhancement/index.js"
     },
+    "./punctuation": {
+      "source": "./src/punctuation/index.ts",
+      "types": "./lib/typescript/src/punctuation/index.d.ts",
+      "default": "./lib/module/punctuation/index.js"
+    },
     "./separation": {
       "source": "./src/separation/index.ts",
       "types": "./lib/typescript/src/separation/index.d.ts",
