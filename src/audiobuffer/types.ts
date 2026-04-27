@@ -7,6 +7,7 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { Segment } from '../segment/segment';
 
 // ========== Buffer Kinds ==========
 
@@ -167,7 +168,20 @@ export interface LiveAudioBufferErrorEvent {
 /** Callback set for live buffer append/error events. */
 export interface LiveAudioBufferCallbacks {
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   onError?: (event: LiveAudioBufferErrorEvent) => void;
+}
+
+export type AudioSegmentationMode = 'off' | 'manual' | 'auto';
+
+export interface AudioSegmentationConfig {
+  mode?: AudioSegmentationMode;
+}
+
+export interface LiveAudioBufferSegmentEvent {
+  bufferId: string;
+  segment: Segment;
+  totalSegments: number;
 }
 
 // ========== Creation Options ==========
@@ -223,8 +237,16 @@ export interface CreateEmptyLiveAudioBufferOptions {
     framesAppended?: StreamEventSpec;
   };
 
+  /**
+   * Segmentation mode for this live audio buffer.
+   * Default: `off`.
+   */
+  segmentation?: AudioSegmentationConfig;
+
   /** Optional JS callback for producer-agnostic append events. */
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  /** Optional JS callback for segment commit events. */
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   /** Optional JS callback for live-buffer errors. */
   onError?: (event: LiveAudioBufferErrorEvent) => void;
 }

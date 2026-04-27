@@ -10,6 +10,7 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { Segment } from '../segment/segment';
 
 // ========== Buffer Kinds ==========
 
@@ -231,7 +232,20 @@ export interface LiveTextBufferErrorEvent {
 /** Callback set for live text buffer partial/error events. */
 export interface LiveTextBufferCallbacks {
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
+  onSegment?: (event: LiveTextBufferSegmentEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
+}
+
+export type TextSegmentationMode = 'off' | 'manual' | 'auto';
+
+export interface TextSegmentationConfig {
+  mode?: TextSegmentationMode;
+}
+
+export interface LiveTextBufferSegmentEvent {
+  bufferId: string;
+  segment: Segment;
+  totalSegments: number;
 }
 
 // ========== Creation Options ==========
@@ -251,7 +265,13 @@ export interface CreateLiveTextBufferOptions {
   streamEvents?: {
     partial?: StreamEventSpec;
   };
+  /**
+   * Segmentation mode for this live text buffer.
+   * Default: `manual`.
+   */
+  segmentation?: TextSegmentationConfig;
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
+  onSegment?: (event: LiveTextBufferSegmentEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
 }
 
