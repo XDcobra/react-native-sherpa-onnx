@@ -28,6 +28,8 @@
 extern void paMicStopQueue(void);
 // ios/punctuation/bridge/SherpaOnnx+OfflinePunctuation.mm
 extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
+// ios/segment/bridge/SherpaOnnx+SegmentLinkMap.mm
+extern "C" void slm_release_all_link_maps(void);
 
 @interface SherpaOnnx (JSI)
 - (BOOL)autoInstallJSI;
@@ -57,6 +59,7 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
     sherpaonnx_punct_offline_invalidate_all();
     txt_release_all_entries();
     seg_release_all_entries();
+    slm_release_all_link_maps();
     pcmPlayerDestroyAll();
     [[PaAudioSessionCoordinator shared] resetAll];
     [super invalidate];
@@ -76,7 +79,7 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegment", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config

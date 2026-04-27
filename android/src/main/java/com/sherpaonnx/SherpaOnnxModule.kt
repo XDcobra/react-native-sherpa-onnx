@@ -5,6 +5,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
@@ -35,6 +36,8 @@ import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
 import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -155,6 +158,76 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
+  private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
+
+  private fun maybeEmitLiveTextPartial(
+    entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
+    source: String,
+  ) {
+    if (!entry.emitPartialEvents) return
+
+    val now = SystemClock.elapsedRealtime()
+    val minInterval = entry.partialEventMinIntervalMs.coerceAtLeast(0L)
+    val last = liveTextPartialLastEmitAtMs[entry.bufferId] ?: 0L
+    if (minInterval > 0L && last > 0L && (now - last) < minInterval) {
+      return
+    }
+    liveTextPartialLastEmitAtMs[entry.bufferId] = now
+
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("liveBufferId", entry.bufferId)
+      payload.putString("source", source)
+      payload.putString("partialText", entry.currentText)
+      payload.putInt("revision", entry.revision)
+      eventEmitter.emit("pipelineLiveTextPartial", payload)
+    } catch (_: Exception) {
+      // JS bridge may be unavailable during teardown.
+    }
+  }
+
+  private fun emitLiveTextSegment(
+    liveBufferId: String,
+    segment: com.sherpaonnx.text.pipeline.TextSegment,
+    totalSegments: Int,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap().apply {
+        putString("liveBufferId", liveBufferId)
+        putInt("totalSegments", totalSegments)
+        putString("text", segment.text)
+        putString("source", segment.source)
+        putInt("segmentIndex", segment.segmentIndex)
+
+        if (segment.tokens.isNotEmpty()) {
+          val tokenArray = Arguments.createArray()
+          segment.tokens.forEach { tokenArray.pushString(it) }
+          putArray("tokens", tokenArray)
+        }
+
+        if (segment.timestamps.isNotEmpty()) {
+          val tsArray = Arguments.createArray()
+          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+          putArray("timestamps", tsArray)
+        }
+
+        segment.meta?.let { rawMeta ->
+          try {
+            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+          } catch (_: Exception) {
+            // Ignore non-serializable meta values.
+          }
+        }
+      }
+      eventEmitter.emit("pipelineLiveTextSegment", payload)
+    } catch (_: Exception) {
+      // JS bridge may be unavailable during teardown.
+    }
+  }
 
   private fun normalizeInputDeviceKind(type: Int): String {
     return when (type) {
@@ -232,6 +305,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
+    liveTextPartialLastEmitAtMs.clear()
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
@@ -242,6 +316,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
     com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.releaseAll()
+    com.sherpaonnx.segment.core.SegmentLinkMapRegistry.releaseAll()
   }
 
   /**
@@ -2351,6 +2426,60 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun setLiveTextBufferPartial(
+    liveBufferId: String,
+    text: String,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Live text buffer not found: $liveBufferId"
+        )
+        return
+      }
+
+      entry.writePartial(text)
+      maybeEmitLiveTextPartial(entry, "replace")
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendLiveTextBufferPartial(
+    liveBufferId: String,
+    text: String,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Live text buffer not found: $liveBufferId"
+        )
+        return
+      }
+
+      entry.appendText(text)
+      maybeEmitLiveTextPartial(entry, "append")
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun appendLiveTextSegment(
     liveBufferId: String,
     text: String,
@@ -2390,6 +2519,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         timestamps = timestampArray,
         source = "append",
         meta = metaMap,
+      )
+
+      emitLiveTextSegment(
+        liveBufferId = liveBufferId,
+        segment = com.sherpaonnx.text.pipeline.TextSegment(
+          text = text,
+          tokens = tokenArray,
+          timestamps = timestampArray,
+          source = "append",
+          segmentIndex = segmentIndex,
+          meta = metaMap,
+        ),
+        totalSegments = entry.segmentCount,
       )
 
       val out = Arguments.createMap()
@@ -2804,6 +2946,247 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  private fun segmentLinkTypeRaw(
+    type: com.sherpaonnx.segment.core.SegmentLinkType
+  ): String = type.name.lowercase()
+
+  private fun segmentLinkToWritableMap(
+    link: com.sherpaonnx.segment.core.SegmentLink
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("linkId", link.linkId)
+    out.putString("textSegmentId", link.textSegmentId)
+    out.putString("speechSegmentId", link.speechSegmentId)
+    out.putString("linkType", segmentLinkTypeRaw(link.linkType))
+    link.confidence?.let { out.putDouble("confidence", it.toDouble()) }
+    link.metaJson?.let { rawMeta ->
+      try {
+        val json = JSONObject(rawMeta)
+        val meta = Arguments.createMap()
+        val keys = json.keys()
+        while (keys.hasNext()) {
+          val key = keys.next()
+          if (json.isNull(key)) {
+            meta.putNull(key)
+            continue
+          }
+          when (val value = json.get(key)) {
+            is String -> meta.putString(key, value)
+            is Int -> meta.putInt(key, value)
+            is Long -> meta.putDouble(key, value.toDouble())
+            is Float -> meta.putDouble(key, value.toDouble())
+            is Double -> meta.putDouble(key, value)
+            is Boolean -> meta.putBoolean(key, value)
+            else -> meta.putString(key, value.toString())
+          }
+        }
+        out.putMap("meta", meta)
+      } catch (_: Exception) {
+        // Ignore malformed meta JSON.
+      }
+    }
+    return out
+  }
+
+  override fun createSegmentLinkMap(options: ReadableMap?, promise: Promise) {
+    try {
+      val textBufferId =
+        if (options != null && options.hasKey("textBufferId") && !options.isNull("textBufferId")) {
+          options.getString("textBufferId")
+        } else {
+          null
+        }
+      val audioBufferId =
+        if (options != null && options.hasKey("audioBufferId") && !options.isNull("audioBufferId")) {
+          options.getString("audioBufferId")
+        } else {
+          null
+        }
+
+      val ref = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.createLinkMap(
+        textBufferId = textBufferId,
+        audioBufferId = audioBufferId,
+      )
+      val out = Arguments.createMap()
+      out.putString("linkMapId", ref.linkMapId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun addSegmentLink(linkMapId: String, link: ReadableMap, promise: Promise) {
+    try {
+      val textSegmentId = link.getString("textSegmentId") ?: ""
+      val speechSegmentId = link.getString("speechSegmentId") ?: ""
+      val linkType = link.getString("linkType") ?: ""
+      val confidence =
+        if (link.hasKey("confidence") && !link.isNull("confidence")) {
+          link.getDouble("confidence").toFloat()
+        } else {
+          null
+        }
+      val metaJson =
+        if (link.hasKey("meta") && !link.isNull("meta")) {
+          link.getMap("meta")?.toHashMap()?.let { JSONObject(it).toString() }
+        } else {
+          null
+        }
+
+      val out = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.addLink(
+        linkMapId = linkMapId,
+        textSegmentId = textSegmentId,
+        speechSegmentId = speechSegmentId,
+        linkTypeRaw = linkType,
+        confidence = confidence,
+        metaJson = metaJson,
+      )
+      promise.resolve(segmentLinkToWritableMap(out))
+    } catch (e: IllegalArgumentException) {
+      promise.reject("SEGMENT_LINK_INVALID", e.message, e)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun addSegmentLinks(linkMapId: String, links: ReadableArray, promise: Promise) {
+    try {
+      val input = ArrayList<com.sherpaonnx.segment.core.SegmentLinkInput>(links.size())
+      for (i in 0 until links.size()) {
+        val link = links.getMap(i)
+          ?: throw IllegalArgumentException("SEGMENT_LINK_INVALID: links[$i] must be an object")
+        val metaJson =
+          if (link.hasKey("meta") && !link.isNull("meta")) {
+            link.getMap("meta")?.toHashMap()?.let { JSONObject(it).toString() }
+          } else {
+            null
+          }
+        input.add(
+          com.sherpaonnx.segment.core.SegmentLinkInput(
+            textSegmentId = link.getString("textSegmentId") ?: "",
+            speechSegmentId = link.getString("speechSegmentId") ?: "",
+            linkType = link.getString("linkType") ?: "",
+            confidence = if (link.hasKey("confidence") && !link.isNull("confidence")) {
+              link.getDouble("confidence").toFloat()
+            } else {
+              null
+            },
+            metaJson = metaJson,
+          )
+        )
+      }
+
+      val created = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.addLinks(linkMapId, input)
+      val arr = Arguments.createArray()
+      created.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: IllegalArgumentException) {
+      promise.reject("SEGMENT_LINK_INVALID", e.message, e)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun removeSegmentLink(linkMapId: String, linkId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.core.SegmentLinkMapRegistry.removeLink(linkMapId, linkId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSpeechSegmentsForText(linkMapId: String, textSegmentId: String, promise: Promise) {
+    try {
+      val links =
+        com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getSpeechSegmentsForText(
+          linkMapId,
+          textSegmentId,
+        )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getTextSegmentsForSpeech(linkMapId: String, speechSegmentId: String, promise: Promise) {
+    try {
+      val links =
+        com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getTextSegmentsForSpeech(
+          linkMapId,
+          speechSegmentId,
+        )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getAllSegmentLinks(
+    linkMapId: String,
+    startIndex: Double?,
+    maxCount: Double?,
+    promise: Promise,
+  ) {
+    try {
+      val from = startIndex?.toInt() ?: 0
+      val count = maxCount?.toInt() ?: 1024
+      val links = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getAllLinks(
+        linkMapId,
+        from,
+        count,
+      )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSegmentLinkCount(linkMapId: String, promise: Promise) {
+    try {
+      promise.resolve(com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getCount(linkMapId))
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSegmentLinkMapInfo(linkMapId: String, promise: Promise) {
+    try {
+      val info = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getInfo(linkMapId)
+      val out = Arguments.createMap()
+      out.putString("linkMapId", info.linkMapId)
+      out.putInt("linkCount", info.linkCount)
+      if (info.textBufferId != null) out.putString("textBufferId", info.textBufferId)
+      if (info.audioBufferId != null) out.putString("audioBufferId", info.audioBufferId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun releaseSegmentLinkMap(linkMapId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.core.SegmentLinkMapRegistry.release(linkMapId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
     }
   }
 

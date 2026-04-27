@@ -17,6 +17,7 @@
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "../pipeline/PaLiveEntry.h"
+#include "../pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "AudioDecodeSession.h"
 #include "AudioEncodeSession.h"
 #include <mutex>
@@ -292,6 +293,25 @@ struct PaOfflineEntry {
 std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 std::mutex g_pa_mutex;
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_saveCancelFlags;
+static std::mutex g_pa_saveCancelMutex;
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_decodeCancelFlags;
+static std::mutex g_pa_decodeCancelMutex;
+
+struct PaFileIngestStatus {
+  bool isRunning = true;
+  int64_t framesIngested = 0;
+  int64_t totalFramesEstimate = 0;
+  int percent = 0;
+  std::string error;
+};
+
+static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
+static std::mutex g_pa_fileIngestMutex;
+
+static std::string pa_generateId(const char *prefix) {
+  return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
+}
 
 enum class PaDeviceRamClass {
   LOW,
@@ -626,49 +646,252 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     NSDate *mod = attrs[NSFileModificationDate];
     if (mod && [now timeIntervalSinceDate:mod] > maxAgeSec) {
       [fm removeItemAtPath:fullPath error:nil];
-              auto region = PaMmapRegion::mapFile(f32Path);
-        if (region) {
-          entry = std::make_shared<PaOfflineEntry>();
-          entry->bufferId = bufferId;
-          entry->sampleRate = outputRate;
-          entry->channelCount = 1;
-          entry->mmapRegion = std::move(region);
-                  }
-      }
-      if (!entry) {
-        // Small or mmap failed: load into heap vector, delete temp file
-                int fd = open(f32Path.c_str(), O_RDONLY);
-        if (fd >= 0) {
-          std::vector<float> samples((size_t)totalSamplesWritten);
-          read(fd, samples.data(), (size_t)totalSamplesWritten * sizeof(float));
-          close(fd);
-          unlink(f32Path.c_str());
-          entry = std::make_shared<PaOfflineEntry>();
-          entry->bufferId = bufferId;
-          entry->sampleRate = outputRate;
-          entry->channelCount = 1;
-          entry->samples = std::move(samples);
-        } else {
-          unlink(f32Path.c_str());
-          reject(kPAErrInternalError, @"Failed to read decoded audio temp file", nil);
-          return;
-        }
-      }
-
-      {
-        std::lock_guard<std::mutex> lock(g_pa_mutex);
-        g_pa_offline[bufferId] = entry;
-      }
-      resolve(entry->toDict());
-    } @catch (NSException *e) {
-      {
-        std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-        g_pa_decodeCancelFlags.erase(opId);
-      }
-      reject(kPAErrInternalError, e.reason, nil);
     }
-  });
+  }
 }
+
+std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_live.find(bufferId);
+  if (it == g_pa_live.end()) return nullptr;
+  return it->second;
+}
+
+bool pa_read_offline_samples(
+  const std::string &bufferId,
+  std::vector<float> *samples,
+  int *sampleRate
+) {
+  if (!samples || !sampleRate) return false;
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) return false;
+    entry = it->second;
+  }
+
+  *sampleRate = entry->sampleRate;
+  *samples = entry->readAllSamples();
+  return true;
+}
+
+bool pa_create_offline_from_samples(
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int channelCount,
+  std::string *json,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!samples || count == 0 || sampleRate <= 0 || channelCount <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid audio samples or format";
+    return false;
+  }
+
+  std::string bufferId = pa_generateId("off");
+  std::vector<float> owned(samples, samples + count);
+  auto entry = pa_createEntryWithThreshold(bufferId, sampleRate, channelCount, owned);
+  if (!entry) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to create offline audio entry";
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+
+  if (json) {
+    *json = std::string("{\"bufferId\":\"") + bufferId +
+      "\",\"kind\":\"offlinePcmBuffer\",\"state\":\"immutable\",\"sampleRate\":" +
+      std::to_string(entry->sampleRate) +
+      ",\"channelCount\":" + std::to_string(entry->channelCount) +
+      ",\"numSamples\":" + std::to_string(entry->numSamples()) +
+      ",\"durationMs\":" + std::to_string(entry->durationMs()) + "}";
+  }
+
+  return true;
+}
+
+bool pa_get_offline_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!out) return false;
+  if (startFrame < 0 || frameCount < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startFrame/frameCount must be >= 0";
+    return false;
+  }
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  *out = entry->readSlice(startFrame, frameCount);
+  return true;
+}
+
+bool pa_get_live_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!out) return false;
+  if (startFrame < 0 || frameCount < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startFrame/frameCount must be >= 0";
+    return false;
+  }
+
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Live buffer not found";
+    return false;
+  }
+
+  *out = live->getSamplesSlice(startFrame, frameCount);
+  return true;
+}
+
+bool pa_append_samples_to_live(
+  const std::string &bufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!samples || count == 0 || sampleRate <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid samples or sample rate";
+    return false;
+  }
+
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Live buffer not found";
+    return false;
+  }
+
+  try {
+    live->appendSamples(samples, count, sampleRate, kPaAppendSourceAppend, false);
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
+bool pa_get_offline_metadata(
+  const std::string &bufferId,
+  int *sampleRate,
+  int *numSamples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!sampleRate || !numSamples) return false;
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  *sampleRate = entry->sampleRate;
+  *numSamples = entry->numSamples();
+  return true;
+}
+
+bool pa_adopt_offline_samples_if_empty(
+  const std::string &bufferId,
+  std::vector<float> &&samples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  int targetSampleRate = 0;
+  int targetChannelCount = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    if (it->second->numSamples() > 0) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+      if (errorMessage) *errorMessage = "Offline buffer is not empty";
+      return false;
+    }
+    targetSampleRate = it->second->sampleRate;
+    targetChannelCount = it->second->channelCount;
+  }
+
+  auto replacement = pa_createEntryWithThreshold(
+    bufferId,
+    targetSampleRate,
+    targetChannelCount,
+    samples
+  );
+  if (!replacement) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to adopt samples into offline buffer";
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    if (it->second->numSamples() > 0) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+      if (errorMessage) *errorMessage = "Offline buffer is not empty";
+      return false;
+    }
+    it->second = replacement;
+  }
+
+  return true;
+}
+
+@implementation SherpaOnnx (PipelineAudio)
+
+#if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
 
 // ---- Offline: empty (output target for TTS) ----
 - (void)createEmptyOfflineAudioBuffer:(double)sampleRate
