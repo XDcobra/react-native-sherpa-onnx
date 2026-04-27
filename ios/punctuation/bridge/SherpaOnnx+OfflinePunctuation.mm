@@ -50,9 +50,19 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
     reject(kInitErr, @"modelDir is required", nil);
     return;
   }
+  if (modelType != nil) {
+    NSString *trimmed =
+        [modelType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *req = [trimmed lowercaseString];
+    if (!([req isEqualToString:@"auto"] || [req isEqualToString:@"ct_transformer"])) {
+      reject(kInitErr,
+             [NSString stringWithFormat:@"Unsupported modelType for offline engine: %@", modelType],
+             nil);
+      return;
+    }
+  }
   std::string idStr = [instanceId UTF8String];
   std::string dirStr = [modelDir UTF8String];
-  (void)modelType;
 
   @try {
     auto det = sherpaonnx::DetectPunctuationModel(

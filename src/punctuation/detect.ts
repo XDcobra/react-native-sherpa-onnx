@@ -14,7 +14,8 @@ export type PunctuationModelType = 'ct_transformer' | 'cnn_bilstm' | 'auto';
 
 /**
  * Detect punctuation model layout (offline CT-Transformer vs online CNN-BiLSTM) without running inference.
- * `isStreaming` is false until a future release enables native streaming heuristics.
+ * `isStreaming` is forwarded from native detection: true when CNN-BiLSTM (online) is selected and the
+ * ORT online-compatibility preflight passes; false for offline CT-Transformer and failed guards.
  */
 export async function detectPunctuationModel(
   source: FileSource,

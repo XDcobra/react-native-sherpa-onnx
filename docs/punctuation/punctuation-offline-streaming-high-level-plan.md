@@ -61,10 +61,17 @@ Important: streaming punctuation is incremental text processing, not audio wavef
 ## 1) Offline
 
 - `createOfflinePunctuation(options): Promise<OfflinePunctuationEngine>`
-- `OfflinePunctuationEngine.punctuate(textIn, textOut): Promise<PunctuationWriteResult>`
+- `OfflinePunctuationEngine.punctuate(textIn, textOut): Promise<OfflinePunctuateResult>`
 - `OfflinePunctuationEngine.destroy(): Promise<void>`
 
 `textIn` and `textOut` are offline text buffers.
+
+**`OfflinePunctuateResult` (v1):** the only field is `processingTimeMs: number` — wall-clock (or high-resolution) duration in milliseconds of the **native** punctuation work for that call, excluding buffer allocation by the caller. The punctuated string lives only in `textOut`. Additional result fields are reserved for future use.
+
+**Convenience helper (optional; same buffer ownership as `punctuate`):**
+
+- `OfflinePunctuationEngine.punctuateString(plain: string, textOut: OfflineTextBufferRef): Promise<OfflinePunctuateResult>`
+- The **output** buffer is **always passed in** by the caller. The user **creates** and **owns** it (e.g. via `createEmptyOfflineTextBuffer()`) and **reuses** it across calls or **destroys** it when done. The engine only **populates** `textOut` with the punctuated result. **It does not** create, cache, or manage an `OfflineTextBuffer` internally for this call.
 
 ## 2) Streaming
 
@@ -97,6 +104,12 @@ Important: streaming punctuation is incremental text processing, not audio wavef
 - output: caller-owned `LiveTextBuffer` (worker appends punctuated chunks)
 - worker: drain/append loop until stop/finalize
 
+## Native bridge: iOS (`TxtOfflineEntry`, decided)
+
+- The punctuation bridge implementation **includes** [`ios/textbuffer/core/SherpaOnnx+TextBufferGlobals.h`](../../ios/textbuffer/core/SherpaOnnx+TextBufferGlobals.h) and uses the **shared** `g_txt_offline` map via the header’s `extern` (same as STT, alignment, TTS batch).
+- **Reuse** the existing C++ helpers exposed there, e.g. `txt_read_offline_text` / `txt_populate_offline_if_empty` (or add a narrow `txt_*` if needed), instead of inlining a second copy of the registry logic.
+- **Do not** re-declare or duplicate `g_txt_offline` in the punctuation `.mm` file.
+
 ---
 
 ## Runtime Behavior
@@ -107,7 +120,7 @@ Important: streaming punctuation is incremental text processing, not audio wavef
 2. read full input text from `textIn`
 3. run offline punctuation model
 4. write punctuated text to `textOut`
-5. return `{ outputTextBufferId, unitsWritten, timingMs? }`
+5. return `{ processingTimeMs }` as `OfflinePunctuateResult` (punctuated text is only in `textOut`, not in the result object)
 
 ## Streaming Runtime
 
@@ -214,5 +227,8 @@ Future segmentation engine usage:
 
 - chunk merge policy in streaming mode (carry-over window, boundary rewrite depth)
 - whether streaming output emits only finalized text or allows revisions
-- whether to expose convenience `punctuateText(text)` helper outside buffer API
+
+**Decided (convenience + buffers):** If a string helper is exposed, the shape is `punctuateString(plain, textOut: OfflineTextBufferRef)` (see **Offline** section above) — not `punctuateString(plain) → buffer`. The caller must supply a buffer; no automatic output-buffer allocation in the engine.
+
+**Decided (offline result type):** `punctuate` and `punctuateString` resolve to `OfflinePunctuateResult` with only `processingTimeMs: number` for v1. Not `void`.
 

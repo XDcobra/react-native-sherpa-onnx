@@ -428,7 +428,7 @@ VadDetectResult DetectVadModel(
 /**
  * Punctuation model detection. Pass at least one of `model_dir` or `asset_name`.
  * Offline (CT) vs online (CNN-BiLSTM) heuristics follow sherpa's Offline/OnlinePunctuationModelConfig.
- * `isStreaming` is false until streaming selection is implemented.
+ * `PunctuationDetectResult::isStreaming` is set per the struct comment (CNN-BiLSTM + ORT preflight).
  */
 PunctuationDetectResult DetectPunctuationModel(
     const std::optional<std::string>& model_dir,
