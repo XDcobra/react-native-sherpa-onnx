@@ -2,7 +2,7 @@
 
 ## Status
 - Phase 1a (High-Level Scope): Completed
-- Runtime follow-up (LinkMap APIs/logic/tests): Deferred to later phases
+- Runtime follow-up (LinkMap APIs/logic/tests): Implemented
 - Prerequisite for: Sub-Plan 02, 03, 04, 05
 
 ## Purpose

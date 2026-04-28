@@ -1,7 +1,7 @@
 # Sub-Plan 03: Buffer Integration & Events
 
 ## Status
-- Draft
+- Implemented (contract baseline)
 - Depends on: Sub-Plan 01, 02
 - Implementation note: `setPartial()` / `appendPartial()` are currently delivered via async TurboModule calls; optional sync-JSI fast-path is deferred to Sub-Plan 06 (Cleanup & Contract Parity).
 
