@@ -94,8 +94,13 @@ static std::mutex g_tts_pipeline_mutex;
         std::lock_guard<std::mutex> lock(g_pa_mutex);
         auto it = g_pa_live.find(audioBufferKey);
         if (it == g_pa_live.end() || !it->second) {
-            reject(@"TTS_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
-                   [NSString stringWithFormat:@"Output live audio buffer not found: %@", audioOutLiveBufferId], nil);
+            if (g_pa_invalidated_live_ids.find(audioBufferKey) != g_pa_invalidated_live_ids.end()) {
+                reject(@"BUFFER_INVALIDATED",
+                       [NSString stringWithFormat:@"Output live audio buffer is invalidated after transfer: %@", audioOutLiveBufferId], nil);
+            } else {
+                reject(@"TTS_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
+                       [NSString stringWithFormat:@"Output live audio buffer not found: %@", audioOutLiveBufferId], nil);
+            }
             return;
         }
         outputEntry = it->second;

@@ -232,6 +232,23 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Transfer a finalized live audio buffer spool into an offline buffer without copying.
+   * The source live buffer becomes invalidated after successful transfer.
+   */
+  transferOfflineAudioBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
    * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
    * The buffer starts unpopulated; native synthesis fills it exactly once.
    * @param sampleRate - Expected sample rate (must match model output rate for TTS).
@@ -570,6 +587,15 @@ export interface Spec extends TurboModule {
     maxUtf16: number
   ): Promise<string>;
 
+  /** Replace the current live text partial (public data-level write API). */
+  setLiveTextBufferPartial(liveBufferId: string, text: string): Promise<void>;
+
+  /** Append text to the current live text partial (public data-level write API). */
+  appendLiveTextBufferPartial(
+    liveBufferId: string,
+    text: string
+  ): Promise<void>;
+
   /** Commit a text segment to a live text buffer. */
   appendLiveTextSegment(
     liveBufferId: string,
@@ -726,6 +752,107 @@ export interface Spec extends TurboModule {
   getLiveSegmentBufferSegmentCount(liveBufferId: string): Promise<number>;
 
   releasePipelineSegmentBuffer(bufferId: string): Promise<void>;
+
+  // ==================== Segment Link Maps ====================
+
+  createSegmentLinkMap(options?: {
+    textBufferId?: string;
+    audioBufferId?: string;
+  }): Promise<{ linkMapId: string }>;
+
+  addSegmentLink(
+    linkMapId: string,
+    link: {
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }
+  ): Promise<{
+    linkId: string;
+    textSegmentId: string;
+    speechSegmentId: string;
+    linkType: string;
+    confidence?: number;
+    meta?: Object;
+  }>;
+
+  addSegmentLinks(
+    linkMapId: string,
+    links: Array<{
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  removeSegmentLink(linkMapId: string, linkId: string): Promise<void>;
+
+  getSpeechSegmentsForText(
+    linkMapId: string,
+    textSegmentId: string
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getTextSegmentsForSpeech(
+    linkMapId: string,
+    speechSegmentId: string
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getAllSegmentLinks(
+    linkMapId: string,
+    startIndex?: number,
+    maxCount?: number
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getSegmentLinkCount(linkMapId: string): Promise<number>;
+
+  getSegmentLinkMapInfo(linkMapId: string): Promise<{
+    linkMapId: string;
+    linkCount: number;
+    textBufferId?: string;
+    audioBufferId?: string;
+  }>;
+
+  releaseSegmentLinkMap(linkMapId: string): Promise<void>;
 
   // ==================== VAD Methods ====================
 

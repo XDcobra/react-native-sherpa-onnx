@@ -11,6 +11,17 @@
 
 import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import {
+  getLiveTextSegmentation,
+  normalizeSegmentationMode,
+  registerLiveTextSegmentation,
+  releaseSegmentationStateForBuffer,
+} from '../segment/runtime-state';
+import type {
+  SegmentReason,
+  SegmentSource,
+  TextSegment,
+} from '../segment/segment';
 import { PipelineTextErrorCode } from './types';
 import type {
   OfflineTextBufferInfo,
@@ -30,6 +41,7 @@ import type {
   LiveTextBufferCallbacks,
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
+  LiveTextBufferSegmentEvent,
   LiveTextSegment,
   TextBufferSpoolingMode,
   LiveTextBufferSpoolInfo,
@@ -137,12 +149,179 @@ const textErrorCallbacks = new Map<
   string,
   Set<(event: LiveTextBufferErrorEvent) => void>
 >();
+const textSegmentCallbacks = new Map<
+  string,
+  Set<(event: LiveTextBufferSegmentEvent) => void>
+>();
+const textLastSegmentIndexByBuffer = new Map<string, number>();
+const textLastSegmentEndOffsetByBuffer = new Map<string, number>();
 
 let partialSubscription: NativeSubscription | null = null;
 let textErrorSubscription: NativeSubscription | null = null;
+let textSegmentSubscription: NativeSubscription | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value != null && !Array.isArray(value);
+}
+
+function inferSegmentReasonFromSource(source: string): SegmentReason {
+  if (source === 'stt_stream') return 'endpoint';
+  return 'manual_commit';
+}
+
+function toSegmentSource(raw: unknown, fallback: SegmentSource): SegmentSource {
+  return raw === 'segmentation_engine' || raw === 'manual' || raw === 'external'
+    ? raw
+    : fallback;
+}
+
+function toSegmentReason(raw: unknown, fallback: SegmentReason): SegmentReason {
+  return raw === 'endpoint' ||
+    raw === 'punctuation' ||
+    raw === 'length_limit' ||
+    raw === 'vad_boundary' ||
+    raw === 'energy_silence' ||
+    raw === 'manual_commit' ||
+    raw === 'finalize' ||
+    raw === 'policy_checkpoint'
+    ? raw
+    : fallback;
+}
+
+function toPublicTextMeta(
+  meta: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!meta) return undefined;
+  const out = { ...meta };
+  delete out.__segmentReason;
+  delete out.__segmentSource;
+  delete out.__segmentCreatedAtMs;
+  delete out.__segmentId;
+  delete out.__segmentLang;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function dispatchLiveTextSegmentEvent(
+  liveBufferId: string,
+  segment: TextSegment,
+  totalSegments: number
+): void {
+  const callbacks = textSegmentCallbacks.get(liveBufferId);
+  if (!callbacks || callbacks.size === 0) return;
+
+  const lastSegmentIndex = textLastSegmentIndexByBuffer.get(liveBufferId);
+  if (
+    typeof lastSegmentIndex === 'number' &&
+    segment.segmentIndex <= lastSegmentIndex
+  ) {
+    return;
+  }
+  textLastSegmentIndexByBuffer.set(liveBufferId, segment.segmentIndex);
+  textLastSegmentEndOffsetByBuffer.set(liveBufferId, segment.endOffset);
+
+  const event: LiveTextBufferSegmentEvent = {
+    bufferId: liveBufferId,
+    segment,
+    totalSegments,
+  };
+
+  for (const cb of callbacks) {
+    try {
+      cb(event);
+    } catch {
+      /* swallow callback errors */
+    }
+  }
+}
+
+function emitLocalTextSegmentEvent(
+  liveBufferId: string,
+  segment: LiveTextSegment,
+  totalSegments: number
+): void {
+  const rawMeta = isRecord(segment.meta)
+    ? (segment.meta as Record<string, unknown>)
+    : undefined;
+  const previousEnd = textLastSegmentEndOffsetByBuffer.get(liveBufferId) ?? 0;
+  const utf16Length = segment.text.length;
+  const source = toSegmentSource(
+    rawMeta?.__segmentSource,
+    segment.source === 'append' ? 'manual' : 'segmentation_engine'
+  );
+  const reason = toSegmentReason(
+    rawMeta?.__segmentReason,
+    inferSegmentReasonFromSource(segment.source)
+  );
+  const createdAtMsRaw = rawMeta?.__segmentCreatedAtMs;
+  const segmentIdRaw = rawMeta?.__segmentId;
+  const langRaw = rawMeta?.__segmentLang;
+
+  const textSegment: TextSegment = {
+    segmentId:
+      typeof segmentIdRaw === 'string' && segmentIdRaw.length > 0
+        ? segmentIdRaw
+        : `txtseg_${liveBufferId}_${segment.segmentIndex}`,
+    domain: 'text',
+    startOffset: previousEnd,
+    endOffset: previousEnd + utf16Length,
+    reason,
+    source,
+    createdAtMs:
+      typeof createdAtMsRaw === 'number' && Number.isFinite(createdAtMsRaw)
+        ? Math.trunc(createdAtMsRaw)
+        : Date.now(),
+    segmentIndex: segment.segmentIndex,
+    text: segment.text,
+    ...(segment.textTruncated === true ? { textTruncated: true } : {}),
+    utf16Length,
+    ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
+    ...(Array.isArray(segment.timestamps)
+      ? { timestamps: segment.timestamps }
+      : {}),
+    ...(typeof langRaw === 'string' && langRaw.length > 0
+      ? { lang: langRaw }
+      : {}),
+    ...(toPublicTextMeta(rawMeta) ? { meta: toPublicTextMeta(rawMeta) } : {}),
+  };
+
+  dispatchLiveTextSegmentEvent(liveBufferId, textSegment, totalSegments);
+}
+
+function parseNativeLiveTextSegment(raw: unknown): LiveTextSegment | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (typeof raw.text !== 'string') return undefined;
+  if (typeof raw.segmentIndex !== 'number') return undefined;
+
+  const tokens = Array.isArray(raw.tokens)
+    ? raw.tokens.filter((t): t is string => typeof t === 'string')
+    : undefined;
+  const timestamps = Array.isArray(raw.timestamps)
+    ? raw.timestamps.filter((t): t is number => typeof t === 'number')
+    : undefined;
+
+  const source =
+    raw.source === 'stt_stream' ||
+    raw.source === 'append' ||
+    raw.source === 'replace' ||
+    raw.source === 'mixed' ||
+    raw.source === 'unknown'
+      ? raw.source
+      : 'unknown';
+
+  return {
+    text: raw.text,
+    ...(raw.textTruncated === true ? { textTruncated: true } : {}),
+    source,
+    segmentIndex: Math.trunc(raw.segmentIndex),
+    ...(tokens && tokens.length > 0 ? { tokens } : {}),
+    ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
+    ...(isRecord(raw.meta) ? { meta: raw.meta } : {}),
+  };
+}
 
 function ensureLiveTextEventSubscriptions(): void {
-  if (partialSubscription && textErrorSubscription) return;
+  if (partialSubscription && textErrorSubscription && textSegmentSubscription)
+    return;
 
   const emitter = new NativeEventEmitter();
 
@@ -217,6 +396,46 @@ function ensureLiveTextEventSubscriptions(): void {
       }
     );
   }
+
+  if (!textSegmentSubscription) {
+    textSegmentSubscription = emitter.addListener(
+      'pipelineLiveTextSegment',
+      (rawEvent: {
+        liveBufferId?: string;
+        bufferId?: string;
+        totalSegments?: number;
+        segment?: TextSegment;
+        text?: string;
+        textTruncated?: boolean;
+        source?: string;
+        segmentIndex?: number;
+        tokens?: string[];
+        timestamps?: number[];
+        meta?: Record<string, unknown>;
+      }) => {
+        const liveBufferId = rawEvent?.liveBufferId ?? rawEvent?.bufferId;
+        if (!liveBufferId) return;
+
+        const rawSegment = rawEvent?.segment;
+        if (rawSegment && rawSegment.domain === 'text') {
+          const totalSegments =
+            typeof rawEvent.totalSegments === 'number'
+              ? Math.trunc(rawEvent.totalSegments)
+              : rawSegment.segmentIndex + 1;
+          dispatchLiveTextSegmentEvent(liveBufferId, rawSegment, totalSegments);
+          return;
+        }
+
+        const normalized = parseNativeLiveTextSegment(rawEvent);
+        if (!normalized) return;
+        const totalSegments =
+          typeof rawEvent.totalSegments === 'number'
+            ? Math.trunc(rawEvent.totalSegments)
+            : normalized.segmentIndex + 1;
+        emitLocalTextSegmentEvent(liveBufferId, normalized, totalSegments);
+      }
+    );
+  }
 }
 
 function registerLiveTextCallbacks(
@@ -246,6 +465,16 @@ function registerLiveTextCallbacks(
     registered = true;
   }
 
+  if (callbacks.onSegment) {
+    let set = textSegmentCallbacks.get(liveBufferId);
+    if (!set) {
+      set = new Set();
+      textSegmentCallbacks.set(liveBufferId, set);
+    }
+    set.add(callbacks.onSegment);
+    registered = true;
+  }
+
   return () => {
     if (!registered) return;
     if (callbacks.onPartial) {
@@ -260,6 +489,13 @@ function registerLiveTextCallbacks(
       if (set) {
         set.delete(callbacks.onError);
         if (set.size === 0) textErrorCallbacks.delete(liveBufferId);
+      }
+    }
+    if (callbacks.onSegment) {
+      const set = textSegmentCallbacks.get(liveBufferId);
+      if (set) {
+        set.delete(callbacks.onSegment);
+        if (set.size === 0) textSegmentCallbacks.delete(liveBufferId);
       }
     }
   };
@@ -392,8 +628,15 @@ export async function createLiveTextBuffer(
     spool: mapLiveTextSpoolInfo(raw),
   };
 
+  const segmentationMode = normalizeSegmentationMode(
+    options.segmentation?.mode,
+    'manual'
+  );
+  registerLiveTextSegmentation(liveBufferId, segmentationMode);
+
   const unsubscribeEvents = registerLiveTextCallbacks(liveBufferId, {
     onPartial: options.onPartial,
+    onSegment: options.onSegment,
     onError: options.onError,
   });
 
@@ -425,6 +668,8 @@ export async function createLiveTextBufferFromOffline(
     spool: mapLiveTextSpoolInfo(raw),
   };
 
+  registerLiveTextSegmentation(liveBufferId, 'manual');
+
   return {
     info,
     bufferId: liveBufferId as LiveTextBufferHandleRecording,
@@ -439,6 +684,27 @@ export async function finalizeLiveTextBuffer(
   liveBufferId: LiveTextBufferRecordingSource
 ): Promise<LiveTextBufferHandleFinished> {
   const id = resolveLiveTextBufferId(liveBufferId);
+
+  const segmentationMode = normalizeSegmentationMode(
+    getLiveTextSegmentation(id)?.mode,
+    'manual'
+  );
+  if (segmentationMode !== 'off') {
+    const partial = await getNative().getLiveTextBufferPartialSlice(
+      id,
+      0,
+      2_000_000_000
+    );
+    if (partial.length > 0) {
+      await appendLiveTextSegment(id, partial, undefined, undefined, {
+        __segmentReason: 'finalize',
+        __segmentSource: 'manual',
+        __segmentCreatedAtMs: Date.now(),
+      });
+      await getNative().setLiveTextBufferPartial(id, '');
+    }
+  }
+
   await getNative().finalizeLiveTextBuffer(id);
   return id as unknown as LiveTextBufferHandleFinished;
 }
@@ -490,6 +756,10 @@ export async function releasePipelineTextBuffer(
   // Clean up JS-side callback maps
   partialCallbacks.delete(id);
   textErrorCallbacks.delete(id);
+  textSegmentCallbacks.delete(id);
+  textLastSegmentIndexByBuffer.delete(id);
+  textLastSegmentEndOffsetByBuffer.delete(id);
+  releaseSegmentationStateForBuffer(id);
   await getNative().releasePipelineTextBuffer(id);
 }
 
@@ -585,6 +855,8 @@ export async function getLiveTextBufferPartialSlice(
   return getNative().getLiveTextBufferPartialSlice(id, startUtf16, maxUtf16);
 }
 
+const MAX_SEGMENT_EVENT_TEXT_CHARS = 4096;
+
 /** Commit a text segment to a live text buffer segment log. */
 export async function appendLiveTextSegment(
   liveBufferId: LiveTextBufferIdSource,
@@ -594,7 +866,33 @@ export async function appendLiveTextSegment(
   meta?: Record<string, unknown>
 ): Promise<{ segmentIndex: number }> {
   const id = resolveLiveTextBufferId(liveBufferId);
-  return getNative().appendLiveTextSegment(id, text, tokens, timestamps, meta);
+  const out = await getNative().appendLiveTextSegment(
+    id,
+    text,
+    tokens,
+    timestamps,
+    meta
+  );
+
+  const callbacks = textSegmentCallbacks.get(id);
+  if (callbacks && callbacks.size > 0) {
+    const truncated = text.length > MAX_SEGMENT_EVENT_TEXT_CHARS;
+    const eventText = truncated
+      ? text.substring(0, MAX_SEGMENT_EVENT_TEXT_CHARS)
+      : text;
+    const segment: LiveTextSegment = {
+      text: eventText,
+      ...(truncated ? { textTruncated: true } : {}),
+      source: 'append',
+      segmentIndex: out.segmentIndex,
+      ...(tokens && tokens.length > 0 ? { tokens } : {}),
+      ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
+      ...(meta ? { meta } : {}),
+    };
+    emitLocalTextSegmentEvent(id, segment, out.segmentIndex + 1);
+  }
+
+  return out;
 }
 
 /**
@@ -675,7 +973,10 @@ export type {
   LiveTextBufferPartialEvent,
   LiveTextBufferErrorEvent,
   LiveTextBufferCallbacks,
+  LiveTextBufferSegmentEvent,
   CreateLiveTextBufferOptions,
+  TextSegmentationMode,
+  TextSegmentationConfig,
   OfflineTextBufferFromLiveMode,
   PipelineTextErrorCodeValue,
 } from './types';

@@ -17,10 +17,12 @@
 #import "fileio/FileIOStreamCopy.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "../pipeline/PaLiveEntry.h"
+#include "../pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "AudioDecodeSession.h"
 #include "AudioEncodeSession.h"
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <string>
 #include <set>
@@ -46,6 +48,10 @@ static NSString *const kPAErrFileNotFound     = @"AUDIO_FILE_NOT_FOUND";
 static NSString *const kPAErrFileReadError    = @"AUDIO_FILE_READ_ERROR";
 static NSString *const kPAErrFileWriteError   = @"AUDIO_FILE_WRITE_ERROR";
 static NSString *const kPAErrAlreadyFinalized = @"AUDIO_ALREADY_FINALIZED";
+static NSString *const kPAErrTransferInvalidState = @"TRANSFER_INVALID_STATE";
+static NSString *const kPAErrTransferSpoolUnavailable = @"TRANSFER_SPOOL_UNAVAILABLE";
+static NSString *const kPAErrTransferCursorsActive = @"TRANSFER_CURSORS_ACTIVE";
+static NSString *const kPAErrBufferInvalidated = @"BUFFER_INVALIDATED";
 static NSString *const kPAErrInternalError    = @"AUDIO_INTERNAL_ERROR";
 
 // Source constants, pa_resampleLinear, pa_writeWavHeaderToStream, and PaLiveEntry are defined in PaLiveEntry.h (included above).
@@ -124,6 +130,8 @@ static bool pa_parseWavHeader(const std::string &filePath, PaWavHeader &hdr) {
 struct PaMmapRegion {
   void *addr = MAP_FAILED;
   size_t length = 0;
+  size_t dataOffsetBytes = 0;
+  bool deleteOnRelease = true;
   std::string filePath;
 
   PaMmapRegion() = default;
@@ -146,9 +154,13 @@ struct PaMmapRegion {
   }
   ~PaMmapRegion() { release(); }
 
-  bool isValid() const { return addr != MAP_FAILED && addr != nullptr; }
-  const float *floatPtr() const { return isValid() ? reinterpret_cast<const float *>(addr) : nullptr; }
-  int numSamples() const { return isValid() ? (int)(length / sizeof(float)) : 0; }
+  bool isValid() const { return addr != MAP_FAILED && addr != nullptr && length > dataOffsetBytes; }
+  const float *floatPtr() const {
+    if (!isValid()) return nullptr;
+    const uint8_t *base = reinterpret_cast<const uint8_t *>(addr);
+    return reinterpret_cast<const float *>(base + dataOffsetBytes);
+  }
+  int numSamples() const { return isValid() ? (int)((length - dataOffsetBytes) / sizeof(float)) : 0; }
 
   void release() {
     if (isValid()) {
@@ -156,19 +168,23 @@ struct PaMmapRegion {
       addr = MAP_FAILED;
       length = 0;
     }
-    if (!filePath.empty()) {
+    if (deleteOnRelease && !filePath.empty()) {
       unlink(filePath.c_str());
-      filePath.clear();
     }
+    filePath.clear();
   }
 
   /** Map an existing raw .f32 file. */
-  static std::unique_ptr<PaMmapRegion> mapFile(const std::string &path) {
+  static std::unique_ptr<PaMmapRegion> mapFile(
+    const std::string &path,
+    size_t dataOffsetBytes = 0,
+    bool deleteOnRelease = true
+  ) {
     int fd = open(path.c_str(), O_RDONLY);
     if (fd < 0) return nullptr;
 
     struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size == 0) { close(fd); return nullptr; }
+    if (fstat(fd, &st) != 0 || st.st_size <= (off_t)dataOffsetBytes) { close(fd); return nullptr; }
 
     void *mapped = mmap(nullptr, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
@@ -177,6 +193,8 @@ struct PaMmapRegion {
     auto region = std::make_unique<PaMmapRegion>();
     region->addr = mapped;
     region->length = (size_t)st.st_size;
+    region->dataOffsetBytes = dataOffsetBytes;
+    region->deleteOnRelease = deleteOnRelease;
     region->filePath = path;
     return region;
   }
@@ -291,7 +309,27 @@ struct PaOfflineEntry {
 // Non-static: shared with SherpaOnnx+STT.mm via SherpaOnnx+PipelineAudioGlobals.h
 std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
+std::unordered_set<std::string> g_pa_invalidated_live_ids;
 std::mutex g_pa_mutex;
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_saveCancelFlags;
+static std::mutex g_pa_saveCancelMutex;
+static std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> g_pa_decodeCancelFlags;
+static std::mutex g_pa_decodeCancelMutex;
+
+struct PaFileIngestStatus {
+  bool isRunning = true;
+  int64_t framesIngested = 0;
+  int64_t totalFramesEstimate = 0;
+  int percent = 0;
+  std::string error;
+};
+
+static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
+static std::mutex g_pa_fileIngestMutex;
+
+static std::string pa_generateId(const char *prefix) {
+  return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
+}
 
 enum class PaDeviceRamClass {
   LOW,
@@ -608,6 +646,57 @@ static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromF32WavSpool(
   }
 }
 
+static std::shared_ptr<PaOfflineEntry> pa_createOfflineFromTransferredWavSpool(
+  const std::string &bufferId,
+  const std::string &spoolPath,
+  int sampleRate,
+  int channelCount
+) {
+  struct stat st;
+  if (stat(spoolPath.c_str(), &st) != 0 || st.st_size <= 44) {
+    return nullptr;
+  }
+
+  int64_t payloadBytes = static_cast<int64_t>(st.st_size) - 44;
+  if (payloadBytes <= 0 || (payloadBytes % (int64_t)sizeof(float)) != 0) {
+    return nullptr;
+  }
+
+  auto entry = std::make_shared<PaOfflineEntry>();
+  entry->bufferId = bufferId;
+  entry->sampleRate = sampleRate;
+  entry->channelCount = channelCount;
+
+  long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
+  if (st.st_size >= threshold) {
+    auto region = PaMmapRegion::mapFile(spoolPath, 44, true);
+    if (!region) {
+      return nullptr;
+    }
+    entry->mmapRegion = std::move(region);
+    return entry;
+  }
+
+  std::ifstream wavFile(spoolPath, std::ios::binary);
+  if (!wavFile) return nullptr;
+  wavFile.seekg(44);
+  if (!wavFile) return nullptr;
+
+  int sampleCount = (int)(payloadBytes / (int64_t)sizeof(float));
+  std::vector<float> tmp((size_t)sampleCount);
+  wavFile.read(
+    reinterpret_cast<char *>(tmp.data()),
+    static_cast<std::streamsize>(payloadBytes)
+  );
+  if (!wavFile && !wavFile.eof()) {
+    return nullptr;
+  }
+
+  entry->samples = std::move(tmp);
+  unlink(spoolPath.c_str());
+  return entry;
+}
+
 
 /**
  * Sweep orphaned pa_off_*.f32 temp files older than maxAgeSec.
@@ -626,49 +715,289 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     NSDate *mod = attrs[NSFileModificationDate];
     if (mod && [now timeIntervalSinceDate:mod] > maxAgeSec) {
       [fm removeItemAtPath:fullPath error:nil];
-              auto region = PaMmapRegion::mapFile(f32Path);
-        if (region) {
-          entry = std::make_shared<PaOfflineEntry>();
-          entry->bufferId = bufferId;
-          entry->sampleRate = outputRate;
-          entry->channelCount = 1;
-          entry->mmapRegion = std::move(region);
-                  }
-      }
-      if (!entry) {
-        // Small or mmap failed: load into heap vector, delete temp file
-                int fd = open(f32Path.c_str(), O_RDONLY);
-        if (fd >= 0) {
-          std::vector<float> samples((size_t)totalSamplesWritten);
-          read(fd, samples.data(), (size_t)totalSamplesWritten * sizeof(float));
-          close(fd);
-          unlink(f32Path.c_str());
-          entry = std::make_shared<PaOfflineEntry>();
-          entry->bufferId = bufferId;
-          entry->sampleRate = outputRate;
-          entry->channelCount = 1;
-          entry->samples = std::move(samples);
-        } else {
-          unlink(f32Path.c_str());
-          reject(kPAErrInternalError, @"Failed to read decoded audio temp file", nil);
-          return;
-        }
-      }
-
-      {
-        std::lock_guard<std::mutex> lock(g_pa_mutex);
-        g_pa_offline[bufferId] = entry;
-      }
-      resolve(entry->toDict());
-    } @catch (NSException *e) {
-      {
-        std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
-        g_pa_decodeCancelFlags.erase(opId);
-      }
-      reject(kPAErrInternalError, e.reason, nil);
     }
-  });
+  }
 }
+
+void pa_sweepOrphanedOrchestrationFiles(int maxAgeSec) {
+  NSString *tmpDir = NSTemporaryDirectory();
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSArray<NSString *> *files = [fm contentsOfDirectoryAtPath:tmpDir error:nil];
+  if (!files) return;
+
+  NSDate *now = [NSDate date];
+  for (NSString *name in files) {
+    if (![name hasPrefix:@"orch_"]) continue;
+    NSString *fullPath = [tmpDir stringByAppendingPathComponent:name];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+    NSDate *mod = attrs[NSFileModificationDate];
+    if (mod && [now timeIntervalSinceDate:mod] > maxAgeSec) {
+      [fm removeItemAtPath:fullPath error:nil];
+    }
+  }
+}
+
+void pa_cleanupOrphanedOrchestrationFiles(int maxAgeSec) {
+  pa_sweepOrphanedOrchestrationFiles(maxAgeSec);
+}
+
+std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_live.find(bufferId);
+  if (it == g_pa_live.end()) return nullptr;
+  return it->second;
+}
+
+bool pa_is_live_invalidated(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  return g_pa_invalidated_live_ids.find(bufferId) != g_pa_invalidated_live_ids.end();
+}
+
+bool pa_read_offline_samples(
+  const std::string &bufferId,
+  std::vector<float> *samples,
+  int *sampleRate
+) {
+  if (!samples || !sampleRate) return false;
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) return false;
+    entry = it->second;
+  }
+
+  *sampleRate = entry->sampleRate;
+  *samples = entry->readAllSamples();
+  return true;
+}
+
+bool pa_create_offline_from_samples(
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int channelCount,
+  std::string *json,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!samples || count == 0 || sampleRate <= 0 || channelCount <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid audio samples or format";
+    return false;
+  }
+
+  std::string bufferId = pa_generateId("off");
+  std::vector<float> owned(samples, samples + count);
+  auto entry = pa_createEntryWithThreshold(bufferId, sampleRate, channelCount, owned);
+  if (!entry) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to create offline audio entry";
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+
+  if (json) {
+    *json = std::string("{\"bufferId\":\"") + bufferId +
+      "\",\"kind\":\"offlinePcmBuffer\",\"state\":\"immutable\",\"sampleRate\":" +
+      std::to_string(entry->sampleRate) +
+      ",\"channelCount\":" + std::to_string(entry->channelCount) +
+      ",\"numSamples\":" + std::to_string(entry->numSamples()) +
+      ",\"durationMs\":" + std::to_string(entry->durationMs()) + "}";
+  }
+
+  return true;
+}
+
+bool pa_get_offline_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!out) return false;
+  if (startFrame < 0 || frameCount < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startFrame/frameCount must be >= 0";
+    return false;
+  }
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  *out = entry->readSlice(startFrame, frameCount);
+  return true;
+}
+
+bool pa_get_live_samples_slice(
+  const std::string &bufferId,
+  int startFrame,
+  int frameCount,
+  std::vector<float> *out,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!out) return false;
+  if (startFrame < 0 || frameCount < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startFrame/frameCount must be >= 0";
+    return false;
+  }
+
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+
+  *out = live->getSamplesSlice(startFrame, frameCount);
+  return true;
+}
+
+bool pa_append_samples_to_live(
+  const std::string &bufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!samples || count == 0 || sampleRate <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid samples or sample rate";
+    return false;
+  }
+
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+
+  try {
+    live->appendSamples(samples, count, sampleRate, kPaAppendSourceAppend, false);
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
+bool pa_get_offline_metadata(
+  const std::string &bufferId,
+  int *sampleRate,
+  int *numSamples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!sampleRate || !numSamples) return false;
+
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+
+  *sampleRate = entry->sampleRate;
+  *numSamples = entry->numSamples();
+  return true;
+}
+
+bool pa_adopt_offline_samples_if_empty(
+  const std::string &bufferId,
+  std::vector<float> &&samples,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  int targetSampleRate = 0;
+  int targetChannelCount = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    if (it->second->numSamples() > 0) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+      if (errorMessage) *errorMessage = "Offline buffer is not empty";
+      return false;
+    }
+    targetSampleRate = it->second->sampleRate;
+    targetChannelCount = it->second->channelCount;
+  }
+
+  auto replacement = pa_createEntryWithThreshold(
+    bufferId,
+    targetSampleRate,
+    targetChannelCount,
+    samples
+  );
+  if (!replacement) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to adopt samples into offline buffer";
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    if (it->second->numSamples() > 0) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+      if (errorMessage) *errorMessage = "Offline buffer is not empty";
+      return false;
+    }
+    it->second = replacement;
+  }
+
+  return true;
+}
+
+@implementation SherpaOnnx (PipelineAudio)
+
+#if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
 
 // ---- Offline: empty (output target for TTS) ----
 - (void)createEmptyOfflineAudioBuffer:(double)sampleRate
@@ -710,7 +1039,11 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       auto it = g_pa_live.find(liveId);
       if (it == g_pa_live.end()) {
-        reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        if (g_pa_invalidated_live_ids.find(liveId) != g_pa_invalidated_live_ids.end()) {
+          reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+        } else {
+          reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        }
         return;
       }
       live = it->second;
@@ -737,6 +1070,85 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       g_pa_offline[bufferId] = entry;
     }
+    resolve(entry->toDict());
+  } @catch (NSException *e) {
+    reject(kPAErrInternalError, e.reason, nil);
+  }
+}
+
+- (void)transferOfflineAudioBufferFromLive:(NSString *)liveBufferId
+                                      mode:(NSString *)mode
+                                   resolve:(RCTPromiseResolveBlock)resolve
+                                    reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    std::string liveId = [liveBufferId UTF8String];
+    std::string modeStr = mode ? [mode UTF8String] : "fullIfSpooled";
+    if (modeStr != "fullIfSpooled") {
+      reject(kPAErrInvalidArgument, @"Unsupported transfer mode. Use 'fullIfSpooled'.", nil);
+      return;
+    }
+
+    std::shared_ptr<PaLiveEntry> live;
+    {
+      std::lock_guard<std::mutex> lock(g_pa_mutex);
+      auto it = g_pa_live.find(liveId);
+      if (it == g_pa_live.end()) {
+        if (g_pa_invalidated_live_ids.find(liveId) != g_pa_invalidated_live_ids.end()) {
+          reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+        } else {
+          reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        }
+        return;
+      }
+      live = it->second;
+    }
+
+    if (live->state != PaLiveEntry::FINISHED) {
+      reject(kPAErrTransferInvalidState, @"Live buffer must be finalized before transfer", nil);
+      return;
+    }
+
+    if (!live->hasActiveSpool || live->spoolPath.empty()) {
+      reject(kPAErrTransferSpoolUnavailable, @"Live buffer has no spool file to transfer", nil);
+      return;
+    }
+
+    if (live->activeCursorCount() > 0) {
+      reject(kPAErrTransferCursorsActive, @"Live buffer has active cursors and cannot be transferred", nil);
+      return;
+    }
+
+    std::string spoolPath = live->spoolPath;
+    std::string bufferId = pa_generateId("off");
+    auto entry = pa_createOfflineFromTransferredWavSpool(
+      bufferId,
+      spoolPath,
+      live->sampleRate,
+      live->channelCount
+    );
+    if (!entry) {
+      reject(kPAErrInternalError, @"Failed to transfer live spool to offline buffer", nil);
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(g_pa_mutex);
+      auto it = g_pa_live.find(liveId);
+      if (it == g_pa_live.end()) {
+        if (g_pa_invalidated_live_ids.find(liveId) != g_pa_invalidated_live_ids.end()) {
+          reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+        } else {
+          reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        }
+        return;
+      }
+      it->second->detachSpoolForTransfer();
+      g_pa_live.erase(it);
+      g_pa_invalidated_live_ids.insert(liveId);
+      g_pa_offline[bufferId] = entry;
+    }
+
     resolve(entry->toDict());
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
@@ -868,7 +1280,14 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       auto lit = g_pa_live.find(liveId);
-      if (lit == g_pa_live.end()) { reject(kPAErrBufferNotFound, @"Live buffer not found", nil); return; }
+      if (lit == g_pa_live.end()) {
+        if (g_pa_invalidated_live_ids.find(liveId) != g_pa_invalidated_live_ids.end()) {
+          reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+        } else {
+          reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        }
+        return;
+      }
       live = lit->second;
       auto oit = g_pa_offline.find(offId);
       if (oit == g_pa_offline.end()) { reject(kPAErrBufferNotFound, @"Offline buffer not found", nil); return; }
@@ -897,7 +1316,14 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
     {
       std::lock_guard<std::mutex> lock(g_pa_mutex);
       auto it = g_pa_live.find(liveId);
-      if (it == g_pa_live.end()) { reject(kPAErrBufferNotFound, @"Live buffer not found", nil); return; }
+      if (it == g_pa_live.end()) {
+        if (g_pa_invalidated_live_ids.find(liveId) != g_pa_invalidated_live_ids.end()) {
+          reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+        } else {
+          reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+        }
+        return;
+      }
       live = it->second;
     }
     live->finalize_();
@@ -1078,7 +1504,12 @@ static std::string pa_encodeViaDecodeFile(
     if (it == g_pa_live.end()) {
       [wh cleanup]; pa_cleanupOutputFile(outputPath);
       { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Live buffer not found", nil); return;
+      if (g_pa_invalidated_live_ids.find(bid) != g_pa_invalidated_live_ids.end()) {
+        reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+      } else {
+        reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Live buffer not found", nil);
+      }
+      return;
     }
     auto &entry = it->second;
     if (entry->state != PaLiveEntry::FINISHED) {
@@ -1241,6 +1672,10 @@ static std::string pa_encodeViaDecodeFile(
     resolve(liveIt->second->toDict());
     return;
   }
+  if (g_pa_invalidated_live_ids.find(bid) != g_pa_invalidated_live_ids.end()) {
+    reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+    return;
+  }
   reject(kPAErrBufferNotFound, @"Buffer not found", nil);
 }
 
@@ -1262,6 +1697,12 @@ static std::string pa_encodeViaDecodeFile(
   if (liveIt != g_pa_live.end()) {
     liveIt->second->release();
     g_pa_live.erase(liveIt);
+    resolve(nil);
+    return;
+  }
+  auto invalidatedIt = g_pa_invalidated_live_ids.find(bid);
+  if (invalidatedIt != g_pa_invalidated_live_ids.end()) {
+    g_pa_invalidated_live_ids.erase(invalidatedIt);
     resolve(nil);
     return;
   }
@@ -1291,7 +1732,11 @@ static std::string pa_encodeViaDecodeFile(
   // Validate live buffer
   auto liveEntry = pa_get_live_entry(liveBufId);
   if (!liveEntry) {
-    reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+    if (pa_is_live_invalidated(liveBufId)) {
+      reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+    } else {
+      reject(kPAErrBufferNotFound, @"Live buffer not found", nil);
+    }
     return;
   }
   if (liveEntry->state != PaLiveEntry::RECORDING) {

@@ -1,8 +1,9 @@
 # Sub-Plan 03: Buffer Integration & Events
 
 ## Status
-- Draft
+- Implemented (contract baseline)
 - Depends on: Sub-Plan 01, 02
+- Implementation note: `setPartial()` / `appendPartial()` are currently delivered via async TurboModule calls; optional sync-JSI fast-path is deferred to Sub-Plan 06 (Cleanup & Contract Parity).
 
 ## Purpose
 
@@ -209,7 +210,8 @@ function appendPartial(buffer: LiveTextBufferRef, text: string): void;
 | `appendPartial(buf, text)` | `TEXT_PARTIAL_APPEND` | `TEXT_PARTIAL_APPEND` |
 
 **Key behaviors:**
-- Both are **synchronous JSI calls** (fast path, no bridge serialization).
+- Current implementation path is Promise-based TurboModule (functionally equivalent API surface).
+- Optional sync-JSI fast path is a dedicated follow-up in Sub-Plan 06.
 - Both increment the buffer's `revision` counter.
 - Both trigger `onPartial` event emission (subject to `minIntervalMs` throttling).
 - Both are rejected with `BUFFER_NOT_RECORDING` if the buffer is finalized.
@@ -372,7 +374,7 @@ createLiveAudioBuffer({
 
 ## Implementation Steps
 
-1. **Implement `setPartial()` and `appendPartial()` public JSI APIs** for LiveTextBuffer.
+1. **Implement `setPartial()` and `appendPartial()` public APIs** for LiveTextBuffer.
 2. **Implement `commitSegment()` public API** for both LiveTextBuffer and LiveAudioBuffer (manual mode).
 3. Add `segmentation` option to `createLiveTextBuffer` and `createLiveAudioBuffer`.
 4. Add `TextSegment` storage to LiveTextBuffer's segment log (replace old segment model).
@@ -384,3 +386,4 @@ createLiveAudioBuffer({
 10. Update `createOfflineTextBufferFromLive('fullIfSpooled')` to reconstruct new segment type.
 11. Write tests: `setPartial`/`appendPartial`, manual commit (both domains), auto commit, finalize flush, spool replay.
 12. **Validate symmetry**: ensure every Level-1 and Level-2 operation is available on both buffer types.
+13. *(Cleanup / optional)* Add sync-JSI host API fast path for `setPartial`/`appendPartial` while preserving TurboModule parity (Sub-Plan 06).

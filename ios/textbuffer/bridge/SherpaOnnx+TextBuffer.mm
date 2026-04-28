@@ -20,6 +20,7 @@
 #include <deque>
 #include <algorithm>
 #include <stdexcept>
+#include <chrono>
 
 // ==================== Error Codes ====================
 static NSString *const kTxtErrBufferNotFound   = @"TEXT_BUFFER_NOT_FOUND";
@@ -142,6 +143,69 @@ struct TxtOfflineEntry {
 std::unordered_map<std::string, std::shared_ptr<TxtOfflineEntry>> g_txt_offline;
 std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> g_txt_live;
 std::mutex g_txt_mutex;
+static std::unordered_map<std::string, int64_t> g_txt_partial_last_emit_ms;
+static std::mutex g_txt_partial_emit_mutex;
+
+static int64_t txt_now_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+static NSString *txt_truncate_event_text(NSString *text, BOOL *truncated) {
+    static const NSUInteger kTxtMaxEventTextChars = 4096;
+    if (truncated) *truncated = NO;
+    if (text == nil) return @"";
+    if (text.length <= kTxtMaxEventTextChars) return text;
+
+    if (truncated) *truncated = YES;
+    NSRange safeRange = [text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, kTxtMaxEventTextChars)];
+    return [text substringWithRange:safeRange];
+}
+
+static void txt_emit_live_text_segment_event(
+    SherpaOnnx *module,
+    NSString *liveBufferId,
+    const TextSegment &segment,
+    int totalSegments
+) {
+    if (module == nil) return;
+
+    NSMutableDictionary *body = [NSMutableDictionary dictionary];
+    body[@"liveBufferId"] = liveBufferId ?: @"";
+    body[@"totalSegments"] = @(totalSegments);
+    NSString *fullText = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
+    BOOL textTruncated = NO;
+    body[@"text"] = txt_truncate_event_text(fullText, &textTruncated);
+    if (textTruncated) {
+        body[@"textTruncated"] = @YES;
+    }
+    body[@"source"] = [NSString stringWithUTF8String:segment.source.c_str()] ?: @"unknown";
+    body[@"segmentIndex"] = @(segment.segmentIndex);
+
+    if (!segment.tokens.empty()) {
+        NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:segment.tokens.size()];
+        for (const auto &token : segment.tokens) {
+            [tokens addObject:[NSString stringWithUTF8String:token.c_str()] ?: @""];
+        }
+        body[@"tokens"] = tokens;
+    }
+
+    if (!segment.timestamps.empty()) {
+        NSMutableArray *timestamps = [NSMutableArray arrayWithCapacity:segment.timestamps.size()];
+        for (float ts : segment.timestamps) {
+            [timestamps addObject:@(ts)];
+        }
+        body[@"timestamps"] = timestamps;
+    }
+
+    if (segment.meta != nil) {
+        body[@"meta"] = segment.meta;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [module sendEventWithName:@"pipelineLiveTextSegment" body:body];
+    });
+}
 
 std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId) {
     std::lock_guard<std::mutex> lock(g_txt_mutex);
@@ -281,6 +345,10 @@ void txt_release_all_entries() {
         liveToRelease = std::move(g_txt_live);
         g_txt_live.clear();
         g_txt_offline.clear();
+    }
+    {
+        std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+        g_txt_partial_last_emit_ms.clear();
     }
     for (auto &pair : liveToRelease) {
         if (pair.second) {
@@ -478,6 +546,18 @@ static std::string txt_generateId(const char *prefix) {
         entry->emitPartialEvents = emitPartialEvents;
         entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
         entry->configureSpooling(spoolingMode, spoolingPath, spoolingTemporary, spoolingThresholdBytes);
+        __weak SherpaOnnx *weakSelf = self;
+        std::weak_ptr<TxtLiveEntry> weakEntry = entry;
+        NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
+        entry->addCommitListener([weakSelf, weakEntry, liveBufferId](const TextSegment &segment) {
+            SherpaOnnx *strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            int totalSegments = segment.segmentIndex + 1;
+            if (auto strongEntry = weakEntry.lock()) {
+                totalSegments = strongEntry->segmentCount();
+            }
+            txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
+        });
         {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_live[bufferId] = entry;
@@ -518,6 +598,18 @@ static std::string txt_generateId(const char *prefix) {
         NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
         std::string spoolPath = [joined UTF8String] ?: "";
         entry->configureSpooling(TxtLiveEntry::SPOOL_ON, spoolPath, true, 0);
+        __weak SherpaOnnx *weakSelf = self;
+        std::weak_ptr<TxtLiveEntry> weakEntry = entry;
+        NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
+        entry->addCommitListener([weakSelf, weakEntry, liveBufferId](const TextSegment &segment) {
+            SherpaOnnx *strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            int totalSegments = segment.segmentIndex + 1;
+            if (auto strongEntry = weakEntry.lock()) {
+                totalSegments = strongEntry->segmentCount();
+            }
+            txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
+        });
         if (!seedText.empty()) {
             entry->writePartial(seedText);
         }
@@ -606,6 +698,10 @@ static std::string txt_generateId(const char *prefix) {
                 liveToRelease = liveIt->second;
                 g_txt_live.erase(liveIt);
             }
+        }
+        {
+            std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+            g_txt_partial_last_emit_ms.erase(bid);
         }
         if (liveToRelease) {
             liveToRelease->release();
@@ -898,6 +994,138 @@ static std::string txt_generateId(const char *prefix) {
         resolve([full substringWithRange:range]);
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
+- (void)setLiveTextBufferPartial:(NSString *)liveBufferId
+                            text:(NSString *)text
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    try {
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::string textStr = [text UTF8String] ?: "";
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        entry->writePartial(textStr);
+
+        if (entry->emitPartialEvents) {
+            bool shouldEmit = true;
+            int64_t nowMs = txt_now_ms();
+            {
+                std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+                int64_t last = 0;
+                auto found = g_txt_partial_last_emit_ms.find(lid);
+                if (found != g_txt_partial_last_emit_ms.end()) {
+                    last = found->second;
+                }
+                int64_t minInterval = std::max<int64_t>(0, entry->partialEventMinIntervalMs);
+                if (minInterval > 0 && last > 0 && (nowMs - last) < minInterval) {
+                    shouldEmit = false;
+                } else {
+                    g_txt_partial_last_emit_ms[lid] = nowMs;
+                }
+            }
+
+            if (shouldEmit) {
+                NSString *currentText = [NSString stringWithUTF8String:entry->snapshotText().c_str()] ?: @"";
+                [self sendEventWithName:@"pipelineLiveTextPartial"
+                                   body:@{
+                                       @"liveBufferId": liveBufferId ?: @"",
+                                       @"source": @"replace",
+                                       @"partialText": currentText,
+                                       @"revision": @(entry->revision.load()),
+                                   }];
+            }
+        }
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown setLiveTextBufferPartial error", nil);
+    }
+}
+
+- (void)appendLiveTextBufferPartial:(NSString *)liveBufferId
+                               text:(NSString *)text
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
+{
+    try {
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::string textStr = [text UTF8String] ?: "";
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        entry->appendText(textStr);
+
+        if (entry->emitPartialEvents) {
+            bool shouldEmit = true;
+            int64_t nowMs = txt_now_ms();
+            {
+                std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+                int64_t last = 0;
+                auto found = g_txt_partial_last_emit_ms.find(lid);
+                if (found != g_txt_partial_last_emit_ms.end()) {
+                    last = found->second;
+                }
+                int64_t minInterval = std::max<int64_t>(0, entry->partialEventMinIntervalMs);
+                if (minInterval > 0 && last > 0 && (nowMs - last) < minInterval) {
+                    shouldEmit = false;
+                } else {
+                    g_txt_partial_last_emit_ms[lid] = nowMs;
+                }
+            }
+
+            if (shouldEmit) {
+                NSString *currentText = [NSString stringWithUTF8String:entry->snapshotText().c_str()] ?: @"";
+                [self sendEventWithName:@"pipelineLiveTextPartial"
+                                   body:@{
+                                       @"liveBufferId": liveBufferId ?: @"",
+                                       @"source": @"append",
+                                       @"partialText": currentText,
+                                       @"revision": @(entry->revision.load()),
+                                   }];
+            }
+        }
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown appendLiveTextBufferPartial error", nil);
     }
 }
 

@@ -7,6 +7,33 @@ export type {
   ExtractArchiveResult,
 } from './NativeSherpaOnnx';
 export type { ModelPathConfig } from './types';
+export type {
+  Segment,
+  SegmentBase,
+  SegmentDomain,
+  SegmentReason,
+  SegmentSource,
+  SpeechSegment,
+  SpeechSegmentVadInfo,
+  TextSegment,
+} from './segment/segment';
+export type {
+  SegmentLink,
+  SegmentLinkMapInfo,
+  SegmentLinkMapRef,
+  SegmentLinkType,
+} from './segment/segment-link';
+export { isSpeechSegment, isTextSegment } from './segment/segment';
+export {
+  segmentFromJson,
+  segmentLinkFromJson,
+  segmentLinkToJson,
+  segmentToJson,
+} from './segment/segment-serialization';
+export {
+  validateSegment,
+  validateSegmentLink,
+} from './segment/segment-validation';
 export {
   assetModelPath,
   autoModelPath,

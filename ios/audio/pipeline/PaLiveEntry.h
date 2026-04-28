@@ -526,6 +526,11 @@ struct PaLiveEntry {
     return id;
   }
 
+  int activeCursorCount() {
+    std::lock_guard<std::mutex> cLock(cursorMutex);
+    return (int)cursors.size();
+  }
+
   std::vector<float> drainCursor(int cursorId, int maxSamples) {
     std::vector<float> result;
     {
@@ -680,5 +685,20 @@ struct PaLiveEntry {
       std::remove(spoolPath.c_str());
     }
     cursors.clear();
+  }
+
+  void detachSpoolForTransfer() {
+    if (spoolFile.is_open()) {
+      spoolFile.close();
+    }
+    {
+      std::lock_guard<std::mutex> lock(spoolReadMutex);
+      if (spoolReadFile.is_open()) {
+        spoolReadFile.close();
+      }
+      spoolReadFileOpen = false;
+    }
+    hasActiveSpool = false;
+    isTemporarySpool = false;
   }
 };

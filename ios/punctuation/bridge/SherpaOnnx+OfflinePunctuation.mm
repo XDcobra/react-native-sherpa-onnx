@@ -103,7 +103,8 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
     auto created = sherpa_onnx::cxx::OfflinePunctuation::Create(cfg);
     {
       std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-      g_punct_offline[idStr] = std::move(created);
+      g_punct_offline.erase(idStr);
+      g_punct_offline.emplace(idStr, std::move(created));
     }
 
     NSMutableArray *models = [NSMutableArray array];
@@ -174,10 +175,6 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
       reject(kTxtNotFound, [NSString stringWithFormat:@"Output buffer not found: %@", textOutId], nil);
       return;
     }
-    if (oi->second->populated) {
-      reject(kTxtPop, @"Output offline text buffer is already populated", nil);
-      return;
-    }
   }
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
   std::string outText;
@@ -241,10 +238,6 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
     auto oi = g_txt_offline.find(outId);
     if (oi == g_txt_offline.end() || !oi->second) {
       reject(kTxtNotFound, [NSString stringWithFormat:@"Output buffer not found: %@", textOutId], nil);
-      return;
-    }
-    if (oi->second->populated) {
-      reject(kTxtPop, @"Output offline text buffer is already populated", nil);
       return;
     }
   }

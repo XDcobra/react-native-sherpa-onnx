@@ -195,8 +195,13 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
         std::lock_guard<std::mutex> lock(g_pa_mutex);
         auto it = g_pa_live.find(inputBufferKey);
         if (it == g_pa_live.end() || it->second == nullptr) {
-            reject(@"STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
-                   [NSString stringWithFormat:@"Input live audio buffer not found: %@", audioInLiveBufferId], nil);
+            if (g_pa_invalidated_live_ids.find(inputBufferKey) != g_pa_invalidated_live_ids.end()) {
+                reject(@"BUFFER_INVALIDATED",
+                       [NSString stringWithFormat:@"Input live audio buffer is invalidated after transfer: %@", audioInLiveBufferId], nil);
+            } else {
+                reject(@"STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
+                       [NSString stringWithFormat:@"Input live audio buffer not found: %@", audioInLiveBufferId], nil);
+            }
             return;
         }
         inputEntry = it->second;

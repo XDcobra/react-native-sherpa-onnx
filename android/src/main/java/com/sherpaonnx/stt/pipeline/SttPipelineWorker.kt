@@ -7,6 +7,7 @@ import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
 import com.sherpaonnx.text.pipeline.LiveTextEntry
+import com.sherpaonnx.text.pipeline.TextSegment
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
@@ -21,6 +22,7 @@ class SttPipelineWorker(
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveTextEntry,
   private val chunkSize: Int = 3200,
+  private val onSegmentCommitted: ((segment: TextSegment, totalSegments: Int) -> Unit)? = null,
 ) : StreamingPipelineWorker {
 
   @Volatile
@@ -98,11 +100,22 @@ class SttPipelineWorker(
 
         if (recognizer.isEndpoint(stream)) {
           if (result.text.isNotBlank()) {
-            outputEntry.commitSegment(
+            val segmentIndex = outputEntry.commitSegment(
               text = result.text,
               tokens = result.tokens,
               timestamps = result.timestamps,
               source = "stt_stream",
+            )
+            onSegmentCommitted?.invoke(
+              TextSegment(
+                text = result.text,
+                tokens = result.tokens,
+                timestamps = result.timestamps,
+                source = "stt_stream",
+                segmentIndex = segmentIndex,
+                meta = null,
+              ),
+              outputEntry.segmentCount,
             )
             unitsWritten += result.text.length
             outputEntry.writePartial("")
@@ -129,11 +142,22 @@ class SttPipelineWorker(
     }
     val result = recognizer.getResult(stream)
     if (result.text.isNotBlank()) {
-      outputEntry.commitSegment(
+      val segmentIndex = outputEntry.commitSegment(
         text = result.text,
         tokens = result.tokens,
         timestamps = result.timestamps,
         source = "stt_stream",
+      )
+      onSegmentCommitted?.invoke(
+        TextSegment(
+          text = result.text,
+          tokens = result.tokens,
+          timestamps = result.timestamps,
+          source = "stt_stream",
+          segmentIndex = segmentIndex,
+          meta = null,
+        ),
+        outputEntry.segmentCount,
       )
       unitsWritten += result.text.length
       outputEntry.writePartial("")

@@ -1,7 +1,8 @@
 # Sub-Plan 01: Segment Contract & Types
 
 ## Status
-- Draft
+- Phase 1a (High-Level Scope): Completed
+- Runtime follow-up (LinkMap APIs/logic/tests): Implemented
 - Prerequisite for: Sub-Plan 02, 03, 04, 05
 
 ## Purpose
@@ -583,23 +584,41 @@ Alignment-specific metadata (text, timingMode, granularity, wordMetadata, etc.) 
 
 ## Implementation Steps
 
+> Scope note (authoritative for migration orchestration):
+> This sub-plan serves two purposes:
+> 1) define the full long-term contract surface, and
+> 2) deliver the **Phase 1a subset** from `segmentation_engine_overview.md`:
+>    **core types + linkage types + serialization contract, no runtime logic**.
+>
+> Therefore, items that require runtime stores, public APIs, and behavior tests are
+> intentionally marked post-1a.
+
 ### Segment Types (core)
 
 1. **Define TypeScript types** in `src/types/segment.ts` (or equivalent SDK types file).
 2. **Define Kotlin sealed interface** in `android/src/main/java/.../segment/Segment.kt`.
 3. **Define C++ structs** in `ios/PicoAudio/segment/PaSegment.h`.
 4. **Add JSON serialization** for both Kotlin (`toJson()`) and C++ (`toJsonString()`).
-5. **Add validation functions** in both native implementations.
-6. **Write unit tests** for serialization roundtrip (native → JSON → TypeScript parse → compare).
-7. **Deprecate** old `SegmentMeta` type in `LiveSegmentBuffer` / `OfflineSegmentBuffer` (migrate in Sub-Plan 05).
+5. **Add validation functions** in both native implementations. *(Post-1a)*
+6. **Write unit tests** for serialization roundtrip (native → JSON → TypeScript parse → compare). *(Post-1a)*
+7. **Deprecate** old `SegmentMeta` type in `LiveSegmentBuffer` / `OfflineSegmentBuffer` (migrate in Sub-Plan 05). *(Post-1a)*
 
 ### SegmentLink & SegmentLinkMap (core, built alongside Segment types)
 
 8. **Define `SegmentLink` TypeScript types** in `src/types/segment-link.ts`.
 9. **Define `PaSegmentLink` Kotlin data class** in `android/src/main/java/.../segment/SegmentLink.kt`.
 10. **Define `PaSegmentLink` C++ struct** in `ios/PicoAudio/segment/PaSegmentLink.h`.
-11. **Implement `PaSegmentLinkMap`** native class (Kotlin + C++) with bidirectional index.
+11. **Implement `PaSegmentLinkMap`** native class (Kotlin + C++) with bidirectional index. *(Post-1a)*
 12. **Add JSON serialization** for SegmentLink.
-13. **Implement public APIs**: `createSegmentLinkMap`, `addSegmentLink`, `getSpeechSegmentsForText`, `getTextSegmentsForSpeech`, `getAllSegmentLinks`, `releaseSegmentLinkMap`.
-14. **Add validation functions** for link creation.
-15. **Write unit tests**: create/query/remove links, bidirectional lookup, N:M cardinality, duplicate rejection.
+13. **Implement public APIs**: `createSegmentLinkMap`, `addSegmentLink`, `getSpeechSegmentsForText`, `getTextSegmentsForSpeech`, `getAllSegmentLinks`, `releaseSegmentLinkMap`. *(Post-1a)*
+14. **Add validation functions** for link creation. *(Post-1a)*
+15. **Write unit tests**: create/query/remove links, bidirectional lookup, N:M cardinality, duplicate rejection. *(Post-1a)*
+
+### Phase 1a Completion Checklist
+
+- [x] TypeScript contract types for `Segment` and `SegmentLink` are implemented.
+- [x] Kotlin contract types for `Segment` and `SegmentLink` are implemented.
+- [x] C++ contract types for `Segment` and `SegmentLink` are implemented.
+- [x] Bridge serialization helpers exist for Segment and SegmentLink contracts.
+- [x] JS entry exports are wired to the canonical segment module paths.
+- [x] No LinkMap runtime behavior/API is required for 1a completion.

@@ -1,8 +1,26 @@
 # Sub-Plan 04: Transfer & Offline Orchestration
 
 ## Status
-- Draft
+- Implemented (Phase 1c complete)
 - Depends on: Sub-Plan 01, 02, 03
+
+### Implemented Scope
+
+- Transfer API added across TS/Android/iOS: `transferOfflineAudioBufferFromLive(..., 'fullIfSpooled')`.
+- File-backed reader offset support (`dataOffsetBytes=44`) added for transferred WAV spool ownership handover.
+- Live-buffer invalidation semantics (`BUFFER_INVALIDATED`) implemented after successful transfer.
+- Internal offline orchestration loops implemented in `src/pipeline/offlineOrchestrator.ts` with:
+  - audio accumulator lifecycle,
+  - per-segment temp buffer management,
+  - recovery strategies (`abort`/`skip`/`retry`/`partial_result`),
+  - cancellation + progress callbacks,
+  - explicit `OrchestrationSession` state-machine lifecycle,
+  - deterministic orchestration temp naming (`orch_{sessionId}_acc.wav`),
+  - structured `OrchestrationResult` including `linkMap` passthrough.
+- Orchestration orphan sweep (`orch_*`) added for crash-recovery on startup:
+  - Android: `OfflineEntry.cleanupOrphanedOrchestrationFiles(...)` via `PipelineAudioRegistry.initializeWithCacheDir(...)`.
+  - iOS: `pa_cleanupOrphanedOrchestrationFiles(...)` in `SherpaOnnx` init.
+- Expanded orchestrator tests for retry paths, `partial_result`, cancellation semantics, deterministic path naming, transfer edge cases, and link-map propagation.
 
 ## Purpose
 

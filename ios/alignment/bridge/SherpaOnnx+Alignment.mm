@@ -372,7 +372,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
             return;
           }
           const int minAnchors = sherpaonnx::alignment::bridge::ParseMinAnchors(options, 2);
-          std::shared_ptr<SegOfflineEntry> anchorEntry;
+          std::vector<SegRecord> anchors;
           {
             std::lock_guard<std::mutex> segLock(g_seg_mutex);
             auto it = g_seg_offline.find(segSourceId);
@@ -382,12 +382,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
                      nil);
               return;
             }
-            anchorEntry = it->second;
-          }
-          std::vector<SegRecord> anchors;
-          {
-            std::lock_guard<std::mutex> anchorLock(anchorEntry->lock);
-            for (const auto &segment : anchorEntry->segments) {
+            for (const auto &segment : it->second->segments) {
               if (segment.kind == "speech" && segment.endSample >= segment.startSample) {
                 anchors.push_back(segment);
               }
@@ -533,7 +528,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
                  nil);
           return;
         }
-        std::shared_ptr<SegOfflineEntry> anchorEntry;
+        std::vector<SegRecord> anchors;
         {
           std::lock_guard<std::mutex> segLock(g_seg_mutex);
           auto it = g_seg_offline.find(segSourceId);
@@ -543,12 +538,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
                    nil);
             return;
           }
-          anchorEntry = it->second;
-        }
-        std::vector<SegRecord> anchors;
-        {
-          std::lock_guard<std::mutex> anchorLock(anchorEntry->lock);
-          for (const auto &segment : anchorEntry->segments) {
+          for (const auto &segment : it->second->segments) {
             if (segment.kind == "speech" && segment.endSample >= segment.startSample) {
               anchors.push_back(segment);
             }

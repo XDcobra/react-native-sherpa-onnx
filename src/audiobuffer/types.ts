@@ -7,6 +7,7 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { Segment } from '../segment/segment';
 
 // ========== Buffer Kinds ==========
 
@@ -167,7 +168,20 @@ export interface LiveAudioBufferErrorEvent {
 /** Callback set for live buffer append/error events. */
 export interface LiveAudioBufferCallbacks {
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   onError?: (event: LiveAudioBufferErrorEvent) => void;
+}
+
+export type AudioSegmentationMode = 'off' | 'manual' | 'auto';
+
+export interface AudioSegmentationConfig {
+  mode?: AudioSegmentationMode;
+}
+
+export interface LiveAudioBufferSegmentEvent {
+  bufferId: string;
+  segment: Segment;
+  totalSegments: number;
 }
 
 // ========== Creation Options ==========
@@ -223,8 +237,16 @@ export interface CreateEmptyLiveAudioBufferOptions {
     framesAppended?: StreamEventSpec;
   };
 
+  /**
+   * Segmentation mode for this live audio buffer.
+   * Default: `off`.
+   */
+  segmentation?: AudioSegmentationConfig;
+
   /** Optional JS callback for producer-agnostic append events. */
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  /** Optional JS callback for segment commit events. */
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   /** Optional JS callback for live-buffer errors. */
   onError?: (event: LiveAudioBufferErrorEvent) => void;
 }
@@ -237,6 +259,9 @@ export interface StartMicToLiveOptions {
 
 /** Mode for creating an offline buffer from a live buffer. */
 export type OfflineFromLiveMode = 'fullIfSpooled' | 'windowSnapshot';
+
+/** Mode for transferring a live spool into a new offline buffer (ownership handover). */
+export type OfflineTransferFromLiveMode = 'fullIfSpooled';
 
 // ========== Error Codes ==========
 
@@ -253,6 +278,10 @@ export const PipelineAudioErrorCode = {
   CAPTURE_ERROR: 'AUDIO_CAPTURE_ERROR',
   ALREADY_FINALIZED: 'AUDIO_ALREADY_FINALIZED',
   CURSOR_LAG_EXCEEDED: 'AUDIO_CURSOR_LAG_EXCEEDED',
+  TRANSFER_INVALID_STATE: 'TRANSFER_INVALID_STATE',
+  TRANSFER_SPOOL_UNAVAILABLE: 'TRANSFER_SPOOL_UNAVAILABLE',
+  TRANSFER_CURSORS_ACTIVE: 'TRANSFER_CURSORS_ACTIVE',
+  BUFFER_INVALIDATED: 'BUFFER_INVALIDATED',
   INTERNAL_ERROR: 'AUDIO_INTERNAL_ERROR',
 } as const;
 

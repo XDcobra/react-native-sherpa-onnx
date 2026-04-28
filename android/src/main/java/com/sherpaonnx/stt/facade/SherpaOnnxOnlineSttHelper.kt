@@ -15,6 +15,7 @@ import com.sherpaonnx.stt.pipeline.SttPipelineWorker
 import com.sherpaonnx.stt.core.OnlineSttRecognizerConfigFactory
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
+import com.sherpaonnx.text.pipeline.TextSegment
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -27,6 +28,7 @@ internal class SherpaOnnxOnlineSttHelper(
   private val context: ReactApplicationContext,
   private val logTag: String
 ) {
+  private val maxEventTextChars = 4096
 
   private data class OnlineSttInstance(
     val recognizer: OnlineRecognizer,
@@ -40,6 +42,59 @@ internal class SherpaOnnxOnlineSttHelper(
 
   private val pathResolver = SttPathResolver(context)
   private val configFactory = OnlineSttRecognizerConfigFactory(pathResolver)
+
+  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
+    if (text.length <= maxEventTextChars) {
+      return Pair(text, false)
+    }
+    return Pair(text.substring(0, maxEventTextChars), true)
+  }
+
+  private fun emitLiveTextSegmentEvent(
+    liveBufferId: String,
+    segment: TextSegment,
+    totalSegments: Int,
+  ) {
+    try {
+      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
+      val payload = Arguments.createMap().apply {
+        putString("liveBufferId", liveBufferId)
+        putInt("totalSegments", totalSegments)
+        putString("text", eventText)
+        if (textTruncated) {
+          putBoolean("textTruncated", true)
+        }
+        putString("source", segment.source)
+        putInt("segmentIndex", segment.segmentIndex)
+
+        if (segment.tokens.isNotEmpty()) {
+          val tokenArray = Arguments.createArray()
+          segment.tokens.forEach { tokenArray.pushString(it) }
+          putArray("tokens", tokenArray)
+        }
+
+        if (segment.timestamps.isNotEmpty()) {
+          val tsArray = Arguments.createArray()
+          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+          putArray("timestamps", tsArray)
+        }
+
+        segment.meta?.let { rawMeta ->
+          try {
+            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+          } catch (_: Exception) {
+            // Ignore non-serializable meta values.
+          }
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("pipelineLiveTextSegment", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
+    }
+  }
 
   fun initializeOnlineStt(
     instanceId: String,
@@ -200,6 +255,9 @@ internal class SherpaOnnxOnlineSttHelper(
         inputEntry = inputEntry,
         outputEntry = outputEntry,
         chunkSize = chunkSize ?: 3200,
+        onSegmentCommitted = { segment, totalSegments ->
+          emitLiveTextSegmentEvent(textOutLiveBufferId, segment, totalSegments)
+        },
       )
 
       StreamingPipelineRegistry.registerAndStart(worker) {

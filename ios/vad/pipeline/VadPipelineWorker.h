@@ -83,7 +83,7 @@ private:
   std::mutex cmdMutex_;
   std::deque<PipelineCommand> commandQueue_;
 
-  std::mutex statusMutex_;
+  mutable std::mutex statusMutex_;
   int64_t chunksProcessed_ = 0;
   int64_t unitsRead_ = 0;
   int64_t unitsWritten_ = 0;

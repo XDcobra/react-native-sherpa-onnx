@@ -122,6 +122,10 @@ class LiveTextEntry(
   private val appendListeners = CopyOnWriteArrayList<Pair<Int, () -> Unit>>()
   private val nextListenerToken = AtomicInteger(0)
 
+  // ── Commit listeners (token-based, for JS segment events) ──
+  private val commitListeners = CopyOnWriteArrayList<Pair<Int, (TextSegment) -> Unit>>()
+  private val nextCommitListenerToken = AtomicInteger(0)
+
   // ── Text spool state ──
   private val spoolLock = Any()
   @Volatile
@@ -414,6 +418,7 @@ class LiveTextEntry(
   ): Int {
     var committedSegmentIndex = -1
     var snapshotAfterCommit = ""
+    var committedSegment: TextSegment? = null
     synchronized(segmentLock) {
       if (state == State.FINISHED) throw IllegalStateException("Live text buffer is finalized: $bufferId")
       val segmentIndex = (evictedCount + segments.size).toInt()
@@ -426,6 +431,7 @@ class LiveTextEntry(
         meta = meta,
       )
       segments.add(segment)
+      committedSegment = segment
       committedSegmentIndex = segmentIndex
       // Capture full history snapshot before any ring eviction. This preserves
       // strict fullIfSpooled guarantees even when maxSegments is exceeded.
@@ -453,6 +459,7 @@ class LiveTextEntry(
       checkpointPayload = buildCheckpointPayload(snapshotAfterCommit)
     )
     notifyAppendListeners()
+    committedSegment?.let { notifyCommitListeners(it) }
     return committedSegmentIndex
   }
 
@@ -513,6 +520,22 @@ class LiveTextEntry(
   private fun notifyAppendListeners() {
     for ((_, listener) in appendListeners) {
       listener()
+    }
+  }
+
+  fun addCommitListener(listener: (TextSegment) -> Unit): Int {
+    val token = nextCommitListenerToken.getAndIncrement()
+    commitListeners.add(Pair(token, listener))
+    return token
+  }
+
+  fun removeCommitListener(token: Int) {
+    commitListeners.removeAll { it.first == token }
+  }
+
+  private fun notifyCommitListeners(segment: TextSegment) {
+    for ((_, listener) in commitListeners) {
+      listener(segment)
     }
   }
 
@@ -674,6 +697,7 @@ class LiveTextEntry(
 
     cursors.clear()
     appendListeners.clear()
+    commitListeners.clear()
   }
 }
 

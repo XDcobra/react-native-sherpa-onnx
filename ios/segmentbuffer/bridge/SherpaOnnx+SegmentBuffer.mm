@@ -140,6 +140,8 @@ std::vector<SegRecord> segment_records_from_json(const std::string &json) {
   return out;
 }
 
+} // namespace
+
 struct SegLiveEntry {
   static constexpr uint32_t kMagic = 0x32474553; // SEG2
   static constexpr uint16_t kVersion = 2;
@@ -546,6 +548,8 @@ struct SegLiveEntry {
     }
   }
 };
+
+namespace {
 
 static NSDictionary *segRecordToDict(const SegRecord &r) {
   NSMutableDictionary *dict = [@{
