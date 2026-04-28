@@ -81,7 +81,7 @@ Da das Fundament (Phase 1) sehr umfangreich ist, wird es in vier machbare Schrit
 |---|---|---|
 | **Phase 1a** | Core Types & Linkage (Sub-Plan 01) | TypeScript, Kotlin, C++ Datentypen für `Segment`, `SegmentLink`, `SegmentLinkMap` + Serialisierung. **Contract only, keine Runtime-APIs/Store-Logik.** **Status: Completed** |
 | **Phase 1b** | Storage & Write APIs (Sub-Plan 03 + Sub-Plan 01 Runtime-Teil) | Symmetric Write API (`setPartial`, `appendPartial`), `getSegmentBuffer()` Abstraktion, Event-Payloads **sowie SegmentLinkMap Runtime-APIs** (`createSegmentLinkMap`, `addSegmentLink(s)`, `getSpeechSegmentsForText`, `getTextSegmentsForSpeech`, `getAllSegmentLinks`, `getSegmentLinkCount`, `getSegmentLinkMapInfo`, `removeSegmentLink`, `releaseSegmentLinkMap`) inkl. nativer LinkMap-Store/Indizes. **Status: Completed** |
-| **Phase 1c** | Orchestration & Transfer (Sub-Plan 04) | `transferOfflineAudioBufferFromLive`, `OrchestrationSession` State Machine, Error Recovery Strategien (abort, skip, retry, partial). |
+| **Phase 1c** | Orchestration & Transfer (Sub-Plan 04) | `transferOfflineAudioBufferFromLive`, `OrchestrationSession` State Machine, Error Recovery Strategien (abort, skip, retry, partial). **Status: Completed** *(Benchmark-Teil explizit nicht erforderlich).* |
 | **Phase 1d** | Engine Core (Sub-Plan 02) | Native Evaluatoren (Energy, Punctuation, etc.), Buffer Attachment, Offline-Segmentation Loop. |
 | **Phase 2** | VAD + STT (+ `stt_produced` Links) | VAD liefert Grenzen, STT nutzt diese und produziert Text. |
 | **Phase 3** | Enhancement (Offline segmentiert) | Verifizierung der Audio-Orchestration & Error Recovery. |
