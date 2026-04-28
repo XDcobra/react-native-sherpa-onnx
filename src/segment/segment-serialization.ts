@@ -67,6 +67,11 @@ function parseSpeechSegment(raw: Record<string, unknown>): SpeechSegment {
 export function segmentFromJson(raw: unknown): Segment {
   if (!isRecord(raw)) throw new Error('SEGMENT_INVALID: expected object');
   const domain = raw.domain;
+  if (domain !== 'text' && domain !== 'speech') {
+    throw new Error(
+      `SEGMENT_INVALID: domain must be 'text' or 'speech', got '${String(domain)}'`
+    );
+  }
   const parsed =
     domain === 'text' ? parseTextSegment(raw) : parseSpeechSegment(raw);
   validateSegment(parsed);

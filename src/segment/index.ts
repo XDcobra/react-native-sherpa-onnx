@@ -434,7 +434,7 @@ async function ensureOfflineAudioSegmentBuffer(
         source: 'external',
         createdAtMs: Date.now(),
         segmentIndex: appendResult.segmentIndex,
-      });
+      }, offlineAudioBufferId);
 
       await finalizeLiveSegmentBuffer(live.bufferId);
       const offline = await createOfflineSegmentBufferFromLive(
@@ -682,7 +682,7 @@ export async function commitSegment(
     source: options.source ?? 'manual',
     createdAtMs: Date.now(),
     segmentIndex,
-  });
+  }, liveAudioBufferId);
   advanceAudioCommitStart(liveAudioBufferId, endSample);
 
   const segments = await readSpeechSegmentsFromSegmentBuffer(

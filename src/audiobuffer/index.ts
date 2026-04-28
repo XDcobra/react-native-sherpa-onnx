@@ -13,8 +13,8 @@ import type { Spec } from '../NativeSherpaOnnx';
 import {
   advanceAudioCommitStart,
   annotateSpeechSegment,
+  consumeSpeechSegmentAnnotation,
   getLiveAudioSegmentation,
-  getSpeechSegmentAnnotation,
   normalizeSegmentationMode,
   registerLiveAudioSegmentation,
   releaseSegmentationStateForBuffer,
@@ -291,7 +291,7 @@ function ensureLiveEventSubscriptions(): void {
             : 0;
         const annotation =
           segmentId.length > 0
-            ? getSpeechSegmentAnnotation(segmentId)
+            ? consumeSpeechSegmentAnnotation(segmentId)
             : undefined;
 
         const segment = {
@@ -490,7 +490,7 @@ async function commitFinalizeSegmentIfNeeded(
     source: 'manual',
     createdAtMs: Date.now(),
     segmentIndex: Math.max(0, totalSegments - 1),
-  });
+  }, liveBufferId);
   advanceAudioCommitStart(liveBufferId, endSample);
 }
 

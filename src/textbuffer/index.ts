@@ -855,6 +855,8 @@ export async function getLiveTextBufferPartialSlice(
   return getNative().getLiveTextBufferPartialSlice(id, startUtf16, maxUtf16);
 }
 
+const MAX_SEGMENT_EVENT_TEXT_CHARS = 4096;
+
 /** Commit a text segment to a live text buffer segment log. */
 export async function appendLiveTextSegment(
   liveBufferId: LiveTextBufferIdSource,
@@ -874,15 +876,20 @@ export async function appendLiveTextSegment(
 
   const callbacks = textSegmentCallbacks.get(id);
   if (callbacks && callbacks.size > 0) {
-    const segments = await getLiveTextBufferSegments(id, out.segmentIndex, 1, {
-      includeTokens: true,
-      includeTimestamps: true,
-      includeMeta: true,
-    });
-    const committed = segments[0];
-    if (committed) {
-      emitLocalTextSegmentEvent(id, committed, out.segmentIndex + 1);
-    }
+    const truncated = text.length > MAX_SEGMENT_EVENT_TEXT_CHARS;
+    const eventText = truncated
+      ? text.substring(0, MAX_SEGMENT_EVENT_TEXT_CHARS)
+      : text;
+    const segment: LiveTextSegment = {
+      text: eventText,
+      ...(truncated ? { textTruncated: true } : {}),
+      source: 'append',
+      segmentIndex: out.segmentIndex,
+      ...(tokens && tokens.length > 0 ? { tokens } : {}),
+      ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
+      ...(meta ? { meta } : {}),
+    };
+    emitLocalTextSegmentEvent(id, segment, out.segmentIndex + 1);
   }
 
   return out;

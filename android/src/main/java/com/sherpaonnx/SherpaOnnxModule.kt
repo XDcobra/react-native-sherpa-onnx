@@ -1374,13 +1374,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: com.sherpaonnx.audio.pipeline.BufferInvalidatedException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message, e)
     } catch (e: IllegalStateException) {
-      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
-        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
-      } else {
-        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
-      }
-      promise.reject(code, e.message, e)
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }

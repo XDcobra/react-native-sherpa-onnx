@@ -31,6 +31,7 @@ const speechSegmentAnnotationBySegmentId = new Map<
   string,
   SpeechSegmentAnnotation
 >();
+const segmentAnnotationsByBufferId = new Map<string, Set<string>>();
 
 export function normalizeSegmentationMode(
   raw: unknown,
@@ -98,9 +99,18 @@ export function advanceAudioCommitStart(
 
 export function annotateSpeechSegment(
   segmentId: string,
-  annotation: SpeechSegmentAnnotation
+  annotation: SpeechSegmentAnnotation,
+  bufferId?: string
 ): void {
   speechSegmentAnnotationBySegmentId.set(segmentId, annotation);
+  if (bufferId) {
+    let set = segmentAnnotationsByBufferId.get(bufferId);
+    if (!set) {
+      set = new Set();
+      segmentAnnotationsByBufferId.set(bufferId, set);
+    }
+    set.add(segmentId);
+  }
 }
 
 export function getSpeechSegmentAnnotation(
@@ -109,7 +119,28 @@ export function getSpeechSegmentAnnotation(
   return speechSegmentAnnotationBySegmentId.get(segmentId);
 }
 
+/**
+ * Retrieve and remove a speech segment annotation in a single operation.
+ * Use this in event handlers where the annotation is needed only once.
+ */
+export function consumeSpeechSegmentAnnotation(
+  segmentId: string
+): SpeechSegmentAnnotation | undefined {
+  const annotation = speechSegmentAnnotationBySegmentId.get(segmentId);
+  if (annotation !== undefined) {
+    speechSegmentAnnotationBySegmentId.delete(segmentId);
+  }
+  return annotation;
+}
+
 export function releaseSegmentationStateForBuffer(bufferId: string): void {
   textByBufferId.delete(bufferId);
   audioByBufferId.delete(bufferId);
+  const annotationIds = segmentAnnotationsByBufferId.get(bufferId);
+  if (annotationIds) {
+    for (const segmentId of annotationIds) {
+      speechSegmentAnnotationBySegmentId.delete(segmentId);
+    }
+    segmentAnnotationsByBufferId.delete(bufferId);
+  }
 }

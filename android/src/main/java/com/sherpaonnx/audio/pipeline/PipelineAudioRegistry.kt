@@ -637,7 +637,7 @@ object PipelineAudioRegistry {
   private fun requireLiveEntry(liveBufferId: String): LiveEntry {
     liveEntries[liveBufferId]?.let { return it }
     if (invalidatedLiveIds.contains(liveBufferId)) {
-      throw IllegalStateException("Live buffer is invalidated after transfer: $liveBufferId")
+      throw BufferInvalidatedException("Live buffer is invalidated after transfer: $liveBufferId")
     }
     throw IllegalArgumentException("Live buffer not found: $liveBufferId")
   }
@@ -720,5 +720,9 @@ object PipelineAudioRegistry {
 
 class TransferException(
   val code: String,
+  message: String,
+) : RuntimeException(message)
+
+class BufferInvalidatedException(
   message: String,
 ) : RuntimeException(message)
