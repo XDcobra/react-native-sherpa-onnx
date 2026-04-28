@@ -23,6 +23,7 @@ object PipelineAudioRegistry {
 
   private val offlineEntries = ConcurrentHashMap<String, OfflineEntry>()
   private val liveEntries = ConcurrentHashMap<String, LiveEntry>()
+  private val invalidatedLiveIds = ConcurrentHashMap.newKeySet<String>()
 
   /** Set once during module init — used for mmap temp files. */
   @Volatile
@@ -35,6 +36,7 @@ object PipelineAudioRegistry {
     cacheDir = dir
     MmapThresholdPolicy.initialize(context.applicationContext)
     OfflineEntry.sweepOrphanedTempFiles(dir)
+    OfflineEntry.cleanupOrphanedOrchestrationFiles(dir)
   }
 
   // ==================== Offline Buffer Creation ====================
@@ -149,8 +151,7 @@ object PipelineAudioRegistry {
     liveBufferId: String,
     mode: String = "fullIfSpooled"
   ): OfflineEntry {
-    val live = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val live = requireLiveEntry(liveBufferId)
 
     val bufferId = "off_${UUID.randomUUID()}"
 
@@ -167,6 +168,82 @@ object PipelineAudioRegistry {
       "windowSnapshot" -> createFromRingSnapshot(bufferId, live)
       else -> throw IllegalArgumentException("Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'.")
     }
+  }
+
+  /**
+   * Transfer ownership of a finalized live spool into a new offline buffer without copying.
+   * After success, the source live buffer ID is invalidated and no longer usable.
+   */
+  fun transferOfflineFromLive(
+    liveBufferId: String,
+    mode: String = "fullIfSpooled"
+  ): OfflineEntry {
+    if (mode != "fullIfSpooled") {
+      throw TransferException(
+        PipelineAudioErrorCodes.INVALID_ARGUMENT,
+        "Unsupported transfer mode: $mode. Use 'fullIfSpooled'."
+      )
+    }
+
+    val live = liveEntries[liveBufferId]
+      ?: if (isInvalidatedLiveBuffer(liveBufferId)) {
+        throw TransferException(
+          PipelineAudioErrorCodes.BUFFER_INVALIDATED,
+          "Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      } else {
+        throw TransferException(
+          PipelineAudioErrorCodes.BUFFER_NOT_FOUND,
+          "Live buffer not found: $liveBufferId"
+        )
+      }
+
+    if (live.state != LiveEntry.State.FINISHED) {
+      throw TransferException(
+        PipelineAudioErrorCodes.TRANSFER_INVALID_STATE,
+        "Live buffer must be finalized before transfer: $liveBufferId"
+      )
+    }
+
+    if (live.activeCursorCount() > 0) {
+      throw TransferException(
+        PipelineAudioErrorCodes.TRANSFER_CURSORS_ACTIVE,
+        "Live buffer has active cursors and cannot be transferred: $liveBufferId"
+      )
+    }
+
+    val spoolPath = live.spoolFilePath
+    if (spoolPath.isNullOrBlank()) {
+      throw TransferException(
+        PipelineAudioErrorCodes.TRANSFER_SPOOL_UNAVAILABLE,
+        "Live buffer has no spool file to transfer: $liveBufferId"
+      )
+    }
+
+    val spoolFile = File(spoolPath)
+    if (!spoolFile.exists() || spoolFile.length() <= 44L) {
+      throw TransferException(
+        PipelineAudioErrorCodes.TRANSFER_SPOOL_UNAVAILABLE,
+        "Spool file missing or empty: $spoolPath"
+      )
+    }
+
+    val bufferId = "off_${UUID.randomUUID()}"
+    val entry = createOfflineFromWavSpoolTransfer(
+      bufferId = bufferId,
+      spoolPath = spoolPath,
+      sampleRate = live.sampleRate,
+      channelCount = live.channelCount,
+    ) ?: throw TransferException(
+      PipelineAudioErrorCodes.INTERNAL_ERROR,
+      "Failed to transfer spool to offline buffer: $liveBufferId"
+    )
+
+    offlineEntries[bufferId] = entry
+    live.detachSpoolForTransfer()
+    liveEntries.remove(liveBufferId)
+    invalidatedLiveIds.add(liveBufferId)
+    return entry
   }
 
   private fun createFromRingSnapshot(bufferId: String, live: LiveEntry): OfflineEntry {
@@ -386,8 +463,7 @@ object PipelineAudioRegistry {
     sampleRate: Int,
     source: String = LIVE_APPEND_SOURCE_APPEND,
   ) {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val entry = requireLiveEntry(liveBufferId)
     if (entry.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
@@ -398,8 +474,7 @@ object PipelineAudioRegistry {
    * Append all samples from an offline buffer to a live buffer.
    */
   fun appendOfflineToLive(liveBufferId: String, offlineBufferId: String) {
-    val live = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val live = requireLiveEntry(liveBufferId)
     if (live.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
@@ -423,8 +498,7 @@ object PipelineAudioRegistry {
     enabled: Boolean? = null,
     minIntervalMs: Int? = null,
   ) {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val entry = requireLiveEntry(liveBufferId)
     entry.configureAppendEvents(enabled, minIntervalMs)
   }
 
@@ -432,16 +506,14 @@ object PipelineAudioRegistry {
     liveBufferId: String,
     listener: ((LiveFramesAppendedEvent) -> Unit)?,
   ) {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val entry = requireLiveEntry(liveBufferId)
     entry.setOnFramesAppendedListener(listener)
   }
 
   // ==================== Finalize Live Buffer ====================
 
   fun finalizeLive(liveBufferId: String) {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val entry = requireLiveEntry(liveBufferId)
     entry.finalize_()
   }
 
@@ -453,6 +525,9 @@ object PipelineAudioRegistry {
   fun getInfo(bufferId: String): WritableMap {
     offlineEntries[bufferId]?.let { return it.toWritableMap() }
     liveEntries[bufferId]?.let { return it.toWritableMap() }
+    if (invalidatedLiveIds.contains(bufferId)) {
+      throw IllegalStateException("Live buffer is invalidated after transfer: $bufferId")
+    }
     throw IllegalArgumentException("Buffer not found: $bufferId")
   }
 
@@ -468,6 +543,9 @@ object PipelineAudioRegistry {
       it.release()
       return true
     }
+    if (invalidatedLiveIds.remove(bufferId)) {
+      return true
+    }
     return false
   }
 
@@ -475,6 +553,7 @@ object PipelineAudioRegistry {
 
   fun getOffline(bufferId: String): OfflineEntry? = offlineEntries[bufferId]
   fun getLive(bufferId: String): LiveEntry? = liveEntries[bufferId]
+  fun isInvalidatedLiveBuffer(bufferId: String): Boolean = invalidatedLiveIds.contains(bufferId)
 
   /** Check whether a buffer ID refers to an offline entry. */
   fun isOffline(bufferId: String): Boolean = offlineEntries.containsKey(bufferId)
@@ -488,8 +567,7 @@ object PipelineAudioRegistry {
    * Get a slice of samples from a live buffer's ring for JS consumption.
    */
   fun getLiveSamplesSlice(liveBufferId: String, startFrame: Int, frameCount: Int): FloatArray {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+    val entry = requireLiveEntry(liveBufferId)
     return entry.getSamplesSlice(startFrame, frameCount)
   }
 
@@ -517,8 +595,7 @@ object PipelineAudioRegistry {
     startFrame: Int,
     frameCount: Int,
   ): FloatArray {
-    val entry = liveEntries[bufferId]
-      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
+    val entry = requireLiveEntry(bufferId)
     return entry.getSamplesSlice(startFrame.coerceAtLeast(0), frameCount)
   }
 
@@ -550,14 +627,60 @@ object PipelineAudioRegistry {
     samples: FloatArray,
     sampleRate: Int,
   ) {
-    val entry = liveEntries[bufferId]
-      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
+    val entry = requireLiveEntry(bufferId)
     if (entry.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("[BUFFER_NOT_RECORDING] $bufferId")
     }
     entry.appendSamples(samples, sampleRate, LIVE_APPEND_SOURCE_APPEND)
   }
 
+  private fun requireLiveEntry(liveBufferId: String): LiveEntry {
+    liveEntries[liveBufferId]?.let { return it }
+    if (invalidatedLiveIds.contains(liveBufferId)) {
+      throw IllegalStateException("Live buffer is invalidated after transfer: $liveBufferId")
+    }
+    throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+  }
+
+  private fun createOfflineFromWavSpoolTransfer(
+    bufferId: String,
+    spoolPath: String,
+    sampleRate: Int,
+    channelCount: Int,
+  ): OfflineEntry? {
+    val spoolFile = File(spoolPath)
+    if (!spoolFile.exists()) return null
+
+    val payloadBytes = spoolFile.length() - 44L
+    if (payloadBytes <= 0L || payloadBytes % 4L != 0L) return null
+
+    val numSamples = (payloadBytes / 4L).toInt()
+    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.FILE_ORIGIN)
+    val shouldMmap = spoolFile.length() >= threshold
+
+    return if (shouldMmap) {
+      OfflineEntry.createMmapFromFile(
+        bufferId = bufferId,
+        sampleRate = sampleRate,
+        channelCount = channelCount,
+        numSamples = numSamples,
+        f32FilePath = spoolPath,
+        dataOffsetBytes = 44,
+      )
+    } else {
+      val out = FloatArray(numSamples)
+      java.io.RandomAccessFile(spoolFile, "r").use { raf ->
+        raf.seek(44L)
+        val bytes = ByteArray(numSamples * 4)
+        raf.readFully(bytes)
+        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until numSamples) {
+          out[i] = bb.float
+        }
+      }
+      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, out)
+    }
+  }
   // ==================== Cursor management (for native pipeline stages) ====================
 
   fun createLiveCursor(liveBufferId: String): Int {
@@ -594,3 +717,8 @@ object PipelineAudioRegistry {
   }
 
 }
+
+class TransferException(
+  val code: String,
+  message: String,
+) : RuntimeException(message)

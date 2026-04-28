@@ -459,6 +459,21 @@ class LiveEntry(
   /** Path to the spool WAV file, if persistence is active and the file exists. */
   val spoolFilePath: String? get() = spoolWriter?.filePath
 
+  /** Number of currently active consumer cursors. */
+  fun activeCursorCount(): Int = synchronized(cursors) { cursors.size }
+
+  /**
+   * Close spool I/O handles and detach ownership for transfer to an offline buffer.
+   * The source live entry should be removed from registry immediately after this call.
+   */
+  fun detachSpoolForTransfer() {
+    spoolWriter?.release()
+    spoolReader?.release()
+    spoolWriter = null
+    spoolReader = null
+    isTemporarySpool = false
+  }
+
   // ========== Consumer Cursor ==========
 
   /**

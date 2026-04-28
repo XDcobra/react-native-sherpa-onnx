@@ -1152,7 +1152,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Validate buffer exists and is RECORDING before resolving file
     val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
     if (liveEntry == null) {
-      promise.reject("AUDIO_BUFFER_NOT_FOUND", "Live buffer not found: $liveBufferId")
+      if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+        promise.reject(
+          com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED,
+          "Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      } else {
+        promise.reject("AUDIO_BUFFER_NOT_FOUND", "Live buffer not found: $liveBufferId")
+      }
       return
     }
     if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
@@ -1368,7 +1375,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
+      }
+      promise.reject(code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun transferOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.transferOfflineFromLive(
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.audio.pipeline.TransferException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1501,7 +1527,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED, e.message, e)
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1513,6 +1544,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: IllegalStateException) {
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1887,7 +1925,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long
   ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
-      ?: throw IllegalArgumentException("Live buffer not found: $bufferId")
+      ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(bufferId)) {
+        throw IllegalStateException("Live buffer is invalidated after transfer: $bufferId")
+      } else {
+        throw IllegalArgumentException("Live buffer not found: $bufferId")
+      }
     if (entry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED)
       throw IllegalStateException("Live buffer must be finalized before conversion")
     if (entry.numSamples == 0L) throw IllegalArgumentException("Buffer is empty")
@@ -2006,6 +2048,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(info)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -2023,7 +2067,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       micToLiveSink = null
 
       val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
-        ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+        ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+          throw IllegalStateException("Live buffer is invalidated after transfer: $liveBufferId")
+        } else {
+          throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+        }
 
       if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
         throw IllegalStateException("Live buffer is finalized, cannot capture into it")
@@ -2057,7 +2105,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
     }
