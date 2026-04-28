@@ -354,6 +354,14 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
     if (liveEntry) {
         sampleRate = liveEntry->sampleRate;
     } else {
+        if (pa_is_live_invalidated(bufferId)) {
+            reject(
+                @"BUFFER_INVALIDATED",
+                [NSString stringWithFormat:@"Audio buffer is invalidated after transfer: %@", audioBufferId],
+                nil
+            );
+            return;
+        }
         hasOfflineSource = true;
         std::string errorCode;
         std::string errorMessage;

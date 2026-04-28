@@ -49,6 +49,8 @@ extern "C" void slm_release_all_link_maps(void);
         [self autoInstallJSI];
         // Sweep orphaned mmap temp files from previous sessions
         pa_sweepOrphanedTempFiles();
+        // Sweep orphaned orchestration temp files from previous sessions
+        pa_cleanupOrphanedOrchestrationFiles();
     }
     return self;
 }

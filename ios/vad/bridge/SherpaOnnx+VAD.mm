@@ -304,7 +304,11 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 
   auto liveAudio = pa_get_live_entry(aid);
   if (!liveAudio) {
-    reject(@"VAD_BUFFER_NOT_FOUND", @"Input live audio buffer not found", nil);
+    if (pa_is_live_invalidated(aid)) {
+      reject(@"BUFFER_INVALIDATED", @"Input live audio buffer is invalidated after transfer", nil);
+    } else {
+      reject(@"VAD_BUFFER_NOT_FOUND", @"Input live audio buffer not found", nil);
+    }
     return;
   }
   {
