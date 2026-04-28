@@ -102,6 +102,8 @@ export interface LiveTextBufferInfo {
 /** A committed text segment from a live text buffer segment log. */
 export interface LiveTextSegment {
   text: string;
+  /** True when event payload text was truncated by maxEventTextChars. */
+  textTruncated?: boolean;
   source: LiveTextBufferPartialSource;
   segmentIndex: number;
   tokens?: string[];

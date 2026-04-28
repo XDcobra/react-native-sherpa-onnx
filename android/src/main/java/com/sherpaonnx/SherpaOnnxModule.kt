@@ -159,6 +159,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
   private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
+  private val maxEventTextChars = 4096
+
+  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
+    if (text.length <= maxEventTextChars) {
+      return Pair(text, false)
+    }
+    return Pair(text.substring(0, maxEventTextChars), true)
+  }
 
   private fun maybeEmitLiveTextPartial(
     entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
@@ -196,10 +204,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       val eventEmitter = reactApplicationContext
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
       val payload = Arguments.createMap().apply {
         putString("liveBufferId", liveBufferId)
         putInt("totalSegments", totalSegments)
-        putString("text", segment.text)
+        putString("text", eventText)
+        if (textTruncated) {
+          putBoolean("textTruncated", true)
+        }
         putString("source", segment.source)
         putInt("segmentIndex", segment.segmentIndex)
 

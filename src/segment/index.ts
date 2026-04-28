@@ -15,11 +15,15 @@ import {
 } from '../audiobuffer';
 import {
   appendLiveSegment,
+  createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
+  createOfflineSegmentBufferFromLive,
+  finalizeLiveSegmentBuffer,
   getLiveSegmentBufferSegmentCount,
   getLiveSegmentBufferSegments,
   getOfflineSegmentBufferSegments,
   getPipelineSegmentBufferInfo,
+  releasePipelineSegmentBuffer,
 } from '../segmentbuffer';
 import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
 import type { PipelineTextBufferIdSource } from '../textbuffer/types';
@@ -50,8 +54,12 @@ import {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
-const TEXT_SEGMENT_PROXY_PREFIX = 'seg_text_proxy_';
-const AUDIO_SEGMENT_PROXY_PREFIX = 'seg_audio_proxy_';
+const offlineTextSegmentByBufferId = new Map<string, TextSegment>();
+const offlineAudioSegmentBufferByParentBufferId = new Map<string, string>();
+const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
+  string,
+  Promise<string>
+>();
 
 export interface SegmentBufferRef {
   segmentBufferId: string;
@@ -107,12 +115,49 @@ function isSegmentBufferId(id: string): boolean {
   return id.startsWith('seg_live_') || id.startsWith('seg_off_');
 }
 
-function isTextProxySegmentBufferId(id: string): boolean {
-  return id.startsWith(TEXT_SEGMENT_PROXY_PREFIX);
+function normalizeReadWindow(
+  startIndex: number,
+  maxCount: number
+): { startIndex: number; maxCount: number } {
+  if (!Number.isFinite(startIndex) || !Number.isInteger(startIndex)) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: startIndex must be a finite integer; received ${String(
+        startIndex
+      )}`
+    );
+  }
+  if (!Number.isFinite(maxCount) || !Number.isInteger(maxCount)) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: maxCount must be a finite integer; received ${String(
+        maxCount
+      )}`
+    );
+  }
+  if (startIndex < 0) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: startIndex must be >= 0; received ${startIndex}`
+    );
+  }
+  if (maxCount < 0) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: maxCount must be >= 0; received ${maxCount}`
+    );
+  }
+  return {
+    startIndex: Math.trunc(startIndex),
+    maxCount: Math.trunc(maxCount),
+  };
 }
 
-function isAudioProxySegmentBufferId(id: string): boolean {
-  return id.startsWith(AUDIO_SEGMENT_PROXY_PREFIX);
+function assertSegmentIndexInRange(
+  startIndex: number,
+  totalCount: number
+): void {
+  if (totalCount > 0 && startIndex >= totalCount) {
+    throw new Error(
+      `SEGMENT_INDEX_OUT_OF_RANGE: startIndex ${startIndex} is outside segment count ${totalCount}`
+    );
+  }
 }
 
 function toSegmentSource(raw: unknown): SegmentSource {
@@ -222,7 +267,8 @@ async function readTextSegments(
   maxCount = 1024
 ): Promise<TextSegment[]> {
   const count = await getLiveTextBufferSegmentCount(liveTextBufferId);
-  if (count <= 0 || startIndex >= count || maxCount <= 0) return [];
+  if (count <= 0 || maxCount === 0) return [];
+  assertSegmentIndexInRange(startIndex, count);
 
   const endExclusive = Math.min(count, startIndex + maxCount);
   const raw = await getLiveTextBufferSegments(
@@ -296,59 +342,130 @@ async function readOfflineTextSegments(
   startIndex = 0,
   maxCount = 1024
 ): Promise<TextSegment[]> {
-  if (startIndex > 0 || maxCount <= 0) return [];
-
   const info = await getPipelineTextBufferInfo(offlineTextBufferId);
-  if (info.kind !== 'offlineTextBuffer' || info.utf16Length <= 0) return [];
+  if (info.kind !== 'offlineTextBuffer') {
+    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
+    return [];
+  }
+
+  const totalCount = info.utf16Length > 0 ? 1 : 0;
+  if (totalCount <= 0 || maxCount === 0) {
+    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
+    return [];
+  }
+  assertSegmentIndexInRange(startIndex, totalCount);
+
+  const cached = offlineTextSegmentByBufferId.get(offlineTextBufferId);
+  if (cached) {
+    return [cached];
+  }
 
   const text = await getOfflineTextBufferTextSlice(
     offlineTextBufferId,
     0,
     Math.max(1, info.utf16Length)
   );
-  if (text.length === 0) return [];
+  if (text.length === 0) {
+    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
+    return [];
+  }
 
-  return [
-    {
-      segmentId: `txtseg_${offlineTextBufferId}_0`,
-      domain: 'text',
-      startOffset: 0,
-      endOffset: text.length,
-      reason: 'finalize',
-      source: 'external',
-      createdAtMs: Date.now(),
-      segmentIndex: 0,
-      text,
-      utf16Length: text.length,
-    },
-  ];
+  const segment: TextSegment = {
+    segmentId: `txtseg_${offlineTextBufferId}_0`,
+    domain: 'text',
+    startOffset: 0,
+    endOffset: text.length,
+    reason: 'finalize',
+    source: 'external',
+    createdAtMs: Date.now(),
+    segmentIndex: 0,
+    text,
+    utf16Length: text.length,
+  };
+  offlineTextSegmentByBufferId.set(offlineTextBufferId, segment);
+  return [segment];
 }
 
-async function readOfflineAudioSegments(
-  offlineAudioBufferId: string,
-  startIndex = 0,
-  maxCount = 1024
-): Promise<SpeechSegment[]> {
-  if (startIndex > 0 || maxCount <= 0) return [];
+async function ensureOfflineAudioSegmentBuffer(
+  offlineAudioBufferId: string
+): Promise<string> {
+  const existing =
+    offlineAudioSegmentBufferByParentBufferId.get(offlineAudioBufferId);
+  if (existing) return existing;
 
-  const info = await getPipelineAudioBufferInfo(offlineAudioBufferId);
-  if (info.kind !== 'offlinePcmBuffer' || info.numSamples <= 0) return [];
+  const pending =
+    pendingOfflineAudioSegmentBufferByParentBufferId.get(offlineAudioBufferId);
+  if (pending) return pending;
 
-  return [
-    {
-      segmentId: `audseg_${offlineAudioBufferId}_0`,
-      domain: 'speech',
-      startOffset: 0,
-      endOffset: info.numSamples,
-      reason: 'finalize',
-      source: 'external',
-      createdAtMs: Date.now(),
-      segmentIndex: 0,
+  const creating = (async (): Promise<string> => {
+    const info = await getPipelineAudioBufferInfo(offlineAudioBufferId);
+    if (info.kind !== 'offlinePcmBuffer') {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: expected an offline audio buffer'
+      );
+    }
+
+    if (info.numSamples <= 0) {
+      const empty = await createEmptyOfflineSegmentBuffer({
+        sourceAudioBufferId: offlineAudioBufferId,
+      });
+      return empty.bufferId;
+    }
+
+    const live = await createLiveSegmentBuffer({
       sourceAudioBufferId: offlineAudioBufferId,
-      sampleRate: info.sampleRate,
-      durationMs: info.durationMs,
-    },
-  ];
+    });
+    try {
+      const durationMs =
+        typeof info.durationMs === 'number' && Number.isFinite(info.durationMs)
+          ? info.durationMs
+          : (info.numSamples / info.sampleRate) * 1000;
+      const appendResult = await appendLiveSegment(live.bufferId, {
+        kind: 'speech',
+        sourceAudioBufferId: offlineAudioBufferId,
+        startSample: 0,
+        endSample: info.numSamples,
+        sampleRate: info.sampleRate,
+        durationMs,
+      });
+
+      annotateSpeechSegment(appendResult.segmentId, {
+        reason: 'finalize',
+        source: 'external',
+        createdAtMs: Date.now(),
+        segmentIndex: appendResult.segmentIndex,
+      });
+
+      await finalizeLiveSegmentBuffer(live.bufferId);
+      const offline = await createOfflineSegmentBufferFromLive(
+        live.bufferId,
+        'fullIfSpooled'
+      );
+      return offline.bufferId;
+    } finally {
+      await releasePipelineSegmentBuffer(live.bufferId).catch(() => {
+        // Ignore cleanup failures for temporary live segment buffers.
+      });
+    }
+  })();
+
+  pendingOfflineAudioSegmentBufferByParentBufferId.set(
+    offlineAudioBufferId,
+    creating
+  );
+
+  try {
+    const segmentBufferId = await creating;
+    offlineAudioSegmentBufferByParentBufferId.set(
+      offlineAudioBufferId,
+      segmentBufferId
+    );
+    return segmentBufferId;
+  } finally {
+    pendingOfflineAudioSegmentBufferByParentBufferId.delete(
+      offlineAudioBufferId
+    );
+  }
 }
 
 async function readSpeechSegmentsFromSegmentBuffer(
@@ -357,6 +474,12 @@ async function readSpeechSegmentsFromSegmentBuffer(
   startIndex = 0,
   maxCount = 1024
 ): Promise<SpeechSegment[]> {
+  const totalCount = segmentBufferId.startsWith('seg_live_')
+    ? await getLiveSegmentBufferSegmentCount(segmentBufferId)
+    : (await getPipelineSegmentBufferInfo(segmentBufferId)).segmentCount;
+  if (totalCount <= 0 || maxCount === 0) return [];
+  assertSegmentIndexInRange(startIndex, totalCount);
+
   const raw = segmentBufferId.startsWith('seg_live_')
     ? await getLiveSegmentBufferSegments(segmentBufferId, startIndex, maxCount)
     : await getOfflineSegmentBufferSegments(
@@ -582,28 +705,12 @@ export async function getSegmentBuffer(
   if (isSegmentBufferRef(buffer)) return buffer;
 
   const rawId = resolveSourceBufferId(buffer);
-  if (isTextProxySegmentBufferId(rawId)) {
-    return {
-      segmentBufferId: rawId,
-      domain: 'text',
-      parentBufferId: rawId.slice(TEXT_SEGMENT_PROXY_PREFIX.length),
-    };
-  }
-
-  if (isAudioProxySegmentBufferId(rawId)) {
-    return {
-      segmentBufferId: rawId,
-      domain: 'speech',
-      parentBufferId: rawId.slice(AUDIO_SEGMENT_PROXY_PREFIX.length),
-    };
-  }
-
   if (isLiveTextBufferId(rawId) || isOfflineTextBufferId(rawId)) {
     const textId = resolvePipelineTextBufferId(
       buffer as PipelineTextBufferIdSource
     );
     return {
-      segmentBufferId: `${TEXT_SEGMENT_PROXY_PREFIX}${textId}`,
+      segmentBufferId: textId,
       domain: 'text',
       parentBufferId: textId,
     };
@@ -627,8 +734,10 @@ export async function getSegmentBuffer(
     buffer as PipelineAudioBufferIdSource
   );
   if (isOfflineAudioBufferId(audioBufferId)) {
+    const associatedOfflineSegmentBufferId =
+      await ensureOfflineAudioSegmentBuffer(audioBufferId);
     return {
-      segmentBufferId: `${AUDIO_SEGMENT_PROXY_PREFIX}${audioBufferId}`,
+      segmentBufferId: associatedOfflineSegmentBufferId,
       domain: 'speech',
       parentBufferId: audioBufferId,
     };
@@ -641,34 +750,39 @@ export async function getSegments(
   startIndex = 0,
   maxCount = 1024
 ): Promise<Segment[]> {
+  const window = normalizeReadWindow(startIndex, maxCount);
   const segBuffer = await getSegmentBuffer(buffer);
   if (segBuffer.domain === 'text') {
     if (isLiveTextBufferId(segBuffer.parentBufferId)) {
-      return readTextSegments(segBuffer.parentBufferId, startIndex, maxCount);
+      return readTextSegments(
+        segBuffer.parentBufferId,
+        window.startIndex,
+        window.maxCount
+      );
     }
     if (isOfflineTextBufferId(segBuffer.parentBufferId)) {
       return readOfflineTextSegments(
         segBuffer.parentBufferId,
-        startIndex,
-        maxCount
+        window.startIndex,
+        window.maxCount
       );
     }
-    return [];
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: unsupported text segment buffer source'
+    );
   }
 
-  if (isAudioProxySegmentBufferId(segBuffer.segmentBufferId)) {
-    return readOfflineAudioSegments(
-      segBuffer.parentBufferId,
-      startIndex,
-      maxCount
+  if (!isSegmentBufferId(segBuffer.segmentBufferId)) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: expected a live/offline segment buffer id for speech domain'
     );
   }
 
   return readSpeechSegmentsFromSegmentBuffer(
     segBuffer.segmentBufferId,
     segBuffer.parentBufferId,
-    startIndex,
-    maxCount
+    window.startIndex,
+    window.maxCount
   );
 }
 
@@ -687,9 +801,10 @@ export async function getSegmentCount(
     return 0;
   }
 
-  if (isAudioProxySegmentBufferId(segBuffer.segmentBufferId)) {
-    const info = await getPipelineAudioBufferInfo(segBuffer.parentBufferId);
-    return info.kind === 'offlinePcmBuffer' && info.numSamples > 0 ? 1 : 0;
+  if (!isSegmentBufferId(segBuffer.segmentBufferId)) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: expected a live/offline segment buffer id for speech domain'
+    );
   }
 
   if (segBuffer.segmentBufferId.startsWith('seg_live_')) {

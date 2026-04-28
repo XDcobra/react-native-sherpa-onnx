@@ -272,6 +272,7 @@ function emitLocalTextSegmentEvent(
         : Date.now(),
     segmentIndex: segment.segmentIndex,
     text: segment.text,
+    ...(segment.textTruncated === true ? { textTruncated: true } : {}),
     utf16Length,
     ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
     ...(Array.isArray(segment.timestamps)
@@ -309,6 +310,7 @@ function parseNativeLiveTextSegment(raw: unknown): LiveTextSegment | undefined {
 
   return {
     text: raw.text,
+    ...(raw.textTruncated === true ? { textTruncated: true } : {}),
     source,
     segmentIndex: Math.trunc(raw.segmentIndex),
     ...(tokens && tokens.length > 0 ? { tokens } : {}),
@@ -404,6 +406,7 @@ function ensureLiveTextEventSubscriptions(): void {
         totalSegments?: number;
         segment?: TextSegment;
         text?: string;
+        textTruncated?: boolean;
         source?: string;
         segmentIndex?: number;
         tokens?: string[];

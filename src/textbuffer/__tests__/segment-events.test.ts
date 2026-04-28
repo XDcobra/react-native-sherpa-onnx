@@ -154,6 +154,7 @@ describe('textbuffer segment event wiring', () => {
     emitEvent('pipelineLiveTextSegment', {
       liveBufferId,
       text: 'worker commit',
+      textTruncated: true,
       source: 'stt_stream',
       segmentIndex: 2,
       totalSegments: 3,
@@ -171,6 +172,7 @@ describe('textbuffer segment event wiring', () => {
       segment: {
         domain: 'text',
         text: 'worker commit',
+        textTruncated: true,
         reason: 'endpoint',
         segmentIndex: 2,
       },

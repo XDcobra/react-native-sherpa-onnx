@@ -35,6 +35,8 @@ export interface SegmentBase {
 export interface TextSegment extends SegmentBase {
   domain: 'text';
   text: string;
+  /** True when event payload text was truncated by maxEventTextChars. */
+  textTruncated?: boolean;
   utf16Length: number;
   tokens?: string[];
   timestamps?: number[];

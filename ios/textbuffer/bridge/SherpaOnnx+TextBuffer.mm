@@ -151,6 +151,17 @@ static int64_t txt_now_ms() {
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
+static NSString *txt_truncate_event_text(NSString *text, BOOL *truncated) {
+    static const NSUInteger kTxtMaxEventTextChars = 4096;
+    if (truncated) *truncated = NO;
+    if (text == nil) return @"";
+    if (text.length <= kTxtMaxEventTextChars) return text;
+
+    if (truncated) *truncated = YES;
+    NSRange safeRange = [text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, kTxtMaxEventTextChars)];
+    return [text substringWithRange:safeRange];
+}
+
 static void txt_emit_live_text_segment_event(
     SherpaOnnx *module,
     NSString *liveBufferId,
@@ -162,7 +173,12 @@ static void txt_emit_live_text_segment_event(
     NSMutableDictionary *body = [NSMutableDictionary dictionary];
     body[@"liveBufferId"] = liveBufferId ?: @"";
     body[@"totalSegments"] = @(totalSegments);
-    body[@"text"] = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
+    NSString *fullText = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
+    BOOL textTruncated = NO;
+    body[@"text"] = txt_truncate_event_text(fullText, &textTruncated);
+    if (textTruncated) {
+        body[@"textTruncated"] = @YES;
+    }
     body[@"source"] = [NSString stringWithUTF8String:segment.source.c_str()] ?: @"unknown";
     body[@"segmentIndex"] = @(segment.segmentIndex);
 
