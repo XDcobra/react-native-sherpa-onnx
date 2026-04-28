@@ -260,6 +260,9 @@ export interface StartMicToLiveOptions {
 /** Mode for creating an offline buffer from a live buffer. */
 export type OfflineFromLiveMode = 'fullIfSpooled' | 'windowSnapshot';
 
+/** Mode for transferring a live spool into a new offline buffer (ownership handover). */
+export type OfflineTransferFromLiveMode = 'fullIfSpooled';
+
 // ========== Error Codes ==========
 
 export const PipelineAudioErrorCode = {
@@ -275,6 +278,10 @@ export const PipelineAudioErrorCode = {
   CAPTURE_ERROR: 'AUDIO_CAPTURE_ERROR',
   ALREADY_FINALIZED: 'AUDIO_ALREADY_FINALIZED',
   CURSOR_LAG_EXCEEDED: 'AUDIO_CURSOR_LAG_EXCEEDED',
+  TRANSFER_INVALID_STATE: 'TRANSFER_INVALID_STATE',
+  TRANSFER_SPOOL_UNAVAILABLE: 'TRANSFER_SPOOL_UNAVAILABLE',
+  TRANSFER_CURSORS_ACTIVE: 'TRANSFER_CURSORS_ACTIVE',
+  BUFFER_INVALIDATED: 'BUFFER_INVALIDATED',
   INTERNAL_ERROR: 'AUDIO_INTERNAL_ERROR',
 } as const;
 

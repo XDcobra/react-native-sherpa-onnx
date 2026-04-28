@@ -42,6 +42,7 @@ import type {
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  OfflineTransferFromLiveMode,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferSegmentEvent,
@@ -615,6 +616,21 @@ export async function createOfflineAudioBufferFromLive(
 }
 
 /**
+ * Transfer ownership of a finalized live spool into a new offline buffer without copying.
+ *
+ * On success, the source live buffer becomes invalidated and must no longer be used.
+ */
+export async function transferOfflineAudioBufferFromLive(
+  liveBufferId: LiveAudioBufferIdSource,
+  mode: OfflineTransferFromLiveMode = 'fullIfSpooled'
+): Promise<OfflineAudioBufferRef> {
+  const id = resolveLiveAudioBufferId(liveBufferId);
+  const result = await getNative().transferOfflineAudioBufferFromLive(id, mode);
+  const info = result as unknown as OfflineAudioBufferInfo;
+  return { info, bufferId: info.bufferId as OfflineBufferHandle };
+}
+
+/**
  * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
  * The buffer starts unpopulated (numSamples=0); native synthesis fills it exactly once.
  *
@@ -1010,6 +1026,7 @@ export type {
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  OfflineTransferFromLiveMode,
   LiveBufferAppendSource,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
