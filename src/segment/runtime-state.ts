@@ -32,6 +32,7 @@ const speechSegmentAnnotationBySegmentId = new Map<
   SpeechSegmentAnnotation
 >();
 const segmentAnnotationsByBufferId = new Map<string, Set<string>>();
+const segmentAnnotationBufferBySegmentId = new Map<string, string>();
 
 export function normalizeSegmentationMode(
   raw: unknown,
@@ -110,6 +111,7 @@ export function annotateSpeechSegment(
       segmentAnnotationsByBufferId.set(bufferId, set);
     }
     set.add(segmentId);
+    segmentAnnotationBufferBySegmentId.set(segmentId, bufferId);
   }
 }
 
@@ -129,6 +131,11 @@ export function consumeSpeechSegmentAnnotation(
   const annotation = speechSegmentAnnotationBySegmentId.get(segmentId);
   if (annotation !== undefined) {
     speechSegmentAnnotationBySegmentId.delete(segmentId);
+    const bufferId = segmentAnnotationBufferBySegmentId.get(segmentId);
+    if (bufferId !== undefined) {
+      segmentAnnotationBufferBySegmentId.delete(segmentId);
+      segmentAnnotationsByBufferId.get(bufferId)?.delete(segmentId);
+    }
   }
   return annotation;
 }
@@ -140,6 +147,7 @@ export function releaseSegmentationStateForBuffer(bufferId: string): void {
   if (annotationIds) {
     for (const segmentId of annotationIds) {
       speechSegmentAnnotationBySegmentId.delete(segmentId);
+      segmentAnnotationBufferBySegmentId.delete(segmentId);
     }
     segmentAnnotationsByBufferId.delete(bufferId);
   }
