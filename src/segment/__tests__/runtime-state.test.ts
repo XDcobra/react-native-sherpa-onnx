@@ -82,8 +82,16 @@ describe('segment runtime state', () => {
 
   it('releaseSegmentationStateForBuffer cleans up tracked annotations', () => {
     const bufferId = 'live_test_annotation_cleanup';
-    annotateSpeechSegment('seg_cleanup_a', { reason: 'endpoint', source: 'manual', createdAtMs: 1, segmentIndex: 0 }, bufferId);
-    annotateSpeechSegment('seg_cleanup_b', { reason: 'finalize', source: 'manual', createdAtMs: 2, segmentIndex: 1 }, bufferId);
+    annotateSpeechSegment(
+      'seg_cleanup_a',
+      { reason: 'endpoint', source: 'manual', createdAtMs: 1, segmentIndex: 0 },
+      bufferId
+    );
+    annotateSpeechSegment(
+      'seg_cleanup_b',
+      { reason: 'finalize', source: 'manual', createdAtMs: 2, segmentIndex: 1 },
+      bufferId
+    );
 
     expect(getSpeechSegmentAnnotation('seg_cleanup_a')).toBeDefined();
     expect(getSpeechSegmentAnnotation('seg_cleanup_b')).toBeDefined();

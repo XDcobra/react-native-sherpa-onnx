@@ -11,6 +11,7 @@
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
 import type { Segment } from '../segment/segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 // ========== Buffer Kinds ==========
 
@@ -242,6 +243,7 @@ export type TextSegmentationMode = 'off' | 'manual' | 'auto';
 
 export interface TextSegmentationConfig {
   mode?: TextSegmentationMode;
+  policy?: SegmentationPolicy;
 }
 
 export interface LiveTextBufferSegmentEvent {

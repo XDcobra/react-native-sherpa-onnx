@@ -16,8 +16,9 @@ import type {
   OfflineAudioBufferRef,
   OfflineAudioBufferIdSource,
 } from '../audiobuffer/types';
-import { getSegments } from '../segment';
+import { getSegments, segmentOfflineBuffer } from '../segment';
 import type { Segment, SpeechSegment, TextSegment } from '../segment/segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
 import {
   createEmptyOfflineTextBuffer,
   createOfflineTextBufferFromText,
@@ -66,6 +67,7 @@ export interface FailedSegmentInfo {
 export interface OrchestrationConfig {
   segmentation?: {
     mode?: 'off' | 'manual' | 'auto';
+    policy?: SegmentationPolicy;
   };
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
@@ -99,6 +101,21 @@ type SessionState =
   | 'cancelled';
 
 let sessionCounter = 0;
+
+const DEFAULT_TEXT_SEGMENTATION_POLICY: SegmentationPolicy = {
+  evaluator: 'text_synthetic_auto',
+  sentenceBoundary: true,
+  maxLengthChars: 500,
+};
+
+const DEFAULT_SPEECH_SEGMENTATION_POLICY: SegmentationPolicy = {
+  evaluator: 'speech_energy_silence',
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1000,
+  maxSegmentMs: 30000,
+  hangoverMs: 300,
+};
 
 function nextSessionId(prefix: string): string {
   sessionCounter += 1;
@@ -329,6 +346,11 @@ async function collectSpeechSegments(
     ];
   }
 
+  await segmentOfflineBuffer(
+    input,
+    config.segmentation?.policy ?? DEFAULT_SPEECH_SEGMENTATION_POLICY
+  );
+
   const segments = await getSegments(input);
   return segments.map(asSpeechSegment);
 }
@@ -362,6 +384,11 @@ async function collectTextSegments(
       },
     ];
   }
+
+  await segmentOfflineBuffer(
+    input,
+    config.segmentation?.policy ?? DEFAULT_TEXT_SEGMENTATION_POLICY
+  );
 
   const segments = await getSegments(input);
   return segments.map(asTextSegment);

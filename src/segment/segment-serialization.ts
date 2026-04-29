@@ -69,7 +69,9 @@ export function segmentFromJson(raw: unknown): Segment {
   const domain = raw.domain;
   if (domain !== 'text' && domain !== 'speech') {
     throw new Error(
-      `SEGMENT_INVALID: domain must be 'text' or 'speech', got '${String(domain)}'`
+      `SEGMENT_INVALID: domain must be 'text' or 'speech', got '${String(
+        domain
+      )}'`
     );
   }
   const parsed =

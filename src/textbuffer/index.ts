@@ -14,6 +14,7 @@ import type { Spec } from '../NativeSherpaOnnx';
 import {
   getLiveTextSegmentation,
   normalizeSegmentationMode,
+  registerAttachedSegmentationEngine,
   registerLiveTextSegmentation,
   releaseSegmentationStateForBuffer,
 } from '../segment/runtime-state';
@@ -46,6 +47,12 @@ import type {
   TextBufferSpoolingMode,
   LiveTextBufferSpoolInfo,
 } from './types';
+
+const DEFAULT_TEXT_SEGMENTATION_POLICY = {
+  evaluator: 'text_synthetic_auto' as const,
+  sentenceBoundary: true,
+  maxLengthChars: 500,
+};
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -634,6 +641,28 @@ export async function createLiveTextBuffer(
   );
   registerLiveTextSegmentation(liveBufferId, segmentationMode);
 
+  if (segmentationMode === 'auto') {
+    try {
+      const attached = await getNative().attachSegmentationEngine(
+        liveBufferId,
+        'text',
+        options.segmentation?.policy ?? DEFAULT_TEXT_SEGMENTATION_POLICY
+      );
+      registerAttachedSegmentationEngine(
+        liveBufferId,
+        attached.engineId,
+        'text'
+      );
+    } catch (error) {
+      await getNative()
+        .releasePipelineTextBuffer(liveBufferId)
+        .catch(() => {
+          // Best-effort cleanup if native engine attachment fails.
+        });
+      throw error;
+    }
+  }
+
   const unsubscribeEvents = registerLiveTextCallbacks(liveBufferId, {
     onPartial: options.onPartial,
     onSegment: options.onSegment,
@@ -689,7 +718,7 @@ export async function finalizeLiveTextBuffer(
     getLiveTextSegmentation(id)?.mode,
     'manual'
   );
-  if (segmentationMode !== 'off') {
+  if (segmentationMode === 'manual') {
     const partial = await getNative().getLiveTextBufferPartialSlice(
       id,
       0,

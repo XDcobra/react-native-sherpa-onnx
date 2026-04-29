@@ -13,6 +13,7 @@ jest.mock('../../audiobuffer', () => ({
 
 jest.mock('../../segment', () => ({
   getSegments: jest.fn(),
+  segmentOfflineBuffer: jest.fn(),
 }));
 
 jest.mock('../../textbuffer', () => ({
@@ -155,6 +156,13 @@ describe('offline orchestrator', () => {
     });
     text.getOfflineTextBufferTextSlice.mockResolvedValue('test');
     text.releasePipelineTextBuffer.mockResolvedValue(undefined);
+
+    segment.segmentOfflineBuffer.mockResolvedValue({
+      segmentBufferId: 'seg_off_derived',
+      domain: 'speech',
+      parentBufferId: 'off_input',
+    });
+    segment.getSegments.mockResolvedValue([]);
   });
 
   it('transfers finalized audio accumulator on complete run', async () => {
@@ -208,7 +216,42 @@ describe('offline orchestrator', () => {
       'live_acc',
       'fullIfSpooled'
     );
+    expect(segment.segmentOfflineBuffer).toHaveBeenCalledWith(
+      'off_input',
+      expect.objectContaining({ evaluator: 'speech_energy_silence' })
+    );
     expect(consumer).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes configured segmentation policy to native offline segmentation', async () => {
+    audio.getPipelineAudioBufferInfo.mockResolvedValue({
+      bufferId: 'off_input',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 0,
+      durationMs: 0,
+    });
+
+    const customPolicy = {
+      evaluator: 'continuous_frames' as const,
+      checkpointIntervalMs: 250,
+      minSegmentMs: 500,
+      maxSegmentMs: 5000,
+    };
+
+    await runOfflineAudioPipeline('off_input', jest.fn(), {
+      segmentation: {
+        mode: 'auto',
+        policy: customPolicy,
+      },
+    });
+
+    expect(segment.segmentOfflineBuffer).toHaveBeenCalledWith(
+      'off_input',
+      customPolicy
+    );
   });
 
   it('skips failed segment and inserts silence when recovery=skip', async () => {
