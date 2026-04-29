@@ -8,6 +8,15 @@ import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
 } from '../textbuffer/types';
+import type {
+  ErrorRecoveryStrategy,
+  FailedSegmentInfo,
+  OrchestrationProgress,
+  RetryExhaustedFallback,
+  SkippedSegmentInfo,
+} from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { SegmentLinkMapRef } from '../segment/segment-link';
 
 /**
  * Supported TTS model types.
@@ -331,7 +340,29 @@ export type TtsSynthesisOptions = {
   numSteps?: number;
   extra?: Record<string, string>;
   voiceClone?: TtsVoiceClone;
+  segmentation?: {
+    mode?: 'off' | 'manual' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  errorRecovery?: ErrorRecoveryStrategy;
+  maxRetriesPerSegment?: number;
+  retryExhaustedFallback?: RetryExhaustedFallback;
+  abortSignal?: AbortSignal;
+  onProgress?: (progress: OrchestrationProgress) => void;
+  overlapChars?: number;
+  textSkipPlaceholder?: string;
+  linkMap?: SegmentLinkMapRef;
 };
+
+export interface TtsSynthesisResult {
+  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  totalSegments: number;
+  completedSegments: number;
+  skippedSegments: SkippedSegmentInfo[];
+  failedSegment?: FailedSegmentInfo;
+  processingTimeMs: number;
+  linkMap?: SegmentLinkMapRef;
+}
 
 /**
  * Instance-based batch TTS engine returned by createTTS().
@@ -353,7 +384,7 @@ export interface TtsEngine {
     textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
     audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
     options?: TtsSynthesisOptions
-  ): Promise<void>;
+  ): Promise<TtsSynthesisResult>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: DetectedModelEntry[];

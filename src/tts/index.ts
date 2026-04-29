@@ -6,6 +6,7 @@ import {
   type TtsModelOptions,
   type TtsUpdateOptions,
   type TtsSynthesisOptions,
+  type TtsSynthesisResult,
   type TTSModelInfo,
   type TtsEngine,
 } from './types';
@@ -27,8 +28,12 @@ import {
 } from './ttsNativeBridge';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  releasePipelineAudioBuffer,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
+import { addSegmentLink, createSegmentLinkMap } from '../segment';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
@@ -37,6 +42,7 @@ import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
 } from '../textbuffer/types';
+import { runOfflineTtsPipeline } from './orchestrate';
 
 let ttsInstanceCounter = 0;
 
@@ -239,17 +245,83 @@ export async function createTTS(
       textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
       audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
       opts?: TtsSynthesisOptions
-    ): Promise<void> {
+    ): Promise<TtsSynthesisResult> {
       guard();
+      const startedAtMs = Date.now();
       const textInId = resolvePipelineTextBufferId(textIn);
       const audioOutId = resolvePipelineAudioBufferId(audioOut);
 
-      await SherpaOnnx.synthesizeTts(
-        instanceId,
+      const segmentationMode = opts?.segmentation?.mode ?? 'off';
+      if (segmentationMode === 'manual') {
+        throw new Error(
+          'SEGMENTATION_POLICY_INVALID: offline TTS does not support segmentation.mode=manual'
+        );
+      }
+      if (segmentationMode === 'off') {
+        await SherpaOnnx.synthesizeTts(
+          instanceId,
+          textInId,
+          audioOutId,
+          toNativeSynthesisOptions(opts) ?? undefined
+        );
+        return {
+          status: 'complete',
+          totalSegments: 1,
+          completedSegments: 1,
+          skippedSegments: [],
+          processingTimeMs: Date.now() - startedAtMs,
+          linkMap: opts?.linkMap,
+        };
+      }
+
+      const orchestrated = await runOfflineTtsPipeline(
         textInId,
-        audioOutId,
-        toNativeSynthesisOptions(opts) ?? undefined
+        instanceId,
+        opts ?? {}
       );
+
+      let linkMap = orchestrated.linkMap ?? opts?.linkMap;
+      if (!linkMap && orchestrated.segmentMappings.length > 0) {
+        linkMap = await createSegmentLinkMap({
+          textBufferId: textInId,
+          audioBufferId: audioOutId,
+        });
+      }
+
+      if (linkMap) {
+        for (const mapping of orchestrated.segmentMappings) {
+          await addSegmentLink(linkMap, {
+            textSegmentId: mapping.textSegmentId,
+            speechSegmentId: mapping.speechSegmentId,
+            linkType: 'tts_produced',
+          });
+        }
+      }
+
+      if (orchestrated.outputBuffer) {
+        try {
+          await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
+            audioOutId,
+            orchestrated.outputBuffer.bufferId
+          );
+        } finally {
+          await releasePipelineAudioBuffer(
+            orchestrated.outputBuffer.bufferId
+          ).catch(() => undefined);
+        }
+      }
+
+      return {
+        status: orchestrated.status,
+        totalSegments: orchestrated.totalSegments,
+        completedSegments: orchestrated.completedSegments,
+        skippedSegments: orchestrated.skippedSegments,
+        ...(orchestrated.failedSegment
+          ? { failedSegment: orchestrated.failedSegment }
+          : {}),
+        processingTimeMs: orchestrated.processingTimeMs,
+        ...(linkMap ? { linkMap } : {}),
+      };
     },
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
@@ -324,31 +396,6 @@ export type {
   TtsPipelineOptions,
 } from './streamingTypes';
 
-// Incremental streaming TTS (higher-level: progressive text feeding + auto-segmentation)
-export { createIncrementalStreamingTTS } from './incremental';
-export type {
-  IncrementalStreamingTtsEngine,
-  IncrementalStreamingTtsFactoryOptions,
-  IncrementalStreamingTtsSource,
-  IncrementalStreamController,
-  IncrementalStreamHandlers,
-  IncrementalRequestOptions,
-  IncrementalMetrics,
-  SessionId,
-  SegmentId,
-  SessionState,
-  SegmentationPolicy,
-  QueuePolicy,
-  QueueMode,
-  OverflowStrategy,
-  CommitOptions,
-  FlushOptions,
-  CancelOptions,
-  CancelScope,
-  SessionEvent,
-  SegmentEvent,
-} from './incremental';
-
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
@@ -372,6 +419,7 @@ export type {
   TtsUpdateOptions,
   TtsUpdateOptionsEmpty,
   TtsSynthesisOptions,
+  TtsSynthesisResult,
   TtsExecutionProvider,
   TtsVoiceClone,
   TtsVoiceCloneZipvoice,

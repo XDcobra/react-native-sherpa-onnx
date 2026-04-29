@@ -1,6 +1,7 @@
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+import type { SegmentationPolicy } from '../segment/engine-types';
 import type { TtsVoiceClone, TTSModelInfo } from './types';
 
 // Re-export types that are still needed
@@ -24,6 +25,10 @@ export interface TtsPipelineOptions {
    * Uses OfflineAudioBuffer reference (same as batch synthesis).
    */
   voiceClone?: TtsVoiceClone;
+  segmentation?: {
+    mode?: 'off' | 'manual' | 'auto';
+    policy?: SegmentationPolicy;
+  };
 }
 
 /**

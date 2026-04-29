@@ -12,13 +12,20 @@ import type {
 } from './streamingTypes';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
-import { resolvePipelineTextBufferId } from '../textbuffer';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  getPipelineTextBufferInfo,
+  resolvePipelineTextBufferId,
+} from '../textbuffer';
+import {
+  getPipelineAudioBufferInfo,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
 } from '../audiobuffer/types';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
@@ -59,6 +66,55 @@ function toNativePipelineOptions(
 }
 
 let streamingTtsInstanceCounter = 0;
+
+function createTtsPipelineHandle(
+  instanceId: string,
+  pipelineId: string,
+  onTerminal: () => void,
+  attachedSegmentationEngineId?: string
+): TtsPipelineHandle {
+  let detached = false;
+  const detachIfNeeded = async () => {
+    if (!attachedSegmentationEngineId || detached) return;
+    detached = true;
+    try {
+      await detachSegmentationEngine(attachedSegmentationEngineId, {
+        flushFinal: true,
+      });
+    } catch {
+      // Best effort: segmentation detach must not mask pipeline shutdown.
+    }
+  };
+
+  const completed = createStreamingPipelineCompletionPromise(pipelineId)
+    .finally(detachIfNeeded)
+    .finally(onTerminal);
+
+  return {
+    instanceId,
+    get pipelineId() {
+      return pipelineId;
+    },
+    completed,
+    async stop(): Promise<void> {
+      try {
+        await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      } finally {
+        await detachIfNeeded();
+        onTerminal();
+      }
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus(): Promise<StreamingPipelineStatus> {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
 
 /**
  * Create a streaming TTS engine instance backed by native TTS pipelines.
@@ -190,53 +246,85 @@ export async function createStreamingTTS(
       const textInLiveBufferId = resolvePipelineTextBufferId(textIn);
       const audioOutLiveBufferId = resolvePipelineAudioBufferId(audioOut);
 
-      const started = await SherpaOnnx.startTtsPipeline(
-        instanceId,
-        textInLiveBufferId,
-        audioOutLiveBufferId,
-        toNativePipelineOptions(pipelineOptions)
-      );
-      activePipelineId = started.pipelineId;
-      const completed = createStreamingPipelineCompletionPromise(
-        started.pipelineId
-      );
+      const [textInfo, audioInfo] = await Promise.all([
+        getPipelineTextBufferInfo(textInLiveBufferId),
+        getPipelineAudioBufferInfo(audioOutLiveBufferId),
+      ]);
+      if (textInfo.kind !== 'liveTextBuffer') {
+        throw new Error(
+          'TTS_INVALID_ARGUMENT: streaming TTS input buffer must be txt_live_*'
+        );
+      }
+      if (audioInfo.kind !== 'livePcmBuffer') {
+        throw new Error(
+          'TTS_INVALID_ARGUMENT: streaming TTS output buffer must be live_*'
+        );
+      }
 
-      completed.then(
-        () => {
-          if (activePipelineId === started.pipelineId) {
-            activePipelineId = null;
-          }
-        },
-        () => {
-          if (activePipelineId === started.pipelineId) {
-            activePipelineId = null;
-          }
+      const mode = pipelineOptions?.segmentation?.mode ?? 'off';
+      const policy = pipelineOptions?.segmentation?.policy;
+      if ((mode === 'off' || mode === 'manual') && policy) {
+        throw new Error(
+          `SEGMENTATION_POLICY_INVALID: streaming TTS ignores segmentation.policy when segmentation.mode='${mode}'; use mode='auto'`
+        );
+      }
+      let attachedSegmentationEngineId: string | undefined;
+      if (mode === 'auto') {
+        const resolvedPolicy = policy ?? {
+          evaluator: 'text_synthetic_auto' as const,
+          sentenceBoundary: true,
+          maxLengthChars: 500,
+        };
+        if (
+          resolvedPolicy.evaluator !== 'text_synthetic_auto' &&
+          resolvedPolicy.evaluator !== 'text_punctuation_assisted'
+        ) {
+          throw new Error(
+            `SEGMENTATION_POLICY_INVALID: live TTS requires a text segmentation evaluator; received ${resolvedPolicy.evaluator}`
+          );
         }
-      );
+        if (
+          resolvedPolicy.evaluator === 'text_punctuation_assisted' &&
+          !resolvedPolicy.punctuationInstanceId
+        ) {
+          throw new Error(
+            'SEGMENTATION_POLICY_INVALID: text_punctuation_assisted requires policy.punctuationInstanceId'
+          );
+        }
 
-      const handle: TtsPipelineHandle = {
-        instanceId,
-        get pipelineId() {
-          return started.pipelineId;
-        },
-        completed,
-        async stop(): Promise<void> {
-          await SherpaOnnx.stopStreamingPipeline(started.pipelineId);
-          if (activePipelineId === started.pipelineId) {
-            activePipelineId = null;
-          }
-        },
-        async flush(): Promise<void> {
-          await SherpaOnnx.flushStreamingPipeline(started.pipelineId);
-        },
-        async reset(): Promise<void> {
-          await SherpaOnnx.resetStreamingPipeline(started.pipelineId);
-        },
-        async getStatus(): Promise<StreamingPipelineStatus> {
-          return SherpaOnnx.getStreamingPipelineStatus(started.pipelineId);
-        },
-      };
-      return handle;
+        const attached = await attachSegmentationEngine(textInLiveBufferId, {
+          policy: resolvedPolicy,
+        });
+        attachedSegmentationEngineId = attached.engineId;
+      }
+
+      try {
+        const started = await SherpaOnnx.startTtsPipeline(
+          instanceId,
+          textInLiveBufferId,
+          audioOutLiveBufferId,
+          toNativePipelineOptions(pipelineOptions)
+        );
+        activePipelineId = started.pipelineId;
+
+        return createTtsPipelineHandle(
+          instanceId,
+          started.pipelineId,
+          () => {
+            if (activePipelineId === started.pipelineId) {
+              activePipelineId = null;
+            }
+          },
+          attachedSegmentationEngineId
+        );
+      } catch (err) {
+        if (attachedSegmentationEngineId) {
+          await detachSegmentationEngine(attachedSegmentationEngineId, {
+            flushFinal: true,
+          }).catch(() => undefined);
+        }
+        throw err;
+      }
     },
 
     async getModelInfo(): Promise<TTSModelInfo> {

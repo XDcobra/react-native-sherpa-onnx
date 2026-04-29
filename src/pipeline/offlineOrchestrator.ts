@@ -98,9 +98,21 @@ export interface AudioToTextSegmentMapping {
   text: string;
 }
 
+export interface TextToAudioSegmentMapping {
+  textSegmentId: string;
+  speechSegmentId: string;
+  segmentIndex: number;
+  text: string;
+}
+
 export interface AudioToTextOrchestrationResult
   extends OrchestrationResult<OfflineTextBufferRef> {
   segmentMappings: AudioToTextSegmentMapping[];
+}
+
+export interface TextToAudioOrchestrationResult
+  extends OrchestrationResult<OfflineAudioBufferRef> {
+  segmentMappings: TextToAudioSegmentMapping[];
 }
 
 type SessionState =
@@ -963,6 +975,328 @@ export async function runOfflineTextPipeline(
       },
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
+    };
+  }
+}
+
+export async function runOfflineTextToAudioPipeline(
+  input: OfflineTextBufferIdSource,
+  consumer: (
+    segIn: OfflineTextBufferRef,
+    segOut: OfflineAudioBufferRef
+  ) => Promise<void>,
+  config: OrchestrationConfig & { sampleRate: number; channels?: number }
+): Promise<TextToAudioOrchestrationResult> {
+  const strategy = normalizeRecovery(config.errorRecovery);
+  const maxRetries = normalizeRetryCount(config.maxRetriesPerSegment);
+  const retryFallback = normalizeRetryFallback(config.retryExhaustedFallback);
+  const overlapChars = Math.max(0, Math.trunc(config.overlapChars ?? 0));
+
+  const sampleRate =
+    Number.isFinite(config.sampleRate) && config.sampleRate > 0
+      ? Math.trunc(config.sampleRate)
+      : 0;
+  const channelCount =
+    Number.isFinite(config.channels) && (config.channels ?? 0) > 0
+      ? Math.trunc(config.channels ?? 1)
+      : 1;
+
+  const session = new OrchestrationSession(nextSessionId('text_audio'));
+  const segmentMappings: TextToAudioSegmentMapping[] = [];
+
+  let accumulator: LiveAudioBufferRef | undefined;
+  let totalSamplesAppended = 0;
+
+  if (sampleRate <= 0) {
+    return {
+      status: 'failed',
+      totalSegments: 0,
+      completedSegments: 0,
+      skippedSegments: [],
+      failedSegment: {
+        segmentIndex: -1,
+        segmentId: `${session.sessionId}_invalid_sample_rate`,
+        error:
+          'ORCHESTRATION_INVALID_ARGUMENT: runOfflineTextToAudioPipeline requires a positive sampleRate',
+        retryCount: 0,
+      },
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
+    };
+  }
+
+  try {
+    const info = await getPipelineTextBufferInfo(input);
+    if (info.kind !== 'offlineTextBuffer') {
+      return {
+        status: 'failed',
+        totalSegments: 0,
+        completedSegments: 0,
+        skippedSegments: [],
+        failedSegment: {
+          segmentIndex: -1,
+          segmentId: 'text_input_kind_mismatch',
+          error:
+            'ORCHESTRATION_INVALID_ARGUMENT: runOfflineTextToAudioPipeline expects an offline text buffer',
+          retryCount: 0,
+        },
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    const segments = await collectTextSegments(
+      input,
+      info,
+      config,
+      session.sessionId
+    );
+    const totalSegments = segments.length;
+    const accumulatorSpoolPath = await resolveOrchestrationAccumulatorPath(
+      session.sessionId
+    );
+
+    accumulator = await createEmptyLiveAudioBuffer({
+      sampleRate,
+      channelCount,
+      retention: {
+        mode: 'path',
+        path: accumulatorSpoolPath,
+        trim: 'session',
+      },
+      segmentation: { mode: 'off' },
+    });
+
+    session.start();
+
+    for (const [i, seg] of segments.entries()) {
+      if (isAbortRequested(config.abortSignal)) {
+        session.cancel();
+        break;
+      }
+
+      const segLength = Math.max(0, seg.endOffset - seg.startOffset);
+      reportProgress(session, config, i, totalSegments, segLength);
+
+      let attempts = 0;
+      let completed = false;
+      while (!completed) {
+        if (isAbortRequested(config.abortSignal)) {
+          session.cancel();
+          break;
+        }
+
+        let tempIn: OfflineTextBufferRef | undefined;
+        let tempOut: OfflineAudioBufferRef | undefined;
+        try {
+          const overlapStart =
+            overlapChars > 0 && i > 0
+              ? Math.max(0, seg.startOffset - overlapChars)
+              : seg.startOffset;
+          const span = Math.max(0, seg.endOffset - overlapStart);
+          const segText =
+            span > 0
+              ? await getOfflineTextBufferTextSlice(input, overlapStart, span)
+              : '';
+
+          tempIn = await createOfflineTextBufferFromText(segText);
+          tempOut = await createEmptyOfflineAudioBuffer(sampleRate, 1);
+
+          await consumer(tempIn, tempOut);
+
+          const outInfo = await getPipelineAudioBufferInfo(tempOut.bufferId);
+          if (outInfo.kind !== 'offlinePcmBuffer') {
+            throw new Error(
+              'ORCHESTRATION_CONSUMER_ERROR: offline text-to-audio consumer must write to an offline audio output buffer'
+            );
+          }
+
+          if (outInfo.numSamples > 0) {
+            await appendOfflineToLiveAudioBuffer(
+              accumulator.bufferId,
+              tempOut.bufferId
+            );
+            totalSamplesAppended += outInfo.numSamples;
+          }
+
+          segmentMappings.push({
+            textSegmentId: seg.segmentId,
+            speechSegmentId: `speech_tts_${session.sessionId}_${seg.segmentIndex}`,
+            segmentIndex: seg.segmentIndex,
+            text: segText,
+          });
+
+          session.addCompletedSegment();
+          completed = true;
+        } catch (err) {
+          const error = formatError(err);
+          session.markRecovering();
+
+          if (strategy === 'retry' && attempts < maxRetries) {
+            attempts += 1;
+            reportProgress(session, config, i, totalSegments, segLength);
+            continue;
+          }
+
+          const exhaustedFallback =
+            strategy === 'retry' ? retryFallback : strategy;
+
+          if (exhaustedFallback === 'skip') {
+            const skipSilenceSamples = Math.max(0, Math.trunc(sampleRate / 10));
+            if (skipSilenceSamples > 0) {
+              appendSamplesToLiveAudioBuffer(
+                accumulator.bufferId,
+                new Float32Array(skipSilenceSamples * channelCount),
+                sampleRate
+              );
+              totalSamplesAppended += skipSilenceSamples;
+            }
+            session.addSkippedSegment({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            completed = true;
+          } else if (exhaustedFallback === 'partial_result') {
+            session.setFailedSegment({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            session.markCompleting();
+            completed = true;
+          } else {
+            session.fail({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            completed = true;
+          }
+        } finally {
+          await cleanupTextTemporaries(tempIn, undefined);
+          await cleanupAudioTemporaries(undefined, tempOut);
+        }
+      }
+
+      if (session.state === 'failed') {
+        break;
+      }
+      if (session.state === 'cancelled') {
+        break;
+      }
+      if (session.state === 'completing') {
+        break;
+      }
+    }
+
+    if (!accumulator) {
+      throw new Error('ORCHESTRATION_INTERNAL_ERROR: accumulator missing');
+    }
+
+    if (session.state === 'failed') {
+      await releasePipelineAudioBuffer(accumulator.bufferId);
+      return {
+        status: 'failed',
+        totalSegments: segments.length,
+        completedSegments: session.completedSegments,
+        skippedSegments: session.skippedSegments,
+        ...(session.failedSegment
+          ? { failedSegment: session.failedSegment }
+          : {}),
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    if (session.state === 'cancelled') {
+      if (!shouldReturnPartialOnCancel(strategy)) {
+        await releasePipelineAudioBuffer(accumulator.bufferId);
+        return {
+          status: 'cancelled',
+          totalSegments: segments.length,
+          completedSegments: session.completedSegments,
+          skippedSegments: session.skippedSegments,
+          processingTimeMs: Date.now() - session.startedAtMs,
+          linkMap: config.linkMap,
+          segmentMappings,
+        };
+      }
+
+      session.markCompleting();
+      const outputBuffer = await finalizeAudioAccumulator(
+        accumulator,
+        sampleRate,
+        totalSamplesAppended
+      );
+      session.markDone();
+      return {
+        outputBuffer,
+        status: 'cancelled',
+        totalSegments: segments.length,
+        completedSegments: session.completedSegments,
+        skippedSegments: session.skippedSegments,
+        ...(session.failedSegment
+          ? { failedSegment: session.failedSegment }
+          : {}),
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    session.markCompleting();
+    const outputBuffer = await finalizeAudioAccumulator(
+      accumulator,
+      sampleRate,
+      totalSamplesAppended
+    );
+    const status: 'complete' | 'partial' =
+      session.failedSegment != null ? 'partial' : 'complete';
+
+    session.markDone();
+    return {
+      outputBuffer,
+      status,
+      totalSegments: segments.length,
+      completedSegments: session.completedSegments,
+      skippedSegments: session.skippedSegments,
+      ...(session.failedSegment
+        ? { failedSegment: session.failedSegment }
+        : {}),
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
+    };
+  } catch (err) {
+    if (accumulator) {
+      try {
+        await releasePipelineAudioBuffer(accumulator.bufferId);
+      } catch {
+        // Ignore cleanup errors in terminal path.
+      }
+    }
+
+    return {
+      status: 'failed',
+      totalSegments: 0,
+      completedSegments: session.completedSegments,
+      skippedSegments: session.skippedSegments,
+      failedSegment: {
+        segmentIndex: -1,
+        segmentId: `${session.sessionId}_fatal`,
+        error: formatError(err),
+        retryCount: 0,
+      },
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
     };
   }
 }
