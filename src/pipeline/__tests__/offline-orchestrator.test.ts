@@ -927,6 +927,17 @@ describe('offline orchestrator', () => {
     expect(result.segmentMappings).toHaveLength(0);
   });
 
+  it('rejects channels other than 1 for text->audio pipeline', async () => {
+    const result = await runOfflineTextToAudioPipeline('txt_in', jest.fn(), {
+      segmentation: { mode: 'auto' },
+      sampleRate: 16000,
+      channels: 2,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.failedSegment?.error).toContain('requires channels=1 (mono)');
+  });
+
   it('runs offline text->audio orchestration and returns segment mappings', async () => {
     segment.getSegments.mockResolvedValue([
       {

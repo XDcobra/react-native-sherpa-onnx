@@ -23,6 +23,11 @@ export async function runOfflineTtsPipeline(
       'SEGMENTATION_POLICY_INVALID: offline TTS does not support segmentation.mode=manual'
     );
   }
+  if (mode === 'off' && options.segmentation?.policy != null) {
+    throw new Error(
+      "SEGMENTATION_POLICY_INVALID: offline TTS ignores segmentation.policy when segmentation.mode='off'; use mode='auto'"
+    );
+  }
   const segmentation =
     mode === 'off'
       ? { mode: 'off' as const }

@@ -149,4 +149,17 @@ describe('runOfflineTtsPipeline', () => {
 
     expect(runOfflineTextToAudioPipeline).not.toHaveBeenCalled();
   });
+
+  it('rejects segmentation.policy when mode is off', async () => {
+    await expect(
+      runOfflineTtsPipeline('txt_off_in', 'tts_1', {
+        segmentation: {
+          mode: 'off',
+          policy: { evaluator: 'text_synthetic_auto' },
+        },
+      })
+    ).rejects.toThrow('SEGMENTATION_POLICY_INVALID');
+
+    expect(runOfflineTextToAudioPipeline).not.toHaveBeenCalled();
+  });
 });

@@ -23,7 +23,8 @@ Final hardening pass before release:
 3. **Cross-platform parity** (Android/iOS behavior and error-code consistency).
 4. **Legacy cleanup** (stale segment models, old adapters, no-longer-used helpers).
 5. **Test hardening** (missing coverage in critical segment/link/runtime paths).
-6. **Documentation closure** (status updates and explicit deviations where intentionally kept).
+6. **CI: Jest (GitHub Actions)** — siehe Workstream 6 unten.
+7. **Documentation closure** (status updates and explicit deviations where intentionally kept).
 
 ---
 
@@ -126,6 +127,26 @@ Minimum test matrix (per feature):
 - Alignment-specific:
   - validate chosen `manual` strategy (supported or rejected) is explicit and tested in both fake-live ingestion and link creation paths.
 
+### 6) GitHub Actions: Jest-Workflow (CI)
+
+Ziel: Die Jest-Test-Suite des Pakets (`yarn test` / `jest`) läuft zuverlässig in CI auf jedem relevanten PR und auf `main`, damit Regressions früh auffallen.
+
+Vorgehen (Phase 7):
+
+1. **Workflow anlegen oder prüfen**  
+   - Falls noch nicht vorhanden: unter `.github/workflows/` einen Workflow hinzufügen, der:
+     - Node gemäß `.nvmrc` / Repository-Standard nutzt,
+     - `yarn install` (bzw. `yarn install --immutable` für Yarn Berry),
+     - **`yarn test --ci`** (Jest) ausführt.  
+   - Im Repo existiert bereits ein Referenz-Workflow: [`.github/workflows/test-js.yml`](../../../.github/workflows/test-js.yml) (`name: Test - JS`, Schritt *Run JS tests* → `yarn test --ci`). Phase 7 soll diesen **verifizieren** (Trigger, Pfade, Node/Yarn) und bei Lücken **anpassen oder erweitern** (z. B. `yarn typecheck` in derselben oder separater Job-Kette, falls gewünscht).
+
+2. **Abdeckung**  
+   - `on:` so wählen, dass SDK-Änderungen an `src/**` und Tests zuverlässig laufen (kein zu aggressives `paths-ignore` für produktiven Code).  
+   - Optional: separater Job nur für schnelle Unit-Tests vs. längere Integrationstests — nur falls nötig.
+
+3. **Definition in DoD**  
+   - Grüner Jest-Run in CI ist Voraussetzung für „Phase 7 / Sub-06 abgeschlossen“; bei rotem Workflow ist kein „release-ready“-Status.
+
 ---
 
 ## Deliverables
@@ -135,7 +156,8 @@ Minimum test matrix (per feature):
 3. **Cleanup Patchset** (dead/legacy code removed).
 4. **JSI Candidate Evaluation Sheet** (candidate, priority, measured baseline, decision, follow-up).
 5. **Test Report** (new tests + executed verification commands).
-6. **Updated statuses** in overview and all touched sub-plans.
+6. **Jest-CI** — funktionierender GitHub Actions Workflow (siehe Workstream 6); mindestens `yarn test --ci` grün auf `main`/PR; Verweis auf die Workflow-Datei im Abschlussbericht.
+7. **Updated statuses** in overview and all touched sub-plans.
 
 ---
 
@@ -146,4 +168,5 @@ Minimum test matrix (per feature):
 - Android/iOS parity for public contracts is verified.
 - Critical segment/link APIs have automated tests covering happy path + edge cases.
 - Migration docs and real implementation are aligned.
+- Jest läuft in GitHub Actions wie in Workstream 6 beschrieben (bestehenden Workflow pflegen oder neuen anlegen).
 

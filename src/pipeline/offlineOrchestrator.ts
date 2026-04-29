@@ -1026,6 +1026,27 @@ export async function runOfflineTextToAudioPipeline(
     };
   }
 
+  if (channelCount !== 1) {
+    return {
+      status: 'failed',
+      totalSegments: 0,
+      completedSegments: 0,
+      skippedSegments: [],
+      failedSegment: {
+        segmentIndex: -1,
+        segmentId: `${session.sessionId}_invalid_channels`,
+        error:
+          'ORCHESTRATION_INVALID_ARGUMENT: runOfflineTextToAudioPipeline requires channels=1 (mono); OfflineTTS segment outputs are mono',
+        retryCount: 0,
+      },
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
+    };
+  }
+
+  const monoChannels = 1 as const;
+
   try {
     const info = await getPipelineTextBufferInfo(input);
     if (info.kind !== 'offlineTextBuffer') {
@@ -1060,7 +1081,7 @@ export async function runOfflineTextToAudioPipeline(
 
     accumulator = await createEmptyLiveAudioBuffer({
       sampleRate,
-      channelCount,
+      channelCount: monoChannels,
       retention: {
         mode: 'path',
         path: accumulatorSpoolPath,
@@ -1102,7 +1123,10 @@ export async function runOfflineTextToAudioPipeline(
               : '';
 
           tempIn = await createOfflineTextBufferFromText(segText);
-          tempOut = await createEmptyOfflineAudioBuffer(sampleRate, 1);
+          tempOut = await createEmptyOfflineAudioBuffer(
+            sampleRate,
+            monoChannels
+          );
 
           await consumer(tempIn, tempOut);
 
@@ -1148,7 +1172,7 @@ export async function runOfflineTextToAudioPipeline(
             if (skipSilenceSamples > 0) {
               appendSamplesToLiveAudioBuffer(
                 accumulator.bufferId,
-                new Float32Array(skipSilenceSamples * channelCount),
+                new Float32Array(skipSilenceSamples * monoChannels),
                 sampleRate
               );
               totalSamplesAppended += skipSilenceSamples;

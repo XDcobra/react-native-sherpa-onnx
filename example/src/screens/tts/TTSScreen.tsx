@@ -616,8 +616,10 @@ export default function TTSScreen() {
     });
   }, []);
 
+  // Mode 4 (streaming + segmentation auto): debounced delta commits while typing.
+  // Mode 3 (streaming manual): only explicit commits — skip auto-append to avoid duplicating manual segments.
   useEffect(() => {
-    if (!streaming) {
+    if (!streaming || !streamingSegmentedMode) {
       if (streamDebounceRef.current) {
         clearTimeout(streamDebounceRef.current);
         streamDebounceRef.current = null;
@@ -634,7 +636,7 @@ export default function TTSScreen() {
         streamDebounceRef.current = null;
       }
     };
-  }, [streaming, inputText, enqueueStreamingText]);
+  }, [streaming, streamingSegmentedMode, inputText, enqueueStreamingText]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -1172,11 +1174,22 @@ export default function TTSScreen() {
 
   const handleManualStreamingCommit = useCallback(async () => {
     const textBufferId = streamTextBufferIdRef.current;
-    const text = inputText.trim();
-    if (!textBufferId || text.length === 0) {
+    const trimmed = inputText.trim();
+    if (!textBufferId || trimmed.length === 0) {
       return;
     }
-    await appendLiveTextSegment(textBufferId, text);
+    const lastCommitted = streamLastTextRef.current;
+    let segmentText: string;
+    if (trimmed.startsWith(lastCommitted)) {
+      segmentText = trimmed.slice(lastCommitted.length);
+    } else {
+      segmentText = trimmed;
+    }
+    if (!segmentText.trim()) {
+      return;
+    }
+    await appendLiveTextSegment(textBufferId, segmentText);
+    streamLastTextRef.current = trimmed;
   }, [inputText]);
 
   const handleCancelStreaming = async () => {

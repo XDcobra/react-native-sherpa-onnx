@@ -25,12 +25,26 @@ jest.mock('../../model-languages', () => ({
 }));
 
 jest.mock('../../audiobuffer', () => ({
-  resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
+  resolvePipelineAudioBufferId: jest.fn((value: unknown) =>
+    typeof value === 'object' &&
+    value !== null &&
+    'bufferId' in value &&
+    typeof (value as { bufferId: unknown }).bufferId === 'string'
+      ? (value as { bufferId: string }).bufferId
+      : String(value)
+  ),
   releasePipelineAudioBuffer: jest.fn(),
 }));
 
 jest.mock('../../textbuffer', () => ({
-  resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
+  resolvePipelineTextBufferId: jest.fn((value: unknown) =>
+    typeof value === 'object' &&
+    value !== null &&
+    'bufferId' in value &&
+    typeof (value as { bufferId: unknown }).bufferId === 'string'
+      ? (value as { bufferId: string }).bufferId
+      : String(value)
+  ),
 }));
 
 jest.mock('../orchestrate', () => ({
@@ -106,6 +120,24 @@ describe('tts synthesize mode 1 (one-shot)', () => {
     expect(native.synthesizeTts).toHaveBeenCalledTimes(1);
     expect(runOfflineTtsPipeline).not.toHaveBeenCalled();
     expect(result.status).toBe('complete');
+  });
+
+  it('rejects segmentation.policy when mode is off', async () => {
+    const tts = await createTTS({
+      modelPath: { type: 'file', path: '/models/tts' },
+    });
+
+    await expect(
+      tts.synthesize(textIn, audioOut, {
+        segmentation: {
+          mode: 'off',
+          policy: { evaluator: 'text_synthetic_auto' },
+        },
+      })
+    ).rejects.toThrow('SEGMENTATION_POLICY_INVALID');
+
+    expect(native.synthesizeTts).not.toHaveBeenCalled();
+    expect(runOfflineTtsPipeline).not.toHaveBeenCalled();
   });
 
   it('rejects manual segmentation mode in offline synth API', async () => {
