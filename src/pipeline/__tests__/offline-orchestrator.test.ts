@@ -236,8 +236,8 @@ describe('offline orchestrator', () => {
     });
 
     const customPolicy = {
-      evaluator: 'continuous_frames' as const,
-      checkpointIntervalMs: 250,
+      evaluator: 'speech_energy_silence' as const,
+      energyThresholdDb: -36,
       minSegmentMs: 500,
       maxSegmentMs: 5000,
     };
