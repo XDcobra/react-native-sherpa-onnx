@@ -97,6 +97,35 @@ Minimum required coverage additions:
 - `SegmentLinkMap` CRUD + duplicate rejection + query semantics + lifecycle
 - cross-platform behavior parity checks (Android/iOS)
 
+### 5) Segmentation Mode Harmonization (Cross-Feature, incl. Alignment)
+
+Goal: remove semantic drift for `segmentation.mode` across all migrated features and align runtime behavior with the segmentation architecture.
+
+Target semantics:
+- `mode: 'off'` = no segmentation engine-driven segmentation.
+- `mode: 'manual'` = caller/manual commit driven flow (streaming-focused); must not silently behave like `auto`.
+- `mode: 'auto'` = SegmentationEngine-driven segmentation with policy.
+- `segmentation.policy` is valid only for `mode: 'auto'`; invalid combinations must fail with `SEGMENTATION_POLICY_INVALID` (shared code across features).
+
+Scope (Phase 7):
+- STT, TTS, Punctuation, Enhancement, Alignment.
+- Type-level + runtime-level behavior parity (no "manual in types but auto in runtime" drift).
+- Error-code/message consistency for invalid mode/policy combinations.
+
+Minimum test matrix (per feature):
+- `mode='off'`: verify non-segmented path and expected output semantics.
+- `mode='manual'`:
+  - where supported: verify manual-commit path, no implicit engine attach.
+  - where not supported: verify explicit rejection (`SEGMENTATION_POLICY_INVALID`), no fallback.
+- `mode='auto'`: verify attach/orchestrated segmentation path with valid policy.
+- `policy` with `mode='off'|'manual'`: verify explicit reject (`SEGMENTATION_POLICY_INVALID`).
+- invalid `auto` policy shape/evaluator: verify explicit reject (`SEGMENTATION_POLICY_INVALID`).
+- parity checks:
+  - identical contract behavior on Android/iOS.
+  - consistent behavior across offline/streaming APIs where both are exposed.
+- Alignment-specific:
+  - validate chosen `manual` strategy (supported or rejected) is explicit and tested in both fake-live ingestion and link creation paths.
+
 ---
 
 ## Deliverables
