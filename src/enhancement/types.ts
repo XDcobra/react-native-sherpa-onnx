@@ -1,6 +1,13 @@
 import type { ModelPathConfig } from '../types';
 import type { EnhancementDetectModelResult } from '../types/modelDetect';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  ErrorRecoveryStrategy,
+  FailedSegmentInfo,
+  OrchestrationProgress,
+  SkippedSegmentInfo,
+} from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 export {
   DETECTION_SOURCES,
@@ -28,6 +35,30 @@ export interface EnhancementInitializeOptions {
 
 export type EnhancementDetectResult = EnhancementDetectModelResult;
 
+export interface EnhanceSegmentationConfig {
+  mode?: 'off' | 'manual' | 'auto';
+  policy?: SegmentationPolicy;
+}
+
+export interface EnhanceOptions {
+  segmentation?: EnhanceSegmentationConfig;
+  errorRecovery?: ErrorRecoveryStrategy;
+  maxRetriesPerSegment?: number;
+  retryExhaustedFallback?: 'abort' | 'skip';
+  abortSignal?: AbortSignal;
+  onProgress?: (progress: OrchestrationProgress) => void;
+  overlapSamples?: number;
+}
+
+export interface EnhancementResult {
+  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  totalSegments: number;
+  completedSegments: number;
+  skippedSegments: SkippedSegmentInfo[];
+  failedSegment?: FailedSegmentInfo;
+  processingTimeMs: number;
+}
+
 export interface EnhancementEngine {
   readonly instanceId: string;
   /**
@@ -37,8 +68,9 @@ export interface EnhancementEngine {
    */
   enhance(
     audioIn: OfflineAudioBufferIdSource,
-    audioOut: OfflineAudioBufferIdSource
-  ): Promise<void>;
+    audioOut: OfflineAudioBufferIdSource,
+    options?: EnhanceOptions
+  ): Promise<EnhancementResult>;
   getSampleRate(): Promise<number>;
   destroy(): Promise<void>;
 }

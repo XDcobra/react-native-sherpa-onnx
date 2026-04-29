@@ -5,15 +5,21 @@ import { resolveFileSourceForDetect } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  releasePipelineAudioBuffer,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
 import type {
   DetectedModelEntry,
   DetectionSource,
   EnhancementDetectResult,
   EnhancementEngine,
   EnhancementInitializeOptions,
+  EnhanceOptions,
+  EnhancementResult,
 } from './types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { runOfflineEnhancementPipeline } from './orchestrate';
 
 let enhancementInstanceCounter = 0;
 
@@ -117,12 +123,57 @@ export async function createEnhancement(
     },
     async enhance(
       audioIn: OfflineAudioBufferIdSource,
-      audioOut: OfflineAudioBufferIdSource
-    ): Promise<void> {
+      audioOut: OfflineAudioBufferIdSource,
+      enhanceOptions?: EnhanceOptions
+    ): Promise<EnhancementResult> {
       guard();
+      const startedAtMs = Date.now();
       const inId = resolvePipelineAudioBufferId(audioIn);
       const outId = resolvePipelineAudioBufferId(audioOut);
-      await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
+
+      const segmentationMode = enhanceOptions?.segmentation?.mode ?? 'off';
+      if (segmentationMode === 'off') {
+        await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
+        return {
+          status: 'complete',
+          totalSegments: 1,
+          completedSegments: 1,
+          skippedSegments: [],
+          processingTimeMs: Date.now() - startedAtMs,
+        };
+      }
+
+      const orchestrated = await runOfflineEnhancementPipeline(
+        inId,
+        instanceId,
+        enhanceOptions ?? {}
+      );
+
+      const outputBuffer = orchestrated.outputBuffer;
+      if (outputBuffer) {
+        try {
+          await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
+            outId,
+            outputBuffer.bufferId
+          );
+        } finally {
+          // Source may already be consumed by populate; release is best-effort cleanup.
+          await releasePipelineAudioBuffer(outputBuffer.bufferId).catch(
+            () => undefined
+          );
+        }
+      }
+
+      return {
+        status: orchestrated.status,
+        totalSegments: orchestrated.totalSegments,
+        completedSegments: orchestrated.completedSegments,
+        skippedSegments: orchestrated.skippedSegments,
+        ...(orchestrated.failedSegment
+          ? { failedSegment: orchestrated.failedSegment }
+          : {}),
+        processingTimeMs: orchestrated.processingTimeMs,
+      };
     },
     async getSampleRate(): Promise<number> {
       guard();
@@ -140,6 +191,7 @@ export { createStreamingEnhancement } from './streaming';
 export type {
   StreamingEnhancementEngine,
   StreamingEnhancementInitializeOptions,
+  StreamingEnhancementEnhanceOptions,
   EnhancementPipelineHandle,
 } from './streamingTypes';
 
@@ -148,5 +200,8 @@ export type {
   EnhancementInitializeOptions,
   EnhancementDetectResult,
   EnhancementEngine,
+  EnhanceOptions,
+  EnhancementResult,
+  EnhanceSegmentationConfig,
 } from './types';
 export { ENHANCEMENT_MODEL_TYPES } from './types';

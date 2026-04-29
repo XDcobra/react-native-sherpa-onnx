@@ -268,6 +268,18 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Populate an existing empty offline audio buffer exactly once by adopting
+   * storage from another offline audio buffer.
+   *
+   * The source buffer is invalidated/consumed after successful adoption.
+   */
+  populateOfflineAudioBufferIfEmpty(
+    targetBufferId: string,
+    sourceBufferId: string,
+    options?: Object
+  ): Promise<void>;
+
+  /**
    * Create an empty live audio buffer with a rolling-window ring buffer.
    * @param options.sampleRate - Sample rate in Hz.
    * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
