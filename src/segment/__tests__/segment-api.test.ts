@@ -2,6 +2,10 @@ jest.mock('react-native', () => {
   const mockNative = {
     setLiveTextBufferPartial: jest.fn(),
     appendLiveTextBufferPartial: jest.fn(),
+    segmentOfflineBuffer: jest.fn(),
+    attachSegmentationEngine: jest.fn(),
+    detachSegmentationEngine: jest.fn(),
+    getSegmentationEngineInfo: jest.fn(),
     createSegmentLinkMap: jest.fn(),
     addSegmentLink: jest.fn(),
     addSegmentLinks: jest.fn(),
@@ -49,7 +53,12 @@ jest.mock('../../segmentbuffer', () => ({
   releasePipelineSegmentBuffer: jest.fn(),
 }));
 
-import { getSegmentBuffer, getSegmentCount, getSegments } from '../index';
+import {
+  getSegmentBuffer,
+  getSegmentCount,
+  getSegments,
+  segmentOfflineBuffer,
+} from '../index';
 
 describe('segment api offline integration', () => {
   const mockTextbuffer = jest.requireMock('../../textbuffer') as any;
@@ -58,6 +67,14 @@ describe('segment api offline integration', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    const native = (jest.requireMock('react-native') as any).__mockNative;
+    native.segmentOfflineBuffer.mockResolvedValue({
+      bufferId: 'seg_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      kind: 'offlineSegmentBuffer',
+      state: 'immutable',
+      segmentCount: 1,
+      sourceAudioBufferId: 'off_11111111-1111-1111-1111-111111111111',
+    });
     mockSegmentbuffer.createLiveSegmentBuffer.mockResolvedValue({
       bufferId: 'seg_live_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     });
@@ -88,12 +105,65 @@ describe('segment api offline integration', () => {
     });
   });
 
-  it('returns synthesized text segment for offline text buffers', async () => {
+  it('rejects offline text reads before materialization', async () => {
     mockTextbuffer.getPipelineTextBufferInfo.mockResolvedValue({
       kind: 'offlineTextBuffer',
       utf16Length: 5,
     });
-    mockTextbuffer.getOfflineTextBufferTextSlice.mockResolvedValue('hello');
+
+    await expect(
+      getSegments('txt_off_11111111-1111-1111-1111-111111111111', 0, 10)
+    ).rejects.toThrow('SEGMENT_NOT_AVAILABLE');
+  });
+
+  it('materializes native offline text one-shot segments', async () => {
+    const native = (jest.requireMock('react-native') as any).__mockNative;
+    native.segmentOfflineBuffer.mockImplementation(
+      async (_bufferId: string, domain: 'text' | 'speech') => {
+        if (domain === 'text') {
+          return {
+            bufferId: 'txt_off_11111111-1111-1111-1111-111111111111',
+            kind: 'offlineTextBuffer',
+            state: 'immutable',
+            segmentCount: 2,
+            segments: [
+              {
+                segmentId:
+                  'txtseg_txt_off_11111111-1111-1111-1111-111111111111_0',
+                startOffset: 0,
+                endOffset: 6,
+                reason: 'punctuation',
+                source: 'segmentation_engine',
+                text: 'hello.',
+              },
+              {
+                segmentId:
+                  'txtseg_txt_off_11111111-1111-1111-1111-111111111111_1',
+                startOffset: 6,
+                endOffset: 11,
+                reason: 'finalize',
+                source: 'segmentation_engine',
+                text: 'world',
+              },
+            ],
+          };
+        }
+
+        return {
+          bufferId: 'seg_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          kind: 'offlineSegmentBuffer',
+          state: 'immutable',
+          segmentCount: 1,
+          sourceAudioBufferId: 'off_11111111-1111-1111-1111-111111111111',
+        };
+      }
+    );
+
+    await segmentOfflineBuffer('txt_off_11111111-1111-1111-1111-111111111111', {
+      evaluator: 'text_synthetic_auto',
+      sentenceBoundary: true,
+      maxLengthChars: 500,
+    });
 
     const segments = await getSegments(
       'txt_off_11111111-1111-1111-1111-111111111111',
@@ -101,13 +171,24 @@ describe('segment api offline integration', () => {
       10
     );
 
-    expect(segments).toHaveLength(1);
+    expect(segments).toHaveLength(2);
     expect(segments[0]).toMatchObject({
       domain: 'text',
-      text: 'hello',
+      text: 'hello.',
+      reason: 'punctuation',
+      source: 'segmentation_engine',
       startOffset: 0,
-      endOffset: 5,
+      endOffset: 6,
       segmentIndex: 0,
+    });
+    expect(segments[1]).toMatchObject({
+      domain: 'text',
+      text: 'world',
+      reason: 'finalize',
+      source: 'segmentation_engine',
+      startOffset: 6,
+      endOffset: 11,
+      segmentIndex: 1,
     });
   });
 
@@ -155,9 +236,28 @@ describe('segment api offline integration', () => {
   });
 
   it('throws SEGMENT_INDEX_OUT_OF_RANGE for out-of-range reads', async () => {
-    mockTextbuffer.getPipelineTextBufferInfo.mockResolvedValue({
+    const native = (jest.requireMock('react-native') as any).__mockNative;
+    native.segmentOfflineBuffer.mockResolvedValue({
+      bufferId: 'txt_off_11111111-1111-1111-1111-111111111111',
       kind: 'offlineTextBuffer',
-      utf16Length: 5,
+      state: 'immutable',
+      segmentCount: 1,
+      segments: [
+        {
+          segmentId: 'txtseg_txt_off_11111111-1111-1111-1111-111111111111_0',
+          startOffset: 0,
+          endOffset: 5,
+          reason: 'finalize',
+          source: 'segmentation_engine',
+          text: 'hello',
+        },
+      ],
+    });
+
+    await segmentOfflineBuffer('txt_off_11111111-1111-1111-1111-111111111111', {
+      evaluator: 'text_synthetic_auto',
+      sentenceBoundary: true,
+      maxLengthChars: 500,
     });
 
     await expect(
@@ -165,11 +265,9 @@ describe('segment api offline integration', () => {
     ).rejects.toThrow('SEGMENT_INDEX_OUT_OF_RANGE');
   });
 
-  it('reports synthesized segment count for offline text and audio', async () => {
-    mockTextbuffer.getPipelineTextBufferInfo.mockResolvedValue({
-      kind: 'offlineTextBuffer',
-      utf16Length: 2,
-    });
+  it('reports cached segment count for offline text and native count for audio', async () => {
+    const textBufferId = 'txt_off_22222222-2222-2222-2222-222222222222';
+
     mockAudiobuffer.getPipelineAudioBufferInfo.mockResolvedValue({
       kind: 'offlinePcmBuffer',
       sampleRate: 16000,
@@ -177,14 +275,48 @@ describe('segment api offline integration', () => {
       durationMs: 0.625,
     });
 
-    const textCount = await getSegmentCount(
-      'txt_off_11111111-1111-1111-1111-111111111111'
+    await expect(getSegmentCount(textBufferId)).rejects.toThrow(
+      'SEGMENT_NOT_AVAILABLE'
     );
+
+    const native = (jest.requireMock('react-native') as any).__mockNative;
+    native.segmentOfflineBuffer.mockResolvedValue({
+      bufferId: textBufferId,
+      kind: 'offlineTextBuffer',
+      state: 'immutable',
+      segmentCount: 2,
+      segments: [
+        {
+          segmentId: `txtseg_${textBufferId}_0`,
+          startOffset: 0,
+          endOffset: 1,
+          reason: 'punctuation',
+          source: 'segmentation_engine',
+          text: 'a',
+        },
+        {
+          segmentId: `txtseg_${textBufferId}_1`,
+          startOffset: 1,
+          endOffset: 2,
+          reason: 'finalize',
+          source: 'segmentation_engine',
+          text: 'b',
+        },
+      ],
+    });
+
+    await segmentOfflineBuffer(textBufferId, {
+      evaluator: 'text_synthetic_auto',
+      sentenceBoundary: true,
+      maxLengthChars: 500,
+    });
+
+    const textCount = await getSegmentCount(textBufferId);
     const audioCount = await getSegmentCount(
       'off_11111111-1111-1111-1111-111111111111'
     );
 
-    expect(textCount).toBe(1);
+    expect(textCount).toBe(2);
     expect(audioCount).toBe(1);
   });
 });
