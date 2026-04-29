@@ -35,6 +35,17 @@ static const char *kPaAppendSourceFileIngest = "file_ingest";
 static const char *kPaAppendSourceUnknown = "unknown";
 static const char *kPaAppendSourceMixed = "mixed";
 
+// Segmentation engine hooks are implemented in segmentbuffer bridge.
+void seg_engine_on_audio_append(
+  const std::string &liveBufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int64_t totalSamplesWritten
+);
+void seg_engine_on_buffer_finalized(const std::string &bufferId);
+void seg_engine_on_buffer_released(const std::string &bufferId);
+
 // ==================== Inline utility functions ====================
 
 inline std::vector<float> pa_resampleLinear(const float *input, size_t inputSize, int inputRate, int outputRate) {
@@ -365,6 +376,7 @@ struct PaLiveEntry {
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
+    seg_engine_on_audio_append(bufferId, toAppend, appendCount, sampleRate, totalSamplesWritten);
     return AppendResult::APPENDED;
   }
 
@@ -485,6 +497,8 @@ struct PaLiveEntry {
 
     // Wake pipeline workers so they detect the FINISHED state immediately
     notifyAppendListeners();
+
+    seg_engine_on_buffer_finalized(bufferId);
   }
 
   std::vector<float> snapshotRing() {
@@ -685,6 +699,7 @@ struct PaLiveEntry {
       std::remove(spoolPath.c_str());
     }
     cursors.clear();
+    seg_engine_on_buffer_released(bufferId);
   }
 
   void detachSpoolForTransfer() {

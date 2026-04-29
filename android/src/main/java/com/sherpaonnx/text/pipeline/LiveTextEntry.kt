@@ -2,6 +2,7 @@ package com.sherpaonnx.text.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -377,6 +378,8 @@ class LiveTextEntry(
       recordPayload = text,
       checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
     )
+
+    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
   }
 
   /**
@@ -401,6 +404,8 @@ class LiveTextEntry(
       recordPayload = text,
       checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
     )
+
+    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
   }
 
   /**
@@ -566,6 +571,7 @@ class LiveTextEntry(
     }
 
     notifyAppendListeners()
+    SegmentationEngineRegistry.onBufferFinalized(bufferId)
   }
 
   fun toWritableMap(): WritableMap {
@@ -698,6 +704,7 @@ class LiveTextEntry(
     cursors.clear()
     appendListeners.clear()
     commitListeners.clear()
+    SegmentationEngineRegistry.onBufferReleased(bufferId)
   }
 }
 

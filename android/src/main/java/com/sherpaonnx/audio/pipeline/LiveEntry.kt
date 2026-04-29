@@ -2,6 +2,7 @@ package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import android.os.SystemClock
 import java.io.File
 import java.io.RandomAccessFile
@@ -282,6 +283,14 @@ class LiveEntry(
         listener(event)
       }
     }
+
+    SegmentationEngineRegistry.onLiveAudioWrite(
+      bufferId = bufferId,
+      chunk = toAppend.copyOf(),
+      sampleRate = sampleRate,
+      totalSamplesWritten = totalSamplesWritten,
+    )
+
     return AppendResult.APPENDED
   }
 
@@ -404,6 +413,8 @@ class LiveEntry(
         listener(event)
       }
     }
+
+    SegmentationEngineRegistry.onBufferFinalized(bufferId)
   }
 
   // ========== Snapshot / Read ==========
@@ -631,6 +642,8 @@ class LiveEntry(
       try { File(path).delete() } catch (_: Exception) {}
     }
     synchronized(cursors) { cursors.clear() }
+
+    SegmentationEngineRegistry.onBufferReleased(bufferId)
   }
 
   // ========== Inner classes ==========

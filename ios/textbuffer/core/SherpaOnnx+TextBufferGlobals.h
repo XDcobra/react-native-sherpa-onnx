@@ -19,6 +19,11 @@
 #include <vector>
 #include <zlib.h>
 
+// Segmentation engine hooks are implemented in segmentbuffer bridge.
+void seg_engine_on_text_write(const std::string &liveBufferId);
+void seg_engine_on_buffer_finalized(const std::string &bufferId);
+void seg_engine_on_buffer_released(const std::string &bufferId);
+
 // Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
 struct TxtOfflineEntry;
 
@@ -491,6 +496,7 @@ struct TxtLiveEntry {
 		totalCharsWritten += len;
 		revision.fetch_add(1);
 		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+		seg_engine_on_text_write(bufferId);
 	}
 
 	void appendText(const std::string &text) {
@@ -512,6 +518,7 @@ struct TxtLiveEntry {
 		totalCharsWritten += appendLen;
 		revision.fetch_add(1);
 		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+		seg_engine_on_text_write(bufferId);
 	}
 
 	int commitSegment(const std::string &text,
@@ -585,6 +592,7 @@ struct TxtLiveEntry {
 		}
 
 		notifyAppendListeners();
+		seg_engine_on_buffer_finalized(bufferId);
 	}
 
 	std::string snapshotText() {
@@ -806,6 +814,7 @@ struct TxtLiveEntry {
 			std::lock_guard<std::mutex> lock(commitListenerMutex);
 			commitListeners.clear();
 		}
+		seg_engine_on_buffer_released(bufferId);
 	}
 };
 

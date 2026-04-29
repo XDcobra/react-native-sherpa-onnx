@@ -53,4 +53,25 @@ bool seg_live_append_segment(
 );
 
 void seg_release_all_entries();
+
+// Segmentation engine lifecycle hooks.
+void seg_engine_on_text_write(const std::string &liveBufferId);
+void seg_engine_on_audio_append(
+  const std::string &liveBufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int64_t totalSamplesWritten
+);
+void seg_engine_on_buffer_finalized(const std::string &bufferId);
+void seg_engine_on_buffer_released(const std::string &bufferId);
+
+// Segment annotation metadata (reason/source/timestamps) emitted by native engines.
+bool seg_engine_peek_annotation(
+  const std::string &segmentId,
+  std::string *reason,
+  std::string *source,
+  int64_t *createdAtMs,
+  int *segmentIndex
+);
 #endif

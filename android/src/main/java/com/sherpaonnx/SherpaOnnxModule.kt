@@ -71,6 +71,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         val eventEmitter = reactApplicationContext
           .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val annotation = com.sherpaonnx.segment.engine.SegmentationEngineRegistry
+          .peekSegmentAnnotation(rec.id)
         val m = com.facebook.react.bridge.Arguments.createMap()
         m.putString("liveBufferId", liveId)
         m.putString("segmentId", rec.id)
@@ -80,6 +82,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         m.putInt("endSample", rec.endSample)
         m.putInt("sampleRate", rec.sampleRate)
         m.putInt("durationMs", rec.durationMs)
+        annotation?.let {
+          m.putString("reason", it.reason)
+          m.putString("source", it.source)
+          m.putDouble("createdAtMs", it.createdAtMs.toDouble())
+        }
         rec.confidence?.let { m.putDouble("confidence", it) }
         if (!rec.payloadJson.isNullOrEmpty()) {
           try {
@@ -326,6 +333,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
+    com.sherpaonnx.segment.engine.SegmentationEngineRegistry.releaseAll()
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
     com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.releaseAll()
     com.sherpaonnx.segment.core.SegmentLinkMapRegistry.releaseAll()
@@ -2698,6 +2706,217 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun attachSegmentationEngine(
+    bufferId: String,
+    domain: String,
+    policy: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val policyMap = policy.toHashMap() as Map<String, Any?>
+      val info = com.sherpaonnx.segment.engine.SegmentationEngineRegistry.attachEngine(
+        bufferId = bufferId,
+        domainRaw = domain,
+        rawPolicy = policyMap,
+      )
+      promise.resolve(segmentationEngineInfoToWritableMap(info))
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun detachSegmentationEngine(
+    engineId: String,
+    flushFinal: Boolean?,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.detachEngine(
+        engineId = engineId,
+        flushFinal = flushFinal == true,
+      )
+      promise.resolve(null)
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun getSegmentationEngineInfo(engineId: String, promise: Promise) {
+    try {
+      val info =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.getEngineInfo(engineId)
+      promise.resolve(segmentationEngineInfoToWritableMap(info))
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun segmentOfflineBuffer(
+    bufferId: String,
+    domain: String,
+    policy: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val policyMap = policy.toHashMap() as Map<String, Any?>
+      val result = com.sherpaonnx.segment.engine.SegmentationEngineRegistry.segmentOfflineBuffer(
+        bufferId = bufferId,
+        domainRaw = domain,
+        rawPolicy = policyMap,
+      )
+
+      val out = Arguments.createMap()
+      val resultBufferId = result["bufferId"] as? String ?: bufferId
+      out.putString("bufferId", resultBufferId)
+      out.putString("kind", result["kind"] as? String ?: "offlineSegmentBuffer")
+      out.putString("state", result["state"] as? String ?: "immutable")
+      (result["segmentCount"] as? Number)?.let { out.putInt("segmentCount", it.toInt()) }
+      (result["sourceAudioBufferId"] as? String)?.let { out.putString("sourceAudioBufferId", it) }
+      @Suppress("UNCHECKED_CAST")
+      val textSegments = result["segments"] as? List<Map<String, Any?>>
+      if (!textSegments.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        textSegments.forEach { segment ->
+          val s = Arguments.createMap()
+          s.putString("segmentId", segment["segmentId"] as? String ?: "")
+          s.putInt("startOffset", (segment["startOffset"] as? Number)?.toInt() ?: 0)
+          s.putInt("endOffset", (segment["endOffset"] as? Number)?.toInt() ?: 0)
+          s.putString("reason", segment["reason"] as? String ?: "manual_commit")
+          s.putString("source", segment["source"] as? String ?: "manual")
+          s.putString("text", segment["text"] as? String ?: "")
+          arr.pushMap(s)
+        }
+        out.putArray("segments", arr)
+      }
+      promise.resolve(out)
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  private fun segmentationEngineInfoToWritableMap(
+    info: com.sherpaonnx.segment.engine.SegmentationEngineInfoSnapshot,
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("engineId", info.engineId)
+    out.putString("attachedBufferId", info.attachedBufferId)
+    out.putString(
+      "domain",
+      if (info.domain == com.sherpaonnx.segment.engine.EngineDomain.TEXT) {
+        "text"
+      } else {
+        "speech"
+      }
+    )
+    out.putString(
+      "state",
+      when (info.state) {
+        com.sherpaonnx.segment.engine.EngineState.ACTIVE -> "active"
+        com.sherpaonnx.segment.engine.EngineState.DETACHED,
+        com.sherpaonnx.segment.engine.EngineState.RELEASED -> "detached"
+      }
+    )
+    out.putInt("totalSegmentsCommitted", info.totalSegmentsCommitted)
+    info.lastSegmentId?.let { out.putString("lastSegmentId", it) }
+    info.segmentBufferId?.let { out.putString("segmentBufferId", it) }
+
+    val policy = Arguments.createMap()
+    policy.putString("evaluator", info.policy.evaluator)
+    policy.putInt("maxLengthChars", info.policy.maxLengthChars)
+    policy.putBoolean("sentenceBoundary", info.policy.sentenceBoundary)
+    policy.putInt("silenceThresholdMs", info.policy.silenceThresholdMs)
+    policy.putDouble("energyThresholdDb", info.policy.energyThresholdDb)
+    policy.putInt("minSegmentMs", info.policy.minSegmentMs)
+    policy.putInt("maxSegmentMs", info.policy.maxSegmentMs)
+    policy.putInt("hangoverMs", info.policy.hangoverMs)
+    policy.putInt("checkpointIntervalMs", info.policy.checkpointIntervalMs)
+    out.putMap("policy", policy)
+
+    return out
+  }
+
+  private fun segmentRecordToWritableMapWithAnnotation(
+    record: com.sherpaonnx.segment.pipeline.SegmentRecord,
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("id", record.id)
+    out.putString("kind", record.kind)
+    out.putString("sourceAudioBufferId", record.sourceAudioBufferId)
+    out.putInt("startSample", record.startSample)
+    out.putInt("endSample", record.endSample)
+    out.putInt("sampleRate", record.sampleRate)
+    out.putInt("durationMs", record.durationMs)
+    record.confidence?.let { out.putDouble("confidence", it) }
+
+    val annotation =
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(
+        record.id
+      )
+    annotation?.let {
+      out.putString("reason", it.reason)
+      out.putString("source", it.source)
+      out.putDouble("createdAtMs", it.createdAtMs.toDouble())
+    }
+
+    record.payloadJson?.let { payloadJson ->
+      try {
+        val json = JSONObject(payloadJson)
+        val payload = Arguments.createMap()
+        val keys = json.keys()
+        while (keys.hasNext()) {
+          val key = keys.next()
+          if (json.isNull(key)) {
+            payload.putNull(key)
+            continue
+          }
+          when (val value = json.get(key)) {
+            is String -> payload.putString(key, value)
+            is Int -> payload.putInt(key, value)
+            is Long -> payload.putDouble(key, value.toDouble())
+            is Float -> payload.putDouble(key, value.toDouble())
+            is Double -> payload.putDouble(key, value)
+            is Boolean -> payload.putBoolean(key, value)
+            else -> payload.putString(key, value.toString())
+          }
+        }
+        out.putMap("payload", payload)
+      } catch (_: Exception) {
+      }
+    }
+
+    return out
+  }
+
+  private fun segmentRecordsToWritableArrayWithAnnotation(
+    records: List<com.sherpaonnx.segment.pipeline.SegmentRecord>,
+  ): com.facebook.react.bridge.WritableArray {
+    val arr = Arguments.createArray()
+    for (record in records) {
+      arr.pushMap(segmentRecordToWritableMapWithAnnotation(record))
+    }
+    return arr
+  }
+
   // ==================== Pipeline Segment Buffers ====================
 
   override fun createLiveSegmentBuffer(options: ReadableMap, promise: Promise) {
@@ -2957,7 +3176,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val count = maxCount?.toInt() ?: 1024
       val segments = entry.snapshotSegments(from, count)
       val out = Arguments.createMap()
-      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -2980,7 +3199,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
       val out = Arguments.createMap()
-      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
