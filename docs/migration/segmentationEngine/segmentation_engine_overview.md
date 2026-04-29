@@ -83,7 +83,7 @@ Da das Fundament (Phase 1) sehr umfangreich ist, wird es in vier machbare Schrit
 | **Phase 1b** | Storage & Write APIs (Sub-Plan 03 + Sub-Plan 01 Runtime-Teil) | Symmetric Write API (`setPartial`, `appendPartial`), `getSegmentBuffer()` Abstraktion, Event-Payloads **sowie SegmentLinkMap Runtime-APIs** (`createSegmentLinkMap`, `addSegmentLink(s)`, `getSpeechSegmentsForText`, `getTextSegmentsForSpeech`, `getAllSegmentLinks`, `getSegmentLinkCount`, `getSegmentLinkMapInfo`, `removeSegmentLink`, `releaseSegmentLinkMap`) inkl. nativer LinkMap-Store/Indizes. **Status: Completed** |
 | **Phase 1c** | Orchestration & Transfer (Sub-Plan 04) | `transferOfflineAudioBufferFromLive`, `OrchestrationSession` State Machine, Error Recovery Strategien (abort, skip, retry, partial). **Status: Completed** *(Benchmark-Teil explizit nicht erforderlich).* |
 | **Phase 1d** | Engine Core (Sub-Plan 02) | Native Evaluatoren (Energy, Punctuation, etc.), Buffer Attachment, Offline-Segmentation Loop. **Status: Completed** |
-| **Phase 2** | VAD + STT (+ `stt_produced` Links) | VAD liefert Grenzen, STT nutzt diese und produziert Text. |
+| **Phase 2** | VAD + STT (+ `stt_produced` Links) | VAD liefert Grenzen, STT nutzt diese und produziert Text. **Status: Completed** (Code + Sub-05/Plan-Parität; Jest-Parity: `segment-api`, `transcribe-segmented`, `offline-orchestrator`). |
 | **Phase 3** | Enhancement (Offline segmentiert) | Verifizierung der Audio-Orchestration & Error Recovery. |
 | **Phase 4** | Punctuation | Verifizierung der Text-Orchestration. |
 | **Phase 5** | TTS (Incremental entfernen, + `tts_produced` Links) | Höchstes Risiko, benötigt Parity. Produziert Links für Playback-Highlighting. |
