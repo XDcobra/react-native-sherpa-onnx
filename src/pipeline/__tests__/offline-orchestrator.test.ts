@@ -34,6 +34,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
 import {
   runOfflineAudioToTextPipeline,
   runOfflineAudioPipeline,
+  runOfflineTextToAudioPipeline,
   runOfflineTextPipeline,
 } from '../offlineOrchestrator';
 import SherpaOnnx from '../../NativeSherpaOnnx';
@@ -924,5 +925,101 @@ describe('offline orchestrator', () => {
     expect(result.status).toBe('complete');
     expect(result.skippedSegments).toHaveLength(1);
     expect(result.segmentMappings).toHaveLength(0);
+  });
+
+  it('rejects channels other than 1 for text->audio pipeline', async () => {
+    const result = await runOfflineTextToAudioPipeline('txt_in', jest.fn(), {
+      segmentation: { mode: 'auto' },
+      sampleRate: 16000,
+      channels: 2,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.failedSegment?.error).toContain('requires channels=1 (mono)');
+  });
+
+  it('runs offline text->audio orchestration and returns segment mappings', async () => {
+    segment.getSegments.mockResolvedValue([
+      {
+        segmentId: 'txt_seg_1',
+        domain: 'text',
+        startOffset: 0,
+        endOffset: 4,
+        reason: 'manual_commit',
+        source: 'external',
+        createdAtMs: Date.now(),
+        segmentIndex: 0,
+        text: 'test',
+        utf16Length: 4,
+      },
+    ]);
+
+    audio.getPipelineAudioBufferInfo.mockResolvedValue({
+      bufferId: 'off_tmp_out',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 4,
+      durationMs: 0.25,
+    });
+
+    const result = await runOfflineTextToAudioPipeline(
+      'txt_in',
+      jest.fn().mockResolvedValue(undefined),
+      {
+        segmentation: { mode: 'auto' },
+        sampleRate: 16000,
+        channels: 1,
+      }
+    );
+
+    expect(result.status).toBe('complete');
+    expect(result.outputBuffer?.bufferId).toBe('off_final');
+    expect(result.segmentMappings).toHaveLength(1);
+    expect(result.segmentMappings[0]).toMatchObject({
+      textSegmentId: 'txt_seg_1',
+      segmentIndex: 0,
+      text: 'test',
+    });
+    expect(result.segmentMappings[0]?.speechSegmentId).toMatch(
+      /^speech_tts_text_audio_\d+_\d+_0$/
+    );
+    expect(audio.appendOfflineToLiveAudioBuffer).toHaveBeenCalledWith(
+      'live_acc',
+      'off_tmp_out'
+    );
+  });
+
+  it('text->audio skip recovery inserts silence checkpoint and reports skip', async () => {
+    segment.getSegments.mockResolvedValue([
+      {
+        segmentId: 'txt_seg_skip',
+        domain: 'text',
+        startOffset: 0,
+        endOffset: 4,
+        reason: 'manual_commit',
+        source: 'external',
+        createdAtMs: Date.now(),
+        segmentIndex: 0,
+        text: 'test',
+        utf16Length: 4,
+      },
+    ]);
+
+    const result = await runOfflineTextToAudioPipeline(
+      'txt_in',
+      jest.fn().mockRejectedValue(new Error('tts_fail')),
+      {
+        segmentation: { mode: 'auto' },
+        errorRecovery: 'skip',
+        sampleRate: 16000,
+      }
+    );
+
+    expect(result.status).toBe('complete');
+    expect(result.skippedSegments).toHaveLength(1);
+    expect(result.segmentMappings).toHaveLength(0);
+    expect(audio.appendSamplesToLiveAudioBuffer).toHaveBeenCalled();
   });
 });

@@ -4,7 +4,8 @@
 - **Phase 2 (STT + VAD + `stt_produced`):** Completed — Implementierung und Parity-Check (Plan `phase-2-vad-stt`, Jest: `segment-api`, `transcribe-segmented`, `offline-orchestrator`) erfüllt.
 - **Phase 3 (Enhancement offline segmentiert + Streaming `continuous_frames`):** Completed — Offline Enhancement nutzt optional den Phase-1c-Audio-Orchestrator, befüllt das Caller-`audioOut` via `populateOfflineAudioBufferIfEmpty`, Streaming Enhancement kann `continuous_frames` als Checkpoint-only Attach nutzen, und native Offline-Segmentation bleibt chunked.
 - **Phase 4 (Punctuation offline segmentiert + Streaming `OnlinePunctuation`):** Completed — Offline Punctuation bleibt `OfflineTextBuffer -> OfflineTextBuffer` und nutzt optional den Text-Orchestrator; Streaming Punctuation ist neu, nutzt echtes `OnlinePunctuation` mit `LiveTextBuffer -> LiveTextBuffer`; `TextPunctuationAssistedEvaluator` unterstützt `punctuationInstanceId`.
-- **Weitere Features in diesem Dokument (TTS, Alignment, …):** weiterhin offen / spätere Phasen.
+- **Phase 5 (TTS, vier Modi + Incremental-Removal):** Completed — Offline one-shot bleibt Default, segmentierter Offline-Pfad nutzt `runOfflineTextToAudioPipeline`/`runOfflineTtsPipeline`, Streaming unterstützt `mode:'off'` und `mode:'auto'` via Segmentation-Engine-Attach, `tts_produced` Links werden im segmentierten Offline-Pfad erzeugt, und `src/tts/incremental/**` wurde entfernt.
+- **Weitere Features in diesem Dokument (Alignment, …):** weiterhin offen / spätere Phasen.
 - Depends on: Sub-Plan 01, 02, 03, 04
 
 ## Purpose
@@ -84,11 +85,12 @@ This is **automatically available** because `SegmentLink` types are defined in P
 
 - **Offline TTS:** Single-shot `OfflineTTS` on full `OfflineTextBuffer` → `OfflineAudioBuffer`.
 - **Streaming TTS (incremental):** Custom `IncrementalStreamingTTS` engine that chunks text internally, runs offline TTS per chunk, streams audio output. **Has its own segmentation logic.**
+- **Model capability note:** sherpa-onnx currently exposes `OfflineTTS` APIs (with callback-style chunk emission), but no separate `OnlineTTS` model class/config equivalent to ASR `OnlineRecognizer`.
 
 ### Target State
 
 - **Offline TTS:** Unchanged for small inputs (mode='off'). For large text, use segmentation: `OfflineTextBuffer + SegmentationEngine → per-segment OfflineTTS → OfflineAudioBuffer`.
-- **Streaming TTS:** Replace `IncrementalStreamingTTS` with `LiveTextBuffer + SegmentationEngine(auto) → per-segment OfflineTTS → LiveAudioBuffer`. The Segmentation Engine decides text chunk boundaries; TTS runs offline per chunk.
+- **Live TTS pipeline (offline-model-backed):** Replace `IncrementalStreamingTTS` with `LiveTextBuffer + SegmentationEngine(auto) → per-segment OfflineTTS → LiveAudioBuffer`. The Segmentation Engine decides text chunk boundaries; TTS inference remains `OfflineTTS` per segment/chunk. This is a live orchestration mode, **not** a separate online TTS model backend.
 - **Cross-domain linkage:** Each text segment → synthesized audio segment pair produces a `SegmentLink` with `linkType: 'tts_produced'`.
 
 ### Migration Steps
@@ -102,7 +104,7 @@ This is **automatically available** because `SegmentLink` types are defined in P
    - On `onSegment` → run offline TTS on segment text → append audio to output `LiveAudioBuffer`.
    - Create `SegmentLink` for each segment pair.
 5. **Remove `IncrementalStreamingTTS`** and all its custom chunking logic.
-6. Update public API: `createStreamingTTS` now internally uses Segmentation Engine.
+6. Update public API: live TTS entry (e.g. `createStreamingTTS`) now internally uses Segmentation Engine orchestration with `OfflineTTS` per segment (no implication of `OnlineTTS` model support).
 7. Return `SegmentLinkMap` from TTS APIs (enables playback tracking, highlight-while-speaking).
 8. Test parity: latency, quality, abort behavior.
 
@@ -110,7 +112,7 @@ This is **automatically available** because `SegmentLink` types are defined in P
 
 TTS is the most natural producer of `tts_produced` links:
 - **Offline segmented TTS:** Each text segment N → audio segment N. The linkMap gives downstream consumers (playback UI, subtitle overlay) the mapping for free.
-- **Streaming TTS:** Each committed text segment → synthesized audio chunk. The linkMap grows as segments are processed, enabling real-time "highlight the sentence being spoken" UX.
+- **Live TTS pipeline:** Each committed text segment → synthesized audio chunk. The linkMap grows as segments are processed, enabling real-time "highlight the sentence being spoken" UX.
 
 ### TTS Incremental Removal — Prerequisites (Gates)
 
@@ -127,9 +129,30 @@ TTS is the most natural producer of `tts_produced` links:
 ### Breaking Changes
 
 - `createIncrementalStreamingTTS` removed.
-- `createStreamingTTS` API may change (now accepts `segmentation` config).
+- Live TTS API (e.g. `createStreamingTTS`) may change (now accepts `segmentation` config) but remains offline-model-backed internally.
 - Internal: entire TTS incremental engine code deleted.
 - New: `SegmentLinkMap` returned from TTS APIs.
+
+### Phase 5 Progress (Completed)
+
+| Mode | API | Status | Notes |
+|---|---|---|---|
+| 1 | `OfflineTtsEngine.synthesize(..., mode: off/default)` | Completed | Native one-shot path bleibt Default und verhaltensgleich; Rückgabe jetzt `TtsSynthesisResult`. |
+| 2 | `OfflineTtsEngine.synthesize(..., mode: auto)` | Completed | Segmentierte Orchestrierung über `runOfflineTextToAudioPipeline` + `runOfflineTtsPipeline`, Caller-`audioOut` via `populateOfflineAudioBufferIfEmpty`. |
+| 3 | `StreamingTtsEngine.synthesize(..., mode: off/default)` | Completed | Kein Attach; Pipeline startet direkt mit Caller-committed Segmenten. |
+| 4 | `StreamingTtsEngine.synthesize(..., mode: auto)` | Completed | `attachSegmentationEngine` vor Pipeline-Start, detach bei `stop()`/`completed`; nur Text-Evaluatoren erlaubt. |
+
+#### Phase 5 Checklist
+
+- [x] `TtsSynthesisOptions` erweitert um `segmentation` + Recovery/Progress/LinkMap-Felder.
+- [x] `TtsSynthesisResult` eingeführt; Offline `synthesize()` liefert Status/Counts/Timing.
+- [x] Neuer Pipeline-Helper `runOfflineTextToAudioPipeline` mit Recovery + SegmentMappings.
+- [x] Neuer TTS-Orchestrator `runOfflineTtsPipeline` mit Default `text_synthetic_auto` und `getTtsSampleRate()`.
+- [x] Segmentierter Offline-Pfad erzeugt `tts_produced` Links pro Segment-Mapping.
+- [x] Streaming validiert Buffer-Kinds (`txt_live_*` -> `live_*`).
+- [x] Streaming validiert Policies (nur `text_synthetic_auto`/`text_punctuation_assisted`; `punctuationInstanceId` Pflicht für assisted).
+- [x] `src/tts/incremental/**` entfernt; keine Legacy-Segmentierung im TTS-Featurepfad.
+- [x] Jest-Abdeckung ergänzt: `synthesize-mode1-oneshot`, `synthesize-mode2-segmented`, `synthesize-mode2-linkmap`, `streaming-mode3`, `streaming-mode4-segmentation`, `orchestrate`, plus Orchestrator-Erweiterung in `offline-orchestrator`.
 
 ---
 
@@ -415,7 +438,7 @@ This gives the SDK user full access to:
 | **Phase 2** | VAD + STT (+ `stt_produced` links) | VAD is a source; STT is the primary consumer. STT creates first SegmentLinks. |
 | **Phase 3** | Enhancement (offline segmented) | High OOM impact. Validates audio orchestration + transfer. |
 | **Phase 4** | Punctuation | **Completed.** Offline segmented text orchestration, true `OnlinePunctuation` streaming engine, and native punctuation-assisted evaluator. |
-| **Phase 5** | TTS (remove incremental, + `tts_produced` links) | Highest risk. TTS creates links for playback tracking. |
+| **Phase 5** | TTS (remove incremental, + `tts_produced` links) | **Completed.** Vier Modi implementiert (offline off/auto, streaming off/auto), segmentierter Offline-Orchestrator + LinkMap aktiv, Incremental-Legacy entfernt. |
 | **Phase 6** | Alignment (fake-live, + `alignment` links) | Most complex (cross-domain strategies). Benefits from all prior phases. |
 
 > **Note:** `SegmentLink` and `SegmentLinkMap` types are implemented in **Phase 1** as part of Sub-Plan 01. Features simply call `addSegmentLink()` with their respective `linkType` when they start producing cross-domain results (Phase 2+).

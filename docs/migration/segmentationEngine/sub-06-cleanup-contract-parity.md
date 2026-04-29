@@ -23,7 +23,8 @@ Final hardening pass before release:
 3. **Cross-platform parity** (Android/iOS behavior and error-code consistency).
 4. **Legacy cleanup** (stale segment models, old adapters, no-longer-used helpers).
 5. **Test hardening** (missing coverage in critical segment/link/runtime paths).
-6. **Documentation closure** (status updates and explicit deviations where intentionally kept).
+6. **CI: Jest (GitHub Actions)** — siehe Workstream 6 unten.
+7. **Documentation closure** (status updates and explicit deviations where intentionally kept).
 
 ---
 
@@ -97,6 +98,55 @@ Minimum required coverage additions:
 - `SegmentLinkMap` CRUD + duplicate rejection + query semantics + lifecycle
 - cross-platform behavior parity checks (Android/iOS)
 
+### 5) Segmentation Mode Harmonization (Cross-Feature, incl. Alignment)
+
+Goal: remove semantic drift for `segmentation.mode` across all migrated features and align runtime behavior with the segmentation architecture.
+
+Target semantics:
+- `mode: 'off'` = no segmentation engine-driven segmentation.
+- `mode: 'manual'` = caller/manual commit driven flow (streaming-focused); must not silently behave like `auto`.
+- `mode: 'auto'` = SegmentationEngine-driven segmentation with policy.
+- `segmentation.policy` is valid only for `mode: 'auto'`; invalid combinations must fail with `SEGMENTATION_POLICY_INVALID` (shared code across features).
+
+Scope (Phase 7):
+- STT, TTS, Punctuation, Enhancement, Alignment.
+- Type-level + runtime-level behavior parity (no "manual in types but auto in runtime" drift).
+- Error-code/message consistency for invalid mode/policy combinations.
+
+Minimum test matrix (per feature):
+- `mode='off'`: verify non-segmented path and expected output semantics.
+- `mode='manual'`:
+  - where supported: verify manual-commit path, no implicit engine attach.
+  - where not supported: verify explicit rejection (`SEGMENTATION_POLICY_INVALID`), no fallback.
+- `mode='auto'`: verify attach/orchestrated segmentation path with valid policy.
+- `policy` with `mode='off'|'manual'`: verify explicit reject (`SEGMENTATION_POLICY_INVALID`).
+- invalid `auto` policy shape/evaluator: verify explicit reject (`SEGMENTATION_POLICY_INVALID`).
+- parity checks:
+  - identical contract behavior on Android/iOS.
+  - consistent behavior across offline/streaming APIs where both are exposed.
+- Alignment-specific:
+  - validate chosen `manual` strategy (supported or rejected) is explicit and tested in both fake-live ingestion and link creation paths.
+
+### 6) GitHub Actions: Jest-Workflow (CI)
+
+Ziel: Die Jest-Test-Suite des Pakets (`yarn test` / `jest`) läuft zuverlässig in CI auf jedem relevanten PR und auf `main`, damit Regressions früh auffallen.
+
+Vorgehen (Phase 7):
+
+1. **Workflow anlegen oder prüfen**  
+   - Falls noch nicht vorhanden: unter `.github/workflows/` einen Workflow hinzufügen, der:
+     - Node gemäß `.nvmrc` / Repository-Standard nutzt,
+     - `yarn install` (bzw. `yarn install --immutable` für Yarn Berry),
+     - **`yarn test --ci`** (Jest) ausführt.  
+   - Im Repo existiert bereits ein Referenz-Workflow: [`.github/workflows/test-js.yml`](../../../.github/workflows/test-js.yml) (`name: Test - JS`, Schritt *Run JS tests* → `yarn test --ci`). Phase 7 soll diesen **verifizieren** (Trigger, Pfade, Node/Yarn) und bei Lücken **anpassen oder erweitern** (z. B. `yarn typecheck` in derselben oder separater Job-Kette, falls gewünscht).
+
+2. **Abdeckung**  
+   - `on:` so wählen, dass SDK-Änderungen an `src/**` und Tests zuverlässig laufen (kein zu aggressives `paths-ignore` für produktiven Code).  
+   - Optional: separater Job nur für schnelle Unit-Tests vs. längere Integrationstests — nur falls nötig.
+
+3. **Definition in DoD**  
+   - Grüner Jest-Run in CI ist Voraussetzung für „Phase 7 / Sub-06 abgeschlossen“; bei rotem Workflow ist kein „release-ready“-Status.
+
 ---
 
 ## Deliverables
@@ -106,7 +156,8 @@ Minimum required coverage additions:
 3. **Cleanup Patchset** (dead/legacy code removed).
 4. **JSI Candidate Evaluation Sheet** (candidate, priority, measured baseline, decision, follow-up).
 5. **Test Report** (new tests + executed verification commands).
-6. **Updated statuses** in overview and all touched sub-plans.
+6. **Jest-CI** — funktionierender GitHub Actions Workflow (siehe Workstream 6); mindestens `yarn test --ci` grün auf `main`/PR; Verweis auf die Workflow-Datei im Abschlussbericht.
+7. **Updated statuses** in overview and all touched sub-plans.
 
 ---
 
@@ -117,4 +168,5 @@ Minimum required coverage additions:
 - Android/iOS parity for public contracts is verified.
 - Critical segment/link APIs have automated tests covering happy path + edge cases.
 - Migration docs and real implementation are aligned.
+- Jest läuft in GitHub Actions wie in Workstream 6 beschrieben (bestehenden Workflow pflegen oder neuen anlegen).
 
