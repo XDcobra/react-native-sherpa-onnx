@@ -474,6 +474,66 @@ static std::string txt_generateId(const char *prefix) {
     }
 }
 
+- (void)populateOfflineTextBufferIfEmpty:(NSString *)bufferId
+                                    text:(NSString *)text
+                                 options:(NSDictionary *)options
+                                 resolve:(RCTPromiseResolveBlock)resolve
+                                  reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (bufferId == nil || [bufferId length] == 0) {
+            reject(kTxtErrInvalidArgument, @"bufferId is required", nil);
+            return;
+        }
+
+        const std::string bid = [bufferId UTF8String] ?: "";
+        const std::string t = text != nil ? ([text UTF8String] ?: "") : "";
+        std::string lang;
+        std::string emotion;
+        std::string event;
+        if (options != nil) {
+            if ([options[@"lang"] isKindOfClass:[NSString class]]) {
+                lang = [options[@"lang"] UTF8String] ?: "";
+            }
+            if ([options[@"emotion"] isKindOfClass:[NSString class]]) {
+                emotion = [options[@"emotion"] UTF8String] ?: "";
+            }
+            if ([options[@"event"] isKindOfClass:[NSString class]]) {
+                event = [options[@"event"] UTF8String] ?: "";
+            }
+        }
+
+        std::string error;
+        if (!txt_populate_offline_if_empty(
+              bid,
+              t,
+              {},
+              {},
+              {},
+              lang,
+              emotion,
+              event,
+              &error
+            )) {
+            NSString *message = [NSString stringWithUTF8String:error.c_str()] ?: @"Failed to populate offline text buffer";
+            if (error.find("not found") != std::string::npos) {
+                reject(kTxtErrBufferNotFound, message, nil);
+                return;
+            }
+            if (error.find("already populated") != std::string::npos) {
+                reject(kTxtErrAlreadyPopulated, message, nil);
+                return;
+            }
+            reject(kTxtErrInternalError, message, nil);
+            return;
+        }
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
 - (void)createLiveTextBuffer:(NSDictionary *)options
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject

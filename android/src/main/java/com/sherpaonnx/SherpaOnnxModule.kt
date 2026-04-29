@@ -2208,6 +2208,38 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineTextBufferIfEmpty(
+    bufferId: String,
+    text: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Offline text buffer not found: $bufferId"
+        )
+        return
+      }
+      entry.populate(
+        text = text,
+        tokens = emptyArray(),
+        timestamps = floatArrayOf(),
+        durations = floatArrayOf(),
+        lang = options?.getString("lang") ?: "",
+        emotion = options?.getString("emotion") ?: "",
+        event = options?.getString("event") ?: "",
+      )
+      promise.resolve(null)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_POPULATED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
       val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
@@ -2850,6 +2882,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     policy.putInt("maxSegmentMs", info.policy.maxSegmentMs)
     policy.putInt("hangoverMs", info.policy.hangoverMs)
     policy.putInt("checkpointIntervalMs", info.policy.checkpointIntervalMs)
+    info.policy.vadModelId?.let { policy.putString("vadModelId", it) }
+    info.policy.vadThreshold?.let { policy.putDouble("vadThreshold", it) }
+    info.policy.vadMinSpeechMs?.let { policy.putInt("vadMinSpeechMs", it) }
+    info.policy.vadMinSilenceMs?.let { policy.putInt("vadMinSilenceMs", it) }
     out.putMap("policy", policy)
 
     return out

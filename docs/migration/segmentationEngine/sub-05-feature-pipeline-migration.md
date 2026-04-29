@@ -1,7 +1,8 @@
 # Sub-Plan 05: Feature Pipeline Migration
 
 ## Status
-- Draft
+- **Phase 2 (STT + VAD + `stt_produced`):** Completed — Implementierung und Parity-Check (Plan `phase-2-vad-stt`, Jest: `segment-api`, `transcribe-segmented`, `offline-orchestrator`) erfüllt.
+- **Weitere Features in diesem Dokument (TTS, Punctuation, Enhancement, Alignment, …):** weiterhin offen / spätere Phasen.
 - Depends on: Sub-Plan 01, 02, 03, 04
 
 ## Purpose
@@ -43,6 +44,16 @@ Define per-feature migration plans to adopt the shared Segmentation Engine. Each
 7. Merge per-segment transcriptions into final OfflineTextBuffer.
 8. Return `SegmentLinkMap` alongside text output (optional, when segmentation active).
 9. Test: compare full-run vs. segmented-run transcription quality.
+
+### Phase 2 Progress (Current)
+
+- Completed: Streaming STT endpoint commits now carry Segment Contract metadata (`reason: 'endpoint'`, `source: 'segmentation_engine'`, created-at timestamp) on Android and iOS.
+- Completed: `speech_vad_model` now uses a real VAD runtime path for live segmentation (no silent fallback to energy evaluator when selected).
+- Completed: Offline `speech_vad_model` segmentation runs chunked over offline audio slices (no full-buffer preload requirement).
+- Completed: `stt.transcribe(audio, textOut, options)` supports segmented offline mode and returns structured orchestration result (`status`, counts, skips, timing, optional `linkMap`).
+- Completed: Segmented offline STT writes `stt_produced` links for each `(speechSegment, textSegment)` pair.
+- Completed: Native bridge method `populateOfflineTextBufferIfEmpty` added to preserve existing target-buffer semantics in segmented flow.
+- Completed: Parity-Validierung (automatisiert: relevante Jest-Suites inkl. `segmentation-engine-vad.test.ts`; manuell: Abgleich Implementierung vs. Phase-2-Plan und Sub-05).
 
 ### SegmentLink Integration
 

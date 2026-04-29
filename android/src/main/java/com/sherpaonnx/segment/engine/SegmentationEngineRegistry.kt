@@ -7,6 +7,12 @@ import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import com.sherpaonnx.text.pipeline.LiveTextEntry
+import com.sherpaonnx.vad.core.VadRuntime
+import com.sherpaonnx.vad.core.VadRuntimeOptions
+import com.sherpaonnx.vad.core.createVadRuntime
+import com.sherpaonnx.vad.core.defaultRuntimeOptions
+import com.sherpaonnx.vad.core.withRuntimeOverrides
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.log10
@@ -34,6 +40,10 @@ data class SegmentationEnginePolicy(
   val maxSegmentMs: Int = 30000,
   val hangoverMs: Int = 300,
   val checkpointIntervalMs: Int = 0,
+  val vadModelId: String? = null,
+  val vadThreshold: Double? = null,
+  val vadMinSpeechMs: Int? = null,
+  val vadMinSilenceMs: Int? = null,
 )
 
 data class SegmentationEngineInfoSnapshot(
@@ -365,6 +375,296 @@ private class SpeechEnergySilenceEngine(
   }
 }
 
+private fun inferVadModelType(modelPath: String): String {
+  val lower = modelPath.lowercase()
+  return if (lower.contains("ten")) "ten_vad" else "silero_vad"
+}
+
+private fun resolveVadModelPath(modelId: String): String {
+  val raw = modelId.trim()
+  if (raw.isEmpty()) {
+    throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message = "speech_vad_model requires non-empty vadModelId",
+    )
+  }
+
+  val direct = File(raw)
+  if (direct.isFile) return direct.absolutePath
+
+  if (direct.isDirectory) {
+    val candidates = listOf(
+      "silero_vad.onnx",
+      "silero.onnx",
+      "model.onnx",
+      "ten_vad.onnx",
+      "ten-vad.onnx",
+    )
+    for (candidate in candidates) {
+      val file = File(direct, candidate)
+      if (file.isFile) {
+        return file.absolutePath
+      }
+    }
+  }
+
+  throw SegmentationEngineException(
+    code = "POLICY_MODEL_UNAVAILABLE",
+    message = "speech_vad_model model not found for vadModelId: $modelId",
+  )
+}
+
+private fun resolveVadRuntime(
+  policy: SegmentationEnginePolicy,
+  sampleRate: Int,
+): Pair<VadRuntime, VadRuntimeOptions> {
+  val modelId = policy.vadModelId
+    ?: throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message = "speech_vad_model requires policy.vadModelId",
+    )
+
+  val modelPath = resolveVadModelPath(modelId)
+  val modelType = inferVadModelType(modelPath)
+  val baseRuntimeOptions = defaultRuntimeOptions(modelType)
+  val overridden = withRuntimeOverrides(
+    base = baseRuntimeOptions,
+    scoreThreshold = policy.vadThreshold,
+    minSpeechDurationMs =
+      policy.vadMinSpeechMs ?: baseRuntimeOptions.minSpeechDurationMs,
+    minSilenceDurationMs =
+      policy.vadMinSilenceMs ?: baseRuntimeOptions.minSilenceDurationMs,
+    windowSize = null,
+    maxSpeechDurationMs = policy.maxSegmentMs,
+  )
+
+  val runtimeOptions = when (modelType) {
+    "silero_vad" -> overridden as? VadRuntimeOptions.Silero
+    "ten_vad" -> overridden as? VadRuntimeOptions.Ten
+    else -> null
+  } ?: throw SegmentationEngineException(
+    code = "POLICY_MODEL_UNAVAILABLE",
+    message = "speech_vad_model options mismatch for modelType=$modelType",
+  )
+
+  val runtime = try {
+    createVadRuntime(
+      modelType = modelType,
+      modelPath = modelPath,
+      sampleRate = sampleRate,
+      provider = "cpu",
+      numThreads = 1,
+      debug = false,
+      runtimeOptions = runtimeOptions,
+    )
+  } catch (e: Exception) {
+    throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message =
+        "speech_vad_model failed to initialize runtime: ${e.message ?: "unknown error"}",
+    )
+  }
+
+  return Pair(runtime, runtimeOptions)
+}
+
+private class SpeechVadModelEngine(
+  engineId: String,
+  attachedBufferId: String,
+  policy: SegmentationEnginePolicy,
+  override val segmentBufferId: String,
+  private val runtime: VadRuntime,
+  private val runtimeOptions: VadRuntimeOptions,
+) : BaseSegmentationEngine(
+  engineId = engineId,
+  domain = EngineDomain.SPEECH,
+  attachedBufferId = attachedBufferId,
+  policy = policy,
+) {
+  private var processedSamples: Long = 0L
+  private var segmentStartSample: Long = 0L
+  private var speechSamples: Long = 0L
+  private var silenceSamples: Long = 0L
+  private var speechScoreSum: Double = 0.0
+  private var speechScoreCount: Int = 0
+  private var pendingVadSamples: FloatArray = FloatArray(0)
+
+  private fun samplesToMs(samples: Long, sampleRate: Int): Long {
+    if (sampleRate <= 0) return 0L
+    return (samples * 1000L) / sampleRate.toLong()
+  }
+
+  private fun resetSpeechState(nextSegmentStart: Long) {
+    segmentStartSample = nextSegmentStart
+    speechSamples = 0L
+    silenceSamples = 0L
+    speechScoreSum = 0.0
+    speechScoreCount = 0
+  }
+
+  private fun appendSegment(
+    endSampleExclusive: Long,
+    sampleRate: Int,
+    reason: String,
+    score: Double?,
+  ) {
+    if (endSampleExclusive <= segmentStartSample) {
+      resetSpeechState(endSampleExclusive)
+      return
+    }
+
+    val durationMs = samplesToMs(endSampleExclusive - segmentStartSample, sampleRate)
+    if (durationMs < runtimeOptions.minSpeechDurationMs.toLong()) {
+      resetSpeechState(endSampleExclusive)
+      return
+    }
+
+    val segEntry = SegmentPipelineRegistry.getLive(segmentBufferId) ?: return
+    val payload = JSONObject()
+      .put("source", "vad")
+      .put("engine", "vad")
+      .put("decision", "model")
+    if (score != null && score.isFinite()) {
+      payload.put("score", score)
+    }
+
+    val (segmentId, segmentIndex) = segEntry.appendSegment(
+      kind = "speech",
+      sourceAudioBufferId = attachedBufferId,
+      startSample = segmentStartSample.toInt(),
+      endSample = endSampleExclusive.toInt(),
+      sampleRate = sampleRate,
+      durationMs = durationMs.toInt(),
+      confidence = null,
+      payloadJson = payload.toString(),
+    )
+
+    SegmentationEngineRegistry.recordSegmentAnnotation(
+      segmentId = segmentId,
+      annotation = SegmentAnnotationSnapshot(
+        reason = reason,
+        source = "segmentation_engine",
+        createdAtMs = nowMs(),
+        segmentIndex = segmentIndex,
+      )
+    )
+
+    totalSegmentsCommitted += 1
+    lastSegmentId = segmentId
+    resetSpeechState(endSampleExclusive)
+  }
+
+  private fun processVadFrame(
+    frame: FloatArray,
+    effectiveSamples: Int,
+    sampleRate: Int,
+  ) {
+    if (effectiveSamples <= 0) return
+
+    val decision = runtime.infer(frame, sampleRate)
+    if (decision.isSpeech) {
+      if (speechSamples == 0L) {
+        segmentStartSample = processedSamples
+      }
+      speechSamples += effectiveSamples.toLong()
+      silenceSamples = 0L
+      if (decision.score != null) {
+        speechScoreSum += decision.score
+        speechScoreCount += 1
+      }
+    } else if (speechSamples > 0L) {
+      silenceSamples += effectiveSamples.toLong()
+      if (samplesToMs(silenceSamples, sampleRate) >= runtimeOptions.minSilenceDurationMs.toLong()) {
+        val avgScore = if (speechScoreCount > 0) {
+          speechScoreSum / speechScoreCount.toDouble()
+        } else {
+          null
+        }
+        appendSegment(
+          endSampleExclusive = segmentStartSample + speechSamples,
+          sampleRate = sampleRate,
+          reason = "vad_boundary",
+          score = avgScore,
+        )
+      }
+    }
+
+    if (
+      speechSamples > 0L &&
+      samplesToMs(speechSamples, sampleRate) >= policy.maxSegmentMs.toLong()
+    ) {
+      val avgScore = if (speechScoreCount > 0) {
+        speechScoreSum / speechScoreCount.toDouble()
+      } else {
+        null
+      }
+      appendSegment(
+        endSampleExclusive = segmentStartSample + speechSamples,
+        sampleRate = sampleRate,
+        reason = "length_limit",
+        score = avgScore,
+      )
+    }
+
+    processedSamples += effectiveSamples.toLong()
+  }
+
+  override fun evaluateAudioChunk(
+    chunk: FloatArray,
+    sampleRate: Int,
+    totalSamplesWritten: Long,
+  ) {
+    if (currentState != EngineState.ACTIVE) return
+    if (chunk.isEmpty() || sampleRate <= 0) return
+
+    val frameSize = runtimeOptions.windowSize.coerceAtLeast(1)
+    val merged = FloatArray(pendingVadSamples.size + chunk.size)
+    pendingVadSamples.copyInto(merged, 0, 0, pendingVadSamples.size)
+    chunk.copyInto(merged, pendingVadSamples.size, 0, chunk.size)
+
+    var offset = 0
+    while (offset + frameSize <= merged.size) {
+      val frame = merged.copyOfRange(offset, offset + frameSize)
+      processVadFrame(frame, frameSize, sampleRate)
+      offset += frameSize
+    }
+
+    pendingVadSamples = if (offset < merged.size) {
+      merged.copyOfRange(offset, merged.size)
+    } else {
+      FloatArray(0)
+    }
+  }
+
+  override fun flush() {
+    if (currentState != EngineState.ACTIVE) return
+    val live = PipelineAudioRegistry.getLive(attachedBufferId) ?: return
+    val sampleRate = live.sampleRate
+
+    val frameSize = runtimeOptions.windowSize.coerceAtLeast(1)
+    if (pendingVadSamples.isNotEmpty()) {
+      val tail = FloatArray(frameSize)
+      pendingVadSamples.copyInto(tail, 0, 0, pendingVadSamples.size)
+      processVadFrame(tail, pendingVadSamples.size, sampleRate)
+      pendingVadSamples = FloatArray(0)
+    }
+
+    if (speechSamples > 0L) {
+      appendSegment(
+        endSampleExclusive = segmentStartSample + speechSamples,
+        sampleRate = sampleRate,
+        reason = "finalize",
+        score = null,
+      )
+    }
+  }
+
+  override fun release() {
+    super.release()
+    runtime.close()
+  }
+}
+
 private fun normalizeDomain(raw: String): EngineDomain {
   return when (raw.lowercase()) {
     "text" -> EngineDomain.TEXT
@@ -397,6 +697,15 @@ private fun readBoolean(
 ): Boolean {
   val raw = map[key] as? Boolean ?: return defaultValue
   return raw
+}
+
+private fun readString(
+  map: Map<String, Any?>,
+  key: String,
+): String? {
+  val raw = map[key] as? String ?: return null
+  val trimmed = raw.trim()
+  return if (trimmed.isEmpty()) null else trimmed
 }
 
 private fun parsePolicy(
@@ -450,6 +759,10 @@ private fun parsePolicy(
     hangoverMs = readInt(rawPolicy, "hangoverMs", 300).coerceAtLeast(0),
     checkpointIntervalMs =
       readInt(rawPolicy, "checkpointIntervalMs", 0).coerceAtLeast(0),
+    vadModelId = readString(rawPolicy, "vadModelId"),
+    vadThreshold = (rawPolicy["vadThreshold"] as? Number)?.toDouble(),
+    vadMinSpeechMs = (rawPolicy["vadMinSpeechMs"] as? Number)?.toInt(),
+    vadMinSilenceMs = (rawPolicy["vadMinSilenceMs"] as? Number)?.toInt(),
   )
 }
 
@@ -537,21 +850,33 @@ object SegmentationEngineRegistry {
           segmentEventMinIntervalMs = 0L,
         )
 
-        val effectivePolicy =
-          if (policy.evaluator == "speech_vad_model") {
-            policy.copy(evaluator = "speech_vad_model")
-          } else if (policy.evaluator == "continuous_frames") {
-            policy.copy(evaluator = "continuous_frames")
-          } else {
-            policy
-          }
+        val effectivePolicy = if (policy.evaluator == "continuous_frames") {
+          policy.copy(evaluator = "continuous_frames")
+        } else {
+          policy
+        }
 
-        SpeechEnergySilenceEngine(
-          engineId = engineId,
-          attachedBufferId = bufferId,
-          policy = effectivePolicy,
-          segmentBufferId = segmentEntry.bufferId,
-        )
+        if (effectivePolicy.evaluator == "speech_vad_model") {
+          val (runtime, runtimeOptions) = resolveVadRuntime(
+            policy = effectivePolicy,
+            sampleRate = live.sampleRate,
+          )
+          SpeechVadModelEngine(
+            engineId = engineId,
+            attachedBufferId = bufferId,
+            policy = effectivePolicy,
+            segmentBufferId = segmentEntry.bufferId,
+            runtime = runtime,
+            runtimeOptions = runtimeOptions,
+          )
+        } else {
+          SpeechEnergySilenceEngine(
+            engineId = engineId,
+            attachedBufferId = bufferId,
+            policy = effectivePolicy,
+            segmentBufferId = segmentEntry.bufferId,
+          )
+        }
       }
     }
 
@@ -666,7 +991,7 @@ object SegmentationEngineRegistry {
   }
 
   fun peekSegmentAnnotation(segmentId: String): SegmentAnnotationSnapshot? {
-    return segmentAnnotationBySegmentId.remove(segmentId)
+    return segmentAnnotationBySegmentId[segmentId]
   }
 
   fun segmentOfflineBuffer(
@@ -739,54 +1064,238 @@ object SegmentationEngineRegistry {
             message = "Offline audio buffer not found: $bufferId",
           )
 
-        val samples = offline.readAllSamples()
         val sr = offline.sampleRate
-        val minSamples = ((policy.minSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(1)
-        val maxSamples = ((policy.maxSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(minSamples)
-        val silenceSamples =
-          (((policy.silenceThresholdMs + policy.hangoverMs).toDouble() * sr) / 1000.0)
-            .toInt()
-            .coerceAtLeast(1)
-
         val records = ArrayList<SegmentRecord>()
-        var start = 0
-        var cursor = 0
-        var silenceRun = 0
-        val frameSize = (sr / 50).coerceAtLeast(160)
 
-        while (cursor < samples.size) {
-          val end = minOf(samples.size, cursor + frameSize)
-          val frame = samples.copyOfRange(cursor, end)
-          var sum = 0.0
-          for (value in frame) {
-            sum += value * value
-          }
-          val rms = if (frame.isEmpty()) 0.0 else sqrt(sum / frame.size)
-          val db = if (rms <= 1e-9) -120.0 else 20.0 * log10(rms)
-          if (db < policy.energyThresholdDb) {
-            silenceRun += frame.size
-          } else {
-            silenceRun = 0
-          }
+        if (policy.evaluator == "speech_vad_model") {
+          val (runtime, runtimeOptions) = resolveVadRuntime(policy, sr)
+          try {
+            val frameSize = runtimeOptions.windowSize.coerceAtLeast(1)
+            val chunkSize = (frameSize * 8).coerceAtLeast(frameSize)
+            var cursor = 0
+            var processedSamples = 0
+            var segmentStart = 0
+            var speechSamples = 0
+            var silenceSamples = 0
+            var scoreSum = 0.0
+            var scoreCount = 0
+            var pending = FloatArray(0)
 
-          val segmentSize = end - start
-          val shouldCommitSilence =
-            silenceRun >= silenceSamples && segmentSize >= minSamples
-          val shouldCommitLength = segmentSize >= maxSamples
-
-          if (shouldCommitSilence || shouldCommitLength) {
-            val reason = if (policy.evaluator == "speech_vad_model") {
-              "vad_boundary"
-            } else if (shouldCommitSilence) {
-              "energy_silence"
-            } else {
-              "length_limit"
+            fun samplesToMs(samples: Int): Int {
+              if (sr <= 0) return 0
+              return (samples * 1000) / sr
             }
+
+            fun resetState(nextStartSample: Int) {
+              segmentStart = nextStartSample
+              speechSamples = 0
+              silenceSamples = 0
+              scoreSum = 0.0
+              scoreCount = 0
+            }
+
+            fun appendVadRecord(reason: String, score: Double?) {
+              val endExclusive = segmentStart + speechSamples
+              if (endExclusive <= segmentStart) {
+                resetState(processedSamples)
+                return
+              }
+              val durationMs = samplesToMs(endExclusive - segmentStart)
+              if (durationMs < runtimeOptions.minSpeechDurationMs) {
+                resetState(processedSamples)
+                return
+              }
+
+              val payload = JSONObject()
+                .put("source", "vad")
+                .put("engine", "vad")
+                .put("decision", "model")
+              if (score != null && score.isFinite()) {
+                payload.put("score", score)
+              }
+
+              val record = SegmentRecord(
+                id = "seg_${UUID.randomUUID()}",
+                kind = "speech",
+                sourceAudioBufferId = bufferId,
+                startSample = segmentStart,
+                endSample = endExclusive,
+                sampleRate = sr,
+                durationMs = durationMs,
+                confidence = null,
+                payloadJson = payload.toString(),
+              )
+              records.add(record)
+              val segmentIndex = records.lastIndex
+              recordSegmentAnnotation(
+                record.id,
+                SegmentAnnotationSnapshot(
+                  reason = reason,
+                  source = "segmentation_engine",
+                  createdAtMs = nowMs(),
+                  segmentIndex = segmentIndex,
+                )
+              )
+              resetState(endExclusive)
+            }
+
+            fun processFrame(frame: FloatArray, effectiveSamples: Int) {
+              if (effectiveSamples <= 0) return
+              val decision = runtime.infer(frame, sr)
+
+              if (decision.isSpeech) {
+                if (speechSamples == 0) {
+                  segmentStart = processedSamples
+                }
+                speechSamples += effectiveSamples
+                silenceSamples = 0
+                if (decision.score != null) {
+                  scoreSum += decision.score
+                  scoreCount += 1
+                }
+              } else if (speechSamples > 0) {
+                silenceSamples += effectiveSamples
+                if (samplesToMs(silenceSamples) >= runtimeOptions.minSilenceDurationMs) {
+                  val avgScore = if (scoreCount > 0) {
+                    scoreSum / scoreCount.toDouble()
+                  } else {
+                    null
+                  }
+                  appendVadRecord("vad_boundary", avgScore)
+                }
+              }
+
+              if (speechSamples > 0 && samplesToMs(speechSamples) >= policy.maxSegmentMs) {
+                val avgScore = if (scoreCount > 0) {
+                  scoreSum / scoreCount.toDouble()
+                } else {
+                  null
+                }
+                appendVadRecord("length_limit", avgScore)
+              }
+
+              processedSamples += effectiveSamples
+            }
+
+            while (cursor < offline.numSamples) {
+              val count = minOf(chunkSize, offline.numSamples - cursor)
+              val chunk = offline.readSlice(cursor, count)
+              cursor += chunk.size
+              if (chunk.isEmpty()) break
+
+              val merged = FloatArray(pending.size + chunk.size)
+              pending.copyInto(merged, 0, 0, pending.size)
+              chunk.copyInto(merged, pending.size, 0, chunk.size)
+
+              var offset = 0
+              while (offset + frameSize <= merged.size) {
+                val frame = merged.copyOfRange(offset, offset + frameSize)
+                processFrame(frame, frameSize)
+                offset += frameSize
+              }
+
+              pending = if (offset < merged.size) {
+                merged.copyOfRange(offset, merged.size)
+              } else {
+                FloatArray(0)
+              }
+            }
+
+            if (pending.isNotEmpty()) {
+              val tail = FloatArray(frameSize)
+              pending.copyInto(tail, 0, 0, pending.size)
+              processFrame(tail, pending.size)
+              pending = FloatArray(0)
+            }
+
+            if (speechSamples > 0) {
+              appendVadRecord("finalize", null)
+            }
+          } finally {
+            runtime.close()
+          }
+        } else {
+          val samples = offline.readAllSamples()
+          val minSamples = ((policy.minSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(1)
+          val maxSamples = ((policy.maxSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(minSamples)
+          val silenceSamples =
+            (((policy.silenceThresholdMs + policy.hangoverMs).toDouble() * sr) / 1000.0)
+              .toInt()
+              .coerceAtLeast(1)
+
+          var start = 0
+          var cursor = 0
+          var silenceRun = 0
+          val frameSize = (sr / 50).coerceAtLeast(160)
+
+          while (cursor < samples.size) {
+            val end = minOf(samples.size, cursor + frameSize)
+            val frame = samples.copyOfRange(cursor, end)
+            var sum = 0.0
+            for (value in frame) {
+              sum += value * value
+            }
+            val rms = if (frame.isEmpty()) 0.0 else sqrt(sum / frame.size)
+            val db = if (rms <= 1e-9) -120.0 else 20.0 * log10(rms)
+            if (db < policy.energyThresholdDb) {
+              silenceRun += frame.size
+            } else {
+              silenceRun = 0
+            }
+
+            val segmentSize = end - start
+            val shouldCommitSilence =
+              silenceRun >= silenceSamples && segmentSize >= minSamples
+            val shouldCommitLength = segmentSize >= maxSamples
+
+            if (shouldCommitSilence || shouldCommitLength) {
+              val reason = if (shouldCommitSilence) {
+                "energy_silence"
+              } else {
+                "length_limit"
+              }
+              val payload = JSONObject()
+                .put("source", "vad")
+                .put("engine", "vad")
+                .put("decision", "model")
+                .put("score", db)
+                .toString()
+              records.add(
+                SegmentRecord(
+                  id = "seg_${UUID.randomUUID()}",
+                  kind = "speech",
+                  sourceAudioBufferId = bufferId,
+                  startSample = start,
+                  endSample = end,
+                  sampleRate = sr,
+                  durationMs = (((end - start) * 1000.0) / sr).toInt(),
+                  confidence = null,
+                  payloadJson = payload,
+                )
+              )
+              val segmentIndex = records.lastIndex
+              recordSegmentAnnotation(
+                records.last().id,
+                SegmentAnnotationSnapshot(
+                  reason = reason,
+                  source = "segmentation_engine",
+                  createdAtMs = nowMs(),
+                  segmentIndex = segmentIndex,
+                )
+              )
+              start = end
+              silenceRun = 0
+            }
+
+            cursor = end
+          }
+
+          if (start < samples.size) {
+            val end = samples.size
             val payload = JSONObject()
               .put("source", "vad")
               .put("engine", "vad")
               .put("decision", "model")
-              .put("score", db)
               .toString()
             records.add(
               SegmentRecord(
@@ -805,49 +1314,13 @@ object SegmentationEngineRegistry {
             recordSegmentAnnotation(
               records.last().id,
               SegmentAnnotationSnapshot(
-                reason = reason,
+                reason = "finalize",
                 source = "segmentation_engine",
                 createdAtMs = nowMs(),
                 segmentIndex = segmentIndex,
               )
             )
-            start = end
-            silenceRun = 0
           }
-
-          cursor = end
-        }
-
-        if (start < samples.size) {
-          val end = samples.size
-          val payload = JSONObject()
-            .put("source", "vad")
-            .put("engine", "vad")
-            .put("decision", "model")
-            .toString()
-          records.add(
-            SegmentRecord(
-              id = "seg_${UUID.randomUUID()}",
-              kind = "speech",
-              sourceAudioBufferId = bufferId,
-              startSample = start,
-              endSample = end,
-              sampleRate = sr,
-              durationMs = (((end - start) * 1000.0) / sr).toInt(),
-              confidence = null,
-              payloadJson = payload,
-            )
-          )
-          val segmentIndex = records.lastIndex
-          recordSegmentAnnotation(
-            records.last().id,
-            SegmentAnnotationSnapshot(
-              reason = "finalize",
-              source = "segmentation_engine",
-              createdAtMs = nowMs(),
-              segmentIndex = segmentIndex,
-            )
-          )
         }
 
         val offlineSegment = SegmentPipelineRegistry.createEmptyOffline(bufferId)

@@ -451,6 +451,16 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Populate an existing empty offline text buffer exactly once.
+   * Rejects when the buffer does not exist or was already populated.
+   */
+  populateOfflineTextBufferIfEmpty(
+    bufferId: string,
+    text: string,
+    options?: Object
+  ): Promise<void>;
+
+  /**
    * Create a live text buffer for streaming/incremental text.
    */
   createLiveTextBuffer(options: {

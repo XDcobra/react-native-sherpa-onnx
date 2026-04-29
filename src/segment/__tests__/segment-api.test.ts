@@ -319,4 +319,35 @@ describe('segment api offline integration', () => {
     expect(textCount).toBe(2);
     expect(audioCount).toBe(1);
   });
+
+  it('maps endpoint/source from native segment meta for live stt commits', async () => {
+    mockTextbuffer.getLiveTextBufferSegmentCount.mockResolvedValue(1);
+    mockTextbuffer.getLiveTextBufferSegments.mockResolvedValue([
+      {
+        text: 'hello world',
+        source: 'stt_stream',
+        segmentIndex: 0,
+        meta: {
+          __segmentReason: 'endpoint',
+          __segmentSource: 'segmentation_engine',
+          __segmentCreatedAtMs: 12345,
+        },
+      },
+    ]);
+
+    const segments = await getSegments(
+      'txt_live_11111111-1111-1111-1111-111111111111',
+      0,
+      10
+    );
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      domain: 'text',
+      reason: 'endpoint',
+      source: 'segmentation_engine',
+      text: 'hello world',
+      createdAtMs: 12345,
+    });
+  });
 });

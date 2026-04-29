@@ -7,6 +7,14 @@ import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
 } from '../textbuffer/types';
+import type {
+  ErrorRecoveryStrategy,
+  FailedSegmentInfo,
+  OrchestrationProgress,
+  SkippedSegmentInfo,
+} from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { SegmentLinkMapRef } from '../segment/segment-link';
 
 /**
  * Supported STT model types.
@@ -334,6 +342,32 @@ export const SttErrorCode = {
 export type SttErrorCodeValue =
   (typeof SttErrorCode)[keyof typeof SttErrorCode];
 
+export interface SttSegmentationConfig {
+  mode?: 'off' | 'manual' | 'auto';
+  policy?: SegmentationPolicy;
+}
+
+export interface SttTranscribeOptions {
+  segmentation?: SttSegmentationConfig;
+  errorRecovery?: ErrorRecoveryStrategy;
+  maxRetriesPerSegment?: number;
+  retryExhaustedFallback?: 'abort' | 'skip';
+  abortSignal?: AbortSignal;
+  onProgress?: (progress: OrchestrationProgress) => void;
+  linkMap?: SegmentLinkMapRef;
+  textSkipPlaceholder?: string;
+}
+
+export interface SttTranscribeResult {
+  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  totalSegments: number;
+  completedSegments: number;
+  skippedSegments: SkippedSegmentInfo[];
+  failedSegment?: FailedSegmentInfo;
+  processingTimeMs: number;
+  linkMap?: SegmentLinkMapRef;
+}
+
 // ========== Engine interfaces ==========
 
 /**
@@ -344,8 +378,9 @@ export interface SttEngine {
   readonly instanceId: string;
   transcribe(
     buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
-    textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string
-  ): Promise<void>;
+    textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string,
+    options?: SttTranscribeOptions
+  ): Promise<SttTranscribeResult>;
   setConfig(options: SttRuntimeConfig): Promise<void>;
   destroy(): Promise<void>;
 }

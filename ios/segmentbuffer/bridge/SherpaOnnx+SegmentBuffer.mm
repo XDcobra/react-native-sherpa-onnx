@@ -2,6 +2,7 @@
 #include "../core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../vad/core/VadRuntime.h"
 
 #ifdef __cplusplus
 #include <algorithm>
@@ -731,6 +732,10 @@ struct SegEnginePolicy {
   int maxSegmentMs = 30000;
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
+  std::string vadModelId;
+  double vadThreshold = 0.5;
+  int vadMinSpeechMs = 250;
+  int vadMinSilenceMs = 250;
 };
 
 struct SegEngineAnnotation {
@@ -755,6 +760,9 @@ struct SegEngine {
   int64_t segmentStartSample = 0;
   int64_t checkpointStartSample = 0;
   double silenceAccumulatedMs = 0.0;
+  std::shared_ptr<VadRuntime> vadRuntime;
+  int vadFrameSize = 0;
+  std::vector<float> pendingVadSamples;
 };
 
 std::unordered_map<std::string, std::shared_ptr<SegEngine>> g_seg_engine_by_id;
@@ -770,6 +778,110 @@ static int64_t seg_now_ms() {
 
 static std::string seg_new_engine_id() {
   return "seg_engine_" + seg_uuid();
+}
+
+static bool seg_file_exists(const std::string &path) {
+  if (path.empty()) return false;
+  return [[NSFileManager defaultManager]
+    fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]];
+}
+
+static bool seg_directory_exists(const std::string &path) {
+  if (path.empty()) return false;
+  BOOL isDir = NO;
+  BOOL exists = [[NSFileManager defaultManager]
+    fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]
+    isDirectory:&isDir];
+  return exists && isDir;
+}
+
+static std::string seg_join_path(const std::string &dir, const std::string &name) {
+  if (dir.empty()) return name;
+  if (dir.back() == '/') return dir + name;
+  return dir + "/" + name;
+}
+
+static std::string seg_resolve_vad_model_path(const std::string &modelId) {
+  const std::string trimmed = modelId;
+  if (trimmed.empty()) {
+    return "";
+  }
+
+  if (seg_file_exists(trimmed)) {
+    return trimmed;
+  }
+
+  if (seg_directory_exists(trimmed)) {
+    static const std::vector<std::string> kCandidates = {
+      "silero_vad.onnx",
+      "silero.onnx",
+      "model.onnx",
+      "ten_vad.onnx",
+      "ten-vad.onnx",
+    };
+    for (const auto &name : kCandidates) {
+      const std::string candidate = seg_join_path(trimmed, name);
+      if (seg_file_exists(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return "";
+}
+
+static std::string seg_vad_model_type_from_path(const std::string &modelPath) {
+  std::string lower = modelPath;
+  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+  return lower.find("ten") != std::string::npos ? "ten_vad" : "silero_vad";
+}
+
+static bool seg_init_vad_runtime(
+  const std::shared_ptr<SegEngine> &engine,
+  int sampleRate,
+  std::string *errorOut
+) {
+  if (!engine) {
+    if (errorOut) *errorOut = "Segmentation engine is null";
+    return false;
+  }
+
+  const std::string modelPath = seg_resolve_vad_model_path(engine->policy.vadModelId);
+  if (modelPath.empty()) {
+    if (errorOut) {
+      *errorOut = "speech_vad_model model not found for vadModelId: " + engine->policy.vadModelId;
+    }
+    return false;
+  }
+
+  VadRuntimeConfig cfg;
+  cfg.modelType = seg_vad_model_type_from_path(modelPath);
+  cfg.modelPath = modelPath;
+  cfg.sampleRate = std::max(1, sampleRate);
+  cfg.numThreads = 1;
+  cfg.provider = "cpu";
+  cfg.debug = false;
+  cfg.scoreThreshold = engine->policy.vadThreshold;
+  cfg.minSpeechDurationMs = std::max(1, engine->policy.vadMinSpeechMs);
+  cfg.minSilenceDurationMs = std::max(1, engine->policy.vadMinSilenceMs);
+  cfg.maxSpeechDurationMs = std::max(cfg.minSpeechDurationMs, engine->policy.maxSegmentMs);
+  cfg.windowSize = cfg.modelType == "ten_vad" ? 256 : 512;
+
+  std::string runtimeError;
+  auto runtime = VadRuntime::Create(cfg, &runtimeError);
+  if (!runtime) {
+    if (errorOut) {
+      *errorOut =
+        "speech_vad_model failed to initialize runtime: " +
+        (runtimeError.empty() ? std::string("unknown error") : runtimeError);
+    }
+    return false;
+  }
+
+  engine->vadRuntime = runtime;
+  engine->vadFrameSize = std::max(1, cfg.windowSize);
+  engine->pendingVadSamples.clear();
+  return true;
 }
 
 static std::string seg_reason_from_eval(const std::string &eval, bool silenceCommit) {
@@ -881,6 +993,78 @@ static bool seg_append_speech_segment(
   return true;
 }
 
+static bool seg_append_speech_segment_range(
+  const std::shared_ptr<SegEngine> &engine,
+  int64_t startSample,
+  int64_t endSampleExclusive,
+  const std::string &reason
+) {
+  if (!engine || engine->segmentBufferId.empty()) return false;
+  if (endSampleExclusive <= startSample) return false;
+
+  auto live = pa_get_live_entry(engine->attachedBufferId);
+  if (!live || live->sampleRate <= 0) return false;
+
+  const int durationMs = static_cast<int>(
+    ((endSampleExclusive - startSample) * 1000.0) / live->sampleRate
+  );
+  if (durationMs <= 0) return false;
+
+  NSDictionary *payloadObj = @{
+    @"source": @"vad",
+    @"engine": @"vad",
+    @"decision": @"model",
+  };
+  NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
+  std::string payloadJson;
+  if (payloadData) {
+    payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+  }
+
+  std::string segmentId;
+  int segmentIndex = 0;
+  std::string err;
+  bool ok = seg_live_append_segment(
+    engine->segmentBufferId,
+    "speech",
+    engine->attachedBufferId,
+    static_cast<int>(startSample),
+    static_cast<int>(endSampleExclusive),
+    live->sampleRate,
+    durationMs,
+    false,
+    0.0,
+    payloadJson,
+    &segmentId,
+    &segmentIndex,
+    &err
+  );
+  if (!ok) {
+    return false;
+  }
+
+  seg_record_annotation_for_engine(engine, segmentId, reason, segmentIndex);
+  engine->totalSegmentsCommitted += 1;
+  engine->lastSegmentId = segmentId;
+  return true;
+}
+
+static void seg_append_runtime_vad_segments(
+  const std::shared_ptr<SegEngine> &engine,
+  const std::string &reason
+) {
+  if (!engine || !engine->vadRuntime) return;
+  auto segments = engine->vadRuntime->PopSegments();
+  for (const auto &segment : segments) {
+    seg_append_speech_segment_range(
+      engine,
+      segment.startSample,
+      segment.endSample,
+      reason
+    );
+  }
+}
+
 static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
   auto entry = txt_get_live_entry(engine->attachedBufferId);
@@ -964,6 +1148,27 @@ static void seg_engine_evaluate_audio(
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
   if (!samples || count == 0 || sampleRate <= 0) return;
 
+  if (engine->policy.evaluator == "speech_vad_model") {
+    if (!engine->vadRuntime || engine->vadFrameSize <= 0) {
+      return;
+    }
+    const int frameSize = std::max(1, engine->vadFrameSize);
+    engine->pendingVadSamples.insert(
+      engine->pendingVadSamples.end(),
+      samples,
+      samples + count
+    );
+    while ((int)engine->pendingVadSamples.size() >= frameSize) {
+      engine->vadRuntime->AcceptWaveform(engine->pendingVadSamples.data(), frameSize);
+      seg_append_runtime_vad_segments(engine, "vad_boundary");
+      engine->pendingVadSamples.erase(
+        engine->pendingVadSamples.begin(),
+        engine->pendingVadSamples.begin() + frameSize
+      );
+    }
+    return;
+  }
+
   double chunkDurationMs = ((double)count * 1000.0) / sampleRate;
   double db = seg_rms_db(samples, count);
 
@@ -1000,6 +1205,27 @@ static void seg_engine_evaluate_audio(
 
 static void seg_engine_flush_audio(const std::shared_ptr<SegEngine> &engine) {
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
+  if (engine->policy.evaluator == "speech_vad_model") {
+    if (!engine->vadRuntime || engine->vadFrameSize <= 0) {
+      return;
+    }
+    const int frameSize = std::max(1, engine->vadFrameSize);
+    if (!engine->pendingVadSamples.empty()) {
+      std::vector<float> tail(frameSize, 0.0f);
+      std::copy(
+        engine->pendingVadSamples.begin(),
+        engine->pendingVadSamples.end(),
+        tail.begin()
+      );
+      engine->vadRuntime->AcceptWaveform(tail.data(), frameSize);
+      engine->pendingVadSamples.clear();
+      seg_append_runtime_vad_segments(engine, "vad_boundary");
+    }
+    engine->vadRuntime->Flush();
+    seg_append_runtime_vad_segments(engine, "finalize");
+    return;
+  }
+
   auto live = pa_get_live_entry(engine->attachedBufferId);
   if (!live) return;
   if (live->totalSamplesWritten > engine->segmentStartSample) {
@@ -1022,6 +1248,10 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   if ([p[@"maxSegmentMs"] respondsToSelector:@selector(intValue)]) out.maxSegmentMs = std::max(out.minSegmentMs, [p[@"maxSegmentMs"] intValue]);
   if ([p[@"hangoverMs"] respondsToSelector:@selector(intValue)]) out.hangoverMs = std::max(0, [p[@"hangoverMs"] intValue]);
   if ([p[@"checkpointIntervalMs"] respondsToSelector:@selector(intValue)]) out.checkpointIntervalMs = std::max(0, [p[@"checkpointIntervalMs"] intValue]);
+  if ([p[@"vadModelId"] isKindOfClass:[NSString class]]) out.vadModelId = [p[@"vadModelId"] UTF8String] ?: "";
+  if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
+  if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
+  if ([p[@"vadMinSilenceMs"] respondsToSelector:@selector(intValue)]) out.vadMinSilenceMs = std::max(1, [p[@"vadMinSilenceMs"] intValue]);
   return out;
 }
 
@@ -1036,6 +1266,10 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"maxSegmentMs": @(p.maxSegmentMs),
     @"hangoverMs": @(p.hangoverMs),
     @"checkpointIntervalMs": @(p.checkpointIntervalMs),
+    @"vadModelId": [NSString stringWithUTF8String:p.vadModelId.c_str()] ?: @"",
+    @"vadThreshold": @(p.vadThreshold),
+    @"vadMinSpeechMs": @(p.vadMinSpeechMs),
+    @"vadMinSilenceMs": @(p.vadMinSilenceMs),
   };
 }
 
@@ -1273,6 +1507,30 @@ bool seg_engine_peek_annotation(
         g_seg_live[entry->bufferId] = entry;
       }
       engine->segmentBufferId = entry->bufferId;
+
+      if (engine->policy.evaluator == "speech_vad_model") {
+        auto live = pa_get_live_entry(bid);
+        if (!live) {
+          {
+            std::lock_guard<std::mutex> lock(g_seg_mutex);
+            g_seg_live.erase(entry->bufferId);
+          }
+          try { entry->release(); } catch (...) {}
+          reject(@"BUFFER_STATE_INVALID", [NSString stringWithFormat:@"Live audio buffer not found: %@", bufferId], nil);
+          return;
+        }
+        std::string vadError;
+        if (!seg_init_vad_runtime(engine, live->sampleRate, &vadError)) {
+          {
+            std::lock_guard<std::mutex> lock(g_seg_mutex);
+            g_seg_live.erase(entry->bufferId);
+          }
+          try { entry->release(); } catch (...) {}
+          NSString *message = [NSString stringWithUTF8String:vadError.c_str()] ?: @"speech_vad_model runtime init failed";
+          reject(@"POLICY_MODEL_UNAVAILABLE", message, nil);
+          return;
+        }
+      }
     }
 
     {
@@ -1408,76 +1666,177 @@ bool seg_engine_peek_annotation(
       return;
     }
 
-    std::vector<float> samples;
     int sampleRate = 0;
-    if (!pa_read_offline_samples(bid, &samples, &sampleRate)) {
+    int totalSamples = 0;
+    std::string metaErrCode;
+    std::string metaErrMessage;
+    if (!pa_get_offline_metadata(
+          bid,
+          &sampleRate,
+          &totalSamples,
+          &metaErrCode,
+          &metaErrMessage
+        )) {
       reject(@"BUFFER_STATE_INVALID", [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
       return;
     }
 
     SegEnginePolicy p = seg_policy_from_dict(policy, SegEngineDomain::SPEECH);
-    int minSamples = std::max(1, (int)((p.minSegmentMs / 1000.0) * sampleRate));
-    int maxSamples = std::max(minSamples, (int)((p.maxSegmentMs / 1000.0) * sampleRate));
-    int silenceSamples = std::max(1, (int)(((p.silenceThresholdMs + p.hangoverMs) / 1000.0) * sampleRate));
-    int frameSize = std::max(160, sampleRate / 50);
-
     std::vector<SegRecord> records;
-    int start = 0;
-    int cursor = 0;
-    int silenceRun = 0;
-    while (cursor < (int)samples.size()) {
-      int end = std::min((int)samples.size(), cursor + frameSize);
-      double db = seg_rms_db(samples.data() + cursor, (size_t)(end - cursor));
-      if (db < p.energyThresholdDb) silenceRun += (end - cursor);
-      else silenceRun = 0;
+    if (p.evaluator == "speech_vad_model") {
+      auto tempEngine = std::make_shared<SegEngine>();
+      tempEngine->attachedBufferId = bid;
+      tempEngine->policy = p;
+      std::string vadError;
+      if (!seg_init_vad_runtime(tempEngine, sampleRate, &vadError)) {
+        NSString *message = [NSString stringWithUTF8String:vadError.c_str()] ?: @"speech_vad_model runtime init failed";
+        reject(@"POLICY_MODEL_UNAVAILABLE", message, nil);
+        return;
+      }
 
-      int segLen = end - start;
-      bool silenceCommit = silenceRun >= silenceSamples && segLen >= minSamples;
-      bool lengthCommit = segLen >= maxSamples;
-      if (silenceCommit || lengthCommit) {
+      const int frameSize = std::max(1, tempEngine->vadFrameSize);
+      const int chunkSize = std::max(frameSize, frameSize * 8);
+      std::vector<float> pending;
+
+      auto appendRecord = [&](int startSample, int endSample, const std::string &reason) {
+        if (endSample <= startSample) return;
+        SegRecord rec;
+        rec.id = "seg_" + seg_uuid();
+        rec.kind = "speech";
+        rec.sourceAudioBufferId = bid;
+        rec.startSample = startSample;
+        rec.endSample = endSample;
+        rec.sampleRate = sampleRate;
+        rec.durationMs = (int)(((endSample - startSample) * 1000.0) / std::max(1, sampleRate));
+        NSDictionary *payloadObj = @{
+          @"source": @"vad",
+          @"engine": @"vad",
+          @"decision": @"model",
+        };
+        NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
+        if (payloadData) rec.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+        records.push_back(rec);
+        seg_record_annotation(rec.id, reason, (int)records.size() - 1);
+      };
+
+      int cursor = 0;
+      while (cursor < totalSamples) {
+        std::vector<float> chunk;
+        std::string sliceErrCode;
+        std::string sliceErrMessage;
+        const int readCount = std::min(chunkSize, totalSamples - cursor);
+        if (!pa_get_offline_samples_slice(
+              bid,
+              cursor,
+              readCount,
+              &chunk,
+              &sliceErrCode,
+              &sliceErrMessage
+            )) {
+          NSString *message = [NSString stringWithUTF8String:sliceErrMessage.c_str()] ?: @"Failed to read offline audio slice";
+          reject(@"BUFFER_STATE_INVALID", message, nil);
+          return;
+        }
+        cursor += (int)chunk.size();
+        if (chunk.empty()) break;
+
+        pending.insert(pending.end(), chunk.begin(), chunk.end());
+        while ((int)pending.size() >= frameSize) {
+          tempEngine->vadRuntime->AcceptWaveform(pending.data(), frameSize);
+          auto segments = tempEngine->vadRuntime->PopSegments();
+          for (const auto &segment : segments) {
+            appendRecord(segment.startSample, segment.endSample, "vad_boundary");
+          }
+          pending.erase(pending.begin(), pending.begin() + frameSize);
+        }
+      }
+
+      if (!pending.empty()) {
+        std::vector<float> tail(frameSize, 0.0f);
+        std::copy(pending.begin(), pending.end(), tail.begin());
+        tempEngine->vadRuntime->AcceptWaveform(tail.data(), frameSize);
+        auto segments = tempEngine->vadRuntime->PopSegments();
+        for (const auto &segment : segments) {
+          appendRecord(segment.startSample, segment.endSample, "vad_boundary");
+        }
+      }
+
+      tempEngine->vadRuntime->Flush();
+      {
+        auto segments = tempEngine->vadRuntime->PopSegments();
+        for (const auto &segment : segments) {
+          appendRecord(segment.startSample, segment.endSample, "finalize");
+        }
+      }
+    } else {
+      std::vector<float> samples;
+      if (!pa_read_offline_samples(bid, &samples, &sampleRate)) {
+        reject(@"BUFFER_STATE_INVALID", [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
+        return;
+      }
+
+      int minSamples = std::max(1, (int)((p.minSegmentMs / 1000.0) * sampleRate));
+      int maxSamples = std::max(minSamples, (int)((p.maxSegmentMs / 1000.0) * sampleRate));
+      int silenceSamples = std::max(1, (int)(((p.silenceThresholdMs + p.hangoverMs) / 1000.0) * sampleRate));
+      int frameSize = std::max(160, sampleRate / 50);
+
+      int start = 0;
+      int cursor = 0;
+      int silenceRun = 0;
+      while (cursor < (int)samples.size()) {
+        int end = std::min((int)samples.size(), cursor + frameSize);
+        double db = seg_rms_db(samples.data() + cursor, (size_t)(end - cursor));
+        if (db < p.energyThresholdDb) silenceRun += (end - cursor);
+        else silenceRun = 0;
+
+        int segLen = end - start;
+        bool silenceCommit = silenceRun >= silenceSamples && segLen >= minSamples;
+        bool lengthCommit = segLen >= maxSamples;
+        if (silenceCommit || lengthCommit) {
+          SegRecord rec;
+          rec.id = "seg_" + seg_uuid();
+          rec.kind = "speech";
+          rec.sourceAudioBufferId = bid;
+          rec.startSample = start;
+          rec.endSample = end;
+          rec.sampleRate = sampleRate;
+          rec.durationMs = (int)(((end - start) * 1000.0) / sampleRate);
+          NSDictionary *payloadObj = @{
+            @"source": @"vad",
+            @"engine": @"vad",
+            @"decision": @"model",
+            @"score": @(db),
+          };
+          NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
+          if (payloadData) rec.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
+          records.push_back(rec);
+          std::string reason = seg_reason_from_eval(p.evaluator, silenceCommit);
+          seg_record_annotation(rec.id, reason, (int)records.size() - 1);
+          start = end;
+          silenceRun = 0;
+        }
+        cursor = end;
+      }
+
+      if (start < (int)samples.size()) {
         SegRecord rec;
         rec.id = "seg_" + seg_uuid();
         rec.kind = "speech";
         rec.sourceAudioBufferId = bid;
         rec.startSample = start;
-        rec.endSample = end;
+        rec.endSample = (int)samples.size();
         rec.sampleRate = sampleRate;
-        rec.durationMs = (int)(((end - start) * 1000.0) / sampleRate);
+        rec.durationMs = (int)(((samples.size() - start) * 1000.0) / sampleRate);
         NSDictionary *payloadObj = @{
           @"source": @"vad",
           @"engine": @"vad",
           @"decision": @"model",
-          @"score": @(db),
         };
         NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
         if (payloadData) rec.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
         records.push_back(rec);
-        std::string reason = seg_reason_from_eval(p.evaluator, silenceCommit);
-        seg_record_annotation(rec.id, reason, (int)records.size() - 1);
-        start = end;
-        silenceRun = 0;
+        seg_record_annotation(rec.id, "finalize", (int)records.size() - 1);
       }
-      cursor = end;
-    }
-
-    if (start < (int)samples.size()) {
-      SegRecord rec;
-      rec.id = "seg_" + seg_uuid();
-      rec.kind = "speech";
-      rec.sourceAudioBufferId = bid;
-      rec.startSample = start;
-      rec.endSample = (int)samples.size();
-      rec.sampleRate = sampleRate;
-      rec.durationMs = (int)(((samples.size() - start) * 1000.0) / sampleRate);
-      NSDictionary *payloadObj = @{
-        @"source": @"vad",
-        @"engine": @"vad",
-        @"decision": @"model",
-      };
-      NSData *payloadData = [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
-      if (payloadData) rec.payloadJson.assign((const char *)payloadData.bytes, payloadData.length);
-      records.push_back(rec);
-      seg_record_annotation(rec.id, "finalize", (int)records.size() - 1);
     }
 
     auto off = std::make_shared<SegOfflineEntry>();

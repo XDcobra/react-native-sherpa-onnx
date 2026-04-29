@@ -32,6 +32,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
 }));
 
 import {
+  runOfflineAudioToTextPipeline,
   runOfflineAudioPipeline,
   runOfflineTextPipeline,
 } from '../offlineOrchestrator';
@@ -793,5 +794,135 @@ describe('offline orchestrator', () => {
     );
 
     expect(result.linkMap).toBe(linkMap);
+  });
+
+  it('runs offline audio->text orchestration and returns segment mappings', async () => {
+    audio.getPipelineAudioBufferInfo.mockImplementation((id: string) => {
+      if (id === 'off_input') {
+        return Promise.resolve({
+          bufferId: 'off_input',
+          kind: 'offlinePcmBuffer',
+          state: 'immutable',
+          sampleRate: 16000,
+          channelCount: 1,
+          numSamples: 8,
+          durationMs: 0.5,
+        });
+      }
+      return Promise.resolve({
+        bufferId: id,
+        kind: 'offlinePcmBuffer',
+        state: 'immutable',
+        sampleRate: 16000,
+        channelCount: 1,
+        numSamples: 4,
+        durationMs: 0.25,
+      });
+    });
+
+    segment.getSegments.mockResolvedValue([
+      {
+        segmentId: 'seg_1',
+        domain: 'speech',
+        startOffset: 0,
+        endOffset: 4,
+        reason: 'manual_commit',
+        source: 'external',
+        createdAtMs: Date.now(),
+        segmentIndex: 0,
+        sourceAudioBufferId: 'off_input',
+        sampleRate: 16000,
+        durationMs: 0.25,
+      },
+    ]);
+
+    text.getPipelineTextBufferInfo.mockImplementation((id: string) => {
+      if (id === 'txt_empty') {
+        return Promise.resolve({
+          bufferId: id,
+          kind: 'offlineTextBuffer',
+          state: 'immutable',
+          utf16Length: 4,
+          tokenCount: 0,
+          timestampCount: 0,
+          durationCount: 0,
+          hasLang: false,
+          hasEmotion: false,
+          hasEvent: false,
+        });
+      }
+      return Promise.resolve({
+        bufferId: id,
+        kind: 'offlineTextBuffer',
+        state: 'immutable',
+        utf16Length: 4,
+        tokenCount: 0,
+        timestampCount: 0,
+        durationCount: 0,
+        hasLang: false,
+        hasEmotion: false,
+        hasEvent: false,
+      });
+    });
+    text.getOfflineTextBufferTextSlice.mockResolvedValue('test');
+
+    const result = await runOfflineAudioToTextPipeline(
+      'off_input',
+      jest.fn().mockResolvedValue(undefined),
+      {
+        segmentation: { mode: 'auto' },
+      }
+    );
+
+    expect(result.status).toBe('complete');
+    expect(result.outputBuffer?.bufferId).toBe('txt_final');
+    expect(result.segmentMappings).toHaveLength(1);
+    expect(result.segmentMappings[0]).toMatchObject({
+      speechSegmentId: 'seg_1',
+      segmentIndex: 0,
+      text: 'test',
+    });
+  });
+
+  it('audio->text skip recovery inserts placeholder and reports skip', async () => {
+    audio.getPipelineAudioBufferInfo.mockResolvedValue({
+      bufferId: 'off_input',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 4,
+      durationMs: 0.25,
+    });
+
+    segment.getSegments.mockResolvedValue([
+      {
+        segmentId: 'seg_skip',
+        domain: 'speech',
+        startOffset: 0,
+        endOffset: 4,
+        reason: 'manual_commit',
+        source: 'external',
+        createdAtMs: Date.now(),
+        segmentIndex: 0,
+        sourceAudioBufferId: 'off_input',
+        sampleRate: 16000,
+        durationMs: 0.25,
+      },
+    ]);
+
+    const result = await runOfflineAudioToTextPipeline(
+      'off_input',
+      jest.fn().mockRejectedValue(new Error('stt_fail')),
+      {
+        segmentation: { mode: 'auto' },
+        errorRecovery: 'skip',
+        textSkipPlaceholder: '[skip]',
+      }
+    );
+
+    expect(result.status).toBe('complete');
+    expect(result.skippedSegments).toHaveLength(1);
+    expect(result.segmentMappings).toHaveLength(0);
   });
 });
