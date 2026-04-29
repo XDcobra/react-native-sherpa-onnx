@@ -2,7 +2,8 @@
 
 ## Status
 - **Phase 2 (STT + VAD + `stt_produced`):** Completed — Implementierung und Parity-Check (Plan `phase-2-vad-stt`, Jest: `segment-api`, `transcribe-segmented`, `offline-orchestrator`) erfüllt.
-- **Weitere Features in diesem Dokument (TTS, Punctuation, Enhancement, Alignment, …):** weiterhin offen / spätere Phasen.
+- **Phase 3 (Enhancement offline segmentiert + Streaming `continuous_frames`):** Completed — Offline Enhancement nutzt optional den Phase-1c-Audio-Orchestrator, befüllt das Caller-`audioOut` via `populateOfflineAudioBufferIfEmpty`, Streaming Enhancement kann `continuous_frames` als Checkpoint-only Attach nutzen, und native Offline-Segmentation bleibt chunked.
+- **Weitere Features in diesem Dokument (TTS, Punctuation, Alignment, …):** weiterhin offen / spätere Phasen.
 - Depends on: Sub-Plan 01, 02, 03, 04
 
 ## Purpose
@@ -180,15 +181,20 @@ Enhancement uses the unified segmentation contract at the API level but retains 
 
 ### Migration Steps
 
-1. Add `segmentation` option to offline enhancement API.
-2. Implement offline enhancement orchestration:
-   - Segment audio → per-segment enhance → accumulate via LiveAudioBuffer → transfer.
-3. Update streaming enhancement to use `ContinuousFramesPolicy`:
-   - Attach `ContinuousFramesEvaluator` (mostly no-op).
-   - Frame-drain execution unchanged.
-   - Optional checkpoints emitted.
-4. Update public API: `enhance(audio, { segmentation })`.
-5. Test: verify no boundary artifacts in offline segmented mode.
+1. Completed: `enhance(audioIn, audioOut, options?)` accepts `segmentation`, recovery, progress, and overlap options while preserving the caller-owned `audioOut`.
+2. Completed: segmented offline enhancement uses `runOfflineAudioPipeline` with per-segment `enhanceOfflineAudioBuffers`, LiveAudioBuffer accumulation, final transfer, and `populateOfflineAudioBufferIfEmpty(audioOut, orchestratorOutput)`.
+3. Completed: streaming enhancement optionally attaches `continuous_frames` before native frame-drain startup and detaches on stop/completion. Frame-drain execution is unchanged.
+4. Completed: Android and iOS `continuous_frames` live engines emit checkpoint commits only; `segmentOfflineBuffer(..., { evaluator: 'continuous_frames' })` rejects with `POLICY_INVALID_FOR_OFFLINE`.
+5. Completed: offline energy/VAD segmentation reads audio in slices for the segmented path; no full-file PCM vector is materialized by the segmentation/orchestration path.
+6. Completed: tests cover single-shot vs segmented enhancement, recovery/populate behavior, continuous-frame attach/offline reject, and audio orchestrator behavior.
+
+### Phase 3 Progress (Completed)
+
+- Public API: `EnhancementEngine.enhance(audioIn, audioOut, options?)` returns `EnhancementResult` with status/counts/skips/timing.
+- Native bridge: `populateOfflineAudioBufferIfEmpty(target, source)` atomically adopts source storage into an empty caller target and consumes the source handle.
+- Offline segmented path: default policy is `speech_energy_silence`; `abort`, `skip`, `retry`, and `partial_result` are delegated to `OrchestrationSession`.
+- Streaming path: `segmentation.policy.evaluator = 'continuous_frames'` is supported for checkpoints only; non-continuous streaming policies are rejected by the Enhancement wrapper.
+- Memory audit: one-shot Enhancement may still use native full-buffer model input by design, but segmented offline orchestration and native offline segmentation loops operate on slices/chunks. Streaming remains frame-drain and does not materialize full PCM.
 
 ### Equivalence
 
@@ -196,8 +202,8 @@ Enhancement uses the unified segmentation contract at the API level but retains 
 
 ### Breaking Changes
 
-- `segmentation` parameter added to offline API (additive, not breaking).
-- Streaming: no functional change (continuous frame-drain preserved).
+- `segmentation`/recovery/options parameter added to offline API; existing `(audioIn, audioOut)` call shape remains valid.
+- Streaming: optional `segmentation` parameter added; frame-drain behavior is preserved.
 
 ---
 
@@ -408,17 +414,17 @@ This gives the SDK user full access to:
 
 ## Validation Checklist (per feature)
 
-- [ ] New Segment Contract types used
-- [ ] Old segment model removed
-- [ ] Segmentation config accepted in API
-- [ ] Auto-segmentation works with appropriate policy
-- [ ] Manual commit works
-- [ ] No segmentation (mode='off') works (full run)
-- [ ] onSegment events emitted correctly
-- [ ] Pull API returns correct segments
-- [ ] Spool replay reconstructs segments
-- [ ] Equivalence documented and tested
-- [ ] Old segmentation code removed
-- [ ] **SegmentLinkMap** created when cross-domain processing active (STT, TTS, Alignment)
-- [ ] **SegmentLinks** correctly reference text ↔ speech segment IDs
-- [ ] Bidirectional query returns correct links
+- [x] New Segment Contract types used (Phase 3 Enhancement uses shared `SegmentationPolicy` and segment accessors)
+- [x] Old segment model removed/avoided for Enhancement migration path
+- [x] Segmentation config accepted in Enhancement offline and streaming APIs
+- [x] Auto-segmentation works with appropriate offline policy (`speech_energy_silence`)
+- [x] Manual commit remains a Segment Engine capability; Enhancement Phase 3 uses auto/offline orchestration and continuous streaming checkpoints
+- [x] No segmentation (`mode='off'`) works (full one-shot Enhancement)
+- [x] onSegment events emitted correctly for Streaming `continuous_frames` checkpoints
+- [x] Pull API returns correct checkpoint segments (`reason: 'policy_checkpoint'`)
+- [x] Spool replay/transfer reconstructs segmented Enhancement output via LiveAudioBuffer accumulator
+- [x] Equivalence documented and tested as approximate with overlap support
+- [x] Old segmentation code removed (**N/A for Enhancement**: there was no legacy custom segmentation pipeline to retire; streaming remained frame-drain by design)
+- [x] **SegmentLinkMap** created when cross-domain processing active (**N/A for Enhancement**: single-domain audio->audio flow, no cross-domain linkage)
+- [x] **SegmentLinks** correctly reference text ↔ speech segment IDs (**N/A for Enhancement**)
+- [x] Bidirectional query returns correct links (**N/A for Enhancement**)
