@@ -2,6 +2,7 @@
 #include "../core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../vad/core/VadRuntime.h"
 
 #ifdef __cplusplus
@@ -603,26 +604,6 @@ static void seg_notify_segment_appended(
 }
 } // namespace
 
-void seg_release_all_entries() {
-  std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> liveEntries;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    liveEntries.swap(g_seg_live);
-    g_seg_offline.clear();
-  }
-  for (auto &pair : liveEntries) {
-    try { pair.second->release(); } catch (...) {}
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-    g_seg_engine_by_id.clear();
-    g_seg_engine_id_by_buffer.clear();
-    g_seg_engine_annotation_by_segment.clear();
-    g_seg_engine_eval_guard.clear();
-  }
-}
-
 std::shared_ptr<SegLiveEntry> seg_get_live_entry(const std::string &bufferId) {
   std::lock_guard<std::mutex> lock(g_seg_mutex);
   auto it = g_seg_live.find(bufferId);
@@ -772,6 +753,33 @@ std::unordered_set<std::string> g_seg_engine_eval_guard;
 std::mutex g_seg_engine_mutex;
 std::condition_variable g_seg_engine_eval_cv;
 
+} // namespace
+
+void seg_release_all_entries() {
+  std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> liveEntries;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_mutex);
+    liveEntries.swap(g_seg_live);
+    g_seg_offline.clear();
+  }
+  for (auto &pair : liveEntries) {
+    try {
+      pair.second->release();
+    } catch (...) {
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    g_seg_engine_by_id.clear();
+    g_seg_engine_id_by_buffer.clear();
+    g_seg_engine_annotation_by_segment.clear();
+    g_seg_engine_eval_guard.clear();
+  }
+}
+
+namespace {
+
 static int64_t seg_now_ms() {
   return (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
 }
@@ -886,7 +894,6 @@ static bool seg_init_vad_runtime(
 
 static std::string seg_reason_from_eval(const std::string &eval, bool silenceCommit) {
   if (eval == "speech_vad_model") return "vad_boundary";
-  if (eval == "continuous_frames") return "policy_checkpoint";
   return silenceCommit ? "energy_silence" : "length_limit";
 }
 
@@ -1148,6 +1155,18 @@ static void seg_engine_evaluate_audio(
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
   if (!samples || count == 0 || sampleRate <= 0) return;
 
+  if (engine->policy.evaluator == "continuous_frames") {
+    if (engine->policy.checkpointIntervalMs <= 0) return;
+    double checkpointMs =
+      ((double)std::max<int64_t>(0, totalSamplesWritten - engine->checkpointStartSample) * 1000.0) /
+      sampleRate;
+    if (checkpointMs >= engine->policy.checkpointIntervalMs) {
+      double db = seg_rms_db(samples, count);
+      seg_append_speech_segment(engine, totalSamplesWritten, "policy_checkpoint", db);
+    }
+    return;
+  }
+
   if (engine->policy.evaluator == "speech_vad_model") {
     if (!engine->vadRuntime || engine->vadFrameSize <= 0) {
       return;
@@ -1192,15 +1211,6 @@ static void seg_engine_evaluate_audio(
     seg_append_speech_segment(engine, totalSamplesWritten, reason, db);
     return;
   }
-
-  if (engine->policy.evaluator == "continuous_frames" && engine->policy.checkpointIntervalMs > 0) {
-    double checkpointMs =
-      ((double)std::max<int64_t>(0, totalSamplesWritten - engine->checkpointStartSample) * 1000.0) /
-      sampleRate;
-    if (checkpointMs >= engine->policy.checkpointIntervalMs) {
-      seg_append_speech_segment(engine, totalSamplesWritten, "policy_checkpoint", db);
-    }
-  }
 }
 
 static void seg_engine_flush_audio(const std::shared_ptr<SegEngine> &engine) {
@@ -1229,7 +1239,9 @@ static void seg_engine_flush_audio(const std::shared_ptr<SegEngine> &engine) {
   auto live = pa_get_live_entry(engine->attachedBufferId);
   if (!live) return;
   if (live->totalSamplesWritten > engine->segmentStartSample) {
-    seg_append_speech_segment(engine, live->totalSamplesWritten, "finalize", 0.0);
+    const char *reason =
+      engine->policy.evaluator == "continuous_frames" ? "policy_checkpoint" : "finalize";
+    seg_append_speech_segment(engine, live->totalSamplesWritten, reason, 0.0);
   }
 }
 
@@ -1682,6 +1694,11 @@ bool seg_engine_peek_annotation(
     }
 
     SegEnginePolicy p = seg_policy_from_dict(policy, SegEngineDomain::SPEECH);
+    if (p.evaluator == "continuous_frames") {
+      reject(@"POLICY_INVALID_FOR_OFFLINE", @"Policy evaluator 'continuous_frames' is streaming-only and invalid for offline segmentation", nil);
+      return;
+    }
+
     std::vector<SegRecord> records;
     if (p.evaluator == "speech_vad_model") {
       auto tempEngine = std::make_shared<SegEngine>();
@@ -1769,12 +1786,6 @@ bool seg_engine_peek_annotation(
         }
       }
     } else {
-      std::vector<float> samples;
-      if (!pa_read_offline_samples(bid, &samples, &sampleRate)) {
-        reject(@"BUFFER_STATE_INVALID", [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId], nil);
-        return;
-      }
-
       int minSamples = std::max(1, (int)((p.minSegmentMs / 1000.0) * sampleRate));
       int maxSamples = std::max(minSamples, (int)((p.maxSegmentMs / 1000.0) * sampleRate));
       int silenceSamples = std::max(1, (int)(((p.silenceThresholdMs + p.hangoverMs) / 1000.0) * sampleRate));
@@ -1783,10 +1794,28 @@ bool seg_engine_peek_annotation(
       int start = 0;
       int cursor = 0;
       int silenceRun = 0;
-      while (cursor < (int)samples.size()) {
-        int end = std::min((int)samples.size(), cursor + frameSize);
-        double db = seg_rms_db(samples.data() + cursor, (size_t)(end - cursor));
-        if (db < p.energyThresholdDb) silenceRun += (end - cursor);
+      while (cursor < totalSamples) {
+        int readCount = std::min(frameSize, totalSamples - cursor);
+        std::vector<float> frame;
+        std::string sliceErrCode;
+        std::string sliceErrMessage;
+        if (!pa_get_offline_samples_slice(
+              bid,
+              cursor,
+              readCount,
+              &frame,
+              &sliceErrCode,
+              &sliceErrMessage
+            )) {
+          NSString *message = [NSString stringWithUTF8String:sliceErrMessage.c_str()] ?: @"Failed to read offline audio slice";
+          reject(@"BUFFER_STATE_INVALID", message, nil);
+          return;
+        }
+        if (frame.empty()) break;
+
+        int end = cursor + (int)frame.size();
+        double db = seg_rms_db(frame.data(), frame.size());
+        if (db < p.energyThresholdDb) silenceRun += (int)frame.size();
         else silenceRun = 0;
 
         int segLen = end - start;
@@ -1818,15 +1847,15 @@ bool seg_engine_peek_annotation(
         cursor = end;
       }
 
-      if (start < (int)samples.size()) {
+      if (start < totalSamples) {
         SegRecord rec;
         rec.id = "seg_" + seg_uuid();
         rec.kind = "speech";
         rec.sourceAudioBufferId = bid;
         rec.startSample = start;
-        rec.endSample = (int)samples.size();
+        rec.endSample = totalSamples;
         rec.sampleRate = sampleRate;
-        rec.durationMs = (int)(((samples.size() - start) * 1000.0) / sampleRate);
+        rec.durationMs = (int)(((totalSamples - start) * 1000.0) / sampleRate);
         NSDictionary *payloadObj = @{
           @"source": @"vad",
           @"engine": @"vad",

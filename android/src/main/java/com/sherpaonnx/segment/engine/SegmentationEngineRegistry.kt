@@ -309,6 +309,22 @@ private class SpeechEnergySilenceEngine(
     if (currentState != EngineState.ACTIVE) return
     if (chunk.isEmpty() || sampleRate <= 0) return
 
+    if (policy.evaluator == "continuous_frames") {
+      if (policy.checkpointIntervalMs <= 0) return
+      val checkpointDurationMs =
+        ((totalSamplesWritten - checkpointStartSample).coerceAtLeast(0L) * 1000.0) /
+          sampleRate
+      if (checkpointDurationMs >= policy.checkpointIntervalMs) {
+        appendSegment(
+          endSampleExclusive = totalSamplesWritten,
+          reason = "policy_checkpoint",
+          source = "segmentation_engine",
+          score = rmsDb(chunk),
+        )
+      }
+      return
+    }
+
     val chunkDurationMs = (chunk.size * 1000.0) / sampleRate
     val db = rmsDb(chunk)
     if (db < policy.energyThresholdDb) {
@@ -345,25 +361,25 @@ private class SpeechEnergySilenceEngine(
       return
     }
 
-    if (policy.evaluator == "continuous_frames" && policy.checkpointIntervalMs > 0) {
-      val checkpointDurationMs =
-        ((totalSamplesWritten - checkpointStartSample).coerceAtLeast(0L) * 1000.0) /
-          sampleRate
-      if (checkpointDurationMs >= policy.checkpointIntervalMs) {
-        appendSegment(
-          endSampleExclusive = totalSamplesWritten,
-          reason = "policy_checkpoint",
-          source = "segmentation_engine",
-          score = db,
-        )
-      }
-    }
   }
 
   override fun flush() {
     if (currentState != EngineState.ACTIVE) return
     val live = PipelineAudioRegistry.getLive(attachedBufferId) ?: return
     val endSampleExclusive = live.totalSamplesWritten
+
+    if (policy.evaluator == "continuous_frames") {
+      if (endSampleExclusive > segmentStartSample) {
+        appendSegment(
+          endSampleExclusive = endSampleExclusive,
+          reason = "policy_checkpoint",
+          source = "segmentation_engine",
+          score = null,
+        )
+      }
+      return
+    }
+
     if (endSampleExclusive > segmentStartSample) {
       appendSegment(
         endSampleExclusive = endSampleExclusive,
@@ -1058,6 +1074,14 @@ object SegmentationEngineRegistry {
       }
 
       EngineDomain.SPEECH -> {
+        if (policy.evaluator == "continuous_frames") {
+          throw SegmentationEngineException(
+            code = "POLICY_INVALID_FOR_OFFLINE",
+            message =
+              "Policy evaluator 'continuous_frames' is streaming-only and invalid for offline segmentation",
+          )
+        }
+
         val offline = PipelineAudioRegistry.getOffline(bufferId)
           ?: throw SegmentationEngineException(
             code = "BUFFER_STATE_INVALID",
@@ -1215,7 +1239,6 @@ object SegmentationEngineRegistry {
             runtime.close()
           }
         } else {
-          val samples = offline.readAllSamples()
           val minSamples = ((policy.minSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(1)
           val maxSamples = ((policy.maxSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(minSamples)
           val silenceSamples =
@@ -1228,9 +1251,11 @@ object SegmentationEngineRegistry {
           var silenceRun = 0
           val frameSize = (sr / 50).coerceAtLeast(160)
 
-          while (cursor < samples.size) {
-            val end = minOf(samples.size, cursor + frameSize)
-            val frame = samples.copyOfRange(cursor, end)
+          while (cursor < offline.numSamples) {
+            val readCount = minOf(frameSize, offline.numSamples - cursor)
+            val frame = offline.readSlice(cursor, readCount)
+            if (frame.isEmpty()) break
+            val end = cursor + frame.size
             var sum = 0.0
             for (value in frame) {
               sum += value * value
@@ -1290,8 +1315,8 @@ object SegmentationEngineRegistry {
             cursor = end
           }
 
-          if (start < samples.size) {
-            val end = samples.size
+          if (start < offline.numSamples) {
+            val end = offline.numSamples
             val payload = JSONObject()
               .put("source", "vad")
               .put("engine", "vad")

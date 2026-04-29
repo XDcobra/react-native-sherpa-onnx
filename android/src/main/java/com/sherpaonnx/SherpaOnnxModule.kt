@@ -1419,6 +1419,43 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineAudioBufferIfEmpty(
+    targetBufferId: String,
+    sourceBufferId: String,
+    _options: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.populateOfflineIfEmpty(
+        targetBufferId = targetBufferId,
+        sourceBufferId = sourceBufferId,
+      )
+      promise.resolve(null)
+    } catch (e: IllegalStateException) {
+      promise.reject(
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE,
+        e.message,
+        e
+      )
+    } catch (e: IllegalArgumentException) {
+      val msg = e.message ?: ""
+      val code = if (
+        msg.contains("not found", ignoreCase = true)
+      ) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT
+      }
+      promise.reject(code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR,
+        e.message,
+        e
+      )
+    }
+  }
+
   override fun createEmptyLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
       val sampleRate = options.getDouble("sampleRate").toInt()

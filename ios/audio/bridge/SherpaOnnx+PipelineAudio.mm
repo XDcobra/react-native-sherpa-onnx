@@ -995,6 +995,68 @@ bool pa_adopt_offline_samples_if_empty(
   return true;
 }
 
+static bool pa_populate_offline_from_source_if_empty(
+  const std::string &targetBufferId,
+  const std::string &sourceBufferId,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (targetBufferId == sourceBufferId) {
+    return true;
+  }
+
+  std::shared_ptr<PaOfflineEntry> target;
+  std::shared_ptr<PaOfflineEntry> source;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto targetIt = g_pa_offline.find(targetBufferId);
+    if (targetIt == g_pa_offline.end() || !targetIt->second) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline target buffer not found";
+      return false;
+    }
+    auto sourceIt = g_pa_offline.find(sourceBufferId);
+    if (sourceIt == g_pa_offline.end() || !sourceIt->second) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline source buffer not found";
+      return false;
+    }
+
+    target = targetIt->second;
+    source = sourceIt->second;
+
+    if (target->numSamples() > 0) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+      if (errorMessage) *errorMessage = "Offline target buffer is not empty";
+      return false;
+    }
+
+    if (
+      target->sampleRate != source->sampleRate ||
+      target->channelCount != source->channelCount
+    ) {
+      if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+      if (errorMessage) *errorMessage = "Offline target/source format mismatch";
+      return false;
+    }
+
+    auto replacement = std::make_shared<PaOfflineEntry>();
+    replacement->bufferId = targetBufferId;
+    replacement->sampleRate = source->sampleRate;
+    replacement->channelCount = source->channelCount;
+    if (source->isMmapBacked()) {
+      replacement->mmapRegion = std::move(source->mmapRegion);
+    } else {
+      replacement->samples = std::move(source->samples);
+    }
+
+    g_pa_offline[targetBufferId] = replacement;
+    g_pa_offline.erase(sourceBufferId);
+  }
+
+  return true;
+}
+
 @implementation SherpaOnnx (PipelineAudio)
 
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
@@ -1150,6 +1212,51 @@ bool pa_adopt_offline_samples_if_empty(
     }
 
     resolve(entry->toDict());
+  } @catch (NSException *e) {
+    reject(kPAErrInternalError, e.reason, nil);
+  }
+}
+
+- (void)populateOfflineAudioBufferIfEmpty:(NSString *)targetBufferId
+                             sourceBufferId:(NSString *)sourceBufferId
+                                    options:(NSDictionary *)options
+                                    resolve:(RCTPromiseResolveBlock)resolve
+                                     reject:(RCTPromiseRejectBlock)reject
+{
+  (void)options;
+  @try {
+    if (targetBufferId == nil || [targetBufferId length] == 0) {
+      reject(kPAErrInvalidArgument, @"targetBufferId is required", nil);
+      return;
+    }
+    if (sourceBufferId == nil || [sourceBufferId length] == 0) {
+      reject(kPAErrInvalidArgument, @"sourceBufferId is required", nil);
+      return;
+    }
+
+    std::string targetId = [targetBufferId UTF8String] ?: "";
+    std::string sourceId = [sourceBufferId UTF8String] ?: "";
+    std::string errCode;
+    std::string errMsg;
+    if (!pa_populate_offline_from_source_if_empty(targetId, sourceId, &errCode, &errMsg)) {
+      NSString *message = [NSString stringWithUTF8String:errMsg.c_str()] ?: @"Failed to populate offline audio buffer";
+      if (errCode == "AUDIO_BUFFER_NOT_FOUND") {
+        reject(kPAErrBufferNotFound, message, nil);
+        return;
+      }
+      if (errCode == "AUDIO_INVALID_STATE") {
+        reject(kPAErrInvalidState, message, nil);
+        return;
+      }
+      if (errCode == "AUDIO_INVALID_ARGUMENT") {
+        reject(kPAErrInvalidArgument, message, nil);
+        return;
+      }
+      reject(kPAErrInternalError, message, nil);
+      return;
+    }
+
+    resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
   }
