@@ -1268,7 +1268,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Punctuation model detection: offline (CT-Transformer) vs online (CNN-BiLSTM + bpe.vocab).
-   * `isStreaming` is reserved; currently false until streaming handling is implemented.
+   * `isStreaming` is true when native detection resolves an online-compatible CNN-BiLSTM layout.
    */
   detectPunctuationModel(
     modelDir: string,
@@ -1328,6 +1328,40 @@ export interface Spec extends TurboModule {
 
   /** Release native `OfflinePunctuation` for this instance. */
   unloadOfflinePunctuation(instanceId: string): Promise<void>;
+
+  /**
+   * Load sherpa-onnx `OnlinePunctuation` (CNN-BiLSTM + bpe.vocab).
+   */
+  initializeOnlinePunctuation(
+    instanceId: string,
+    modelDir: string,
+    modelType?: string | null,
+    numThreads?: number,
+    provider?: string,
+    debug?: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /** Punctuate one committed live-text chunk with an existing OnlinePunctuation instance. */
+  processOnlinePunctuationChunk(
+    instanceId: string,
+    text: string
+  ): Promise<{ punctuatedText: string; processingTimeMs: number }>;
+
+  /** Release native `OnlinePunctuation` for this instance. */
+  unloadOnlinePunctuation(instanceId: string): Promise<void>;
+
+  // ==================== Punctuation Pipeline ====================
+
+  startStreamingPunctuationPipeline(
+    instanceId: string,
+    inputBufferId: string,
+    outputBufferId: string
+  ): Promise<{ pipelineId: string }>;
 
   initializeEnhancement(
     instanceId: string,
