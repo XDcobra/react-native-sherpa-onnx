@@ -1,7 +1,7 @@
 # Sub-Plan 02: Segmentation Engine Core
 
 ## Status
-- Draft
+- **Implemented** (Phase 1d abgeschlossen laut `segmentation_engine_overview.md`): Native Engine-Registry und Laufzeit-APIs (`attachSegmentationEngine`, `detachSegmentationEngine`, `getSegmentationEngineInfo`, `segmentOfflineBuffer`) auf Android (`SegmentationEngineRegistry.kt`) und iOS (`SherpaOnnx+SegmentBuffer.mm`); P0-Evaluatoren (`text_synthetic_auto`, `speech_energy_silence`); `continuous_frames` mit Checkpoints; Buffer-Hooks bei Text-/Audio-Writes und Finalize/Release. Policy-IDs `text_punctuation_assisted` und `speech_vad_model` sind gültig; dedizierte Modell-Pipelines dafür bleiben gemäß Prioritätstabelle (P1/P2) und Folgephasen (z. B. Phase 2/4) nachziehbar.
 - Depends on: Sub-Plan 01 (Segment Contract)
 - Prerequisite for: Sub-Plan 03, 04, 05
 
