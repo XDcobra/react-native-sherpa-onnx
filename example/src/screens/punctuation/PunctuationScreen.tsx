@@ -117,6 +117,10 @@ export default function PunctuationScreen() {
     'auto'
   );
   const [lastProcessingMs, setLastProcessingMs] = useState<number | null>(null);
+  const [lastSegmentStatus, setLastSegmentStatus] = useState<string | null>(
+    null
+  );
+  const [segmentedOffline, setSegmentedOffline] = useState(false);
   const [engineReady, setEngineReady] = useState(false);
 
   const engineRef = useRef<OfflinePunctuationEngine | null>(null);
@@ -253,6 +257,7 @@ export default function PunctuationScreen() {
     setInitMessage(null);
     setOutputText('');
     setLastProcessingMs(null);
+    setLastSegmentStatus(null);
     setEngineReady(false);
     try {
       await releaseTextBuffers();
@@ -298,6 +303,7 @@ export default function PunctuationScreen() {
     setPunctuateBusy(true);
     setError(null);
     setLastProcessingMs(null);
+    setLastSegmentStatus(null);
     try {
       await releaseTextBuffers();
       setOutputText('');
@@ -310,8 +316,32 @@ export default function PunctuationScreen() {
       textInRef.current = textIn;
       textOutRef.current = textOut;
 
-      const { processingTimeMs } = await engine.punctuate(textIn, textOut);
+      const result = await engine.punctuate(textIn, textOut, {
+        segmentation: segmentedOffline
+          ? {
+              mode: 'auto',
+              policy: {
+                evaluator: 'text_synthetic_auto',
+                sentenceBoundary: true,
+                maxLengthChars: 320,
+              },
+            }
+          : { mode: 'off' },
+        errorRecovery: 'retry',
+        maxRetriesPerSegment: 1,
+        retryExhaustedFallback: 'skip',
+        overlapChars: segmentedOffline ? 24 : 0,
+        textSkipPlaceholder: '',
+      });
+      const { processingTimeMs } = result;
       setLastProcessingMs(processingTimeMs);
+      if (result.status) {
+        setLastSegmentStatus(
+          `${result.status}: ${result.completedSegments ?? 0}/${
+            result.totalSegments ?? 0
+          } segments`
+        );
+      }
       const info = (await getPipelineTextBufferInfo(
         textOut
       )) as OfflineTextBufferInfo;
@@ -498,6 +528,21 @@ export default function PunctuationScreen() {
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>4) Run (buffer → buffer)</Text>
+              <View style={puncStyles.debugRow}>
+                <Text style={puncStyles.smallLabel}>
+                  segmented offline for long text{' '}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setSegmentedOffline((v) => !v)}
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name={segmentedOffline ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={segmentedOffline ? '#007AFF' : '#8E8E93'}
+                  />
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity
                 style={[
                   styles.button,
@@ -515,6 +560,11 @@ export default function PunctuationScreen() {
               {lastProcessingMs != null ? (
                 <Text style={[styles.hint, puncStyles.hintAfterAction]}>
                   Native addPunctuation: {lastProcessingMs.toFixed(1)} ms
+                </Text>
+              ) : null}
+              {lastSegmentStatus ? (
+                <Text style={[styles.hint, puncStyles.hintAfterAction]}>
+                  Segmented orchestration: {lastSegmentStatus}
                 </Text>
               ) : null}
             </View>

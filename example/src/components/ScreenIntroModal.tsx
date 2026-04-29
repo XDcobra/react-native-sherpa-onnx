@@ -49,6 +49,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Offline punctuation',
     body: 'This screen loads an offline CT-Transformer model, builds plain text into offline text buffers, runs the punctuation engine buffer-to-buffer, and shows a read-only punctuated result with a copy action. Re-run releases previous buffers; options mirror the library’s init and pass-through language field.',
   },
+  PunctuationStreaming: {
+    title: 'Streaming punctuation',
+    body: 'This screen runs online CNN-BiLSTM punctuation over live text buffers. It is useful for checking the LiveTextBuffer input/output contract, pipeline lifecycle, and optional segmentation attach.',
+  },
   PipelineShowcase: {
     title: 'End-to-end pipeline showcase',
     body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',
