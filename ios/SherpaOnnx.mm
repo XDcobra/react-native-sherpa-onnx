@@ -28,6 +28,7 @@
 extern void paMicStopQueue(void);
 // ios/punctuation/bridge/SherpaOnnx+OfflinePunctuation.mm
 extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
+extern "C" void sherpaonnx_punct_online_invalidate_all(void);
 // ios/segment/bridge/SherpaOnnx+SegmentLinkMap.mm
 extern "C" void slm_release_all_link_maps(void);
 
@@ -59,6 +60,7 @@ extern "C" void slm_release_all_link_maps(void);
 {
     paMicStopQueue();
     sherpaonnx_punct_offline_invalidate_all();
+    sherpaonnx_punct_online_invalidate_all();
     txt_release_all_entries();
     seg_release_all_entries();
     slm_release_all_link_maps();

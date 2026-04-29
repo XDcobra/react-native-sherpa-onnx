@@ -31,6 +31,31 @@ extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
   g_punct_offline.clear();
 }
 
+extern "C" bool sherpaonnx_punct_offline_add_punctuation_if_exists(
+    const std::string &instanceId,
+    const std::string &text,
+    std::string *outText) {
+  sherpa_onnx::cxx::OfflinePunctuation *engine = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+    auto it = g_punct_offline.find(instanceId);
+    if (it == g_punct_offline.end()) {
+      return false;
+    }
+    engine = &it->second;
+  }
+  if (outText != nullptr) {
+    *outText = engine->AddPunctuation(text);
+  }
+  return true;
+}
+
+extern "C" bool sherpaonnx_punct_offline_has_instance(
+    const std::string &instanceId) {
+  std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+  return g_punct_offline.find(instanceId) != g_punct_offline.end();
+}
+
 @implementation SherpaOnnx (OfflinePunctuation)
 
 - (void)initializeOfflinePunctuation:(NSString *)instanceId

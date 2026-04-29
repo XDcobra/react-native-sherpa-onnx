@@ -2,6 +2,8 @@ package com.sherpaonnx.segment.engine
 
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.segment.pipeline.OfflineSegmentEntry
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
@@ -40,6 +42,7 @@ data class SegmentationEnginePolicy(
   val maxSegmentMs: Int = 30000,
   val hangoverMs: Int = 300,
   val checkpointIntervalMs: Int = 0,
+  val punctuationInstanceId: String? = null,
   val vadModelId: String? = null,
   val vadThreshold: Double? = null,
   val vadMinSpeechMs: Int? = null,
@@ -203,6 +206,104 @@ private class TextSyntheticAutoEngine(
       text = committedText,
       source = "stt_stream",
       meta = meta,
+    )
+    entry.writePartial(remainder)
+
+    totalSegmentsCommitted += 1
+    lastSegmentId = "txtseg_${attachedBufferId}_${segmentIndex}"
+    return true
+  }
+
+  override fun evaluateText() {
+    if (currentState != EngineState.ACTIVE) return
+    val entry = TextPipelineRegistry.getLive(attachedBufferId) ?: return
+    var madeProgress = true
+    while (madeProgress) {
+      madeProgress = commitIfNeeded(entry, "policy_checkpoint")
+    }
+  }
+
+  override fun flush() {
+    if (currentState != EngineState.ACTIVE) return
+    val entry = TextPipelineRegistry.getLive(attachedBufferId) ?: return
+    commitIfNeeded(entry, "finalize")
+  }
+}
+
+private fun resolvePunctuatedTextOrThrow(instanceId: String, text: String): String {
+  val online = SherpaOnnxOnlinePunctuationHelper.processOnlineIfExists(instanceId, text)
+  if (online != null) return online
+  val offline = SherpaOnnxPunctuationHelper.processOfflineIfExists(instanceId, text)
+  if (offline != null) return offline
+  throw SegmentationEngineException(
+    code = "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+    message = "text_punctuation_assisted requires a valid punctuationInstanceId; not found: $instanceId",
+  )
+}
+
+private class TextPunctuationAssistedEngine(
+  engineId: String,
+  attachedBufferId: String,
+  policy: SegmentationEnginePolicy,
+) : BaseSegmentationEngine(
+  engineId = engineId,
+  domain = EngineDomain.TEXT,
+  attachedBufferId = attachedBufferId,
+  policy = policy,
+) {
+  override val segmentBufferId: String? = null
+
+  private fun commitIfNeeded(entry: LiveTextEntry, reason: String): Boolean {
+    if (currentState != EngineState.ACTIVE) return false
+    val partial = entry.currentText
+    if (partial.isEmpty()) return false
+
+    val instanceId = policy.punctuationInstanceId
+      ?: throw SegmentationEngineException(
+        code = "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+        message = "text_punctuation_assisted requires policy.punctuationInstanceId",
+      )
+
+    val punctuated = resolvePunctuatedTextOrThrow(instanceId, partial)
+    val boundaryChars = charArrayOf('.', '!', '?', ';', ':', '\n')
+    val boundaryIndex = punctuated.indexOfLast { ch -> boundaryChars.contains(ch) }
+
+    var commitLength = 0
+    var commitReason = reason
+    if (policy.sentenceBoundary && boundaryIndex >= 0) {
+      commitLength = minOf(partial.length, boundaryIndex + 1)
+      commitReason = "punctuation"
+    }
+
+    if (commitLength <= 0 && partial.length >= policy.maxLengthChars) {
+      val maxLen = policy.maxLengthChars.coerceAtLeast(1)
+      val prefix = partial.substring(0, maxLen)
+      commitLength = prefix.lastIndexOf(' ').let { if (it <= 0) maxLen else it + 1 }
+      commitReason = "length_limit"
+    }
+
+    if (reason == "finalize") {
+      commitLength = partial.length
+      commitReason = "finalize"
+    }
+
+    if (commitLength <= 0) return false
+    val committedText = partial.substring(0, commitLength)
+    val remainder = partial.substring(commitLength)
+    if (committedText.isBlank() && reason != "finalize") {
+      entry.writePartial(remainder)
+      return false
+    }
+
+    val segmentIndex = entry.commitSegment(
+      text = committedText,
+      source = "stt_stream",
+      meta = mutableMapOf<String, Any?>(
+        "__segmentReason" to commitReason,
+        "__segmentSource" to "segmentation_engine",
+        "__segmentCreatedAtMs" to nowMs(),
+        "punctuationInstanceId" to instanceId,
+      ),
     )
     entry.writePartial(remainder)
 
@@ -775,6 +876,7 @@ private fun parsePolicy(
     hangoverMs = readInt(rawPolicy, "hangoverMs", 300).coerceAtLeast(0),
     checkpointIntervalMs =
       readInt(rawPolicy, "checkpointIntervalMs", 0).coerceAtLeast(0),
+    punctuationInstanceId = readString(rawPolicy, "punctuationInstanceId"),
     vadModelId = readString(rawPolicy, "vadModelId"),
     vadThreshold = (rawPolicy["vadThreshold"] as? Number)?.toDouble(),
     vadMinSpeechMs = (rawPolicy["vadMinSpeechMs"] as? Number)?.toInt(),
@@ -839,11 +941,33 @@ object SegmentationEngineRegistry {
             message = "Live text buffer is not in recording state: $bufferId",
           )
         }
-        TextSyntheticAutoEngine(
-          engineId = engineId,
-          attachedBufferId = bufferId,
-          policy = policy,
-        )
+        if (policy.evaluator == "text_punctuation_assisted") {
+          val punctuationId = policy.punctuationInstanceId
+            ?: throw SegmentationEngineException(
+              code = "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+              message = "text_punctuation_assisted requires policy.punctuationInstanceId",
+            )
+          if (
+            !SherpaOnnxOnlinePunctuationHelper.hasOnlineInstance(punctuationId) &&
+            !SherpaOnnxPunctuationHelper.hasOfflineInstance(punctuationId)
+          ) {
+            throw SegmentationEngineException(
+              code = "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+              message = "Punctuation instance not found for segmentation policy: $punctuationId",
+            )
+          }
+          TextPunctuationAssistedEngine(
+            engineId = engineId,
+            attachedBufferId = bufferId,
+            policy = policy,
+          )
+        } else {
+          TextSyntheticAutoEngine(
+            engineId = engineId,
+            attachedBufferId = bufferId,
+            policy = policy,
+          )
+        }
       }
 
       EngineDomain.SPEECH -> {
@@ -1026,7 +1150,17 @@ object SegmentationEngineRegistry {
             message = "Offline text buffer not found: $bufferId",
           )
 
-        val text = offline.text
+        val rawText = offline.text
+        val text = if (policy.evaluator == "text_punctuation_assisted") {
+          val punctuationId = policy.punctuationInstanceId
+            ?: throw SegmentationEngineException(
+              code = "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+              message = "text_punctuation_assisted requires policy.punctuationInstanceId",
+            )
+          resolvePunctuatedTextOrThrow(punctuationId, rawText)
+        } else {
+          rawText
+        }
         var index = 0
         val records = ArrayList<Map<String, Any?>>()
         while (index < text.length) {
