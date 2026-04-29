@@ -100,11 +100,18 @@ class SttPipelineWorker(
 
         if (recognizer.isEndpoint(stream)) {
           if (result.text.isNotBlank()) {
+            val createdAtMs = System.currentTimeMillis()
+            val segmentMeta = mapOf<String, Any>(
+              "__segmentReason" to "endpoint",
+              "__segmentSource" to "segmentation_engine",
+              "__segmentCreatedAtMs" to createdAtMs,
+            )
             val segmentIndex = outputEntry.commitSegment(
               text = result.text,
               tokens = result.tokens,
               timestamps = result.timestamps,
               source = "stt_stream",
+              meta = segmentMeta,
             )
             onSegmentCommitted?.invoke(
               TextSegment(
@@ -113,7 +120,7 @@ class SttPipelineWorker(
                 timestamps = result.timestamps,
                 source = "stt_stream",
                 segmentIndex = segmentIndex,
-                meta = null,
+                meta = segmentMeta,
               ),
               outputEntry.segmentCount,
             )
@@ -142,11 +149,18 @@ class SttPipelineWorker(
     }
     val result = recognizer.getResult(stream)
     if (result.text.isNotBlank()) {
+      val createdAtMs = System.currentTimeMillis()
+      val segmentMeta = mapOf<String, Any>(
+        "__segmentReason" to "endpoint",
+        "__segmentSource" to "segmentation_engine",
+        "__segmentCreatedAtMs" to createdAtMs,
+      )
       val segmentIndex = outputEntry.commitSegment(
         text = result.text,
         tokens = result.tokens,
         timestamps = result.timestamps,
         source = "stt_stream",
+        meta = segmentMeta,
       )
       onSegmentCommitted?.invoke(
         TextSegment(
@@ -155,7 +169,7 @@ class SttPipelineWorker(
           timestamps = result.timestamps,
           source = "stt_stream",
           segmentIndex = segmentIndex,
-          meta = null,
+          meta = segmentMeta,
         ),
         outputEntry.segmentCount,
       )

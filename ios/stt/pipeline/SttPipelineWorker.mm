@@ -83,6 +83,17 @@ void SttPipelineWorker::runLoop() {
 
       if (wrapper_->isEndpoint(streamId_)) {
         if (!result.text.empty()) {
+          const int64_t createdAtMs =
+            static_cast<int64_t>(
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+              ).count()
+            );
+          NSDictionary *segmentMeta = @{
+            @"__segmentReason": @"endpoint",
+            @"__segmentSource": @"segmentation_engine",
+            @"__segmentCreatedAtMs": @(createdAtMs),
+          };
           std::string err;
           if (!txt_live_commit_segment(
                 outputEntry_,
@@ -90,7 +101,7 @@ void SttPipelineWorker::runLoop() {
                 result.tokens,
                 result.timestamps,
                 "stt_stream",
-                nil,
+                segmentMeta,
                 &err
               )) {
             throw std::runtime_error("Failed to commit text segment: " + err);
@@ -140,6 +151,17 @@ void SttPipelineWorker::autoFlushAndCommit() {
 
   auto result = wrapper_->getResult(streamId_);
   if (!result.text.empty()) {
+    const int64_t createdAtMs =
+      static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch()
+        ).count()
+      );
+    NSDictionary *segmentMeta = @{
+      @"__segmentReason": @"endpoint",
+      @"__segmentSource": @"segmentation_engine",
+      @"__segmentCreatedAtMs": @(createdAtMs),
+    };
     std::string err;
     if (!txt_live_commit_segment(
           outputEntry_,
@@ -147,7 +169,7 @@ void SttPipelineWorker::autoFlushAndCommit() {
           result.tokens,
           result.timestamps,
           "stt_stream",
-          nil,
+          segmentMeta,
           &err
         )) {
       throw std::runtime_error("Failed to commit flushed text segment: " + err);
