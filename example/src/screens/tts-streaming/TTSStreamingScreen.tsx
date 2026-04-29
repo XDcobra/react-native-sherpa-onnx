@@ -11,10 +11,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createIncrementalStreamingTTS,
+  createStreamingTTS,
   detectTtsModel,
-  type IncrementalStreamController,
-  type IncrementalStreamingTtsEngine,
+  type TtsPipelineHandle,
+  type TtsPipelineOptions,
+  type StreamingTtsEngine,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
 import {
@@ -25,6 +26,11 @@ import {
   type LiveAudioBufferInfo,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  appendLiveTextSegment,
+  createLiveTextBuffer,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { listAssetModels } from 'react-native-sherpa-onnx';
 import {
@@ -64,6 +70,85 @@ function longestCommonPrefixLength(a: string, b: string): number {
 
 type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
 
+type StreamingSessionController = {
+  pipeline: TtsPipelineHandle;
+  pushText: (text: string) => void;
+  flush: () => Promise<void>;
+  cancel: () => Promise<void>;
+};
+
+type StreamingSessionEngine = {
+  getSampleRate: () => Promise<number>;
+  startSession: (
+    audioOut: LiveAudioBufferRef | string,
+    options?: TtsPipelineOptions
+  ) => Promise<StreamingSessionController>;
+  destroy: () => Promise<void>;
+};
+
+async function createStreamingSessionEngine(options: {
+  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelType: TTSModelType;
+  numThreads: number;
+  debug: boolean;
+}): Promise<StreamingSessionEngine> {
+  const ttsEngine: StreamingTtsEngine = await createStreamingTTS(options);
+  let activePipeline: TtsPipelineHandle | null = null;
+  let activeTextBufferId: string | null = null;
+
+  const releaseTextBufferIfNeeded = async () => {
+    if (!activeTextBufferId) return;
+    const bufferId = activeTextBufferId;
+    activeTextBufferId = null;
+    await releasePipelineTextBuffer(bufferId).catch(() => {});
+  };
+
+  return {
+    getSampleRate: () => ttsEngine.getSampleRate(),
+    async startSession(audioOut, pipelineOptions) {
+      const textBuffer = await createLiveTextBuffer({
+        streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
+      });
+      activeTextBufferId = textBuffer.bufferId;
+      const audioOutId =
+        typeof audioOut === 'string' ? audioOut : audioOut.bufferId;
+      const pipeline = await ttsEngine.synthesize(
+        textBuffer.bufferId,
+        audioOutId,
+        {
+          ...(pipelineOptions ?? {}),
+          segmentation: { mode: 'auto' },
+        }
+      );
+      activePipeline = pipeline;
+
+      return {
+        pipeline,
+        pushText(text: string) {
+          if (!activeTextBufferId || text.length === 0) return;
+          appendLiveTextSegment(activeTextBufferId, text).catch(() => {});
+        },
+        flush: () => pipeline.flush(),
+        cancel: async () => {
+          if (activePipeline) {
+            await activePipeline.stop().catch(() => {});
+            activePipeline = null;
+          }
+          await releaseTextBufferIfNeeded();
+        },
+      };
+    },
+    async destroy() {
+      if (activePipeline) {
+        await activePipeline.stop().catch(() => {});
+        activePipeline = null;
+      }
+      await releaseTextBufferIfNeeded();
+      await ttsEngine.destroy();
+    },
+  };
+}
+
 export default function TTSStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
@@ -72,12 +157,12 @@ export default function TTSStreamingScreen() {
     null
   );
   const [inputText, setInputText] = useState(
-    'This example streams text into the incremental TTS pipeline so synthesis can start before the whole script is fully prepared.'
+    'This example streams text into the TTS pipeline so synthesis can start before the whole script is fully prepared.'
   );
   const [speakerId, setSpeakerId] = useState('0');
   const [speed, setSpeed] = useState('1.0');
   const [status, setStatus] = useState(
-    'Select a model and stream the text into the incremental TTS engine.'
+    'Select a model and stream the text into the TTS engine.'
   );
   const [error, setError] = useState<string | null>(null);
   const [streamingState, setStreamingState] = useState<StreamingState>('idle');
@@ -90,8 +175,8 @@ export default function TTSStreamingScreen() {
   } | null>(null);
   const [isResultPlaying, setIsResultPlaying] = useState(false);
 
-  const engineRef = useRef<IncrementalStreamingTtsEngine | null>(null);
-  const controllerRef = useRef<IncrementalStreamController | null>(null);
+  const engineRef = useRef<StreamingSessionEngine | null>(null);
+  const controllerRef = useRef<StreamingSessionController | null>(null);
   const audioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const playerRef = useRef<PcmPlayer | null>(null);
   const cleanupLockRef = useRef(false);
@@ -217,7 +302,7 @@ export default function TTSStreamingScreen() {
 
       try {
         try {
-          await controllerRef.current?.cancel({ scope: 'all' });
+          await controllerRef.current?.cancel();
         } catch {
           // ignore teardown races
         }
@@ -281,28 +366,11 @@ export default function TTSStreamingScreen() {
         throw new Error(detection.error ?? 'TTS model detection failed');
       }
 
-      const engine = await createIncrementalStreamingTTS({
-        source: {
-          engineOptions: {
-            modelPath,
-            modelType: 'auto' as TTSModelType,
-            numThreads: 2,
-            debug: false,
-          },
-        },
-        segmentation: {
-          // UI/UX tuning for live human typing in this example screen.
-          minCharsPerSegment: 14,
-          maxCharsPerSegment: 220,
-          maxWaitMs: 1300,
-          debounceMs: 150,
-        },
-        queue: {
-          mode: 'fifo',
-          maxSegments: 24,
-          maxBufferedChars: 12000,
-          overflowStrategy: 'drop-oldest',
-        },
+      const engine = await createStreamingSessionEngine({
+        modelPath,
+        modelType: 'auto' as TTSModelType,
+        numThreads: 2,
+        debug: false,
       });
       engineRef.current = engine;
 
@@ -334,7 +402,7 @@ export default function TTSStreamingScreen() {
 
       setStreamingState('running');
       setStatus(
-        'Streaming TTS is running. Incremental segmentation and queueing keep playback moving before the whole prompt finishes.'
+        'Streaming TTS is running. Segmentation and queueing keep playback moving before the whole prompt finishes.'
       );
       streamedInputLengthRef.current = text.length;
       lastInputSnapshotRef.current = text;
@@ -569,7 +637,7 @@ export default function TTSStreamingScreen() {
           <TextInput
             value={inputText}
             onChangeText={setInputText}
-            placeholder="Enter a long prompt to stream through incremental TTS..."
+            placeholder="Enter a long prompt to stream through TTS..."
             multiline
             style={styles.textInput}
           />

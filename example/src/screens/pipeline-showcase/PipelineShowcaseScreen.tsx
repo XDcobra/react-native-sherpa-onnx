@@ -27,10 +27,11 @@ import {
   type SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import {
-  createIncrementalStreamingTTS,
+  createStreamingTTS,
   detectTtsModel,
-  type IncrementalStreamController,
-  type IncrementalStreamingTtsEngine,
+  type StreamingTtsEngine,
+  type TtsPipelineHandle,
+  type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyLiveAudioBuffer,
@@ -46,6 +47,7 @@ import {
   type OfflineAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
+  appendLiveTextSegment,
   createLiveTextBuffer,
   getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
@@ -98,6 +100,98 @@ type PipelineStep = {
   label: string;
   active: boolean;
 };
+
+type StreamingSessionController = {
+  pipeline: TtsPipelineHandle;
+  pushText: (text: string) => void;
+  commit: (_options?: { force?: boolean }) => void;
+  flush: () => Promise<void>;
+  cancel: () => Promise<void>;
+  getMetrics: () => { queueDepth: number };
+  readonly state: 'active' | 'idle';
+};
+
+type StreamingSessionEngine = {
+  getSampleRate: () => Promise<number>;
+  startSession: (
+    audioOut: LiveAudioBufferRef,
+    options?: TtsPipelineOptions
+  ) => Promise<StreamingSessionController>;
+  destroy: () => Promise<void>;
+};
+
+async function createStreamingSessionEngine(options: {
+  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelType: 'auto';
+  numThreads: number;
+  debug: boolean;
+}): Promise<StreamingSessionEngine> {
+  const ttsEngine: StreamingTtsEngine = await createStreamingTTS(options);
+  let activePipeline: TtsPipelineHandle | null = null;
+  let activeTextBufferId: string | null = null;
+  let activeState: 'active' | 'idle' = 'idle';
+
+  const releaseTextBufferIfNeeded = async () => {
+    if (!activeTextBufferId) return;
+    const id = activeTextBufferId;
+    activeTextBufferId = null;
+    await releasePipelineTextBuffer(id).catch(() => {});
+  };
+
+  return {
+    getSampleRate: () => ttsEngine.getSampleRate(),
+    async startSession(audioOut, pipelineOptions) {
+      const textBuffer = await createLiveTextBuffer({
+        windowMaxChars: 65536,
+        maxSegments: 4096,
+      });
+      activeTextBufferId = textBuffer.bufferId;
+      const pipeline = await ttsEngine.synthesize(
+        textBuffer.bufferId,
+        audioOut.bufferId,
+        {
+          ...(pipelineOptions ?? {}),
+          segmentation: { mode: 'auto' },
+        }
+      );
+      activePipeline = pipeline;
+      activeState = 'active';
+
+      return {
+        pipeline,
+        pushText(text: string) {
+          if (!activeTextBufferId || text.length === 0) return;
+          appendLiveTextSegment(activeTextBufferId, text).catch(() => {});
+        },
+        commit() {
+          // StreamingTTS consumes committed segments directly; appendLiveTextSegment already commits.
+        },
+        flush: () => pipeline.flush(),
+        cancel: async () => {
+          activeState = 'idle';
+          if (activePipeline) {
+            await activePipeline.stop().catch(() => {});
+            activePipeline = null;
+          }
+          await releaseTextBufferIfNeeded();
+        },
+        getMetrics: () => ({ queueDepth: 0 }),
+        get state() {
+          return activeState;
+        },
+      };
+    },
+    async destroy() {
+      activeState = 'idle';
+      if (activePipeline) {
+        await activePipeline.stop().catch(() => {});
+        activePipeline = null;
+      }
+      await releaseTextBufferIfNeeded();
+      await ttsEngine.destroy();
+    },
+  };
+}
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -226,11 +320,9 @@ export default function PipelineShowcaseScreen() {
   const [saving, setSaving] = useState(false);
 
   const sttEngineRef = useRef<LiveSttEngine | null>(null);
-  const incrementalTtsEngineRef = useRef<IncrementalStreamingTtsEngine | null>(
-    null
-  );
+  const streamingTtsEngineRef = useRef<StreamingSessionEngine | null>(null);
   const sttPipelineRef = useRef<SttPipelineHandle | null>(null);
-  const ttsControllerRef = useRef<IncrementalStreamController | null>(null);
+  const ttsControllerRef = useRef<StreamingSessionController | null>(null);
 
   const inputAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const sttTextBufferRef = useRef<LiveTextBufferRef | null>(null);
@@ -371,7 +463,7 @@ export default function PipelineShowcaseScreen() {
     const controller = ttsControllerRef.current;
     ttsControllerRef.current = null;
     if (controller) {
-      await controller.cancel({ scope: 'all' }).catch(() => {});
+      await controller.cancel().catch(() => {});
     }
 
     const sttPipeline = sttPipelineRef.current;
@@ -413,10 +505,10 @@ export default function PipelineShowcaseScreen() {
       await sttEngine.destroy().catch(() => {});
     }
 
-    const incrementalTtsEngine = incrementalTtsEngineRef.current;
-    incrementalTtsEngineRef.current = null;
-    if (incrementalTtsEngine) {
-      await incrementalTtsEngine.destroy().catch(() => {});
+    const streamingTtsEngine = streamingTtsEngineRef.current;
+    streamingTtsEngineRef.current = null;
+    if (streamingTtsEngine) {
+      await streamingTtsEngine.destroy().catch(() => {});
     }
 
     setIngestProgress(null);
@@ -746,31 +838,15 @@ export default function PipelineShowcaseScreen() {
       });
       sttEngineRef.current = sttEngine;
 
-      const incrementalTts = await createIncrementalStreamingTTS({
-        source: {
-          engineOptions: {
-            modelPath: ttsModelPath,
-            modelType: 'auto',
-            numThreads: 2,
-            debug: false,
-          },
-        },
-        segmentation: {
-          minCharsPerSegment: 6,
-          maxCharsPerSegment: 260,
-          maxWaitMs: 700,
-          debounceMs: 120,
-        },
-        queue: {
-          mode: 'fifo',
-          maxSegments: 32,
-          maxBufferedChars: 12000,
-          overflowStrategy: 'drop-oldest',
-        },
+      const streamingTts = await createStreamingSessionEngine({
+        modelPath: ttsModelPath,
+        modelType: 'auto',
+        numThreads: 2,
+        debug: false,
       });
-      incrementalTtsEngineRef.current = incrementalTts;
+      streamingTtsEngineRef.current = streamingTts;
 
-      const ttsSampleRate = await incrementalTts.getSampleRate();
+      const ttsSampleRate = await streamingTts.getSampleRate();
       outputSampleRateRef.current = ttsSampleRate;
 
       const outputAudioPath = `${DocumentDirectoryPath}/showcase_tts_${Date.now()}.wav`;
@@ -832,7 +908,7 @@ export default function PipelineShowcaseScreen() {
       );
       sttPipelineRef.current = sttPipeline;
 
-      const ttsController = await incrementalTts.startSession(outputLiveAudio, {
+      const ttsController = await streamingTts.startSession(outputLiveAudio, {
         sid: 0,
         speed: 1.0,
       });
@@ -899,7 +975,7 @@ export default function PipelineShowcaseScreen() {
             setError(normalizeErrorMessage(ingestErr));
           });
 
-        setStatusText('Streaming file into STT -> incremental TTS pipeline...');
+        setStatusText('Streaming file into STT -> streaming TTS pipeline...');
       }
 
       setIsRunning(true);
@@ -1125,8 +1201,7 @@ export default function PipelineShowcaseScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Pipeline Showcase</Text>
             <Text style={styles.hint}>
-              Mic/File -&gt; Streaming STT -&gt; Incremental Streaming TTS -&gt;{' '}
-              PCM Player
+              Mic/File -&gt; Streaming STT -&gt; Streaming TTS -&gt; PCM Player
             </Text>
             <Text style={styles.warningText}>
               Headset recommended: Without a headset, the microphone may pick up
@@ -1343,7 +1418,7 @@ export default function PipelineShowcaseScreen() {
                   })}
                 </View>
 
-                <Text style={styles.modelGroupTitle}>Incremental TTS</Text>
+                <Text style={styles.modelGroupTitle}>Streaming TTS</Text>
                 <View style={styles.modelList}>
                   {availableTtsModels.map((modelId) => {
                     const active = selectedTtsModel === modelId;

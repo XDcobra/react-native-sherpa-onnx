@@ -16,6 +16,7 @@ import {
   detectTtsModel,
   type TTSModelType,
   type TtsSynthesisOptions,
+  type TtsSynthesisResult,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
   type TtsPipelineHandle,
@@ -44,7 +45,6 @@ import {
   createOfflineTextBufferFromText,
   createLiveTextBuffer,
   appendLiveTextSegment,
-  finalizeLiveTextBuffer,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
@@ -137,6 +137,10 @@ export default function TTSScreen() {
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
   const [streamSampleCount, setStreamSampleCount] = useState(0);
+  const [offlineSegmentedMode, setOfflineSegmentedMode] = useState(false);
+  const [streamingSegmentedMode, setStreamingSegmentedMode] = useState(false);
+  const [lastSynthesisResult, setLastSynthesisResult] =
+    useState<TtsSynthesisResult | null>(null);
   const [modelInfo, setModelInfo] = useState<{
     sampleRate: number;
     numSpeakers: number;
@@ -890,6 +894,7 @@ export default function TTSScreen() {
     setGeneratedAudio(null);
     setSavedAudioPath(null);
     setSavedAudioBufferId(null);
+    setLastSynthesisResult(null);
     if (streaming) {
       resetStreamingState();
     }
@@ -934,6 +939,10 @@ export default function TTSScreen() {
         if (Object.keys(ex).length > 0) options.extra = ex;
       }
 
+      if (offlineSegmentedMode) {
+        options.segmentation = { mode: 'auto' };
+      }
+
       // Voice clone: create buffer from raw reference samples
       let refAudioBuf: OfflineAudioBufferRef | undefined;
       const hasRefAudio =
@@ -966,11 +975,12 @@ export default function TTSScreen() {
       const textBuf = await createOfflineTextBufferFromText(inputText);
       const audioBuf = await createEmptyOfflineAudioBuffer(sr);
       try {
-        await engine.synthesize(
+        const synthesisResult = await engine.synthesize(
           textBuf,
           audioBuf,
           Object.keys(options).length > 0 ? options : undefined
         );
+        setLastSynthesisResult(synthesisResult);
         const info = await getPipelineAudioBufferInfo(audioBuf.bufferId);
         appendOfflineAudioBuffer({
           kind: 'buffer',
@@ -980,7 +990,11 @@ export default function TTSScreen() {
         });
         Alert.alert(
           'Success',
-          `Generated ${info.numSamples ?? 0} samples at ${info.sampleRate} Hz`
+          `Generated ${info.numSamples ?? 0} samples at ${
+            info.sampleRate
+          } Hz (${synthesisResult.status}, ${
+            synthesisResult.completedSegments
+          }/${synthesisResult.totalSegments} segments)`
         );
       } finally {
         // Release text buffer (audio buffer kept for save/playback)
@@ -1106,7 +1120,6 @@ export default function TTSScreen() {
         },
       });
       streamAudioBufferRef.current = liveAudioBuf;
-
       // Create a live text buffer and commit the initial text
       const liveTextBuf = await createLiveTextBuffer({
         streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
@@ -1116,9 +1129,6 @@ export default function TTSScreen() {
       // Append the initial text as a segment
       await appendLiveTextSegment(liveTextBuf.bufferId, inputText.trim());
       streamLastTextRef.current = inputText.trim();
-
-      // Finalize immediately since we have the full text
-      await finalizeLiveTextBuffer(liveTextBuf.bufferId);
 
       // Build pipeline options
       let pipelineOpts: TtsPipelineOptions | undefined;
@@ -1133,10 +1143,17 @@ export default function TTSScreen() {
       }
 
       // Start the TTS pipeline
+      const pipelineConfig: TtsPipelineOptions = {
+        ...(pipelineOpts ?? {}),
+        ...(streamingSegmentedMode
+          ? { segmentation: { mode: 'auto' as const } }
+          : { segmentation: { mode: 'off' as const } }),
+      };
+
       const pipelineHandle = await streamingEngine.synthesize(
         liveTextBuf.bufferId,
         liveAudioBuf.bufferId,
-        pipelineOpts
+        pipelineConfig
       );
       streamPipelineRef.current = pipelineHandle;
 
@@ -1152,6 +1169,15 @@ export default function TTSScreen() {
       resetStreamingState();
     }
   };
+
+  const handleManualStreamingCommit = useCallback(async () => {
+    const textBufferId = streamTextBufferIdRef.current;
+    const text = inputText.trim();
+    if (!textBufferId || text.length === 0) {
+      return;
+    }
+    await appendLiveTextSegment(textBufferId, text);
+  }, [inputText]);
 
   const handleCancelStreaming = async () => {
     if (!streaming) {
@@ -1427,6 +1453,7 @@ export default function TTSScreen() {
       }
       setSavedAudioPath(null);
       setSavedAudioBufferId(null);
+      setLastSynthesisResult(null);
       setSpeakerId('0');
       setSpeed('1.0');
       setSilenceScale('');
@@ -1816,6 +1843,67 @@ export default function TTSScreen() {
                 numberOfLines={3}
               />
 
+              <Text style={styles.sectionDescription}>
+                Offline mode:{' '}
+                {offlineSegmentedMode
+                  ? 'Mode 2 (segmented offline)'
+                  : 'Mode 1 (one-shot offline)'}
+              </Text>
+              <Text style={styles.sectionDescription}>
+                Streaming mode:{' '}
+                {streamingSegmentedMode
+                  ? 'Mode 4 (live + segmentation engine attach)'
+                  : 'Mode 3 (live + caller-committed segments)'}
+              </Text>
+
+              <View style={styles.streamControls}>
+                <TouchableOpacity
+                  style={[
+                    styles.streamButton,
+                    offlineSegmentedMode && styles.buttonDisabled,
+                  ]}
+                  onPress={() => setOfflineSegmentedMode(false)}
+                >
+                  <Text style={styles.generateButtonText}>
+                    Offline One-shot
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelStreamButton,
+                    !offlineSegmentedMode && styles.buttonDisabled,
+                  ]}
+                  onPress={() => setOfflineSegmentedMode(true)}
+                >
+                  <Text style={styles.generateButtonText}>
+                    Offline Segmented
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.streamControls}>
+                <TouchableOpacity
+                  style={[
+                    styles.streamButton,
+                    streamingSegmentedMode && styles.buttonDisabled,
+                  ]}
+                  onPress={() => setStreamingSegmentedMode(false)}
+                >
+                  <Text style={styles.generateButtonText}>
+                    Streaming Manual
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelStreamButton,
+                    !streamingSegmentedMode && styles.buttonDisabled,
+                  ]}
+                  onPress={() => setStreamingSegmentedMode(true)}
+                >
+                  <Text style={styles.generateButtonText}>Streaming Auto</Text>
+                </TouchableOpacity>
+              </View>
+
               <View style={styles.generateActionsSpacer} />
               <TouchableOpacity
                 style={[
@@ -1861,11 +1949,38 @@ export default function TTSScreen() {
                     Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
                     {streamSampleCount} samples)
                   </Text>
+                  {!streamingSegmentedMode && (
+                    <TouchableOpacity
+                      style={styles.streamButton}
+                      onPress={() => {
+                        handleManualStreamingCommit().catch(() => {});
+                      }}
+                    >
+                      <Text style={styles.generateButtonText}>
+                        Manual commit segment (Mode 3)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   <Text style={styles.streamInfoText}>
                     Further input in the text field will be read aloud
                     automatically (live mode).
                   </Text>
                 </>
+              )}
+
+              {lastSynthesisResult && (
+                <View style={styles.resultContainer}>
+                  <Text style={styles.resultText}>
+                    Last offline run: {lastSynthesisResult.status}
+                  </Text>
+                  <Text style={styles.resultText}>
+                    Segments: {lastSynthesisResult.completedSegments}/
+                    {lastSynthesisResult.totalSegments}
+                  </Text>
+                  <Text style={styles.resultText}>
+                    Processing: {lastSynthesisResult.processingTimeMs} ms
+                  </Text>
+                </View>
               )}
             </View>
           </>
