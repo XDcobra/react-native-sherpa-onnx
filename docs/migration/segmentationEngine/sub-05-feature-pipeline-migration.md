@@ -3,7 +3,8 @@
 ## Status
 - **Phase 2 (STT + VAD + `stt_produced`):** Completed — Implementierung und Parity-Check (Plan `phase-2-vad-stt`, Jest: `segment-api`, `transcribe-segmented`, `offline-orchestrator`) erfüllt.
 - **Phase 3 (Enhancement offline segmentiert + Streaming `continuous_frames`):** Completed — Offline Enhancement nutzt optional den Phase-1c-Audio-Orchestrator, befüllt das Caller-`audioOut` via `populateOfflineAudioBufferIfEmpty`, Streaming Enhancement kann `continuous_frames` als Checkpoint-only Attach nutzen, und native Offline-Segmentation bleibt chunked.
-- **Weitere Features in diesem Dokument (TTS, Punctuation, Alignment, …):** weiterhin offen / spätere Phasen.
+- **Phase 4 (Punctuation offline segmentiert + Streaming `OnlinePunctuation`):** Completed — Offline Punctuation bleibt `OfflineTextBuffer -> OfflineTextBuffer` und nutzt optional den Text-Orchestrator; Streaming Punctuation ist neu, nutzt echtes `OnlinePunctuation` mit `LiveTextBuffer -> LiveTextBuffer`; `TextPunctuationAssistedEvaluator` unterstützt `punctuationInstanceId`.
+- **Weitere Features in diesem Dokument (TTS, Alignment, …):** weiterhin offen / spätere Phasen.
 - Depends on: Sub-Plan 01, 02, 03, 04
 
 ## Purpose
@@ -136,22 +137,22 @@ TTS is the most natural producer of `tts_produced` links:
 
 ### Current State
 
-- **Offline Punctuation:** Already implemented and public (`createOfflinePunctuation`).
-- **Streaming Punctuation:** Not implemented yet.
-- sherpa-onnx has `OfflinePunctuationConfig` and `OnlinePunctuationConfig`.
+- **Offline Punctuation:** Completed and public (`createOfflinePunctuation`), with default one-shot behavior and optional segmented orchestration.
+- **Streaming Punctuation:** Completed as `createStreamingPunctuation`, backed by sherpa-onnx `OnlinePunctuation`.
+- sherpa-onnx `OfflinePunctuationConfig` and `OnlinePunctuationConfig` are both wired through public API entry points.
 
 ### Target State
 
 - **Offline Punctuation:** `OfflineTextBuffer₁ → OfflinePunctuation → OfflineTextBuffer₂`. With optional segmentation for large texts.
-- **Streaming Punctuation:** `LiveTextBuffer₁ + SegmentationEngine → per-segment OfflinePunctuation → LiveTextBuffer₂`. Segments are punctuated as they are committed.
+- **Streaming Punctuation:** `LiveTextBuffer₁ + optional SegmentationEngine → OnlinePunctuation → LiveTextBuffer₂`. Segments/chunks are punctuated as they are committed, with no Offline/Live buffer mixing.
 
 ### Migration Steps
 
-1. Add `segmentation` option to existing offline punctuation API.
-2. Implement streaming punctuation:
-   - LiveTextBuffer₁ with auto segmentation.
-   - On segment commit → run offline punctuation on segment text → commit result to LiveTextBuffer₂.
-3. Implement `TextPunctuationAssistedEvaluator` for bidirectional integration (punctuation model output feeds back into segmentation decisions for downstream features).
+1. Completed: `segmentation` option added to existing offline punctuation API; default remains one-shot.
+2. Completed: segmented offline path uses `runOfflineTextPipeline`, per-segment `punctuateOfflineTextBuffers`, final `populateOfflineTextBufferIfEmpty` into caller-owned output.
+3. Completed: `StreamingPunctuationEngine` added with `OnlinePunctuation` (CNN-BiLSTM + `bpe.vocab`), `LiveTextBuffer` in/out, generic streaming lifecycle, and optional segmentation attach.
+4. Completed: `TextPunctuationAssistedEvaluator` resolves `punctuationInstanceId` against online first, offline second, and rejects missing/invalid instances.
+5. Completed: `continuous_frames` remains speech-only; text attach/offline paths reject it via policy validation.
 
 ### Equivalence
 
@@ -159,7 +160,16 @@ TTS is the most natural producer of `tts_produced` links:
 
 ### Breaking Changes
 
-- New public API (no existing API to break).
+- `OfflinePunctuateResult` now carries orchestration status/count fields in segmented mode; existing `(textIn, textOut)` calls remain valid and one-shot by default.
+- New public streaming API: `createStreamingPunctuation`.
+
+### Phase 4 Progress (Completed)
+
+- TS API: `OfflinePunctuationEngine.punctuate(..., options?)`, `punctuateString(..., options?)`, `runOfflinePunctuationPipeline`, `StreamingPunctuationEngine`, and shared `SegmentationPolicy.punctuationInstanceId`.
+- Native Android/iOS: online punctuation init/process/unload, streaming punctuation worker, `startStreamingPunctuationPipeline`, and punctuation-assisted segmentation evaluator.
+- Buffer contract: offline APIs accept only `OfflineTextBuffer`; streaming APIs accept only `LiveTextBuffer`. No hybrid OfflinePunctuation-per-live-segment path remains.
+- Recovery/parity: segmented offline punctuation delegates `abort`, `skip`, `retry`, and `partial_result` to `OrchestrationSession`; equivalence is approximate because punctuation quality depends on text context and boundary overlap.
+- Validation: Jest coverage for segmented offline punctuation, streaming punctuation lifecycle/attach, and punctuation-assisted policy forwarding; Android Kotlin compilation through the example project.
 
 ---
 
@@ -404,7 +414,7 @@ This gives the SDK user full access to:
 | **Phase 1d** | Engine Core (Sub-Plan 02) | Native Evaluatoren, Offline-Segmentation Loop. |
 | **Phase 2** | VAD + STT (+ `stt_produced` links) | VAD is a source; STT is the primary consumer. STT creates first SegmentLinks. |
 | **Phase 3** | Enhancement (offline segmented) | High OOM impact. Validates audio orchestration + transfer. |
-| **Phase 4** | Punctuation | New public engine. Uses text segmentation. |
+| **Phase 4** | Punctuation | **Completed.** Offline segmented text orchestration, true `OnlinePunctuation` streaming engine, and native punctuation-assisted evaluator. |
 | **Phase 5** | TTS (remove incremental, + `tts_produced` links) | Highest risk. TTS creates links for playback tracking. |
 | **Phase 6** | Alignment (fake-live, + `alignment` links) | Most complex (cross-domain strategies). Benefits from all prior phases. |
 
@@ -414,17 +424,17 @@ This gives the SDK user full access to:
 
 ## Validation Checklist (per feature)
 
-- [x] New Segment Contract types used (Phase 3 Enhancement uses shared `SegmentationPolicy` and segment accessors)
-- [x] Old segment model removed/avoided for Enhancement migration path
-- [x] Segmentation config accepted in Enhancement offline and streaming APIs
-- [x] Auto-segmentation works with appropriate offline policy (`speech_energy_silence`)
-- [x] Manual commit remains a Segment Engine capability; Enhancement Phase 3 uses auto/offline orchestration and continuous streaming checkpoints
-- [x] No segmentation (`mode='off'`) works (full one-shot Enhancement)
-- [x] onSegment events emitted correctly for Streaming `continuous_frames` checkpoints
-- [x] Pull API returns correct checkpoint segments (`reason: 'policy_checkpoint'`)
-- [x] Spool replay/transfer reconstructs segmented Enhancement output via LiveAudioBuffer accumulator
+- [x] New Segment Contract types used (Phase 4 Punctuation uses shared `SegmentationPolicy`, text segment accessors, and `punctuationInstanceId`)
+- [x] Old segment model removed/avoided for Punctuation migration path
+- [x] Segmentation config accepted in Punctuation offline and streaming APIs
+- [x] Auto-segmentation works with appropriate offline policy (`text_synthetic_auto`) and optional `text_punctuation_assisted`
+- [x] Manual commit remains a Segment Engine capability; Streaming Punctuation consumes committed LiveTextBuffer segments
+- [x] No segmentation (`mode='off'`) works (full one-shot OfflinePunctuation and direct streaming pipeline start)
+- [x] onSegment events emitted through LiveTextBuffer commits in Streaming Punctuation
+- [x] Pull API returns text segments committed by streaming punctuation output
+- [x] Spool replay/transfer remains buffer-owned; Punctuation does not introduce cross-buffer storage mixing
 - [x] Equivalence documented and tested as approximate with overlap support
-- [x] Old segmentation code removed (**N/A for Enhancement**: there was no legacy custom segmentation pipeline to retire; streaming remained frame-drain by design)
-- [x] **SegmentLinkMap** created when cross-domain processing active (**N/A for Enhancement**: single-domain audio->audio flow, no cross-domain linkage)
-- [x] **SegmentLinks** correctly reference text ↔ speech segment IDs (**N/A for Enhancement**)
-- [x] Bidirectional query returns correct links (**N/A for Enhancement**)
+- [x] Old segmentation code removed/avoided (**N/A for Punctuation**: no legacy public streaming punctuation existed; the rejected hybrid design is documented)
+- [x] **SegmentLinkMap** created when cross-domain processing active (**N/A for Punctuation**: single-domain text->text flow)
+- [x] **SegmentLinks** correctly reference text ↔ speech segment IDs (**N/A for Punctuation**)
+- [x] Bidirectional query returns correct links (**N/A for Punctuation**)

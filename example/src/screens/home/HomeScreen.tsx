@@ -110,6 +110,14 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'punctuation_streaming',
+    title: 'Punctuation Streaming',
+    description: 'Online CNN-BiLSTM over LiveTextBuffer in/out',
+    icon: 'chatbubbles-outline',
+    screen: 'PunctuationStreaming',
+    implemented: true,
+  },
+  {
     id: 'diarization',
     title: 'Speaker Diarization',
     description: 'Identify who spoke when in audio',

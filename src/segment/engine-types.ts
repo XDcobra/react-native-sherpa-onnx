@@ -16,6 +16,7 @@ export interface SegmentationPolicy {
   maxSegmentMs?: number;
   hangoverMs?: number;
   checkpointIntervalMs?: number;
+  punctuationInstanceId?: string;
   vadModelId?: string;
   vadThreshold?: number;
   vadMinSpeechMs?: number;

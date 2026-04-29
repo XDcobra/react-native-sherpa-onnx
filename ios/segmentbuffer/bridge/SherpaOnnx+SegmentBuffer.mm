@@ -17,6 +17,17 @@
 #include <unistd.h>
 #include <zlib.h>
 
+extern "C" bool sherpaonnx_punct_offline_add_punctuation_if_exists(
+  const std::string &instanceId,
+  const std::string &text,
+  std::string *outText);
+extern "C" bool sherpaonnx_punct_online_add_punctuation_if_exists(
+  const std::string &instanceId,
+  const std::string &text,
+  std::string *outText);
+extern "C" bool sherpaonnx_punct_offline_has_instance(const std::string &instanceId);
+extern "C" bool sherpaonnx_punct_online_has_instance(const std::string &instanceId);
+
 std::unordered_map<std::string, std::shared_ptr<SegOfflineEntry>> g_seg_offline;
 std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> g_seg_live;
 std::mutex g_seg_mutex;
@@ -713,6 +724,7 @@ struct SegEnginePolicy {
   int maxSegmentMs = 30000;
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
+  std::string punctuationInstanceId;
   std::string vadModelId;
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
@@ -1072,6 +1084,29 @@ static void seg_append_runtime_vad_segments(
   }
 }
 
+static bool seg_punctuation_instance_exists(const std::string &instanceId) {
+  if (instanceId.empty()) return false;
+  return sherpaonnx_punct_online_has_instance(instanceId) ||
+         sherpaonnx_punct_offline_has_instance(instanceId);
+}
+
+static std::string seg_add_punctuation_or_throw(
+  const std::string &instanceId,
+  const std::string &text
+) {
+  std::string out;
+  if (sherpaonnx_punct_online_add_punctuation_if_exists(instanceId, text, &out)) {
+    return out;
+  }
+  if (sherpaonnx_punct_offline_add_punctuation_if_exists(instanceId, text, &out)) {
+    return out;
+  }
+  throw std::runtime_error(
+    "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND: Punctuation instance not found: " +
+    instanceId
+  );
+}
+
 static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
   auto entry = txt_get_live_entry(engine->attachedBufferId);
@@ -1083,11 +1118,24 @@ static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
 
     int commitLength = 0;
     std::string reason = "policy_checkpoint";
+    std::string decisionText = partial;
+
+    if (engine->policy.evaluator == "text_punctuation_assisted") {
+      if (engine->policy.punctuationInstanceId.empty()) {
+        throw std::runtime_error(
+          "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND: text_punctuation_assisted requires punctuationInstanceId"
+        );
+      }
+      decisionText = seg_add_punctuation_or_throw(
+        engine->policy.punctuationInstanceId,
+        partial
+      );
+    }
 
     if (engine->policy.sentenceBoundary) {
-      size_t boundary = partial.find_last_of(".!?;:\n");
+      size_t boundary = decisionText.find_last_of(".!?;:\n");
       if (boundary != std::string::npos) {
-        commitLength = (int)boundary + 1;
+        commitLength = std::min((int)partial.size(), (int)boundary + 1);
         reason = "punctuation";
       }
     }
@@ -1112,6 +1160,7 @@ static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
       @"__segmentReason": [NSString stringWithUTF8String:reason.c_str()],
       @"__segmentSource": @"segmentation_engine",
       @"__segmentCreatedAtMs": @(seg_now_ms()),
+      @"punctuationInstanceId": [NSString stringWithUTF8String:engine->policy.punctuationInstanceId.c_str()] ?: @"",
     };
     int segmentIndex = entry->commitSegment(
       committed,
@@ -1251,6 +1300,7 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   out.evaluator = domain == SegEngineDomain::TEXT ? "text_synthetic_auto" : "speech_energy_silence";
   if ([p[@"evaluator"] isKindOfClass:[NSString class]]) {
     out.evaluator = [p[@"evaluator"] UTF8String] ?: out.evaluator;
+    std::transform(out.evaluator.begin(), out.evaluator.end(), out.evaluator.begin(), ::tolower);
   }
   if ([p[@"maxLengthChars"] respondsToSelector:@selector(intValue)]) out.maxLengthChars = std::max(1, [p[@"maxLengthChars"] intValue]);
   if ([p[@"sentenceBoundary"] respondsToSelector:@selector(boolValue)]) out.sentenceBoundary = [p[@"sentenceBoundary"] boolValue];
@@ -1260,6 +1310,7 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   if ([p[@"maxSegmentMs"] respondsToSelector:@selector(intValue)]) out.maxSegmentMs = std::max(out.minSegmentMs, [p[@"maxSegmentMs"] intValue]);
   if ([p[@"hangoverMs"] respondsToSelector:@selector(intValue)]) out.hangoverMs = std::max(0, [p[@"hangoverMs"] intValue]);
   if ([p[@"checkpointIntervalMs"] respondsToSelector:@selector(intValue)]) out.checkpointIntervalMs = std::max(0, [p[@"checkpointIntervalMs"] intValue]);
+  if ([p[@"punctuationInstanceId"] isKindOfClass:[NSString class]]) out.punctuationInstanceId = [p[@"punctuationInstanceId"] UTF8String] ?: "";
   if ([p[@"vadModelId"] isKindOfClass:[NSString class]]) out.vadModelId = [p[@"vadModelId"] UTF8String] ?: "";
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
@@ -1278,6 +1329,7 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"maxSegmentMs": @(p.maxSegmentMs),
     @"hangoverMs": @(p.hangoverMs),
     @"checkpointIntervalMs": @(p.checkpointIntervalMs),
+    @"punctuationInstanceId": [NSString stringWithUTF8String:p.punctuationInstanceId.c_str()] ?: @"",
     @"vadModelId": [NSString stringWithUTF8String:p.vadModelId.c_str()] ?: @"",
     @"vadThreshold": @(p.vadThreshold),
     @"vadMinSpeechMs": @(p.vadMinSpeechMs),
@@ -1463,6 +1515,42 @@ bool seg_engine_peek_annotation(
     engine->state = SegEngineState::ACTIVE;
     engine->attachedBufferId = bid;
     engine->policy = seg_policy_from_dict(policy, d);
+    if (d == SegEngineDomain::TEXT) {
+      if (!(engine->policy.evaluator == "text_synthetic_auto" ||
+            engine->policy.evaluator == "text_punctuation_assisted")) {
+        reject(@"POLICY_INVALID",
+               [NSString stringWithFormat:@"Policy evaluator '%@' is invalid for text domain",
+                                          policy[@"evaluator"] ?: @""],
+               nil);
+        return;
+      }
+      if (engine->policy.evaluator == "text_punctuation_assisted") {
+        if (engine->policy.punctuationInstanceId.empty()) {
+          reject(@"POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+                 @"text_punctuation_assisted requires policy.punctuationInstanceId",
+                 nil);
+          return;
+        }
+        if (!seg_punctuation_instance_exists(engine->policy.punctuationInstanceId)) {
+          reject(@"POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+                 [NSString stringWithFormat:@"Punctuation instance not found for segmentation policy: %@",
+                                            [NSString stringWithUTF8String:engine->policy.punctuationInstanceId.c_str()] ?: @""],
+                 nil);
+          return;
+        }
+      }
+    }
+    if (d == SegEngineDomain::SPEECH) {
+      if (!(engine->policy.evaluator == "speech_energy_silence" ||
+            engine->policy.evaluator == "speech_vad_model" ||
+            engine->policy.evaluator == "continuous_frames")) {
+        reject(@"POLICY_INVALID",
+               [NSString stringWithFormat:@"Policy evaluator '%@' is invalid for speech domain",
+                                          policy[@"evaluator"] ?: @""],
+               nil);
+        return;
+      }
+    }
 
     if (d == SegEngineDomain::SPEECH) {
       auto entry = std::make_shared<SegLiveEntry>();
@@ -1635,6 +1723,30 @@ bool seg_engine_peek_annotation(
         return;
       }
       SegEnginePolicy p = seg_policy_from_dict(policy, SegEngineDomain::TEXT);
+      if (!(p.evaluator == "text_synthetic_auto" ||
+            p.evaluator == "text_punctuation_assisted")) {
+        reject(@"POLICY_INVALID",
+               [NSString stringWithFormat:@"Policy evaluator '%@' is invalid for text domain",
+                                          policy[@"evaluator"] ?: @""],
+               nil);
+        return;
+      }
+      if (p.evaluator == "text_punctuation_assisted") {
+        if (p.punctuationInstanceId.empty()) {
+          reject(@"POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+                 @"text_punctuation_assisted requires policy.punctuationInstanceId",
+                 nil);
+          return;
+        }
+        try {
+          text = seg_add_punctuation_or_throw(p.punctuationInstanceId, text);
+        } catch (const std::exception &e) {
+          reject(@"POLICY_PUNCTUATION_INSTANCE_NOT_FOUND",
+                 [NSString stringWithUTF8String:e.what()] ?: @"Punctuation instance not found",
+                 nil);
+          return;
+        }
+      }
       NSMutableArray *segments = [NSMutableArray array];
       int index = 0;
       while (index < (int)text.size()) {

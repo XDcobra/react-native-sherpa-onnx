@@ -19,7 +19,18 @@ class SherpaOnnxPunctuationHelper(
     modelType: String,
   ) -> HashMap<String, Any>?
 ) {
-  private val offlineEngines = ConcurrentHashMap<String, OfflinePunctuation>()
+  companion object {
+    private val offlineEngines = ConcurrentHashMap<String, OfflinePunctuation>()
+
+    fun processOfflineIfExists(instanceId: String, text: String): String? {
+      val engine = offlineEngines[instanceId] ?: return null
+      return engine.addPunctuation(text)
+    }
+
+    fun hasOfflineInstance(instanceId: String): Boolean {
+      return offlineEngines.containsKey(instanceId)
+    }
+  }
 
   fun shutdown() {
     for (e in offlineEngines.values) {

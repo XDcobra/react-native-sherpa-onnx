@@ -7,6 +7,7 @@ import TTSScreen from '../screens/tts/TTSScreen';
 import STTStreamingScreen from '../screens/stt-streaming/STTStreamingScreen';
 import TTSStreamingScreen from '../screens/tts-streaming/TTSStreamingScreen';
 import PunctuationScreen from '../screens/punctuation/PunctuationScreen';
+import PunctuationStreamingScreen from '../screens/punctuation-streaming/PunctuationStreamingScreen';
 import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcaseScreen';
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
@@ -73,6 +74,13 @@ export default function RootNavigator() {
         component={PunctuationScreen}
         options={{
           title: 'Punctuation (offline)',
+        }}
+      />
+      <Stack.Screen
+        name="PunctuationStreaming"
+        component={PunctuationStreamingScreen}
+        options={{
+          title: 'Punctuation (Streaming)',
         }}
       />
       <Stack.Screen

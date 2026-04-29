@@ -11,6 +11,10 @@ import {
 } from '../types/modelDetect';
 
 export type PunctuationModelType = 'ct_transformer' | 'cnn_bilstm' | 'auto';
+export type OnlinePunctuationModelType = Extract<
+  PunctuationModelType,
+  'cnn_bilstm' | 'auto'
+>;
 
 /**
  * Detect punctuation model layout (offline CT-Transformer vs online CNN-BiLSTM) without running inference.
@@ -93,4 +97,26 @@ export async function detectPunctuationModel(
         }
       : {}),
   };
+}
+
+export async function createOnlinePunctuationConfig(
+  modelDir: string,
+  options?: { modelType?: OnlinePunctuationModelType }
+): Promise<PunctuationDetectModelResult> {
+  const requested = options?.modelType ?? 'auto';
+  const detect = await detectPunctuationModel(
+    { kind: 'fs', path: modelDir },
+    { modelType: requested === 'auto' ? 'cnn_bilstm' : requested }
+  );
+  if (
+    !detect.success ||
+    detect.isStreaming !== true ||
+    detect.modelType !== 'cnn_bilstm'
+  ) {
+    const suffix = detect.error ? `: ${detect.error}` : '';
+    throw new Error(
+      `PUNCTUATION_INVALID_ARGUMENT: StreamingPunctuationEngine requires an online-capable cnn_bilstm model${suffix}`
+    );
+  }
+  return detect;
 }

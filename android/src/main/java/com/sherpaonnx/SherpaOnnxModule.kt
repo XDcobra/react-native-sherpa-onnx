@@ -23,6 +23,7 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
@@ -160,6 +161,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private val punctuationHelper = SherpaOnnxPunctuationHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    }
+  )
+  private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
+    reactApplicationContext,
     { modelDir, assetName, modelType ->
       Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
     }
@@ -330,6 +337,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
     punctuationHelper.shutdown()
+    onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -3919,6 +3927,50 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     punctuationHelper.unloadOfflinePunctuation(instanceId, promise)
+  }
+
+  override fun initializeOnlinePunctuation(
+    instanceId: String,
+    modelDir: String,
+    modelType: String?,
+    numThreads: Double?,
+    provider: String?,
+    debug: Boolean?,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.initializeOnlinePunctuation(
+      instanceId,
+      modelDir,
+      modelType,
+      numThreads,
+      provider,
+      debug,
+      promise
+    )
+  }
+
+  override fun processOnlinePunctuationChunk(
+    instanceId: String,
+    text: String,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.processOnlinePunctuationChunk(instanceId, text, promise)
+  }
+
+  override fun unloadOnlinePunctuation(
+    instanceId: String,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.unloadOnlinePunctuation(instanceId, promise)
+  }
+
+  override fun startStreamingPunctuationPipeline(
+    instanceId: String,
+    inputBufferId: String,
+    outputBufferId: String,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.startStreamingPunctuationPipeline(instanceId, inputBufferId, outputBufferId, promise)
   }
 
   override fun startVadPipeline(
