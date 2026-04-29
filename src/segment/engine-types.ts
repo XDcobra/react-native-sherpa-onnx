@@ -19,7 +19,7 @@ export interface SegmentationPolicy {
 }
 
 export interface SegmentationConfig {
-  policy: SegmentationPolicy;
+  policy?: SegmentationPolicy;
 }
 
 export interface SegmentationEngineRef {

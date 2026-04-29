@@ -434,14 +434,19 @@ private fun parsePolicy(
     }
   }
 
+  val minSegmentMs = readInt(rawPolicy, "minSegmentMs", 1000).coerceAtLeast(100)
+  val maxSegmentMs = readInt(rawPolicy, "maxSegmentMs", 30000)
+    .coerceAtLeast(200)
+    .coerceAtLeast(minSegmentMs)
+
   return SegmentationEnginePolicy(
     evaluator = evaluator,
     maxLengthChars = readInt(rawPolicy, "maxLengthChars", 500).coerceAtLeast(1),
     sentenceBoundary = readBoolean(rawPolicy, "sentenceBoundary", true),
     silenceThresholdMs = readInt(rawPolicy, "silenceThresholdMs", 500).coerceAtLeast(50),
     energyThresholdDb = readDouble(rawPolicy, "energyThresholdDb", -40.0),
-    minSegmentMs = readInt(rawPolicy, "minSegmentMs", 1000).coerceAtLeast(100),
-    maxSegmentMs = readInt(rawPolicy, "maxSegmentMs", 30000).coerceAtLeast(200),
+    minSegmentMs = minSegmentMs,
+    maxSegmentMs = maxSegmentMs,
     hangoverMs = readInt(rawPolicy, "hangoverMs", 300).coerceAtLeast(0),
     checkpointIntervalMs =
       readInt(rawPolicy, "checkpointIntervalMs", 0).coerceAtLeast(0),
@@ -661,7 +666,7 @@ object SegmentationEngineRegistry {
   }
 
   fun peekSegmentAnnotation(segmentId: String): SegmentAnnotationSnapshot? {
-    return segmentAnnotationBySegmentId[segmentId]
+    return segmentAnnotationBySegmentId.remove(segmentId)
   }
 
   fun segmentOfflineBuffer(
@@ -686,21 +691,31 @@ object SegmentationEngineRegistry {
         while (index < text.length) {
           val remaining = text.substring(index)
           var split = -1
+          var foundBoundary = false
           if (policy.sentenceBoundary) {
             val local = remaining.indexOfFirst { it == '.' || it == '!' || it == '?' || it == '\n' }
-            if (local >= 0) split = local + 1
+            if (local >= 0) {
+              split = local + 1
+              foundBoundary = true
+            }
           }
           if (split <= 0) {
             split = minOf(policy.maxLengthChars.coerceAtLeast(1), remaining.length)
           }
           val chunk = remaining.substring(0, split)
           val end = index + chunk.length
+          val isFinalChunk = split >= remaining.length
+          val reason = when {
+            isFinalChunk -> "finalize"
+            foundBoundary -> "punctuation"
+            else -> "length_limit"
+          }
           records.add(
             mapOf(
               "segmentId" to "txtseg_${bufferId}_${records.size}",
               "startOffset" to index,
               "endOffset" to end,
-              "reason" to if (split < remaining.length) "punctuation" else "finalize",
+              "reason" to reason,
               "source" to "segmentation_engine",
               "text" to chunk,
             )

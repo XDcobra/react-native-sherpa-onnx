@@ -40,6 +40,9 @@ import {
   advanceAudioCommitStart,
   annotateSpeechSegment,
   clearAttachedSegmentationEngineByEngineId,
+  deleteOfflineTextSegments,
+  getOfflineTextSegments,
+  hasOfflineTextSegments,
   getLiveAudioSegmentation,
   getLiveTextSegmentation,
   getSpeechSegmentAnnotation,
@@ -48,6 +51,7 @@ import {
   registerLiveTextSegmentation,
   registerAttachedSegmentationEngine,
   setAssociatedAudioSegmentBuffer,
+  setOfflineTextSegments,
 } from './runtime-state';
 import type {
   SegmentationConfig,
@@ -59,7 +63,6 @@ import type {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
-const offlineTextSegmentsByBufferId = new Map<string, TextSegment[]>();
 const offlineAudioSegmentBufferByParentBufferId = new Map<string, string>();
 const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
   string,
@@ -395,7 +398,7 @@ async function readOfflineTextSegments(
 ): Promise<TextSegment[]> {
   const info = await getPipelineTextBufferInfo(offlineTextBufferId);
   if (info.kind !== 'offlineTextBuffer') {
-    offlineTextSegmentsByBufferId.delete(offlineTextBufferId);
+    deleteOfflineTextSegments(offlineTextBufferId);
     return [];
   }
 
@@ -403,13 +406,13 @@ async function readOfflineTextSegments(
     return [];
   }
 
-  if (!offlineTextSegmentsByBufferId.has(offlineTextBufferId)) {
+  if (!hasOfflineTextSegments(offlineTextBufferId)) {
     throw new Error(
       'SEGMENT_NOT_AVAILABLE: offline text segmentation is not materialized; call segmentOfflineBuffer() first'
     );
   }
 
-  const cached = offlineTextSegmentsByBufferId.get(offlineTextBufferId) ?? [];
+  const cached = getOfflineTextSegments(offlineTextBufferId) ?? [];
   if (cached.length === 0) {
     return [];
   }
@@ -670,7 +673,7 @@ export async function segmentOfflineBuffer(
         utf16Length: text.length,
       };
     });
-    offlineTextSegmentsByBufferId.set(bufferId, materialized);
+    setOfflineTextSegments(bufferId, materialized);
 
     return {
       segmentBufferId: bufferId,
@@ -948,14 +951,12 @@ export async function getSegmentCount(
       return getLiveTextBufferSegmentCount(segBuffer.parentBufferId);
     }
     if (isOfflineTextBufferId(segBuffer.parentBufferId)) {
-      if (!offlineTextSegmentsByBufferId.has(segBuffer.parentBufferId)) {
+      if (!hasOfflineTextSegments(segBuffer.parentBufferId)) {
         throw new Error(
           'SEGMENT_NOT_AVAILABLE: offline text segmentation is not materialized; call segmentOfflineBuffer() first'
         );
       }
-      return (
-        offlineTextSegmentsByBufferId.get(segBuffer.parentBufferId)?.length ?? 0
-      );
+      return getOfflineTextSegments(segBuffer.parentBufferId)?.length ?? 0;
     }
     return 0;
   }

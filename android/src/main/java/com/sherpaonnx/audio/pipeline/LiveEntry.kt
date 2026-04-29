@@ -286,7 +286,7 @@ class LiveEntry(
 
     SegmentationEngineRegistry.onLiveAudioWrite(
       bufferId = bufferId,
-      chunk = toAppend.copyOf(),
+      chunk = toAppend,
       sampleRate = sampleRate,
       totalSamplesWritten = totalSamplesWritten,
     )

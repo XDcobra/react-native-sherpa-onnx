@@ -748,6 +748,7 @@ struct SegEngine {
   std::string segmentBufferId;
   int totalSegmentsCommitted = 0;
   std::string lastSegmentId;
+  std::vector<std::string> annotatedSegmentIds;
 
   // Speech runtime state
   int64_t segmentStartSample = 0;
@@ -801,6 +802,24 @@ static void seg_record_annotation(
   };
 }
 
+static void seg_record_annotation_for_engine(
+  const std::shared_ptr<SegEngine> &engine,
+  const std::string &segmentId,
+  const std::string &reason,
+  int segmentIndex
+) {
+  std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+  g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+    reason,
+    "segmentation_engine",
+    seg_now_ms(),
+    segmentIndex,
+  };
+  if (engine) {
+    engine->annotatedSegmentIds.push_back(segmentId);
+  }
+}
+
 static bool seg_append_speech_segment(
   const std::shared_ptr<SegEngine> &engine,
   int64_t endSampleExclusive,
@@ -851,7 +870,7 @@ static bool seg_append_speech_segment(
     return false;
   }
 
-  seg_record_annotation(segmentId, reason, segmentIndex);
+  seg_record_annotation_for_engine(engine, segmentId, reason, segmentIndex);
   engine->totalSegmentsCommitted += 1;
   engine->lastSegmentId = segmentId;
   engine->segmentStartSample = endSampleExclusive;
@@ -1078,23 +1097,33 @@ void seg_engine_on_audio_append(
 
 void seg_engine_on_buffer_finalized(const std::string &bufferId) {
   std::shared_ptr<SegEngine> engine;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-    auto itId = g_seg_engine_id_by_buffer.find(bufferId);
-    if (itId == g_seg_engine_id_by_buffer.end()) return;
-    auto itEngine = g_seg_engine_by_id.find(itId->second);
-    if (itEngine == g_seg_engine_by_id.end()) return;
-    engine = itEngine->second;
+  for (;;) {
+    {
+      std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+      auto itId = g_seg_engine_id_by_buffer.find(bufferId);
+      if (itId == g_seg_engine_id_by_buffer.end()) return;
+      auto itEngine = g_seg_engine_by_id.find(itId->second);
+      if (itEngine == g_seg_engine_by_id.end()) return;
+      if (g_seg_engine_eval_guard.find(bufferId) == g_seg_engine_eval_guard.end()) {
+        g_seg_engine_eval_guard.insert(bufferId);
+        engine = itEngine->second;
+        break;
+      }
+    }
+    usleep(1000);
   }
 
   if (engine->state == SegEngineState::ACTIVE) {
     if (engine->domain == SegEngineDomain::TEXT) seg_engine_flush_text(engine);
     else seg_engine_flush_audio(engine);
-    engine->state = SegEngineState::DETACHED;
   }
 
   std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+  if (engine->state == SegEngineState::ACTIVE) {
+    engine->state = SegEngineState::DETACHED;
+  }
   g_seg_engine_id_by_buffer.erase(bufferId);
+  g_seg_engine_eval_guard.erase(bufferId);
 }
 
 void seg_engine_on_buffer_released(const std::string &bufferId) {
@@ -1103,7 +1132,11 @@ void seg_engine_on_buffer_released(const std::string &bufferId) {
   if (itId == g_seg_engine_id_by_buffer.end()) return;
   auto itEngine = g_seg_engine_by_id.find(itId->second);
   if (itEngine != g_seg_engine_by_id.end()) {
-    itEngine->second->state = SegEngineState::RELEASED;
+    auto &engine = itEngine->second;
+    for (const auto &sid : engine->annotatedSegmentIds) {
+      g_seg_engine_annotation_by_segment.erase(sid);
+    }
+    engine->state = SegEngineState::RELEASED;
     g_seg_engine_by_id.erase(itEngine);
   }
   g_seg_engine_id_by_buffer.erase(itId);
@@ -1328,15 +1361,20 @@ bool seg_engine_peek_annotation(
       int index = 0;
       while (index < (int)text.size()) {
         int split = -1;
+        bool foundBoundary = false;
         std::string remaining = text.substr((size_t)index);
         if (p.sentenceBoundary) {
           size_t b = remaining.find_first_of(".!?\n");
-          if (b != std::string::npos) split = (int)b + 1;
+          if (b != std::string::npos) {
+            split = (int)b + 1;
+            foundBoundary = true;
+          }
         }
         if (split <= 0) split = std::min(std::max(1, p.maxLengthChars), (int)remaining.size());
         std::string chunk = remaining.substr(0, (size_t)split);
         int end = index + split;
-        NSString *reason = split < (int)remaining.size() ? @"punctuation" : @"finalize";
+        BOOL isFinalChunk = split >= (int)remaining.size();
+        NSString *reason = isFinalChunk ? @"finalize" : (foundBoundary ? @"punctuation" : @"length_limit");
         [segments addObject:@{
           @"segmentId": [NSString stringWithFormat:@"txtseg_%@_%ld", bufferId ?: @"", (long)segments.count],
           @"startOffset": @(index),

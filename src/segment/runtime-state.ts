@@ -1,5 +1,7 @@
 export type SegmentationMode = 'off' | 'manual' | 'auto';
 
+import type { TextSegment } from './segment';
+
 interface TextSegmentationState {
   mode: SegmentationMode;
   engineId?: string;
@@ -37,6 +39,7 @@ const speechSegmentAnnotationBySegmentId = new Map<
 >();
 const segmentAnnotationsByBufferId = new Map<string, Set<string>>();
 const segmentAnnotationBufferBySegmentId = new Map<string, string>();
+const offlineTextSegmentsByBufferId = new Map<string, TextSegment[]>();
 
 export function normalizeSegmentationMode(
   raw: unknown,
@@ -267,4 +270,26 @@ export function releaseSegmentationStateForBuffer(bufferId: string): void {
     }
     segmentAnnotationsByBufferId.delete(bufferId);
   }
+  offlineTextSegmentsByBufferId.delete(bufferId);
+}
+
+export function setOfflineTextSegments(
+  bufferId: string,
+  segments: TextSegment[]
+): void {
+  offlineTextSegmentsByBufferId.set(bufferId, segments);
+}
+
+export function getOfflineTextSegments(
+  bufferId: string
+): TextSegment[] | undefined {
+  return offlineTextSegmentsByBufferId.get(bufferId);
+}
+
+export function hasOfflineTextSegments(bufferId: string): boolean {
+  return offlineTextSegmentsByBufferId.has(bufferId);
+}
+
+export function deleteOfflineTextSegments(bufferId: string): void {
+  offlineTextSegmentsByBufferId.delete(bufferId);
 }
