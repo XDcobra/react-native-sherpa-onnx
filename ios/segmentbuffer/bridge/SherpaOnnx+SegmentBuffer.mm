@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -761,6 +762,7 @@ std::unordered_map<std::string, std::string> g_seg_engine_id_by_buffer;
 std::unordered_map<std::string, SegEngineAnnotation> g_seg_engine_annotation_by_segment;
 std::unordered_set<std::string> g_seg_engine_eval_guard;
 std::mutex g_seg_engine_mutex;
+std::condition_variable g_seg_engine_eval_cv;
 
 static int64_t seg_now_ms() {
   return (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
@@ -1067,8 +1069,11 @@ void seg_engine_on_text_write(const std::string &liveBufferId) {
 
   seg_engine_evaluate_text(engine);
 
-  std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-  g_seg_engine_eval_guard.erase(liveBufferId);
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    g_seg_engine_eval_guard.erase(liveBufferId);
+  }
+  g_seg_engine_eval_cv.notify_all();
 }
 
 void seg_engine_on_audio_append(
@@ -1091,26 +1096,26 @@ void seg_engine_on_audio_append(
 
   seg_engine_evaluate_audio(engine, samples, count, sampleRate, totalSamplesWritten);
 
-  std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-  g_seg_engine_eval_guard.erase(liveBufferId);
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    g_seg_engine_eval_guard.erase(liveBufferId);
+  }
+  g_seg_engine_eval_cv.notify_all();
 }
 
 void seg_engine_on_buffer_finalized(const std::string &bufferId) {
   std::shared_ptr<SegEngine> engine;
-  for (;;) {
-    {
-      std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-      auto itId = g_seg_engine_id_by_buffer.find(bufferId);
-      if (itId == g_seg_engine_id_by_buffer.end()) return;
-      auto itEngine = g_seg_engine_by_id.find(itId->second);
-      if (itEngine == g_seg_engine_by_id.end()) return;
-      if (g_seg_engine_eval_guard.find(bufferId) == g_seg_engine_eval_guard.end()) {
-        g_seg_engine_eval_guard.insert(bufferId);
-        engine = itEngine->second;
-        break;
-      }
-    }
-    usleep(1000);
+  {
+    std::unique_lock<std::mutex> lock(g_seg_engine_mutex);
+    g_seg_engine_eval_cv.wait(lock, [&bufferId] {
+      return g_seg_engine_eval_guard.find(bufferId) == g_seg_engine_eval_guard.end();
+    });
+    auto itId = g_seg_engine_id_by_buffer.find(bufferId);
+    if (itId == g_seg_engine_id_by_buffer.end()) return;
+    auto itEngine = g_seg_engine_by_id.find(itId->second);
+    if (itEngine == g_seg_engine_by_id.end()) return;
+    g_seg_engine_eval_guard.insert(bufferId);
+    engine = itEngine->second;
   }
 
   if (engine->state == SegEngineState::ACTIVE) {
@@ -1118,12 +1123,15 @@ void seg_engine_on_buffer_finalized(const std::string &bufferId) {
     else seg_engine_flush_audio(engine);
   }
 
-  std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
-  if (engine->state == SegEngineState::ACTIVE) {
-    engine->state = SegEngineState::DETACHED;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    if (engine->state == SegEngineState::ACTIVE) {
+      engine->state = SegEngineState::DETACHED;
+    }
+    g_seg_engine_id_by_buffer.erase(bufferId);
+    g_seg_engine_eval_guard.erase(bufferId);
   }
-  g_seg_engine_id_by_buffer.erase(bufferId);
-  g_seg_engine_eval_guard.erase(bufferId);
+  g_seg_engine_eval_cv.notify_all();
 }
 
 void seg_engine_on_buffer_released(const std::string &bufferId) {

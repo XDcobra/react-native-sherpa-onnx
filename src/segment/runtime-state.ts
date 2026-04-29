@@ -1,6 +1,6 @@
-export type SegmentationMode = 'off' | 'manual' | 'auto';
-
 import type { TextSegment } from './segment';
+
+export type SegmentationMode = 'off' | 'manual' | 'auto';
 
 interface TextSegmentationState {
   mode: SegmentationMode;
