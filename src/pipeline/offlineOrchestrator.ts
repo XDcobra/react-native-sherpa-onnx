@@ -91,6 +91,18 @@ export interface OrchestrationResult<TOutput> {
   linkMap?: SegmentLinkMapRef;
 }
 
+export interface AudioToTextSegmentMapping {
+  speechSegmentId: string;
+  textSegmentId: string;
+  segmentIndex: number;
+  text: string;
+}
+
+export interface AudioToTextOrchestrationResult
+  extends OrchestrationResult<OfflineTextBufferRef> {
+  segmentMappings: AudioToTextSegmentMapping[];
+}
+
 type SessionState =
   | 'created'
   | 'running'
@@ -951,6 +963,256 @@ export async function runOfflineTextPipeline(
       },
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
+    };
+  }
+}
+
+export async function runOfflineAudioToTextPipeline(
+  input: OfflineAudioBufferIdSource,
+  consumer: (
+    segIn: OfflineAudioBufferRef,
+    segOut: OfflineTextBufferRef
+  ) => Promise<void>,
+  config: OrchestrationConfig = {}
+): Promise<AudioToTextOrchestrationResult> {
+  const strategy = normalizeRecovery(config.errorRecovery);
+  const maxRetries = normalizeRetryCount(config.maxRetriesPerSegment);
+  const retryFallback = normalizeRetryFallback(config.retryExhaustedFallback);
+  const skipPlaceholder = config.textSkipPlaceholder ?? '';
+
+  const session = new OrchestrationSession(nextSessionId('audio_text'));
+  const chunks: string[] = [];
+  const segmentMappings: AudioToTextSegmentMapping[] = [];
+
+  try {
+    const info = await getPipelineAudioBufferInfo(input);
+    if (info.kind !== 'offlinePcmBuffer') {
+      return {
+        status: 'failed',
+        totalSegments: 0,
+        completedSegments: 0,
+        skippedSegments: [],
+        failedSegment: {
+          segmentIndex: -1,
+          segmentId: 'audio_input_kind_mismatch',
+          error:
+            'ORCHESTRATION_INVALID_ARGUMENT: runOfflineAudioToTextPipeline expects an offline audio buffer',
+          retryCount: 0,
+        },
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    const segments = await collectSpeechSegments(
+      input,
+      info,
+      config,
+      session.sessionId
+    );
+    const totalSegments = segments.length;
+
+    session.start();
+
+    for (const [i, seg] of segments.entries()) {
+      if (isAbortRequested(config.abortSignal)) {
+        session.cancel();
+        break;
+      }
+
+      reportProgress(session, config, i, totalSegments, seg.durationMs ?? 0);
+
+      let attempts = 0;
+      let completed = false;
+      while (!completed) {
+        if (isAbortRequested(config.abortSignal)) {
+          session.cancel();
+          break;
+        }
+
+        let tempIn: OfflineAudioBufferRef | undefined;
+        let tempOut: OfflineTextBufferRef | undefined;
+        try {
+          const segLength = Math.max(0, seg.endOffset - seg.startOffset);
+          const segSamples =
+            segLength > 0
+              ? getOfflineAudioBufferSamplesSlice(
+                  input,
+                  seg.startOffset,
+                  segLength
+                )
+              : new Float32Array(0);
+
+          tempIn = createOfflineAudioBufferFromSamples(
+            segSamples,
+            info.sampleRate,
+            info.channelCount
+          );
+          tempOut = await createEmptyOfflineTextBuffer();
+
+          await consumer(tempIn, tempOut);
+
+          const outInfo = await getPipelineTextBufferInfo(tempOut.bufferId);
+          if (outInfo.kind !== 'offlineTextBuffer') {
+            throw new Error(
+              'ORCHESTRATION_CONSUMER_ERROR: offline audio-to-text consumer must write to an offline text output buffer'
+            );
+          }
+
+          const outText =
+            outInfo.utf16Length > 0
+              ? await getOfflineTextBufferTextSlice(
+                  tempOut.bufferId,
+                  0,
+                  outInfo.utf16Length
+                )
+              : '';
+
+          chunks.push(outText);
+          segmentMappings.push({
+            speechSegmentId: seg.segmentId,
+            textSegmentId: `txtseg_${session.sessionId}_${seg.segmentIndex}`,
+            segmentIndex: seg.segmentIndex,
+            text: outText,
+          });
+          session.addCompletedSegment();
+          completed = true;
+        } catch (err) {
+          const error = formatError(err);
+          session.markRecovering();
+
+          if (strategy === 'retry' && attempts < maxRetries) {
+            attempts += 1;
+            reportProgress(
+              session,
+              config,
+              i,
+              totalSegments,
+              seg.durationMs ?? 0
+            );
+            continue;
+          }
+
+          const exhaustedFallback =
+            strategy === 'retry' ? retryFallback : strategy;
+
+          if (exhaustedFallback === 'skip') {
+            chunks.push(skipPlaceholder);
+            session.addSkippedSegment({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            completed = true;
+          } else if (exhaustedFallback === 'partial_result') {
+            session.setFailedSegment({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            session.markCompleting();
+            completed = true;
+          } else {
+            session.fail({
+              segmentIndex: seg.segmentIndex,
+              segmentId: seg.segmentId,
+              error,
+              retryCount: attempts,
+            });
+            completed = true;
+          }
+        } finally {
+          await cleanupAudioTemporaries(tempIn, undefined);
+          await cleanupTextTemporaries(tempOut, undefined);
+        }
+      }
+
+      if (session.state === 'failed') {
+        break;
+      }
+      if (session.state === 'cancelled') {
+        break;
+      }
+      if (session.state === 'completing') {
+        break;
+      }
+    }
+
+    if (session.state === 'failed') {
+      return {
+        status: 'failed',
+        totalSegments: segments.length,
+        completedSegments: session.completedSegments,
+        skippedSegments: session.skippedSegments,
+        ...(session.failedSegment
+          ? { failedSegment: session.failedSegment }
+          : {}),
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    if (
+      session.state === 'cancelled' &&
+      !shouldReturnPartialOnCancel(strategy)
+    ) {
+      return {
+        status: 'cancelled',
+        totalSegments: segments.length,
+        completedSegments: session.completedSegments,
+        skippedSegments: session.skippedSegments,
+        processingTimeMs: Date.now() - session.startedAtMs,
+        linkMap: config.linkMap,
+        segmentMappings,
+      };
+    }
+
+    const wasCancelled = session.state === 'cancelled';
+    session.markCompleting();
+    const finalText = chunks.join('');
+    const outputBuffer =
+      finalText.length > 0
+        ? await createOfflineTextBufferFromText(finalText)
+        : await createEmptyOfflineTextBuffer();
+    const status: 'complete' | 'partial' | 'cancelled' = wasCancelled
+      ? 'cancelled'
+      : session.failedSegment != null
+      ? 'partial'
+      : 'complete';
+
+    session.markDone();
+    return {
+      outputBuffer,
+      status,
+      totalSegments: segments.length,
+      completedSegments: session.completedSegments,
+      skippedSegments: session.skippedSegments,
+      ...(session.failedSegment
+        ? { failedSegment: session.failedSegment }
+        : {}),
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
+    };
+  } catch (err) {
+    return {
+      status: 'failed',
+      totalSegments: 0,
+      completedSegments: session.completedSegments,
+      skippedSegments: session.skippedSegments,
+      failedSegment: {
+        segmentIndex: -1,
+        segmentId: `${session.sessionId}_fatal`,
+        error: formatError(err),
+        retryCount: 0,
+      },
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+      segmentMappings,
     };
   }
 }
