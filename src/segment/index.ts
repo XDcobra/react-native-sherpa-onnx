@@ -2,7 +2,6 @@ import { TurboModuleRegistry } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import {
   appendLiveTextSegment,
-  getOfflineTextBufferTextSlice,
   getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
@@ -15,15 +14,11 @@ import {
 } from '../audiobuffer';
 import {
   appendLiveSegment,
-  createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
-  createOfflineSegmentBufferFromLive,
-  finalizeLiveSegmentBuffer,
   getLiveSegmentBufferSegmentCount,
   getLiveSegmentBufferSegments,
   getOfflineSegmentBufferSegments,
   getPipelineSegmentBufferInfo,
-  releasePipelineSegmentBuffer,
 } from '../segmentbuffer';
 import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
 import type { PipelineTextBufferIdSource } from '../textbuffer/types';
@@ -44,22 +39,47 @@ import type {
 import {
   advanceAudioCommitStart,
   annotateSpeechSegment,
+  clearAttachedSegmentationEngineByEngineId,
   getLiveAudioSegmentation,
   getLiveTextSegmentation,
   getSpeechSegmentAnnotation,
   normalizeSegmentationMode,
+  registerLiveAudioSegmentation,
+  registerLiveTextSegmentation,
+  registerAttachedSegmentationEngine,
   setAssociatedAudioSegmentBuffer,
 } from './runtime-state';
+import type {
+  SegmentationConfig,
+  SegmentationEngineInfo,
+  SegmentationEngineRef,
+  SegmentationPolicy,
+} from './engine-types';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
-const offlineTextSegmentByBufferId = new Map<string, TextSegment>();
+const offlineTextSegmentsByBufferId = new Map<string, TextSegment[]>();
 const offlineAudioSegmentBufferByParentBufferId = new Map<string, string>();
 const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
   string,
   Promise<string>
 >();
+
+const DEFAULT_TEXT_POLICY: SegmentationPolicy = {
+  evaluator: 'text_synthetic_auto',
+  sentenceBoundary: true,
+  maxLengthChars: 500,
+};
+
+const DEFAULT_SPEECH_POLICY: SegmentationPolicy = {
+  evaluator: 'speech_energy_silence',
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1000,
+  maxSegmentMs: 30000,
+  hangoverMs: 300,
+};
 
 export interface SegmentBufferRef {
   segmentBufferId: string;
@@ -113,6 +133,37 @@ function isOfflineAudioBufferId(id: string): boolean {
 
 function isSegmentBufferId(id: string): boolean {
   return id.startsWith('seg_live_') || id.startsWith('seg_off_');
+}
+
+function toEngineInfo(raw: {
+  engineId: string;
+  attachedBufferId: string;
+  domain: 'text' | 'speech';
+  policy: object;
+  state: 'active' | 'detached';
+  totalSegmentsCommitted: number;
+  lastSegmentId?: string;
+  segmentBufferId?: string;
+}): SegmentationEngineInfo {
+  return {
+    engineId: raw.engineId,
+    attachedBufferId: raw.attachedBufferId,
+    domain: raw.domain,
+    policy: raw.policy as SegmentationPolicy,
+    state: raw.state,
+    totalSegmentsCommitted: raw.totalSegmentsCommitted,
+    ...(typeof raw.lastSegmentId === 'string' && raw.lastSegmentId.length > 0
+      ? { lastSegmentId: raw.lastSegmentId }
+      : {}),
+    ...(typeof raw.segmentBufferId === 'string' &&
+    raw.segmentBufferId.length > 0
+      ? { segmentBufferId: raw.segmentBufferId }
+      : {}),
+  };
+}
+
+function resolveDefaultPolicy(domain: 'text' | 'speech'): SegmentationPolicy {
+  return domain === 'text' ? DEFAULT_TEXT_POLICY : DEFAULT_SPEECH_POLICY;
 }
 
 function normalizeReadWindow(
@@ -344,46 +395,27 @@ async function readOfflineTextSegments(
 ): Promise<TextSegment[]> {
   const info = await getPipelineTextBufferInfo(offlineTextBufferId);
   if (info.kind !== 'offlineTextBuffer') {
-    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
+    offlineTextSegmentsByBufferId.delete(offlineTextBufferId);
     return [];
   }
 
-  const totalCount = info.utf16Length > 0 ? 1 : 0;
-  if (totalCount <= 0 || maxCount === 0) {
-    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
-    return [];
-  }
-  assertSegmentIndexInRange(startIndex, totalCount);
-
-  const cached = offlineTextSegmentByBufferId.get(offlineTextBufferId);
-  if (cached) {
-    return [cached];
-  }
-
-  const text = await getOfflineTextBufferTextSlice(
-    offlineTextBufferId,
-    0,
-    Math.max(1, info.utf16Length)
-  );
-  if (text.length === 0) {
-    offlineTextSegmentByBufferId.delete(offlineTextBufferId);
+  if (maxCount === 0) {
     return [];
   }
 
-  const segment: TextSegment = {
-    segmentId: `txtseg_${offlineTextBufferId}_0`,
-    domain: 'text',
-    startOffset: 0,
-    endOffset: text.length,
-    reason: 'finalize',
-    source: 'external',
-    createdAtMs: Date.now(),
-    segmentIndex: 0,
-    text,
-    utf16Length: text.length,
-  };
-  offlineTextSegmentByBufferId.set(offlineTextBufferId, segment);
-  return [segment];
+  if (!offlineTextSegmentsByBufferId.has(offlineTextBufferId)) {
+    throw new Error(
+      'SEGMENT_NOT_AVAILABLE: offline text segmentation is not materialized; call segmentOfflineBuffer() first'
+    );
+  }
+
+  const cached = offlineTextSegmentsByBufferId.get(offlineTextBufferId) ?? [];
+  if (cached.length === 0) {
+    return [];
+  }
+
+  assertSegmentIndexInRange(startIndex, cached.length);
+  return cached.slice(startIndex, startIndex + maxCount);
 }
 
 async function ensureOfflineAudioSegmentBuffer(
@@ -398,55 +430,11 @@ async function ensureOfflineAudioSegmentBuffer(
   if (pending) return pending;
 
   const creating = (async (): Promise<string> => {
-    const info = await getPipelineAudioBufferInfo(offlineAudioBufferId);
-    if (info.kind !== 'offlinePcmBuffer') {
-      throw new Error(
-        'SEGMENT_INVALID_ARGUMENT: expected an offline audio buffer'
-      );
-    }
-
-    if (info.numSamples <= 0) {
-      const empty = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: offlineAudioBufferId,
-      });
-      return empty.bufferId;
-    }
-
-    const live = await createLiveSegmentBuffer({
-      sourceAudioBufferId: offlineAudioBufferId,
-    });
-    try {
-      const durationMs =
-        typeof info.durationMs === 'number' && Number.isFinite(info.durationMs)
-          ? info.durationMs
-          : (info.numSamples / info.sampleRate) * 1000;
-      const appendResult = await appendLiveSegment(live.bufferId, {
-        kind: 'speech',
-        sourceAudioBufferId: offlineAudioBufferId,
-        startSample: 0,
-        endSample: info.numSamples,
-        sampleRate: info.sampleRate,
-        durationMs,
-      });
-
-      annotateSpeechSegment(appendResult.segmentId, {
-        reason: 'finalize',
-        source: 'external',
-        createdAtMs: Date.now(),
-        segmentIndex: appendResult.segmentIndex,
-      }, offlineAudioBufferId);
-
-      await finalizeLiveSegmentBuffer(live.bufferId);
-      const offline = await createOfflineSegmentBufferFromLive(
-        live.bufferId,
-        'fullIfSpooled'
-      );
-      return offline.bufferId;
-    } finally {
-      await releasePipelineSegmentBuffer(live.bufferId).catch(() => {
-        // Ignore cleanup failures for temporary live segment buffers.
-      });
-    }
+    const segmented = await segmentOfflineBuffer(
+      offlineAudioBufferId,
+      DEFAULT_SPEECH_POLICY
+    );
+    return segmented.segmentBufferId;
   })();
 
   pendingOfflineAudioSegmentBufferByParentBufferId.set(
@@ -491,15 +479,28 @@ async function readSpeechSegmentsFromSegmentBuffer(
   return raw
     .filter((segment) => segment.kind === 'speech')
     .map((segment, idx) => {
+      const nativeReason = toSegmentReason(
+        (segment as unknown as { reason?: string }).reason
+      );
+      const nativeSource = toSegmentSource(
+        (segment as unknown as { source?: string }).source
+      );
+      const nativeCreatedAtMsRaw = (
+        segment as unknown as { createdAtMs?: number }
+      ).createdAtMs;
       const annotation = getSpeechSegmentAnnotation(segment.id);
       return {
         segmentId: segment.id,
         domain: 'speech',
         startOffset: segment.startSample,
         endOffset: segment.endSample,
-        reason: annotation?.reason ?? 'manual_commit',
-        source: annotation?.source ?? 'manual',
-        createdAtMs: annotation?.createdAtMs ?? Date.now(),
+        reason: annotation?.reason ?? nativeReason,
+        source: annotation?.source ?? nativeSource,
+        createdAtMs:
+          annotation?.createdAtMs ??
+          (typeof nativeCreatedAtMsRaw === 'number'
+            ? Math.trunc(nativeCreatedAtMsRaw)
+            : Date.now()),
         segmentIndex: annotation?.segmentIndex ?? startIndex + idx,
         sourceAudioBufferId: segment.sourceAudioBufferId || parentBufferId,
         sampleRate: segment.sampleRate,
@@ -554,6 +555,154 @@ async function resolveSpeechSegmentBufferRef(
     segmentBufferId: associatedSegmentBufferId,
     domain: 'speech',
     parentBufferId: liveAudioId,
+  };
+}
+
+export async function attachSegmentationEngine(
+  buffer: PipelineTextBufferIdSource | PipelineAudioBufferIdSource,
+  config: SegmentationConfig
+): Promise<SegmentationEngineRef> {
+  const rawId = resolveSourceBufferId(buffer as SegmentBufferSource);
+
+  let domain: 'text' | 'speech';
+  let bufferId: string;
+  if (isLiveTextBufferId(rawId)) {
+    domain = 'text';
+    bufferId = resolvePipelineTextBufferId(
+      buffer as PipelineTextBufferIdSource
+    );
+    registerLiveTextSegmentation(bufferId, 'auto');
+  } else {
+    bufferId = resolvePipelineAudioBufferId(
+      buffer as PipelineAudioBufferIdSource
+    );
+    if (!isLiveAudioBufferId(bufferId)) {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: attachSegmentationEngine() requires a live text or live audio buffer'
+      );
+    }
+    domain = 'speech';
+    registerLiveAudioSegmentation(bufferId, 'auto');
+  }
+
+  const policy = config.policy ?? resolveDefaultPolicy(domain);
+  const attached = await getNative().attachSegmentationEngine(
+    bufferId,
+    domain,
+    policy as unknown as Object
+  );
+
+  registerAttachedSegmentationEngine(bufferId, attached.engineId, domain, {
+    associatedSegmentBufferId: attached.segmentBufferId,
+  });
+  if (domain === 'speech' && attached.segmentBufferId) {
+    setAssociatedAudioSegmentBuffer(bufferId, attached.segmentBufferId);
+  }
+
+  return { engineId: attached.engineId };
+}
+
+export async function detachSegmentationEngine(
+  engine: SegmentationEngineRef | string,
+  options?: { flushFinal?: boolean }
+): Promise<void> {
+  const engineId = typeof engine === 'string' ? engine : engine.engineId;
+  await getNative().detachSegmentationEngine(engineId, options?.flushFinal);
+  clearAttachedSegmentationEngineByEngineId(engineId);
+}
+
+export async function getSegmentationEngineInfo(
+  engine: SegmentationEngineRef | string
+): Promise<SegmentationEngineInfo> {
+  const engineId = typeof engine === 'string' ? engine : engine.engineId;
+  const info = toEngineInfo(
+    await getNative().getSegmentationEngineInfo(engineId)
+  );
+  registerAttachedSegmentationEngine(
+    info.attachedBufferId,
+    info.engineId,
+    info.domain,
+    {
+      associatedSegmentBufferId: info.segmentBufferId,
+    }
+  );
+  if (info.domain === 'speech' && info.segmentBufferId) {
+    setAssociatedAudioSegmentBuffer(
+      info.attachedBufferId,
+      info.segmentBufferId
+    );
+  }
+  return info;
+}
+
+export async function segmentOfflineBuffer(
+  buffer: PipelineTextBufferIdSource | PipelineAudioBufferIdSource,
+  policy: SegmentationPolicy
+): Promise<SegmentBufferRef> {
+  const rawId = resolveSourceBufferId(buffer as SegmentBufferSource);
+
+  if (isOfflineTextBufferId(rawId)) {
+    const bufferId = resolvePipelineTextBufferId(
+      buffer as PipelineTextBufferIdSource
+    );
+    const out = await getNative().segmentOfflineBuffer(
+      bufferId,
+      'text',
+      policy as unknown as Object
+    );
+
+    const createdAtMs = Date.now();
+    const nativeSegments = Array.isArray(out.segments) ? out.segments : [];
+    const materialized: TextSegment[] = nativeSegments.map((segment, index) => {
+      const text = segment.text;
+      const startOffset = Math.max(0, Math.trunc(segment.startOffset));
+      const endOffset = Math.max(startOffset, Math.trunc(segment.endOffset));
+      return {
+        segmentId: segment.segmentId,
+        domain: 'text',
+        startOffset,
+        endOffset,
+        reason: toSegmentReason(segment.reason),
+        source: toSegmentSource(segment.source),
+        createdAtMs,
+        segmentIndex: index,
+        text,
+        utf16Length: text.length,
+      };
+    });
+    offlineTextSegmentsByBufferId.set(bufferId, materialized);
+
+    return {
+      segmentBufferId: bufferId,
+      domain: 'text',
+      parentBufferId: bufferId,
+    };
+  }
+
+  const audioBufferId = resolvePipelineAudioBufferId(
+    buffer as PipelineAudioBufferIdSource
+  );
+  if (!isOfflineAudioBufferId(audioBufferId)) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: segmentOfflineBuffer() requires an offline text or offline audio buffer'
+    );
+  }
+
+  const out = await getNative().segmentOfflineBuffer(
+    audioBufferId,
+    'speech',
+    policy as unknown as Object
+  );
+  if (!isSegmentBufferId(out.bufferId)) {
+    throw new Error(
+      'SEGMENT_INTERNAL_ERROR: native segmentOfflineBuffer must return a segment buffer id for speech domain'
+    );
+  }
+  offlineAudioSegmentBufferByParentBufferId.set(audioBufferId, out.bufferId);
+  return {
+    segmentBufferId: out.bufferId,
+    domain: 'speech',
+    parentBufferId: audioBufferId,
   };
 }
 
@@ -677,12 +826,16 @@ export async function commitSegment(
 
   const total = await getLiveSegmentBufferSegmentCount(segRef.segmentBufferId);
   const segmentIndex = Math.max(0, total - 1);
-  annotateSpeechSegment(appendResult.segmentId, {
-    reason: options.reason ?? 'manual_commit',
-    source: options.source ?? 'manual',
-    createdAtMs: Date.now(),
-    segmentIndex,
-  }, liveAudioBufferId);
+  annotateSpeechSegment(
+    appendResult.segmentId,
+    {
+      reason: options.reason ?? 'manual_commit',
+      source: options.source ?? 'manual',
+      createdAtMs: Date.now(),
+      segmentIndex,
+    },
+    liveAudioBufferId
+  );
   advanceAudioCommitStart(liveAudioBufferId, endSample);
 
   const segments = await readSpeechSegmentsFromSegmentBuffer(
@@ -795,8 +948,14 @@ export async function getSegmentCount(
       return getLiveTextBufferSegmentCount(segBuffer.parentBufferId);
     }
     if (isOfflineTextBufferId(segBuffer.parentBufferId)) {
-      const info = await getPipelineTextBufferInfo(segBuffer.parentBufferId);
-      return info.kind === 'offlineTextBuffer' && info.utf16Length > 0 ? 1 : 0;
+      if (!offlineTextSegmentsByBufferId.has(segBuffer.parentBufferId)) {
+        throw new Error(
+          'SEGMENT_NOT_AVAILABLE: offline text segmentation is not materialized; call segmentOfflineBuffer() first'
+        );
+      }
+      return (
+        offlineTextSegmentsByBufferId.get(segBuffer.parentBufferId)?.length ?? 0
+      );
     }
     return 0;
   }

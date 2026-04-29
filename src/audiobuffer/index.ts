@@ -15,6 +15,7 @@ import {
   annotateSpeechSegment,
   consumeSpeechSegmentAnnotation,
   getLiveAudioSegmentation,
+  registerAttachedSegmentationEngine,
   normalizeSegmentationMode,
   registerLiveAudioSegmentation,
   releaseSegmentationStateForBuffer,
@@ -56,6 +57,15 @@ const AUDIO_BUFFER_ID_PATTERN =
   /^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 let opIdCounter = 0;
+
+const DEFAULT_SPEECH_SEGMENTATION_POLICY = {
+  evaluator: 'speech_energy_silence' as const,
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1000,
+  maxSegmentMs: 30000,
+  hangoverMs: 300,
+};
 
 function createInvalidAudioBufferIdError(
   sourceName: string,
@@ -276,6 +286,9 @@ function ensureLiveEventSubscriptions(): void {
         durationMs?: number;
         confidence?: number;
         payload?: Record<string, unknown>;
+        reason?: string;
+        source?: string;
+        createdAtMs?: number;
       }) => {
         const sourceAudioBufferId = rawEvent?.sourceAudioBufferId;
         if (!sourceAudioBufferId) return;
@@ -289,6 +302,26 @@ function ensureLiveEventSubscriptions(): void {
           typeof rawEvent.segmentIndex === 'number'
             ? Math.trunc(rawEvent.segmentIndex)
             : 0;
+        const eventReason = toSegmentReason(rawEvent.reason);
+        const eventSource = toSegmentSource(rawEvent.source);
+        const eventCreatedAtMs =
+          typeof rawEvent.createdAtMs === 'number'
+            ? Math.trunc(rawEvent.createdAtMs)
+            : Date.now();
+
+        if (segmentId.length > 0 && rawEvent.reason && rawEvent.source) {
+          annotateSpeechSegment(
+            segmentId,
+            {
+              reason: eventReason,
+              source: eventSource,
+              createdAtMs: eventCreatedAtMs,
+              segmentIndex,
+            },
+            sourceAudioBufferId
+          );
+        }
+
         const annotation =
           segmentId.length > 0
             ? consumeSpeechSegmentAnnotation(segmentId)
@@ -305,9 +338,9 @@ function ensureLiveEventSubscriptions(): void {
             typeof rawEvent.endSample === 'number'
               ? Math.trunc(rawEvent.endSample)
               : 0,
-          reason: toSegmentReason(annotation?.reason),
-          source: toSegmentSource(annotation?.source),
-          createdAtMs: annotation?.createdAtMs ?? Date.now(),
+          reason: annotation?.reason ?? eventReason,
+          source: annotation?.source ?? eventSource,
+          createdAtMs: annotation?.createdAtMs ?? eventCreatedAtMs,
           segmentIndex,
           sourceAudioBufferId,
           sampleRate:
@@ -448,7 +481,7 @@ async function commitFinalizeSegmentIfNeeded(
     getLiveAudioSegmentation(liveBufferId)?.mode,
     'off'
   );
-  if (segmentationMode === 'off') return;
+  if (segmentationMode !== 'manual') return;
 
   const info = await getPipelineAudioBufferInfo(liveBufferId);
   if (info.kind !== 'livePcmBuffer') return;
@@ -485,12 +518,16 @@ async function commitFinalizeSegmentIfNeeded(
   const totalSegments = await getNative().getLiveSegmentBufferSegmentCount(
     segmentBufferId
   );
-  annotateSpeechSegment(appendResult.segmentId, {
-    reason: 'finalize',
-    source: 'manual',
-    createdAtMs: Date.now(),
-    segmentIndex: Math.max(0, totalSegments - 1),
-  }, liveBufferId);
+  annotateSpeechSegment(
+    appendResult.segmentId,
+    {
+      reason: 'finalize',
+      source: 'manual',
+      createdAtMs: Date.now(),
+      segmentIndex: Math.max(0, totalSegments - 1),
+    },
+    liveBufferId
+  );
   advanceAudioCommitStart(liveBufferId, endSample);
 }
 
@@ -722,6 +759,40 @@ export async function createEmptyLiveAudioBuffer(
     'off'
   );
   registerLiveAudioSegmentation(info.bufferId, segmentationMode);
+
+  if (segmentationMode === 'auto') {
+    try {
+      const attached = await getNative().attachSegmentationEngine(
+        info.bufferId,
+        'speech',
+        options.segmentation?.policy ?? DEFAULT_SPEECH_SEGMENTATION_POLICY
+      );
+      registerAttachedSegmentationEngine(
+        info.bufferId,
+        attached.engineId,
+        'speech',
+        {
+          associatedSegmentBufferId:
+            typeof attached.segmentBufferId === 'string'
+              ? attached.segmentBufferId
+              : undefined,
+        }
+      );
+      if (typeof attached.segmentBufferId === 'string') {
+        setAssociatedAudioSegmentBuffer(
+          info.bufferId,
+          attached.segmentBufferId
+        );
+      }
+    } catch (error) {
+      await getNative()
+        .releasePipelineAudioBuffer(info.bufferId)
+        .catch(() => {
+          // Best-effort cleanup if native engine attachment fails.
+        });
+      throw error;
+    }
+  }
 
   const unsubscribeEvents =
     onFramesAppended || onSegment || onError

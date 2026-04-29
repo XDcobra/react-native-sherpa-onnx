@@ -8,6 +8,7 @@
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
 import type { Segment } from '../segment/segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 // ========== Buffer Kinds ==========
 
@@ -176,6 +177,7 @@ export type AudioSegmentationMode = 'off' | 'manual' | 'auto';
 
 export interface AudioSegmentationConfig {
   mode?: AudioSegmentationMode;
+  policy?: SegmentationPolicy;
 }
 
 export interface LiveAudioBufferSegmentEvent {

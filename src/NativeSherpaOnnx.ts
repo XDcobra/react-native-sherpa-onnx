@@ -629,6 +629,63 @@ export interface Spec extends TurboModule {
   /** Return number of committed segments currently retained in the live segment log. */
   getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
 
+  // ==================== Segmentation Engine Core ====================
+
+  /** Attach a segmentation engine to a live text/audio buffer. */
+  attachSegmentationEngine(
+    bufferId: string,
+    domain: 'text' | 'speech',
+    policy: Object
+  ): Promise<{
+    engineId: string;
+    attachedBufferId: string;
+    domain: 'text' | 'speech';
+    policy: Object;
+    state: 'active' | 'detached';
+    totalSegmentsCommitted: number;
+    lastSegmentId?: string;
+    segmentBufferId?: string;
+  }>;
+
+  /** Detach a segmentation engine and optionally flush final pending data. */
+  detachSegmentationEngine(
+    engineId: string,
+    flushFinal?: boolean
+  ): Promise<void>;
+
+  /** Get segmentation engine runtime info. */
+  getSegmentationEngineInfo(engineId: string): Promise<{
+    engineId: string;
+    attachedBufferId: string;
+    domain: 'text' | 'speech';
+    policy: Object;
+    state: 'active' | 'detached';
+    totalSegmentsCommitted: number;
+    lastSegmentId?: string;
+    segmentBufferId?: string;
+  }>;
+
+  /** One-shot offline segmentation pass. */
+  segmentOfflineBuffer(
+    bufferId: string,
+    domain: 'text' | 'speech',
+    policy: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+    segments?: Array<{
+      segmentId: string;
+      startOffset: number;
+      endOffset: number;
+      reason: string;
+      source: string;
+      text: string;
+    }>;
+  }>;
+
   // ==================== Pipeline Segment Buffers ====================
 
   createLiveSegmentBuffer(options: {

@@ -2,12 +2,14 @@ export type SegmentationMode = 'off' | 'manual' | 'auto';
 
 interface TextSegmentationState {
   mode: SegmentationMode;
+  engineId?: string;
 }
 
 interface AudioSegmentationState {
   mode: SegmentationMode;
   associatedSegmentBufferId?: string;
   nextCommitStartSample: number;
+  engineId?: string;
 }
 
 interface SpeechSegmentAnnotation {
@@ -27,6 +29,8 @@ interface SpeechSegmentAnnotation {
 
 const textByBufferId = new Map<string, TextSegmentationState>();
 const audioByBufferId = new Map<string, AudioSegmentationState>();
+const engineByBufferId = new Map<string, string>();
+const bufferByEngineId = new Map<string, string>();
 const speechSegmentAnnotationBySegmentId = new Map<
   string,
   SpeechSegmentAnnotation
@@ -45,7 +49,11 @@ export function registerLiveTextSegmentation(
   liveTextBufferId: string,
   mode: SegmentationMode
 ): void {
-  textByBufferId.set(liveTextBufferId, { mode });
+  const prev = textByBufferId.get(liveTextBufferId);
+  textByBufferId.set(liveTextBufferId, {
+    mode,
+    ...(prev?.engineId ? { engineId: prev.engineId } : {}),
+  });
 }
 
 export function getLiveTextSegmentation(
@@ -63,6 +71,7 @@ export function registerLiveAudioSegmentation(
     mode,
     associatedSegmentBufferId: prev?.associatedSegmentBufferId,
     nextCommitStartSample: prev?.nextCommitStartSample ?? 0,
+    engineId: prev?.engineId,
   });
 }
 
@@ -84,6 +93,112 @@ export function setAssociatedAudioSegmentBuffer(
     ...prev,
     associatedSegmentBufferId: segmentBufferId,
   });
+}
+
+export function registerAttachedSegmentationEngine(
+  bufferId: string,
+  engineId: string,
+  domain: 'text' | 'speech',
+  options?: {
+    associatedSegmentBufferId?: string;
+  }
+): void {
+  const previousBufferId = bufferByEngineId.get(engineId);
+  if (previousBufferId && previousBufferId !== bufferId) {
+    engineByBufferId.delete(previousBufferId);
+  }
+
+  const previousEngineId = engineByBufferId.get(bufferId);
+  if (previousEngineId && previousEngineId !== engineId) {
+    bufferByEngineId.delete(previousEngineId);
+  }
+
+  engineByBufferId.set(bufferId, engineId);
+  bufferByEngineId.set(engineId, bufferId);
+
+  if (domain === 'text') {
+    const prev = textByBufferId.get(bufferId);
+    textByBufferId.set(bufferId, {
+      mode: prev?.mode ?? 'auto',
+      engineId,
+    });
+    return;
+  }
+
+  const prev = audioByBufferId.get(bufferId);
+  audioByBufferId.set(bufferId, {
+    mode: prev?.mode ?? 'auto',
+    nextCommitStartSample: prev?.nextCommitStartSample ?? 0,
+    associatedSegmentBufferId:
+      options?.associatedSegmentBufferId ?? prev?.associatedSegmentBufferId,
+    engineId,
+  });
+}
+
+export function getAttachedSegmentationEngineId(
+  bufferId: string
+): string | undefined {
+  return engineByBufferId.get(bufferId);
+}
+
+export function resolveAttachedBufferIdForEngine(
+  engineId: string
+): string | undefined {
+  return bufferByEngineId.get(engineId);
+}
+
+export function clearAttachedSegmentationEngineByEngineId(
+  engineId: string
+): string | undefined {
+  const bufferId = bufferByEngineId.get(engineId);
+  if (!bufferId) return undefined;
+  bufferByEngineId.delete(engineId);
+  engineByBufferId.delete(bufferId);
+
+  const textState = textByBufferId.get(bufferId);
+  if (textState) {
+    textByBufferId.set(bufferId, {
+      mode: textState.mode,
+    });
+  }
+
+  const audioState = audioByBufferId.get(bufferId);
+  if (audioState) {
+    audioByBufferId.set(bufferId, {
+      mode: audioState.mode,
+      associatedSegmentBufferId: audioState.associatedSegmentBufferId,
+      nextCommitStartSample: audioState.nextCommitStartSample,
+    });
+  }
+
+  return bufferId;
+}
+
+export function clearAttachedSegmentationEngineForBuffer(
+  bufferId: string
+): string | undefined {
+  const engineId = engineByBufferId.get(bufferId);
+  if (!engineId) return undefined;
+  engineByBufferId.delete(bufferId);
+  bufferByEngineId.delete(engineId);
+
+  const textState = textByBufferId.get(bufferId);
+  if (textState) {
+    textByBufferId.set(bufferId, {
+      mode: textState.mode,
+    });
+  }
+
+  const audioState = audioByBufferId.get(bufferId);
+  if (audioState) {
+    audioByBufferId.set(bufferId, {
+      mode: audioState.mode,
+      associatedSegmentBufferId: audioState.associatedSegmentBufferId,
+      nextCommitStartSample: audioState.nextCommitStartSample,
+    });
+  }
+
+  return engineId;
 }
 
 export function advanceAudioCommitStart(
@@ -141,6 +256,7 @@ export function consumeSpeechSegmentAnnotation(
 }
 
 export function releaseSegmentationStateForBuffer(bufferId: string): void {
+  clearAttachedSegmentationEngineForBuffer(bufferId);
   textByBufferId.delete(bufferId);
   audioByBufferId.delete(bufferId);
   const annotationIds = segmentAnnotationsByBufferId.get(bufferId);
