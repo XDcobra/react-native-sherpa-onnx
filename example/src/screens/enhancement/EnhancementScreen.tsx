@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -87,6 +88,18 @@ function isEnhancementHint(folder: string, hint: string): boolean {
 }
 
 const localStyles = StyleSheet.create({
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  optionLabel: {
+    color: '#333',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   playRow: {
     flexDirection: 'row',
     gap: 10,
@@ -155,6 +168,7 @@ export default function EnhancementScreen() {
     string | null
   >(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [useSegmentedEnhancement, setUseSegmentedEnhancement] = useState(false);
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   /** Path of the input file used for the last successful run (for playback). */
@@ -798,7 +812,17 @@ export default function EnhancementScreen() {
       // Create empty output buffer at model sample rate
       const outputBuf = await createEmptyOfflineAudioBuffer(sr);
       try {
-        await engine.enhance(prepared.bufferId, outputBuf.bufferId);
+        const result = await engine.enhance(
+          prepared.bufferId,
+          outputBuf.bufferId,
+          useSegmentedEnhancement
+            ? {
+                segmentation: { mode: 'auto' },
+                errorRecovery: 'partial_result',
+                overlapSamples: Math.round(sr * 0.02),
+              }
+            : undefined
+        );
         // Get output info for display
         const outInfo = await getPipelineAudioBufferInfo(outputBuf.bufferId);
         const n = outInfo.numSamples ?? 0;
@@ -818,7 +842,13 @@ export default function EnhancementScreen() {
           numSamples: n,
         });
         setEnhanceResult(
-          `Samples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
+          `Mode: ${
+            useSegmentedEnhancement ? 'segmented' : 'single-shot'
+          }\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${
+            result.totalSegments
+          }\nSkipped: ${
+            result.skippedSegments.length
+          }\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
         );
       } catch (enhanceErr) {
         // Release output buffer on error (input buffer remains cached for retries)
@@ -1309,21 +1339,33 @@ export default function EnhancementScreen() {
                   ))}
                 </View>
                 {preparedInputBuffer?.sourceType === 'example' && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (enhancing || loading || preparingInputBuffer) &&
-                        styles.buttonDisabled,
-                    ]}
-                    onPress={handleEnhance}
-                    disabled={enhancing || loading || preparingInputBuffer}
-                  >
-                    {enhancing ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.buttonText}>Run enhancement</Text>
-                    )}
-                  </TouchableOpacity>
+                  <>
+                    <View style={localStyles.optionRow}>
+                      <Text style={localStyles.optionLabel}>
+                        Segmented offline
+                      </Text>
+                      <Switch
+                        value={useSegmentedEnhancement}
+                        onValueChange={setUseSegmentedEnhancement}
+                        disabled={enhancing || loading || preparingInputBuffer}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        (enhancing || loading || preparingInputBuffer) &&
+                          styles.buttonDisabled,
+                      ]}
+                      onPress={handleEnhance}
+                      disabled={enhancing || loading || preparingInputBuffer}
+                    >
+                      {enhancing ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.buttonText}>Run enhancement</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
                 )}
                 {!preparingInputBuffer && !preparedInputBuffer && (
                   <TouchableOpacity

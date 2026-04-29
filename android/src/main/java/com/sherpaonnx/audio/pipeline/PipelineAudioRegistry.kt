@@ -246,6 +246,64 @@ object PipelineAudioRegistry {
     return entry
   }
 
+  /**
+   * Atomically populate an empty offline target by adopting storage from a source offline buffer.
+   *
+   * This is a storage hand-off helper for segmented orchestration outputs where the caller owns
+   * the target buffer handle but the orchestrator produced a temporary source buffer.
+   */
+  @Synchronized
+  fun populateOfflineIfEmpty(
+    targetBufferId: String,
+    sourceBufferId: String,
+  ) {
+    if (targetBufferId == sourceBufferId) return
+
+    val target = offlineEntries[targetBufferId]
+      ?: throw IllegalArgumentException("Offline target buffer not found: $targetBufferId")
+    val source = offlineEntries[sourceBufferId]
+      ?: throw IllegalArgumentException("Offline source buffer not found: $sourceBufferId")
+
+    if (target.numSamples != 0) {
+      throw IllegalStateException("Offline target buffer is not empty: $targetBufferId")
+    }
+
+    if (target.sampleRate != source.sampleRate || target.channelCount != source.channelCount) {
+      throw IllegalArgumentException(
+        "Offline buffer format mismatch: target(${target.sampleRate}Hz/${target.channelCount}ch) != source(${source.sampleRate}Hz/${source.channelCount}ch)"
+      )
+    }
+
+    val replacement = when (source) {
+      is OfflineEntry.InMemory -> {
+        val adopted = source.samples
+        source.samples = FloatArray(0)
+        OfflineEntry.InMemory(
+          bufferId = targetBufferId,
+          sampleRate = source.sampleRate,
+          channelCount = source.channelCount,
+          samples = adopted,
+        )
+      }
+
+      is OfflineEntry.MmapBacked -> {
+        OfflineEntry.createMmapFromFile(
+          bufferId = targetBufferId,
+          sampleRate = source.sampleRate,
+          channelCount = source.channelCount,
+          numSamples = source.numSamples,
+          f32FilePath = source.filePath,
+          dataOffsetBytes = source.dataOffsetBytes,
+        ) ?: throw IllegalStateException(
+          "Failed to adopt mmap-backed source buffer into target: $sourceBufferId"
+        )
+      }
+    }
+
+    offlineEntries[targetBufferId] = replacement
+    offlineEntries.remove(sourceBufferId)
+  }
+
   private fun createFromRingSnapshot(bufferId: String, live: LiveEntry): OfflineEntry {
     val snapshot = live.snapshotRing()
     val entry = createEntryWithThreshold(bufferId, live.sampleRate, live.channelCount, snapshot)

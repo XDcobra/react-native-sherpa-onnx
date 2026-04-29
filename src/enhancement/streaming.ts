@@ -1,11 +1,14 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { resolveModelPath } from '../utils';
 import type { EnhancementModelType } from './types';
 import type {
   EnhancementPipelineHandle,
   StreamingEnhancementEngine,
+  StreamingEnhancementEnhanceOptions,
   StreamingEnhancementInitializeOptions,
 } from './streamingTypes';
 
@@ -13,9 +16,26 @@ let streamingEnhancementInstanceCounter = 0;
 
 function createEnhancementPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedSegmentationEngineId?: string
 ): EnhancementPipelineHandle {
-  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  let detached = false;
+  const detachIfNeeded = async () => {
+    if (!attachedSegmentationEngineId || detached) return;
+    detached = true;
+    try {
+      await detachSegmentationEngine(attachedSegmentationEngineId, {
+        flushFinal: true,
+      });
+    } catch {
+      // Best effort: segmentation detach must not mask pipeline shutdown.
+    }
+  };
+
+  const completed =
+    createStreamingPipelineCompletionPromise(pipelineId).finally(
+      detachIfNeeded
+    );
 
   return {
     instanceId,
@@ -24,7 +44,11 @@ function createEnhancementPipelineHandle(
     },
     completed,
     async stop(): Promise<void> {
-      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      try {
+        await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      } finally {
+        await detachIfNeeded();
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -94,15 +118,63 @@ export async function createStreamingEnhancement(
 
     async enhance(
       inputBufferId: string,
-      outputBufferId: string
+      outputBufferId: string,
+      enhanceOptions?: StreamingEnhancementEnhanceOptions
     ): Promise<EnhancementPipelineHandle> {
       guard();
-      const raw = await SherpaOnnx.startEnhancementPipeline(
-        instanceId,
-        inputBufferId,
-        outputBufferId
-      );
-      return createEnhancementPipelineHandle(instanceId, raw.pipelineId);
+
+      const normalizedInputId = resolvePipelineAudioBufferId(inputBufferId);
+      if (!normalizedInputId.startsWith('live_')) {
+        throw new Error(
+          'ENHANCEMENT_INVALID_ARGUMENT: streaming enhancement input buffer must be live_*'
+        );
+      }
+
+      const normalizedOutputId = resolvePipelineAudioBufferId(outputBufferId);
+      if (!normalizedOutputId.startsWith('live_')) {
+        throw new Error(
+          'ENHANCEMENT_INVALID_ARGUMENT: streaming enhancement output buffer must be live_*'
+        );
+      }
+
+      const mode = enhanceOptions?.segmentation?.mode ?? 'off';
+      let attachedSegmentationEngineId: string | undefined;
+      if (mode !== 'off') {
+        const policy = enhanceOptions?.segmentation?.policy ?? {
+          evaluator: 'continuous_frames' as const,
+          checkpointIntervalMs: 1000,
+        };
+        if (policy.evaluator !== 'continuous_frames') {
+          throw new Error(
+            'ENHANCEMENT_INVALID_SEGMENTATION: streaming enhancement supports only continuous_frames policy'
+          );
+        }
+
+        const attached = await attachSegmentationEngine(normalizedInputId, {
+          policy,
+        });
+        attachedSegmentationEngineId = attached.engineId;
+      }
+
+      try {
+        const raw = await SherpaOnnx.startEnhancementPipeline(
+          instanceId,
+          normalizedInputId,
+          normalizedOutputId
+        );
+        return createEnhancementPipelineHandle(
+          instanceId,
+          raw.pipelineId,
+          attachedSegmentationEngineId
+        );
+      } catch (err) {
+        if (attachedSegmentationEngineId) {
+          await detachSegmentationEngine(attachedSegmentationEngineId, {
+            flushFinal: true,
+          }).catch(() => undefined);
+        }
+        throw err;
+      }
     },
   };
 }

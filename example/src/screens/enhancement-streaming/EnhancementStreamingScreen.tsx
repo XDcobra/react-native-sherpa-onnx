@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -48,6 +49,7 @@ import {
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import { getSegments } from 'react-native-sherpa-onnx/segment';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -89,6 +91,18 @@ function isEnhancementHint(folder: string, hint: string): boolean {
 }
 
 const localStyles = StyleSheet.create({
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  optionLabel: {
+    color: '#333',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   playRow: {
     flexDirection: 'row',
     gap: 10,
@@ -147,6 +161,7 @@ export default function EnhancementStreamingScreen() {
     string | null
   >(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [attachContinuousFrames, setAttachContinuousFrames] = useState(false);
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
@@ -861,7 +876,18 @@ export default function EnhancementStreamingScreen() {
       setInputBufferBuildStatus('Starting enhancement pipeline...');
       const pipeline = await engine.enhance(
         inputLive.bufferId,
-        outputLive.bufferId
+        outputLive.bufferId,
+        attachContinuousFrames
+          ? {
+              segmentation: {
+                mode: 'auto',
+                policy: {
+                  evaluator: 'continuous_frames',
+                  checkpointIntervalMs: 1000,
+                },
+              },
+            }
+          : undefined
       );
       pipelineRef.current = pipeline;
       setInputBufferBuildStatus(
@@ -921,6 +947,12 @@ export default function EnhancementStreamingScreen() {
 
       pipelineRef.current = null;
 
+      const checkpointCount = attachContinuousFrames
+        ? (
+            await getSegments(inputLive.bufferId, 0, 100000).catch(() => [])
+          ).filter((segment) => segment.reason === 'policy_checkpoint').length
+        : 0;
+
       setInputBufferBuildProgress(100);
       setInputBufferBuildStatus('Finalizing output...');
       await finalizeLiveAudioBuffer(outputLive.bufferId).catch(() => {});
@@ -954,7 +986,7 @@ export default function EnhancementStreamingScreen() {
       setOutputWavPath(outputPath);
       setLastInputPath(selectedInput.sourcePathForPlayback);
       setEnhanceResult(
-        `Pipeline: streaming enhancement\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
+        `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
       );
       producedOfflineBufferId = null;
       setInputBufferBuildProgress(null);
@@ -1220,6 +1252,19 @@ export default function EnhancementStreamingScreen() {
                 <Text style={styles.warningText}>
                   Initialize a streaming enhancement model first.
                 </Text>
+              </View>
+            )}
+
+            {engineReady && (
+              <View style={localStyles.optionRow}>
+                <Text style={localStyles.optionLabel}>
+                  Continuous checkpoints
+                </Text>
+                <Switch
+                  value={attachContinuousFrames}
+                  onValueChange={setAttachContinuousFrames}
+                  disabled={enhancing || loading || preparingInputBuffer}
+                />
               </View>
             )}
 

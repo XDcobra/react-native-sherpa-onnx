@@ -84,7 +84,7 @@ Da das Fundament (Phase 1) sehr umfangreich ist, wird es in vier machbare Schrit
 | **Phase 1c** | Orchestration & Transfer (Sub-Plan 04) | `transferOfflineAudioBufferFromLive`, `OrchestrationSession` State Machine, Error Recovery Strategien (abort, skip, retry, partial). **Status: Completed** *(Benchmark-Teil explizit nicht erforderlich).* |
 | **Phase 1d** | Engine Core (Sub-Plan 02) | Native Evaluatoren (Energy, Punctuation, etc.), Buffer Attachment, Offline-Segmentation Loop. **Status: Completed** |
 | **Phase 2** | VAD + STT (+ `stt_produced` Links) | VAD liefert Grenzen, STT nutzt diese und produziert Text. **Status: Completed** (Code + Sub-05/Plan-Parität; Jest-Parity: `segment-api`, `transcribe-segmented`, `offline-orchestrator`). |
-| **Phase 3** | Enhancement (Offline segmentiert) | Verifizierung der Audio-Orchestration & Error Recovery. |
+| **Phase 3** | Enhancement (Offline segmentiert + Streaming `continuous_frames`) | Offline segmentiert über Phase-1c-Orchestrator + `populateOfflineAudioBufferIfEmpty`; Streaming-Enhancement optional mit Checkpoint-only `continuous_frames`-Attach; native Offline-Segmentation bleibt chunked und `continuous_frames` ist streaming-only. **Status: Completed** (Jest: `enhance-segmented`, `enhancement/orchestrate`, `streaming-continuous-frames`, `segmentation-engine-continuous-frames`, erweiterte `offline-orchestrator`). |
 | **Phase 4** | Punctuation | Verifizierung der Text-Orchestration. |
 | **Phase 5** | TTS (Incremental entfernen, + `tts_produced` Links) | Höchstes Risiko, benötigt Parity. Produziert Links für Playback-Highlighting. |
 | **Phase 6** | Alignment (Fake-Live, + `alignment` Links) | Basiert auf `SegmentLinkMap` aus Phase 1a. Komplexe Cross-Domain Strategien. |
