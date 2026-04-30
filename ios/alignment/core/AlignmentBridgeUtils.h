@@ -3,6 +3,7 @@
 #ifdef __OBJC__
 @class NSString;
 @class NSDictionary;
+@class NSArray;
 #elif defined(__cplusplus)
 class NSString;
 class NSDictionary;
@@ -24,6 +25,7 @@ namespace alignment {
 namespace bridge {
 
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options);
+std::vector<float> ParseFloatSamples(NSArray *samples);
 int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRate);
 std::string ParseAlignmentModelPath(NSDictionary *options);
 std::string ParseSegmentationBufferId(NSDictionary *options);

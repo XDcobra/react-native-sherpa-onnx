@@ -3678,6 +3678,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun alignAccurateForcedCtcFromPcm(
+    modelPath: String,
+    windowText: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignAccurateForcedCtcFromPcm(
+      modelPath,
+      windowText,
+      samples,
+      sampleRate,
+      granularity,
+      language,
+      promise,
+    )
+  }
+
   /**
    * Start a streaming TTS pipeline worker.
    */

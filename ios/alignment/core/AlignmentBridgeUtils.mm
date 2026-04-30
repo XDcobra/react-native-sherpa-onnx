@@ -46,6 +46,25 @@ std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
   return out;
 }
 
+std::vector<float> ParseFloatSamples(NSArray *samples) {
+  if (![samples isKindOfClass:[NSArray class]]) {
+    throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: samples must be an array of numbers.");
+  }
+
+  NSArray *arr = (NSArray *)samples;
+  std::vector<float> out;
+  out.reserve(arr.count);
+  for (id value in arr) {
+    if (![value isKindOfClass:[NSNumber class]]) {
+      out.push_back(0.0f);
+      continue;
+    }
+    double x = [(NSNumber *)value doubleValue];
+    out.push_back(std::isfinite(x) ? static_cast<float>(x) : 0.0f);
+  }
+  return out;
+}
+
 int32_t ParseEstimatedSampleRate(
     NSDictionary *options,
     int32_t fallbackSampleRate) {

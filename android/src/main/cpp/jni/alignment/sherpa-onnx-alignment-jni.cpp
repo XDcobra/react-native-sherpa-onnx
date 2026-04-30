@@ -169,6 +169,101 @@ jobject AlignmentResultToJavaHashMap(
   return map;
 }
 
+jobject ForcedCtcResultToJavaHashMap(
+    JNIEnv* env,
+    const sherpa_onnx::alignment::ForcedCtcResult& result) {
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) {
+    return nullptr;
+  }
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(mapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jobject map = env->NewObject(mapClass, mapInit);
+  if (!map) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  jmethodID listInit = listClass ? env->GetMethodID(listClass, "<init>", "()V") : nullptr;
+  jmethodID listAdd = listClass ? env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z") : nullptr;
+  jobject tokens = (listClass && listInit) ? env->NewObject(listClass, listInit) : nullptr;
+
+  if (tokens && mapClass && mapPut) {
+    for (const auto& token : result.tokens) {
+      jobject row = env->NewObject(mapClass, mapInit);
+      if (!row) {
+        continue;
+      }
+      sherpaonnx::PutString(env, row, mapPut, "text", token.text);
+      PutDouble(env, row, mapPut, "startMs", token.start_ms);
+      PutDouble(env, row, mapPut, "endMs", token.end_ms);
+      if (listAdd) {
+        env->CallBooleanMethod(tokens, listAdd, row);
+      }
+      env->DeleteLocalRef(row);
+    }
+  }
+
+  if (tokens) {
+    jstring tokensKey = env->NewStringUTF("tokens");
+    if (tokensKey) {
+      env->CallObjectMethod(map, mapPut, tokensKey, tokens);
+      env->DeleteLocalRef(tokensKey);
+    }
+    env->DeleteLocalRef(tokens);
+  }
+
+  jclass integerClass = env->FindClass("java/lang/Integer");
+  jmethodID integerValueOf =
+      integerClass ? env->GetStaticMethodID(integerClass, "valueOf", "(I)Ljava/lang/Integer;") : nullptr;
+  if (integerClass && integerValueOf) {
+    jobject boxed = env->CallStaticObjectMethod(
+        integerClass,
+        integerValueOf,
+        static_cast<jint>(result.consumed_token_count));
+    if (boxed) {
+      jstring key = env->NewStringUTF("consumedTokenCount");
+      if (key) {
+        env->CallObjectMethod(map, mapPut, key, boxed);
+        env->DeleteLocalRef(key);
+      }
+      env->DeleteLocalRef(boxed);
+    }
+  }
+  if (integerClass) {
+    env->DeleteLocalRef(integerClass);
+  }
+
+  jobject diagnostics = env->NewObject(mapClass, mapInit);
+  if (diagnostics) {
+    PutDouble(env, diagnostics, mapPut, "ctcBlankRatio", result.diagnostics.ctc_blank_ratio);
+    PutDouble(
+        env,
+        diagnostics,
+        mapPut,
+        "framesProcessed",
+        static_cast<double>(result.diagnostics.frames_processed));
+    jstring key = env->NewStringUTF("diagnostics");
+    if (key) {
+      env->CallObjectMethod(map, mapPut, key, diagnostics);
+      env->DeleteLocalRef(key);
+    }
+    env->DeleteLocalRef(diagnostics);
+  }
+
+  if (listClass) {
+    env->DeleteLocalRef(listClass);
+  }
+  env->DeleteLocalRef(mapClass);
+  return map;
+}
+
 void ThrowRuntimeException(JNIEnv* env, const char* message) {
   jclass ex = env->FindClass("java/lang/RuntimeException");
   if (ex) {
@@ -302,6 +397,51 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     return nullptr;
   } catch (...) {
     ThrowRuntimeException(env, "Accurate alignment (file) failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccurateForcedCtcFromFloatPcm(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jModelPath,
+    jstring jWindowText,
+    jfloatArray jSamples,
+    jint jSampleRate,
+    jstring jGranularity,
+    jstring jLanguage) {
+  try {
+    if (!jModelPath || !jWindowText || !jSamples) {
+      throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: null argument");
+    }
+
+    const std::string modelPath = JStringToUtf8(env, jModelPath);
+    const std::string windowText = JStringToUtf8(env, jWindowText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+    const std::string language = JStringToUtf8(env, jLanguage);
+
+    const jsize n = env->GetArrayLength(jSamples);
+    if (n <= 0) {
+      throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: samples array is empty");
+    }
+    std::vector<float> samples(static_cast<size_t>(n));
+    env->GetFloatArrayRegion(jSamples, 0, n, samples.data());
+
+    auto result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
+        modelPath,
+        windowText,
+        samples.data(),
+        samples.size(),
+        static_cast<int32_t>(jSampleRate),
+        granularity,
+        language);
+
+    return ForcedCtcResultToJavaHashMap(env, result);
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(env, e.what());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed");
     return nullptr;
   }
 }

@@ -2,6 +2,7 @@ package com.sherpaonnx.alignment.facade
 
 import android.util.Log
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.alignment.core.AlignmentErrorCodes
 import com.sherpaonnx.alignment.core.AlignmentOptionParsers
@@ -55,6 +56,15 @@ internal class SherpaOnnxAlignmentHelper {
     text: String,
     audioPath: String,
     granularity: String,
+  ): HashMap<String, Any>
+
+  private external fun nativeAlignAccurateForcedCtcFromFloatPcm(
+    modelPath: String,
+    windowText: String,
+    samples: FloatArray,
+    sampleRate: Int,
+    granularity: String,
+    language: String,
   ): HashMap<String, Any>
 
   private data class VadaAnchor(
@@ -528,6 +538,100 @@ internal class SherpaOnnxAlignmentHelper {
           e.message ?: "Alignment failed",
           e,
         )
+      }
+    }
+  }
+
+  private fun readableArrayToFloatArray(samples: ReadableArray): FloatArray {
+    val out = FloatArray(samples.size())
+    for (i in 0 until samples.size()) {
+      if (samples.isNull(i)) {
+        out[i] = 0f
+        continue
+      }
+      val value = samples.getDouble(i)
+      out[i] = if (value.isFinite()) value.toFloat() else 0f
+    }
+    return out
+  }
+
+  fun alignAccurateForcedCtcFromPcm(
+    modelPath: String,
+    windowText: String,
+    samples: ReadableArray,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        val normalizedModelPath = modelPath.trim()
+        if (normalizedModelPath.isEmpty()) {
+          promise.reject(
+            "ALIGNMENT_FORCED_CTC_FAILED",
+            "ALIGNMENT_FORCED_CTC_FAILED: modelPath is required.",
+          )
+          return@execute
+        }
+
+        val normalizedWindowText = windowText.trim()
+        if (normalizedWindowText.isEmpty()) {
+          promise.reject(
+            "ALIGNMENT_FORCED_CTC_FAILED",
+            "ALIGNMENT_FORCED_CTC_FAILED: windowText must not be empty.",
+          )
+          return@execute
+        }
+
+        val normalizedSampleRate = sampleRate.toInt()
+        if (!sampleRate.isFinite() || normalizedSampleRate <= 0) {
+          promise.reject(
+            "ALIGNMENT_FORCED_CTC_FAILED",
+            "ALIGNMENT_FORCED_CTC_FAILED: sampleRate must be positive.",
+          )
+          return@execute
+        }
+
+        val normalizedGranularity = AlignmentOptionParsers
+          .normalizeGranularity(granularity)
+          .let { if (it == "character") "word" else it }
+
+        val pcm = readableArrayToFloatArray(samples)
+        if (pcm.isEmpty()) {
+          promise.reject(
+            "ALIGNMENT_FORCED_CTC_FAILED",
+            "ALIGNMENT_FORCED_CTC_FAILED: samples are empty.",
+          )
+          return@execute
+        }
+
+        val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
+          normalizedModelPath,
+          normalizedWindowText,
+          pcm,
+          normalizedSampleRate,
+          normalizedGranularity,
+          language?.trim().orEmpty(),
+        )
+
+        promise.resolve(AlignmentResultMapper.forcedCtcResultToWritable(raw))
+      } catch (e: OutOfMemoryError) {
+        Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
+        promise.reject(
+          AlignmentErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("alignment"),
+          e,
+        )
+      } catch (e: Exception) {
+        val message = e.message ?: "ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed"
+        val prefixed = if (message.startsWith("ALIGNMENT_FORCED_CTC_FAILED:")) {
+          message
+        } else {
+          "ALIGNMENT_FORCED_CTC_FAILED: $message"
+        }
+        Log.e(AlignmentErrorCodes.TAG, prefixed, e)
+        promise.reject("ALIGNMENT_FORCED_CTC_FAILED", prefixed, e)
       }
     }
   }

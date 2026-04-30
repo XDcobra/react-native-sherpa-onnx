@@ -673,4 +673,97 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
   });
 }
 
+- (void)alignAccurateForcedCtcFromPcm:(NSString *)modelPath
+                           windowText:(NSString *)windowText
+                              samples:(NSArray *)samples
+                           sampleRate:(double)sampleRate
+                          granularity:(NSString *)granularity
+                             language:(NSString *)language
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    try {
+      const std::string modelPathStr =
+          (modelPath != nil) ? std::string([modelPath UTF8String]) : std::string();
+      const std::string windowTextStr =
+          (windowText != nil) ? std::string([windowText UTF8String]) : std::string();
+      const std::string granularityStr =
+          sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
+      const std::string languageStr =
+          (language != nil) ? std::string([language UTF8String]) : std::string();
+
+      if (modelPathStr.empty()) {
+        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+               @"ALIGNMENT_FORCED_CTC_FAILED: modelPath is required.",
+               nil);
+        return;
+      }
+      if (windowTextStr.empty()) {
+        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+               @"ALIGNMENT_FORCED_CTC_FAILED: windowText is required.",
+               nil);
+        return;
+      }
+      if (!std::isfinite(sampleRate) || sampleRate <= 0.0) {
+        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+               @"ALIGNMENT_FORCED_CTC_FAILED: sampleRate must be positive.",
+               nil);
+        return;
+      }
+
+      std::vector<float> pcm = sherpaonnx::alignment::bridge::ParseFloatSamples(samples);
+      if (pcm.empty()) {
+        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+               @"ALIGNMENT_FORCED_CTC_FAILED: samples are empty.",
+               nil);
+        return;
+      }
+
+      const std::string effectiveGranularity =
+          (granularityStr == "character") ? "word" : granularityStr;
+
+      const auto result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
+          modelPathStr,
+          windowTextStr,
+          pcm.data(),
+          pcm.size(),
+          static_cast<int32_t>(sampleRate),
+          effectiveGranularity,
+          languageStr);
+
+      NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:result.tokens.size()];
+      for (const auto &token : result.tokens) {
+        [tokens addObject:@{
+          @"text": [NSString stringWithUTF8String:token.text.c_str()] ?: @"",
+          @"startMs": @(token.start_ms),
+          @"endMs": @(token.end_ms),
+        }];
+      }
+
+      resolve(@{
+        @"tokens": tokens,
+        @"consumedTokenCount": @(result.consumed_token_count),
+        @"diagnostics": @{
+          @"ctcBlankRatio": @(result.diagnostics.ctc_blank_ratio),
+          @"framesProcessed": @(result.diagnostics.frames_processed),
+        },
+      });
+    } catch (const std::bad_alloc &) {
+      reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
+    } catch (const std::exception &e) {
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()]
+          ?: @"ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed";
+      NSString *code = [errorMsg hasPrefix:@"ALIGNMENT_FORCED_CTC_FAILED:"]
+          ? @"ALIGNMENT_FORCED_CTC_FAILED"
+          : extractAlignmentCodeFromMessage(errorMsg);
+      reject(code, errorMsg, nil);
+    } catch (...) {
+      reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+             @"ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed",
+             nil);
+    }
+  });
+}
+
 @end
