@@ -109,7 +109,7 @@ describe('AlignmentEngine options validation', () => {
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
-  it('emits ALIGNMENT_NOT_IMPLEMENTED for strategy B placeholder in P1', async () => {
+  it('emits ALIGNMENT_OPTIONS_INVALID when strategy B incorrectly passes asr config', async () => {
     const engine = createAlignment();
 
     await expect(
@@ -121,9 +121,10 @@ describe('AlignmentEngine options validation', () => {
           mode: 'auto',
           anchorSegmentBuffer: 'seg_anchor',
           mappingStrategy: 'chunked_forced_ctc',
-        },
+          asr: { hypothesisTextBuffer: 'txt_hyp' },
+        } as any,
       })
-    ).rejects.toMatchObject({ code: 'ALIGNMENT_NOT_IMPLEMENTED' });
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_OPTIONS_INVALID' });
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
